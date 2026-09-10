@@ -6,6 +6,14 @@
     <span class="badge {{ extra_class }} {{ 'active' if prerequisite.status in ['ready', 'not_required'] else 'blocked' if prerequisite.status == 'blocked' else '' }}"
           title="{{ prerequisite.detail }}">{{ prerequisite.status | replace('_', ' ') }}</span>
   {%- endmacro %}
+  {# Plain names for where work runs and what the network allows. #}
+  {% set backend = (perm.sandbox.backend or 'local') | lower %}
+  {% set where = {'local': 'directly on this computer',
+                  'docker': 'in an isolated Docker container',
+                  'podman': 'in an isolated Podman container'}.get(backend, 'in the ' ~ (backend | e) ~ ' environment') %}
+  {% set network = 'open' if perm.network == 'open'
+                   else 'blocked' if perm.network in ['deny-all', 'deny_all', 'deny']
+                   else (perm.network | e) %}
   {% call hero('Governance', 'Permissions',
                subtitle='What Lightwork can do',
                lede='Choose which tools Lightwork may use and review whether
@@ -13,11 +21,10 @@
                      on the next goal.') %}
     {{ state('Current state',
              perm.tool_page.admitted_total ~ ' of ' ~ perm.tool_page.catalog_total ~ ' tools allowed by policy',
-             badge='review sandbox' if perm.sandbox_warning else 'governed',
+             badge='on this computer' if perm.sandbox_warning else 'isolated',
              badge_class='warn' if perm.sandbox_warning else 'ok',
-             copy='Sandbox: <code>' ~ (perm.sandbox.backend or 'local') ~
-                  '</code> · network policy: <code>' ~ perm.network ~
-                  '</code>. Allowed tools still need their connections and setup checked.') }}
+             copy='Work runs ' ~ where ~ '. Network access is ' ~ network ~
+                  '. Allowed tools still need their connections and setup checked.') }}
   {% endcall %}
 
   {% if perm.error %}
@@ -25,24 +32,24 @@
   {% endif %}
 
   {% if perm.sandbox_warning %}
-    <div class="panel" style="border-left: 3px solid var(--danger);">
-      <p style="color: var(--danger);"><strong>⚠ {{ perm.sandbox_warning }}</strong></p>
+    <div class="boundary" role="note">
+      <p style="margin: 0;"><strong>⚠ Runs on this computer.</strong> {{ perm.sandbox_warning }}</p>
     </div>
   {% endif %}
 
   <div class="section-head"><h2>Where work runs</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      Choose the environment where agents run commands and code. Changes apply
-      from the next goal. A container can be selected only when its service
-      is reachable. Review the isolation warning before changing environments.
+      Choose where Lightwork runs commands and code. Changes apply from the
+      next goal. A container can be selected only while its service is
+      running. Choosing this computer removes isolation.
     </p>
     {% if not permissions_can_manage_sandbox %}
     <p class="muted" role="note">
-      Read only: changing the deployment-wide sandbox backend requires a global administrator.
+      Read only: only a global administrator can change where work runs.
     </p>
     {% endif %}
-    <div id="sbx-rows" aria-live="polite"><p class="muted">Checking the container runtimes…</p></div>
+    <div id="sbx-rows" aria-live="polite"><p class="muted">Checking the container services…</p></div>
     <p id="sbx-err" role="alert" aria-live="assertive"
        style="color: var(--danger); font-weight: var(--font-medium); margin: var(--space-2) 0 0; white-space: pre-wrap;"></p>
   </div>
@@ -53,6 +60,7 @@
     var err = document.getElementById('sbx-err');
     var canManageSandbox = {{ 'true' if permissions_can_manage_sandbox else 'false' }};
     var switching = false;
+    var labels = { local: 'This computer', docker: 'Docker container', podman: 'Podman container' };
 
     async function pick(backend) {
       if (!canManageSandbox || switching) return;
@@ -60,8 +68,8 @@
       var body = { backend: backend };
       if (backend === 'local') {
         if (!(await mvConfirm(
-          'Switch to the local backend? The agent’s shell will run on this ' +
-          'host with NO filesystem or network isolation.', { okText: 'Use local backend' }
+          'Run work directly on this computer? Commands will be able to reach ' +
+          'this computer’s files and network with no isolation.', { okText: 'Use this computer' }
         ))) return;
         body.acknowledge_local_risk = true;
       }
@@ -76,7 +84,7 @@
         body: JSON.stringify(body),
       }).then(function (r) {
         if (r.status === 403) {
-          throw new Error('Only an administrator can switch the sandbox — ask yours.');
+          throw new Error('Only a global administrator can change where work runs.');
         }
         if (!r.ok) {
           return r.json().catch(function () { return {}; }).then(function (b) {
@@ -84,10 +92,10 @@
           });
         }
         return r.json().catch(function () {
-          throw new Error('Could not confirm the selected sandbox. Reload this page before retrying.');
+          throw new Error('Could not confirm the selected environment. Reload this page before retrying.');
         }).then(function (result) {
           if (!result || result.backend !== backend) {
-            throw new Error('Could not confirm the selected sandbox. Reload this page before retrying.');
+            throw new Error('Could not confirm the selected environment. Reload this page before retrying.');
           }
           location.reload();
         });
@@ -109,8 +117,8 @@
       var badge = document.createElement('span');
       badge.className = 'badge ' + (name === current ? 'active' : (info.available ? '' : 'blocked'));
       badge.textContent = name === current ? 'selected' : (info.available ? 'ready' : 'unavailable');
-      var label = document.createElement('code');
-      label.textContent = name;
+      var label = document.createElement('strong');
+      label.textContent = labels[name] || name;
       var detail = document.createElement('span');
       detail.className = 'muted';
       detail.style.cssText = 'flex: 1 1 auto; font-size: var(--text-sm);';
@@ -120,13 +128,13 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn' + (info.available && name !== 'local' ? ' btn--primary' : '');
-        btn.textContent = canManageSandbox ? 'Use ' + name : 'Read only';
+        btn.textContent = canManageSandbox ? 'Use ' + (name === 'local' ? 'this computer' : (labels[name] || name)) : 'Read only';
         btn.disabled = !info.available || !canManageSandbox;
         btn.setAttribute('aria-disabled', btn.disabled ? 'true' : 'false');
         if (canManageSandbox) {
           btn.addEventListener('click', function () { pick(name); });
         } else {
-          btn.title = 'A global administrator is required to change the sandbox backend.';
+          btn.title = 'Only a global administrator can change where work runs.';
         }
         li.appendChild(btn);
       }
@@ -144,13 +152,13 @@
       var note = document.createElement('p');
       note.className = 'muted';
       note.style.cssText = 'font-size: var(--text-sm); margin: var(--space-2) 0 0;';
-      note.textContent = 'A runtime showing "unavailable" usually just needs its ' +
-        'daemon started (open Docker Desktop, or `systemctl start docker` / ' +
-        '`podman machine start`) — reload this page after starting it.';
+      note.textContent = 'An environment shown as unavailable usually needs its ' +
+        'container service started first, for example by opening Docker Desktop. ' +
+        'Reload this page after starting it.';
       rows.appendChild(note);
     }).catch(function () {
       rows.innerHTML = '';
-      err.textContent = 'Could not read the sandbox status — reload to try again.';
+      err.textContent = 'Could not read where work runs — reload to try again.';
     });
   })();
   </script>
@@ -244,12 +252,12 @@
   <div class="panel">
     <table>
       <tbody>
-        <tr><td>computer-use</td><td>{% if perm.capabilities.computer_use %}<span class="badge blocked">⚠ on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
-        <tr><td>browser</td><td>{% if perm.capabilities.browser %}<span class="badge blocked">⚠ on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
-        <tr><td>web search</td><td>{% if perm.capabilities.web_search %}<span class="badge active">on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
-        <tr><td>sandbox</td><td><code>{{ perm.sandbox.backend or 'local' }}</code></td></tr>
-        <tr><td>network policy</td><td><code>{{ perm.network }}</code></td></tr>
-        <tr><td>budget / task</td><td>${{ perm.budget.max_dollars if perm.budget.max_dollars is defined else '?' }} · {{ perm.budget.max_wall_seconds if perm.budget.max_wall_seconds is defined else '?' }}s</td></tr>
+        <tr><td>Computer use</td><td>{% if perm.capabilities.computer_use %}<span class="badge blocked">⚠ on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
+        <tr><td>Browser</td><td>{% if perm.capabilities.browser %}<span class="badge blocked">⚠ on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
+        <tr><td>Web search</td><td>{% if perm.capabilities.web_search %}<span class="badge active">on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
+        <tr><td>Where work runs</td><td>{{ where[0] | upper }}{{ where[1:] }}</td></tr>
+        <tr><td>Network access</td><td>{{ network }}</td></tr>
+        <tr><td>Budget per goal</td><td>${{ perm.budget.max_dollars if perm.budget.max_dollars is defined else '?' }} · {{ perm.budget.max_wall_seconds if perm.budget.max_wall_seconds is defined else '?' }}s</td></tr>
       </tbody>
     </table>
   </div>

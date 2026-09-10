@@ -6824,9 +6824,9 @@ def _permissions_snapshot() -> dict:
     _sb_backend = str(snap["sandbox"].get("backend") or "local").strip().lower()
     if _sb_backend == "local":
         snap["sandbox_warning"] = (
-            "Sandbox backend is 'local': the agent's shell runs on this host "
-            "with no filesystem/network isolation. Use the docker or podman "
-            "backend for untrusted goals."
+            "Work runs directly on this computer, with no isolation from its "
+            "files or network. For goals you do not fully trust, choose an "
+            "isolated container under Where work runs."
         )
     try:
         from maverick.config import provider_configuration_state

@@ -67,7 +67,7 @@ def test_switch_refused_while_daemon_unreachable(monkeypatch):
     r = client.post("/api/v1/sandbox/backend", json={"backend": "docker"})
     assert r.status_code == 409
     assert "not ready" in r.json()["detail"]
-    assert "Start the docker daemon" in r.json()["detail"]  # actionable, not vague
+    assert "Start Docker" in r.json()["detail"]  # actionable, not vague
     assert (config.load_config().get("sandbox") or {}).get("backend") is None
 
 
