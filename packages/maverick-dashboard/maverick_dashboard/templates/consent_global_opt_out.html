@@ -42,7 +42,7 @@
     <button class="btn" id="goo-refresh-status" type="button">Refresh status</button>
     <details class="goo-span">
       <summary>Readiness and product boundaries</summary>
-      <pre class="goo-output" id="goo-status-output" tabindex="0"></pre>
+      <pre hidden class="goo-output" id="goo-status-output" tabindex="0"></pre>
     </details>
   </section>
 
@@ -65,8 +65,8 @@
             <label for="goo-expected-revision">Expected record revision
               <input class="input" id="goo-expected-revision" name="expected_revision" type="number" min="0" max="2147483647" value="0" required>
             </label>
-            <label for="goo-idempotency-key">Request reference (reuse when retrying)
-              <input class="input" id="goo-idempotency-key" name="idempotency_key" minlength="8" maxlength="192" required>
+            <label for="goo-idempotency-key" hidden>Request reference (reuse when retrying)
+              <input data-auto-reference class="input" id="goo-idempotency-key" name="idempotency_key" minlength="8" maxlength="192" required>
             </label>
           </div>
 
@@ -128,8 +128,8 @@
           <label for="goo-lifecycle-revision">Current version
             <input class="input" id="goo-lifecycle-revision" name="expected_revision" type="number" min="1" max="2147483647" required>
           </label>
-          <label for="goo-lifecycle-key">Lifecycle idempotency key
-            <input class="input" id="goo-lifecycle-key" name="idempotency_key" minlength="8" maxlength="192" required>
+          <label for="goo-lifecycle-key" hidden>Lifecycle idempotency key
+            <input data-auto-reference class="input" id="goo-lifecycle-key" name="idempotency_key" minlength="8" maxlength="192" required>
           </label>
           <div class="goo-actions">
             <button class="btn" id="goo-list" type="button">List</button>

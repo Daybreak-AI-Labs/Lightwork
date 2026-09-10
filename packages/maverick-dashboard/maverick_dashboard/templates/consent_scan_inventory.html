@@ -24,13 +24,13 @@
       <label>Property ID<input class="input" name="property_id" value="primary-web" required maxlength="128"></label><label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
       <label class="csi-wide">Exact HTTPS origins, one per line<textarea class="input" name="origins" rows="3" placeholder="https://www.example.com" required></textarea></label>
       <label class="csi-wide">Start URLs, one per line<textarea class="input" name="start_urls" rows="3" placeholder="https://www.example.com/" required></textarea></label>
-      <label class="csi-wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+      <label class="csi-wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
       <div class="csi-actions"><button class="btn btn--primary" type="submit">Save property</button><button class="btn" id="csi-properties" type="button">List properties</button></div>
     </form></section>
     <section class="csi-card"><h2>2. Scan schedule</h2><form id="csi-schedule" class="csi-form">
       <label>Schedule ID<input class="input" name="schedule_id" value="weekly-primary" required maxlength="128"></label><label>Property ID<input class="input" name="property_id" value="primary-web" required maxlength="128"></label>
       <label>Interval seconds<input class="input" name="interval_seconds" type="number" min="300" max="2592000" value="604800" required></label><label>Next due Unix time<input class="input" name="next_due_at" type="number" min="1" step="0.001" required></label>
-      <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+      <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
       <label>Maximum pages<input class="input" name="max_pages" type="number" min="1" max="10000" value="100" required></label><label>Maximum depth<input class="input" name="max_depth" type="number" min="0" max="20" value="4" required></label>
       <label>Page timeout seconds<input class="input" name="page_timeout_seconds" type="number" min="1" max="300" value="30" required></label><label>Network event cap<input class="input" name="max_network_events" type="number" min="1" max="100000" value="5000" required></label>
       <label>Settle milliseconds<input class="input" name="settle_milliseconds" type="number" min="0" max="30000" value="1000" required></label><label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="3" required></label>
@@ -58,15 +58,15 @@
       <label>Expected review version<input class="input" name="expected_version" type="number" min="0" value="0" required></label><label>Authority expected revision<input class="input" name="authority_expected_revision" type="number" min="0" value="0" required></label>
       <label>Tracker registry ID<input class="input" name="tracker_id" maxlength="128"></label><label>Vendor ID<input class="input" name="vendor_id" maxlength="128"></label>
       <label class="csi-wide">Purpose IDs (comma separated)<input class="input" name="purpose_ids"></label><label class="csi-wide">Second reviewer SHA-256 for registry actions<input class="input csi-secret" name="second_reviewer_sha256" minlength="64" maxlength="64"></label>
-      <label class="csi-wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+      <label class="csi-wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
       <div class="csi-actions"><button class="btn btn--primary" type="submit">Record immutable review</button></div>
     </form></section>
     <section class="csi-card"><h2>6. Reviewed-only bridge and recovery</h2><form id="csi-bridge" class="csi-form">
       <label>Report ID<input class="input" name="report_id" required maxlength="128"></label><label>Page limit<input class="input" name="limit" type="number" min="1" max="500" value="100" required></label>
-      <label>After tracker key (optional)<input class="input csi-secret" name="after_tracker_key" minlength="64" maxlength="64"></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+      <label>After tracker key (optional)<input class="input csi-secret" name="after_tracker_key" minlength="64" maxlength="64"></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
       <div class="csi-actions"><button class="btn btn--primary" type="submit">Bridge fresh reviewed mappings</button></div>
     </form><hr><form id="csi-replay" class="csi-form">
-      <label>Dead-letter job ID<input class="input" name="job_id" required maxlength="128"></label><label>Current version<input class="input" name="expected_revision" type="number" min="0" required></label><label class="csi-wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+      <label>Dead-letter job ID<input class="input" name="job_id" required maxlength="128"></label><label>Current version<input class="input" name="expected_revision" type="number" min="0" required></label><label class="csi-wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
       <div class="csi-actions"><button class="btn" type="submit">Replay dead letter</button></div>
     </form></section>
     <section class="csi-card"><h2>7. Audit and retention</h2><form id="csi-retention" class="csi-form">

@@ -15,13 +15,13 @@
     <div>
       <section class="cd-card cd-glass"><h2>Destination and key ID</h2><form id="cd-destination" class="cd-form">
         <label>Destination ID<input class="input" name="destination_id" value="crm" required></label><label>Exact HTTPS origin<input class="input" name="origin" placeholder="https://crm.example.com" required></label>
-        <label>Signing key ID<input class="input" name="signing_key_id" required></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+        <label>Signing key ID<input class="input" name="signing_key_id" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
         <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="6" required></label><label>Retention seconds<input class="input" name="retention" type="number" min="1" value="2592000" required></label>
         <div class="cd-actions"><button class="btn btn--primary" type="submit">Enroll destination</button><button class="btn" id="cd-load-destination" type="button">Load destination</button></div>
       </form></section>
       <section class="cd-card cd-glass"><h2>Key rotation and revocation</h2><form id="cd-key" class="cd-form">
         <label>Destination ID<input class="input" name="destination_id" value="crm" required></label><label>Key ID<input class="input" name="key_id" required></label>
-        <label>Expected destination revision<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+        <label>Expected destination revision<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
         <div class="cd-actions"><button class="btn btn--primary" type="submit" value="rotate">Rotate to key ID</button><button class="btn" type="submit" value="revoke-key">Revoke key ID</button><button class="btn" type="submit" value="revoke">Revoke destination</button></div>
       </form></section>
     </div>

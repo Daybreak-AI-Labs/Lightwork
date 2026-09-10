@@ -333,9 +333,9 @@
         <h2 id="aet-status-title">Service availability</h2>
       </div>
     </div>
-    <details>
+    <details hidden>
       <summary>Technical details</summary>
-      <pre class="aet-output" id="aet-status-output" tabindex="0"></pre>
+      <pre hidden class="aet-output" id="aet-status-output" tabindex="0"></pre>
     </details>
   </section>
 
@@ -434,8 +434,8 @@
             <label>Due date <span class="aet-muted">Optional, tenant server time remains authoritative</span>
               <input class="input" name="due_at" type="datetime-local" step="1">
             </label>
-            <label>Request reference (reuse when retrying)
-              <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
+            <label hidden>Request reference (reuse when retrying)
+              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Create task</button>
           </fieldset>
@@ -507,8 +507,8 @@
                 <input class="input" name="due_at" type="datetime-local" step="1" aria-label="New due date">
               </span>
             </div>
-            <label>Request reference (reuse when retrying)
-              <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
+            <label hidden>Request reference (reuse when retrying)
+              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Save changes</button>
           </fieldset>

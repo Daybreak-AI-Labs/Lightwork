@@ -19,16 +19,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `discovery_ttl_minutes` sets freshness.
 
 ### Changed
-- **Operator workbenches are held back from customers until they are
-  ready** — 44 operator consoles (the consent, privacy, data-use, AI
-  oversight, third-party and compliance workbenches of record ids,
-  verification fingerprints and JSON request bodies, plus the agent control
-  plane, the evolution ledger and the document vault) and the Research lab
-  carry `ready: False` in the page registry: their routes and permission
-  gates stay, but they appear in no sidebar, page finder or Settings
-  visibility matrix. The Autonomous Compliance landing links only offered
-  modules and drops a suite with none. The AI Governance page no longer
-  shows a CLI hint.
+- **Governance workbenches lose their plumbing** — across 32 governance,
+  consent, privacy, data-use, AI-oversight and third-party pages the request
+  references and idempotency keys are generated automatically and no longer
+  shown, the "Technical details" disclosures and raw status documents are
+  hidden, and the pages stay on the sidebar and the compliance landing. Only
+  the Research lab is held back (`ready: False` in the page registry keeps a
+  page governed and reachable by URL but off every customer surface).
 - **The first administrator gets a workspace, not a dead end** — a signed-in
   global administrator who reaches a tenant gate on an installation with no
   workspace has the one-click `local` workspace created and selected and is

@@ -401,7 +401,7 @@ PAGES: tuple[dict, ...] = (
     # to auditors and viewers rather than making the nav imply one permission
     # governs the mixed-authority surface.
     {
-        "path": "/agent-control-plane", "ready": False,
+        "path": "/agent-control-plane",
         "label": "Agent Control Plane",
         "group": "Govern",
         "icon": "agents",
@@ -420,7 +420,7 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/privacy/data-discovery", "ready": False,
+        "path": "/privacy/data-discovery",
         "label": "Privacy Data Discovery",
         "group": "Privacy",
         "icon": "eye",
@@ -429,7 +429,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/privacy/regulatory-intelligence", "ready": False,
+        "path": "/privacy/regulatory-intelligence",
         "label": "Privacy Regulatory Intelligence",
         "group": "Privacy",
         "icon": "facts",
@@ -438,7 +438,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/privacy/rights-orchestration", "ready": False,
+        "path": "/privacy/rights-orchestration",
         "label": "Privacy Rights Orchestration",
         "group": "Privacy",
         "icon": "shield",
@@ -447,7 +447,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/privacy/rights-consumer-delivery", "ready": False,
+        "path": "/privacy/rights-consumer-delivery",
         "label": "Privacy Rights Consumer Delivery",
         "group": "Privacy",
         "icon": "key",
@@ -456,7 +456,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/privacy/notice-governance", "ready": False,
+        "path": "/privacy/notice-governance",
         "label": "Privacy Notice Governance",
         "group": "Privacy",
         "icon": "check",
@@ -468,7 +468,7 @@ PAGES: tuple[dict, ...] = (
     # approval gate it carries pseudonymous profiles, immutable receipts,
     # tracker observations, and downstream preference synchronization.
     {
-        "path": "/consent", "ready": False,
+        "path": "/consent",
         "label": "Consent & Preferences",
         "group": "Consent",
         "icon": "check",
@@ -476,7 +476,7 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/consent/publishing", "ready": False,
+        "path": "/consent/publishing",
         "label": "Consent Publishing",
         "group": "Consent",
         "icon": "check",
@@ -485,7 +485,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/experiments", "ready": False,
+        "path": "/consent/experiments",
         "label": "Consent Experiments",
         "group": "Consent",
         "icon": "bench",
@@ -494,7 +494,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/delivery", "ready": False,
+        "path": "/consent/delivery",
         "label": "Consent Delivery",
         "group": "Consent",
         "icon": "check",
@@ -503,7 +503,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/public-clients", "ready": False,
+        "path": "/consent/public-clients",
         "label": "Public Consent Clients",
         "group": "Consent",
         "icon": "key",
@@ -512,7 +512,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/native", "ready": False,
+        "path": "/consent/native",
         "label": "Native Consent SDK",
         "group": "Consent",
         "icon": "key",
@@ -521,7 +521,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/profile-data", "ready": False,
+        "path": "/consent/profile-data",
         "label": "Consent Profile Data",
         "group": "Consent",
         "icon": "check",
@@ -530,7 +530,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/custom-indexes", "ready": False,
+        "path": "/consent/custom-indexes",
         "label": "Custom Consent Indexes",
         "group": "Consent",
         "icon": "search",
@@ -539,7 +539,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/bulk-jobs", "ready": False,
+        "path": "/consent/bulk-jobs",
         "label": "Consent Bulk Jobs",
         "group": "Consent",
         "icon": "clock",
@@ -548,7 +548,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/publish-settings", "ready": False,
+        "path": "/consent/publish-settings",
         "label": "Consent Publish Settings",
         "group": "Consent",
         "icon": "settings",
@@ -557,7 +557,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/global-opt-out", "ready": False,
+        "path": "/consent/global-opt-out",
         "label": "Global Opt-Out",
         "group": "Consent",
         "icon": "check",
@@ -566,7 +566,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/application-scans", "ready": False,
+        "path": "/consent/application-scans",
         "label": "Application Consent Scans",
         "group": "Consent",
         "icon": "search",
@@ -575,7 +575,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/scan-inventory", "ready": False,
+        "path": "/consent/scan-inventory",
         "label": "Consent Scan Inventory",
         "group": "Consent",
         "icon": "eye",
@@ -584,7 +584,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/scan-notice-proposals", "ready": False,
+        "path": "/consent/scan-notice-proposals",
         "label": "Scan Disclosure Proposals",
         "group": "Consent",
         "icon": "check",
@@ -593,7 +593,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/trust-center-authority", "ready": False,
+        "path": "/consent/trust-center-authority",
         "label": "Trust Center Authority",
         "group": "Consent",
         "icon": "key",
@@ -602,7 +602,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/data-use", "ready": False,
+        "path": "/data-use",
         "label": "Data Use Governance",
         "group": "Privacy",
         "icon": "shield",
@@ -610,7 +610,7 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/data-use/providers", "ready": False,
+        "path": "/data-use/providers",
         "label": "Native Data Controls",
         "group": "Privacy",
         "icon": "shield",
@@ -619,7 +619,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/governance-agents", "ready": False,
+        "path": "/governance-agents",
         "label": "Governance Agents",
         "group": "AI oversight",
         "icon": "agents",
@@ -628,7 +628,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/governance/inventory", "ready": False,
+        "path": "/governance/inventory",
         "label": "Governance Inventory",
         "group": "AI oversight",
         "icon": "overview",
@@ -637,7 +637,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/ai-evidence-analysis", "ready": False,
+        "path": "/ai-evidence-analysis",
         "label": "AI Evidence Analysis",
         "group": "AI oversight",
         "icon": "check",
@@ -646,7 +646,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/assess/evidence-autopopulation", "ready": False,
+        "path": "/assess/evidence-autopopulation",
         "label": "Assessment Evidence",
         "group": "AI oversight",
         "icon": "check",
@@ -655,7 +655,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/ai-entity-tasks", "ready": False,
+        "path": "/ai-entity-tasks",
         "label": "AI Entity Tasks",
         "group": "AI oversight",
         "icon": "check",
@@ -664,7 +664,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/assurance/cloud-agents", "ready": False,
+        "path": "/assurance/cloud-agents",
         "label": "Cloud Agent Governance",
         "group": "AI oversight",
         "icon": "shield",
@@ -673,7 +673,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/privacy/drop", "ready": False,
+        "path": "/privacy/drop",
         "label": "DROP Requests",
         "group": "Privacy",
         "icon": "shield",
@@ -693,7 +693,7 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/third-party/vendor-onboarding", "ready": False,
+        "path": "/third-party/vendor-onboarding",
         "label": "AI Vendor Onboarding",
         "group": "Third parties",
         "icon": "shield",
@@ -702,7 +702,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/third-party/contracts", "ready": False,
+        "path": "/third-party/contracts",
         "label": "Contracts & Engagements",
         "group": "Third parties",
         "icon": "shield",
@@ -711,7 +711,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/third-party/executive-reports", "ready": False,
+        "path": "/third-party/executive-reports",
         "label": "Executive Vendor Reports",
         "group": "Third parties",
         "icon": "shield",
@@ -720,7 +720,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/third-party/intelligence", "ready": False,
+        "path": "/third-party/intelligence",
         "label": "Third-Party Intelligence",
         "group": "Third parties",
         "icon": "shield",
@@ -729,7 +729,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/third-party/lifecycle", "ready": False,
+        "path": "/third-party/lifecycle",
         "label": "Third-Party Lifecycle",
         "group": "Third parties",
         "icon": "shield",
@@ -738,7 +738,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/third-party/collaboration", "ready": False,
+        "path": "/third-party/collaboration",
         "label": "Third-Party Collaboration",
         "group": "Third parties",
         "icon": "shield",
@@ -777,7 +777,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/security/assurance", "ready": False,
+        "path": "/security/assurance",
         "label": "Model Risk & AI Assurance",
         "aliases": "assurance cockpit evidence gateway model risk",
         "group": "Govern",
@@ -876,7 +876,7 @@ PAGES: tuple[dict, ...] = (
         "default": "audit",
     },
     {
-        "path": "/compliance/grc-studio", "ready": False,
+        "path": "/compliance/grc-studio",
         "label": "No-code GRC Studio",
         "aliases": "workflow builder governance risk compliance studio",
         "group": "Govern",
@@ -886,7 +886,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/compliance/policy-links", "ready": False,
+        "path": "/compliance/policy-links",
         "label": "Policy Publication Links",
         "group": "Govern",
         "icon": "compliance",
@@ -895,7 +895,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/compliance/scoping", "ready": False,
+        "path": "/compliance/scoping",
         "label": "Compliance Scoping",
         "group": "Govern",
         "icon": "compliance",
@@ -904,7 +904,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/compliance/scope-actions", "ready": False,
+        "path": "/compliance/scope-actions",
         "label": "Compliance Scope Actions",
         "group": "Govern",
         "icon": "compliance",
@@ -913,7 +913,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/compliance/continuous-evidence", "ready": False,
+        "path": "/compliance/continuous-evidence",
         "label": "Continuous Evidence",
         "group": "Govern",
         "icon": "compliance",
@@ -963,7 +963,7 @@ PAGES: tuple[dict, ...] = (
     # Digest-only lifecycle evidence over the durable promotion authority.
     # It is audit-gated like the source evidence, and has no product mutation.
     {
-        "path": "/audit/evolution-ledger", "ready": False,
+        "path": "/audit/evolution-ledger",
         "label": "Evolution Ledger",
         "group": "Govern",
         "icon": "learned",
@@ -1079,7 +1079,7 @@ PAGES: tuple[dict, ...] = (
     },
     # -- Admin ----------------------------------------------------------------
     {
-        "path": "/administration/document-vault", "ready": False,
+        "path": "/administration/document-vault",
         "label": "Document Vault",
         "group": "Admin",
         "icon": "shield",

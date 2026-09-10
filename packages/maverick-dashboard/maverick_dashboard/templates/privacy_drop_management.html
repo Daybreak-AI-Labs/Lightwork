@@ -38,9 +38,9 @@
       <h2 id="drop-status-title">Service availability</h2>
       <span class="badge pending" id="drop-status-badge">Checking</span>
     </div>
-    <details class="governance-details">
+    <details hidden class="governance-details">
       <summary>Technical details</summary>
-      <pre class="governance-output" id="drop-status-output" tabindex="0"></pre>
+      <pre hidden class="governance-output" id="drop-status-output" tabindex="0"></pre>
     </details>
   </section>
 
@@ -72,8 +72,8 @@
           <label>Approved template UUID
             <input class="input mono" name="template_id" maxlength="36" required>
           </label>
-          <label>Request reference (reuse when retrying)
-            <input class="input mono" name="idempotency_key" maxlength="192" required>
+          <label hidden>Request reference (reuse when retrying)
+            <input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required>
           </label>
           <button class="btn btn--primary" type="submit">Create request</button>
           </fieldset>
@@ -121,8 +121,8 @@
               <option value="NOT_FOUND">Not found</option>
             </select>
           </label>
-          <label>Request reference (reuse when retrying)
-            <input class="input mono" name="idempotency_key" maxlength="192" required>
+          <label hidden>Request reference (reuse when retrying)
+            <input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required>
           </label>
           <label class="governance-confirmation">
             <input name="confirmation" type="checkbox" required>
@@ -185,7 +185,7 @@
             <label>Valid until (Unix seconds)<input class="input" name="valid_until" type="number" min="1" step="any"></label>
             <label>Expected version<input class="input" name="expected_version" type="number" min="0" max="2147483646" step="1" value="0" required></label>
           </div>
-          <label>Request reference (reuse when retrying)<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required></label>
           <button class="btn btn--primary" type="submit">Propose broker change</button>
         </form>
       </section>
@@ -215,7 +215,7 @@
           </div>
           <label>Approved template UUID<input class="input mono" name="template_id" maxlength="36"></label>
           <label>Import/revocation evidence SHA-256<input class="input mono" name="evidence_sha256" pattern="[0-9a-f]{64}" maxlength="64" required></label>
-          <label>Request reference (reuse when retrying)<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required></label>
           <button class="btn btn--primary" type="submit">Propose record change</button>
         </form>
       </section>
@@ -240,7 +240,7 @@
             <label><input name="exemption_approved" type="checkbox"> Exemption approved</label>
             <label><input name="provider_operations_complete" type="checkbox"> Provider operations complete</label>
           </div>
-          <label>Request reference (reuse when retrying)<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required></label>
           <button class="btn btn--primary" type="submit">Propose outcome</button>
         </form>
       </section>
@@ -260,7 +260,7 @@
             <label>Remaining dependencies<input class="input" name="remaining_dependencies" type="number" min="0" max="1000000" step="1"></label>
           </div>
           <label>Migration reference<input class="input mono" name="migration_id" maxlength="192"></label>
-          <label>Request reference (reuse when retrying)<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required></label>
           <button class="btn btn--danger" type="submit">Propose key operation</button>
         </form>
       </section>
@@ -271,7 +271,7 @@
         <form id="drop-approval-form" autocomplete="off">
           <label>Proposal UUID<input class="input mono" name="proposal_id" maxlength="36" required></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="1" step="1" value="1" required></label>
-          <label>Approval idempotency key<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Approval idempotency key<input data-auto-reference class="input mono" name="idempotency_key" maxlength="192" required></label>
           <label class="governance-confirmation"><input name="confirmation" type="checkbox" required><span>I am not the proposer and independently reviewed the bounded evidence.</span></label>
           <button class="btn btn--danger" type="submit">Approve and apply</button>
         </form>
