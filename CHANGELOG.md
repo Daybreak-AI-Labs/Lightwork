@@ -19,6 +19,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `discovery_ttl_minutes` sets freshness.
 
 ### Changed
+- **Operator workbenches are held back from customers until they are
+  ready** — 24 tenant-scoped consoles (consent, privacy data discovery and
+  DROP, data-use governance, AI evidence analysis, AI entity tasks, governance
+  agents and inventory, assessment evidence, cloud-agent governance, vendor
+  onboarding, contracts, executive reports, the GRC studio, continuous
+  evidence, the agent control plane, the evolution ledger, the document vault)
+  and the Research lab carry `ready: False` in the page registry: their routes
+  and permission gates stay, but they appear in no sidebar, page finder or
+  Settings visibility matrix. The Autonomous Compliance landing links only
+  offered modules. The AI Governance page no longer shows a CLI hint.
+- **The first administrator gets a workspace, not a dead end** — a signed-in
+  global administrator who reaches a tenant gate on an installation with no
+  workspace has the one-click `local` workspace created and selected and is
+  sent back to the page, instead of "No workspaces exist yet".
 - **Settings > Models is grouped by provider** — the default and per-role
   pickers are real selects grouped by configured provider (allow-listed models
   stay offered before their key is saved) with a "Type a model id" option
