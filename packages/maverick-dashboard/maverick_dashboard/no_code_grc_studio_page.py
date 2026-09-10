@@ -53,6 +53,7 @@ def create_no_code_grc_studio_page_router(templates: Jinja2Templates) -> APIRout
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
+        from .api import module_activation_enabled
         _tenant_selected()
         if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
             raise HTTPException(status_code=404, detail="GRC studio workbench unavailable")
@@ -67,6 +68,8 @@ def create_no_code_grc_studio_page_router(templates: Jinja2Templates) -> APIRout
                 "studio_can_operate": has_permission(request, "operate"),
                 "studio_can_audit": has_global_permission(request, "audit"),
                 "studio_can_admin": has_global_permission(request, "admin"),
+                "studio_module_enabled": module_activation_enabled("tech_risk_compliance.grc_studio"),
+                "studio_can_activate": has_global_permission(request, "admin"),
             },
         )
         for name, value in _HEADERS.items():

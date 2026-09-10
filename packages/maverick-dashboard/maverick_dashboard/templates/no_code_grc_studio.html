@@ -76,6 +76,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not studio_module_enabled %}
+{{ module_gate('tech_risk_compliance.grc_studio', 'No-code GRC studio',
+               detail='Turns on Tech Risk &amp; Compliance and the studio together.',
+               can_activate=studio_can_activate) }}
+{% endif %}
 <div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
   <section class="grcs-hero" aria-labelledby="grcs-title">
     <div>

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import has_permission, require_permission
+from .auth import has_global_permission, has_permission, require_permission
 
 _HEADERS = {
     "Cache-Control": "no-store, private, max-age=0",
@@ -58,6 +58,7 @@ def create_governed_document_vault_page_router(
     )
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
+        from .api import module_activation_enabled
         _tenant_selected()
         if any(
             key not in {"theme", "density", "font", "lang", "document"}
@@ -77,6 +78,8 @@ def create_governed_document_vault_page_router(
                 "document_vault_can_admin": has_permission(request, "admin"),
                 "document_vault_can_operate": has_permission(request, "operate"),
                 "document_vault_can_audit": has_permission(request, "audit"),
+                "document_vault_module_enabled": module_activation_enabled("governed_document_vault"),
+                "document_vault_can_activate": has_global_permission(request, "admin"),
             },
         )
         for name, value in _HEADERS.items():

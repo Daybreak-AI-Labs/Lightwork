@@ -59,6 +59,7 @@ def create_third_party_contracts_page_router(
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
+        from .api import module_activation_enabled
         _tenant_selected()
         if any(
             key not in {"theme", "density", "font", "lang"}
@@ -76,6 +77,8 @@ def create_third_party_contracts_page_router(
                 "contracts_can_operate": has_permission(request, "operate"),
                 "contracts_can_audit": has_global_permission(request, "audit"),
                 "contracts_can_admin": has_global_permission(request, "admin"),
+                "contracts_module_enabled": module_activation_enabled("third_party_management.contracts"),
+                "contracts_can_activate": has_global_permission(request, "admin"),
             },
         )
         for name, value in _HEADERS.items():

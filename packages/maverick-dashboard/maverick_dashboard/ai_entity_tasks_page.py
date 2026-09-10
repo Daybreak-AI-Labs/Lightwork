@@ -58,6 +58,7 @@ def create_ai_entity_tasks_page_router(templates: Jinja2Templates) -> APIRouter:
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
+        from .api import module_activation_enabled
         _tenant_selected()
         if any(
             key not in {"theme", "density", "font", "lang"}
@@ -76,6 +77,8 @@ def create_ai_entity_tasks_page_router(templates: Jinja2Templates) -> APIRouter:
                 "task_can_operate": has_permission(request, "operate"),
                 "task_can_audit": has_global_permission(request, "audit"),
                 "task_can_admin": has_global_permission(request, "admin"),
+                "task_module_enabled": module_activation_enabled("ai_entity_tasks"),
+                "task_can_activate": has_global_permission(request, "admin"),
             },
         )
         for name, value in _HEADERS.items():

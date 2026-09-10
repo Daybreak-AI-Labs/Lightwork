@@ -282,6 +282,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not contracts_module_enabled %}
+{{ module_gate('third_party_management.contracts', 'Contracts and engagements',
+               detail='Turns on Third-Party Management and contract records together.',
+               can_activate=contracts_can_activate) }}
+{% endif %}
 <div class="tpc-shell" id="third-party-contracts-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
   <section class="tpc-hero" aria-labelledby="tpc-title">

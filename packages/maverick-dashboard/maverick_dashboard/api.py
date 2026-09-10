@@ -11021,6 +11021,26 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "AI evidence analysis",
         "requires": (),
     },
+    "ai_inventory": {
+        "label": "AI inventory",
+        "requires": (),
+    },
+    "ai_entity_tasks": {
+        "label": "AI entity tasks",
+        "requires": ("ai_inventory",),
+    },
+    "governed_document_vault": {
+        "label": "Governed document vault",
+        "requires": (),
+    },
+    "tech_risk_compliance.grc_studio": {
+        "label": "No-code GRC studio",
+        "requires": ("tech_risk_compliance",),
+    },
+    "third_party_management.contracts": {
+        "label": "Contracts and engagements",
+        "requires": ("third_party_management",),
+    },
     "assessment_evidence_autopopulation": {
         "label": "Assessment evidence proposals",
         "requires": ("ai_evidence_analysis",),

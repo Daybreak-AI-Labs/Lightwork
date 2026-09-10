@@ -969,6 +969,11 @@ def set_section_enable(section: str, enabled: bool) -> None:
 # module switching; anything not listed stays config-file-only.
 MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "connections",
+    "ai_inventory",
+    "ai_entity_tasks",
+    "governed_document_vault",
+    "tech_risk_compliance.grc_studio",
+    "third_party_management.contracts",
     "vendor_onboarding",
     "ai_vendor_risk",
     "model_risk_assurance",
