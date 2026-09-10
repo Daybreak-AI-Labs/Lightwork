@@ -7,6 +7,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Settings offers the models your keys can reach** — a new
+  `maverick.model_discovery` module asks each configured provider's own
+  model-list endpoint (Anthropic, OpenAI, Gemini, xAI, DeepSeek, Moonshot,
+  OpenRouter, Ollama and OpenAI-compatible self-hosted servers) through the
+  SSRF-safe client, keeps well-formed ids only, and caches the answer under
+  the data home. Settings > Models lists those ids next to the shipped
+  catalog, refreshes them on demand or whenever a key is saved or tested, and
+  shows each provider's list status. `[models] discovery` (default on, wizard
+  question) and `MAVERICK_MODEL_DISCOVERY=0` switch it off;
+  `discovery_ttl_minutes` sets freshness.
+
+### Changed
+- **Settings > Models is grouped by provider** — the default and per-role
+  pickers are real selects grouped by configured provider with a "Type a model
+  id" option instead of free-text fields with a hidden datalist, the allow-list
+  is grouped per provider with select-all/clear and a live/catalog marker,
+  and an overview shows how many providers, models and live lists are in
+  play. Provider rows under Provider keys show how many models each key
+  reaches and offer a per-provider refresh.
 - **Bedrock through the Anthropic SDK** — `BedrockClient` now builds on
   `AnthropicClient` using the SDK's Bedrock clients (Claude in Amazon Bedrock
   by default, the legacy InvokeModel endpoint on request), so prompt caching,

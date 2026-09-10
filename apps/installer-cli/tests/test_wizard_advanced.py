@@ -1179,6 +1179,20 @@ def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_pat
     assert "compress" not in on
 
 
+def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
+    # Settings > Models discovers reachable models by default, so only a
+    # deliberate "no" reaches config.toml, alongside any per-role picks.
+    off = _write(tmp_path, monkeypatch, {"model_discovery": False})
+    assert tomllib.loads(off)["models"]["discovery"] is False
+    on = _write(tmp_path, monkeypatch, {"model_discovery": True})
+    assert "discovery" not in on
+    from maverick_installer.wizard import _cfg_role_models
+    both = "\n".join(_cfg_role_models({"coder": "openai:gpt-5.4"}, discovery=False))
+    parsed = tomllib.loads(both)["models"]
+    assert parsed == {"coder": "openai:gpt-5.4", "discovery": False}
+    assert _cfg_role_models({}, discovery=True) == []
+
+
 def test_bedrock_auth_mode_is_written_and_iam_needs_no_key(tmp_path, monkeypatch):
     # W1-10: the wizard asks how to authenticate to Bedrock and writes it; IAM
     # signing carries no api_key line, a bearer token does.

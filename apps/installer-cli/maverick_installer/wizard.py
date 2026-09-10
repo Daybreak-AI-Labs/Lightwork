@@ -5077,6 +5077,14 @@ def pick_advanced() -> dict[str, Any]:
         "of Lightwork already compresses.",
         default=True,
     )
+    # Settings > Models lists the models each saved key can reach by asking the
+    # provider's own model-list endpoint ([models] discovery, default on).
+    advanced["model_discovery"] = _q_confirm(
+        "Let Settings discover the models each provider key can reach (one "
+        "bounded model-list request per provider, cached)? Say no to offer "
+        "only the shipped catalog.",
+        default=True,
+    )
     return advanced
 
 
@@ -6230,12 +6238,16 @@ def _cfg_providers(
     return lines
 
 
-def _cfg_role_models(role_models: dict[str, str]) -> list[str]:
-    if not role_models:
+def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True) -> list[str]:
+    if not role_models and discovery:
         return []
     lines = ["[models]"]
     for role, spec in role_models.items():
         lines.append(f'{role} = "{spec}"')
+    if not discovery:
+        # Default-on in the app; only a deliberate "no" is written.
+        lines.append("# Live model discovery off: Settings offers the shipped catalog only.")
+        lines.append("discovery = false")
     lines.append("")
     return lines
 
@@ -8452,7 +8464,9 @@ def write_config(
     lines += _cfg_providers(
         providers, per_tenant_keys=per_tenant_keys, provider_options=provider_options,
     )
-    lines += _cfg_role_models(role_models)
+    lines += _cfg_role_models(
+        role_models, discovery=advanced.get("model_discovery") is not False,
+    )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
     lines += _cfg_skills(skills)
