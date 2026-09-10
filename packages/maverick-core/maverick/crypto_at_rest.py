@@ -78,25 +78,45 @@ _KEY_BYTES = 32              # AES-256
 _KEYID_BYTES = 8             # short key fingerprint embedded in v2 blobs
 # On-disk key location. ``_KEY_PATH`` is an OVERRIDE (tests pin it to a tmp
 # dir; an operator could too); ``None`` -- the production default -- means
-# "resolve <data_dir>/keys/at_rest.key for the ACTIVE tenant at call time" via
+# "resolve <home>/keys/at_rest.key for the DEPLOYMENT when asked" via
 # :func:`_key_path`. This used to be ``_KEY_PATH = data_dir(...)`` evaluated
-# at import, which was wrong twice over: it froze the path to whichever tenant
-# happened to be active when the module was first imported, and it ran
-# ``data_dir()`` DURING import. ``data_dir()`` resolves the tenant through the
-# client binding, which loads config, which -- when the dashboard overlay holds
-# a sealed value -- imports THIS module to open it. With the import still in
-# progress that raised "cannot import name 'deployment_key_scope' from
-# partially initialized module" on the very first ``data_dir()`` call of a
-# fresh process, and every production task exited before it could listen
-# (2026-09-10). Nothing may touch the data directory at import time here.
+# at import, which ran ``data_dir()`` DURING import: it resolves the tenant
+# through the client binding, which loads config, which -- when the dashboard
+# overlay holds a sealed value -- imports THIS module to open it. With the
+# import still in progress that raised "cannot import name
+# 'deployment_key_scope' from partially initialized module" on the very first
+# ``data_dir()`` call of a fresh process, and every production task exited
+# before it could listen (2026-09-10). Nothing may touch the data directory at
+# import time here.
+#
+# The key is one per deployment, not one per request tenant. The old
+# import-time binding always landed before any request scope existed, so every
+# row -- tenant-scoped or shared -- has been sealed under the deployment key
+# (MAVERICK_TENANT / the client binding decide its directory); per-tenant
+# separation is the KEK derivation on top of it. Resolving the path from the
+# request-scoped tenant instead would mint a fresh key per workspace and leave
+# a row sealed inside a tenant-bound request unreadable to any reader outside
+# that scope (the owner-invite flow proved it), so the request context is
+# deliberately ignored here.
 _KEY_PATH: Path | None = None
 
 
+def _deployment_tenant() -> str | None:
+    """The tenant the deployment itself is bound to (``MAVERICK_TENANT`` or the
+    client binding), ignoring any request-scoped ``set_tenant`` context."""
+    env = os.environ.get("MAVERICK_TENANT", "").strip()
+    if env:
+        return env
+    from .client import strict_client_id
+
+    return strict_client_id()
+
+
 def _key_path() -> Path:
-    """The at-rest key file for the active scope, resolved when asked."""
+    """The deployment's at-rest key file, resolved when asked (never at import)."""
     if _KEY_PATH is not None:
         return _KEY_PATH
-    return data_dir("keys", "at_rest.key")
+    return data_dir("keys", "at_rest.key", tenant=_deployment_tenant())
 _KEY_ENV = "MAVERICK_ENCRYPTION_KEY"
 _KEY_DIGEST_ENV = "MAVERICK_ENCRYPTION_KEY_DIGEST"
 _SHA256_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")

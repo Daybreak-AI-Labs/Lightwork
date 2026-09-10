@@ -773,13 +773,20 @@ def test_importing_the_module_does_not_resolve_the_data_dir():
     assert r.returncode == 0, r.stderr
 
 
-def test_key_path_follows_the_active_tenant_at_call_time(tmp_path, monkeypatch):
+def test_key_path_is_deployment_wide_not_request_scoped(tmp_path, monkeypatch):
+    """One key per deployment: a request bound to a workspace must seal with
+    the same key every other scope reads with (a row sealed inside a
+    tenant-bound request was unreadable to the owner-invite flow otherwise).
+    MAVERICK_TENANT, a deployment-level binding, still picks the directory."""
     from maverick.paths import reset_tenant, set_tenant
 
-    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
     monkeypatch.setattr(car, "_KEY_PATH", None)   # the production default
 
+    unbound = car._key_path()
     tok = set_tenant("tenant-a")
     try:
         path_a = car._key_path()
@@ -790,9 +797,16 @@ def test_key_path_follows_the_active_tenant_at_call_time(tmp_path, monkeypatch):
         path_b = car._key_path()
     finally:
         reset_tenant(tok)
-    assert path_a != path_b
-    assert "tenant-a" in str(path_a) and "tenant-b" in str(path_b)
-    assert path_a.name == path_b.name == "at_rest.key"
+    assert unbound == path_a == path_b == home / "keys" / "at_rest.key"
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-env")
+    bound = car._key_path()
+    assert "tenant-env" in str(bound) and bound.name == "at_rest.key"
+    tok = set_tenant("tenant-a")
+    try:
+        assert car._key_path() == bound
+    finally:
+        reset_tenant(tok)
 
 
 def test_key_path_override_still_wins(tmp_path, monkeypatch):
