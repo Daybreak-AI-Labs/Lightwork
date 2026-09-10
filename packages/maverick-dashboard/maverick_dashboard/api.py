@@ -11472,6 +11472,10 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
     return state
 
 
+# Product names for the container runtimes, as customers know them.
+_CONTAINER_PRODUCTS = {"docker": "Docker", "podman": "Podman"}
+
+
 def _probe_container_daemon(binary: str) -> dict:
     """``{"available": bool, "detail": str}`` for a container runtime.
 
@@ -11481,11 +11485,12 @@ def _probe_container_daemon(binary: str) -> dict:
     import shutil
     import subprocess
 
+    product = _CONTAINER_PRODUCTS.get(binary, binary)
     path = shutil.which(binary)
     if not path:
         return {
             "available": False,
-            "detail": f"{binary} is not installed (not found on PATH)",
+            "detail": f"{product} is not installed on this computer.",
         }
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
@@ -11498,16 +11503,16 @@ def _probe_container_daemon(binary: str) -> dict:
     except subprocess.TimeoutExpired:
         return {
             "available": False,
-            "detail": f"{binary} did not answer within 6s -- daemon starting or hung?",
+            "detail": f"{product} did not answer within 6 seconds. It may still be starting.",
         }
     except OSError as exc:
-        return {"available": False, "detail": f"could not run {binary}: {exc}"}
+        return {"available": False, "detail": f"{product} could not be started: {exc}"}
     if proc.returncode != 0:
         lines = (proc.stderr or proc.stdout or "").strip().splitlines()
-        detail = lines[-1].strip() if lines else f"{binary} info failed"
+        detail = lines[-1].strip() if lines else f"{product} is not running."
         return {"available": False, "detail": detail[:300]}
     version = (proc.stdout or "").strip()
-    detail = "daemon reachable" + (f" (server {version})" if version else "")
+    detail = "Ready" + (f" · version {version}" if version else "")
     return {"available": True, "detail": detail}
 
 
@@ -11527,8 +11532,8 @@ async def sandbox_status(request: Request) -> dict:
                 "local": {
                     "available": True,
                     "detail": (
-                        "always available -- runs model-driven shell on this "
-                        "host with no isolation"
+                        "Always available. Commands run directly on this "
+                        "computer with no isolation from its files or network."
                     ),
                 },
                 "docker": _probe_container_daemon("docker"),
@@ -11552,20 +11557,19 @@ async def set_sandbox_backend(request: Request, body: SandboxBackendIn) -> dict:
         raise HTTPException(
             status_code=400,
             detail=(
-                "switching to the local backend runs the agent's shell on "
-                "this host with no isolation; pass acknowledge_local_risk "
-                "to confirm"
+                "Running work on this computer gives commands no isolation "
+                "from its files or network; confirm with acknowledge_local_risk."
             ),
         )
     if backend != "local":
         probe = await run_in_threadpool(_probe_container_daemon, backend)
         if not probe["available"]:
+            product = _CONTAINER_PRODUCTS.get(backend, backend)
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{backend} is not ready: {probe['detail']}. Start the "
-                    f"{backend} daemon (e.g. open Docker Desktop, or "
-                    f"`systemctl start {backend}`) and try again."
+                    f"{product} is not ready: {probe['detail']} Start "
+                    f"{product} (for example, open Docker Desktop) and try again."
                 ),
             )
     from maverick_dashboard import settings_store

@@ -48,7 +48,7 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     assert "changing deployment-wide learning controls requires a global administrator" in learning.text
     assert "disabled" in _button(learning.text, "lrn-enable")
     assert "disabled" in _button(learning.text, "lrn-auto-evolve")
-    assert "changing the deployment-wide sandbox backend requires a global administrator" in permissions.text
+    assert "only a global administrator can change where work runs" in permissions.text
     assert "var canManageSandbox = false" in permissions.text
     # Tenant operate authority remains truthful and independently enables the
     # tenant-scoped tool overlay; it must not be collapsed into global admin.
