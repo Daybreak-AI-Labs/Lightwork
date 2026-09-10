@@ -45,12 +45,12 @@ python -m pip install -e './packages/maverick-core[postgres]'   # psycopg[binary
 
 The container image (`deploy/docker/Dockerfile`) and the VPS bootstrap
 (`deploy/vps/install.sh`) already install it: both use the core extras
-`release-runtime,postgres,oidc,s3`. On a VPS, override the set with
+`release-runtime,postgres,oidc,s3,evidence-analysis`. On a VPS, override the set with
 `MAVERICK_CORE_EXTRAS=...` before running the installer. A pipx install done
 by hand needs the extra spelled out the same way:
 
 ```bash
-pipx install './packages/maverick-core[release-runtime,postgres,oidc,s3]'
+pipx install './packages/maverick-core[release-runtime,postgres,oidc,s3,evidence-analysis]'
 ```
 
 ## Tenant isolation (row-level security)
