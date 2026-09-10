@@ -175,10 +175,11 @@ def build_app(directory):
     # A separately downloadable local custody copy for the synthetic rehearsal.
     # Tenant KEKs use the ordinary local derivation from this same fixture key.
     # The fresh rehearsal child cannot inherit this environment or key path.
-    if directory.resolve() not in crypto_at_rest._KEY_PATH.resolve().parents:
+    key_path = crypto_at_rest._key_path()
+    if directory.resolve() not in key_path.resolve().parents:
         raise RuntimeError("Browser fixture key path escaped its temporary home")
-    ensure_private_directory(crypto_at_rest._KEY_PATH.parent)
-    atomic_create_text(crypto_at_rest._KEY_PATH, os.environ["MAVERICK_ENCRYPTION_KEY"])
+    ensure_private_directory(key_path.parent)
+    atomic_create_text(key_path, os.environ["MAVERICK_ENCRYPTION_KEY"])
     tenant, principal = "browser-workspace", "user:browser-reviewer"
     # Keep the real fixture database inside the named workspace's snapshot
     # scope so ordinary domain mutations exercise database recovery guards.
