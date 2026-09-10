@@ -76,19 +76,38 @@ def test_page_renders_with_one_h1_and_every_suite(client: TestClient) -> None:
     parser.feed(body)
     assert parser.h1 == 1
     assert "Autonomous Compliance" in body
-    for suite in catalog.suites():
+    for suite in page.visible_suites(catalog.suites(), ui_visibility.not_ready_paths()):
         assert escape(suite.label) in body
         assert f'id="acm-suite-{suite.key}"' in body
 
 
-def test_every_module_card_carries_the_catalog_badge(client: TestClient) -> None:
+def test_every_offered_module_card_carries_the_catalog_badge(client: TestClient) -> None:
     parser = _CardBadges()
     parser.feed(client.get(page.PAGE_PATH).text)
+    held = ui_visibility.not_ready_paths()
+    offered = 0
     for suite in catalog.suites():
         for module in suite.modules:
+            if module.path in held:
+                # Held back from customers: the landing must not link into a
+                # workbench the sidebar and finder deliberately do not offer.
+                assert module.path not in parser.by_href, module.path
+                continue
+            offered += 1
             assert module.path in parser.by_href, module.path
             expected = catalog.STATUS_BADGE_CLASS[module.status]
             assert expected in parser.by_href[module.path], (module.path, module.status)
+    assert offered and len(parser.by_href) == offered
+
+
+def test_visible_suites_drops_held_modules_and_empty_suites() -> None:
+    suites = catalog.suites()
+    held = frozenset(m.path for m in suites[0].modules) | {suites[1].modules[0].path}
+    shown = page.visible_suites(suites, held)
+    assert [s.key for s in shown] == [s.key for s in suites[1:]]
+    assert shown[0].modules == suites[1].modules[1:]
+    assert shown[1:] == list(suites[2:])
+    assert page.visible_suites(suites, frozenset()) == list(suites)
 
 
 def test_labels_note_and_pricing_call_are_present(client: TestClient) -> None:

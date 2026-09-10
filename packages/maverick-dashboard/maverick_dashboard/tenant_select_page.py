@@ -14,10 +14,14 @@ among their own workspaces.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 PAGE_PATH = "/workspace/tenant"
+
+# The workspace the picker's one-click action creates; the same record is
+# provisioned automatically for the first signed-in administrator (below).
+FIRST_WORKSPACE = {"id": "local", "display_name": "My workspace", "plan": "free"}
 
 
 def _safe_return_path(value: str | None) -> str:
@@ -91,6 +95,68 @@ def _page_context(
     }
 
 
+def first_workspace_for_admin(request: Request) -> RedirectResponse | None:
+    """Provision and select the first workspace for a signed-in global
+    administrator who reaches a tenant gate on an installation with no
+    workspace at all, then send them back to the page that refused.
+
+    The owner's account is the demo account: it must never land on a "no
+    workspaces exist yet" dead end that a one-click button would resolve
+    anyway. Mirrors exactly what that button does (create ``local`` through
+    the registry, record the global audit event, select it for this
+    principal). Anything else -- auth off, a MAVERICK_TENANT binding, an
+    existing roster, a non-admin, a licence or audit refusal -- returns None
+    and the picker renders as before.
+    """
+    import os
+
+    from maverick.tenant.registry import create_tenant, delete_tenant, list_tenants
+
+    from maverick_dashboard import workspace_tenants
+
+    from .auth import caller_principal, has_global_permission
+
+    principal = caller_principal(request)
+    if not principal or os.environ.get("MAVERICK_TENANT", "").strip():
+        return None
+    if not has_global_permission(request, "admin"):
+        return None
+    try:
+        if list_tenants():
+            return None
+        rec = create_tenant(
+            FIRST_WORKSPACE["id"],
+            plan=FIRST_WORKSPACE["plan"],
+            display_name=FIRST_WORKSPACE["display_name"],
+        )
+    except Exception:
+        return None
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        audit_event(
+            EventKind.TENANT_CREATED,
+            agent=principal,
+            _global=True,
+            actor=principal,
+            tenant=rec.id,
+            plan=rec.plan,
+            max_daily_dollars=rec.max_daily_dollars,
+        )
+    except AuditRefused:
+        try:
+            delete_tenant(rec.id, purge=False)
+        except Exception:  # pragma: no cover -- the picker still renders
+            pass
+        return None
+    try:
+        workspace_tenants.set_selection(principal, rec.id)
+    except Exception:
+        return None
+    back = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(_safe_return_path(back) or PAGE_PATH, status_code=303)
+
+
 def tenant_select_response(
     request: Request,
     templates: Jinja2Templates,
@@ -98,7 +164,12 @@ def tenant_select_response(
     detail: str = "",
 ) -> HTMLResponse:
     """The picker rendered in place of a tenant-gate 409 (keeps the URL, so
-    selecting a tenant and reloading lands on the workbench that refused)."""
+    selecting a tenant and reloading lands on the workbench that refused).
+    A signed-in administrator on an empty installation skips the picker: the
+    first workspace is created and selected for them."""
+    provisioned = first_workspace_for_admin(request)
+    if provisioned is not None:
+        return provisioned
     return templates.TemplateResponse(
         request,
         "tenant_select.html",

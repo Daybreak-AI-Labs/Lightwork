@@ -26,6 +26,20 @@ PRICING_MAILTO = (
 )
 
 
+def visible_suites(suites, not_ready) -> list:
+    """The catalog with every module held back from customers removed, and any
+    suite left empty dropped: the landing must never link a visitor into a
+    workbench the sidebar and finder deliberately do not offer."""
+    from dataclasses import replace
+
+    out = []
+    for suite in suites:
+        modules = tuple(m for m in suite.modules if m.path not in not_ready)
+        if modules:
+            out.append(suite if len(modules) == len(suite.modules) else replace(suite, modules=modules))
+    return out
+
+
 def create_autonomous_compliance_page_router(
     templates: Jinja2Templates,
 ) -> APIRouter:
@@ -49,7 +63,9 @@ def create_autonomous_compliance_page_router(
             )
         from maverick import compliance_catalog as catalog
 
-        catalog_suites = catalog.suites()
+        from . import ui_visibility
+
+        catalog_suites = visible_suites(catalog.suites(), ui_visibility.not_ready_paths())
         response = templates.TemplateResponse(
             request,
             "autonomous_compliance.html",

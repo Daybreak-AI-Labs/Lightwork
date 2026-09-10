@@ -711,7 +711,9 @@ def test_needs_attention_digest_on_api_and_page():
     assert "Needs attention" in page.text
     assert "incident report(s) OVERDUE" in page.text
     assert "training(s) missing" in page.text
-    assert "governance-alerts due" in page.text
+    # The alerts stand on their own; the CLI that mirrors them is not shown
+    # to a non-technical user.
+    assert "governance-alerts due" not in page.text
 
 
 # ---------------------------------------------------------------------------

@@ -50,12 +50,17 @@ def test_finder_pages_lists_folded_pages_that_nav_groups_excludes(monkeypatch, t
     assert nav <= set(finder)
     assert len(finder) == len(set(finder))
     assert set(finder) - nav == {
-        p["path"] for p in ui_visibility.PAGES if not p.get("in_nav", True)
+        p["path"] for p in ui_visibility.PAGES
+        if not p.get("in_nav", True) and ui_visibility.customer_ready(p)
     }
-    # auth off: every registered page exactly once (grouped by label like the
-    # nav, so a group split in the registry is merged, not duplicated).
+    # auth off: every customer-ready registered page exactly once (grouped by
+    # label like the nav, so a group split in the registry is merged, not
+    # duplicated); pages held back as not ready are offered nowhere.
     auth_off = _hrefs(ui_visibility.finder_pages(None))
-    assert sorted(auth_off) == sorted(p["path"] for p in ui_visibility.PAGES)
+    assert sorted(auth_off) == sorted(
+        p["path"] for p in ui_visibility.PAGES if ui_visibility.customer_ready(p)
+    )
+    assert set(auth_off).isdisjoint(ui_visibility.not_ready_paths())
     # Groups merge by label like the nav (no duplicate sections).
     labels = [g["label"] for g in ui_visibility.finder_pages("admin")]
     assert len(labels) == len(set(labels))
