@@ -143,7 +143,7 @@ test("sandbox switching suppresses repeated clicks and restores unavailable choi
 
 test("a local sandbox switch requires confirmation and sends its explicit acknowledgement", async () => {
   const ui = await sandboxFixture(response({ backend: "local" }), { selected: "docker" });
-  const local = ui.rows.querySelectorAll("button").find((button) => button.textContent === "Use local");
+  const local = ui.rows.querySelectorAll("button").find((button) => button.textContent === "Use this computer");
   await local.click();
   await turn();
   assert.equal(ui.confirmations.length, 1);
@@ -153,7 +153,7 @@ test("a local sandbox switch requires confirmation and sends its explicit acknow
 
 test("cancelling the local sandbox confirmation sends no mutation", async () => {
   const ui = await sandboxFixture(response({ backend: "local" }), { selected: "docker", confirmed: false });
-  const local = ui.rows.querySelectorAll("button").find((button) => button.textContent === "Use local");
+  const local = ui.rows.querySelectorAll("button").find((button) => button.textContent === "Use this computer");
   await local.click();
   assert.equal(ui.requests.length, 0);
   assert.equal(ui.reloads(), 0);
