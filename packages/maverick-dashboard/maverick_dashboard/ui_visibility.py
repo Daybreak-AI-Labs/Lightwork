@@ -41,15 +41,20 @@ from . import rbac
 # primary page's own links, so the nav stays one entry per job.
 # ``scope: global`` uses the installation-wide role and permission in
 # request navigation and HTTP admission, never a tenant-local role grant.
+# ``ready: False`` marks a page that is not ready for customers -- an operator
+# workbench of record ids, verification fingerprints and raw status documents,
+# or a module that ships switched off with no in-app way to turn it on. Such a
+# page keeps its route and its permission gate (engineers and tests reach it
+# by URL) but is offered nowhere: not in the sidebar, not in the page finder,
+# not in the Settings visibility matrix. Flip it back to ready when the page
+# speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
     {"path": "/workflow-readiness", "label": "Workflow readiness", "group": "Observe",
      "icon": "check", "floor": "view", "default": "view"},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
-    # Research lab is not ready for customers: kept governed (enforced, in the
-    # Settings matrix, reachable by URL from Knowledge access) but off the rail.
-    {"path": "/research", "label": "Research lab", "aliases": "experiments candidates evaluation",
-     "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/research", "ready": False, "label": "Research lab", "aliases": "experiments candidates evaluation",
+     "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
@@ -396,7 +401,7 @@ PAGES: tuple[dict, ...] = (
     # to auditors and viewers rather than making the nav imply one permission
     # governs the mixed-authority surface.
     {
-        "path": "/agent-control-plane",
+        "path": "/agent-control-plane", "ready": False,
         "label": "Agent Control Plane",
         "group": "Govern",
         "icon": "agents",
@@ -415,7 +420,7 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/privacy/data-discovery",
+        "path": "/privacy/data-discovery", "ready": False,
         "label": "Privacy Data Discovery",
         "group": "Privacy",
         "icon": "eye",
@@ -463,7 +468,7 @@ PAGES: tuple[dict, ...] = (
     # approval gate it carries pseudonymous profiles, immutable receipts,
     # tracker observations, and downstream preference synchronization.
     {
-        "path": "/consent",
+        "path": "/consent", "ready": False,
         "label": "Consent & Preferences",
         "group": "Consent",
         "icon": "check",
@@ -507,7 +512,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/native",
+        "path": "/consent/native", "ready": False,
         "label": "Native Consent SDK",
         "group": "Consent",
         "icon": "key",
@@ -525,7 +530,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/consent/custom-indexes",
+        "path": "/consent/custom-indexes", "ready": False,
         "label": "Custom Consent Indexes",
         "group": "Consent",
         "icon": "search",
@@ -534,7 +539,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/bulk-jobs",
+        "path": "/consent/bulk-jobs", "ready": False,
         "label": "Consent Bulk Jobs",
         "group": "Consent",
         "icon": "clock",
@@ -543,7 +548,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/publish-settings",
+        "path": "/consent/publish-settings", "ready": False,
         "label": "Consent Publish Settings",
         "group": "Consent",
         "icon": "settings",
@@ -552,7 +557,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/global-opt-out",
+        "path": "/consent/global-opt-out", "ready": False,
         "label": "Global Opt-Out",
         "group": "Consent",
         "icon": "check",
@@ -561,7 +566,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/consent/application-scans",
+        "path": "/consent/application-scans", "ready": False,
         "label": "Application Consent Scans",
         "group": "Consent",
         "icon": "search",
@@ -597,7 +602,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/data-use",
+        "path": "/data-use", "ready": False,
         "label": "Data Use Governance",
         "group": "Privacy",
         "icon": "shield",
@@ -614,7 +619,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/governance-agents",
+        "path": "/governance-agents", "ready": False,
         "label": "Governance Agents",
         "group": "AI oversight",
         "icon": "agents",
@@ -623,7 +628,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/governance/inventory",
+        "path": "/governance/inventory", "ready": False,
         "label": "Governance Inventory",
         "group": "AI oversight",
         "icon": "overview",
@@ -632,7 +637,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/ai-evidence-analysis",
+        "path": "/ai-evidence-analysis", "ready": False,
         "label": "AI Evidence Analysis",
         "group": "AI oversight",
         "icon": "check",
@@ -641,7 +646,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/assess/evidence-autopopulation",
+        "path": "/assess/evidence-autopopulation", "ready": False,
         "label": "Assessment Evidence",
         "group": "AI oversight",
         "icon": "check",
@@ -650,7 +655,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/ai-entity-tasks",
+        "path": "/ai-entity-tasks", "ready": False,
         "label": "AI Entity Tasks",
         "group": "AI oversight",
         "icon": "check",
@@ -659,7 +664,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/assurance/cloud-agents",
+        "path": "/assurance/cloud-agents", "ready": False,
         "label": "Cloud Agent Governance",
         "group": "AI oversight",
         "icon": "shield",
@@ -668,7 +673,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/privacy/drop",
+        "path": "/privacy/drop", "ready": False,
         "label": "DROP Requests",
         "group": "Privacy",
         "icon": "shield",
@@ -688,7 +693,7 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/third-party/vendor-onboarding",
+        "path": "/third-party/vendor-onboarding", "ready": False,
         "label": "AI Vendor Onboarding",
         "group": "Third parties",
         "icon": "shield",
@@ -697,7 +702,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/third-party/contracts",
+        "path": "/third-party/contracts", "ready": False,
         "label": "Contracts & Engagements",
         "group": "Third parties",
         "icon": "shield",
@@ -706,7 +711,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/third-party/executive-reports",
+        "path": "/third-party/executive-reports", "ready": False,
         "label": "Executive Vendor Reports",
         "group": "Third parties",
         "icon": "shield",
@@ -871,7 +876,7 @@ PAGES: tuple[dict, ...] = (
         "default": "audit",
     },
     {
-        "path": "/compliance/grc-studio",
+        "path": "/compliance/grc-studio", "ready": False,
         "label": "No-code GRC Studio",
         "aliases": "workflow builder governance risk compliance studio",
         "group": "Govern",
@@ -908,7 +913,7 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
-        "path": "/compliance/continuous-evidence",
+        "path": "/compliance/continuous-evidence", "ready": False,
         "label": "Continuous Evidence",
         "group": "Govern",
         "icon": "compliance",
@@ -958,7 +963,7 @@ PAGES: tuple[dict, ...] = (
     # Digest-only lifecycle evidence over the durable promotion authority.
     # It is audit-gated like the source evidence, and has no product mutation.
     {
-        "path": "/audit/evolution-ledger",
+        "path": "/audit/evolution-ledger", "ready": False,
         "label": "Evolution Ledger",
         "group": "Govern",
         "icon": "learned",
@@ -1074,7 +1079,7 @@ PAGES: tuple[dict, ...] = (
     },
     # -- Admin ----------------------------------------------------------------
     {
-        "path": "/administration/document-vault",
+        "path": "/administration/document-vault", "ready": False,
         "label": "Document Vault",
         "group": "Admin",
         "icon": "shield",
@@ -1319,6 +1324,8 @@ def apply_selection(checked: set[str]) -> None:
     """
     data: dict[str, dict[str, bool]] = {}
     for page in PAGES:
+        if not customer_ready(page):
+            continue  # not in the matrix, so never "absent" from a submission
         for role in rbac.known_roles():
             if (page["path"], role) in LOCKED or not eligible(page, role):
                 continue
@@ -1339,6 +1346,18 @@ def page_for(path: str) -> dict | None:
             if best is None or len(root) > len(best["path"]):
                 best = p
     return best
+
+
+def customer_ready(page: dict) -> bool:
+    """False for a registered page marked ``ready: False``: governed and
+    reachable by URL, but offered on no customer surface (sidebar, finder,
+    Settings matrix)."""
+    return page.get("ready", True) is not False
+
+
+def not_ready_paths() -> frozenset[str]:
+    """Registered paths held back from every customer surface."""
+    return frozenset(p["path"] for p in PAGES if not customer_ready(p))
 
 
 def nav_groups(
@@ -1372,6 +1391,8 @@ def _grouped_links(
     ov = overrides() if role is not None or scope_roles else {}
     groups: list[dict] = []
     for page in PAGES:
+        if not customer_ready(page):
+            continue
         if not include_folded and not page.get("in_nav", True):
             continue
         page_role = (scope_roles or {}).get(page.get("scope", "workspace"), role)
@@ -1416,6 +1437,8 @@ def matrix() -> list[dict]:
     roles = rbac.known_roles()
     groups: list[dict] = []
     for page in PAGES:
+        if not customer_ready(page):
+            continue
         cells = []
         for role in roles:
             locked = (page["path"], role) in LOCKED

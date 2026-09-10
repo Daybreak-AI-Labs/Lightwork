@@ -145,9 +145,12 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     def hrefs(role):
         return {ln["href"] for g in ui_visibility.nav_groups(role) for ln in g["links"]}
 
-    in_nav = {p["path"] for p in ui_visibility.PAGES if p.get("in_nav", True)}
+    in_nav = {
+        p["path"] for p in ui_visibility.PAGES
+        if p.get("in_nav", True) and ui_visibility.customer_ready(p)
+    }
     # auth off: every sidebar page (in_nav: False pages are reached from
-    # in-page links, never the sidebar).
+    # in-page links, never the sidebar; ready: False pages are offered nowhere).
     assert hrefs(None) == in_nav
     # The redesigned Flows builder is the primary sidebar entry; the older
     # workflow index/builder and the alt goal composer are reached in-page.
@@ -164,12 +167,11 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # 30-link Govern block read as unorganized); the role still sees no
     # Extend/Admin group.
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
-        "Operate", "Observe", "Govern", "Privacy", "Consent",
-        "AI oversight", "Third parties"}
+        "Operate", "Observe", "Govern", "AI oversight"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
     # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")
-    assert {"/audit", "/compliance", "/overview", "/agent-control-plane"} <= a
+    assert {"/audit", "/compliance", "/overview"} <= a
     assert a.isdisjoint({"/chat", "/settings", "/automations", "/replay"})
     # operator: operate surfaces but no admin plumbing.
     o = hrefs("operator")
@@ -178,6 +180,31 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
                          "/cache", "/audit"})
     # admin: every sidebar page.
     assert hrefs("admin") == in_nav
+
+
+def test_not_ready_pages_are_offered_on_no_customer_surface(monkeypatch, tmp_path):
+    """``ready: False`` = an operator workbench (record ids, fingerprints, raw
+    status documents) or a module that ships switched off: governed and
+    reachable by URL, but never in the sidebar, the finder or the matrix."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_dashboard import rbac, ui_visibility
+
+    held = ui_visibility.not_ready_paths()
+    assert {"/research", "/administration/document-vault", "/ai-entity-tasks",
+            "/ai-evidence-analysis", "/governance-agents", "/consent", "/data-use"} <= held
+    for role in [None, *rbac.ROLES]:
+        nav = {ln["href"] for g in ui_visibility.nav_groups(role) for ln in g["links"]}
+        finder = {ln["href"] for g in ui_visibility.finder_pages(role) for ln in g["links"]}
+        assert nav.isdisjoint(held), role
+        assert finder.isdisjoint(held), role
+    assert held.isdisjoint(row["path"] for g in ui_visibility.matrix() for row in g["pages"])
+    # Still registered and enforced: the route keeps its permission floor.
+    for path in held:
+        page = ui_visibility.page_for(path)
+        assert page is not None and page["floor"] in rbac.permissions_for("admin")
+    # Saving the matrix never records a verdict for a page it does not show.
+    ui_visibility.apply_selection(set())
+    assert held.isdisjoint(ui_visibility.overrides())
 
 
 # ---------- HTTP enforcement + settings matrix ----------

@@ -36,7 +36,9 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
 
     assert response.status_code == 200
     page = response.text
-    assert "Consent &amp; Preferences" in page
+    # The page's own heading: the workbench is held back from the sidebar and
+    # finder until it is customer-ready, so no nav entry carries the name.
+    assert "<h1>Consent & Preferences</h1>" in page
     # Default-off is explicit, and the gate is switchable IN-APP: the shared
     # module-gate banner with a Turn on control, no config keys in the UI.
     assert 'data-module-gate="consent_preferences"' in page

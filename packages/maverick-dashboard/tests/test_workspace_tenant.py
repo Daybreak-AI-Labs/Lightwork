@@ -320,6 +320,47 @@ def _as(user: str, *, expected: str = "") -> dict[str, str]:
     return headers
 
 
+def test_first_signed_in_admin_gets_a_workspace_instead_of_the_empty_picker(monkeypatch):
+    """The owner's demo account must never land on "No workspaces exist yet":
+    a signed-in global administrator hitting a tenant gate on an empty
+    installation gets the one-click workspace created and selected, and is
+    sent back to the page that refused."""
+    from maverick.tenant.registry import get_tenant, list_tenants
+    from maverick_dashboard import rbac, workspace_tenants
+
+    rbac.set_role("user:owner", "admin")
+    rbac.set_role("user:alice", "viewer")
+    _enable_oidc(monkeypatch)
+    assert list_tenants() == []
+
+    # A non-admin still gets the picker, and provisions nothing.
+    blocked = client.get(
+        MEMBER_GATED_PAGE, headers={**_as("alice"), "Accept": "text/html"}, follow_redirects=False
+    )
+    assert blocked.status_code == 409 and list_tenants() == []
+
+    first = client.get(
+        GATED_PAGE + "?tab=x",
+        headers={**_as("owner"), "Accept": "text/html"},
+        follow_redirects=False,
+    )
+    assert first.status_code == 303, first.text
+    assert first.headers["location"] == GATED_PAGE + "?tab=x"
+    rec = get_tenant("local")
+    assert rec is not None and rec.display_name == "My workspace" and rec.plan == "free"
+    assert workspace_tenants.get_selection("user:owner") == "local"
+    # The page that refused now renders for the owner.
+    assert client.get(GATED_PAGE, headers=_as("owner")).status_code == 200
+
+    # A second administrator with a roster in place gets the picker, not
+    # another silent workspace.
+    rbac.set_role("user:second", "admin")
+    again = client.get(
+        MEMBER_GATED_PAGE, headers={**_as("second"), "Accept": "text/html"}, follow_redirects=False
+    )
+    assert again.status_code == 409 and [t.id for t in list_tenants()] == ["local"]
+
+
 def test_authenticated_selection_is_principal_and_membership_scoped(monkeypatch):
     """One operator's selection must never become another user's authority."""
     from maverick_dashboard import rbac
