@@ -103,15 +103,9 @@ def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(
     assert not any(href.startswith("//") for href in markup.finder_hrefs)
 
 
-def test_page_finder_holds_back_the_grc_builder_until_it_is_ready(monkeypatch, tmp_path):
-    from maverick_dashboard import ui_visibility
-
+def test_page_finder_accepts_the_workflow_name_for_the_grc_builder(monkeypatch, tmp_path):
     markup = _overview_markup(monkeypatch, tmp_path)
 
-    # The studio is an operator workbench today (studio ids, integrity digests,
-    # opaque option values), so it is offered nowhere; its aliases stay on the
-    # registry entry so the finder accepts the workflow name once it is ready.
-    assert "/compliance/grc-studio" not in markup.finder_search
-    assert "/compliance/grc-studio" not in markup.sidebar_hrefs
-    aliases = ui_visibility.page_for("/compliance/grc-studio")["aliases"].lower()
-    assert "workflow" in aliases and "builder" in aliases
+    search_terms = markup.finder_search["/compliance/grc-studio"].lower()
+    assert "workflow" in search_terms
+    assert "builder" in search_terms

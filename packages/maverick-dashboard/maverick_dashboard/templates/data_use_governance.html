@@ -33,7 +33,7 @@
         <label>Asset ID<input class="input" name="asset_id" required value="customers"></label><label>Asset type<select class="input" name="asset_type"><option>table</option><option>view</option><option>dataset</option><option>stream</option><option>file</option><option>api</option><option>model_input</option><option>model_output</option></select></label>
         <label>Field ID<input class="input" name="field_id" placeholder="leave empty for asset only"></label><label>Field type<select class="input" name="data_type"><option>string</option><option>integer</option><option>number</option><option>boolean</option><option>date</option><option>datetime</option><option>uuid</option><option>binary</option><option>json</option><option>object</option><option>array</option></select></label>
         <label>Catalog binding SHA-256<input class="input" name="catalog_binding_sha256" pattern="[0-9a-f]{64}" required></label><label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-        <label>Nullable<select class="input" name="nullable"><option value="false">No</option><option value="true">Yes</option></select></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+        <label>Nullable<select class="input" name="nullable"><option value="false">No</option><option value="true">Yes</option></select></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
         <div class="dug-actions"><button class="btn btn--primary" type="submit">Bind catalog record</button><span class="muted">Admin required; IDs are opaque and tenant-pinned.</span></div>
       </fieldset></form></section>
 
@@ -43,7 +43,7 @@
         <label>Values (comma separated)<input class="input" name="values" required></label><label>Source system<input class="input" name="source_system" required></label><label>Source revision<input class="input" name="source_revision" type="number" min="1" required></label>
         <label>Source authority SHA-256<input class="input" name="source_authority_sha256" pattern="[0-9a-f]{64}" required></label><label>Evidence SHA-256<input class="input" name="evidence_sha256" pattern="[0-9a-f]{64}" required></label>
         <label>Observed timestamp<input class="input" name="observed_at" type="number" step="any" required></label><label>Fresh until<input class="input" name="fresh_until" type="number" step="any" required></label>
-        <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+        <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
         <div class="dug-actions"><button class="btn btn--primary" type="submit">Record reviewed context</button><span class="muted">All four roots must be fresh and independently sourced.</span></div>
       </fieldset></form></section>
 
@@ -51,7 +51,7 @@
         <legend class="sr-only">Policy version controls</legend>
         <label>Policy ID<input class="input" name="policy_id" required></label><label>Version<input class="input" name="version" type="number" min="1" value="1" required></label><label>Expected current version<input class="input" name="expected_current_version" type="number" min="0" value="0" required></label><label>Expected pointer revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
         <label class="wide">Closed policy document JSON<textarea class="input" name="document" rows="13" required>{"scope":{"asset_ids":[],"field_ids":[],"project_ids":[],"actions":["read"]},"conditions":{"business_purpose_any":[],"regulatory_any":[],"consent_any":[],"observed_classification_any":[],"label_any":[]},"controls":[{"control_id":"default-deny","effect":"deny","field_ids":[]}]}</textarea></label>
-        <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label><label>Review timestamp<input class="input" name="reviewed_at" type="number" step="any"></label>
+        <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label><label>Review timestamp<input class="input" name="reviewed_at" type="number" step="any"></label>
         <div class="dug-actions"><button class="btn" type="submit" value="draft">Append draft</button><button class="btn btn--primary" type="submit" value="activate">Activate current draft</button><span class="muted">The server binds author/reviewer identity and enforces four eyes.</span></div>
       </fieldset></form></section>
     </div>
@@ -60,7 +60,7 @@
         <legend class="sr-only">Data-use request controls</legend>
         <label>Request ID<input class="input" name="request_id" required></label><label>Project ID<input class="input" name="project_id" required></label><label>Asset ID<input class="input" name="asset_id" required value="customers"></label><label>Fields (comma separated)<input class="input" name="field_ids" required></label>
         <label>Action<select class="input" name="action"><option>read</option><option>export</option><option>train</option><option>analyze</option><option>share</option><option>write</option></select></label><label>Purposes (comma separated)<input class="input" name="purpose_codes" required></label>
-        <label>Request evidence SHA-256<input class="input" name="request_evidence_sha256" pattern="[0-9a-f]{64}" required></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+        <label>Request evidence SHA-256<input class="input" name="request_evidence_sha256" pattern="[0-9a-f]{64}" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
         <label>Expected request revision<input class="input" name="expected_request_revision" type="number" min="0" value="1" required></label><label>Decision ID (for compile)<input class="input" name="decision_id"></label>
         <div class="dug-actions"><button class="btn" type="submit" value="create">Create request</button><button class="btn btn--primary" type="submit" value="authorize">Authorize</button><button class="btn" id="dug-compile" type="submit" value="compile"{% if not data_use_compiler_enabled %} disabled aria-disabled="true"{% endif %}>Compile decision</button></div>
       </fieldset></form></section>

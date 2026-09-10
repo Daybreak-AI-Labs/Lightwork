@@ -62,11 +62,13 @@
 {% if not governance_can_audit %}
 <p>Integrity verification is hidden because global audit permission is required.</p>
 {% endif %}
+<details class="ga-advanced">
+<summary>Advanced operations (administrators)</summary>
 <div class="ga-grid">
   <section class="panel ga-stack">
-    <h2>Strict JSON operator workbench</h2>
-    <p>Use opaque source references for analysis. The server resolves the
-      corresponding bytes; raw document or incident content is rejected.</p>
+    <h2>Operator console</h2>
+    <p>For administrators running one governed operation at a time. Evidence is
+      referenced, never pasted: the server resolves the referenced records.</p>
     <fieldset id="ga-operation-controls" disabled aria-disabled="true">
       <legend>Permission-scoped operations</legend>
       <label>Operation
@@ -125,6 +127,7 @@
     <pre class="ga-output" id="ga-output" aria-live="polite">No request made.</pre>
   </section>
 </div>
+</details>
 
 <script>
 (function () {

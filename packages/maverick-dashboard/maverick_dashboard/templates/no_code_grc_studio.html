@@ -76,6 +76,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not studio_module_enabled %}
+{{ module_gate('tech_risk_compliance.grc_studio', 'No-code GRC studio',
+               detail='Turns on Tech Risk &amp; Compliance and the studio together.',
+               can_activate=studio_can_activate) }}
+{% endif %}
 <div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
   <section class="grcs-hero" aria-labelledby="grcs-title">
     <div>
@@ -103,7 +109,7 @@
 
   <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-status-title">
     <div class="grcs-head"><div><p class="grcs-kicker">Readiness first</p><h2 id="grcs-status-title">Service availability</h2></div></div>
-    <details><summary>Technical details</summary><pre class="grcs-output" id="grcs-status-output" tabindex="0"></pre></details>
+    <details hidden><summary>Technical details</summary><pre hidden class="grcs-output" id="grcs-status-output" tabindex="0"></pre></details>
   </section>
 
   <fieldset class="grcs-fieldset" id="grcs-operations" disabled>
@@ -140,7 +146,7 @@
             </div>
 
             <div class="grcs-mini-actions"><button class="btn" id="grcs-compose-blueprint" type="button">Generate closed blueprint</button><button class="btn" id="grcs-load-blueprint" type="button">Load advanced JSON into composer</button><button class="btn" id="grcs-reset-composer" type="button">Reset composer</button></div>
-            <details><summary>Technical details: blueprint JSON</summary><p class="grcs-help">The builder generates this JSON. You can also load a compatible blueprint; Lightwork validates it before saving.</p><label>Closed blueprint JSON<textarea class="input" name="blueprint_json" maxlength="1048576" required></textarea></label></details>
+            <details hidden><summary>Technical details: blueprint JSON</summary><p class="grcs-help">The builder generates this JSON. You can also load a compatible blueprint; Lightwork validates it before saving.</p><label>Closed blueprint JSON<textarea class="input" name="blueprint_json" maxlength="1048576" required></textarea></label></details>
             <button class="btn btn--primary" type="submit">Validate and save draft</button>
           </fieldset>
         </form>

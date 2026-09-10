@@ -68,7 +68,7 @@
           <label>Validity days<input name="validity_days" type="number" min="1" max="1830" value="365" required></label>
           <label>Due within days<input name="due_within_days" type="number" min="0" max="366" value="30" required></label>
           <label>Expected revision<input name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="256"></label>
+          <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
           <div class="assurance-form__wide assurance-actions">
             <button class="btn" type="submit">Save requirement</button>
             <span id="ai-literacy-requirement-status" role="status" aria-live="polite"></span>
@@ -79,7 +79,7 @@
           <label>Role IDs<input name="role_ids" maxlength="2048" placeholder="developer, reviewer"></label>
           <label>System IDs<input name="system_ids" maxlength="2048" placeholder="customer-assistant"></label>
           <label>Expected revision<input name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="256"></label>
+          <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
           <div class="assurance-form__wide assurance-actions">
             <button class="btn" type="submit">Replace assignment</button>
             <span id="ai-literacy-assignment-status" role="status" aria-live="polite"></span>
@@ -363,7 +363,7 @@
           <label>Source ID<input name="source_id" required maxlength="256"></label>
           <label class="assurance-form__wide">Source SHA-256<input name="source_digest" required maxlength="64" pattern="[0-9a-f]{64}"></label>
           <label>Signal code<input name="signal_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:-]{0,127}"></label>
-          <label>Idempotency key<input name="idempotency_key" required maxlength="256"></label>
+          <label hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
           <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Ingest normalized signal</button><span id="dynamic-risk-signal-ingest-status" role="status" aria-live="polite"></span></div>
         </form>
         <form id="dynamic-risk-score" class="assurance-form">
@@ -494,7 +494,7 @@
         <label>Model Risk asset ID<input name="asset_id" required maxlength="36" pattern="MAA-[0-9a-f]{32}"></label>
         <label class="assurance-form__wide">Closed profile content JSON<textarea name="content" required maxlength="65536" rows="10" autocomplete="off"></textarea></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off" placeholder='[{"evidence_id":"MRE-...","digest":"64 hex"}]'></textarea></label>
-        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="256"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare version one</button><span id="ai-insurability-create-status" role="status" aria-live="polite"></span></div>
       </form>
       <form id="ai-insurability-version" class="assurance-form">
@@ -502,7 +502,7 @@
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
         <label class="assurance-form__wide">Closed profile content JSON<textarea name="content" required maxlength="65536" rows="10" autocomplete="off"></textarea></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off"></textarea></label>
-        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="256"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare next version</button><span id="ai-insurability-version-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -646,7 +646,7 @@
         <label>Expected revision (version)<input name="expected_revision" type="number" min="1"></label>
         <label class="assurance-form__wide">Closed package content JSON<textarea name="content" required maxlength="65536" rows="10" autocomplete="off"></textarea></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off" placeholder='[{"evidence_id":"MRE-...","digest":"64 hex"}]'></textarea></label>
-        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="256"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare bounded package</button><span id="ai-regulated-package-prepare-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -705,7 +705,7 @@
         <label>Model modality<select name="model_modality_code"><option value="text">text</option><option value="audio">audio</option><option value="image">image</option><option value="multimodal">multimodal</option><option value="tabular">tabular</option><option value="video">video</option><option value="other">other</option></select></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off" placeholder='[{"evidence_id":"MRE-...","digest":"64 lowercase hex"}]'></textarea></label>
         <label class="assurance-form__wide"><input type="checkbox" name="voluntary_opt_in" required> I explicitly opt in to preparing this aggregate contribution</label>
-        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare voluntary aggregate</button><span id="ai-benchmark-prepare-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -724,7 +724,7 @@
       <form id="ai-benchmark-submit" class="assurance-form">
         <label>Approved contribution ID<input name="contribution_id" required maxlength="36" pattern="BCI-[0-9a-f]{32}"></label>
         <label>Approved version (optional)<input name="version" type="number" min="1" max="50"></label>
-        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
         <label class="assurance-form__wide"><input type="checkbox" name="explicit_consent" required> I explicitly consent to transmitting this exact approved aggregate export to the configured coordinator</label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Submit exact approved export</button><span id="ai-benchmark-submit-status" role="status" aria-live="polite"></span></div>
       </form>
@@ -884,7 +884,7 @@
         <label>Federation binding SHA-256<input name="expected_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
         <label>Authority revision<input name="expected_revision" type="number" min="1" step="1" required></label>
         <label>Required capability<input name="required_capability" maxlength="128" pattern="[a-z][a-z0-9_.:-]{0,127}" value="agent.execute"></label>
-        <label>Decision idempotency key<input name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="identity-decision-unique-key"></label>
+        <label hidden>Decision idempotency key<input data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="identity-decision-unique-key"></label>
         <div class="assurance-form__wide assurance-actions"><button id="ai-identity-federation-observe" class="btn btn--ghost" type="button">Observe federation</button><button id="ai-identity-capability-map" class="btn btn--ghost" type="button">Map capabilities</button><button id="ai-identity-capability-decision" class="btn" type="button">Decide capability</button><button id="ai-identity-conditional-decision" class="btn" type="button">Decide conditional access</button><span id="ai-identity-control-evaluate-status" role="status" aria-live="polite"></span></div>
       </form>
       <form id="ai-identity-purview-prepare" class="assurance-form">
@@ -897,7 +897,7 @@
         <label>Sorted classification codes<input name="classification_codes" maxlength="4096" placeholder="confidential, regulated"></label>
         <label>Current asset binding SHA-256<input name="expected_asset_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
         <label>Current asset revision<input name="expected_source_revision" type="number" min="1" step="1" required></label>
-        <label>Prepare idempotency key<input name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="purview-prepare-unique-key"></label>
+        <label hidden>Prepare idempotency key<input data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="purview-prepare-unique-key"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare only</button><span id="ai-identity-purview-prepare-status" role="status" aria-live="polite"></span></div>
       </form>
       <form id="ai-identity-purview-resume" class="assurance-form">

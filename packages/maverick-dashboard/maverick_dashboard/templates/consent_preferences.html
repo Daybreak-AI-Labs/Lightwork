@@ -82,7 +82,7 @@
           <label>Vendor<input class="input" name="vendor_id" value="all" required></label>
           <label>Jurisdiction<input class="input" name="jurisdiction" value="global" required></label>
           <label>Country code<input class="input" name="country_code" value="US" minlength="2" maxlength="2" required></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Record choice</button></div>
         </fieldset></form>
       </section>
@@ -108,7 +108,7 @@
           <label>Profile ID<input class="input" name="profile_id" required></label>
           <label>Identity kind<select class="input" name="identity_kind"><option>anonymous</option><option>known</option></select></label>
           <label class="wide">Subject SHA-256<input class="input" name="subject_sha256" pattern="[0-9a-f]{64}" required></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Create profile</button></div>
         </fieldset></form>
       </section>
@@ -136,7 +136,7 @@
           <label>Status<select class="input" name="status"><option>blocked</option><option>approved</option><option>retired</option></select></label>
           <label>Purposes (comma separated)<input class="input" name="purpose_ids" value="analytics" required></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Save tracker</button><span class="muted">Admin required</span></div>
         </fieldset></form>
       </section>

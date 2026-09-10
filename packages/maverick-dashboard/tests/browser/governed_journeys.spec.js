@@ -74,7 +74,8 @@ test('explicit consent publication resolves through an enrolled public client, r
   await expect(rulePicker.getByRole('status')).toContainText('1 matching');await rulePicker.getByRole('listbox',{name:'Matching saved records'}).selectOption({index:0});
   await rulePicker.getByRole('combobox',{name:'Saved version'}).selectOption({label:'Version 1 · latest'});
   await rulePicker.getByRole('button',{name:'Use selected version',exact:true}).click();
-  await promotion.locator('[name="idempotency_key"]').fill('browser-explicit-publication');
+  // The page generates the request reference; a person no longer types it.
+  expect(await promotion.locator('[name="idempotency_key"]').inputValue()).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{7,}$/);
   let publishes=0;page.on('request',req=>{if(req.url().endsWith('/publish'))publishes++;});
   await promotion.getByRole('button',{name:'Preview exact bundle',exact:true}).click();
   await expect(page.locator('#cpp-status')).toHaveText('Exact unpublished bundle previewed.');
@@ -94,12 +95,14 @@ test('explicit consent publication resolves through an enrolled public client, r
   await promotion.getByRole('button',{name:'Load history',exact:true}).click();await expect(page.locator('#cpp-status')).toHaveText('Immutable publication history loaded.');
   expect(JSON.parse(await page.locator('#cpp-result').textContent()).items).toHaveLength(1);
   const withdrawal=page.locator('#cpp-withdraw');await selectProperty(withdrawal);
-  await withdrawal.locator('[name="expected_publication_revision"]').fill('0');await withdrawal.locator('[name="idempotency_key"]').fill('browser-stale-withdrawal');
+  await withdrawal.locator('[name="expected_publication_revision"]').fill('0');const staleKey=await withdrawal.locator('[name="idempotency_key"]').inputValue();expect(staleKey).not.toBe('');
   await page.locator('#cpp-withdraw-confirm').check();const rejected=page.waitForResponse(response=>response.url().endsWith('/withdraw'));
   await withdrawal.getByRole('button',{name:'Withdraw active publication',exact:true}).click();expect((await rejected).status()).toBe(409);
   await expect(page.locator('#cpp-status')).toContainText('revision');await expect(withdrawal.locator('[name="expected_publication_revision"]')).toHaveValue('0');
   expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(1);
-  await withdrawal.locator('[name="expected_publication_revision"]').fill('1');await withdrawal.locator('[name="idempotency_key"]').fill('browser-confirmed-withdrawal');
+  await withdrawal.locator('[name="expected_publication_revision"]').fill('1');
+  // Changing the revision is a new operation: the page renews the reference on its own.
+  await expect(withdrawal.locator('[name="idempotency_key"]')).not.toHaveValue(staleKey);
   await page.locator('#cpp-withdraw-confirm').uncheck();await page.locator('#cpp-withdraw-confirm').check();
   await withdrawal.getByRole('button',{name:'Withdraw active publication',exact:true}).click();await expect(page.locator('#cpp-status')).toContainText('Active publication withdrawn');
   const withdrawn=JSON.parse(await page.locator('#cpp-result').textContent());expect(withdrawn.action).toBe('withdraw');expect(withdrawn.source_publication_id).toBe(published.publication_id);
@@ -134,14 +137,17 @@ test('a failed recovery save retries the exact operation and survives a page rel
 test('real field validation marks the rejected input and preserves the other enrollment fields',async({page})=>{
   await page.goto('/consent/publishing');const form=page.locator('#cpp-property');
   await form.locator('[name="consent_group_id"]').fill('not a valid identifier!');
-  await form.locator('[name="idempotency_key"]').fill('browser-invalid-enrollment');
   const rejected=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().endsWith('/properties/web-main'));
-  await form.getByRole('button',{name:'Enroll / revise property'}).click();expect((await rejected).status()).toBe(422);
+  await form.getByRole('button',{name:'Enroll / revise property'}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
+  // The page generated the request reference it sent; a person no longer types it.
+  const enrollmentKey=rejection.request().postDataJSON().idempotency_key;expect(enrollmentKey).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{7,}$/);
   const field=form.locator('[name="consent_group_id"]');await expect(field).toHaveAttribute('aria-invalid','true');await expect(field).toBeFocused();
   await expect(form.getByRole('alert')).toContainText(/Consent group/);
   await expect(form.locator('[name="web_domains"]')).toHaveValue('example.com');
-  await expect(form.locator('[name="idempotency_key"]')).toHaveValue('browser-invalid-enrollment');
+  // A retry of the same operation keeps the same generated reference.
+  await expect(form.locator('[name="idempotency_key"]')).toHaveValue(enrollmentKey);
   await field.fill('browser-consumer-group');await expect(field).not.toHaveAttribute('aria-invalid','true');
+  await expect(form.locator('[name="idempotency_key"]')).not.toHaveValue(enrollmentKey);
   await page.setViewportSize({width:320,height:800});await fits(page);
 });
 

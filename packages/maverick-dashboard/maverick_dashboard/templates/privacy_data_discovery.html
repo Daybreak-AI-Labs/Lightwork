@@ -66,7 +66,7 @@
             <p>Existing deployment-managed environment names remain supported. Saved references include an exact version; changing provider, connection or key requires saving this source again.</p>
           </details>
           <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Save source settings</button><button class="btn" id="pdd-test-source" type="button" data-requires="admin">Test saved source access</button><button class="btn" id="pdd-list-sources" type="button">List sources</button></div>
         </form>
         <h3>Evidence keys</h3>
@@ -75,7 +75,7 @@
           <label>Key to manage<select class="input" id="pdd-key-picker"><option value="">Create a new key</option></select></label>
           <label>Key name<input class="input" name="name" required pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64" placeholder="privacy-inventory"></label>
           <input name="expected_revision" type="hidden" value="0">
-          <details><summary>Request details</summary><label>Request reference<input class="input" name="idempotency_key" required maxlength="192"></label></details>
+          <details><summary>Request details</summary><label hidden>Request reference<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label></details>
           <button class="btn" type="submit" data-requires="admin">Create or rotate evidence key</button>
         </form>
       </section>
@@ -86,7 +86,7 @@
           <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
           <label>State<select class="input" name="state"><option value="suspended">suspended</option><option value="active">active</option><option value="revoked">revoked</option></select></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="1" required></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Apply source state</button></div>
         </form>
       </section>
@@ -103,7 +103,7 @@
           <label>Active<select class="input" name="active"><option value="true">true</option><option value="false">false</option></select></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
           <label class="wide">Scan limits JSON<textarea class="input" name="limits" rows="5" required data-guided-endpoint="/api/v1/privacy/data-discovery/schedules/{schedule_id}" data-guided-method="put" data-guided-property="limits" data-guided-title="Scan limits">{"max_records":10000,"max_files":1000,"max_bytes":67108864,"max_seconds":300.0,"max_findings":10000,"max_fields_per_record":256,"max_record_bytes":262144,"max_document_bytes":4194304}</textarea></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Create or update schedule</button><button class="btn" id="pdd-list-schedules" type="button">List schedules</button><button class="btn" id="pdd-enqueue-due" type="button" data-requires="operate">Enqueue due schedules</button></div>
         </form>
       </section>
@@ -114,7 +114,7 @@
           <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
           <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="3" required></label>
           <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="1" max="315360000" value="7776000" required></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <label class="wide">Scan limits JSON<textarea class="input" name="limits" rows="5" required data-guided-endpoint="/api/v1/privacy/data-discovery/sources/{source_id}/jobs" data-guided-property="limits" data-guided-title="Scan limits">{"max_records":10000,"max_files":1000,"max_bytes":67108864,"max_seconds":300.0,"max_findings":10000,"max_fields_per_record":256,"max_record_bytes":262144,"max_document_bytes":4194304}</textarea></label>
           <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="operate">Enqueue manual scan</button><button class="btn" id="pdd-claim" type="button" data-requires="operate">Claim up to 10 jobs</button><button class="btn" id="pdd-list-jobs" type="button">List jobs</button></div>
         </form>
@@ -127,7 +127,7 @@
           <label>Failure code<select class="input" name="error_code"><option value="adapter_error">adapter_error</option><option value="credential_unavailable">credential_unavailable</option><option value="provider_contract_invalid">provider_contract_invalid</option><option value="operator_cancelled">operator_cancelled</option></select></label>
           <label>Backoff seconds<input class="input" name="base_backoff_seconds" type="number" min="0.1" max="3600" step="0.1" value="5.0"></label>
           <label>Current job version<input class="input" name="expected_revision" type="number" min="1"></label>
-          <label class="wide">Retry request reference<input class="input" name="idempotency_key" maxlength="192"></label>
+          <label class="wide" hidden>Retry request reference<input data-auto-reference class="input" name="idempotency_key" maxlength="192"></label>
           <div class="pdd-actions"><button class="btn btn--primary" type="submit" value="execute" data-requires="admin">Run scan (contacts source)</button><button class="btn" type="submit" value="fail" data-requires="operate">Record failure</button><button class="btn" type="submit" value="replay" data-requires="admin">Retry failed job</button></div>
         </form>
       </section>
@@ -154,7 +154,7 @@
           <label>Effective category<select class="input" name="effective_category"><option value="">None (false positive only)</option><option>authentication_secret</option><option>biometric_identifier</option><option>date_of_birth</option><option>email_address</option><option>financial_account</option><option>government_identifier</option><option>health_information</option><option>ip_address</option><option>payment_card</option><option>person_name</option><option>phone_number</option><option>physical_address</option><option>precise_location</option><option>unknown_personal_data</option></select></label>
           <label>Freshness seconds<input class="input" name="freshness_seconds" type="number" min="1" max="31536000" value="3600" required></label>
           <label>Finding version<input class="input" name="expected_finding_revision" type="number" min="1" required></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Propose classification review</button></div>
         </form>
         <p class="pdd-note">The proposal records who prepared it and which finding it uses. Submitting a proposal does not change the data map.</p>
@@ -166,7 +166,7 @@
           <label>Review ID<input class="input" name="review_id" required maxlength="128"></label>
           <label>Expected version<input class="input" name="expected_version" type="number" min="1" required></label>
           <label class="wide">Exact review integrity SHA-256<input class="input" name="expected_integrity_sha256" pattern="[0-9a-f]{64}" required></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Approve as second authenticated reviewer</button></div>
         </form>
         <p class="pdd-note">The approver must be a different signed-in person. Only approval of a current finding can update the configured data map or processing-activities record.</p>
@@ -191,12 +191,12 @@
           <label>Ambiguous work ID<input class="input" name="work_id" maxlength="128" required></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
           <label>Absent backoff seconds<input class="input" name="absent_backoff_seconds" type="number" min="0" max="86400" value="0" required></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
           <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Check an uncertain update</button></div>
         </form>
         <form id="pdd-remediation-maintenance" class="pdd-form">
           <label>Target purge limit<input class="input" name="target_limit" type="number" min="1" max="1000" value="500" required></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
           <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Purge expired outbox/data-map records and verify integrity</button></div>
         </form>
         <p class="pdd-note">Lightwork records the user and workspace responsible for each update. These actions use fingerprints and enforce processing limits; they do not write to external providers or establish successful use with a live provider.</p>
@@ -205,7 +205,7 @@
       <section class="pdd-card">
         <h2>10. Audit, posture, and retention</h2>
         <form id="pdd-retention" class="pdd-form">
-          <label class="wide">Retention idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide" hidden>Retention idempotency key<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Purge expired reports</button><button class="btn" id="pdd-audit" type="button" data-requires="audit">Load audit</button><button class="btn" id="pdd-verify" type="button" data-requires="audit">Verify audit chain</button><button class="btn" id="pdd-posture" type="button">Privacy posture</button><button class="btn" id="pdd-runtime" type="button">Availability</button></div>
         </form>
       </section>

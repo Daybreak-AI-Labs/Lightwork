@@ -282,6 +282,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not contracts_module_enabled %}
+{{ module_gate('third_party_management.contracts', 'Contracts and engagements',
+               detail='Turns on Third-Party Management and contract records together.',
+               can_activate=contracts_can_activate) }}
+{% endif %}
 <div class="tpc-shell" id="third-party-contracts-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
   <section class="tpc-hero" aria-labelledby="tpc-title">
@@ -316,7 +322,7 @@
     <div class="tpc-head">
       <div><p class="tpc-kicker">Readiness first</p><h2 id="tpc-status-title">Service availability</h2></div>
     </div>
-    <details><summary>Technical details</summary><pre class="tpc-output" id="tpc-status-output" tabindex="0"></pre></details>
+    <details hidden><summary>Technical details</summary><pre hidden class="tpc-output" id="tpc-status-output" tabindex="0"></pre></details>
   </section>
 
   <fieldset class="tpc-fieldset" id="tpc-operations" disabled>
@@ -391,7 +397,7 @@
             <label>Custom field schema JSON<textarea class="input" name="field_schema_json" maxlength="32768">[]</textarea></label>
             <label>Custom field values JSON<textarea class="input" name="field_values_json" maxlength="32768">{}</textarea></label>
             <label>Safe formula definitions JSON<textarea class="input" name="formulas_json" maxlength="32768">[]</textarea></label>
-            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required></label>
+            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required></label>
             <button class="btn btn--primary" type="submit">Create record</button>
           </fieldset>
         </form>
@@ -407,7 +413,7 @@
               <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
               <label>Record kind<select class="select" name="record_kind"><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
               <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required></label>
-              <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
+              <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
             </div>
             <label class="tpc-check"><input name="include_title_ref" type="checkbox"><span>Replace title reference</span></label>
             <input class="input" name="update_title_ref" maxlength="128" aria-label="Updated title reference">
@@ -443,7 +449,7 @@
           <fieldset class="tpc-permission" id="tpc-archive-controls"{% if not contracts_can_operate %} disabled aria-disabled="true"{% endif %}>
             <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
             <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
+            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
             <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand archived records become immutable and retention-eligible.</span></label>
             <button class="btn" type="submit">Archive record</button>
           </fieldset>
@@ -456,7 +462,7 @@
           <fieldset class="tpc-permission" id="tpc-delete-controls"{% if not contracts_can_admin %} disabled aria-disabled="true"{% endif %}>
             <label>Archived record ID<input class="input" name="record_id" maxlength="128" required></label>
             <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
+            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
             <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand deletion removes the record and history while preserving an immutable replay-prevention tombstone.</span></label>
             <button class="btn btn--danger" type="submit">Delete archived record</button>
           </fieldset>

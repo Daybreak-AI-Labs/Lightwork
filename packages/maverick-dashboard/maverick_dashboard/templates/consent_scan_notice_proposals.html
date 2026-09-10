@@ -69,8 +69,8 @@
         <label>Expected approval revision
           <input class="input" name="expected_approval_revision" type="number" min="1" max="2147483647" value="1">
         </label>
-        <label>Request reference (reuse when retrying)
-          <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" autocomplete="off">
+        <label hidden>Request reference (reuse when retrying)
+          <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" autocomplete="off">
         </label>
         <label class="csnp-wide"><span><input name="acknowledge_local" type="checkbox"> I understand that acceptance is a local metadata baseline only and performs no legal-copy generation, site/app mutation, provider write, or notice publication.</span></label>
         <div class="csnp-actions">

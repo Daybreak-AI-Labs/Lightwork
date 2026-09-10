@@ -54,7 +54,7 @@
           <fieldset class="wide"><legend>Allowed uses</legend><div class="pri-checks">
             <label><input type="checkbox" name="allowed_uses" value="search" checked>search</label><label><input type="checkbox" name="allowed_uses" value="research" checked>research</label><label><input type="checkbox" name="allowed_uses" value="compare" checked>compare</label><label><input type="checkbox" name="allowed_uses" value="alerts" checked>alerts</label><label><input type="checkbox" name="allowed_uses" value="reports" checked>reports</label><label><input type="checkbox" name="allowed_uses" value="share">share</label>
           </div></fieldset>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pri-actions"><button class="btn btn--primary" type="submit">Enroll source metadata</button><button class="btn" id="pri-list-sources" type="button">List sources</button></div>
         </form>
       </section>
@@ -65,7 +65,7 @@
           <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="1" required></label>
           <label>Decision<select class="input" name="approved"><option value="true">approve</option><option value="false">reject</option></select></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <label class="wide">Rationale<textarea class="input" name="rationale" rows="3" required maxlength="2000"></textarea></label>
           <div class="pri-actions"><button class="btn btn--primary" type="submit">Record independent review</button><button class="btn" id="pri-revoke-source" type="button">Revoke source</button></div>
         </form>
@@ -88,7 +88,7 @@
           <label>Expected latest version<input class="input" name="expected_latest_version" type="number" min="0" value="0" required></label>
           <label class="wide">Citation JSON list<textarea class="input" name="citations" rows="4" required>[{"citation_id":"official","title":"Official publication","uri":"https://authority.example/document","pinpoint":"full text"}]</textarea></label>
           <label class="wide">Licensed document text<textarea class="input" name="content" rows="8" required maxlength="524288"></textarea></label>
-          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pri-actions"><button class="btn btn--primary" type="submit">Hash and ingest new version</button></div>
         </form>
       </section>
@@ -116,7 +116,7 @@
           <label>Jurisdictions<input class="input" name="jurisdictions" required value="US-CA"></label>
           <label>Cadence seconds<input class="input" name="cadence_seconds" type="number" min="300" max="31536000" value="86400" required></label>
           <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
           <div class="pri-actions"><button class="btn btn--primary" type="submit">Save tracker</button><button class="btn" id="pri-due" type="button">List due trackers</button><button class="btn" id="pri-claim" type="button">Claim alert deliveries</button><button class="btn" id="pri-run-delivery" type="button">Run configured email worker — external side effect</button></div>
         </form>
         <p class="pri-note">Claiming leases bounded delivery records; it does not send email or call an external transport. A worker must acknowledge success or record a sanitized failure and retry delay.</p>
@@ -129,7 +129,7 @@
           <label>Jurisdictions<input class="input" name="jurisdictions" value="US-CA"></label>
           <label class="wide">Query<input class="input" name="query" maxlength="2048"></label>
           <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="86400" max="315360000" value="31536000"></label>
-          <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192"></label>
+          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192"></label>
           <div class="pri-actions"><button class="btn btn--primary" type="submit">Create evidence report</button><button class="btn" id="pri-get-report" type="button">Get report</button><button class="btn" id="pri-integrity" type="button">Verify retained-state integrity</button><button class="btn" id="pri-purge" type="button">Purge expired content</button><button class="btn" id="pri-runtime" type="button">Show runtime boundary</button></div>
         </form>
       </section>

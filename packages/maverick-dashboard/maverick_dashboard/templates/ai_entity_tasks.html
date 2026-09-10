@@ -292,6 +292,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not task_module_enabled %}
+{{ module_gate('ai_entity_tasks', 'AI entity tasks',
+               detail='Turns on AI inventory and AI entity tasks together. Workspace settings and retention rules are still checked before use.',
+               can_activate=task_can_activate) }}
+{% endif %}
 <div class="aet-shell" id="ai-entity-task-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
   <section class="aet-hero" aria-labelledby="aet-title">
@@ -333,9 +339,9 @@
         <h2 id="aet-status-title">Service availability</h2>
       </div>
     </div>
-    <details>
+    <details hidden>
       <summary>Technical details</summary>
-      <pre class="aet-output" id="aet-status-output" tabindex="0"></pre>
+      <pre hidden class="aet-output" id="aet-status-output" tabindex="0"></pre>
     </details>
   </section>
 
@@ -434,8 +440,8 @@
             <label>Due date <span class="aet-muted">Optional, tenant server time remains authoritative</span>
               <input class="input" name="due_at" type="datetime-local" step="1">
             </label>
-            <label>Request reference (reuse when retrying)
-              <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
+            <label hidden>Request reference (reuse when retrying)
+              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Create task</button>
           </fieldset>
@@ -507,8 +513,8 @@
                 <input class="input" name="due_at" type="datetime-local" step="1" aria-label="New due date">
               </span>
             </div>
-            <label>Request reference (reuse when retrying)
-              <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
+            <label hidden>Request reference (reuse when retrying)
+              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Save changes</button>
           </fieldset>

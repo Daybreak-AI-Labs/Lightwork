@@ -167,11 +167,12 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # 30-link Govern block read as unorganized); the role still sees no
     # Extend/Admin group.
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
-        "Operate", "Observe", "Govern", "AI oversight"}
+        "Operate", "Observe", "Govern", "Privacy", "Consent",
+        "AI oversight", "Third parties"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
     # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")
-    assert {"/audit", "/compliance", "/overview"} <= a
+    assert {"/audit", "/compliance", "/overview", "/agent-control-plane"} <= a
     assert a.isdisjoint({"/chat", "/settings", "/automations", "/replay"})
     # operator: operate surfaces but no admin plumbing.
     o = hrefs("operator")
@@ -190,8 +191,8 @@ def test_not_ready_pages_are_offered_on_no_customer_surface(monkeypatch, tmp_pat
     from maverick_dashboard import rbac, ui_visibility
 
     held = ui_visibility.not_ready_paths()
-    assert {"/research", "/administration/document-vault", "/ai-entity-tasks",
-            "/ai-evidence-analysis", "/governance-agents", "/consent", "/data-use"} <= held
+    # Only the Research lab is held back; every governance workbench is offered.
+    assert held == {"/research"}
     for role in [None, *rbac.ROLES]:
         nav = {ln["href"] for g in ui_visibility.nav_groups(role) for ln in g["links"]}
         finder = {ln["href"] for g in ui_visibility.finder_pages(role) for ln in g["links"]}

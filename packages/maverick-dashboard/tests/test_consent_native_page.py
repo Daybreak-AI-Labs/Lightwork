@@ -75,7 +75,6 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
     visibility = next(item for item in ui_visibility.PAGES if item["path"] == page.PAGE_PATH)
     assert visibility == {
         "path": "/consent/native",
-        "ready": False,
         "label": "Native Consent SDK",
         "group": "Consent",
         "icon": "key",

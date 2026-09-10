@@ -300,3 +300,33 @@ def test_module_state_and_mutation_fail_closed_on_unreadable_sources(
     )
     assert response.status_code == 503
     assert overlay.read_text(encoding="utf-8") == original
+
+
+def test_previously_switchless_workbenches_carry_turn_on_banners(monkeypatch):
+    """AI entity tasks, the document vault, the GRC studio and contracts used
+    to report 'disabled' with no in-app way to turn them on. Each page now
+    renders the shared banner for its switch while off, and the switch
+    applies the module's requirement chain."""
+    monkeypatch.setenv("MAVERICK_TENANT", "gate-test")
+    pages = {
+        "/ai-entity-tasks": "ai_entity_tasks",
+        "/administration/document-vault": "governed_document_vault",
+        "/compliance/grc-studio": "tech_risk_compliance.grc_studio",
+        "/third-party/contracts": "third_party_management.contracts",
+    }
+    for path, section in pages.items():
+        page = client.get(path)
+        assert page.status_code == 200, (path, page.status_code)
+        assert f'data-module-gate="{section}"' in page.text, path
+        assert "mg-on" in page.text, path
+
+    flipped = client.post(
+        "/api/v1/features/modules",
+        json={"section": "ai_entity_tasks", "enabled": True},
+    )
+    assert flipped.status_code == 200, flipped.text
+    assert _module("ai_inventory")["activation"]["status"] == "enabled"
+    assert _module("ai_entity_tasks")["activation"]["status"] == "enabled"
+    assert 'data-module-gate="ai_entity_tasks"' not in client.get("/ai-entity-tasks").text
+    # The others stay off and keep their own banner.
+    assert 'data-module-gate="governed_document_vault"' in client.get("/administration/document-vault").text

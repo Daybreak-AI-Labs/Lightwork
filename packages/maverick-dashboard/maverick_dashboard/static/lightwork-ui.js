@@ -760,3 +760,38 @@
         });
       });
     })();
+
+// Request references and idempotency keys are protocol plumbing, not something
+// a person should type. Inputs marked data-auto-reference are hidden by their
+// pages and filled here: one fresh reference per operation, kept unchanged
+// while the same operation is retried, replaced as soon as any other field in
+// the same form or section changes (that is a new operation).
+(function () {
+  'use strict';
+  function fresh() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+    var bytes = new Uint8Array(16), out = '';
+    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for (var j = 0; j < bytes.length; j++) bytes[j] = Math.floor(Math.random() * 256);
+    for (var i = 0; i < bytes.length; i++) out += ('0' + bytes[i].toString(16)).slice(-2);
+    return out;
+  }
+  function scopeOf(input) {
+    return input.closest('form, fieldset, section, .panel, .card') || document.body;
+  }
+  var refs = Array.prototype.slice.call(document.querySelectorAll('[data-auto-reference]'));
+  if (!refs.length) return;
+  refs.forEach(function (input) { if (!input.value) input.value = fresh(); });
+  function renew(ev) {
+    var t = ev.target;
+    // Only a named field of the operation counts as a change; a record
+    // picker's own search box and lists live inside the form but are not
+    // part of what gets submitted, and the picker refuses to apply a
+    // selection when the draft changed underneath it.
+    if (!t || !t.name || !t.hasAttribute || t.hasAttribute('data-auto-reference')) return;
+    refs.forEach(function (input) { if (scopeOf(input).contains(t)) input.value = fresh(); });
+  }
+  // 'input' only: a 'change' event also fires when focus leaves an edited
+  // field, which would renew the reference on the click that submits it.
+  document.addEventListener('input', renew, true);
+})();

@@ -33,7 +33,7 @@
       <label>Traffic basis points<input class="input" name="traffic_bps" type="number" min="1" max="10000" value="10000" required></label><label>Maximum exposures<input class="input" name="max_exposures" type="number" min="1" max="100000000" value="1000000" required></label>
       <label>Minimum sample per variant<input class="input" name="min_sample_per_variant" type="number" min="20" max="10000000" value="100" required></label><label>Familywise alpha<input class="input" name="alpha" type="number" min="0.001" max="0.1" step="0.001" value="0.05" required></label>
       <label>Maximum analysis looks<input class="input" name="max_analysis_looks" type="number" min="1" max="20" value="5" required></label><label>Minimum absolute effect<input class="input" name="minimum_effect" type="number" min="0" max="0.5" step="0.001" value="0" required></label>
-      <label>Dedupe retention days<input class="input" name="dedupe_retention_days" type="number" min="1" max="90" value="30" required></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
+      <label>Dedupe retention days<input class="input" name="dedupe_retention_days" type="number" min="1" max="90" value="30" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
       <label class="ce-wide">Variants JSON<textarea class="input ce-secret" name="variants" rows="13" required data-guided-endpoint="/api/v1/consent/experiments" data-guided-property="variants" data-guided-title="Variants">[
   {"variant_id":"control","allocation_bps":5000,"content_ref":"bundle:control","content_sha256":"0000000000000000000000000000000000000000000000000000000000000000","accessibility_evidence_sha256":"0000000000000000000000000000000000000000000000000000000000000000","equal_choice_evidence_sha256":"0000000000000000000000000000000000000000000000000000000000000000","is_control":true,"is_holdout":false},
   {"variant_id":"treatment","allocation_bps":5000,"content_ref":"bundle:treatment","content_sha256":"0000000000000000000000000000000000000000000000000000000000000000","accessibility_evidence_sha256":"0000000000000000000000000000000000000000000000000000000000000000","equal_choice_evidence_sha256":"0000000000000000000000000000000000000000000000000000000000000000","is_control":false,"is_holdout":false}
@@ -45,7 +45,7 @@
 
     <section class="ce-card"><h2>2. Human approval and lifecycle</h2><form id="ce-lifecycle" class="ce-form">
       <label>Experiment ID<input class="input" name="experiment_id" value="banner-copy-v1" required maxlength="128"></label><label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-      <label class="ce-wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
+      <label class="ce-wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
       <div class="ce-actions"><button class="btn btn--primary" type="submit" value="approve">Approve exact digest</button><button class="btn btn--primary" type="submit" value="activate">Activate</button><button class="btn" type="submit" value="pause">Pause</button><button class="btn" type="submit" value="resume">Resume</button><button class="btn" type="submit" value="kill">Kill</button><button class="btn" type="submit" value="rollback">Rollback to control</button></div>
     </form><p class="muted">The creator cannot approve the same experiment definition; a different authenticated person must review it. Every lifecycle action preserves one stable caller identity, so changing duties cannot manufacture a second reviewer.</p></section>
 
@@ -55,24 +55,24 @@
       <label>Channel<input class="input" name="channel" maxlength="128" placeholder="web"></label><label>Locale<input class="input" name="locale" maxlength="35" placeholder="en-US"></label>
       <label class="ce-wide">Asserted privacy signals (comma separated)<input class="input" name="privacy_signals" placeholder="gpc"></label>
       <label><input name="required_purpose" type="checkbox"> Required purpose</label><label><input name="accessibility_supported" type="checkbox" checked> Accessibility supported</label><label><input name="equal_choice_prominence" type="checkbox" checked> Equal accept/reject prominence</label>
-      <label>Event time (optional)<input class="input" name="occurred_at" type="number" min="1" step="0.001"></label><label>Exposure idempotency key<input class="input" name="idempotency_key" minlength="8" maxlength="256"></label>
+      <label>Event time (optional)<input class="input" name="occurred_at" type="number" min="1" step="0.001"></label><label hidden>Exposure idempotency key<input data-auto-reference class="input" name="idempotency_key" minlength="8" maxlength="256"></label>
       <div class="ce-actions"><button class="btn" type="submit" value="assign">Preview sticky assignment</button><button class="btn btn--primary" type="submit" value="exposure">Record deduplicated exposure</button></div>
     </form></section>
 
     <section class="ce-card"><h2>4. Binary outcome</h2><form id="ce-outcome" class="ce-form">
       <label>Experiment ID<input class="input" name="experiment_id" value="banner-copy-v1" required maxlength="128"></label><label>Subject identity (ephemeral)<input class="input ce-secret" name="subject_identity" type="password" autocomplete="off" required maxlength="512"></label>
       <label><input name="success" type="checkbox"> Metric success</label><label>Outcome time (optional)<input class="input" name="occurred_at" type="number" min="1" step="0.001"></label>
-      <label class="ce-wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
+      <label class="ce-wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
       <div class="ce-actions"><button class="btn btn--primary" type="submit">Record outcome after exposure</button></div>
     </form></section>
 
     <section class="ce-card"><h2>5. Inspect, analyze, and audit</h2><form id="ce-inspect" class="ce-form">
-      <label>Experiment ID<input class="input" name="experiment_id" value="banner-copy-v1" required maxlength="128"></label><label>Analysis idempotency key<input class="input" name="idempotency_key" minlength="8" maxlength="256"></label>
+      <label>Experiment ID<input class="input" name="experiment_id" value="banner-copy-v1" required maxlength="128"></label><label hidden>Analysis idempotency key<input data-auto-reference class="input" name="idempotency_key" minlength="8" maxlength="256"></label>
       <div class="ce-actions"><button class="btn" type="submit" value="get">Get current authority</button><button class="btn btn--primary" type="submit" value="analysis">Run bounded analysis look</button><button class="btn" type="submit" value="audit-export">Verify audit export</button></div>
     </form></section>
 
     <section class="ce-card"><h2>6. Privacy retention</h2><form id="ce-retention" class="ce-form">
-      <label>Expired before (optional; defaults now)<input class="input" name="before" type="number" min="1" step="0.001"></label><label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
+      <label>Expired before (optional; defaults now)<input class="input" name="before" type="number" min="1" step="0.001"></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required minlength="8" maxlength="256"></label>
       <div class="ce-actions"><button class="btn" type="submit">Purge expired pseudonymous dedupe tokens</button></div>
     </form><p class="muted">Aggregate counts and immutable governance audit remain. Raw identities, profiles, contexts, and event payloads are never part of this store.</p></section>
 

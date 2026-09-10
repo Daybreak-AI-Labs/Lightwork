@@ -46,8 +46,8 @@ def test_finder_pages_lists_folded_pages_that_nav_groups_excludes(monkeypatch, t
     offered = {p for p in FOLDED if ui_visibility.customer_ready(ui_visibility.page_for(p))}
     held = set(FOLDED) - offered
     assert offered and offered <= set(finder)
-    # Folded pages held back as not ready are offered nowhere, finder included.
-    assert held and held.isdisjoint(finder)
+    # A folded page held back as not ready would be offered nowhere, finder included.
+    assert held.isdisjoint(finder)
     assert set(FOLDED).isdisjoint(nav)
     # The sidebar is a strict subset of the finder; nothing is finder-only
     # beyond in_nav=False pages, and the finder has no duplicates.

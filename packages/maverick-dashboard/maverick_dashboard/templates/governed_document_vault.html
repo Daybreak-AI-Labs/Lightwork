@@ -37,6 +37,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not document_vault_module_enabled %}
+{{ module_gate('governed_document_vault', 'Governed document vault',
+               detail='Turns on encrypted document custody for this installation. Storage limits and reviewer authority are still checked before use.',
+               can_activate=document_vault_can_activate) }}
+{% endif %}
 <div class="document-vault-shell" id="document-vault-shell"
       data-vault-api-base="{{ vault_api_base }}" data-access-api-base="{{ access_api_base }}"
       data-copilot-page="/administration/document-vault">
@@ -65,7 +71,7 @@
       <button class="btn" id="document-vault-refresh-status" type="button">Refresh readiness</button>
       <button class="btn" id="document-vault-refresh-documents" type="button">Refresh documents</button>
     </div>
-    <pre class="document-vault-output" id="document-vault-status-output" tabindex="0"></pre>
+    <pre hidden class="document-vault-output" id="document-vault-status-output" tabindex="0"></pre>
   </section>
 
   <fieldset class="document-vault-grid" id="document-vault-operations" disabled>
