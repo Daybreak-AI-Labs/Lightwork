@@ -53,6 +53,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **A sealed value in the dashboard Settings overlay no longer stops the
+  process from starting.** Once Settings had encrypted a provider key into
+  `dashboard-config.toml`, the next boot died before listening: the first
+  `data_dir()` call resolved the tenant, which loaded config, which opened the
+  overlay, which imported `crypto_at_rest` -- whose import-time key-path
+  binding called `data_dir()` again and hit its own half-initialised module
+  (`cannot import name 'deployment_key_scope' ... circular import`). The
+  key path is now resolved when used, never at import, and config loading
+  will not re-enter its own unseal (a nested load during decryption sees the
+  tokens unopened; it only ever needs plaintext keys such as `[client] id`).
+  Both the running image and the previous one were affected; the fault was
+  latent from the day the overlay learned to seal values and only a restart
+  with a sealed value present triggered it.
 - Wizard-generated Kubernetes sandbox could not run a command: the backend now
   verifies a deny-all NetworkPolicy and runs under it (fails closed with the
   manifest when none exists); the wizard asks for the namespace and networking.

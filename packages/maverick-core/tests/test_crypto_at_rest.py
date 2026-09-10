@@ -751,3 +751,54 @@ def test_backup_key_material_errors_when_no_key(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     with pytest.raises(car.EncryptionUnavailable, match="no at-rest key material"):
         car.backup_key_material(tmp_path / "escrow")
+
+
+# ---- the on-disk key path is resolved at call time, never at import ---------
+
+
+def test_importing_the_module_does_not_resolve_the_data_dir():
+    """Regression for the 2026-09-10 boot outage: a module-level
+    ``data_dir(...)`` binding ran DURING import, re-entered config loading
+    (tenant -> client id -> load_config -> unseal overlay -> import this
+    module) and died on the half-initialised module. The path must be lazy."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import maverick.crypto_at_rest as car\n"
+        "assert car._KEY_PATH is None, car._KEY_PATH\n"
+        "assert car._key_path().name == 'at_rest.key'\n"
+    )
+    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_key_path_follows_the_active_tenant_at_call_time(tmp_path, monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(car, "_KEY_PATH", None)   # the production default
+
+    tok = set_tenant("tenant-a")
+    try:
+        path_a = car._key_path()
+    finally:
+        reset_tenant(tok)
+    tok = set_tenant("tenant-b")
+    try:
+        path_b = car._key_path()
+    finally:
+        reset_tenant(tok)
+    assert path_a != path_b
+    assert "tenant-a" in str(path_a) and "tenant-b" in str(path_b)
+    assert path_a.name == path_b.name == "at_rest.key"
+
+
+def test_key_path_override_still_wins(tmp_path, monkeypatch):
+    # The test-suite convention (and an operator escape hatch): a pinned
+    # module attribute takes precedence over tenant resolution.
+    pinned = tmp_path / "pinned" / "at_rest.key"
+    monkeypatch.setattr(car, "_KEY_PATH", pinned)
+    assert car._key_path() == pinned
+    assert car._keyring_dir() == pinned.parent / "at_rest.d"
