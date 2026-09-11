@@ -246,6 +246,15 @@ def require_work_item_admission(kind: str, reference: str) -> dict[str, Any] | N
     except OutcomePilotAdmissionRequired:
         raise
     except Exception as exc:
+        # The PUBLIC message stays identifier-free, but operators need the real
+        # cause: a read/parse/crypto error on the shared admission index would
+        # otherwise silently block EVERY work item (unclaimed goals included,
+        # which must take the no-op path) with no server-side signal.
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "outcome-pilot admission gate refused %s:%s -- underlying cause: %s: %s",
+            kind, reference, type(exc).__name__, exc,
+        )
         raise OutcomePilotAdmissionRequired(
             "This work item belongs to an outcome pilot whose complete "
             "accounting admission is not verified. Open the pilot in the app "

@@ -24,12 +24,18 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+from .._envparse import env_int
 from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
 from ..retry import async_retry, sync_retry
 from ..secrets import scrub
 
 log = logging.getLogger(__name__)
+
+# OpenAI Chat Completions hard limit on the `tools` array. Requests with more
+# are rejected with a 400 ("Invalid 'tools': array too long"). Overridable for
+# providers/gateways with a different ceiling.
+_OPENAI_MAX_TOOLS = max(1, env_int("MAVERICK_OPENAI_MAX_TOOLS", 128))
 
 
 # Models that require max_completion_tokens instead of max_tokens.
@@ -552,11 +558,11 @@ class OpenAIClient:
         # the model has no auto-cache, to keep behaviour unchanged elsewhere.
         sys_tok = len(system or "") // 4
         tools_tok = sum(len(str(t)) for t in (tools or [])) // 4
-        if (
-            self._has_auto_prompt_cache(chosen_model)
-            and sys_tok + tools_tok >= _MIN_AUTO_CACHE_TOKENS
-        ):
-            tools = self._cache_friendly_tools(tools)
+        # The cache-friendly tool sort is applied AFTER the 128-tool cap below,
+        # on the surviving tools. Sorting before the cap would let tool NAME
+        # order (not registration order) choose which 128 survive, silently
+        # dropping core/orchestration tools in favour of alphabetically-early
+        # MCP tools. See the post-cap stable sort next to the cap.
         kwargs: dict[str, Any] = {
             "model": chosen_model,
             "messages": self._to_openai_messages(system, messages),
@@ -575,8 +581,47 @@ class OpenAIClient:
             if effort is not None:
                 kwargs["reasoning_effort"] = effort
         oai_tools = self._to_openai_tools(tools)
+        if oai_tools and len(oai_tools) > _OPENAI_MAX_TOOLS:
+            # OpenAI's Chat Completions API hard-caps `tools` at 128 and 400s the
+            # whole request otherwise ("array too long"). A goal that assembles
+            # more (many MCP servers / enabled capabilities) would fail entirely.
+            # base_registry registers core/orchestration tools BEFORE MCP and
+            # extension tools, so keeping the first _OPENAI_MAX_TOOLS preserves the
+            # essential ones and drops the excess tail. Operators who need the
+            # dropped tools should reduce enabled MCP servers/capabilities or run
+            # the orchestrator on a provider with a higher tool ceiling.
+            log.warning(
+                "openai: %d tools exceed the API's %d-tool limit; sending the "
+                "first %d (core tools kept, excess MCP/extension tools dropped). "
+                "Trim enabled MCP servers/capabilities to expose the rest.",
+                len(oai_tools), _OPENAI_MAX_TOOLS, _OPENAI_MAX_TOOLS,
+            )
+            oai_tools = oai_tools[:_OPENAI_MAX_TOOLS]
+        if (
+            oai_tools
+            and self._has_auto_prompt_cache(chosen_model)
+            and sys_tok + tools_tok >= _MIN_AUTO_CACHE_TOKENS
+        ):
+            # Stable, byte-identical tool prefix for the auto prompt cache,
+            # applied to the already-capped survivors so ordering never decides
+            # WHICH tools survive. The name is nested under "function" after
+            # conversion (t["name"] is None here and would collapse the sort).
+            oai_tools = sorted(
+                oai_tools,
+                key=lambda t: str((t.get("function") or {}).get("name") or ""),
+            )
         if oai_tools:
             kwargs["tools"] = oai_tools
+            # Chat Completions rejects a reasoning effort together with function
+            # tools for gpt-5.x reasoning models: "Function tools with
+            # reasoning_effort are not supported ... use /v1/responses or set
+            # reasoning_effort to 'none'." Omitting the param is NOT enough --
+            # the model applies a default effort server-side and still refuses
+            # the tools -- so it must be set to the explicit "none" the API
+            # names. A tool-using agent must keep its tools, so force "none"
+            # whenever we set an effort above (i.e. for reasoning models).
+            if "reasoning_effort" in kwargs:
+                kwargs["reasoning_effort"] = "none"
             # W1-11: forced / restricted tool selection and serialised calls.
             mapped_choice, no_parallel = self._to_openai_tool_choice(tool_choice)
             if mapped_choice is not None:

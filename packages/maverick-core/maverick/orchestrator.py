@@ -2411,10 +2411,17 @@ async def run_goal(
         try:
             require_work_item_admission("goal", str(goal_id))
         except OutcomePilotAdmissionRequired as exc:
-            return (
-                "BLOCKED: "
-                f"{_safe_exception_text(exc, fallback='pilot admission required')}"
-            )
+            reason = _safe_exception_text(exc, fallback="pilot admission required")
+            # Persist the terminal state. Without this the goal row stays
+            # 'pending' forever and the dashboard shows a perpetual "Working…"
+            # (the CLI surfaces the returned string, but background/dashboard
+            # callers only observe status). Mark it blocked so the block is
+            # visible and the run is not silently stranded.
+            try:
+                world.set_goal_status(goal_id, "blocked", result=reason)
+            except Exception:  # pragma: no cover - status write must not mask the block
+                log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
+            return f"BLOCKED: {reason}"
     from .task_file_recovery import run_scope
     sandbox = sandbox or LocalBackend()
     with run_scope(world, goal_id, sandbox):

@@ -248,6 +248,19 @@ def run_goal_in_thread(
                 "goal #%s execution principal does not match its binding",
                 goal_id,
             )
+            # Persist the terminal state, mirroring the crash path below and the
+            # killswitch/quota/tenant/shield blocks. Without this the goal row
+            # stays 'pending'/'active' and the dashboard shows a perpetual
+            # "Working..." (a resume by a different owner/operator strands it).
+            try:
+                world.set_goal_status(
+                    goal_id, "blocked",
+                    result="execution principal does not match the goal's binding",
+                )
+            except Exception:  # pragma: no cover - status write must not mask the block
+                log.exception(
+                    "failed to mark goal #%s blocked after principal mismatch", goal_id,
+                )
             return "blocked"
         if was_unbound:
             rebound = world.get_goal(goal_id)

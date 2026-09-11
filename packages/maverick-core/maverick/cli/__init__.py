@@ -249,6 +249,10 @@ def _maybe_start_progress_poller(world_path, goal_id, stop_poll):
     import threading
 
     from ..config import get_features
+    # No pollable local DB file (e.g. the Postgres backend, whose .path is None):
+    # file-based progress streaming does not apply. Skip rather than crash.
+    if world_path is None:
+        return None
     try:
         streaming_on = get_features()["streaming"]
     except Exception:
@@ -633,6 +637,32 @@ def doctor() -> None:
         # At least one ✗ check: exit nonzero so `maverick doctor && ...` and CI
         # health gates can detect a broken install (it always exited 0 before).
         sys.exit(1)
+
+
+@main.command("shared-key-digest", hidden=True)
+def shared_key_digest() -> None:
+    """Print sha256:<hex> of the injected at-rest key.
+
+    This is the value to set as MAVERICK_ENCRYPTION_KEY_DIGEST -- the operator
+    trust anchor a Postgres (shared-authority) deployment requires for governed
+    records. Output is a one-way hash of the key, never the key itself, so it
+    is safe to store in IaC. Reads the key from the process environment exactly
+    as crypto_at_rest does; run it wherever MAVERICK_ENCRYPTION_KEY is injected.
+    """
+    import hashlib
+
+    from ..crypto_at_rest import _KEY_ENV, _decode_injected_key
+
+    raw = os.environ.get(_KEY_ENV, "")
+    if not raw.strip():
+        click.echo(f"{_KEY_ENV} is not set in this environment", err=True)
+        sys.exit(1)
+    try:
+        key = _decode_injected_key(raw)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"cannot decode {_KEY_ENV}: {exc}", err=True)
+        sys.exit(1)
+    click.echo("sha256:" + hashlib.sha256(key).hexdigest())
 
 
 @main.command("launch-check")

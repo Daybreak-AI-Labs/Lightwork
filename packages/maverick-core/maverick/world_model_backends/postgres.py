@@ -1041,6 +1041,8 @@ class PGGoal:
     result: str | None
     owner: str = ""
     execution_principal: str = ""
+    domain: str = ""
+    project_id: int | None = None
 
 
 def _seal(text):
@@ -1069,6 +1071,8 @@ def _dec_goal_row(row) -> PGGoal:
         row[5], row[6], row[7], _unseal(row[8]),
         str(row[9] or "") if len(row) > 9 else "",
         str(row[10] or "") if len(row) > 10 else "",
+        str(row[11] or "") if len(row) > 11 else "",
+        (int(row[12]) if row[12] is not None else None) if len(row) > 12 else None,
     )
 
 
@@ -1112,6 +1116,13 @@ class PostgresWorldModel:
     actually configures the postgres backend.
     """
 
+    # The SQLite backend exposes ``.path`` (its on-disk DB file); callers such
+    # as the CLI progress poller and ``maverick monitor`` read it. There is no
+    # local file for Postgres, and the DSN carries credentials so it must never
+    # be surfaced as a path. ``None`` means "no pollable file" -- the poller
+    # skips file-based streaming rather than raising AttributeError.
+    path = None
+
     def __init__(self, dsn: str | None = None):
         try:
             import psycopg  # noqa: F401
@@ -1134,6 +1145,26 @@ class PostgresWorldModel:
         # single-connection + RLock model byte-for-byte.
         self._pool = None
         size = _pool_size()
+        # Bound server-side timeouts so a stalled statement raises
+        # OperationalError (which _tx handles by closing + reconnecting) instead
+        # of holding the shared RLock forever and wedging the replica. Defaulted
+        # only when the operator's DSN hasn't already set them; env-overridable.
+        def _timeout_ms(name: str, default: int) -> int:
+            raw = os.environ.get(name, "")
+            try:
+                return max(0, int(raw)) if raw else default
+            except (TypeError, ValueError):
+                return default
+        _opts = []
+        if "statement_timeout" not in self._dsn:
+            _opts.append("-c statement_timeout="
+                         + str(_timeout_ms("MAVERICK_PG_STATEMENT_TIMEOUT_MS", 30000)))
+        if "idle_in_transaction_session_timeout" not in self._dsn:
+            _opts.append("-c idle_in_transaction_session_timeout="
+                         + str(_timeout_ms("MAVERICK_PG_IDLE_TX_TIMEOUT_MS", 60000)))
+        _conn_kwargs: dict = {"autocommit": False}
+        if _opts:
+            _conn_kwargs["options"] = " ".join(_opts)
         if size > 0:
             try:
                 from psycopg_pool import ConnectionPool
@@ -1144,11 +1175,11 @@ class PostgresWorldModel:
                 ) from e
             self._pool = ConnectionPool(
                 self._dsn, min_size=1, max_size=size, open=True,
-                kwargs={"autocommit": False},
+                kwargs=dict(_conn_kwargs),
             )
             self.conn = None
         else:
-            self.conn = psycopg.connect(self._dsn, autocommit=False)
+            self.conn = psycopg.connect(self._dsn, **_conn_kwargs)
         # One long-lived connection shared across this object (non-pooled mode).
         # psycopg connections are NOT safe for concurrent use by multiple
         # threads, and the kernel drives this from FastAPI's threadpool + the
@@ -1465,7 +1496,8 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals WHERE id=%s"
         )
         p: list = [goal_id]
@@ -1658,8 +1690,10 @@ class PostgresWorldModel:
     ) -> list[PGGoal]:
         """Search goals by text in title / description / result (newest first).
 
-        ``owner`` is accepted for signature parity but not used -- PG isolates by
-        tenant, applied below. When at-rest encryption is on, title/description/
+        When ``owner`` is given the search is scoped to that owner (the
+        dashboard's per-user /goals/search relies on this to keep one user from
+        reading another's goals); PG additionally isolates by tenant. When
+        at-rest encryption is on, title/description/
         result are ciphertext so a SQL ILIKE can't match; we then scan a bounded
         window of the most-recent goals (``scan``) and filter on the decrypted
         text in Python -- the same scan-then-decrypt shape the SQLite backend
@@ -1671,16 +1705,22 @@ class PostgresWorldModel:
         sealed = at_rest_enabled()
         cols = ("SELECT id, parent_id, title, description, status, "
                 "created_at, updated_at, deadline, result, owner, "
-                "execution_principal FROM goals")
+                "execution_principal, domain, project_id FROM goals")
         frag, fparams = _tenant_scope()
         cap = max(1, int(limit))
         if sealed:
             # Scan-then-decrypt: fetch a recent window, decrypt, filter in Python.
             sql = cols
             params: list = []
+            conds: list[str] = []
+            if owner is not None:
+                conds.append("owner = %s")
+                params.append(str(owner))
             if frag:
-                sql += " WHERE " + frag
+                conds.append(frag)
                 params += fparams
+            if conds:
+                sql += " WHERE " + " AND ".join(conds)
             sql += " ORDER BY updated_at DESC LIMIT %s"
             params.append(max(1, int(scan)))
             with self._tx() as cur:
@@ -1699,6 +1739,9 @@ class PostgresWorldModel:
         like = f"%{q}%"
         sql = cols + " WHERE (title ILIKE %s OR description ILIKE %s OR result ILIKE %s)"
         params = [like, like, like]
+        if owner is not None:
+            sql += " AND owner = %s"
+            params.append(str(owner))
         if frag:
             sql += " AND " + frag
             params += fparams
@@ -2263,7 +2306,7 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope("g.tenant_id")
         sql = ("SELECT g.id, g.parent_id, g.title, g.description, g.status, "
                "g.created_at, g.updated_at, g.deadline, g.result, g.owner, "
-               "g.execution_principal FROM goals g "
+               "g.execution_principal, g.domain, g.project_id FROM goals g "
                "JOIN goal_origins o ON o.goal_id = g.id "
                "WHERE o.kind=%s AND o.ref=%s")
         params: list = [str(kind), str(ref)]
@@ -2301,7 +2344,8 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals "
             "WHERE status IN ('pending', 'in_progress', 'running')"
         )
@@ -2338,7 +2382,8 @@ class PostgresWorldModel:
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals"
         )
         params: list = []
@@ -2375,7 +2420,8 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals"
         )
         if frag:
@@ -2390,7 +2436,8 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals "
             "WHERE status IN ('active', 'blocked')"
         )
@@ -2409,7 +2456,8 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals "
             "WHERE status IN ('active', 'pending')"
         )
@@ -2439,7 +2487,8 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "SELECT id, parent_id, title, description, status, created_at, "
-                "updated_at, deadline, result, owner, execution_principal "
+                "updated_at, deadline, result, owner, execution_principal, "
+                "domain, project_id "
                 "FROM goals WHERE "
                 + " AND ".join(conds)
                 + " ORDER BY updated_at DESC LIMIT %s",
@@ -2452,7 +2501,8 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, created_at, "
-            "updated_at, deadline, result, owner, execution_principal "
+            "updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id "
             "FROM goals WHERE parent_id = %s"
         )
         params: list = [parent_id]

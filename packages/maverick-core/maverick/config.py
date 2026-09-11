@@ -44,6 +44,18 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
+# Eagerly bind crypto_at_rest at import time so it is fully initialized before
+# any worker thread reaches _unseal_config_tree's `from .crypto_at_rest import
+# deployment_key_scope, ...`. That lazy import races a partially-initialized
+# crypto_at_rest whenever client binding -> load_config -> unseal a sealed
+# config value (e.g. a dashboard-set provider key) first triggers the module's
+# import from inside a goal-execution thread, raising "cannot import name
+# 'deployment_key_scope' from partially initialized module 'maverick.
+# crypto_at_rest'" and failing open_world() so goals never leave 'pending'.
+# The edge is one-directional: crypto_at_rest imports only file_lock + paths at
+# module level (neither imports config), so this cannot re-form a cycle.
+from . import crypto_at_rest  # noqa: E402,F401
+
 
 # Note: do not cache the default at module import time. Both the platform home
 # and the documented MAVERICK_HOME override can change in test/embedded
@@ -320,7 +332,23 @@ def _load_config_file(path: Path) -> dict:
     # contract.
     loaded = _interp(_read_toml_raw(path))
     if path.name == DASHBOARD_OVERRIDES_BASENAME:
-        return _unseal_config_tree(loaded)  # type: ignore[return-value]
+        try:
+            return _unseal_config_tree(loaded)  # type: ignore[return-value]
+        except Exception as exc:
+            # An undecryptable sealed overlay value (e.g. after a
+            # MAVERICK_ENCRYPTION_KEY rotation leaves dashboard-config.toml
+            # sealed under the old key) must NOT crash every config read.
+            # Fail soft exactly like a corrupt-TOML source: record the error so
+            # config_source_errors() surfaces it (health goes red and security
+            # callers fail closed), and drop the overlay so callers fall back to
+            # base/env config instead of load_config() raising process-wide.
+            _toml_errors[str(path)] = f"{type(exc).__name__}: {exc}"
+            logging.getLogger(__name__).warning(
+                "dashboard overlay %s could not be decrypted; dropping it "
+                "(rotate keys / re-save provider settings to restore): %s",
+                path, exc,
+            )
+            return {}
     return loaded
 
 
