@@ -54,9 +54,9 @@ def test_runs_under_a_present_deny_all_policy(monkeypatch, tmp_path):
     get = _calls_with(calls, "get")[0]
     assert "networkpolicy" in get and "agents" in get
     assert _calls_with(calls, "exec")
-    # Verified once per instance: the second command does not re-query.
+    # Verify each command: administrators can change policy between calls.
     backend.exec("echo again")
-    assert len(_calls_with(calls, "get")) == 1
+    assert len(_calls_with(calls, "get")) == 2
     assert len(_calls_with(calls, "exec")) == 2
 
 

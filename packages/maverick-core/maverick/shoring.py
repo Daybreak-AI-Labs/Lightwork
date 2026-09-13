@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from dataclasses import asdict, dataclass, field
@@ -36,7 +37,12 @@ from pathlib import Path
 from typing import Any
 
 from .config import env_flag
-from .file_lock import atomic_read_text, atomic_write_text, ensure_private_file
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_file,
+)
 
 log = logging.getLogger(__name__)
 
@@ -146,32 +152,46 @@ def _coerce_sla(raw: Any) -> SLATarget | None:
         target = float(raw.get("target", 0) or 0)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(target) or target < 0:
+        return None
     return SLATarget(name=name, metric=metric, target=target)
 
 
-def _coerce_function(raw: Any) -> Function | None:
-    """Load one stored row defensively -- a malformed row is skipped, never
-    fatal, so a hand-edited or partially-written book still opens."""
+def _coerce_function(raw: Any, *, strict: bool = False) -> Function | None:
+    """Read a row defensively; strict callers must never discard damaged SLAs."""
     if not isinstance(raw, dict):
         return None
     key = str(raw.get("key", "") or "").strip()
-    if not _KEY_RE.match(key):
+    if not _KEY_RE.fullmatch(key):
         return None
     name = str(raw.get("name", "") or "").strip()[:_MAX_TEXT]
     if not name:
         return None
     status = str(raw.get("status", "") or "scoping")
     if status not in LIFECYCLE:
+        if strict:
+            return None
         status = "scoping"
     slas: list[SLATarget] = []
-    for item in (raw.get("slas") or [])[:_MAX_SLAS]:
+    raw_slas = raw.get("slas", []) if strict else raw.get("slas") or []
+    if not isinstance(raw_slas, list):
+        return None
+    if strict and len(raw_slas) > _MAX_SLAS:
+        return None
+    for item in raw_slas[:_MAX_SLAS]:
         sla = _coerce_sla(item)
         if sla is not None:
             slas.append(sla)
+        elif strict:
+            return None
     try:
         updated_at = float(raw.get("updated_at", 0) or 0)
     except (TypeError, ValueError):
+        if strict:
+            return None
         updated_at = 0.0
+    if not math.isfinite(updated_at):
+        return None
     return Function(
         key=key, name=name,
         department=str(raw.get("department", "") or "").strip()[:_MAX_TEXT],
@@ -182,12 +202,13 @@ def _coerce_function(raw: Any) -> Function | None:
     )
 
 
-def load(tenant: str | None = None) -> list[Function]:
+def load(tenant: str | None = None, *, strict: bool = False) -> list[Function]:
     """The Book of Work for the active (or given) tenant, newest-edited first.
 
     Tenant-isolated: two tenants never see each other's book (the path is under
-    ``data_dir("shoring", tenant=...)``). A missing or unreadable book is an
-    empty book, never an error.
+    ``data_dir("shoring", tenant=...)``). A missing book is empty. Strict reads
+    reject unreadable or malformed records; recovery callers may opt into the
+    permissive default, which returns the rows that can still be understood.
     """
     path = _book_path(tenant)
     if not path.exists():
@@ -195,14 +216,22 @@ def load(tenant: str | None = None) -> list[Function]:
     try:
         ensure_private_file(path)
         raw = json.loads(atomic_read_text(path))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise RuntimeError("shoring book is unreadable; restore it before editing") from exc
         return []
+    if strict and not isinstance(raw, list):
+        raise RuntimeError("shoring book has an invalid structure; restore it before editing")
     rows = raw if isinstance(raw, list) else []
     out: list[Function] = []
     for row in rows:
-        fn = _coerce_function(row)
+        fn = _coerce_function(row, strict=strict)
         if fn is not None:
             out.append(fn)
+        elif strict:
+            raise RuntimeError("shoring book contains an invalid function; repair it before editing")
+    if strict and len({f.key for f in out}) != len(out):
+        raise RuntimeError("shoring book contains duplicate function keys; repair it before editing")
     out.sort(key=lambda f: f.updated_at, reverse=True)
     return out
 
@@ -210,8 +239,11 @@ def load(tenant: str | None = None) -> list[Function]:
 def save(functions: list[Function], tenant: str | None = None) -> None:
     """Atomically persist the whole book (0600, private parent)."""
     path = _book_path(tenant)
-    payload = [f.to_dict() for f in functions[:_MAX_FUNCTIONS]]
-    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
+    if len(functions) > _MAX_FUNCTIONS:
+        raise ValueError(f"shoring book capacity is {_MAX_FUNCTIONS} functions")
+    payload = [f.to_dict() for f in functions]
+    with cross_process_lock(path, strict=True):
+        atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True, allow_nan=False))
 
 
 def upsert(function: Function, tenant: str | None = None) -> Function:
@@ -219,25 +251,31 @@ def upsert(function: Function, tenant: str | None = None) -> Function:
 
     Stamps ``updated_at`` so the book orders by most-recently-touched.
     """
-    if not _KEY_RE.match(function.key or ""):
+    if not _KEY_RE.fullmatch(function.key or ""):
         raise ValueError(
             "function key must be a slug ([a-z0-9][a-z0-9_-]{0,63})")
-    function.updated_at = time.time()
-    book = load(tenant)
-    book = [f for f in book if f.key != function.key]
-    book.append(function)
-    save(book, tenant)
+    if not function.name.strip():
+        raise ValueError("function name must not be blank")
+    with cross_process_lock(_book_path(tenant), strict=True):
+        book = load(tenant, strict=True)
+        book = [f for f in book if f.key != function.key]
+        if len(book) >= _MAX_FUNCTIONS:
+            raise ValueError(f"shoring book capacity is {_MAX_FUNCTIONS} functions")
+        function.updated_at = time.time()
+        book.append(function)
+        save(book, tenant)
     return function
 
 
 def remove(key: str, tenant: str | None = None) -> bool:
     """Drop a function from the book. Returns whether a row was removed."""
-    book = load(tenant)
-    kept = [f for f in book if f.key != key]
-    if len(kept) == len(book):
-        return False
-    save(kept, tenant)
-    return True
+    with cross_process_lock(_book_path(tenant), strict=True):
+        book = load(tenant, strict=True)
+        kept = [f for f in book if f.key != key]
+        if len(kept) == len(book):
+            return False
+        save(kept, tenant)
+        return True
 
 
 # --------------------------------------------------------------------------- #
@@ -245,21 +283,21 @@ def remove(key: str, tenant: str | None = None) -> bool:
 # --------------------------------------------------------------------------- #
 def _measure(department: str, world: Any, *, window_days: int,
              now: float | None = None) -> dict:
-    """Delivered / blocked / throughput for one department from the Operating
-    Record. Fail-open: an unreadable world measures zero, never raises."""
-    from . import operating_record
-
+    """Bounded department-scoped goal measurements, with explicit completeness."""
+    if not isinstance(window_days, int) or isinstance(window_days, bool) or window_days < 1:
+        raise ValueError("window_days must be a positive integer")
     delivered = blocked = in_flight = 0
     try:
-        records = operating_record.assemble(world, limit=2000)
-        goals = operating_record.query(records, department=department, kind="goal")
-    except Exception:  # pragma: no cover -- assembly is itself fail-open
-        goals = []
+        goals = world.list_goals(domain=department, limit=2001, order="desc")
+    except Exception as exc:
+        raise RuntimeError("shoring measurements are unavailable; retry after restoring the work store") from exc
+    complete = len(goals) <= 2000
     cutoff = (now if now is not None else time.time()) - window_days * 86400
-    for r in goals:
-        if r.ts and r.ts < cutoff:
+    for r in goals[:2000]:
+        timestamp = getattr(r, "updated_at", 0) or 0
+        if getattr(r, "domain", "") != department or not timestamp or timestamp < cutoff:
             continue
-        outcome = (r.outcome or "").lower()
+        outcome = (getattr(r, "status", "") or "").lower()
         if outcome == "done":
             delivered += 1
         elif outcome in ("blocked", "cancelled", "failed", "error"):
@@ -274,6 +312,7 @@ def _measure(department: str, world: Any, *, window_days: int,
         "blocked": blocked,
         "in_flight": in_flight,
         "completed": completed,
+        "measurement_complete": complete,
         "throughput_per_day": (delivered / window_days) if window_days else 0.0,
         "exception_rate_pct": (100.0 * blocked / completed) if completed else 0.0,
     }
@@ -283,9 +322,11 @@ def _band(metric: str, target: float, actual: float | None) -> str:
     """met / at_risk / breached / no_data for one SLA."""
     if actual is None:
         return "no_data"
-    if target <= 0:
-        # A non-positive target can't be measured against meaningfully.
+    if target < 0:
         return "no_data"
+    if target == 0:
+        direction = METRICS.get(metric, {}).get("direction", "min")
+        return "met" if direction == "min" or actual == 0 else "breached"
     ratio = actual / target
     direction = METRICS.get(metric, {}).get("direction", "min")
     if direction == "max":
@@ -308,11 +349,17 @@ def sla_status(function: Function, world: Any, *,
     with no completed work) reports ``no_data`` rather than a false breach.
     """
     m = _measure(function.department, world, window_days=window_days, now=now)
+    return _sla_rows(function, m)
+
+
+def _sla_rows(function: Function, m: dict) -> list[dict]:
     out: list[dict] = []
     for sla in function.slas:
         metric = sla.metric
-        if metric == "throughput_per_day":
-            actual: float | None = m["throughput_per_day"]
+        if not m["measurement_complete"]:
+            actual: float | None = None
+        elif metric == "throughput_per_day":
+            actual = m["throughput_per_day"] if m["completed"] else None
         elif metric == "max_exception_rate_pct":
             actual = m["exception_rate_pct"] if m["completed"] else None
         else:
@@ -379,11 +426,11 @@ def function_status(function: Function, world: Any, *,
     indicators, the exception-desk count, and a rolled-up overall indicator
     (the worst SLA band)."""
     m = _measure(function.department, world, window_days=window_days, now=now)
-    slas = sla_status(function, world, window_days=window_days, now=now)
+    slas = _sla_rows(function, m)
     try:
         pending = list(world.pending_approvals())
-    except Exception:  # pragma: no cover -- older/stub worlds
-        pending = []
+    except Exception as exc:
+        raise RuntimeError("shoring exception desk is unavailable; retry after restoring the work store") from exc
     exceptions = exceptions_for(function, pending)
     graded = [s for s in slas if s["status"] != "no_data"]
     overall = max((s["status"] for s in graded),
@@ -401,6 +448,7 @@ def function_status(function: Function, world: Any, *,
         "throughput_per_day": round(m["throughput_per_day"], 2),
         "exception_rate_pct": round(m["exception_rate_pct"], 1),
         "window_days": window_days,
+        "measurement_complete": m["measurement_complete"],
         "slas": slas,
         "exceptions": exceptions,
         "exception_count": len(exceptions),
@@ -414,7 +462,7 @@ def book_status(world: Any, *, tenant: str | None = None,
     """Every function in the book with its computed status (the page/API feed)."""
     return [
         function_status(fn, world, window_days=window_days, now=now)
-        for fn in load(tenant)
+        for fn in load(tenant, strict=True)
     ]
 
 

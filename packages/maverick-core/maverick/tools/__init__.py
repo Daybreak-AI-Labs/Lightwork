@@ -1004,7 +1004,7 @@ def base_registry(
     reg.register(http_fetch())
     from .control_tools import find_controls_tool
     reg.register(find_controls_tool())
-    reg.register(read_pdf())
+    reg.register(read_pdf(sandbox))
     reg.register(view_image())
     reg.register(view_video(sandbox, budget=budget))
     reg.register(dep_graph(sandbox))

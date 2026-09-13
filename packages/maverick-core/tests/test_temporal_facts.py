@@ -69,11 +69,12 @@ def test_temporal_delete_closes_window(tmp_path, monkeypatch):
 
 def test_temporal_delete_window_survives_clock_rollback(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
-    times = iter((1_000.0, 999.0))
-    monkeypatch.setattr("maverick.world_model.time.time", lambda: next(times))
+    now = [1_000.0]
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: now[0])
     w = _wm(tmp_path)
 
     w.upsert_fact("k", "v")
+    now[0] = 999.0
     assert w.delete_fact("k") == 1
 
     [version] = w.fact_history("k")
@@ -85,12 +86,14 @@ def test_temporal_change_after_rollback_reassertion_keeps_valid_window(
     tmp_path, monkeypatch,
 ):
     monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
-    times = iter((1_000.0, 900.0, 901.0))
-    monkeypatch.setattr("maverick.world_model.time.time", lambda: next(times))
+    now = [1_000.0]
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: now[0])
     w = _wm(tmp_path)
 
     w.upsert_fact("k", "v1")
+    now[0] = 900.0
     w.upsert_fact("k", "v1")  # no new version, rolled-back wall timestamp
+    now[0] = 901.0
     w.upsert_fact("k", "v2")
 
     new, old = w.fact_history("k")

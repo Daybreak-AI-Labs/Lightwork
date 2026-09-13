@@ -109,7 +109,7 @@
       <label style="display: flex; flex-direction: column; gap: 4px;">
         <span class="muted" style="font-size: var(--text-sm);">Role name (lowercase, e.g. privacy-officer)</span>
         <input class="input" name="name" required maxlength="32"
-               pattern="[a-z][a-z0-9_-]{1,31}" spellcheck="false" autocomplete="off" />
+               pattern="[a-z][a-z0-9_\-]{1,31}" spellcheck="false" autocomplete="off" />
       </label>
       <fieldset style="border: 0; padding: 0; margin: 0; display: flex; gap: var(--space-3);">
         <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 4px;">Adds (viewing is always on)</legend>

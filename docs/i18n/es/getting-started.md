@@ -2,32 +2,53 @@
 
 # Primeros pasos
 
+<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+
 ## Instalación
 
-La vía más segura desde la terminal es instalar el paquete publicado con pipx, en lugar de ejecutar un script de arranque remoto:
+Usa Python 3.10–3.12 y el SHA completo de un commit revisado. Los ocho paquetes propios aún no se publican como un conjunto completo en PyPI; instálalos juntos desde el repositorio con el instalador del manifiesto. Incluye el panel, el asistente, los canales, el servidor MCP y los paquetes de conocimiento y aprendizaje. `release-runtime` aporta el cliente compatible con OpenAI; `evidence-analysis`, los lectores de PDF y hojas de cálculo.
+
+macOS / Linux:
 
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
-python -m pip install -e ./packages/maverick-core
-python -m pip install -e ./apps/installer-cli
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade 'pip==26.2.1'
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
 lightwork init
+lightwork dashboard
 ```
 
-Si necesitas el arranque de escritorio sin requisitos previos, descarga `deploy/desktop/install.sh` o `deploy/desktop/install.ps1` desde un commit o una release en los que confíes, verifica el script y establece `MAVERICK_REF` con el SHA completo de 40 caracteres de un commit. Por defecto, los scripts rechazan referencias mutables a ramas o etiquetas.
+En Windows PowerShell, sustituye primero el marcador del commit:
 
-El paquete de PyPI es `maverick-agent` (el nombre `maverick` está ocupado por otro proyecto). El extra `[installer]` instala el asistente en el mismo entorno de pipx que el núcleo, de modo que `maverick init` se pueda resolver.
+```powershell
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
+Set-Location Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
+.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
+.\.venv\Scripts\lightwork.exe init
+.\.venv\Scripts\lightwork.exe dashboard
+```
 
-Desde el código fuente, mientras desarrollas:
+Las rutas explícitas evitan tener que cambiar la política de activación de PowerShell. Configura el proveedor y el entorno aislado en el asistente. La instalación desde el código fuente no crea cuentas externas, créditos de API, un motor de contenedores ni un clúster de Kubernetes. Comprueba una operación real autorizada antes de usar una integración con clientes.
+
+Verifica los paquetes con el Python del mismo entorno:
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd maverick
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
-maverick init
+python scripts/install_release_cohort.py --verify-only
+python -m pip check
+lightwork version
+lightwork doctor
 ```
+
+En Windows, usa `.\.venv\Scripts\python.exe` y `.\.venv\Scripts\lightwork.exe` para esos ejecutables.
+
+Para el arranque de escritorio autenticado, obtén `deploy/desktop/install.sh` o `deploy/desktop/install.ps1` del commit revisado y asigna a `MAVERICK_REF` su SHA completo en minúsculas. Sigue siendo una instalación desde fuentes que requiere acceso al repositorio y los requisitos de la plataforma; no es un instalador de producto firmado y autónomo. Los scripts rechazan referencias mutables y no recurren a un índice público para los paquetes propios. También puedes escribir las variables `MAVERICK_*` como `LIGHTWORK_*`.
 
 ## Primera ejecución
 

@@ -359,7 +359,7 @@
         <form class="aet-form" id="aet-filter-form" autocomplete="off" novalidate>
           <div class="aet-form-grid">
             <label>Inventory entity ID
-              <input class="input" name="entity_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}">
+              <input class="input" name="entity_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}">
             </label>
             <label>Status
               <select class="select" name="status">
@@ -372,7 +372,7 @@
               </select>
             </label>
             <label>Assignee reference
-              <input class="input" name="assignee_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}">
+              <input class="input" name="assignee_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}">
             </label>
             <label>Priority
               <select class="select" name="priority">
@@ -405,7 +405,7 @@
             <legend class="sr-only">Create an AI entity task</legend>
             <div class="aet-form-grid">
               <label>Inventory entity ID
-                <input class="input" name="entity_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required>
+                <input class="input" name="entity_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required>
               </label>
               <label>Entity version being reviewed
                 <input class="input" name="entity_revision" type="number" min="1" max="2147483647" step="1" required>
@@ -432,7 +432,7 @@
               <textarea class="input" name="description" maxlength="16000"></textarea>
             </label>
             <label>Assignee reference <span class="aet-muted">Optional</span>
-              <input class="input" name="assignee_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}">
+              <input class="input" name="assignee_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}">
             </label>
             <label>Collaborator references <span class="aet-muted">Comma-separated, maximum 64</span>
               <input class="input" name="collaborator_refs" maxlength="8255">
@@ -441,7 +441,7 @@
               <input class="input" name="due_at" type="datetime-local" step="1">
             </label>
             <label hidden>Request reference (reuse when retrying)
-              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
+              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Create task</button>
           </fieldset>
@@ -458,7 +458,7 @@
             <legend class="sr-only">Update an AI entity task</legend>
             <div class="aet-form-grid">
               <label>Task ID
-                <input class="input" name="task_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required>
+                <input class="input" name="task_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required>
               </label>
               <label>Current version
                 <input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required>
@@ -490,7 +490,7 @@
                   <option value="set">Set assignee</option>
                   <option value="clear">Clear assignee</option>
                 </select>
-                <input class="input" name="assignee_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" aria-label="New assignee reference">
+                <input class="input" name="assignee_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" aria-label="New assignee reference">
               </span>
             </div>
             <div class="aet-field-label">Collaborators
@@ -514,7 +514,7 @@
               </span>
             </div>
             <label hidden>Request reference (reuse when retrying)
-              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
+              <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Save changes</button>
           </fieldset>
@@ -527,7 +527,7 @@
         <h2 id="aet-inspect-title">Inspect and trace</h2>
         <form class="aet-form" id="aet-inspect-form" autocomplete="off" novalidate>
           <label>Task ID
-            <input class="input" name="task_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required>
+            <input class="input" name="task_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required>
           </label>
           <div class="aet-actions">
             <button class="btn" type="submit">Load current</button>

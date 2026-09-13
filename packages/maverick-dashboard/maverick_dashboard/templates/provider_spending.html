@@ -12,7 +12,7 @@
     <label for="spend-period">UTC day or month (leave blank for the current period)</label>
     <input id="spend-period" type="text" placeholder="YYYY-MM-DD or YYYY-MM" maxlength="10" pattern="[0-9]{4}-[0-9]{2}(-[0-9]{2})?">
     <label for="spend-provider">Provider name (optional, including a previously configured provider)</label>
-    <input id="spend-provider" type="text" maxlength="128" pattern="[a-z0-9][a-z0-9_.-]*">
+    <input id="spend-provider" type="text" maxlength="128" pattern="[a-z0-9][a-z0-9_.\-]*">
     <button type="button" id="spend-load-period">Show period</button>
     <p>Previous periods retain their unresolved reservations. Today’s configured cap is shown for comparison; it does not change historical costs.</p>
     <div id="spend-balances"></div></section>
@@ -47,7 +47,7 @@
     </form>
   </section>
   <section aria-labelledby="spend-retained-title"><h2 id="spend-retained-title">Reopen a retained review</h2>
-    <label for="spend-review-id">Accounting review reference</label><input id="spend-review-id" type="text" maxlength="196" pattern="PAR-[A-Za-z0-9_-]+" placeholder="PAR-…">
+    <label for="spend-review-id">Accounting review reference</label><input id="spend-review-id" type="text" maxlength="196" pattern="PAR-[A-Za-z0-9_\-]+" placeholder="PAR-…">
     <button type="button" id="spend-open-review">Open review</button>
     <p>Only the administrator who prepared a review can reopen it in the same workspace. Reopening does not apply a correction.</p>
   </section>

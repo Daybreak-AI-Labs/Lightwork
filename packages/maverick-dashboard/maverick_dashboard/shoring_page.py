@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from ._shared import _world
 from .auth import has_global_permission, require_permission
@@ -39,8 +40,14 @@ def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
             raise HTTPException(status_code=404, detail="autonomous shoring is disabled")
 
         world = _world()
-        report = savings_mod.compute(world)
-        functions = shoring.book_status(world)
+        try:
+            report = await run_in_threadpool(savings_mod.compute, world)
+            functions = await run_in_threadpool(shoring.book_status, world)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Shoring data is unavailable. Restore access to the work store and reload.",
+            ) from exc
         return templates.TemplateResponse(
             request,
             "shoring.html",

@@ -6,8 +6,9 @@ host ``workdir`` is streamed in via ``kubectl cp``, the command runs via
 ``kubectl exec``, any files it wrote are streamed back out via ``kubectl
 cp``, and the pod is deleted on exit -- so exec() semantics (a workspace
 that persists across calls, host-visible after each command) match the
-other container backends (Docker, Podman, Devcontainer) despite Kubernetes
-having no host bind-mount primitive.
+other container backends for copied-in and exported files despite Kubernetes
+having no host bind-mount primitive. This copy transport does not mirror
+deletions back to the host; use a bind-mounted backend for that requirement.
 
 Why kubectl-driven instead of the official Python client?
   - The Python client adds 50+ MB of generated code + grpcio + a
@@ -32,12 +33,14 @@ Config::
 
 ``allow_network = false`` (the default, and what the wizard writes) means
 "no egress". A transient ``kubectl run`` pod cannot enforce that on
-itself, so before the first command the backend checks the namespace for
+itself, so before every command the backend checks the namespace for
 a deny-all NetworkPolicy (empty ``podSelector``, ``Egress`` in
 ``policyTypes``, no egress rules). When one is present the commands run
 under it; when none is, exec() fails closed with exit code 2 and prints
 the manifest to apply (``_DENY_ALL_NETWORKPOLICY``). ``allow_network =
-true`` skips the check and lets pods use the cluster network.
+true`` skips the check and lets pods use the cluster network. Policies are
+additive: use a dedicated namespace without egress allow rules and a CNI that
+enforces NetworkPolicy. The API check does not test live packet filtering.
 
 Loud-fallback: missing kubectl binary or ``kubectl version`` failure
 raises ``RuntimeError`` at construction so the wizard's smoke test
@@ -49,6 +52,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shlex
 import subprocess
 import uuid
@@ -110,11 +114,8 @@ class KubernetesBackend:
     transfer_timeout: float = 120.0
 
     def __post_init__(self) -> None:
-        self.workdir = Path(self.workdir).expanduser()
+        self.workdir = Path(self.workdir).expanduser().resolve()
         self.workdir.mkdir(parents=True, exist_ok=True)
-        # Result of the deny-all NetworkPolicy check, verified once per
-        # backend instance (None = not yet checked).
-        self._deny_all_verified: bool | None = None
         self._verify_kubectl()
 
     def deny_all_networkpolicy_manifest(self) -> str:
@@ -136,19 +137,29 @@ class KubernetesBackend:
             items = json.loads(proc.stdout or "{}").get("items") or []
         except (subprocess.TimeoutExpired, OSError, ValueError, AttributeError):
             return False
+        if not isinstance(items, list):
+            return False
+        found = False
         for item in items:
             spec = item.get("spec") if isinstance(item, dict) else None
             if not isinstance(spec, dict):
-                continue
+                return False
+            # NetworkPolicies are additive. A second policy with allow rules
+            # can reopen egress despite a namespace-wide deny policy. Use a
+            # dedicated namespace with no egress grants; reject ambiguous scopes.
+            if spec.get("egress"):
+                return False
             selector = spec.get("podSelector") or {}
+            if not isinstance(selector, dict):
+                return False
             if selector.get("matchLabels") or selector.get("matchExpressions"):
                 continue  # scoped to some pods, not the whole namespace
             if "Egress" not in (spec.get("policyTypes") or []):
                 continue
             if spec.get("egress"):
                 continue  # has allow rules, so not deny-all
-            return True
-        return False
+            found = True
+        return found
 
     def _pod_overrides(self, container_name: str) -> dict:
         """A non-root, resource-bounded pod spec for ``kubectl run --overrides``.
@@ -168,7 +179,13 @@ class KubernetesBackend:
         container hardening (drop-ALL caps, no-priv-escalation) unapplied."""
         limits: dict[str, str] = {}
         if self.memory:
-            limits["memory"] = str(self.memory)
+            # The shared sandbox configuration uses Docker-style sizes (4g).
+            # Kubernetes requires case-sensitive quantities such as 4Gi.
+            memory = str(self.memory).strip()
+            docker_size = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([kmgt])(?:b)?", memory)
+            if docker_size:
+                memory = docker_size[1] + docker_size[2].upper() + "i"
+            limits["memory"] = memory
         if self.cpus:
             limits["cpu"] = str(self.cpus)
         container: dict = {
@@ -189,6 +206,8 @@ class KubernetesBackend:
                 "securityContext": {
                     "runAsNonRoot": True,
                     "runAsUser": int(self.run_as_user),
+                    "runAsGroup": int(self.run_as_user),
+                    "fsGroup": int(self.run_as_user),
                 },
                 "containers": [container],
                 # emptyDir: node-local scratch space for the copied-in
@@ -259,6 +278,9 @@ class KubernetesBackend:
             "run", pod_name,
             "--restart=Never", "--quiet",
             f"--image={self.image}",
+            # Merge lists by container name; JSON merge replaces the generated
+            # container and would discard its image and command arguments.
+            "--override-type=strategic", "--command",
             "--overrides", json.dumps(self._pod_overrides(pod_name)),
             "--",
             "sleep", str(sleep_budget),
@@ -309,13 +331,15 @@ class KubernetesBackend:
         ``<dir>`` would land as ``<dest>/<basename(dir)>`` instead of
         populating ``<dest>`` itself.
         """
-        src = f"{self.workdir}/."
+        # A Windows drive colon is parsed by kubectl as POD:PATH. A relative
+        # local operand plus an explicit subprocess cwd works on every host.
+        src = "./."
         dest = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}"
         args = [*self._kubectl_prefix(), "cp", src, dest]
         try:
             proc = subprocess.run(
                 args, capture_output=True, text=True,
-                timeout=self.transfer_timeout, env=scrub_env(),
+                timeout=self.transfer_timeout, env=scrub_env(), cwd=self.workdir,
             )
         except subprocess.TimeoutExpired:
             return ExecResult(
@@ -355,16 +379,16 @@ class KubernetesBackend:
     def _copy_out(self, pod_name: str) -> str:
         """Best-effort: stream files the command wrote/modified back to the
         host workdir. Returns "" on success, else a short note to append to
-        the command's own stderr -- this must never override the command's
-        already-captured exit_code/stdout/stderr, so failures are reported,
-        not raised.
+        the command's stderr. ``exec()`` retains its output and original
+        failure code, but promotes a successful command to an I/O failure if
+        its files could not be returned.
         """
         src = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}/."
-        args = [*self._kubectl_prefix(), "cp", src, str(self.workdir)]
+        args = [*self._kubectl_prefix(), "cp", src, "."]
         try:
             proc = subprocess.run(
                 args, capture_output=True, text=True,
-                timeout=self.transfer_timeout, env=scrub_env(),
+                timeout=self.transfer_timeout, env=scrub_env(), cwd=self.workdir,
             )
         except subprocess.TimeoutExpired:
             return "; kubectl cp (pod -> workspace) timed out"
@@ -379,14 +403,12 @@ class KubernetesBackend:
         if not self.allow_network:
             # A single transient `kubectl run` pod cannot enforce no-egress
             # on its own -- that needs a namespace-level NetworkPolicy the
-            # operator applies once. Verify one is present (once per
-            # instance) and run under it; otherwise fail closed (never
+            # operator applies. Reverify an exclusive deny policy before
+            # each command; otherwise fail closed (never
             # silently run with network) and print the manifest to apply.
             # Previously this branch refused EVERY command, so the wizard's
             # default config could not run anything (platform audit W1-104).
-            if self._deny_all_verified is None:
-                self._deny_all_verified = self._deny_all_policy_present()
-            if not self._deny_all_verified:
+            if not self._deny_all_policy_present():
                 manifest = self.deny_all_networkpolicy_manifest()
                 log.warning(
                     "kubernetes backend: allow_network=false but namespace %r "
@@ -399,8 +421,9 @@ class KubernetesBackend:
                     stderr=(
                         "networking is disabled for the kubernetes backend "
                         f"(allow_network=false), but namespace {self.namespace!r} "
-                        "has no deny-all NetworkPolicy and a transient pod cannot "
-                        "enforce no-network on its own. Apply this policy once "
+                        "has no verified exclusive deny-all NetworkPolicy. A transient pod cannot "
+                        "enforce no-network on its own. Use a dedicated namespace without egress "
+                        "allow rules and apply this policy "
                         "(kubectl apply -f -), then retry -- or set "
                         "allow_network=true to let pods use the network:\n"
                         + manifest
@@ -425,7 +448,9 @@ class KubernetesBackend:
                 result = ExecResult(
                     stdout=result.stdout,
                     stderr=result.stderr + copy_out_note,
-                    exit_code=result.exit_code,
+                    # The command may have run successfully, but its output
+                    # files were not delivered. Do not advertise overall success.
+                    exit_code=result.exit_code or 74,
                 )
             return result
         finally:

@@ -94,7 +94,7 @@
         <p class="muted">Inspect the current identity link and its verified history. Unlinking or changing the link requires a newly verified identity through the public consent experience and cannot be done here.</p>
         <form id="cp-identity-form"><fieldset class="cp-form" id="cp-identity-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
           <legend class="sr-only">Identity lifecycle inspection controls</legend>
-          <label class="wide">Anonymous profile ID<input class="input" name="profile_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
+          <label class="wide">Anonymous profile ID<input class="input" name="profile_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Inspect lifecycle</button><button class="btn" id="cp-identity-integrity" type="button">Verify tenant slice</button></div>
         </fieldset></form>
         <pre id="cp-identity-current" class="cp-result">No identity lifecycle inspected.</pre>
