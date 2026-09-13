@@ -49,11 +49,13 @@ def test_cap_keeps_explicitly_required_tool(monkeypatch):
 def _bad_request(message):
     sdk = pytest.importorskip("openai")
     response = httpx.Response(400, request=httpx.Request("POST", "https://example.invalid/chat"))
-    return sdk.BadRequestError(message, response=response, body={"message": message})
+    body = {"message": message}
+    # Match the SDK's error envelope, including its escaped repr of the body.
+    return sdk.BadRequestError(f"Error code: 400 - { {'error': body} }", response=response, body=body)
 
 
 _REJECTION = (
-    "Function tools with reasoning_effort are not supported in Chat Completions; "
+    'Function tools with reasoning_effort are not supported for model "fixture" in Chat Completions; '
     "use /v1/responses or set reasoning_effort to 'none'."
 )
 

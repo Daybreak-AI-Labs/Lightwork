@@ -649,7 +649,14 @@ class OpenAIClient:
 
         if not isinstance(exc, BadRequestError):
             return False
-        message = str(exc.message).lower()
+        # SDK message text embeds a repr of the response body, which escapes
+        # quotes when a model name and the remedy use different quote styles.
+        # Inspect the structured provider message before that formatting.
+        body = getattr(exc, "body", None)
+        message = body.get("message") if isinstance(body, dict) else None
+        if not isinstance(message, str):
+            message = str(exc.message)
+        message = message.lower()
         if (
             "function tools with reasoning_effort are not supported" not in message
             or not any(value in message for value in ("'none'", '"none"'))
