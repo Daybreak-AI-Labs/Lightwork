@@ -1,5 +1,9 @@
 # Lightwork client reliability audit — September 13, 2026
 
+For repairs to the unresolved items after PRs #2510/#2506, see the
+[client readiness follow-up](client-readiness-follow-up-2026-09-13.md).
+The source and test counts in this original report describe its earlier review.
+
 This review found and repaired client-impacting defects in file handling,
 connector responses, Shoring records and measurements, Kubernetes execution,
 browser forms, installation instructions, and CI coverage. The original

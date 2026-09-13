@@ -347,6 +347,12 @@ class KubernetesBackend:
         dest = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}"
         args = [*self._kubectl_prefix(), "cp", src, dest]
         try:
+            # kubectl archives an empty source as the destination directory
+            # itself. Restoring that header can chmod the root-owned emptyDir
+            # mount, which a non-root worker cannot do. There is no input to
+            # transfer on a first run; retain the volume's kubelet permissions.
+            if not any((source or self.workdir).iterdir()):
+                return None
             proc = subprocess.run(
                 args, capture_output=True, text=True,
                 timeout=self.transfer_timeout, env=scrub_env(), cwd=source or self.workdir,

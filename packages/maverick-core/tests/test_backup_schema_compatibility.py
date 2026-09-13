@@ -66,10 +66,11 @@ def test_unknown_or_malformed_archive_schema_requires_actionable_migration(tmp_p
 
 
 @pytest.mark.parametrize("operation", ["validate", "restore", "force_restore"])
-@pytest.mark.parametrize("declared", [None, 35, 36])
+@pytest.mark.parametrize("declared", [None, "prior", "current", "future"])
 def test_future_payload_never_reaches_live_transaction_even_with_old_or_missing_metadata(tmp_path, monkeypatch, operation, declared):
-    assert world_model.SCHEMA_VERSION == 35  # This fixture targets the declared release boundary.
-    archive = _versioned_archive(tmp_path, [36], declared=declared)
+    current = world_model.SCHEMA_VERSION
+    declared = {None: None, "prior": current - 1, "current": current, "future": current + 1}[declared]
+    archive = _versioned_archive(tmp_path, [current + 1], declared=declared)
     live = file_lock.ensure_private_directory(tmp_path / "live")
     sentinel = live / "keep.txt"
     file_lock.atomic_write_text(sentinel, "newer live data")
@@ -114,7 +115,7 @@ def test_malformed_signed_schema_metadata_is_not_a_compatibility_override(tmp_pa
 
 
 def test_whole_home_restore_checks_each_tenant_world_schema(tmp_path):
-    archive = _versioned_archive(tmp_path, [36], declared=None, relative="tenants/acme/world.db")
+    archive = _versioned_archive(tmp_path, [world_model.SCHEMA_VERSION + 1], declared=None, relative="tenants/acme/world.db")
     live = tmp_path / "live"
     with backup.recovery_scope(live, "acme", KEY, whole_home=True), pytest.raises(backup.BackupError, match="newer than this binary.*upgrade"):
         backup.restore_backup(archive, replace_existing=True, force=True)
@@ -138,7 +139,7 @@ def test_empty_version_table_remains_supported_legacy_restore(tmp_path):
         assert connection.execute("SELECT version FROM schema_version").fetchall() == []
 
 
-@pytest.mark.parametrize("actual", [34, 36])
+@pytest.mark.parametrize("actual", [34, world_model.SCHEMA_VERSION + 1])
 def test_explicit_unsigned_v1_still_checks_actual_schema_without_a_declaration(tmp_path, actual):
     archive = _versioned_archive(tmp_path, [actual], declared=None, schema=1, signed=False)
     live = tmp_path / "legacy-live"
@@ -175,7 +176,7 @@ def test_snapshot_schema_metadata_is_bound_to_the_copied_database(tmp_path, monk
 
 
 def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, monkeypatch):
-    assert world_model.SCHEMA_VERSION == 35
+    current = world_model.SCHEMA_VERSION
     source = file_lock.ensure_private_directory(tmp_path / "source")
     # Reconstruct the v33 database using the released SQL ladder through v33.
     # This is a prior-schema fixture, not execution of a historical installer.
@@ -188,7 +189,7 @@ def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, 
         archive = backup.create_backup(tmp_path / "v33.tgz")
         assert backup.verify_backup(archive)["world_schema_version"] == 33
     with world_model.WorldModel(source / "world.db") as upgraded:
-        assert upgraded.schema_version == 35
+        assert upgraded.schema_version == current
         assert upgraded.get_goal(goal_id).title == "Prior schema customer record"
         assert upgraded.conn.execute("SELECT name FROM sqlite_master WHERE name='provider_cap_receipts'").fetchone()
         assert upgraded.conn.execute("SELECT name FROM sqlite_master WHERE name='provider_operation_attempts'").fetchone()
@@ -198,7 +199,7 @@ def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, 
     with closing(sqlite3.connect(live / "world.db")) as connection:
         assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 33
     with world_model.WorldModel(live / "world.db") as reopened:
-        assert reopened.schema_version == 35
+        assert reopened.schema_version == current
         assert reopened.get_goal(goal_id).title == "Prior schema customer record"
         assert reopened.get_goal(goal_id).owner == "operator"
 
@@ -247,7 +248,7 @@ def test_custom_named_prior_world_restores_and_reopens(tmp_path, monkeypatch, re
     with backup.recovery_scope(live, "acme", KEY, whole_home=relative.startswith("tenants/")):
         backup.restore_backup(archive, replace_existing=True)
     with world_model.WorldModel(live / relative) as reopened:
-        assert reopened.schema_version == 35
+        assert reopened.schema_version == world_model.SCHEMA_VERSION
         assert reopened.get_goal(goal_id).title == "Custom prior record"
         assert reopened.get_goal(goal_id).owner == "operator"
 

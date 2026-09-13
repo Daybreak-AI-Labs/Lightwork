@@ -52,7 +52,7 @@ COPY apps/installer-cli ./apps/installer-cli
 RUN python -m pip install --upgrade 'pip==26.2.1' \
     && python scripts/install_release_cohort.py \
         --target-python python \
-        --core-extra release-runtime,postgres,oidc,s3,evidence-analysis,spreadsheet,pdf \
+        --core-extra release-runtime,postgres,oidc,s3,evidence-analysis \
         --wheel-dir /wheelhouse
 
 FROM python:3.12-slim${PYTHON_DIGEST} AS runtime

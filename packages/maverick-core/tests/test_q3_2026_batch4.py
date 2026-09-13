@@ -107,6 +107,7 @@ def test_k8s_exec_pipeline_order_and_no_rm(monkeypatch, tmp_path):
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(image="alpine", namespace="ci", allow_network=True,
                                 workdir=tmp_path / "workspace")
+    (backend.workdir / "input.txt").write_text("input")
     result = backend.exec("echo hi")
     assert result.ok
     assert result.stdout == "hi\n"
@@ -130,6 +131,7 @@ def test_k8s_copies_workspace_into_pod_before_running(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch)
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(namespace="ci", allow_network=True, workdir=tmp_path / "workspace")
+    (backend.workdir / "input.txt").write_text("input")
     backend.exec("true")
 
     cp_in = _calls_with(calls, "cp")[0]
@@ -155,6 +157,7 @@ def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_p
     calls = _fake_kubectl(monkeypatch, cp_in_rc=1, cp_in_stderr="no such file or directory")
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
+    (backend.workdir / "input.txt").write_text("input")
     result = backend.exec("echo hi")
     assert result.exit_code != 0
     assert "kubectl cp" in result.stderr

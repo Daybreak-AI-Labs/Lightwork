@@ -22,6 +22,7 @@ from . import config, connections, oauth_providers
 from .file_lock import (
     atomic_read_bytes,
     atomic_write_bytes,
+    cross_process_lock,
     ensure_private_directory,
     ensure_private_file,
 )
@@ -165,10 +166,15 @@ def _path():
 def _load():
     try:
         path = _path()
-        ensure_private_file(path)
-        if path.stat().st_size > _MAX_BYTES:
-            raise ValueError("setup exceeds its bound")
-        value = json.loads(unseal_text_for_tenant(current_tenant_id_strict(), atomic_read_bytes(path)))
+        # App registrations and connection credentials share one mutation
+        # transaction. Use its same sidecar while verifying and reading setup,
+        # including for metadata readers outside a mutation transaction.
+        with cross_process_lock(connections._path(), strict=True):
+            ensure_private_file(path)
+            if path.stat().st_size > _MAX_BYTES:
+                raise ValueError("setup exceeds its bound")
+            raw = unseal_text_for_tenant(current_tenant_id_strict(), atomic_read_bytes(path))
+        value = json.loads(raw)
         if not isinstance(value, dict) or set(value) != {"applications", "consents"} or any(not isinstance(value[k], dict) for k in value):
             raise ValueError("invalid setup")
         return value

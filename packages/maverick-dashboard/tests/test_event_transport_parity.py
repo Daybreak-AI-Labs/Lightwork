@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from maverick_dashboard import api, auth
 from maverick_dashboard import app as dashboard
+from starlette.concurrency import run_in_threadpool
 
 
 @pytest.fixture
@@ -122,10 +123,10 @@ async def test_websocket_blocked_status_ends_stream(event_world, monkeypatch):
 async def test_polling_terminal_only_after_replay_is_drained(event_world, surface):
     goal_id = _goal(event_world)
     route = api.goal_events if surface == "v1" else dashboard.api_goal_events_legacy
-    first = await route(_request(), goal_id, limit=2)
+    first = await run_in_threadpool(route, _request(), goal_id, limit=2)
     first = first.model_dump() if hasattr(first, "model_dump") else first
     assert first["has_more"] and not first["terminal"]
-    last = await route(_request(), goal_id, since=first["next_id"], limit=2)
+    last = await run_in_threadpool(route, _request(), goal_id, since=first["next_id"], limit=2)
     last = last.model_dump() if hasattr(last, "model_dump") else last
     assert not last["has_more"] and last["terminal"]
     assert len(first["events"]) + len(last["events"]) == 3

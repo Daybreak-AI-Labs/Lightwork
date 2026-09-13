@@ -69,13 +69,18 @@ def _path():
 
 
 def _load() -> dict[str, dict]:
-    from .file_lock import atomic_read_bytes, ensure_private_file
+    from .file_lock import atomic_read_bytes, cross_process_lock, ensure_private_file
     from .paths import current_tenant_id
 
     path = _path()
     try:
-        ensure_private_file(path)
-        raw = unseal_text_for_tenant(current_tenant_id(), atomic_read_bytes(path))
+        # Permission verification checks the file identity across syscalls.
+        # A legitimate atomic credential rotation must not replace that inode
+        # between verification and read. The writer's sidecar lock is reentrant
+        # for callers already inside the credential mutation transaction.
+        with cross_process_lock(path, strict=True):
+            ensure_private_file(path)
+            raw = unseal_text_for_tenant(current_tenant_id(), atomic_read_bytes(path))
         data = json.loads(raw)
         if (
             not isinstance(data, dict)

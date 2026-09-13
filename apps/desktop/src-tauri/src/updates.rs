@@ -1425,8 +1425,41 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn timed_out_protocol_terminates_its_descendant_tree() {
-        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+        use std::process::{Command, Stdio};
         use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+        const ROLE: &str = "LIGHTWORK_MAINTENANCE_TIMEOUT_TEST_ROLE";
+        const READY: &str = "LIGHTWORK_MAINTENANCE_TIMEOUT_TEST_READY";
+        const TEST: &str = "updates::tests::timed_out_protocol_terminates_its_descendant_tree";
+        let executable = std::env::current_exe().expect("test executable");
+        // Re-enter this exact native test as the fixture processes. Cold
+        // PowerShell startup can consume the entire timeout on a CI runner,
+        // leaving the old test with no descendant whose containment it proved.
+        match std::env::var(ROLE).as_deref() {
+            Ok("descendant") => {
+                std::fs::write(
+                    std::env::var_os(READY).expect("ready path"),
+                    std::process::id().to_string(),
+                )
+                .expect("announce running descendant");
+                std::thread::sleep(Duration::from_secs(120));
+                return;
+            }
+            Ok("parent") => {
+                let mut descendant = Command::new(&executable)
+                    .args(["--exact", TEST, "--nocapture"])
+                    .env(ROLE, "descendant")
+                    .stdin(Stdio::null())
+                    .creation_flags(0x0800_0000)
+                    .spawn()
+                    .expect("start native descendant");
+                descendant.wait().expect("wait for native descendant");
+                return;
+            }
+            Ok(other) => panic!("unknown timeout fixture role: {other}"),
+            Err(_) => {}
+        }
 
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1437,31 +1470,17 @@ mod tests {
             std::process::id()
         ));
         std::fs::create_dir(&directory).expect("create timeout fixture");
-        let parent = directory.join("parent.ps1");
         let ready = directory.join("ready.txt");
-        std::fs::write(
-            &parent,
-            "param([string]$Ready)\n$child = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/ping.exe') -ArgumentList @('-n','31','127.0.0.1') -WindowStyle Hidden -PassThru\n[IO.File]::WriteAllText($Ready, [string]$child.Id)\nWait-Process -Id $child.Id\n",
-        )
-        .expect("write parent fixture");
-        let powershell =
-            std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("Windows SystemRoot"))
-                .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        let mut command = Command::new(&powershell);
-        command.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            parent.to_str().expect("fixture path"),
-            ready.to_str().expect("ready path"),
-        ]);
+        let mut command = Command::new(&executable);
+        command
+            .args(["--exact", TEST, "--nocapture"])
+            .env(ROLE, "parent")
+            .env(READY, &ready);
         let started = Instant::now();
-        let error = run_protocol_command(command, b"{}", Duration::from_secs(5))
+        let error = run_protocol_command(command, b"{}", Duration::from_secs(10))
             .expect_err("hung tree must time out");
-        assert!(error.contains("time limit"));
-        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(error.contains("time limit and was stopped"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(20));
         assert!(
             ready.is_file(),
             "the descendant must start before the timeout"
@@ -1470,21 +1489,26 @@ mod tests {
             .expect("read descendant id")
             .parse()
             .expect("parse descendant id");
-        let check = Command::new(&powershell)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &format!(
-                    "if (Get-Process -Id {descendant_id} -ErrorAction SilentlyContinue) {{ exit 1 }}"
-                ),
-            ])
-            .status()
-            .expect("inspect descendant process");
-        assert!(
-            check.success(),
-            "the timed-out descendant escaped the maintenance Job Object"
-        );
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, process_id: u32) -> *mut std::ffi::c_void;
+            fn WaitForSingleObject(handle: *mut std::ffi::c_void, milliseconds: u32) -> u32;
+        }
+        // TerminateJobObject is asynchronous. Accept either an already-reaped
+        // process or a signalled process handle within the bounded drain time.
+        unsafe {
+            let process = OpenProcess(0x0010_0000, 0, descendant_id); // SYNCHRONIZE
+            if process.is_null() {
+                assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(87));
+            } else {
+                let waited = WaitForSingleObject(process, 5_000);
+                CloseHandle(process);
+                assert_eq!(
+                    waited, 0,
+                    "the timed-out descendant escaped the maintenance Job Object"
+                );
+            }
+        }
         std::fs::remove_dir_all(directory).expect("remove timeout fixture");
     }
 }

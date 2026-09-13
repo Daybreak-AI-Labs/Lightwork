@@ -836,7 +836,7 @@ def test_hunter_feature_switch_uses_governed_security_update(monkeypatch):
 
     seen = []
 
-    async def current(_request):
+    def current(_request):
         return {
             "security_ops": True, "threat_hunt": False, "env_hunt": True,
             "response_execution": False, "revision": 7,

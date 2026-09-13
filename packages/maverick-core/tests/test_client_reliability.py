@@ -328,6 +328,7 @@ def test_kubernetes_copy_uses_unambiguous_local_operands(tmp_path, monkeypatch):
     from .test_kubernetes_workspace_transfer import _capture_using_fake_run
     monkeypatch.setattr("maverick.sandbox.workspace_transfer.capture_archive", _capture_using_fake_run)
     backend = KubernetesBackend(workdir=tmp_path / "workspace", allow_network=True)
+    (backend.workdir / "input.txt").write_text("input")
     assert backend._copy_in("fixture") is None
     from maverick.sandbox import workspace_transfer
     recovery = workspace_transfer.recovery_directory()

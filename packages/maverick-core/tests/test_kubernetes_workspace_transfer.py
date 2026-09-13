@@ -27,8 +27,10 @@ def _backend(monkeypatch, tmp_path, operation, *, export_fails=False):
 
     def run(args, **kwargs):
         calls.append(args)
-        if "cp" in args:
-            shutil.copytree(kwargs["cwd"], remote)
+        if "run" in args:
+            remote.mkdir()
+        elif "cp" in args:
+            shutil.copytree(kwargs["cwd"], remote, dirs_exist_ok=True)
         elif "exec" in args:
             if "tar" in args:
                 if export_fails:
@@ -86,6 +88,15 @@ def test_end_to_end_rename_deletion_and_new_files(monkeypatch, tmp_path):
     assert (local / "reports" / "result.txt").read_text() == "finished"
     assert (local / "concurrent.txt").read_text() == "local work"
     assert any("delete" in call for call in calls)
+
+
+def test_first_run_with_empty_workspace_receives_output_without_copying_volume_root(monkeypatch, tmp_path):
+    backend, local, calls = _backend(monkeypatch, tmp_path,
+        lambda remote, local: (remote / "first.txt").write_text("first deliverable"))
+    result = backend.exec("create first deliverable")
+    assert result.exit_code == 0, result.stderr
+    assert (local / "first.txt").read_text() == "first deliverable"
+    assert not any("cp" in call for call in calls)
 
 
 def test_conflict_keeps_local_edit_and_exported_output(monkeypatch, tmp_path):
