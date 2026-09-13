@@ -2,32 +2,53 @@
 
 # はじめに
 
+<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+
 ## インストール
 
-ターミナルからの最も安全なインストール方法は、リモートのブートストラップスクリプトを実行するのではなく、公開済みパッケージを pipx でインストールすることです。
+Python 3.10〜3.12 と、確認済みコミットの完全な SHA を使用してください。自社製の 8 パッケージは、完全な一式としてはまだ PyPI に公開されていません。マニフェストのインストーラーでリポジトリのソースをまとめてインストールします。ダッシュボード、ウィザード、チャネル、MCP サーバー、知識・学習パッケージが含まれます。`release-runtime` は OpenAI 互換クライアント、`evidence-analysis` は PDF と表計算ファイルのパーサーを追加します。
+
+macOS / Linux:
 
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
-python -m pip install -e ./packages/maverick-core
-python -m pip install -e ./apps/installer-cli
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade 'pip==26.2.1'
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
 lightwork init
+lightwork dashboard
 ```
 
-前提条件なしで使えるデスクトップ向けブートストラップが必要な場合は、信頼できるコミットまたはリリースから `deploy/desktop/install.sh` か `deploy/desktop/install.ps1` をダウンロードして検証し、`MAVERICK_REF` に 40 文字の完全なコミット SHA を設定してください。これらのスクリプトは、デフォルトでは可変のブランチ参照やタグ参照を拒否します。
+Windows PowerShell では、先にコミットのプレースホルダーを置き換えてください。
 
-PyPI のパッケージ名は `maverick-agent` です（`maverick` という名前は別の登録者に取られています）。`[installer]` エクストラを付けると、ウィザードがカーネルと同じ pipx 環境にインストールされ、`maverick init` が実行できるようになります。
+```powershell
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
+Set-Location Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
+.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
+.\.venv\Scripts\lightwork.exe init
+.\.venv\Scripts\lightwork.exe dashboard
+```
 
-開発中にソースから使う場合:
+実行ファイルのパスを明示するため、PowerShell の有効化ポリシーを変更する必要はありません。ウィザードでプロバイダーとサンドボックスを設定してください。ソースからのインストールでは、外部アカウント、API クレジット、コンテナーエンジン、Kubernetes クラスターは用意されません。顧客業務に使う前に、許可された実際の操作で連携を確認してください。
+
+同じ環境の Python でパッケージ一式を確認します。
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd maverick
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
-maverick init
+python scripts/install_release_cohort.py --verify-only
+python -m pip check
+lightwork version
+lightwork doctor
 ```
+
+Windows では、実行ファイル名を `.\.venv\Scripts\python.exe` と `.\.venv\Scripts\lightwork.exe` に置き換えてください。
+
+認証付きのデスクトップ用ソースインストールには、確認済みコミットから `deploy/desktop/install.sh` または `deploy/desktop/install.ps1` を取得し、その小文字の完全な SHA を `MAVERICK_REF` に設定します。これはリポジトリへのアクセスと各プラットフォームの前提条件を必要とするソースインストールであり、単独で動く署名済み製品インストーラーではありません。スクリプトは変更可能な参照を拒否し、自社製パッケージを公開インデックスから代替取得しません。`MAVERICK_*` 変数は `LIGHTWORK_*` とも表記できます。
 
 ## 初回実行
 

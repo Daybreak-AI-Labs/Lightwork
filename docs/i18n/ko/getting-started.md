@@ -2,32 +2,53 @@
 
 # 시작하기
 
+<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+
 ## 설치
 
-터미널에서 가장 안전한 설치 방법은 원격 부트스트랩 스크립트를 실행하는 대신 pipx로 게시된 패키지를 설치하는 것입니다.
+Python 3.10–3.12와 검토한 커밋의 전체 SHA를 사용하세요. 자체 패키지 8개는 아직 완전한 묶음으로 PyPI에 게시되지 않았으므로, 매니페스트 설치 프로그램을 통해 저장소 소스를 함께 설치하세요. 대시보드, 마법사, 채널, MCP 서버, 지식 및 학습 패키지가 포함됩니다. `release-runtime`은 OpenAI 호환 클라이언트를, `evidence-analysis`는 PDF 및 스프레드시트 파서를 제공합니다.
+
+macOS / Linux:
 
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
-python -m pip install -e ./packages/maverick-core
-python -m pip install -e ./apps/installer-cli
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade 'pip==26.2.1'
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
 lightwork init
+lightwork dashboard
 ```
 
-사전 요구 사항이 없는 데스크톱 부트스트랩이 필요하다면, 신뢰할 수 있는 커밋이나 릴리스에서 `deploy/desktop/install.sh` 또는 `deploy/desktop/install.ps1`을 내려받아 검증한 뒤 `MAVERICK_REF`에 40자 전체 커밋 SHA를 설정하세요. 이 스크립트들은 기본적으로 변경 가능한 브랜치/태그 참조를 거부합니다.
+Windows PowerShell에서는 먼저 커밋 자리표시자를 바꾸세요.
 
-PyPI 패키지 이름은 `maverick-agent`입니다(`maverick`이라는 이름은 이미 다른 곳에서 선점했습니다). `[installer]` 엑스트라는 마법사를 커널과 같은 pipx 환경에 설치하므로 `maverick init` 명령을 찾을 수 있게 됩니다.
+```powershell
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
+Set-Location Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
+.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
+.\.venv\Scripts\lightwork.exe init
+.\.venv\Scripts\lightwork.exe dashboard
+```
 
-개발 중에 소스에서 설치하려면:
+실행 파일 경로를 명시하므로 PowerShell 활성화 정책을 변경할 필요가 없습니다. 마법사에서 공급자와 샌드박스를 설정하세요. 소스 설치는 외부 계정, API 크레딧, 컨테이너 엔진이나 Kubernetes 클러스터를 만들지 않습니다. 고객 업무에 통합 기능을 사용하기 전에 허가된 실제 작업으로 확인하세요.
+
+같은 환경의 Python으로 패키지 묶음을 확인하세요.
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd maverick
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
-maverick init
+python scripts/install_release_cohort.py --verify-only
+python -m pip check
+lightwork version
+lightwork doctor
 ```
+
+Windows에서는 해당 실행 파일 이름 대신 `.\.venv\Scripts\python.exe`와 `.\.venv\Scripts\lightwork.exe`를 사용하세요.
+
+인증이 필요한 데스크톱 소스 설치에는 검토한 커밋의 `deploy/desktop/install.sh` 또는 `deploy/desktop/install.ps1`을 사용하고 `MAVERICK_REF`에 소문자로 된 전체 SHA를 설정하세요. 이 방식은 저장소 접근 권한과 플랫폼 사전 요구 사항이 필요한 소스 설치이며, 독립적으로 실행되는 서명된 제품 설치 프로그램이 아닙니다. 스크립트는 변경 가능한 참조를 거부하고 자체 패키지를 공개 인덱스에서 대신 받지 않습니다. `MAVERICK_*` 변수는 `LIGHTWORK_*`로도 표기할 수 있습니다.
 
 ## 첫 실행
 

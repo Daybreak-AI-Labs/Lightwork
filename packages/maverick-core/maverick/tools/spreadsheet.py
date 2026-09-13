@@ -230,10 +230,12 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
             if not isinstance(rows, list) or any(not isinstance(row, list) for row in rows):
                 return "ERROR: write requires rows (list of lists)"
             norm = [list(r) for r in rows]
-            if _is_xlsx(path):
-                _xlsx_write(path, norm, sheet)
-            else:
-                _csv_write(path, norm)
+            from ..file_lock import cross_process_lock
+            with cross_process_lock(path, strict=True):
+                if _is_xlsx(path):
+                    _xlsx_write(path, norm, sheet)
+                else:
+                    _csv_write(path, norm)
             return f"wrote {len(rows)} row(s) to {path}"
         if op == "set_cell":
             if not _is_xlsx(path):
@@ -241,7 +243,9 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
             cell = str(args.get("cell") or "").strip()
             if not cell:
                 return "ERROR: set_cell requires cell (e.g. 'B2')"
-            _xlsx_set_cell(path, cell, args.get("value"), sheet)
+            from ..file_lock import cross_process_lock
+            with cross_process_lock(path, strict=True):
+                _xlsx_set_cell(path, cell, args.get("value"), sheet)
             return f"set {cell} in {path}"
     except RuntimeError as e:
         return f"ERROR: {e}"

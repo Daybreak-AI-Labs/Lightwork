@@ -114,7 +114,7 @@ def test_spreadsheet_failed_write_preserves_original(tmp_path, monkeypatch):
     result = spreadsheet._run({"op": "write", "path": str(path), "rows": [[750]]})
     assert result.startswith("ERROR:")
     assert path.read_bytes() == original
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.csv"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.csv", "orders.csv.lock"]
 
 
 def test_spreadsheet_macro_enabled_edits_are_refused_before_loading(tmp_path, monkeypatch):
@@ -258,7 +258,7 @@ def test_xlsx_replace_failure_preserves_original_and_cleans_temporary(tmp_path, 
     monkeypatch.setattr(spreadsheet.os, "replace", fail)
     result = spreadsheet._run({"op": "set_cell", "path": str(path), "cell": "B2", "value": 900})
     assert result.startswith("ERROR:") and path.read_bytes() == original
-    assert [p.name for p in tmp_path.iterdir()] == ["orders.xlsx"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.xlsx", "orders.xlsx.lock"]
 
 
 def test_pdf_local_size_limit_is_enforced_before_parser(tmp_path, monkeypatch):
@@ -407,3 +407,28 @@ def test_shoring_nested_record_damage_refuses_edits_without_data_loss(damage):
     with pytest.raises(RuntimeError, match="invalid function"):
         shoring.upsert(shoring.Function(key="support", name="Support"))
     assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("filename,op", [("orders.csv", "write"), ("orders.xlsx", "write"), ("orders.xlsx", "set_cell")])
+def test_spreadsheet_mutations_wait_for_shared_file_lock(tmp_path, filename, op):
+    if filename.endswith("xlsx"):
+        pytest.importorskip("openpyxl")
+    tool = spreadsheet.spreadsheet(SimpleNamespace(workdir=tmp_path))
+    assert tool.fn({"op": "write", "path": filename, "rows": [["original"]]}).startswith("wrote")
+    path = tmp_path / filename
+    original = path.read_bytes()
+    started = threading.Event()
+
+    def mutate():
+        started.set()
+        return tool.fn({"op": op, "path": filename, "rows": [["updated"]], "cell": "A1", "value": "updated"})
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with cross_process_lock(path, strict=True):
+            future = pool.submit(mutate)
+            assert started.wait(2)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            assert path.read_bytes() == original
+        assert not future.result(timeout=5).startswith("ERROR:")
+    assert json.loads(tool.fn({"op": "read", "path": filename})) == [["updated"]]
