@@ -4,7 +4,7 @@
   "repository": "Daybreak-AI-Labs/Lightwork",
   "baseline_commit": "e0140f85aa3f67c4dd034f542d61d5bbbcb28baa",
   "full_local_suite_commit": "e4d67d2248066a06ff3042ee4deb752eb5a599ff",
-  "final_runtime_commit": "301c237e43ba4cab78000cfefac728c92d6b576f",
+  "final_runtime_commit": "5cfd0fb774d69458b8250d9b1c875ed647dc85a2",
   "pull_request": "https://github.com/Daybreak-AI-Labs/Lightwork/pull/2510",
   "local_platform": {
     "os": "Windows",
@@ -29,6 +29,10 @@
   },
   "final_shoring_and_client_regressions": {
     "passed_each_posture": 86,
+    "failed": 0
+  },
+  "spreadsheet_and_translations_followup": {
+    "passed_each_posture": 89,
     "failed": 0
   },
   "dashboard_javascript": {
@@ -169,8 +173,8 @@
     },
     {
       "path": "final-core-wheel.log",
-      "bytes": 577634,
-      "sha256": "85b1788ba469a9d2c687379ccebf0f5432428c2ba8c86cdd4e9c1326816e3282"
+      "bytes": 577514,
+      "sha256": "02441e69e4cf8149a1602aa7b7436664c8ccff52ee6061633fefdffcc71cc534"
     },
     {
       "path": "final-dashboard-wheel.log",
@@ -179,13 +183,13 @@
     },
     {
       "path": "wheel-final-reinstall.log",
-      "bytes": 817,
-      "sha256": "2a5e77c4a738c10fca66b439feeefa68d299c63c8e360f775ea0694dd7082259"
+      "bytes": 421,
+      "sha256": "2f2f1b8bebb00948130852411013f649318d2e4cf5d623beed0c3483eeda451a"
     },
     {
       "path": "wheel-verify.log",
-      "bytes": 98,
-      "sha256": "1c4c726067b04a1bd1e1e9b345806447c6b48844e1964006323bcfa929e74c8a"
+      "bytes": 67,
+      "sha256": "c605d8ad507b1ab20906a27ef16303b4a65498e9e8ea625ac542b287f9ac5097"
     },
     {
       "path": "wheel-smoke-verified.log",
@@ -205,7 +209,7 @@
     {
       "path": "frontier-final-measure.log",
       "bytes": 1135,
-      "sha256": "d5fe539874bd0595c8ef3fc96a41aacb9511659b5c112ca7641a9adcf31db14a"
+      "sha256": "d2349654f0d0e941ddace966150684b9cf8c986c167f33ceefc20669d5074ed6"
     },
     {
       "path": "frontier-final-verify.log",
@@ -215,7 +219,7 @@
     {
       "path": "overhead-final-measure.log",
       "bytes": 1306,
-      "sha256": "dcaecbb1b2384b2b530f5fc3645c7d5e8082894b00a413e7c1ae5864617890b1"
+      "sha256": "dcb3e2176bdb87826a13fdc48a52e097eaabbe738bf04d8905b04f6206ac977a"
     },
     {
       "path": "overhead-final-verify.log",
@@ -256,6 +260,26 @@
       "path": "final-vulture.log",
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "spreadsheet-lock-before.log",
+      "bytes": 1638,
+      "sha256": "395bd823b45b01a2f907b6bffcdb8dd1dad6a3696555384a1bcffd4ead274453"
+    },
+    {
+      "path": "spreadsheet-docs-final.log",
+      "bytes": 182,
+      "sha256": "c5670b7b9116cbe7cbed8c9f203a1005f5815b0bc0485d8fc541d8155ea3d36a"
+    },
+    {
+      "path": "spreadsheet-docs-final-secure.log",
+      "bytes": 182,
+      "sha256": "a80406d87a599d6c299dfcd57f4a01f6938a10b314e1d0f8ba4f8f3ff1c46a7e"
+    },
+    {
+      "path": "ci-e19-final-failures.log",
+      "bytes": 437743,
+      "sha256": "72ab852c5258c19ccbc35f789499a3a6f9f96d2577c281c7b648359fc75aa97a"
     }
   ]
 }
