@@ -3411,11 +3411,15 @@ async def facts_page(request: Request) -> HTMLResponse:
 async def spend_page(request: Request) -> HTMLResponse:
     # The burn/outcome/top-goal charts render client-side from
     # GET /api/v1/dashboards/spend; the page keeps the episode table + hero.
+    # Scope both reads to the caller (matches /api/v1/spend and the on-page
+    # charts) so a non-admin never sees the whole tenant's spend/episodes.
+    # goal_owner_filter returns None for admins / auth-off, preserving that view.
+    owner = goal_owner_filter(request)
     w = _world()
     return templates.TemplateResponse(
         request,
         "spend.html",
-        {"episodes": w.list_episodes(limit=50), "total": w.total_spend()},
+        {"episodes": w.list_episodes(limit=50, owner=owner), "total": w.total_spend(owner=owner)},
     )
 
 

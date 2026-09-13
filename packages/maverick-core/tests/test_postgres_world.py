@@ -29,6 +29,52 @@ def world():
         w.close()
 
 
+@pytest.mark.parametrize("encrypted", [False, True])
+def test_goal_search_enforces_owner_and_preserves_project_metadata(world, monkeypatch, encrypted):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1" if encrypted else "0")
+    marker = "owner-search-" + uuid.uuid4().hex
+    with tenant_scope(tenant=marker):
+        try:
+            project = world.create_project("project", owner="user:alice", domain="finance")
+            alice = world.create_goal(marker, owner="user:alice", domain="finance", project_id=project)
+            bob = world.create_goal(marker, owner="user:bob")
+            anonymous = world.create_goal(marker)
+            assert [goal.id for goal in world.search_goals(marker, owner="user:alice")] == [alice]
+            assert [goal.id for goal in world.search_goals(marker, owner="user:bob")] == [bob]
+            assert [goal.id for goal in world.search_goals(marker, owner="")] == [anonymous]
+            assert {goal.id for goal in world.search_goals(marker)} == {alice, bob, anonymous}
+            reads = [world.get_goal(alice), *world.search_goals(marker, owner="user:alice"),
+                     *world.list_goals(owner="user:alice", domain="finance", project_id=project)]
+            assert len(reads) == 3
+            assert all(goal.domain == "finance" and goal.project_id == project for goal in reads)
+        finally:
+            # The service is shared by this test module; later encryption tests
+            # deliberately use different keys. Remove only this unique fixture
+            # tenant's rows so their unscoped scans never encounter our key.
+            with world._tx() as cursor:
+                cursor.execute("DELETE FROM goals WHERE tenant_id=%s", (marker,))
+                cursor.execute("DELETE FROM projects WHERE tenant_id=%s", (marker,))
+
+
+def test_connection_timeouts_and_operator_options_survive_real_reconnect(monkeypatch):
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from psycopg.conninfo import make_conninfo
+
+    monkeypatch.setenv("MAVERICK_PG_IDLE_TX_TIMEOUT_MS", "60000")
+    dsn = make_conninfo(_DSN, options="-c statement_timeout=12345 -c application_name=lightwork-test")
+    with PostgresWorldModel(dsn) as database:
+        for reconnect in (False, True):
+            if reconnect:
+                database.conn.close()
+            with database._tx() as cursor:
+                cursor.execute("SELECT current_setting('statement_timeout'), "
+                               "current_setting('idle_in_transaction_session_timeout'), "
+                               "current_setting('application_name')")
+                assert cursor.fetchone() == ("12345ms", "1min", "lightwork-test")
+
+
 def test_provider_admission_is_atomic_across_shared_connections(monkeypatch):
     """Real PostgreSQL CI service; distinct connections race one provider period."""
     from concurrent.futures import ThreadPoolExecutor

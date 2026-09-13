@@ -508,8 +508,9 @@ def test_list_goals_omits_domain_and_project_id_predicates_when_unset(monkeypatc
     world.list_goals()
 
     sql, params = cur.calls[0]
-    assert "domain" not in sql
-    assert "project_id" not in sql
+    assert "domain, project_id FROM goals" in sql
+    assert "domain = %s" not in sql
+    assert "project_id = %s" not in sql
     assert params == ()
 
 
@@ -624,6 +625,7 @@ class TestReconnectOnBrokenConnection:
         world._rls = False
         world._lock = threading.RLock()
         world._dsn = "postgresql://fake"
+        world._connect_kwargs = {"autocommit": False}
         return world
 
     def test_already_closed_connection_is_reopened_before_use(self, monkeypatch):

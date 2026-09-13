@@ -24,12 +24,18 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+from .._envparse import env_int
 from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
 from ..retry import async_retry, sync_retry
 from ..secrets import scrub
 
 log = logging.getLogger(__name__)
+
+# OpenAI Chat Completions hard limit on the `tools` array. Requests with more
+# are rejected with a 400 ("Invalid 'tools': array too long"). Overridable for
+# providers/gateways with a different ceiling.
+_OPENAI_MAX_TOOLS = max(1, env_int("MAVERICK_OPENAI_MAX_TOOLS", 128))
 
 
 # Models that require max_completion_tokens instead of max_tokens.
@@ -552,11 +558,11 @@ class OpenAIClient:
         # the model has no auto-cache, to keep behaviour unchanged elsewhere.
         sys_tok = len(system or "") // 4
         tools_tok = sum(len(str(t)) for t in (tools or [])) // 4
-        if (
-            self._has_auto_prompt_cache(chosen_model)
-            and sys_tok + tools_tok >= _MIN_AUTO_CACHE_TOKENS
-        ):
-            tools = self._cache_friendly_tools(tools)
+        # The cache-friendly tool sort is applied AFTER the 128-tool cap below,
+        # on the surviving tools. Sorting before the cap would let tool NAME
+        # order (not registration order) choose which 128 survive, silently
+        # dropping core/orchestration tools in favour of alphabetically-early
+        # MCP tools. See the post-cap stable sort next to the cap.
         kwargs: dict[str, Any] = {
             "model": chosen_model,
             "messages": self._to_openai_messages(system, messages),
@@ -575,15 +581,90 @@ class OpenAIClient:
             if effort is not None:
                 kwargs["reasoning_effort"] = effort
         oai_tools = self._to_openai_tools(tools)
+        mapped_choice, no_parallel = self._to_openai_tool_choice(tool_choice) if oai_tools else (None, False)
+        if oai_tools and len(oai_tools) > _OPENAI_MAX_TOOLS:
+            # OpenAI's Chat Completions API hard-caps `tools` at 128 and 400s the
+            # whole request otherwise ("array too long"). A goal that assembles
+            # more (many MCP servers / enabled capabilities) would fail entirely.
+            # base_registry registers core/orchestration tools BEFORE MCP and
+            # extension tools, so keeping the first _OPENAI_MAX_TOOLS preserves the
+            # essential ones and drops the excess tail. An explicitly selected
+            # function takes precedence over the last retained tool. Operators who need the
+            # dropped tools should reduce enabled MCP servers/capabilities or run
+            # the orchestrator on a provider with a higher tool ceiling.
+            log.warning(
+                "openai: %d tools exceed the API's %d-tool limit; sending the "
+                "first %d, retaining any explicitly selected function. "
+                "Trim enabled MCP servers/capabilities to expose the rest.",
+                len(oai_tools), _OPENAI_MAX_TOOLS, _OPENAI_MAX_TOOLS,
+            )
+            retained = oai_tools[:_OPENAI_MAX_TOOLS]
+            if isinstance(mapped_choice, dict):
+                forced_name = mapped_choice["function"]["name"]
+                forced = next(
+                    (item for item in oai_tools if item["function"]["name"] == forced_name),
+                    None,
+                )
+                if forced is not None and forced not in retained:
+                    retained[-1] = forced
+            oai_tools = retained
+        if (
+            oai_tools
+            and self._has_auto_prompt_cache(chosen_model)
+            and sys_tok + tools_tok >= _MIN_AUTO_CACHE_TOKENS
+        ):
+            # Stable, byte-identical tool prefix for the auto prompt cache,
+            # applied to the already-capped survivors so ordering never decides
+            # WHICH tools survive. The name is nested under "function" after
+            # conversion (t["name"] is None here and would collapse the sort).
+            oai_tools = sorted(
+                oai_tools,
+                key=lambda t: str((t.get("function") or {}).get("name") or ""),
+            )
         if oai_tools:
             kwargs["tools"] = oai_tools
             # W1-11: forced / restricted tool selection and serialised calls.
-            mapped_choice, no_parallel = self._to_openai_tool_choice(tool_choice)
             if mapped_choice is not None:
                 kwargs["tool_choice"] = mapped_choice
             if no_parallel:
                 kwargs["parallel_tool_calls"] = False
         return kwargs
+
+    @staticmethod
+    def _disable_rejected_tool_reasoning(kwargs: dict[str, Any], exc: Exception) -> bool:
+        """Apply the provider's explicit compatibility remedy once, after a 400.
+
+        Reasoning support is model-specific. Forcing ``none`` before every
+        tool call breaks older reasoning models and discards requested effort.
+        Only honor the precise rejection that explicitly offers ``none``;
+        unrelated validation, authentication and transport errors propagate.
+        """
+        if (
+            getattr(exc, "status_code", None) != 400
+            or not kwargs.get("tools")
+            or kwargs.get("reasoning_effort") == "none"
+        ):
+            return False
+        from openai import BadRequestError
+
+        if not isinstance(exc, BadRequestError):
+            return False
+        # SDK message text embeds a repr of the response body, which escapes
+        # quotes when a model name and the remedy use different quote styles.
+        # Inspect the structured provider message before that formatting.
+        body = getattr(exc, "body", None)
+        message = body.get("message") if isinstance(body, dict) else None
+        if not isinstance(message, str):
+            message = str(exc.message)
+        message = message.lower()
+        if (
+            "function tools with reasoning_effort are not supported" not in message
+            or not any(value in message for value in ("'none'", '"none"'))
+        ):
+            return False
+        log.warning("openai: provider requires reasoning_effort=none with function tools; retrying once")
+        kwargs["reasoning_effort"] = "none"
+        return True
 
     def complete(
         self,
@@ -605,7 +686,15 @@ class OpenAIClient:
             system, messages, tools, max_tokens, model, thinking_budget,
             **({"tool_choice": tool_choice} if tool_choice else {}),
         )
-        resp = sync_retry(lambda: self._sync.chat.completions.create(**kwargs))
+        def request():
+            try:
+                return self._sync.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if not self._disable_rejected_tool_reasoning(kwargs, exc):
+                    raise
+                return self._sync.chat.completions.create(**kwargs)
+
+        resp = sync_retry(request)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,
@@ -627,7 +716,15 @@ class OpenAIClient:
             system, messages, tools, max_tokens, model, thinking_budget,
             **({"tool_choice": tool_choice} if tool_choice else {}),
         )
-        resp = await async_retry(lambda: self._async.chat.completions.create(**kwargs))
+        async def request():
+            try:
+                return await self._async.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if not self._disable_rejected_tool_reasoning(kwargs, exc):
+                    raise
+                return await self._async.chat.completions.create(**kwargs)
+
+        resp = await async_retry(request)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,

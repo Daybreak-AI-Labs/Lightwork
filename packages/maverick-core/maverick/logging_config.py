@@ -163,12 +163,41 @@ def current_goal_id() -> int | None:
 
 
 class _ContextFilter(logging.Filter):
-    """Attach goal/conversation/channel context to every record."""
+    """Attach goal/conversation/channel context to every record, and scrub
+    secrets from the message + traceback.
+
+    Scrubbing lives in the filter (not only the JsonFormatter) because a filter
+    runs for EVERY handler/formatter regardless of ``MAVERICK_LOG_FORMAT``. The
+    default is text mode, so without this an interpolated provider key / DSN
+    password / Bearer token in a log message would reach the sink verbatim."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.goal_id = _goal_id_var.get()
         record.conversation_id = _conversation_id_var.get()
         record.channel = _channel_var.get()
+        # Resolve args into the message and scrub, then drop args so no handler
+        # re-interpolates the unscrubbed values. Never raise from logging.
+        try:
+            record.msg = _scrub_value(record.getMessage())
+            record.args = ()
+        except Exception:  # pragma: no cover -- scrubbing must never break logging
+            pass
+        # Pre-format + scrub the traceback into cached exc_text so the text
+        # formatter emits the scrubbed version. exc_info is left intact so the
+        # JsonFormatter (which re-derives and independently scrubs it) still
+        # renders a traceback in JSON mode.
+        if record.exc_text:
+            record.exc_text = _scrub_value(record.exc_text)
+        elif record.exc_info:
+            try:
+                import traceback as _tb
+                record.exc_text = _scrub_value(
+                    "".join(_tb.format_exception(*record.exc_info))
+                )
+            except Exception:  # pragma: no cover
+                pass
+        if record.stack_info:
+            record.stack_info = _scrub_value(record.stack_info)
         return True
 
 

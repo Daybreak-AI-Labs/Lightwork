@@ -1003,6 +1003,7 @@ jobs:
           timeout --verbose --signal=ABRT --kill-after=30s 10m
           python -m pytest -vvs --timeout=180 --timeout-method=signal
           packages/maverick-core/tests/test_postgres_world.py
+          packages/maverick-core/tests/test_production_runtime_regressions.py
           packages/maverick-core/tests/test_pgvector_isolation_pg.py
           packages/maverick-core/tests/test_postgres_fact_history.py
           packages/maverick-core/tests/test_postgres_facts_trust.py

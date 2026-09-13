@@ -248,6 +248,8 @@ def run_goal_in_thread(
                 "goal #%s execution principal does not match its binding",
                 goal_id,
             )
+            # A rejected caller has no authority to change the goal. In
+            # particular, it must not interrupt another principal's live run.
             return "blocked"
         if was_unbound:
             rebound = world.get_goal(goal_id)

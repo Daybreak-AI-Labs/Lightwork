@@ -39,11 +39,13 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+# Initialize encryption before a worker resolves sealed dashboard settings.
+from . import crypto_at_rest
+
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
-
 
 # Note: do not cache the default at module import time. Both the platform home
 # and the documented MAVERICK_HOME override can change in test/embedded
@@ -289,15 +291,12 @@ def _unseal_config_tree(value: object) -> object:
         return value
     token = _UNSEALING.set(True)
     try:
-        from .crypto_at_rest import (
-            deployment_key_scope,
-            is_sealed_str,
-            unseal_from_str,
-        )
-
         def walk(item: object) -> object:
             if isinstance(item, str):
-                return unseal_from_str(item) if is_sealed_str(item) else item
+                return (
+                    crypto_at_rest.unseal_from_str(item)
+                    if crypto_at_rest.is_sealed_str(item) else item
+                )
             if isinstance(item, dict):
                 return {key: walk(child) for key, child in item.items()}
             if isinstance(item, list):
@@ -306,7 +305,7 @@ def _unseal_config_tree(value: object) -> object:
                 return tuple(walk(child) for child in item)
             return item
 
-        with deployment_key_scope():
+        with crypto_at_rest.deployment_key_scope():
             return walk(value)
     finally:
         _UNSEALING.reset(token)
@@ -320,7 +319,29 @@ def _load_config_file(path: Path) -> dict:
     # contract.
     loaded = _interp(_read_toml_raw(path))
     if path.name == DASHBOARD_OVERRIDES_BASENAME:
-        return _unseal_config_tree(loaded)  # type: ignore[return-value]
+        try:
+            unsealed = _unseal_config_tree(loaded)
+        except Exception as exc:
+            # An undecryptable sealed overlay value (e.g. after a
+            # MAVERICK_ENCRYPTION_KEY rotation leaves dashboard-config.toml
+            # sealed under the old key) must NOT crash every config read.
+            # Fail soft exactly like a corrupt-TOML source: record the error so
+            # config_source_errors() surfaces it (health goes red and security
+            # callers fail closed), and drop the overlay so callers fall back to
+            # base/env config instead of load_config() raising process-wide.
+            _toml_errors[str(path)] = f"{type(exc).__name__}: {exc}"
+            logging.getLogger(__name__).warning(
+                "dashboard overlay %s could not be decrypted; dropping it "
+                "(rotate keys / re-save provider settings to restore): %s",
+                path, exc,
+            )
+            return {}
+        # A corrected key can recover the same cached TOML without a file edit.
+        # Only clear a decryption error after a complete unseal; plaintext or
+        # recursive reads must not erase parse errors or a prior failed unseal.
+        if _tree_contains_sealed_value(loaded) and not _UNSEALING.get():
+            _toml_errors.pop(str(path), None)
+        return unsealed  # type: ignore[return-value]
     return loaded
 
 
