@@ -74,6 +74,8 @@ openpyxl==3.1.5
 packageurl-python==0.17.6
 packaging==26.3
 patchelf==0.19.1.0; sys_platform == "linux"
+pdfminer-six==20260107
+pdfplumber==0.11.10
 pefile==2024.8.26
 pillow==12.3.0
 pip==26.2.1
@@ -101,6 +103,7 @@ pywin32-ctypes==0.2.3
 pyparsing==3.3.2
 pyproject-hooks==1.2.0
 pypdf==6.16.2
+pypdfium2==5.13.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-timeout==2.4.0

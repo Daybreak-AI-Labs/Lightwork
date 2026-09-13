@@ -37,7 +37,7 @@ client (build argument `KUBECTL_VERSION`, currently v1.36.4).
 5. Set Terraform variables, then review its plan before applying:
 
    ```hcl
-   executor_kubeconfig_secret_arn = "arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME"
+   executor_kubeconfig_secret_arn = "arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME" # pragma: allowlist secret -- placeholder ARN
    executor_namespace             = "lightwork-execution"
    executor_image                 = "REGISTRY/WORKER@sha256:REVIEWED_DIGEST"
    ```
