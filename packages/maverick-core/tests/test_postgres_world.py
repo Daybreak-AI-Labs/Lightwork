@@ -35,7 +35,7 @@ def test_goal_search_enforces_owner_and_preserves_project_metadata(world, monkey
 
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1" if encrypted else "0")
     marker = "owner-search-" + uuid.uuid4().hex
-    with tenant_scope(marker):
+    with tenant_scope(tenant=marker):
         project = world.create_project("project", owner="user:alice", domain="finance")
         alice = world.create_goal(marker, owner="user:alice", domain="finance", project_id=project)
         bob = world.create_goal(marker, owner="user:bob")
