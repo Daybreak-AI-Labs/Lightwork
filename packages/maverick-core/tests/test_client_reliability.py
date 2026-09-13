@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -427,7 +428,7 @@ def test_spreadsheet_mutations_wait_for_shared_file_lock(tmp_path, filename, op)
         with cross_process_lock(path, strict=True):
             future = pool.submit(mutate)
             assert started.wait(2)
-            with pytest.raises(TimeoutError):
+            with pytest.raises(FutureTimeoutError):
                 future.result(timeout=0.2)
             assert path.read_bytes() == original
         assert not future.result(timeout=5).startswith("ERROR:")
