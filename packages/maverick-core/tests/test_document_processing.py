@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 from maverick import config
@@ -13,6 +14,27 @@ from maverick.tools import document_processing, spreadsheet
 from maverick.tools.office_package import WorkbookPackage, _xml
 
 openpyxl = pytest.importorskip("openpyxl")
+
+
+def test_frozen_package_retains_document_helper_source_and_parser_imports():
+    root = Path(__file__).resolve().parents[3]
+    spec = (root / "build/maverick.spec").read_text(encoding="utf-8")
+    assert "sandbox/document_engine.py" in spec and "include_py_files=True" in spec
+    for module in ("openpyxl", "lxml", "pypdf", "pdfplumber"):
+        assert f"collect_submodules('{module}')" in spec
+
+
+def test_release_document_runtime_requires_real_parsers_and_worker_source(monkeypatch):
+    pytest.importorskip("pdfplumber")
+    document_processing.verify_release_document_runtime()
+    original_import = document_processing.importlib.import_module
+    def missing_parser(name):
+        if name == "lxml.etree":
+            raise ImportError("packaged XML parser missing")
+        return original_import(name)
+    monkeypatch.setattr(document_processing.importlib, "import_module", missing_parser)
+    with pytest.raises(ImportError, match="packaged XML parser missing"):
+        document_processing.verify_release_document_runtime()
 
 
 def _workbook(path, *, macros=False):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import io
 import json
 import tempfile
@@ -17,6 +18,21 @@ from ..sandbox.docker import DockerBackend
 from ..sandbox.kubernetes import KubernetesBackend
 from ..sandbox.podman import PodmanBackend
 from ..sandbox.workspace_transfer import _read
+
+
+def verify_release_document_runtime() -> None:
+    """Check real parser imports and worker source in wheel/frozen artifacts.
+
+    This does not start an engine or claim a configured Docker/Kubernetes host.
+    """
+    for name, attribute in (("openpyxl", "load_workbook"), ("lxml.etree", "fromstring"),
+                            ("pypdf", "PdfReader"), ("pdfplumber", "open")):
+        if not callable(getattr(importlib.import_module(name), attribute, None)):
+            raise RuntimeError(f"Document parser {name}.{attribute} is unavailable")
+    source = resources.files("maverick.sandbox").joinpath("document_engine.py").read_bytes()
+    if not source:
+        raise RuntimeError("Document worker source is missing from this release")
+    compile(source, "document_engine.py", "exec")
 
 
 @contextmanager

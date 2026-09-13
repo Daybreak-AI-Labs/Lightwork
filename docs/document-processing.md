@@ -11,6 +11,9 @@ required. Editing with openpyxl does not calculate formulas.
 Install the core `spreadsheet` and `pdf` extras. The application Docker image
 includes them. The advanced installer has opt-ins for macro cell edits, native
 recalculation and scanned-PDF OCR, plus the worker image setting.
+Full `release-runtime` artifacts include the parsers and the standalone worker
+source. `maverick release-runtime-check` checks both in the actual wheel or
+frozen executable; it does not imply that an external engine is configured.
 
 Build the dedicated worker image, then publish it to a registry reachable by
 the selected executor if necessary:
