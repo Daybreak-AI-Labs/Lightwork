@@ -1,0 +1,261 @@
+{
+  "schema": "lightwork.client-reliability-audit.v1",
+  "date": "2026-09-13",
+  "repository": "Daybreak-AI-Labs/Lightwork",
+  "baseline_commit": "e0140f85aa3f67c4dd034f542d61d5bbbcb28baa",
+  "full_local_suite_commit": "e4d67d2248066a06ff3042ee4deb752eb5a599ff",
+  "final_runtime_commit": "301c237e43ba4cab78000cfefac728c92d6b576f",
+  "pull_request": "https://github.com/Daybreak-AI-Labs/Lightwork/pull/2510",
+  "local_platform": {
+    "os": "Windows",
+    "python": "3.12.10",
+    "node": "24.13.0"
+  },
+  "normal_full_suite": {
+    "passed": 28954,
+    "failed": 0,
+    "skipped": 340,
+    "xfailed": 3
+  },
+  "secure_full_suite": {
+    "passed": 28954,
+    "failed": 0,
+    "skipped": 340,
+    "xfailed": 3
+  },
+  "serial_heavy_concurrency": {
+    "passed": 7,
+    "failed": 0
+  },
+  "final_shoring_and_client_regressions": {
+    "passed_each_posture": 86,
+    "failed": 0
+  },
+  "dashboard_javascript": {
+    "passed": 745,
+    "failed": 0
+  },
+  "distinct_browser_journeys": {
+    "general": 60,
+    "explicit_setup": 7,
+    "failed": 0
+  },
+  "benchmark_followup_tests": {
+    "passed": 103,
+    "failed": 0
+  },
+  "evidence_boundaries": {
+    "test_counts_overlap": true,
+    "live_customer_or_provider_acceptance": false,
+    "local_wheel_install_used_editables": false,
+    "wheel_health_probe_checks_configuration_only": true,
+    "benchmark_signing_independent_certification": false,
+    "kubernetes_used_real_cluster": false,
+    "windows_ci_used_production_publisher": false,
+    "all_features_proven_bug_free": false
+  },
+  "initial_ci": {
+    "url": "https://github.com/Daybreak-AI-Labs/Lightwork/actions/runs/34736737615",
+    "result": "two stale signed-artifact checks failed; other executed jobs passed",
+    "pr_interpreter_and_secure_posture_skip_bodies_not_counted_as_tests": true
+  },
+  "initial_windows_package_acceptance": {
+    "url": "https://github.com/Daybreak-AI-Labs/Lightwork/actions/runs/34736737626",
+    "result": "passed with disposable test publishers; customer signing skipped"
+  },
+  "final_github_validation": "pending final push and manual full-matrix execution",
+  "remaining_static_async_route_findings": 149,
+  "local_evidence_directory": "work/client-audit-evidence",
+  "files": [
+    {
+      "path": "baseline-collection.log",
+      "bytes": 3275941,
+      "sha256": "4d39a4dea9848752ffb6b9987f2823162740f25676bd08e491402010fd63b2a3"
+    },
+    {
+      "path": "baseline-windows.log",
+      "bytes": 42289,
+      "sha256": "ba8bfade5fe23b4f626bf9d4b5b7805e646664b75f6350074e34852589e2e89a"
+    },
+    {
+      "path": "baseline-windows.xml",
+      "bytes": 4536827,
+      "sha256": "346a457b804ac6eef63b44f157b4047aea0a02c32a6c002e64e00cd55e65d1c0"
+    },
+    {
+      "path": "baseline-ci-repro.log",
+      "bytes": 4182,
+      "sha256": "0f1a855ec518bdeea7b2327866818e80b97247153ef3a7bfaf6d3d31742287f7"
+    },
+    {
+      "path": "expanded-before.log",
+      "bytes": 98029,
+      "sha256": "f528b1a6ca70af7fee651a0b94962b53b955b13d492ee7ba3aab6e61a06da888"
+    },
+    {
+      "path": "fixes-windows.log",
+      "bytes": 39946,
+      "sha256": "a54b4d4ebb4c7048bef11dccb27a17525b590c127d58f5a406fcbf35f00d0b94"
+    },
+    {
+      "path": "fixes-windows.xml",
+      "bytes": 4588575,
+      "sha256": "c79377f3031f89f32ce5da713eb80acce8f7e91a1dbefc0ba8ade52a28ca9834"
+    },
+    {
+      "path": "fixes-secure.log",
+      "bytes": 39899,
+      "sha256": "17c2f749123d6f879b377f2e83226548a431c50e0c9f534ab2f9135423bc473f"
+    },
+    {
+      "path": "fixes-secure.xml",
+      "bytes": 4588577,
+      "sha256": "b3126cfd750434a1784f19393360abb6913901444b6ea2fddc8a25ceb91461ca"
+    },
+    {
+      "path": "heavy-concurrency.log",
+      "bytes": 101,
+      "sha256": "ea740b51ee2baf63a434e36384b482f61b3975eacd779e394d5ec8cc13e036fc"
+    },
+    {
+      "path": "final-affected.log",
+      "bytes": 892,
+      "sha256": "87cd8268e95b9c60f58643c1bbedf5b65c1afaf5677c6dbffee4b5667ebfc6a3"
+    },
+    {
+      "path": "final-affected-secure.log",
+      "bytes": 1380,
+      "sha256": "1f6cd2b5941d93369e352a2a17a2390fb2fe1981717057a3c7ea3bf1c39d86d0"
+    },
+    {
+      "path": "final-pdf-rest.log",
+      "bytes": 101,
+      "sha256": "b94344f8a1ce71794a8649aaffea0767bb149709909611bfe009de49dd0ad536"
+    },
+    {
+      "path": "shoring-nested-before.log",
+      "bytes": 2371,
+      "sha256": "afff4eff8ee632a6143bd23ccc4166c7d27a638a96420cd11c3459bb7d9c7bb7"
+    },
+    {
+      "path": "shoring-final.log",
+      "bytes": 182,
+      "sha256": "2001e3bac7cd125d95d9290d2dd49a7bb916070a15e81830dea3b8d86b6dd3d2"
+    },
+    {
+      "path": "shoring-final-secure.log",
+      "bytes": 182,
+      "sha256": "a4703a6b6888f141c700a72635700f2ebf764584dde4a9f56d6057e41e813e5c"
+    },
+    {
+      "path": "js-final-lock-tests.log",
+      "bytes": 69491,
+      "sha256": "eae3fabd9d2e2bd06a33907142bfd9ca054439881e05f4304d6d20c949e51cdd"
+    },
+    {
+      "path": "fixes-browser-full.log",
+      "bytes": 10854,
+      "sha256": "94669e8f2e9ed666f2fde45937521ab84395ff9df45d1ec0bf433abc181393f3"
+    },
+    {
+      "path": "fixes-browser-setup-final.log",
+      "bytes": 2037,
+      "sha256": "f975273c348784685214957a123c13516689153cdf55317883bc3f580b9c3af8"
+    },
+    {
+      "path": "wheel-cohort.log",
+      "bytes": 24312,
+      "sha256": "a502d69c7e806b1bea2cae0350a614a2bc9360656a397e53f2702856acd21616"
+    },
+    {
+      "path": "final-core-wheel.log",
+      "bytes": 577634,
+      "sha256": "85b1788ba469a9d2c687379ccebf0f5432428c2ba8c86cdd4e9c1326816e3282"
+    },
+    {
+      "path": "final-dashboard-wheel.log",
+      "bytes": 92588,
+      "sha256": "c588e8f728a18573bb6437f654a22f3713ae7859dd5f6b2502999e068625c54d"
+    },
+    {
+      "path": "wheel-final-reinstall.log",
+      "bytes": 817,
+      "sha256": "2a5e77c4a738c10fca66b439feeefa68d299c63c8e360f775ea0694dd7082259"
+    },
+    {
+      "path": "wheel-verify.log",
+      "bytes": 98,
+      "sha256": "1c4c726067b04a1bd1e1e9b345806447c6b48844e1964006323bcfa929e74c8a"
+    },
+    {
+      "path": "wheel-smoke-verified.log",
+      "bytes": 1690,
+      "sha256": "d1e7ff82a4f8ba7898d59f205a866e4b95a6ada186ccad2dd80ce79e9db2371a"
+    },
+    {
+      "path": "wheel-closure-final.json",
+      "bytes": 46,
+      "sha256": "056653360fea79b8b33399b4019b23998392d2d905aa8a4783a97563c0f8549d"
+    },
+    {
+      "path": "wheel-recovery-drill.log",
+      "bytes": 6301,
+      "sha256": "d2b52384ced9e3137817b7d8db3798a052a11b76d7ad805c6398c8a77e909b03"
+    },
+    {
+      "path": "frontier-final-measure.log",
+      "bytes": 1135,
+      "sha256": "d5fe539874bd0595c8ef3fc96a41aacb9511659b5c112ca7641a9adcf31db14a"
+    },
+    {
+      "path": "frontier-final-verify.log",
+      "bytes": 113,
+      "sha256": "c6d33946a2f90bd9dd5148123ff23befdabd7d17d5075339784cb73359ac91ff"
+    },
+    {
+      "path": "overhead-final-measure.log",
+      "bytes": 1306,
+      "sha256": "dcaecbb1b2384b2b530f5fc3645c7d5e8082894b00a413e7c1ae5864617890b1"
+    },
+    {
+      "path": "overhead-final-verify.log",
+      "bytes": 110,
+      "sha256": "34b35966a9693fc27ed8a2e357b56aa868578b4a3944578e1262f7244affaeb2"
+    },
+    {
+      "path": "benchmarks-final-tests.log",
+      "bytes": 184,
+      "sha256": "d3147fc960f4b66432c46e96c3b0a1e7a6f2082139d5c3868bd5a074221d4f51"
+    },
+    {
+      "path": "kubectl-manifest-before.jsonl",
+      "bytes": 324,
+      "sha256": "b368bc6db1441e0fb7364de0c8ce5dbf49733271097e631c601fdcecb5e2cddf"
+    },
+    {
+      "path": "kubectl-manifest-fixes.jsonl",
+      "bytes": 1546,
+      "sha256": "7780f5e3f07c51b7e412e1663a24691a217f082e8c942526d3fd0c7273fc6e11"
+    },
+    {
+      "path": "pdf-extra-before.json",
+      "bytes": 106,
+      "sha256": "49e26f854023c5a1c4c4158d39f9a8097cdc23ee008c2af15e492d07a75a16b0"
+    },
+    {
+      "path": "pdf-extra-after.json",
+      "bytes": 174,
+      "sha256": "d6e872ef2d663ab87e0c2d69e17f93ef3e7a431cda91a2c0d95651b0c8f605f4"
+    },
+    {
+      "path": "final-ruff.log",
+      "bytes": 20,
+      "sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0"
+    },
+    {
+      "path": "final-vulture.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}
