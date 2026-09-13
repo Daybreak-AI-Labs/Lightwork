@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Release/client-readiness reviews can exercise the full interpreter and
+  # security-posture matrix on a branch without merging it into main.
+  workflow_dispatch: {}
   # The merge queue builds a temporary branch per entry and gates the merge on
   # this workflow's required checks. Without this trigger nothing reports on
   # that branch and every entry times out (.github/rulesets/protect-main.json).
@@ -348,9 +351,9 @@ jobs:
             'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
             'packaging==26.3'
           # Resolve all first-party base dependencies together so pip-audit
-          # sees the complete cohort rather than a hand-reconstructed subset.
+          # sees the complete cohort plus the document-processing surface.
           python -m pip install \
-            -e ./packages/maverick-core \
+            -e './packages/maverick-core[evidence-analysis]' \
             -e ./packages/maverick-shield \
             -e ./packages/maverick-channels \
             -e ./packages/maverick-evolve \
@@ -748,9 +751,9 @@ jobs:
             'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
             'packaging==26.3'
           python -m pip install \
-            -e ./packages/maverick-core \
+            -e './packages/maverick-core[openai,evidence-analysis]' \
             -e ./packages/maverick-shield \
-            -e ./packages/maverick-channels \
+            -e './packages/maverick-channels[sms]' \
             -e ./packages/maverick-evolve \
             -e ./packages/maverick-dashboard \
             -e ./packages/maverick-mcp \

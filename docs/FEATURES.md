@@ -1530,7 +1530,6 @@ here.
   when the comparison is incomplete. Renewal and expansion evidence remains
   separate from operating savings. Operator-recorded evidence is identified as
   such until customer qualification supplies measured baseline and effort.
-- **2,031-agent specialist portfolio across 54 suites** — the original 8
 - **Autonomous Shoring** (`shoring.py`, dashboard `/shoring` +
   `/api/v1/shoring`; `[shoring] enable`, `MAVERICK_SHORING`) — the engagement
   tooling for moving a whole business function onto the workforce: a tenant-
@@ -1543,7 +1542,12 @@ here.
   department, the same queue behind `/approvals` seen through the shoring lens.
   The Shoring P&L is the Savings report above. Read-only over existing stores;
   the book is a small governed JSON store, not a world-model migration.
-- **2,020-agent specialist portfolio across 53 suites** — the original 8
+  Goal measurements are department-scoped before sampling. Above 2,000 department
+  goals, counts are explicitly partial and SLAs remain ungraded; no completed
+  work also reports `no_data`. Turnaround targets are declared but not measured.
+  Book edits are serialized across processes; capacity (500 functions) and
+  corrupt records cause an explicit refusal, preserving the saved book.
+- **2,031-agent specialist portfolio across 54 suites** — the original 8
   business suites plus customer experience, marketing, procurement,
   data & analytics, security ops, executive office, facilities/EHS, tax
   preparation, commerce (shopper + merchant agents), and 30+ industry
@@ -2179,6 +2183,11 @@ here.
   mockup).
 - **Data** — `sql_query` (read-only by default), `pandas_query`, `spreadsheet`
   (CSV/XLSX, write-capable), `compute` (SymPy), `embeddings`.
+  Spreadsheet writes stage a complete file before replacement; XLSM mutation is
+  refused to preserve macros. XLSX reads use cached values, without recalculating
+  formulas. CSV `info` identifies counts beyond its bounded sample as partial.
+  PDF reads use the assigned workspace; blank selections request OCR text and
+  table extraction requires `pdfplumber` rather than silently returning plain text.
 - **Web & research** — `web_search` (Tavily/Brave/DDG/SerpAPI), `http_fetch`,
   `browser` (navigate/click/type/`fill_form`), `browser_device` (device-emulation
   presets), `browser_auth_vault` (Fernet-encrypted session store), `websocket`

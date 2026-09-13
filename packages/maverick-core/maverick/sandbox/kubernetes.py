@@ -6,8 +6,9 @@ host ``workdir`` is streamed in via ``kubectl cp``, the command runs via
 ``kubectl exec``, any files it wrote are streamed back out via ``kubectl
 cp``, and the pod is deleted on exit -- so exec() semantics (a workspace
 that persists across calls, host-visible after each command) match the
-other container backends (Docker, Podman, Devcontainer) despite Kubernetes
-having no host bind-mount primitive.
+other container backends for copied-in and exported files despite Kubernetes
+having no host bind-mount primitive. This copy transport does not mirror
+deletions back to the host; use a bind-mounted backend for that requirement.
 
 Why kubectl-driven instead of the official Python client?
   - The Python client adds 50+ MB of generated code + grpcio + a
@@ -32,12 +33,14 @@ Config::
 
 ``allow_network = false`` (the default, and what the wizard writes) means
 "no egress". A transient ``kubectl run`` pod cannot enforce that on
-itself, so before the first command the backend checks the namespace for
+itself, so before every command the backend checks the namespace for
 a deny-all NetworkPolicy (empty ``podSelector``, ``Egress`` in
 ``policyTypes``, no egress rules). When one is present the commands run
 under it; when none is, exec() fails closed with exit code 2 and prints
 the manifest to apply (``_DENY_ALL_NETWORKPOLICY``). ``allow_network =
-true`` skips the check and lets pods use the cluster network.
+true`` skips the check and lets pods use the cluster network. Policies are
+additive: use a dedicated namespace without egress allow rules and a CNI that
+enforces NetworkPolicy. The API check does not test live packet filtering.
 
 Loud-fallback: missing kubectl binary or ``kubectl version`` failure
 raises ``RuntimeError`` at construction so the wizard's smoke test
@@ -376,9 +379,9 @@ class KubernetesBackend:
     def _copy_out(self, pod_name: str) -> str:
         """Best-effort: stream files the command wrote/modified back to the
         host workdir. Returns "" on success, else a short note to append to
-        the command's own stderr -- this must never override the command's
-        already-captured exit_code/stdout/stderr, so failures are reported,
-        not raised.
+        the command's stderr. ``exec()`` retains its output and original
+        failure code, but promotes a successful command to an I/O failure if
+        its files could not be returned.
         """
         src = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}/."
         args = [*self._kubectl_prefix(), "cp", src, "."]
@@ -400,8 +403,8 @@ class KubernetesBackend:
         if not self.allow_network:
             # A single transient `kubectl run` pod cannot enforce no-egress
             # on its own -- that needs a namespace-level NetworkPolicy the
-            # operator applies once. Verify one is present (once per
-            # instance) and run under it; otherwise fail closed (never
+            # operator applies. Reverify an exclusive deny policy before
+            # each command; otherwise fail closed (never
             # silently run with network) and print the manifest to apply.
             # Previously this branch refused EVERY command, so the wizard's
             # default config could not run anything (platform audit W1-104).
@@ -445,7 +448,9 @@ class KubernetesBackend:
                 result = ExecResult(
                     stdout=result.stdout,
                     stderr=result.stderr + copy_out_note,
-                    exit_code=result.exit_code,
+                    # The command may have run successfully, but its output
+                    # files were not delivered. Do not advertise overall success.
+                    exit_code=result.exit_code or 74,
                 )
             return result
         finally:

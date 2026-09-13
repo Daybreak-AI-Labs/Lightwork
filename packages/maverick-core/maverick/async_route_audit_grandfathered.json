@@ -1229,13 +1229,5 @@
     "lineno": 179,
     "name": "security_config",
     "path": "maverick_dashboard/security_api.py"
-  },
-  {
-    "blocking_calls": [
-      "_world"
-    ],
-    "lineno": 33,
-    "name": "shoring_console",
-    "path": "maverick_dashboard/shoring_page.py"
   }
 ]

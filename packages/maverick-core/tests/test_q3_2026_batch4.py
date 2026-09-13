@@ -148,15 +148,14 @@ def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_p
     assert len(_calls_with(calls, "delete")) == 1
 
 
-def test_k8s_copy_out_failure_is_appended_not_fatal(monkeypatch, tmp_path):
-    """A failed copy-out must not mask the command's own exit code/output --
-    note it on stderr instead (matches _delete_pod's cleanup-failure style)."""
+def test_k8s_copy_out_failure_does_not_claim_workspace_delivery(monkeypatch, tmp_path):
+    """Keep command output but report that returning the output files failed."""
     calls = _fake_kubectl(monkeypatch, exec_stdout="hi\n", cp_out_rc=1,
                           cp_out_stderr="connection refused")
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
     result = backend.exec("echo hi")
-    assert result.exit_code == 0
+    assert result.exit_code == 74
     assert result.stdout == "hi\n"
     assert "kubectl cp (pod -> workspace) failed" in result.stderr
     assert calls  # sanity: the fake actually ran

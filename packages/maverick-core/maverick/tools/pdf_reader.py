@@ -133,12 +133,14 @@ def _extract_with_pdfplumber(data: bytes, pages: str | None, include_tables: boo
     except ImportError:
         return None
     out: list[str] = []
+    has_content = False
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         total = len(pdf.pages)
         page_indices = _parse_pages(pages or "", total)
         for idx in page_indices:
             page = pdf.pages[idx]
             text = (page.extract_text() or "").strip()
+            has_content = has_content or bool(text)
             block = f"=== Page {idx + 1} of {total} ===\n{text}"
             if include_tables:
                 tables = page.extract_tables() or []
@@ -146,9 +148,12 @@ def _extract_with_pdfplumber(data: bytes, pages: str | None, include_tables: boo
                     if not table:
                         continue
                     md = _table_to_markdown(table)
+                    has_content = has_content or any(
+                        cell is not None and str(cell).strip() for row in table for cell in row
+                    )
                     block += f"\n\n[Table {ti}]\n{md}"
             out.append(block)
-    return "\n\n".join(out)
+    return "\n\n".join(out) if has_content else ""
 
 
 def _extract_with_pypdf(data: bytes, pages: str | None) -> str | None:
@@ -163,10 +168,12 @@ def _extract_with_pypdf(data: bytes, pages: str | None) -> str | None:
     total = len(reader.pages)
     page_indices = _parse_pages(pages or "", total)
     out: list[str] = []
+    has_content = False
     for idx in page_indices:
         text = (reader.pages[idx].extract_text() or "").strip()
+        has_content = has_content or bool(text)
         out.append(f"=== Page {idx + 1} of {total} ===\n{text}")
-    return "\n\n".join(out)
+    return "\n\n".join(out) if has_content else ""
 
 
 def _table_to_markdown(rows: list[list]) -> str:
@@ -174,10 +181,14 @@ def _table_to_markdown(rows: list[list]) -> str:
         return ""
     header = rows[0]
     body = rows[1:]
-    md = "| " + " | ".join(str(c or "") for c in header) + " |\n"
+    def cell_text(cell):
+        value = "" if cell is None else str(cell)
+        return value.replace("|", r"\|").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+    md = "| " + " | ".join(cell_text(c) for c in header) + " |\n"
     md += "|" + "|".join("---" for _ in header) + "|\n"
     for r in body:
-        md += "| " + " | ".join(str(c or "") for c in r) + " |\n"
+        md += "| " + " | ".join(cell_text(c) for c in r) + " |\n"
     return md
 
 
@@ -193,6 +204,11 @@ def extract_text_from_bytes(data: bytes, *, pages: str = "",
     """
     text = _extract_with_pdfplumber(data, pages, include_tables)
     if text is None:
+        if include_tables:
+            return (
+                "ERROR: PDF table extraction requires the optional pdfplumber dependency; "
+                "use include_tables=false for text-only extraction."
+            )
         text = _extract_with_pypdf(data, pages)
     return text
 

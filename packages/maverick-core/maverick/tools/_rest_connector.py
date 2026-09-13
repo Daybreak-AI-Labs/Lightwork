@@ -278,6 +278,7 @@ def _rest_response(response, data: Any, args: dict[str, Any], token: str) -> str
     if not metadata and len(rendered) <= _RESPONSE_LIMIT:
         return rendered
     headers = {}
+    omitted_headers = []
     # Deliberately exclude cookies, authorization, arbitrary headers and URLs
     # carrying signed query strings. ETags provide the existing If-Match input.
     for name in ("etag", "last-modified", "retry-after"):
@@ -285,9 +286,16 @@ def _rest_response(response, data: Any, args: dict[str, Any], token: str) -> str
         if (isinstance(value, str) and len(value) <= 512
                 and not any(ord(c) < 32 or ord(c) == 127 for c in value)
                 and not (token and token in value)):
-            headers[name] = value
+            # Count the encoded size too: three 512-character non-ASCII
+            # headers can exceed the entire envelope before any preview fits.
+            if len(json.dumps(value)) <= 514:
+                headers[name] = value
+            else:
+                omitted_headers.append(name)
     payload = {"status_code": response.status_code, "headers": headers,
                "truncated": False, "body": data}
+    if omitted_headers:
+        payload["omitted_headers"] = omitted_headers
     if response.status_code == 202:
         payload["pending"] = True
         payload["note"] = "Accepted for processing; completion has not been verified."

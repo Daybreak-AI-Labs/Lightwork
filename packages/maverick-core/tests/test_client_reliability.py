@@ -218,7 +218,7 @@ def test_rest_malformed_write_body_refuses_before_network(monkeypatch, body):
     assert tool.fn({"op": "post", "path": "/orders", "body": body, "confirm": True}).startswith("ERROR:")
 
 
-@pytest.mark.parametrize("payload", ["x" * 5000, "\"\\\n" * 2500, "\u2603" * 3000])
+@pytest.mark.parametrize("payload", ["x" * 5000, "\"\\\n" * 2500, "\u2603" * 3000], ids=["ascii", "escaping", "unicode"])
 def test_response_encoding_bound_is_valid_with_escaped_content(payload):
     response = httpx.Response(202, headers={
         "etag": "e" * 512, "last-modified": "m" * 512, "retry-after": "r" * 512,
@@ -352,3 +352,38 @@ def test_kubernetes_changed_policy_is_rechecked(tmp_path, monkeypatch):
     assert backend.exec("true").exit_code == 0
     policies.clear()
     assert backend.exec("true").exit_code == 2
+
+
+def test_response_non_ascii_headers_cannot_exhaust_the_envelope():
+    response = httpx.Response(200, headers=[
+        (name, b"\xff" * 512) for name in (b"etag", b"last-modified", b"retry-after")
+    ])
+    rendered = _rest_connector._rest_response(response, {"id": 7}, {"response_format": "metadata"}, "")
+    assert len(rendered) <= 4000
+    result = json.loads(rendered)
+    assert result["body"] == {"id": 7}
+    assert result["omitted_headers"] == ["etag", "last-modified", "retry-after"]
+
+
+def test_pdf_table_preserves_zero_false_and_cell_boundaries():
+    result = pdf_reader._table_to_markdown([["Value"], [0], [False], ["a|b\nc"]])
+    assert "| 0 |" in result and "| False |" in result
+    assert r"a\|b<br>c" in result
+
+
+def test_pdf_blank_selected_page_requests_ocr(tmp_path, monkeypatch):
+    pypdf = pytest.importorskip("pypdf")
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with (tmp_path / "blank.pdf").open("wb") as stream:
+        writer.write(stream)
+    monkeypatch.setenv("MAVERICK_ISOLATE_PARSERS", "1")
+    result = pdf_reader.read_pdf(SimpleNamespace(workdir=tmp_path)).fn({"source": "blank.pdf"})
+    assert result.startswith("ERROR:") and "OCR" in result
+
+
+def test_pdf_requested_tables_are_not_silently_downgraded_to_plain_text(monkeypatch):
+    monkeypatch.setattr(pdf_reader, "_extract_with_pdfplumber", lambda *a: None)
+    monkeypatch.setattr(pdf_reader, "_extract_with_pypdf", lambda *a: pytest.fail("table request must not silently lose structure"))
+    result = pdf_reader.extract_text_from_bytes(b"synthetic", include_tables=True)
+    assert result.startswith("ERROR:") and "pdfplumber" in result
