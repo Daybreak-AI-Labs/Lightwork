@@ -157,9 +157,8 @@ def _coerce_sla(raw: Any) -> SLATarget | None:
     return SLATarget(name=name, metric=metric, target=target)
 
 
-def _coerce_function(raw: Any) -> Function | None:
-    """Load one stored row defensively -- a malformed row is skipped, never
-    fatal, so a hand-edited or partially-written book still opens."""
+def _coerce_function(raw: Any, *, strict: bool = False) -> Function | None:
+    """Read a row defensively; strict callers must never discard damaged SLAs."""
     if not isinstance(raw, dict):
         return None
     key = str(raw.get("key", "") or "").strip()
@@ -170,18 +169,26 @@ def _coerce_function(raw: Any) -> Function | None:
         return None
     status = str(raw.get("status", "") or "scoping")
     if status not in LIFECYCLE:
+        if strict:
+            return None
         status = "scoping"
     slas: list[SLATarget] = []
-    raw_slas = raw.get("slas") or []
+    raw_slas = raw.get("slas", []) if strict else raw.get("slas") or []
     if not isinstance(raw_slas, list):
+        return None
+    if strict and len(raw_slas) > _MAX_SLAS:
         return None
     for item in raw_slas[:_MAX_SLAS]:
         sla = _coerce_sla(item)
         if sla is not None:
             slas.append(sla)
+        elif strict:
+            return None
     try:
         updated_at = float(raw.get("updated_at", 0) or 0)
     except (TypeError, ValueError):
+        if strict:
+            return None
         updated_at = 0.0
     if not math.isfinite(updated_at):
         return None
@@ -199,8 +206,9 @@ def load(tenant: str | None = None, *, strict: bool = False) -> list[Function]:
     """The Book of Work for the active (or given) tenant, newest-edited first.
 
     Tenant-isolated: two tenants never see each other's book (the path is under
-    ``data_dir("shoring", tenant=...)``). A missing or unreadable book is an
-    empty book, never an error.
+    ``data_dir("shoring", tenant=...)``). A missing book is empty. Strict reads
+    reject unreadable or malformed records; recovery callers may opt into the
+    permissive default, which returns the rows that can still be understood.
     """
     path = _book_path(tenant)
     if not path.exists():
@@ -217,7 +225,7 @@ def load(tenant: str | None = None, *, strict: bool = False) -> list[Function]:
     rows = raw if isinstance(raw, list) else []
     out: list[Function] = []
     for row in rows:
-        fn = _coerce_function(row)
+        fn = _coerce_function(row, strict=strict)
         if fn is not None:
             out.append(fn)
         elif strict:

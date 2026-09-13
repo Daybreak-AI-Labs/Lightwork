@@ -387,3 +387,23 @@ def test_pdf_requested_tables_are_not_silently_downgraded_to_plain_text(monkeypa
     monkeypatch.setattr(pdf_reader, "_extract_with_pypdf", lambda *a: pytest.fail("table request must not silently lose structure"))
     result = pdf_reader.extract_text_from_bytes(b"synthetic", include_tables=True)
     assert result.startswith("ERROR:") and "pdfplumber" in result
+
+
+@pytest.mark.parametrize("damage", ["sla_metric", "sla_count", "status", "timestamp"])
+def test_shoring_nested_record_damage_refuses_edits_without_data_loss(damage):
+    shoring.upsert(shoring.Function(key="ap", name="Accounts Payable"))
+    path = shoring._book_path()
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    if damage == "sla_metric":
+        rows[0]["slas"] = [{"name": "Cycle", "metric": "unknown", "target": 1}]
+    elif damage == "sla_count":
+        rows[0]["slas"] = [{"name": "Cycle", "metric": "throughput_per_day", "target": 1}] * 13
+    elif damage == "status":
+        rows[0]["status"] = "corrupted"
+    else:
+        rows[0]["updated_at"] = "corrupted"
+    original = json.dumps(rows)
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="invalid function"):
+        shoring.upsert(shoring.Function(key="support", name="Support"))
+    assert path.read_text(encoding="utf-8") == original
