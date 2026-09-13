@@ -73,7 +73,7 @@ def _book() -> dict:
 def _sla(key: str) -> dict:
     from maverick import shoring
 
-    fn = next((f for f in shoring.load() if f.key == key), None)
+    fn = next((f for f in shoring.load(strict=True) if f.key == key), None)
     if fn is None:
         raise HTTPException(status_code=404, detail=f"no shored function {key!r}")
     return {"schema": SLA_SCHEMA, "function": shoring.function_status(fn, _world())}

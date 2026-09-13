@@ -36,6 +36,19 @@ def _add_function(**over):
     assert client.post("/api/v1/shoring/function", json=body).status_code == 200
 
 
+def test_unavailable_book_is_an_explicit_recoverable_page_error(monkeypatch):
+    from maverick import shoring
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("synthetic private storage detail")
+
+    monkeypatch.setattr(shoring, "book_status", unavailable)
+    response = client.get("/shoring")
+    assert response.status_code == 503
+    assert "Restore access" in response.text
+    assert "private storage detail" not in response.text
+
+
 def test_page_renders_pieces():
     resp = client.get("/shoring")
     assert resp.status_code == 200

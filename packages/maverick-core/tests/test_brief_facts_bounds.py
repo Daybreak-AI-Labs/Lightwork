@@ -57,13 +57,15 @@ def test_upserted_fact_is_newest_even_when_wall_clock_ties(monkeypatch):
 
 
 def test_latest_write_stays_newest_through_wall_clock_rollback(monkeypatch):
-    times = iter((1_000.0, 1_001.0, 999.0))
+    now = [1_000.0]
     monkeypatch.setattr(
-        "maverick.world_model.time.time", lambda: next(times)
+        "maverick.world_model.time.time", lambda: now[0]
     )
     w = _world()
     w.upsert_fact("a", "first")
+    now[0] = 1_001.0
     w.upsert_fact("b", "second")
+    now[0] = 999.0
     w.upsert_fact("a", "updated after rollback")
 
     assert list(w.get_facts()) == ["a", "b"]

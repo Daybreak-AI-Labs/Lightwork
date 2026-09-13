@@ -55,14 +55,14 @@
         <summary><strong>Register a dataset version</strong></summary>
         <form id="research-dataset-form" class="research-form">
           <div class="research-grid">
-            <label>Dataset ID<input class="input" name="dataset_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
-            <label>Version<input class="input" name="version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Dataset ID<input class="input" name="dataset_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
+            <label>Version<input class="input" name="version" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
           </div>
           <label>Safe source reference<input class="input" name="source_ref" maxlength="2048" placeholder="artifact:dataset/version or an installed catalog source" required></label>
           <label>Content SHA-256<input class="input" name="content_sha256" pattern="[a-f0-9]{64}" maxlength="64" aria-describedby="research-content-sha-help"></label>
           <p class="muted" id="research-content-sha-help">Installation administrators may leave this blank for an exact installed evidence-graph node, fleet-memory record, position-stamped knowledge document, or owner-bound Ekko candidate set. Lightwork reads the selected record and binds its canonical checksum. Other source types require a supplied SHA-256.</p>
           <div class="research-grid">
-            <label>License ID<input class="input" name="license_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>License ID<input class="input" name="license_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
             <label>License evidence SHA-256<input class="input" name="license_evidence_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
           </div>
           <label>Allowed purposes, comma separated<input class="input" name="allowed_purposes" placeholder="product_research" required></label>
@@ -73,7 +73,7 @@
           </div>
           <div class="research-grid">
             <label>Authorized data-use decision<select class="input" name="data_use_decision_choice"><option value="">Choose an authorized allow decision or enter one below</option></select></label>
-            <label>Data-use decision ID<input class="input" name="data_use_decision_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Data-use decision ID<input class="input" name="data_use_decision_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
             <label>Decision SHA-256<input class="input" name="data_use_decision_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
           </div>
           <p class="muted">Authorized “allow” decision records appear here. Approval and every run recheck their current authority. <a href="/data-use">Create or review data-use authority in the app</a>.</p>
@@ -81,15 +81,15 @@
             <summary>Consent and derivative lineage</summary>
             <label>Parent dataset versions<select class="input" name="parent_datasets" multiple></select></label>
             <div class="research-grid">
-              <label>Consent record ID<input class="input" name="consent_record_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Consent record ID<input class="input" name="consent_record_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128"></label>
               <label>Consent evidence SHA-256<input class="input" name="consent_evidence_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
             </div>
           </details>
           <div id="research-synthetic-fields" class="research-advanced" hidden>
             <p><strong>Synthetic fixture provenance</strong> — this label is preserved in every run and export.</p>
             <div class="research-grid">
-              <label>Generator ID<input class="input" name="synthetic_generator_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
-              <label>Generator version<input class="input" name="synthetic_generator_version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Generator ID<input class="input" name="synthetic_generator_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128"></label>
+              <label>Generator version<input class="input" name="synthetic_generator_version" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128"></label>
               <label>Generator artifact SHA-256<input class="input" name="synthetic_generator_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
               <label>Generator config SHA-256<input class="input" name="synthetic_config_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
               <label>Seed<input class="input" name="synthetic_seed" type="number" min="0" max="9007199254740991" step="1"></label>
@@ -104,20 +104,20 @@
         <summary><strong>Register a model version</strong></summary>
         <form id="research-model-form" class="research-form">
           <div class="research-grid">
-            <label>Model ID<input class="input" name="model_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
-            <label>Version<input class="input" name="version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Model ID<input class="input" name="model_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
+            <label>Version<input class="input" name="version" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
           </div>
           <label>Safe source reference<input class="input" name="source_ref" maxlength="2048" placeholder="artifact:model/version or safe HTTPS URL" required></label>
           <label>Artifact SHA-256<input class="input" name="artifact_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
           <div class="research-grid">
-            <label>License ID<input class="input" name="license_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>License ID<input class="input" name="license_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
             <label>License evidence SHA-256<input class="input" name="license_evidence_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
           </div>
           <label>Allowed purposes, comma separated<input class="input" name="allowed_purposes" placeholder="product_research" required></label>
           <label>Usage constraints, one per line<textarea class="input" name="usage_constraints" rows="3" maxlength="8192" placeholder="local_only" required></textarea></label>
           <label>Provider model identity<input class="input" name="provider_model_identity" maxlength="256" required></label>
           <div class="research-grid">
-            <label>Immutable provider revision<input class="input" name="immutable_provider_revision" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" placeholder="Leave blank only when the provider cannot pin a revision"></label>
+            <label>Immutable provider revision<input class="input" name="immutable_provider_revision" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" placeholder="Leave blank only when the provider cannot pin a revision"></label>
             <label>Provenance<select class="input" name="provenance_kind"><option value="external">External model</option><option value="trained">Lightwork training result</option></select></label>
           </div>
           <details class="research-advanced">
@@ -131,13 +131,13 @@
           <details class="research-advanced">
             <summary>Dataset and model lineage</summary>
             <label>Dataset versions<select class="input" name="dataset_lineage" multiple></select></label>
-            <label>Dataset lineage purpose<input class="input" name="dataset_lineage_purpose" pattern="[a-z][a-z0-9_.-]{0,63}" maxlength="64"></label>
+            <label>Dataset lineage purpose<input class="input" name="dataset_lineage_purpose" pattern="[a-z][a-z0-9_.\-]{0,63}" maxlength="64"></label>
             <label>Base model versions<select class="input" name="model_lineage" multiple></select></label>
           </details>
           <div id="research-training-receipt-fields" class="research-advanced" hidden>
             <p>A trained model is admitted only when the server verifies its signed receipt against current trust roots.</p>
             <div class="research-grid">
-              <label>Training receipt ID<input class="input" name="training_receipt_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Training receipt ID<input class="input" name="training_receipt_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128"></label>
               <label>Receipt payload SHA-256<input class="input" name="training_receipt_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
               <label>Training dataset boundary SHA-256<input class="input" name="training_dataset_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
             </div>
@@ -153,13 +153,13 @@
           <summary><strong>Plan and submit a governed run</strong></summary>
           <form id="research-run-form" class="research-form">
           <div class="research-grid">
-            <label>Run ID<input class="input" name="run_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
-            <label>Run version<input class="input" name="run_version" value="v1" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
-            <label>Experiment ID<input class="input" name="experiment_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
-            <label>Experiment version<input class="input" name="experiment_version" value="v1" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Run ID<input class="input" name="run_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
+            <label>Run version<input class="input" name="run_version" value="v1" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
+            <label>Experiment ID<input class="input" name="experiment_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
+            <label>Experiment version<input class="input" name="experiment_version" value="v1" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
           </div>
           <div class="research-grid">
-            <label>Purpose<input class="input" name="purpose" pattern="[a-z][a-z0-9_.-]{0,63}" maxlength="64" placeholder="product_research" required></label>
+            <label>Purpose<input class="input" name="purpose" pattern="[a-z][a-z0-9_.\-]{0,63}" maxlength="64" placeholder="product_research" required></label>
             <label>Action<select class="input" name="action"><option value="analyze">Analyze</option><option value="train">Train</option></select></label>
           </div>
           <label>Approved dataset versions<select class="input" name="dataset_refs" multiple required></select></label>
@@ -169,8 +169,8 @@
             <label>Code commit digest<input class="input" name="code_revision" pattern="(?:[a-f0-9]{40}|[a-f0-9]{64}|sha256:[a-f0-9]{64})" required></label>
             <label>Code artifact SHA-256<input class="input" name="code_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
             <div class="research-grid">
-              <label>Environment ID<input class="input" name="environment_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
-              <label>Environment version<input class="input" name="environment_version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+              <label>Environment ID<input class="input" name="environment_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
+              <label>Environment version<input class="input" name="environment_version" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
               <label>Environment SHA-256<input class="input" name="environment_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
               <label>Seed<input class="input" name="seed" type="number" min="0" max="9007199254740991" step="1" required></label>
             </div>
@@ -219,7 +219,7 @@
       <p>Select a completed run and a reviewed deployment preset. Lightwork loads the canonical evaluator study and all immutable evidence from trusted server records.</p>
       <form id="research-promotion-form" class="research-form">
         <div class="research-grid">
-          <label>Candidate name<input class="input" name="candidate_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+          <label>Candidate name<input class="input" name="candidate_id" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" required></label>
           <label>Completed run<select class="input" name="run_id" required><option value="">Choose a completed run</option></select></label>
           <label>Reviewed target preset<select class="input" name="target_preset" required><option value="">Choose a deployment target</option></select></label>
         </div>

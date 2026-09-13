@@ -87,7 +87,7 @@
     </label>
     <label>Where will it be used?
       <input name="context" required maxlength="128" placeholder="underwriting-triage"
-             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+\-]{0,127}"
              title="Letters, digits, and _.:@+- — no spaces">
       <span class="gov-help">A short name for the deployment context, e.g. a process or team
         (no spaces — use dashes).</span>
@@ -502,7 +502,7 @@
   <form id="literacy-require" class="gov-form">
     <label>Role name
       <input name="role" required maxlength="128" placeholder="underwriting_operator"
-             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+\-]{0,127}"
              title="Letters, digits, and _.:@+- — no spaces">
     </label>
     <label class="gov-form__wide">Required trainings, one per line as key:title:valid-days
@@ -515,7 +515,7 @@
   <form id="literacy-assign" class="gov-form">
     <label>Person
       <input name="person" required maxlength="128" placeholder="analyst@example.com"
-             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+\-]{0,127}"
              title="Letters, digits, and _.:@+- — no spaces">
     </label>
     <label>Roles (comma-separated)
@@ -527,7 +527,7 @@
   <form id="literacy-complete" class="gov-form">
     <label>Person
       <input name="person" required maxlength="128"
-             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+\-]{0,127}"
              title="Letters, digits, and _.:@+- — no spaces">
     </label>
     <label>Training key

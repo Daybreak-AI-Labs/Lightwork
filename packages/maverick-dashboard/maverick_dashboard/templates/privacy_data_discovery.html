@@ -73,7 +73,7 @@
         <p>Lightwork generates and seals these keys in this workspace. Rotation pauses scans using the previous version until you explicitly update their source settings. Reports from different key generations cannot be compared as data changes.</p>
         <form id="pdd-key-form" class="pdd-form">
           <label>Key to manage<select class="input" id="pdd-key-picker"><option value="">Create a new key</option></select></label>
-          <label>Key name<input class="input" name="name" required pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64" placeholder="privacy-inventory"></label>
+          <label>Key name<input class="input" name="name" required pattern="[a-z0-9][a-z0-9_\-]{0,63}" maxlength="64" placeholder="privacy-inventory"></label>
           <input name="expected_revision" type="hidden" value="0">
           <details><summary>Request details</summary><label hidden>Request reference<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label></details>
           <button class="btn" type="submit" data-requires="admin">Create or rotate evidence key</button>

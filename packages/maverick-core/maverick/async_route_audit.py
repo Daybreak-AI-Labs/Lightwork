@@ -98,7 +98,7 @@ def _scan_file(path: Path, *, rel_to: Path) -> list[Finding]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError, UnicodeDecodeError):
         return []
-    rel = str(path.relative_to(rel_to))
+    rel = path.relative_to(rel_to).as_posix()
     out: list[Finding] = []
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.AsyncFunctionDef):

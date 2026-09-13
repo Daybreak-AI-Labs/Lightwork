@@ -643,28 +643,55 @@ def test_tampered_durable_candidate_never_reaches_runner(controller):
     assert result["status"] == "review_required" and state["calls"] == 0
 
 
-def test_concurrent_workers_only_one_claim_enters_candidate(controller):
+@pytest.mark.parametrize("loser_reads_after_claim", [False, True])
+def test_concurrent_workers_only_one_claim_enters_candidate(
+    controller, monkeypatch, loser_reads_after_claim,
+):
     from maverick.privacy_ops import RecordConflict
+    from maverick.research_jobs import ResearchConflict
 
     service, state = controller
     row = _submit(service)
     review_sha256 = service.review("tenant-a", "user:admin", row["id"])["review_sha256"]
-    barrier = threading.Barrier(2)
+    winner, loser = state["make"](), state["make"]()
+    loser_read = threading.Event()
+    winner_entered = threading.Event()
+    original_record = loser._record
 
-    def dispatch():
-        barrier.wait(timeout=5)
+    def read_loser(record_id):
+        # Force both valid interleavings: the loser either reads the reviewed
+        # revision before the claim, or reads the newly claimed revision.
+        if loser_reads_after_claim:
+            assert winner_entered.wait(timeout=5)
+        current = original_record(record_id)
+        loser_read.set()
+        assert winner_entered.wait(timeout=5)
+        return current
+
+    monkeypatch.setattr(loser, "_record", read_loser)
+    state["during"] = winner_entered.set
+
+    def dispatch(worker):
+        if worker is winner and not loser_reads_after_claim:
+            assert loser_read.wait(timeout=5)
         try:
-            return _run(state["make"](), row, review_sha256=review_sha256)
-        except RecordConflict:
-            return "stale"
+            return _run(worker, row, review_sha256=review_sha256)
+        except (RecordConflict, ResearchConflict) as exc:
+            return exc
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(dispatch) for _ in range(2)]
+        futures = [pool.submit(dispatch, worker) for worker in (winner, loser)]
         results = [future.result(timeout=10) for future in futures]
     assert (
         sum(isinstance(result, dict) and result["status"] == "completed" for result in results) == 1
     )
-    assert results.count("stale") == 1 and state["calls"] == 1
+    # A fresh read rejects the now-stale review; an older snapshot reaches
+    # the CAS and rejects the stale revision. Neither path may run a candidate.
+    expected_conflict = ResearchConflict if loser_reads_after_claim else RecordConflict
+    assert type(results[1]) is expected_conflict
+    if loser_reads_after_claim:
+        assert "review the exact source again" in str(results[1])
+    assert state["calls"] == 1 and state["constructions"] == 1
 
 
 def test_queue_expiry_denies_before_candidate_effect(controller, monkeypatch):

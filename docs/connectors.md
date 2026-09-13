@@ -1,15 +1,35 @@
 # Connectors
 
 Lightwork ships connectors to the systems enterprises actually run on. Every
-connector follows the same house rules:
+connector follows governed execution rules. The catalog contains implementation
+adapters; a listing does not certify a customer's provider configuration or every
+endpoint/version of the upstream service.
 
-- **Explicit-env auth.** Each connector reads its credentials from named
-  environment variables (e.g. `SERVICENOW_INSTANCE_URL` + `SERVICENOW_TOKEN`).
-  Nothing uses ambient host credentials unless you opt in.
+- **Scoped credentials.** Generic REST/GraphQL adapters resolve saved connections
+  or documented environment variables. Authenticated enterprise requests require
+  a saved connection authorized for that principal; they do not borrow the
+  operator's process credentials. Dedicated integrations may have their own
+  documented authentication modes.
 - **Writes are confirm-gated.** Any state-changing call (POST/PUT/PATCH/DELETE,
   GraphQL mutations, non-read SQL) is a dry run until you pass `confirm=true`.
 - **Fail closed, fail loud.** Missing config or an API error returns an
-  `ERROR:`-prefixed message; it never silently half-succeeds.
+  `ERROR:`-prefixed message. A completed HTTP request alone does not establish a
+  completed business operation.
+
+For the generic REST/GraphQL factories, small successful responses retain the
+legacy JSON body. Set `response_format="metadata"` to receive `status_code`,
+`body`, `truncated`, and the allowlisted `etag`, `last-modified`, and `retry-after`
+headers. Read the remote ETag before a conditional PUT/PATCH/DELETE and pass it as
+`if_match`; review the current record again after a conflict.
+
+HTTP 202 returns `pending=true`; obtain a later result before claiming completion.
+Redirects and conditional 3xx responses are refused. Responses exceeding the
+4,000-character envelope become valid JSON with `truncated=true` and a partial
+`preview`. Request smaller pages and follow the provider's pagination contract;
+the generic adapter does not aggregate an entire collection automatically.
+Malformed `body`, `params`, or GraphQL `variables` objects are refused before the
+request. These rules are tested with synthetic upstream responses; live
+qualification requires the customer's endpoint, scopes, revisions and readback.
 
 There are **2,877 write-capable long-tail enterprise connectors** in the
 catalog below, plus dedicated-module connectors (Salesforce, HubSpot, Stripe,

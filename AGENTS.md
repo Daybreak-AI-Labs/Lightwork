@@ -30,7 +30,8 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
 6. New capabilities need a config knob + an installer-wizard step.
 7. PR titles: Conventional Commits prefix and the subject starts with a
    letter (`feat: add the 2027 ...`, never `feat: 2027 ...`).
-8. Don't fix/enable ruff bugbear (B) findings in unrelated PRs — deliberately off.
+8. Follow the active Ruff selections in pyproject.toml, including Bugbear (B).
+   Do not suppress enabled rules to clear a failing check.
 9. Don't add `/api/v1/health` — `/healthz`, `/livez`, `/readyz` exist,
    auth-exempt by design; `/healthz` 503s until a provider key is configured.
 10. Relative imports inside packages, absolute in tests; renames must update
@@ -40,5 +41,8 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
 12. pytest aborts everything on one collection error; a pyo3 PanicException
     usually hides a missing import on the stderr line above it.
 
-Suite at HEAD: 9094 passed, 107 skipped, 1 xfailed (~2m40s). No type checker
-configured; ruff is the only static gate.
+The suite size changes frequently; collect and run it from the reviewed checkout.
+The September 12 baseline collected 29,254 tests. No type checker is configured;
+Ruff, Vulture and the contract/governance gates in .github/workflows/ci.yml are
+required. Run heavy_concurrency tests serially after the ordinary suite, matching
+.github/actions/test-shard/action.yml. Also validate MAVERICK_TEST_SECURE_DEFAULT=1.

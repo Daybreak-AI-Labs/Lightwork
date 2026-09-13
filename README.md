@@ -32,8 +32,10 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
-pip install -e ./packages/maverick-core   # kernel (with deps)
-pip install -e ./apps/installer-cli       # + the setup wizard
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade 'pip==26.2.1'
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
 lightwork init                        # four questions, safe defaults
 lightwork start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
 ```
@@ -113,18 +115,18 @@ pipx inject maverick-agent ./apps/installer-cli
 
 ### From source
 
+Use Python 3.10–3.12. The manifest installer resolves all eight local packages
+together against the reviewed constraints. The examples below use a POSIX shell;
+[Getting started](docs/getting-started.md#install) includes PowerShell commands.
+
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
-# Optional sister packages:
-pip install -e ./packages/maverick-shield
-pip install -e ./packages/maverick-channels
-pip install -e ./packages/maverick-dashboard
-pip install -e ./packages/maverick-mcp
-pip install -e ./packages/maverick-evolve
-pip install -e ./packages/maverick-knowledge
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade 'pip==26.2.1'
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
 
 lightwork init                           # interactive wizard
 lightwork start "Plan a 2-week trip"      # one-shot goal

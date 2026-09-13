@@ -1,5 +1,6 @@
 const {test,expect}=require('@playwright/test');
 const {spawn}=require('node:child_process'),net=require('node:net'),path=require('node:path');
+const pythonExecutable=require('./python-runtime');
 
 async function availablePort(){
   const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -8,7 +9,7 @@ async function availablePort(){
 
 test('fresh owner setup and login submit real browser origin without header injection',async({browser},info)=>{
   const port=await availablePort(),origin=`http://127.0.0.1:${port}`;
-  const child=spawn('python',[path.join(__dirname,'owner_server.py'),'--port',String(port)],{cwd:__dirname,stdio:'ignore',windowsHide:true});
+  const child=spawn(pythonExecutable,[path.join(__dirname,'owner_server.py'),'--port',String(port)],{cwd:__dirname,stdio:'ignore',windowsHide:true});
   const exited=new Promise(resolve=>child.once('exit',resolve));
   let context;
   try{
@@ -38,6 +39,6 @@ test('fresh owner setup and login submit real browser origin without header inje
     expect(await signedIn.request().headerValue('origin')).toBe(origin);
     await expect(page).toHaveURL(origin+'/start');expect(errors).toEqual([]);
   }finally{
-    if(context)await context.close();child.kill();await exited;
+    try{if(context)await context.close();}finally{child.kill();await exited;}
   }
 });

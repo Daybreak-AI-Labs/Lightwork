@@ -118,7 +118,7 @@ def test_k8s_copies_workspace_into_pod_before_running(monkeypatch, tmp_path):
     backend.exec("true")
 
     cp_in = _calls_with(calls, "cp")[0]
-    assert cp_in[cp_in.index("cp") + 1] == f"{tmp_path}/."
+    assert cp_in[cp_in.index("cp") + 1] == "./."
     dest = cp_in[cp_in.index("cp") + 2]
     assert dest.startswith("ci/") and dest.endswith(":/workspace")
 
@@ -132,7 +132,7 @@ def test_k8s_copies_pod_workspace_back_out_after_running(monkeypatch, tmp_path):
     cp_out = _calls_with(calls, "cp")[1]
     src = cp_out[cp_out.index("cp") + 1]
     assert src.startswith("ci/") and src.endswith(":/workspace/.")
-    assert cp_out[cp_out.index("cp") + 2] == str(tmp_path)
+    assert cp_out[cp_out.index("cp") + 2] == "."
 
 
 def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_path):
@@ -148,15 +148,14 @@ def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_p
     assert len(_calls_with(calls, "delete")) == 1
 
 
-def test_k8s_copy_out_failure_is_appended_not_fatal(monkeypatch, tmp_path):
-    """A failed copy-out must not mask the command's own exit code/output --
-    note it on stderr instead (matches _delete_pod's cleanup-failure style)."""
+def test_k8s_copy_out_failure_does_not_claim_workspace_delivery(monkeypatch, tmp_path):
+    """Keep command output but report that returning the output files failed."""
     calls = _fake_kubectl(monkeypatch, exec_stdout="hi\n", cp_out_rc=1,
                           cp_out_stderr="connection refused")
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
     result = backend.exec("echo hi")
-    assert result.exit_code == 0
+    assert result.exit_code == 74
     assert result.stdout == "hi\n"
     assert "kubectl cp (pod -> workspace) failed" in result.stderr
     assert calls  # sanity: the fake actually ran
@@ -237,10 +236,14 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     pod_sc = overrides["spec"]["securityContext"]
     assert pod_sc["runAsNonRoot"] is True
     assert pod_sc["runAsUser"] == 1000
+    assert pod_sc["fsGroup"] == 1000
+    assert pod_sc["runAsGroup"] == 1000
+    assert "--override-type=strategic" in run_args
+    assert "--command" in run_args
     container = overrides["spec"]["containers"][0]
     assert container["securityContext"]["allowPrivilegeEscalation"] is False
     assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
-    assert container["resources"]["limits"] == {"memory": "2g", "cpu": "1"}
+    assert container["resources"]["limits"] == {"memory": "2Gi", "cpu": "1"}
     assert overrides["spec"]["automountServiceAccountToken"] is False
     assert container["volumeMounts"] == [{"name": "workspace", "mountPath": "/workspace"}]
     assert overrides["spec"]["volumes"] == [{"name": "workspace", "emptyDir": {}}]

@@ -336,9 +336,9 @@
         <form class="tpc-form" id="tpc-filter-form" autocomplete="off" novalidate>
           <div class="tpc-form-grid">
             <label>Record kind<select class="select" name="record_kind"><option value="">Both</option><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
-            <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
-            <label>Status<input class="input" name="status" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
-            <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
+            <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
+            <label>Status<input class="input" name="status" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
+            <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
             <label>Maximum results<input class="input" name="limit" type="number" min="1" max="1000" value="100" step="1" required></label>
             <label class="tpc-check"><input name="include_sensitive_fields" type="checkbox"{% if not contracts_can_audit %} disabled{% endif %}><span>Include sensitive custom values (global audit only)</span></label>
           </div>
@@ -356,11 +356,11 @@
             <legend class="sr-only">Create Contract or Engagement</legend>
             <div class="tpc-form-grid">
               <label>Record kind<select class="select" name="record_kind" required><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
-              <label>Optional record ID<input class="input" name="record_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
-              <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
+              <label>Optional record ID<input class="input" name="record_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
+              <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
               <label>Vendor version being reviewed<input class="input" name="vendor_revision" type="number" min="1" max="2147483647" step="1" required></label>
-              <label>Title reference<input class="input" name="title_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
-              <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
+              <label>Title reference<input class="input" name="title_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
+              <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
             </div>
 
             <fieldset class="tpc-kind-fields" id="tpc-contract-fields">
@@ -397,7 +397,7 @@
             <label>Custom field schema JSON<textarea class="input" name="field_schema_json" maxlength="32768">[]</textarea></label>
             <label>Custom field values JSON<textarea class="input" name="field_values_json" maxlength="32768">{}</textarea></label>
             <label>Safe formula definitions JSON<textarea class="input" name="formulas_json" maxlength="32768">[]</textarea></label>
-            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required></label>
+            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,191}" required></label>
             <button class="btn btn--primary" type="submit">Create record</button>
           </fieldset>
         </form>

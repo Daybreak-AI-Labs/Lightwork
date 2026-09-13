@@ -362,7 +362,7 @@
           <label>Source type<select name="source_type"><option value="drift_receipt">drift receipt</option><option value="policy_receipt">policy receipt</option><option value="runtime_receipt">runtime receipt</option><option value="telemetry">telemetry</option><option value="evidence">evidence</option></select></label>
           <label>Source ID<input name="source_id" required maxlength="256"></label>
           <label class="assurance-form__wide">Source SHA-256<input name="source_digest" required maxlength="64" pattern="[0-9a-f]{64}"></label>
-          <label>Signal code<input name="signal_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:-]{0,127}"></label>
+          <label>Signal code<input name="signal_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:\-]{0,127}"></label>
           <label hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="256"></label>
           <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Ingest normalized signal</button><span id="dynamic-risk-signal-ingest-status" role="status" aria-live="polite"></span></div>
         </form>
@@ -378,7 +378,7 @@
         <form id="dynamic-risk-resolve" class="assurance-form">
           <label>Signal ID<input name="signal_id" required maxlength="64"></label>
           <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
-          <label>Resolution code<input name="resolution_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:-]{0,127}"></label>
+          <label>Resolution code<input name="resolution_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:\-]{0,127}"></label>
           <label>Resolution evidence SHA-256<input name="resolution_evidence_digest" required maxlength="64" pattern="[0-9a-f]{64}"></label>
           <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Resolve exact signal</button><span id="dynamic-risk-resolve-status" role="status" aria-live="polite"></span></div>
         </form>
@@ -407,7 +407,7 @@
       <label>Asset revision<input name="asset_revision" type="number" min="1" required></label>
       <label class="assurance-form__wide">Model Risk asset ID<input name="asset_id" required maxlength="36" pattern="MAA-[0-9a-f]{32}" placeholder="MAA-0123456789abcdef0123456789abcdef"></label>
       <label class="assurance-form__wide">Asset version SHA-256<input name="asset_version_digest" required maxlength="64" pattern="[0-9a-f]{64}"></label>
-      <label>Action name (action stage only)<input name="action_name" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}"></label>
+      <label>Action name (action stage only)<input name="action_name" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/\-]{0,255}"></label>
       <label>Known prompt (output stage only)<textarea name="known_prompt" maxlength="65536" rows="3" autocomplete="off"></textarea></label>
       <label class="assurance-form__wide">Transient content<textarea name="content" maxlength="65536" rows="6" autocomplete="off"></textarea></label>
       <label class="assurance-form__wide">Action arguments JSON (action stage only)<textarea name="action_arguments" maxlength="65536" rows="5" autocomplete="off" placeholder='{"record_id":"example"}'></textarea></label>
@@ -477,7 +477,7 @@
       <tbody id="ai-insurability-profiles"><tr><td colspan="5">Loading insurance-assurance profiles…</td></tr></tbody>
     </table></div>
     <form id="ai-insurability-detail" class="assurance-form">
-      <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+      <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
       <label>Version for export (optional)<input name="version" type="number" min="1" max="50"></label>
       <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Inspect profile</button><button id="ai-insurability-export" class="btn btn--ghost" type="button">Build safe export</button><span id="ai-insurability-detail-status" role="status" aria-live="polite"></span></div>
     </form>
@@ -490,7 +490,7 @@
         personal contacts, secrets, and affirmative insurance claims are
         rejected.</p>
       <form id="ai-insurability-create" class="assurance-form">
-        <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <label>Model Risk asset ID<input name="asset_id" required maxlength="36" pattern="MAA-[0-9a-f]{32}"></label>
         <label class="assurance-form__wide">Closed profile content JSON<textarea name="content" required maxlength="65536" rows="10" autocomplete="off"></textarea></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off" placeholder='[{"evidence_id":"MRE-...","digest":"64 hex"}]'></textarea></label>
@@ -498,7 +498,7 @@
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare version one</button><span id="ai-insurability-create-status" role="status" aria-live="polite"></span></div>
       </form>
       <form id="ai-insurability-version" class="assurance-form">
-        <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
         <label class="assurance-form__wide">Closed profile content JSON<textarea name="content" required maxlength="65536" rows="10" autocomplete="off"></textarea></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off"></textarea></label>
@@ -510,7 +510,7 @@
     <details>
       <summary>Independent profile approval</summary>
       <form id="ai-insurability-approve" class="assurance-form">
-        <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label>Profile ID<input name="profile_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <label>Version<input name="version" type="number" min="1" max="50" required></label>
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Record four-eyes approval</button><span id="ai-insurability-approve-status" role="status" aria-live="polite"></span></div>
@@ -630,7 +630,7 @@
     </table></div>
     <form id="ai-regulated-package-detail" class="assurance-form">
       <label>Package plane<select name="plane"><option value="regulated_verticals">Credit, employment, or insurance</option><option value="bank_mrm">Bank model risk</option></select></label>
-      <label>Package ID<input name="package_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+      <label>Package ID<input name="package_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
       <label>Version for export (optional)<input name="version" type="number" min="1" max="50"></label>
       <div class="assurance-actions"><button class="btn btn--ghost" type="submit">Inspect package</button><button id="ai-regulated-package-export" class="btn btn--ghost" type="button">Build safe export</button><span id="ai-regulated-package-detail-status" role="status" aria-live="polite"></span></div>
     </form>
@@ -640,7 +640,7 @@
       <form id="ai-regulated-package-prepare" class="assurance-form">
         <label>Package plane<select name="plane"><option value="regulated_verticals">Credit, employment, or insurance</option><option value="bank_mrm">Bank model risk</option></select></label>
         <label>Operation<select name="operation"><option value="create">create version one</option><option value="version">add version</option></select></label>
-        <label>Package ID<input name="package_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label>Package ID<input name="package_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <label>Regulated package type<select name="package_type"><option value="credit_adverse_action">credit adverse-action support</option><option value="fair_lending_aggregate">aggregate fair lending</option><option value="nyc_ll144">NYC Local Law 144</option><option value="naic_insurance">NAIC insurance governance</option></select></label>
         <label>Model Risk asset ID (create)<input name="asset_id" maxlength="36" pattern="MAA-[0-9a-f]{32}"></label>
         <label>Expected revision (version)<input name="expected_revision" type="number" min="1"></label>
@@ -655,7 +655,7 @@
       <summary>Independent package-integrity approval</summary>
       <form id="ai-regulated-package-approve" class="assurance-form">
         <label>Package plane<select name="plane"><option value="regulated_verticals">Credit, employment, or insurance</option><option value="bank_mrm">Bank model risk</option></select></label>
-        <label>Package ID<input name="package_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label>Package ID<input name="package_id" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <label>Version<input name="version" type="number" min="1" max="50" required></label>
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Record four-eyes approval</button><span id="ai-regulated-package-approve-status" role="status" aria-live="polite"></span></div>
@@ -705,7 +705,7 @@
         <label>Model modality<select name="model_modality_code"><option value="text">text</option><option value="audio">audio</option><option value="image">image</option><option value="multimodal">multimodal</option><option value="tabular">tabular</option><option value="video">video</option><option value="other">other</option></select></label>
         <label class="assurance-form__wide">Exact evidence bindings JSON array<textarea name="evidence_bindings" required maxlength="32768" rows="5" autocomplete="off" placeholder='[{"evidence_id":"MRE-...","digest":"64 lowercase hex"}]'></textarea></label>
         <label class="assurance-form__wide"><input type="checkbox" name="voluntary_opt_in" required> I explicitly opt in to preparing this aggregate contribution</label>
-        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare voluntary aggregate</button><span id="ai-benchmark-prepare-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -724,7 +724,7 @@
       <form id="ai-benchmark-submit" class="assurance-form">
         <label>Approved contribution ID<input name="contribution_id" required maxlength="36" pattern="BCI-[0-9a-f]{32}"></label>
         <label>Approved version (optional)<input name="version" type="number" min="1" max="50"></label>
-        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label class="assurance-form__wide" hidden>Idempotency key<input data-auto-reference name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}"></label>
         <label class="assurance-form__wide"><input type="checkbox" name="explicit_consent" required> I explicitly consent to transmitting this exact approved aggregate export to the configured coordinator</label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Submit exact approved export</button><span id="ai-benchmark-submit-status" role="status" aria-live="polite"></span></div>
       </form>
@@ -778,7 +778,7 @@
     <details>
       <summary>Register or change a sensor authority</summary>
       <form id="ai-discovery-sensor-register" class="assurance-form">
-        <label>Sensor name<input name="sensor_name" required maxlength="64" pattern="[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?"></label>
+        <label>Sensor name<input name="sensor_name" required maxlength="64" pattern="[a-z0-9](?:[a-z0-9_\-]{0,62}[a-z0-9])?"></label>
         <label>Sensor type<select name="sensor_type"><option value="browser_extension">browser extension</option><option value="network_egress">network egress</option><option value="oauth_grant">OAuth grant</option><option value="saas_posture">SaaS posture</option><option value="identity_directory">identity directory</option><option value="data_catalog">data catalog</option></select></label>
         <label class="assurance-form__wide">Configuration SHA-256<input name="config_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Register pending sensor</button><span id="ai-discovery-sensor-register-status" role="status" aria-live="polite"></span></div>
@@ -792,7 +792,7 @@
       <form id="ai-discovery-sensor-revoke" class="assurance-form">
         <label>Sensor ID<input name="sensor_id" required maxlength="36" pattern="DSN-[0-9a-f]{32}"></label>
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
-        <label>Reason code<input name="reason_code" required maxlength="64" pattern="[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?"></label>
+        <label>Reason code<input name="reason_code" required maxlength="64" pattern="[a-z0-9](?:[a-z0-9_\-]{0,62}[a-z0-9])?"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Stop ingestion and request revocation</button><span id="ai-discovery-sensor-revoke-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -883,8 +883,8 @@
         <label>Pseudonymous provider subject<input name="provider_subject_id" required maxlength="36" pattern="(?:sub|idn)_[0-9a-f]{32}" placeholder="sub_…"></label>
         <label>Federation binding SHA-256<input name="expected_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
         <label>Authority revision<input name="expected_revision" type="number" min="1" step="1" required></label>
-        <label>Required capability<input name="required_capability" maxlength="128" pattern="[a-z][a-z0-9_.:-]{0,127}" value="agent.execute"></label>
-        <label hidden>Decision idempotency key<input data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="identity-decision-unique-key"></label>
+        <label>Required capability<input name="required_capability" maxlength="128" pattern="[a-z][a-z0-9_.:\-]{0,127}" value="agent.execute"></label>
+        <label hidden>Decision idempotency key<input data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,255}" placeholder="identity-decision-unique-key"></label>
         <div class="assurance-form__wide assurance-actions"><button id="ai-identity-federation-observe" class="btn btn--ghost" type="button">Observe federation</button><button id="ai-identity-capability-map" class="btn btn--ghost" type="button">Map capabilities</button><button id="ai-identity-capability-decision" class="btn" type="button">Decide capability</button><button id="ai-identity-conditional-decision" class="btn" type="button">Decide conditional access</button><span id="ai-identity-control-evaluate-status" role="status" aria-live="polite"></span></div>
       </form>
       <form id="ai-identity-purview-prepare" class="assurance-form">
@@ -897,7 +897,7 @@
         <label>Sorted classification codes<input name="classification_codes" maxlength="4096" placeholder="confidential, regulated"></label>
         <label>Current asset binding SHA-256<input name="expected_asset_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
         <label>Current asset revision<input name="expected_source_revision" type="number" min="1" step="1" required></label>
-        <label hidden>Prepare idempotency key<input data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="purview-prepare-unique-key"></label>
+        <label hidden>Prepare idempotency key<input data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,255}" placeholder="purview-prepare-unique-key"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare only</button><span id="ai-identity-purview-prepare-status" role="status" aria-live="polite"></span></div>
       </form>
       <form id="ai-identity-purview-resume" class="assurance-form">
@@ -981,8 +981,8 @@
         <label>Media file<input name="file" type="file" accept="image/*,audio/*,video/*" required></label>
         <label>Media kind<select name="media_kind"><option value="image">image</option><option value="audio">audio</option><option value="video">video</option></select></label>
         <label>Model Risk asset ID<input name="asset_id" required maxlength="36" pattern="MAA-[0-9a-f]{32}"></label>
-        <label>Deployment ID<input name="deployment_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@/+=-]{0,255}"></label>
-        <label class="assurance-form__wide">Release-context ID<input name="context_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@/+=-]{0,255}"></label>
+        <label>Deployment ID<input name="deployment_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/+=\-]{0,255}"></label>
+        <label class="assurance-form__wide">Release-context ID<input name="context_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/+=\-]{0,255}"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Verify through real adapter</button><span id="ai-media-provenance-verify-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -993,8 +993,8 @@
         <label>Media file<input name="file" type="file" accept="image/*,audio/*,video/*" required></label>
         <label>Media kind<select name="media_kind"><option value="image">image</option><option value="audio">audio</option><option value="video">video</option></select></label>
         <label>Model Risk asset ID<input name="asset_id" required maxlength="36" pattern="MAA-[0-9a-f]{32}"></label>
-        <label>Deployment ID<input name="deployment_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@/+=-]{0,255}"></label>
-        <label>Release-context ID<input name="context_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@/+=-]{0,255}"></label>
+        <label>Deployment ID<input name="deployment_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/+=\-]{0,255}"></label>
+        <label>Release-context ID<input name="context_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/+=\-]{0,255}"></label>
         <label>Assertion codes<input name="assertion_codes" required maxlength="2048" placeholder="c2pa.created, c2pa.actions"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Sign and download media</button><span id="ai-media-provenance-sign-status" role="status" aria-live="polite"></span></div>
       </form>
@@ -1005,7 +1005,7 @@
       <form id="ai-media-provenance-release" class="assurance-form">
         <label>Provenance ID<input name="provenance_id" required maxlength="36" pattern="AMP-[0-9a-f]{32}"></label>
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
-        <label>Purpose code<input name="purpose_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:/-]{0,127}"></label>
+        <label>Purpose code<input name="purpose_code" required maxlength="128" pattern="[a-z0-9][a-z0-9_.:\/\-]{0,127}"></label>
         <label>Evidence SHA-256<input name="evidence_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare release review</button><span id="ai-media-provenance-release-status" role="status" aria-live="polite"></span></div>
       </form>

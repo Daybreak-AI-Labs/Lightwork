@@ -11,9 +11,7 @@ if(process.platform==='win32'){
 // origin only. Keep the default browser gate on that real origin; callers that
 // override the port are running the non-native browser journeys only.
 const port=Number(process.env.LIGHTWORK_BROWSER_PORT||8765);
-const repositoryRoot=path.resolve(__dirname,'../../../..');
-const workspacePython=path.join(repositoryRoot,'.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
-const pythonExecutable=process.env.LIGHTWORK_BROWSER_PYTHON||(fs.existsSync(workspacePython)?workspacePython:(process.platform==='win32'?'python':'python3'));
+const pythonExecutable=require('./python-runtime');
 const pythonCommand=JSON.stringify(pythonExecutable);
 // Capture this test-only opt-in before the server clears LIGHTWORK_* variables.
 const showVendorSetup=process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP==='1'?' --show-vendor-setup':'';
