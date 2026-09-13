@@ -58,6 +58,48 @@ def test_goal_search_enforces_owner_and_preserves_project_metadata(world, monkey
                 cursor.execute("DELETE FROM projects WHERE tenant_id=%s", (marker,))
 
 
+def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkeypatch):
+    from maverick.logging_config import reset_goal_context, set_goal_context
+    from maverick.paths import tenant_scope
+    from maverick.world_model_backends import postgres
+
+    marker = "shoring-" + uuid.uuid4().hex
+    other = marker + "-other"
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(postgres.time, "time", lambda: clock[0])
+    try:
+        with tenant_scope(tenant=marker):
+            goal = world.create_goal("Invoice", domain="finance_ap")
+            clock[0] += 3600
+            world.set_goal_status(goal, "done", result="Paid")
+            clock[0] += 3600
+            world.set_goal_status(goal, "done", result="Payment checked")
+            metrics = world.shoring_measurements("finance_ap", since=0, until=clock[0])
+            assert metrics["delivered"] == 1 and metrics["max_turnaround_hours"] == 1
+            with world._tx() as cursor:
+                cursor.execute("UPDATE goals SET completed_at=NULL WHERE id=%s AND tenant_id=%s", (goal, marker))
+            clock[0] += 3600
+            world.set_goal_status(goal, "done", result="Legacy deliverable edited")
+            metrics = world.shoring_measurements("finance_ap", since=0, until=clock[0] + 1)
+            assert metrics["delivered"] == 1 and metrics["legacy_completion_count"] == 1
+            assert metrics["max_turnaround_hours"] is None
+            tokens = set_goal_context(goal_id=goal)
+            try:
+                approval = world.create_approval("payment", detail="support")
+                with tenant_scope(tenant=other):
+                    foreign = world.create_approval("finance_ap", scope="finance_ap")
+                    assert world.get_approval(foreign).department == ""
+                    assert world.shoring_measurements("finance_ap", since=0, until=clock[0])["delivered"] == 0
+            finally:
+                reset_goal_context(tokens)
+            records = [world.get_approval(approval), *world.pending_approvals(), *world.list_approvals()]
+            assert all(row.department == "finance_ap" and row.goal_id == goal for row in records)
+    finally:
+        with world._tx() as cursor:
+            cursor.execute("DELETE FROM approvals WHERE tenant_id IN (%s, %s)", (marker, other))
+            cursor.execute("DELETE FROM goals WHERE tenant_id IN (%s, %s)", (marker, other))
+
+
 def test_connection_timeouts_and_operator_options_survive_real_reconnect(monkeypatch):
     from maverick.world_model_backends.postgres import PostgresWorldModel
     from psycopg.conninfo import make_conninfo

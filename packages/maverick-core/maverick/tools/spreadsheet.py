@@ -12,7 +12,7 @@ import csv as _csv
 import os
 import stat
 import tempfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +21,8 @@ from . import Tool
 _SPREADSHEET_SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["info", "read", "write", "set_cell"]},
-        "path": {"type": "string", "description": "path to a .csv or .xlsx file"},
+        "op": {"type": "string", "enum": ["info", "read", "write", "set_cell", "recalculate"]},
+        "path": {"type": "string", "description": "path to a .csv, .xlsx or .xlsm file"},
         "rows": {"type": "array", "description": "rows (list of lists) for write",
                  "items": {"type": "array"}},
         "sheet": {"type": "string", "description": "sheet name (xlsx; default: first/active)"},
@@ -139,13 +139,71 @@ def _csv_write(path: Path, rows: list[list]) -> None:
 
 # ---- XLSX -------------------------------------------------------------------
 
+def _xlsx_read_bounds(worksheet, limit: int) -> tuple[int, int]:
+    """Inspect actual sparse coordinates before openpyxl expands any rows.
+
+    Worksheet dimensions are optional and may be stale. The read-only source
+    accessor avoids materializing cells merely to discover their bounds.
+    """
+    from lxml import etree
+    from openpyxl.utils.cell import coordinate_to_tuple
+
+    namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    row = column = max_row = max_column = 0
+    with worksheet._get_source() as source:
+        nodes = etree.iterparse(source, events=("start", "end"), resolve_entities=False,
+                                load_dtd=False, no_network=True, huge_tree=False)
+        for event, node in nodes:
+            if event == "end":
+                node.clear()
+                while node.getprevious() is not None:
+                    del node.getparent()[0]
+                continue
+            if node.tag == namespace + "row":
+                previous = row
+                row = int(node.get("r", previous + 1))
+                if not previous < row <= 1_048_576:
+                    raise ValueError("Spreadsheet contains invalid or unordered rows")
+                column = 0
+                max_row = min(limit, row)
+            elif node.tag == namespace + "c":
+                cell_row, cell_column = coordinate_to_tuple(node.get("r")) if node.get("r") else (row, column + 1)
+                if cell_row != row or not 0 < cell_column <= 16_384 or cell_column <= column:
+                    raise ValueError("Spreadsheet contains invalid or unordered cell coordinates")
+                column = cell_column
+                if row <= limit:
+                    max_column = max(max_column, column)
+            if max_row * max_column > 100_000:
+                raise ValueError("Spreadsheet read exceeds 100,000 cells; choose a smaller row limit")
+        if nodes.root.getroottree().docinfo.doctype:
+            raise ValueError("Spreadsheet XML declarations/entities are unsupported")
+    return max_row, max_column
+
+
 def _xlsx_read(path: Path, sheet: str | None, limit: int) -> list[list]:
-    wb = _openpyxl().load_workbook(path, read_only=True, data_only=True)
-    try:
+    with ExitStack() as cleanup:
+        wb = _openpyxl().load_workbook(path, read_only=True, data_only=False)
+        cleanup.callback(wb.close)
         ws = wb[sheet] if sheet else wb.active
-        return [list(row) for _, row in zip(range(limit), ws.iter_rows(values_only=True), strict=False)]
-    finally:
-        wb.close()
+        height, width = _xlsx_read_bounds(ws, limit)
+        if not height or not width:
+            return []
+        cached = _openpyxl().load_workbook(path, read_only=True, data_only=True)
+        cleanup.callback(cached.close)
+        values = cached[ws.title]
+        rows = []
+        for row, cached_row in zip(ws.iter_rows(max_row=height, max_col=width),
+                                   values.iter_rows(max_row=height, max_col=width), strict=True):
+            output = []
+            for cell, value in zip(row, cached_row, strict=True):
+                if cell.data_type == "f":
+                    output.append({"formula": str(cell.value), "cached_value": value.value,
+                                   "value_status": "uncalculated" if value.value is None else "cached",
+                                   "cell": cell.coordinate})
+                else:
+                    output.append(cell.value)
+            rows.append(output)
+        return rows
 
 
 def _xlsx_write(path: Path, rows: list[list], sheet: str | None) -> None:
@@ -187,6 +245,42 @@ def _xlsx_set_cell(path: Path, cell: str, value: Any, sheet: str | None) -> None
 
 # ---- dispatch ---------------------------------------------------------------
 
+def _special_operation(path, op, sandbox):
+    if path.suffix.lower() == ".xlsm" and op == "write":
+        return "ERROR: replacing an entire .xlsm workbook is unsupported; use set_cell to preserve its macros"
+    if path.suffix.lower() == ".xlsm" and op == "set_cell":
+        from ..config import get_document_tools
+        if not get_document_tools()["macro_cell_edits"]:
+            return "ERROR: .xlsm cell edits require documents.macro_cell_edits=true; macros are preserved but never executed"
+    if op == "recalculate":
+        if not _is_xlsx(path) or not path.is_file():
+            return "ERROR: recalculate requires an existing .xlsx or .xlsm workbook"
+        from ..file_lock import cross_process_lock
+        from .document_processing import recalculate
+        with cross_process_lock(path, strict=True):
+            return recalculate(path, sandbox)
+    return None
+
+
+def _set_cell_operation(path, args, sheet):
+    if not _is_xlsx(path):
+        return "ERROR: set_cell is xlsx-only; use write for csv"
+    cell = str(args.get("cell") or "").strip()
+    if not cell:
+        return "ERROR: set_cell requires cell (e.g. 'B2')"
+    from ..file_lock import cross_process_lock
+    with cross_process_lock(path, strict=True):
+        if path.suffix.lower() == ".xlsm":
+            from .office_package import WorkbookPackage
+            package = WorkbookPackage(path)
+            package.set_cell(cell, _neutralize_formula(args.get("value")), sheet)
+            with _atomic_destination(path) as temporary:
+                package.write(temporary)
+        else:
+            _xlsx_set_cell(path, cell, args.get("value"), sheet)
+    return f"set {cell} in {path}"
+
+
 def _run(args: dict[str, Any], sandbox=None) -> str:
     op = args.get("op")
     raw_path = str(args.get("path") or "")
@@ -202,9 +296,10 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
     if type(limit) is not int or not 1 <= limit <= 10000:
         return "ERROR: limit must be an integer between 1 and 10000"
     sheet = args.get("sheet")
-    if path.suffix.lower() == ".xlsm" and op in ("write", "set_cell"):
-        return "ERROR: editing .xlsm is unsupported because it can remove macros; use a reviewed .xlsx copy"
     try:
+        special = _special_operation(path, op, sandbox)
+        if special is not None:
+            return special
         if op == "info":
             if not path.exists():
                 return f"ERROR: no such file {path}"
@@ -238,15 +333,7 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
                     _csv_write(path, norm)
             return f"wrote {len(rows)} row(s) to {path}"
         if op == "set_cell":
-            if not _is_xlsx(path):
-                return "ERROR: set_cell is xlsx-only; use write for csv"
-            cell = str(args.get("cell") or "").strip()
-            if not cell:
-                return "ERROR: set_cell requires cell (e.g. 'B2')"
-            from ..file_lock import cross_process_lock
-            with cross_process_lock(path, strict=True):
-                _xlsx_set_cell(path, cell, args.get("value"), sheet)
-            return f"set {cell} in {path}"
+            return _set_cell_operation(path, args, sheet)
     except RuntimeError as e:
         return f"ERROR: {e}"
     except Exception as e:  # noqa: BLE001
@@ -260,7 +347,9 @@ def spreadsheet(sandbox=None) -> Tool:
         description=(
             "Read / write / edit CSV + XLSX spreadsheets. ops: info (sheets + "
             "dims), read (rows as JSON), write (rows -> file), set_cell (xlsx "
-            "A1-cell). Complements pandas_query (read-only analysis) with writes."
+            "A1-cell), recalculate (offline LibreOffice engine when enabled). "
+            "Formula cells include formula, cached_value and value_status; a cache is "
+            "not proof of fresh calculation. Enabled .xlsm cell edits preserve VBA without executing it."
         ),
         input_schema=_SPREADSHEET_SCHEMA,
         fn=lambda args: _run(args, sandbox),

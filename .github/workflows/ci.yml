@@ -26,6 +26,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  document-engines:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12.13"
+      - name: Install document test dependencies
+        run: python -m pip install -e './packages/maverick-core[spreadsheet,pdf]' pytest pytest-timeout pillow
+      - name: Build the offline native document worker
+        run: docker build -f deploy/docker/Dockerfile.documents -t lightwork-documents:test .
+      - name: Exercise actual Calc and scanned-PDF OCR
+        env:
+          MAVERICK_TEST_DOCUMENT_IMAGE: lightwork-documents:test
+        run: >-
+          python -m pytest -q packages/maverick-core/tests/test_native_document_engines.py
+          --timeout=180 --junitxml=document-engine-results.xml
+      - name: Retain native engine results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: document-engine-results
+          path: document-engine-results.xml
+          retention-days: 14
+
   lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -217,18 +245,10 @@ jobs:
       - name: Async route audit (no new event-loop-blocking dashboard routes)
         # A FastAPI `async def` route runs on the single event loop thread
         # that serves every request -- unlike a plain `def` route, which
-        # FastAPI thread-pools automatically. A census found 469 async route
-        # handlers with zero `await` that still call synchronous SQLite/
-        # world/file/config work, blocking every other in-flight request for
-        # that call's duration.
-        #
-        # Rewriting all 469 is a separate, large mechanical change, not
-        # something to bundle unreviewed into this gate. They're grandfathered
-        # in async_route_audit_grandfathered.json (a debt register to shrink,
-        # not an exemption list) -- this fails the build on any NEW
-        # zero-await/blocking-call route, and on a grandfathered entry that no
-        # longer reproduces (regenerate with `--regen` once it's actually
-        # fixed, so the register shrinks instead of just going stale).
+        # FastAPI thread-pools automatically. All previously grandfathered
+        # handlers have been fixed; the empty lock makes every detected
+        # zero-await/blocking-call route a CI failure. Runtime regressions
+        # also verify responsiveness and tenant context during slow storage.
         run: python -m maverick.async_route_audit --ci
       - name: Failure-policy gate (audit-subsystem broad excepts are classified)
         # Requires every broad `except` in maverick/audit/* to declare its
@@ -751,7 +771,7 @@ jobs:
             'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
             'packaging==26.3'
           python -m pip install \
-            -e './packages/maverick-core[openai,evidence-analysis]' \
+            -e './packages/maverick-core[openai,evidence-analysis,spreadsheet,pdf]' \
             -e ./packages/maverick-shield \
             -e './packages/maverick-channels[sms]' \
             -e ./packages/maverick-evolve \

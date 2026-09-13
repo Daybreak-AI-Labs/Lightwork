@@ -50,6 +50,22 @@ def test_advanced_all_on_writes_kernel_sections(tmp_path, monkeypatch):
     assert "[reflexion]" in cfg and "enable = true" in cfg
 
 
+def test_document_engine_choices_reach_runtime_configuration(tmp_path, monkeypatch):
+    from maverick import config
+    written = tomllib.loads(_write(tmp_path, monkeypatch, {
+        "macro_cell_edits": True, "native_recalculation": True, "pdf_ocr": True,
+        "document_engine_image": "registry.invalid/documents@sha256:" + "a" * 64,
+    }))
+    monkeypatch.setattr(config, "load_config", lambda: written)
+    actual = config.get_document_tools()
+    assert actual["macro_cell_edits"] and actual["native_recalculation"] and actual["pdf_ocr"]
+    assert actual["engine_image"] == written["documents"]["engine_image"]
+    assert actual["ocr_max_pages"] == 20
+    monkeypatch.setattr(config, "load_config", dict)
+    defaults = config.get_document_tools()
+    assert not any(defaults[key] for key in ("macro_cell_edits", "native_recalculation", "pdf_ocr"))
+
+
 def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, dict.fromkeys(
         ["cost_aware", "verify_ensemble", "tree_of_thought",

@@ -283,19 +283,34 @@ def remove(key: str, tenant: str | None = None) -> bool:
 # --------------------------------------------------------------------------- #
 def _measure(department: str, world: Any, *, window_days: int,
              now: float | None = None) -> dict:
-    """Bounded department-scoped goal measurements, with explicit completeness."""
+    """Department totals; old embedders retain a visibly bounded fallback."""
     if not isinstance(window_days, int) or isinstance(window_days, bool) or window_days < 1:
         raise ValueError("window_days must be a positive integer")
+    evaluated_at = now if now is not None else time.time()
+    if not math.isfinite(evaluated_at):
+        raise ValueError("now must be finite")
+    cutoff = evaluated_at - window_days * 86400
+    aggregate = getattr(world, "shoring_measurements", None)
+    if callable(aggregate):
+        try:
+            m = aggregate(department, since=cutoff, until=evaluated_at)
+        except Exception as exc:
+            raise RuntimeError("shoring measurements are unavailable; retry after restoring the work store") from exc
+        completed = m["delivered"] + m["blocked"]
+        return {
+            **m, "department": department, "window_days": window_days, "completed": completed,
+            "throughput_per_day": m["delivered"] / window_days,
+            "exception_rate_pct": 100.0 * m["blocked"] / completed if completed else 0.0,
+        }
     delivered = blocked = in_flight = 0
     try:
         goals = world.list_goals(domain=department, limit=2001, order="desc")
     except Exception as exc:
         raise RuntimeError("shoring measurements are unavailable; retry after restoring the work store") from exc
     complete = len(goals) <= 2000
-    cutoff = (now if now is not None else time.time()) - window_days * 86400
     for r in goals[:2000]:
         timestamp = getattr(r, "updated_at", 0) or 0
-        if getattr(r, "domain", "") != department or not timestamp or timestamp < cutoff:
+        if getattr(r, "domain", "") != department or not timestamp or not cutoff <= timestamp <= evaluated_at:
             continue
         outcome = (getattr(r, "status", "") or "").lower()
         if outcome == "done":
@@ -313,6 +328,9 @@ def _measure(department: str, world: Any, *, window_days: int,
         "in_flight": in_flight,
         "completed": completed,
         "measurement_complete": complete,
+        "turnaround_measurement_complete": False,
+        "max_turnaround_hours": None,
+        "legacy_completion_count": delivered,
         "throughput_per_day": (delivered / window_days) if window_days else 0.0,
         "exception_rate_pct": (100.0 * blocked / completed) if completed else 0.0,
     }
@@ -362,8 +380,9 @@ def _sla_rows(function: Function, m: dict) -> list[dict]:
             actual = m["throughput_per_day"] if m["completed"] else None
         elif metric == "max_exception_rate_pct":
             actual = m["exception_rate_pct"] if m["completed"] else None
+        elif metric == "max_turnaround_hours":
+            actual = m["max_turnaround_hours"] if m["turnaround_measurement_complete"] else None
         else:
-            # Declared but not measured from the record in v1 (e.g. turnaround).
             actual = None
         status = _band(metric, sla.target, actual)
         out.append({
@@ -381,20 +400,12 @@ _STATUS_RANK = {"breached": 3, "at_risk": 2, "met": 1, "no_data": 0}
 
 
 def _matches_department(approval: Any, department: str) -> bool:
-    """Whether a pending approval belongs to a function's department.
+    """Match the department recorded from trusted goal context at creation.
 
-    Approvals are not department-tagged in the schema, so match the department
-    id (case-insensitive) against the fields that carry routing context --
-    scope first (the consent scope), then provenance/action/detail.
+    Free text can mention other teams or be model supplied. Legacy and
+    goal-less approvals stay in the shared queue as unassigned; never guess.
     """
-    dept = (department or "").strip().lower()
-    if not dept:
-        return False
-    for attr in ("scope", "provenance", "action", "detail"):
-        value = getattr(approval, attr, None)
-        if isinstance(value, str) and dept in value.lower():
-            return True
-    return False
+    return bool(department) and getattr(approval, "department", "") == department
 
 
 def exceptions_for(function: Function, approvals: list) -> list[dict]:
@@ -415,6 +426,7 @@ def exceptions_for(function: Function, approvals: list) -> list[dict]:
             "scope": getattr(a, "scope", None),
             "detail": getattr(a, "detail", None),
             "requested_at": getattr(a, "requested_at", None),
+            "goal_id": getattr(a, "goal_id", None),
         })
     return out
 
@@ -449,9 +461,13 @@ def function_status(function: Function, world: Any, *,
         "exception_rate_pct": round(m["exception_rate_pct"], 1),
         "window_days": window_days,
         "measurement_complete": m["measurement_complete"],
+        "turnaround_measurement_complete": m["turnaround_measurement_complete"],
+        "max_turnaround_hours": m["max_turnaround_hours"],
+        "legacy_completion_count": m["legacy_completion_count"],
         "slas": slas,
         "exceptions": exceptions,
         "exception_count": len(exceptions),
+        "unassigned_exception_count": sum(1 for a in pending if not getattr(a, "department", "")),
         "overall": overall,
     }
 

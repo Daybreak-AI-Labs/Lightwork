@@ -22,6 +22,25 @@ class _Pat:
 
 
 _PATTERNS: list[_Pat] = [
+    # Keep these conversation-boundary families aligned with the built-in
+    # shield. Core must retain this floor when the optional shield is absent.
+    _Pat("discard_conversation", re.compile(
+        r"\b(?:ignore|disregard|forget|discard)\s+"
+        r"(?:everything|all(?:\s+(?:the\s+)?(?:text|content|instructions?))?)\s+"
+        r"(?:above|before)(?:\s+(?:this|my|the)\s+(?:line|message|request|prompt))?"
+        r"\s*(?=[,.;:!?\n\u2014\u2013]|$|(?:and|then|now|instead)\b)", re.IGNORECASE), 2.0),
+    _Pat("configured_directives_leak", re.compile(
+        r"\b(?:paste|show|print|repeat|output|quote|dump|share|reveal)\s+"
+        r"(?:back\s+)?(?:me\s+)?(?:the\s+|your\s+)?"
+        r"(?:directives?|instructions?|rules?|prompt|guidance)\s+"
+        r"(?:that\s+)?you\s+were\s+(?:configured|initiali[sz]ed|set\s+up)\s+with\b",
+        re.IGNORECASE), 2.0),
+    _Pat("cancel_setup_limits", re.compile(
+        r"\b(?:treat|consider|regard)\s+(?:the\s+|your\s+)?(?:setup\s+)?"
+        r"(?:limits?|constraints?|rules?|instructions?|directives?|guidelines?|guardrails?)\s+"
+        r"(?:that\s+)?you\s+(?:started|began)\s+with\s+as\s+(?:now\s+)?"
+        r"(?:cancelled|canceled|void|invalid|revoked|inapplicable|nullified)\b",
+        re.IGNORECASE), 2.0),
     _Pat("ignore_prior",
          re.compile(
              # The object group is now REQUIRED: every group used to be optional,

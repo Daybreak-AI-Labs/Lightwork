@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 36
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -636,6 +636,14 @@ MIGRATIONS: dict[int, list[str]] = {
         " singleton INTEGER PRIMARY KEY CHECK(singleton = 1),"
         " completed INTEGER NOT NULL CHECK(completed = 1))",
     ],
+    # v36: recorded completion time and exact approval routing. Legacy rows
+    # remain unknown instead of fabricating historical SLA/department data.
+    36: [
+        "ALTER TABLE goals ADD COLUMN completed_at REAL",
+        "ALTER TABLE approvals ADD COLUMN goal_id INTEGER",
+        "ALTER TABLE approvals ADD COLUMN department TEXT NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_goals_domain_completed ON goals(domain, completed_at)",
+    ],
 }
 
 
@@ -682,6 +690,8 @@ class Approval:
     decided_by: str | None = None
     approvals_required: int = 1
     requested_by: str | None = None
+    goal_id: int | None = None
+    department: str = ""
 
 
 @dataclass(frozen=True)
@@ -2012,16 +2022,31 @@ class WorldModel:
         # version. All goal timestamp writes advance it atomically in SQL:
         # coarse/repeated or backwards wall time cannot reauthorize stale
         # bytes, even when independent connections mutate the same goal.
+        now = time.time()
         with self._writing() as conn:
             cur = conn.execute(
-                "UPDATE goals SET status = ?, updated_at = MAX(updated_at + 0.000001, ?), result = COALESCE(?, result) WHERE id = ?",
-                (status, time.time(), _enc_field(result), goal_id),
+                "UPDATE goals SET completed_at = CASE WHEN ? <> 'done' THEN NULL "
+                "WHEN status = 'done' THEN completed_at "
+                "ELSE MAX(updated_at + 0.000001, ?) END, "
+                "status = ?, updated_at = MAX(updated_at + 0.000001, ?), "
+                "result = COALESCE(?, result) WHERE id = ?",
+                (status, now, status, now, _enc_field(result), goal_id),
             )
             # A sign-off is authority over one immutable terminal payload, not
             # over a goal id forever.  Reruns, failures, and any result rewrite
             # revoke it atomically so old approval cannot authorize new bytes.
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
+
+    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+        """Complete department totals in one read snapshot, without a row cap."""
+        from .shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
+
+        row = self._read_one(
+            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?",
+            (department, since, until),
+        )
+        return measurements(row)
 
     def bind_goal_execution_principal(self, goal_id: int, principal: str) -> bool:
         """Atomically bind an unbound goal to its execution principal.
@@ -2900,14 +2925,19 @@ class WorldModel:
         approver). ``requested_by`` is the requesting principal, so a multi-party
         approval can bar the requester from approving their own request.
         """
+        from .logging_config import current_goal_id
+
+        context_goal = current_goal_id()
         with self._writing() as conn:
+            goal = conn.execute("SELECT id, domain FROM goals WHERE id = ?", (context_goal,)).fetchone()
             cur = conn.execute(
                 "INSERT INTO approvals(action, risk, scope, detail, provenance, "
-                "status, requested_at, approvals_required, requested_by) "
-                "VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+                "status, requested_at, approvals_required, requested_by, goal_id, department) "
+                "VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
                 (_enc_field(action), risk, _enc_field(scope), _enc_field(detail),
                  provenance, time.time(), max(1, int(approvals_required)),
-                 (requested_by or None)),
+                 (requested_by or None), goal["id"] if goal else None,
+                 goal["domain"] if goal else ""),
             )
             return cur.lastrowid
 

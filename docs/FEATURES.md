@@ -1542,9 +1542,11 @@ here.
   department, the same queue behind `/approvals` seen through the shoring lens.
   The Shoring P&L is the Savings report above. Read-only over existing stores;
   the book is a small governed JSON store, not a world-model migration.
-  Goal measurements are department-scoped before sampling. Above 2,000 department
-  goals, counts are explicitly partial and SLAs remain ungraded; no completed
-  work also reports `no_data`. Turnaround targets are declared but not measured.
+  SQLite/Postgres measurements aggregate all department goals without sampling.
+  Turnaround uses the recorded completion time and remains stable after later
+  edits; historical goals without that timestamp remain explicitly unmeasured.
+  Exception attribution uses the approval's originating goal/department, with
+  unattributed approvals shown as a shared queue rather than guessed from text.
   Book edits are serialized across processes; capacity (500 functions) and
   corrupt records cause an explicit refusal, preserving the saved book.
 - **2,031-agent specialist portfolio across 54 suites** — the original 8
@@ -2183,11 +2185,14 @@ here.
   mockup).
 - **Data** — `sql_query` (read-only by default), `pandas_query`, `spreadsheet`
   (CSV/XLSX, write-capable), `compute` (SymPy), `embeddings`.
-  Spreadsheet writes stage a complete file before replacement; XLSM mutation is
-  refused to preserve macros. XLSX reads use cached values, without recalculating
-  formulas. CSV `info` identifies counts beyond its bounded sample as partial.
-  PDF reads use the assigned workspace; blank selections request OCR text and
-  table extraction requires `pdfplumber` rather than silently returning plain text.
+  Spreadsheet writes stage a complete file before replacement. Formula cells
+  explicitly identify cached or uncalculated values. Optional XLSM cell edits
+  preserve untouched ZIP/VBA parts. Optional native recalculation updates caches
+  using an offline Calc worker; macros are never executed. CSV `info` identifies
+  counts beyond its bounded sample as partial. PDF reads use the assigned
+  workspace; enabled offline OCR handles scans, with `ocr=true` for mixed pages.
+  Native text-table extraction requires `pdfplumber`. See
+  [document processing](document-processing.md) for setup and format limits.
 - **Web & research** — `web_search` (Tavily/Brave/DDG/SerpAPI), `http_fetch`,
   `browser` (navigate/click/type/`fill_form`), `browser_device` (device-emulation
   presets), `browser_auth_vault` (Fernet-encrypted session store), `websocket`

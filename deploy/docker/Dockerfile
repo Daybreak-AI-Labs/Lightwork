@@ -17,6 +17,15 @@
 # arch via `docker buildx imagetools inspect python:3.12-slim`). Left as the
 # floating tag by default so the public quickstart still builds unchanged.
 ARG PYTHON_DIGEST=
+FROM debian:bookworm-slim AS kubectl-builder
+ARG KUBECTL_VERSION=v1.36.4
+ARG TARGETARCH=amd64
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl --fail --location "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" -o /kubectl \
+    && curl --fail --location "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl.sha256" -o /kubectl.sha256 \
+    && cd / && awk '{print $1 "  kubectl"}' kubectl.sha256 | sha256sum --check \
+    && chmod 0755 /kubectl
+
 FROM python:3.12-slim${PYTHON_DIGEST} AS wheel-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -43,7 +52,7 @@ COPY apps/installer-cli ./apps/installer-cli
 RUN python -m pip install --upgrade 'pip==26.2.1' \
     && python scripts/install_release_cohort.py \
         --target-python python \
-        --core-extra release-runtime,postgres,oidc,s3,evidence-analysis \
+        --core-extra release-runtime,postgres,oidc,s3,evidence-analysis,spreadsheet,pdf \
         --wheel-dir /wheelhouse
 
 FROM python:3.12-slim${PYTHON_DIGEST} AS runtime
@@ -64,6 +73,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
+
+COPY --from=kubectl-builder /kubectl /usr/local/bin/kubectl
 
 # System deps for sqlite + git (skills, world model).
 RUN apt-get update \

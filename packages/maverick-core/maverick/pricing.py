@@ -22,7 +22,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from functools import lru_cache
 from importlib import resources
@@ -67,6 +67,7 @@ class ModelPrice:
     evidence_id: str
     pricing_basis: str
     applicability: str
+    valid_until: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model_id.strip():
@@ -81,6 +82,7 @@ class ModelPrice:
             date.fromisoformat(self.as_of)
         except (TypeError, ValueError) as exc:
             raise PricingError("as_of must be an ISO-8601 date") from exc
+        _validate_expiry(self.as_of, self.valid_until)
         try:
             fetched = datetime.fromisoformat(self.fetched_at.replace("Z", "+00:00"))
         except (AttributeError, TypeError, ValueError) as exc:
@@ -128,6 +130,7 @@ class RateEvidence:
     rates: Mapping[str, tuple[float, float]]
     model_pattern: str | None = None
     pattern_rates: tuple[float, float] | None = None
+    valid_until: str | None = None
 
     def supports(self, quote: ModelPrice) -> bool:
         if quote.evidence_id != self.evidence_id:
@@ -148,6 +151,7 @@ class RateEvidence:
             and quote.verified is self.verified
             and quote.pricing_basis == self.pricing_basis
             and quote.applicability == self.applicability
+            and quote.valid_until == self.valid_until
         )
 
 
@@ -156,6 +160,17 @@ class PricingEvidencePack:
     schema_version: int
     rate_card_version: str
     entries: Mapping[str, RateEvidence]
+
+
+def _validate_expiry(as_of: str, valid_until: str | None) -> None:
+    if valid_until is None:
+        return
+    try:
+        expires = date.fromisoformat(valid_until)
+    except (TypeError, ValueError) as exc:
+        raise PricingError("valid_until must be an ISO-8601 date") from exc
+    if expires < date.fromisoformat(as_of):
+        raise PricingError("valid_until must not precede as_of")
 
 
 def _parse_evidence_entry(raw: object) -> RateEvidence:
@@ -220,6 +235,7 @@ def _parse_evidence_entry(raw: object) -> RateEvidence:
                 str(raw["model_pattern"]) if raw.get("model_pattern") else None
             ),
             pattern_rates=pattern_rates,
+            valid_until=raw.get("valid_until"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise PricingError("malformed pricing evidence entry") from exc
@@ -236,6 +252,7 @@ def _parse_evidence_entry(raw: object) -> RateEvidence:
         raise PricingError("pricing evidence dates must be ISO-8601") from exc
     if fetched.tzinfo is None:
         raise PricingError("pricing evidence retrieved_at needs a timezone")
+    _validate_expiry(entry.as_of, entry.valid_until)
     if len(entry.currency) != 3 or entry.currency != entry.currency.upper():
         raise PricingError("pricing evidence currency must be ISO-4217")
     if (
@@ -351,6 +368,11 @@ class VersionedPricingProvider:
         rate = self._rates.get(model_id)
         if rate is None:
             return None
+        if (use is PriceUse.BILLING and rate.valid_until is not None
+                and datetime.now(timezone.utc).date() > date.fromisoformat(rate.valid_until)):
+            raise UnverifiedRateError(
+                f"rate for {model_id!r} expired on {rate.valid_until}; refresh reviewed pricing before billing"
+            )
         if use is PriceUse.BILLING and not rate.verified:
             raise UnverifiedRateError(
                 f"rate for {model_id!r} is unverified "

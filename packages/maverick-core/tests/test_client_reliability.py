@@ -318,16 +318,24 @@ def test_kubernetes_copy_uses_unambiguous_local_operands(tmp_path, monkeypatch):
 
     def run(args, **kwargs):
         calls.append((args, kwargs))
+        if "tar" in args:
+            import tarfile
+            with tarfile.open(fileobj=kwargs["stdout"], mode="w"):
+                pass
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", run)
-    backend = KubernetesBackend(workdir=tmp_path, allow_network=True)
+    from .test_kubernetes_workspace_transfer import _capture_using_fake_run
+    monkeypatch.setattr("maverick.sandbox.workspace_transfer.capture_archive", _capture_using_fake_run)
+    backend = KubernetesBackend(workdir=tmp_path / "workspace", allow_network=True)
     assert backend._copy_in("fixture") is None
-    assert backend._copy_out("fixture") == ""
+    from maverick.sandbox import workspace_transfer
+    recovery = workspace_transfer.recovery_directory()
+    assert backend._copy_out("fixture", {}, recovery) == ""
     transfers = [(args, kw) for args, kw in calls if "cp" in args]
-    assert len(transfers) == 2
+    assert len(transfers) == 1  # export uses a binary stream, not a colon-bearing local operand
     for args, kwargs in transfers:
-        assert kwargs["cwd"] == tmp_path.resolve()
+        assert kwargs["cwd"] == backend.workdir
         operands = args[args.index("cp") + 1:]
         assert sum(":" in operand for operand in operands) == 1
 
@@ -349,7 +357,7 @@ def test_kubernetes_changed_policy_is_rechecked(tmp_path, monkeypatch):
 
     policies = [_policy()]
     _fake_kubectl(monkeypatch, policies=policies)
-    backend = KubernetesBackend(workdir=tmp_path)
+    backend = KubernetesBackend(workdir=tmp_path / "workspace")
     assert backend.exec("true").exit_code == 0
     policies.clear()
     assert backend.exec("true").exit_code == 2

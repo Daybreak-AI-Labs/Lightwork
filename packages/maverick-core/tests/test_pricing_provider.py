@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import datetime, timezone
 from importlib import resources
 
 import pytest
@@ -71,6 +72,7 @@ def _pack_for(quote: ModelPrice) -> PricingEvidencePack:
         pricing_basis=quote.pricing_basis,
         applicability=quote.applicability,
         rates={quote.model_id: quote.rates},
+        valid_until=quote.valid_until,
     )
     return PricingEvidencePack(
         schema_version=1,
@@ -101,6 +103,65 @@ def test_builtin_rate_card_is_complete_and_legacy_view_is_derived():
         assert quote.applicability
         assert_price_evidenced(quote, evidence_pack)
         assert MODEL_PRICES[model_id] == quote.rates
+
+
+@pytest.mark.parametrize("model_id,rates", [
+    ("gpt-6-astra", (27.5, 82.5)),
+    ("gpt-5.6-sol", (11.0, 33.0)),
+    ("gpt-5.6", (11.0, 33.0)),
+    ("gpt-5.6-terra", (5.5, 19.8)),
+    ("gpt-5.6-luna", (0.55, 1.98)),
+])
+def test_current_openai_standard_ceilings_have_billing_evidence(monkeypatch, model_id, rates):
+    import maverick.pricing as pricing
+
+    class CapturedDate(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 13, tzinfo=tz or timezone.utc)
+
+    monkeypatch.setattr(pricing, "datetime", CapturedDate)
+    quote = _lookup_price_quote(model_id)
+    assert quote.rates == rates
+    assert quote.verified
+    assert "ceiling" in quote.pricing_basis.lower()
+    assert_price_evidenced(quote, load_pricing_evidence_pack())
+    budget = Budget(max_dollars=1000)
+    budget.record_tokens(1000, 2000, model=model_id)
+    assert budget.dollars == pytest.approx(rates[0] / 1000 + rates[1] / 500)
+
+
+@pytest.mark.parametrize("day,expired", [(21, False), (22, True)])
+def test_promo_rates_stop_billing_after_captured_guarantee(monkeypatch, day, expired):
+    import maverick.pricing as pricing
+
+    class BoundaryDate(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, day, tzinfo=tz or timezone.utc)
+
+    quote = replace(_quote(), valid_until="2026-11-21")
+    provider = VersionedPricingProvider(quote.rate_card_version, [quote], evidence_pack=_pack_for(quote))
+    monkeypatch.setattr(pricing, "datetime", BoundaryDate)
+    if expired:
+        with pytest.raises(UnverifiedRateError, match="expired"):
+            provider.quote(quote.model_id)
+    else:
+        assert provider.quote(quote.model_id) == quote
+    assert provider.quote(quote.model_id, use=PriceUse.ESTIMATE) == quote
+    assert quote.metadata()["valid_until"] == "2026-11-21"
+
+
+@pytest.mark.parametrize("expiry", ["", "tomorrow", "2026-02-30", "2025-01-01", 123])
+def test_invalid_expiry_is_rejected_in_quotes_and_evidence(expiry):
+    from maverick.pricing import _parse_evidence_entry
+
+    with pytest.raises(PricingError, match="valid_until"):
+        replace(_quote(), valid_until=expiry)
+    raw = json.loads(resources.files("maverick").joinpath(
+        "data/pricing-rate-card-2026-07-29.json").read_text(encoding="utf-8"))["entries"][0]
+    with pytest.raises(PricingError, match="valid_until"):
+        _parse_evidence_entry({**raw, "valid_until": expiry})
 
 
 def test_provider_rejects_unverified_rate_for_billing_but_estimate_is_explicit():
@@ -282,7 +343,7 @@ def test_budget_retains_exact_rate_provenance_and_absorb_merges_it():
     assert evidence["verified"] is True
     assert evidence["currency"] == "USD"
     assert evidence["source"].startswith("https://")
-    assert evidence["rate_card_version"] == "2026-09-07.1"
+    assert evidence["rate_card_version"] == "2026-09-13.1"
     assert evidence["evidence_id"] == "anthropic-direct-2026-07-29"
 
     parent = Budget(max_dollars=100.0)

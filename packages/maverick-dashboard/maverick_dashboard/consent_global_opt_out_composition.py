@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -137,22 +136,12 @@ def _active_policy(
     evaluated_at: float,
 ) -> Mapping[str, Any]:
     store = dependencies.preference_store_for(tenant_id)
-    listed = store.list_policies(tenant_id, limit=500)
-    policies = listed.get("policies") if isinstance(listed, Mapping) else None
-    if listed.get("truncated") is not False or not isinstance(policies, list):
-        raise opt_out.GlobalOptOutAuthorityStale("receipt policy authority is unavailable")
-    matches = [
-        item
-        for item in policies
-        if isinstance(item, Mapping)
-        and item.get("policy_id") == policy_id
-        and item.get("version") == policy_version
-        and float(item.get("effective_at", math.inf)) <= evaluated_at
-        and (item.get("expires_at") is None or float(item["expires_at"]) > evaluated_at)
-    ]
-    if len(matches) != 1:
+    policy = store.get_active_policy(
+        tenant_id, policy_id, version=policy_version, at=evaluated_at,
+    )
+    if not isinstance(policy, Mapping):
         raise opt_out.GlobalOptOutAuthorityStale("receipt policy authority changed")
-    return matches[0]
+    return policy
 
 
 def _channel_binding_sha256(client: PublicClientBinding | Mapping[str, Any]) -> str:

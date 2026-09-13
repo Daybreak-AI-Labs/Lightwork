@@ -4044,6 +4044,25 @@ def pick_advanced() -> dict[str, Any]:
             "faster-whisper). ON by default.",
             default=True,
         ),
+        "macro_cell_edits": _q_confirm(
+            "Allow cell edits in macro-enabled Excel workbooks? Preserve VBA and untouched workbook parts; "
+            "never execute macros. Whole-workbook replacement and digitally signed documents are refused.",
+            default=False,
+        ),
+        "native_recalculation": _q_confirm(
+            "Recalculate existing spreadsheet formulas with offline LibreOffice Calc? Requires the "
+            "document engine image and a Docker, Podman or Kubernetes sandbox. Original formulas and VBA are preserved.",
+            default=False,
+        ),
+        "pdf_ocr": _q_confirm(
+            "Read scanned PDFs with offline OCR? Requires the document engine image (Poppler/Tesseract) "
+            "and a Docker, Podman or Kubernetes sandbox. Default limit: 20 pages per call.",
+            default=False,
+        ),
+        "document_engine_image": _q_text(
+            "Document engine image (build/publish deploy/docker/Dockerfile.documents before enabling native processing):",
+            default="lightwork-documents:local",
+        ),
         "compaction_strategy": _q_select(
             "  Compaction strategy? (default = simple shrink)",
             [
@@ -7716,6 +7735,11 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[voice]")
         lines.extend(_voice_lines)
     _attach_lines = []
+    if any(advanced.get(key) for key in ("macro_cell_edits", "native_recalculation", "pdf_ocr")):
+        lines.extend(["", "[documents]"])
+        for key in ("macro_cell_edits", "native_recalculation", "pdf_ocr"):
+            lines.append(f"{key} = {str(bool(advanced.get(key))).lower()}")
+        lines.append("engine_image = " + _toml_str(advanced.get("document_engine_image") or "lightwork-documents:local"))
     if advanced.get("attach_any_mime"):
         _attach_lines.append("allow_any_mime = true")
     if advanced.get("attachment_understanding") is False:

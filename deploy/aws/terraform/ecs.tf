@@ -41,6 +41,12 @@ resource "aws_ecs_task_definition" "app" {
       environment = concat(
         [
           { name = "MAVERICK_WORLD_BACKEND", value = "postgres" },
+          # Model-generated commands run in a separate executor, never in this
+          # credential-bearing Fargate application task. Missing setup fails closed.
+          { name = "MAVERICK_DEPLOYMENT_ISOLATION", value = "kubernetes" },
+          { name = "MAVERICK_REQUIRE_CONTAINER_BACKEND", value = "1" },
+          { name = "MAVERICK_EXECUTOR_NAMESPACE", value = var.executor_namespace },
+          { name = "MAVERICK_EXECUTOR_IMAGE", value = var.executor_image },
           # Shared governed-record trust anchor: sha256 of the DECODED injected
           # at-rest key. crypto_at_rest.require_shared_deployment_key_identity
           # requires it for the Postgres (shared-authority) backend; without it
@@ -97,6 +103,9 @@ resource "aws_ecs_task_definition" "app" {
           # config's receipt_key_secret_ref must name this variable.
           { name = "MAVERICK_CONSENT_RECEIPT_ROOT", valueFrom = aws_secretsmanager_secret.consent_receipt_root.arn },
         ],
+        var.executor_kubeconfig_secret_arn == "" ? [] : [
+          { name = "MAVERICK_EXECUTOR_KUBECONFIG_SECRET", valueFrom = var.executor_kubeconfig_secret_arn },
+        ],
         var.oidc_issuer == "" ? [] : [
           { name = "MAVERICK_OIDC_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn },
           { name = "MAVERICK_OIDC_SESSION_SECRET", valueFrom = aws_secretsmanager_secret.oidc_session_secret.arn },
@@ -136,6 +145,13 @@ resource "aws_ecs_task_definition" "app" {
   # Keep superseded revisions registered so a rollback is one `update-service`
   # away instead of "TaskDefinition is inactive".
   skip_destroy = true
+
+  lifecycle {
+    precondition {
+      condition     = var.executor_kubeconfig_secret_arn != "" && can(regex("@sha256:[a-f0-9]{64}$", var.executor_image))
+      error_message = "Provision and qualify the separate Kubernetes executor first: set executor_kubeconfig_secret_arn and a digest-pinned executor_image. See deploy/aws/EXECUTOR.md."
+    }
+  }
 }
 
 resource "aws_ecs_service" "app" {

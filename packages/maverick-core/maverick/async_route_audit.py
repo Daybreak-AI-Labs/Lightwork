@@ -9,8 +9,7 @@ awaits anything gets neither benefit: it isn't thread-pooled (FastAPI assumes
 an ``async def`` handler already yields control when it blocks), and it
 blocks the one event loop for however long its synchronous DB/file/config
 call takes -- stalling every other in-flight request on the dashboard for
-that duration. A census found 469 of 1,894 dashboard route handlers in this
-shape.
+that duration.
 
 This module is the static, offline, AST-only detector (no server, no
 network, mirrors :mod:`maverick.a11y_audit`'s "parse the shipped source, no
@@ -18,17 +17,13 @@ deps beyond stdlib" design): a route-decorated ``async def`` with zero
 ``await``/``async for``/``async with`` anywhere in its body, whose body calls
 something that looks like synchronous DB/file/config/store work.
 
-469 existing violations are grandfathered in
-``async_route_audit_grandfathered.json`` (next to this module) -- rewriting
-all of them to ``def`` (or wrapping their blocking calls in
-``run_in_threadpool``) is a large, separate mechanical change, not something
-to bundle unreviewed into the gate that catches new ones. The gate's job is
-to stop the count from growing: a NEW zero-await handler not in the lock
-fails CI, and a grandfathered entry that no longer reproduces (i.e. someone
-fixed it) also fails CI until the lock is regenerated -- the same ratchet
-:mod:`maverick.egress_contract`'s ``KNOWN_UNCOVERED`` and
-:mod:`maverick.migration_governance`'s lock already use, so the count can
-only go down.
+The previously grandfathered handlers have been moved to worker threads.
+``async_route_audit_grandfathered.json`` is now empty, so every detected
+zero-await blocking handler fails CI. The two-sided ratchet also rejects
+stale lock entries; fixing a handler cannot silently leave an exemption.
+This static check is a regression guard, not proof that every async path
+is free of blocking I/O; runtime concurrency tests cover representative
+storage-backed requests and tenant context propagation.
 
 Surfaced as ``python -m maverick.async_route_audit --ci`` (CI gate) and
 ``--regen`` (rewrite the lock after intentionally fixing or adding entries).

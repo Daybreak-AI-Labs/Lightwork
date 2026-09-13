@@ -477,7 +477,7 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
 
 
 @router.get("/workforce/posture")
-async def workforce_posture(request: Request) -> dict:
+def workforce_posture(request: Request) -> dict:
     """The workforce autonomy dial: fleet posture + graduation candidates.
 
     Read-only surface for the dashboard -- whether per-agent autonomy levels are
@@ -980,7 +980,7 @@ def _board_oversight(w, owner, days: int) -> dict:
 
 
 @router.get("/dashboards/{board}")
-async def dashboard_board(request: Request, board: str, days: int | None = None) -> dict:
+def dashboard_board(request: Request, board: str, days: int | None = None) -> dict:
     """Executive-board payload for the Overview / Spend / Workforce pages."""
     require_permission(request, "view")
     w = _world()
@@ -1317,7 +1317,7 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
         },
     },
 )
-async def create_goal(
+def create_goal(
     request: Request,
     payload: GoalIn,
     bg: BackgroundTasks,
@@ -1483,7 +1483,7 @@ async def create_goal(
         },
     },
 )
-async def list_goals(
+def list_goals(
     request: Request,
     response: Response,
     status: str | None = None,
@@ -1520,7 +1520,7 @@ async def list_goals(
 
 
 @router.get("/goals/search", response_model=list[GoalOut])
-async def search_goals(request: Request, q: str, limit: int = 50) -> list[GoalOut]:
+def search_goals(request: Request, q: str, limit: int = 50) -> list[GoalOut]:
     """Search across runs (goals) by text in title / description / result.
 
     Owner-scoped: a non-admin authenticated caller searches only their own
@@ -1536,7 +1536,7 @@ async def search_goals(request: Request, q: str, limit: int = 50) -> list[GoalOu
 
 
 @router.get("/goals/{goal_id}", response_model=GoalOut)
-async def get_goal(request: Request, goal_id: int) -> GoalOut:
+def get_goal(request: Request, goal_id: int) -> GoalOut:
     g = _world().get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
@@ -1545,7 +1545,7 @@ async def get_goal(request: Request, goal_id: int) -> GoalOut:
 
 
 @router.get("/goals/{goal_id}/events", response_model=GoalEventsResponse)
-async def goal_events(
+def goal_events(
     request: Request,
     goal_id: int,
     since: int = 0,
@@ -1684,7 +1684,7 @@ async def goal_events_stream(
 
 
 @router.post("/goals/{goal_id}/answer", status_code=204)
-async def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> None:
+def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> None:
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -5143,7 +5143,7 @@ async def assessment_memory_similar(
 
 
 @router.get("/goals/{goal_id}/attachments", response_model=list[AttachmentOut])
-async def list_goal_attachments(request: Request, goal_id: int) -> list[AttachmentOut]:
+def list_goal_attachments(request: Request, goal_id: int) -> list[AttachmentOut]:
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -5204,12 +5204,12 @@ async def download_goal_attachment(
 
 
 @router.get("/facts", response_model=dict[str, str])
-async def list_facts() -> dict[str, str]:
+def list_facts() -> dict[str, str]:
     return _world().get_facts()
 
 
 @router.post("/facts", status_code=204)
-async def set_fact(request: Request, payload: FactIn) -> None:
+def set_fact(request: Request, payload: FactIn) -> None:
     require_permission(request, "operate")
     key = (payload.key or "").strip()
     if not key:
@@ -5218,7 +5218,7 @@ async def set_fact(request: Request, payload: FactIn) -> None:
 
 
 @router.post("/outcomes", status_code=204)
-async def record_outcome(request: Request, payload: OutcomeIn) -> None:
+def record_outcome(request: Request, payload: OutcomeIn) -> None:
     """Ingest a real downstream outcome for a past episode (the grounded reward).
 
     The HTTP entrypoint a system-of-record connector (CRM / ERP / ticketing
@@ -5243,7 +5243,7 @@ async def record_outcome(request: Request, payload: OutcomeIn) -> None:
 
 
 @router.post("/outcomes/link", status_code=204)
-async def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
+def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
     """Link an external business key to the episode that acted on it.
 
     The registration half of the system-of-record loop: when a run creates an
@@ -5267,7 +5267,7 @@ async def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
 
 
 @router.post("/outcomes/by-key")
-async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> dict:
+def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> dict:
     """Ingest a real downstream outcome using only the business key.
 
     The endpoint a system-of-record webhook (Stripe "invoice.paid", Zendesk
@@ -5932,7 +5932,7 @@ def _flow_publication_fields(flow_id: str) -> dict:
 
 
 @router.get("/flows")
-async def list_flows_endpoint(request: Request) -> dict:
+def list_flows_endpoint(request: Request) -> dict:
     """The saved flow definitions (a summary per flow)."""
     require_permission(request, "operate")
     _require_flows()
@@ -5956,7 +5956,7 @@ async def list_flows_endpoint(request: Request) -> dict:
 
 
 @router.post("/flows", status_code=201)
-async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
+def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     """Create or replace a flow definition (validated before it is stored)."""
     require_permission(request, "operate")
     _require_flows()
@@ -6005,7 +6005,7 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
 
 
 @router.post("/flows/{flow_id}/publish")
-async def publish_flow_endpoint(
+def publish_flow_endpoint(
     request: Request,
     flow_id: str,
     payload: FlowPublishIn,
@@ -6049,7 +6049,7 @@ async def publish_flow_endpoint(
 
 
 @router.post("/flows/{flow_id}/unpublish")
-async def unpublish_flow_endpoint(
+def unpublish_flow_endpoint(
     request: Request,
     flow_id: str,
     payload: FlowPublishIn,
@@ -6352,7 +6352,7 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
 
 
 @router.get("/flows/runs")
-async def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50) -> dict:
+def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50) -> dict:
     """Recent flow runs (owner-scoped). Defined before ``/flows/{flow_id}`` so the
     literal ``runs`` path isn't captured as a flow id."""
     require_permission(request, "operate")
@@ -6365,7 +6365,7 @@ async def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: in
 
 
 @router.get("/flows/{flow_id}/schema")
-async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
+def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
     """The learned output-key shapes for a flow (from real runs): per key, its
     value type and, for objects/arrays-of-objects, the field names -- so the
     designer's data pills can offer nested keys like ``order.total``. Field
@@ -6650,7 +6650,7 @@ async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowR
 
 
 @router.post("/flows/runs/{run_id}/retry")
-async def retry_flow_run_endpoint(
+def retry_flow_run_endpoint(
     request: Request, run_id: str, from_failure: bool = False
 ) -> dict:
     """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
@@ -6977,7 +6977,7 @@ async def flow_analytics_endpoint(request: Request, limit: int = 500) -> dict:
 
 
 @router.get("/flows/insights")
-async def flow_insights_endpoint(request: Request) -> dict:
+def flow_insights_endpoint(request: Request) -> dict:
     """Proactive automation intelligence across all flows: pending self-rewrite
     proposals and the measured before/after impact of changes already applied --
     so the automations page can surface 'N suggestions to improve your flows'
@@ -7021,7 +7021,7 @@ async def flow_insights_endpoint(request: Request) -> dict:
 
 
 @router.post("/flows/dry-run")
-async def dry_run_flow_draft_endpoint(
+def dry_run_flow_draft_endpoint(
     request: Request,
     payload: FlowDryRunIn,
 ) -> dict:
@@ -7095,7 +7095,7 @@ async def dry_run_flow_draft_endpoint(
 
 
 @router.get("/flows/{flow_id}")
-async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
+def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
@@ -7108,7 +7108,7 @@ async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
 
 
 @router.delete("/flows/{flow_id}", status_code=204)
-async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
+def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
@@ -7135,7 +7135,7 @@ async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
 
 
 @router.post("/flows/{flow_id}/run")
-async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dict:
+def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dict:
     """Start the exact active release as a durable live run."""
     require_permission(request, "operate")
     _require_flows()
@@ -7206,7 +7206,7 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
 
 
 @router.get("/flows/{flow_id}/proposals")
-async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
+def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     """Self-rewrite proposals for a flow: node-type swaps its grounded per-node
     outcomes justify (harden a reliable agent to an action, soften a flaky action
     to an agent). Proposals only -- never auto-applied."""
@@ -7222,7 +7222,7 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
 
 
 @router.get("/flows/{flow_id}/signals")
-async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
+def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
     """The grounded learning signals a flow has accumulated, for display:
     per-node success rate (work nodes), human accept-rate (approval nodes), and
     trigger reliability (the reserved ``__trigger__`` outcome). This is what the
@@ -7256,7 +7256,7 @@ async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
 
 
 @router.post("/flows/{flow_id}/apply")
-async def apply_flow_proposal_endpoint(
+def apply_flow_proposal_endpoint(
     request: Request, flow_id: str, payload: FlowApplyIn
 ) -> dict:
     """Apply a self-rewrite: swap a node between agent and action, producing a new
@@ -7326,7 +7326,7 @@ async def apply_flow_proposal_endpoint(
 
 
 @router.get("/flows/{flow_id}/versions")
-async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
+def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
     """Every stored version of a flow (newest first), each with a per-kind node
     count -- so the designer can show history and offer a rollback."""
     require_permission(request, "operate")
@@ -7355,7 +7355,7 @@ async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
 
 
 @router.post("/flows/{flow_id}/rollback")
-async def rollback_flow_endpoint(request: Request, flow_id: str, payload: FlowRollbackIn) -> dict:
+def rollback_flow_endpoint(request: Request, flow_id: str, payload: FlowRollbackIn) -> dict:
     """Roll a flow back to a prior version (default: the immediately previous),
     non-destructively -- the restore is itself a new version."""
     require_permission(request, "operate")
@@ -7386,7 +7386,7 @@ async def rollback_flow_endpoint(request: Request, flow_id: str, payload: FlowRo
 
 
 @router.get("/flows/{flow_id}/nodes/{node_id}/impact")
-async def flow_node_impact_endpoint(request: Request, flow_id: str, node_id: str) -> dict:
+def flow_node_impact_endpoint(request: Request, flow_id: str, node_id: str) -> dict:
     """Whether a node was rewritten and, if so, how its grounded outcomes compare
     before vs. after the change -- the proof that a self-rewrite actually helped."""
     require_permission(request, "operate")
@@ -7434,7 +7434,7 @@ async def list_installed_skills() -> list[SkillOut]:
 
 
 @router.get("/flywheel")
-async def get_flywheel_state() -> dict:
+def get_flywheel_state() -> dict:
     """What the Cognitive Data Engine has learned from the workforce's own outcomes.
 
     A read-only window into the moat: the **guardrails** it has mined (actions it
@@ -7588,7 +7588,7 @@ async def templates_catalog() -> dict:
 
 
 @router.get("/templates/suggested")
-async def templates_suggested(request: Request, k: int = 5) -> dict:
+def templates_suggested(request: Request, k: int = 5) -> dict:
     """Personalized starter templates: the catalog ranked for THIS user from
     their goal-title history (pure scorer, no LLM — ``maverick.starter_templates``).
     Owner-scoped history: an authenticated non-admin is ranked on their own
@@ -8183,7 +8183,7 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
 
 
 @router.get("/spend")
-async def get_spend(request: Request) -> dict:
+def get_spend(request: Request) -> dict:
     """Spend + recent run costs, scoped to the caller's own runs.
 
     ``goal_owner_filter`` returns the caller's principal (so each user sees
@@ -8290,7 +8290,7 @@ def _value_assumptions_resolution() -> dict:
 
 
 @router.put("/savings/assumptions")
-async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) -> dict:
+def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) -> dict:
     """Persist the client's cost/value inputs (their hourly rate and human
     hours per task, plus per-department overrides) to the dashboard overlay --
     the same [value] section config.toml carries, so the wizard and the UI
@@ -8736,7 +8736,7 @@ def _local_halt_details(path) -> dict:
 
 
 @router.get("/halt")
-async def halt_status(request: Request) -> dict:
+def halt_status(request: Request) -> dict:
     """Return a verified halt state; sensitive incident detail is audit-only."""
 
     require_global_permission(request, "view")
@@ -8808,7 +8808,7 @@ async def halt_status(request: Request) -> dict:
 
 
 @router.post("/halt", status_code=204)
-async def halt_set(request: Request, payload: HaltIn, response: Response) -> None:
+def halt_set(request: Request, payload: HaltIn, response: Response) -> None:
     """Arm the verified local HALT authority and any configured shared one.
 
     The mutation always attempts a deployment-global control-plane audit row.
@@ -8889,7 +8889,7 @@ async def halt_set(request: Request, payload: HaltIn, response: Response) -> Non
 
 
 @router.delete("/halt", status_code=204)
-async def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
+def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
     request: Request,
     response: Response,
 ) -> None:
@@ -9229,7 +9229,7 @@ async def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transac
 
 
 @router.post("/goals/{goal_id}/cancel", status_code=204)
-async def cancel_goal(request: Request, goal_id: int) -> None:
+def cancel_goal(request: Request, goal_id: int) -> None:
     """Mark a goal as cancelled.
 
     The agent loop checks status at each tool-call boundary; setting
@@ -9251,7 +9251,7 @@ async def cancel_goal(request: Request, goal_id: int) -> None:
 
 
 @router.get("/goals/{goal_id}/open_questions")
-async def goal_open_questions(request: Request, goal_id: int) -> dict:
+def goal_open_questions(request: Request, goal_id: int) -> dict:
     """List unanswered questions an agent has parked for this goal."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -9307,7 +9307,7 @@ def _goal_shape(domain: str) -> str:
 
 
 @router.get("/goals/{goal_id}/signoff")
-async def get_signoff(request: Request, goal_id: int) -> dict:
+def get_signoff(request: Request, goal_id: int) -> dict:
     """The current sign-off on a goal's deliverable, plus the gate its pack
     declares (so the UI knows whether a sign-off is even called for)."""
     w = _world()
@@ -9323,7 +9323,7 @@ async def get_signoff(request: Request, goal_id: int) -> dict:
 
 
 @router.post("/goals/{goal_id}/signoff")
-async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
+def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     """Record a human's certify/reject decision on a finished deliverable -- the
     governed hand-off step (agents draft; humans certify). 400 if the pack
     declares no gate (there is nothing to sign off)."""
@@ -9387,7 +9387,7 @@ def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
 
 
 @router.get("/goals/{goal_id}/feedback")
-async def get_feedback(request: Request, goal_id: int) -> dict:
+def get_feedback(request: Request, goal_id: int) -> dict:
     """The current human thumbs-up/down on a goal's result (or ``null``)."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -9400,7 +9400,7 @@ async def get_feedback(request: Request, goal_id: int) -> dict:
 
 
 @router.post("/goals/{goal_id}/feedback")
-async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
+def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
     """Record a human thumbs-up/down on a goal's result.
 
     The always-available verdict: unlike the sign-off gate (which only exists when
@@ -9427,7 +9427,7 @@ async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> 
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")
-async def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn) -> dict:
+def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn) -> dict:
     """Save a human's revised deliverable and ground the edit as a learning signal.
 
     How much the human changed the agent's draft is graded ground truth: a
@@ -9490,7 +9490,7 @@ def _handoff_approved_deliverable(g, decided_by: str) -> None:
 
 
 @router.get("/goals/{goal_id}/deliverable.csv")
-async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
+def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     """Export a goal's deliverable as CSV -- the mechanical hand-off so an
     approved forecast/table can be loaded into a downstream system instead of
     re-keyed. 404 when the result carries no tabular deliverable."""
@@ -9531,7 +9531,7 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
 
 
 @router.get("/goals/{goal_id}/artifacts")
-async def list_goal_artifacts(request: Request, goal_id: int) -> dict:
+def list_goal_artifacts(request: Request, goal_id: int) -> dict:
     """The goal's latest artifacts -- the newest version of each titled output
     (markdown / code / table / text) it produced, with a per-title version
     count. Goal-access gated; content is decrypted for the owner."""
@@ -9544,7 +9544,7 @@ async def list_goal_artifacts(request: Request, goal_id: int) -> dict:
 
 
 @router.get("/goals/{goal_id}/artifacts/history")
-async def goal_artifact_history(request: Request, goal_id: int, title: str) -> dict:
+def goal_artifact_history(request: Request, goal_id: int, title: str) -> dict:
     """Every version of one titled artifact, oldest -> newest, each with a unified
     diff against the previous version. Powers the version/diff viewer."""
     import difflib
@@ -9586,7 +9586,7 @@ _SHARE_TTL_SECONDS = 7 * 24 * 3600
 
 
 @router.post("/goals/{goal_id}/share", status_code=201)
-async def create_goal_share(request: Request, goal_id: int) -> dict:
+def create_goal_share(request: Request, goal_id: int) -> dict:
     """Mint a read-only share link to a goal's deliverable (default 7-day
     expiry). Operator role + goal access. The clear token is returned ONCE --
     only its hash is stored, so it can't be re-fetched later, only revoked."""
@@ -9616,7 +9616,7 @@ async def create_goal_share(request: Request, goal_id: int) -> dict:
 
 
 @router.post("/goals/{goal_id}/share/{link_id}/revoke")
-async def revoke_goal_share(request: Request, goal_id: int, link_id: int) -> dict:
+def revoke_goal_share(request: Request, goal_id: int, link_id: int) -> dict:
     """Revoke a share link. Operator role + goal access; the revoke is scoped to
     this goal so a caller can't revoke another goal's link by id."""
     w = _world()
@@ -9661,7 +9661,7 @@ async def list_mcp_servers(request: Request) -> dict:
 
 
 @router.get("/tools")
-async def list_tools() -> dict:
+def list_tools() -> dict:
     """Tools the agent currently has registered (post-ACL, post-rate-limit)."""
     try:
         from maverick.sandbox import build_sandbox
@@ -9905,7 +9905,7 @@ def _inbound_secret_set() -> bool:
 
 
 @router.get("/triggers")
-async def list_triggers_endpoint(request: Request) -> dict:
+def list_triggers_endpoint(request: Request) -> dict:
     """Registered inbound webhook triggers (read-only; always available).
 
     Owner-scoped: an authenticated non-admin sees only the triggers it
@@ -9925,7 +9925,7 @@ async def list_triggers_endpoint(request: Request) -> dict:
 
 
 @router.post("/triggers", response_model=TriggerOut, status_code=201)
-async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
+def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     require_permission(request, "operate")
     _require_triggers()
     if bool(payload.template) == bool(payload.flow):
@@ -10014,7 +10014,7 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
 
 
 @router.delete("/triggers/{name}")
-async def delete_trigger_endpoint(request: Request, name: str) -> dict:
+def delete_trigger_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "operate")
     _require_triggers()
     from maverick_dashboard import triggers_store
@@ -10113,7 +10113,7 @@ async def list_event_triggers_endpoint(request: Request) -> dict:
 
 
 @router.post("/event-triggers", response_model=EventTriggerOut, status_code=201)
-async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
+def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     require_permission(request, "operate")
     _require_event_triggers()
     cfg = _govern_event_source_config(request, payload.source, payload.config)
@@ -10211,7 +10211,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
 
 
 @router.delete("/event-triggers/{name}")
-async def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
+def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "operate")
     _require_event_triggers()
     from maverick.paths import current_tenant_id
@@ -10310,7 +10310,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
 
 
 @router.get("/event-triggers/history")
-async def event_trigger_history(request: Request, name: str = "", limit: int = 50) -> dict:
+def event_trigger_history(request: Request, name: str = "", limit: int = 50) -> dict:
     """Recent firings + errors for event triggers (owner-scoped). Complements
     ``/automation-runs?kind=event`` (which shows the goals a trigger spawned)
     with the no-goal outcomes: poll failures, missing templates, skipped events."""
@@ -10331,7 +10331,7 @@ async def event_trigger_history(request: Request, name: str = "", limit: int = 5
 
 
 @router.get("/event-triggers/outcomes")
-async def event_trigger_outcomes(request: Request) -> dict:
+def event_trigger_outcomes(request: Request) -> dict:
     """Per-trigger goal-outcome counts (done / failed / blocked / active ...).
 
     Closes the attribution loop the firing history can't: a trigger that fires a
@@ -10565,7 +10565,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
 
 
 @router.get("/automation-runs")
-async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8) -> dict:
+def automation_runs(request: Request, kind: str, ref: str, limit: int = 8) -> dict:
     """Recent goals an automation spawned + a status summary. ``kind`` is
     'schedule', 'trigger', or 'event'; ``ref`` is the schedule_id or trigger name."""
     if kind not in ("schedule", "trigger", "event"):
@@ -10872,7 +10872,7 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
         from . import security_api
         from .api_schemas import SecuritySuiteConfigIn
 
-        current = await security_api.security_config(request)
+        current = await run_in_threadpool(security_api.security_config, request)
         update = SecuritySuiteConfigIn(
             security_ops=current["security_ops"],
             threat_hunt=(
@@ -12142,7 +12142,7 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
 
 
 @router.get("/replay/{goal_id}")
-async def replay_json(request: Request, goal_id: int) -> dict:
+def replay_json(request: Request, goal_id: int) -> dict:
     """Flight-recorder timeline + chain-verification verdict for one run."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -12156,7 +12156,7 @@ async def replay_json(request: Request, goal_id: int) -> dict:
 
 
 @router.get("/replay/{goal_id}/evidence")
-async def replay_evidence(request: Request, goal_id: int) -> Response:
+def replay_evidence(request: Request, goal_id: int) -> Response:
     """Download the run's evidence packet as a standalone JSON artifact."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -12563,7 +12563,7 @@ async def enable_tool(request: Request, name: str) -> dict:
 
 
 @router.get("/approvals")
-async def list_approvals(request: Request) -> dict:
+def list_approvals(request: Request) -> dict:
     """Pending high-risk actions parked by safety.consent (dashboard mode).
 
     This is the operators' collaborative supervision queue (an approval has no
@@ -12878,7 +12878,7 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         },
     },
 )
-async def approve_approval(request: Request, approval_id: int) -> Response:
+def approve_approval(request: Request, approval_id: int) -> Response:
     """Record an approval vote; once the required quorum of distinct approvers is
     met the polling consent path proceeds (N-of-M dual control)."""
     from .approval_authority import require_approval_authority
@@ -12916,7 +12916,7 @@ async def approve_approval(request: Request, approval_id: int) -> Response:
         },
     },
 )
-async def deny_approval(request: Request, approval_id: int) -> Response:
+def deny_approval(request: Request, approval_id: int) -> Response:
     """Deny a parked action (a single deny rejects it); the polling consent path
     then refuses it."""
     from .approval_authority import require_approval_authority
@@ -13013,7 +13013,7 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
 
 
 @router.get("/approvals/{approval_id}/state")
-async def approval_state(request: Request, approval_id: int) -> dict:
+def approval_state(request: Request, approval_id: int) -> dict:
     """N-of-M quorum progress for an approval (status, approvers so far vs.
     required) — the operator view of an in-flight multi-party decision."""
     require_permission(request, "operate")
@@ -13024,7 +13024,7 @@ async def approval_state(request: Request, approval_id: int) -> dict:
 
 
 @router.post("/approvals/{approval_id}/claim")
-async def claim_approval(request: Request, approval_id: int) -> dict:
+def claim_approval(request: Request, approval_id: int) -> dict:
     """Claim a pending approval (collaborative supervision).
 
     Marks "I'm handling this" so two supervisors don't double-work the same
@@ -13043,7 +13043,7 @@ async def claim_approval(request: Request, approval_id: int) -> dict:
 
 
 @router.post("/approvals/{approval_id}/release")
-async def release_approval(request: Request, approval_id: int) -> dict:
+def release_approval(request: Request, approval_id: int) -> dict:
     """Release a claim you hold. 409 when you don't hold it."""
     require_permission(request, "operate")
     who = _supervisor(request)
@@ -13053,7 +13053,7 @@ async def release_approval(request: Request, approval_id: int) -> dict:
 
 
 @router.get("/oversight/active")
-async def oversight_active(request: Request) -> dict:
+def oversight_active(request: Request) -> dict:
     """Active agents right now: running goals + their latest activity.
 
     Owner-scoped (auth-off/admin -> all). Powers the live "Active now" panel on
@@ -13098,7 +13098,7 @@ async def oversight_active(request: Request) -> dict:
 
 
 @router.get("/oversight/why/{goal_id}")
-async def oversight_why(request: Request, goal_id: int, limit: int = 40) -> dict:
+def oversight_why(request: Request, goal_id: int, limit: int = 40) -> dict:
     """Explain *why* an agent is doing what it's doing — the governance drill-down.
 
     For one goal: status, cost-so-far, a by-kind summary, and the most-recent
@@ -13166,7 +13166,7 @@ async def list_fleets_api(request: Request) -> dict:
 
 
 @router.post("/fleets/{fleet_name}/run", status_code=201)
-async def run_fleet_agent(
+def run_fleet_agent(
     request: Request,
     fleet_name: str,
     payload: FleetRunIn,
@@ -13533,7 +13533,7 @@ async def redact_preview(request: Request, payload: RedactIn) -> dict:
 
 
 @router.get("/glance")
-async def watch_glance(request: Request) -> dict:
+def watch_glance(request: Request) -> dict:
     """The Apple Watch glance payload (tiny fixed shape; see maverick.glance)."""
     from maverick.glance import build_glance
     from maverick.world_model import close_world_if_owned, open_world
@@ -13707,7 +13707,7 @@ async def cache_purge(request: Request, payload: CachePurgeIn) -> dict:
 
 
 @router.get("/goal-tree")
-async def goal_tree_api(request: Request, limit: int = 300) -> dict:
+def goal_tree_api(request: Request, limit: int = 300) -> dict:
     """The caller's goal forest with a server-computed layered layout.
 
     Powers /graph-editor and /plan-tree-3d: nodes carry (x, y) pixel
@@ -13721,7 +13721,7 @@ async def goal_tree_api(request: Request, limit: int = 300) -> dict:
 
 
 @router.post("/goals/{goal_id}/retitle", status_code=204)
-async def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
+def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     """Rename a goal (graph editor).
 
     Uses the world model's public ``set_goal_title`` so it works identically on
@@ -13741,7 +13741,7 @@ async def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> No
 
 
 @router.post("/goals/{goal_id}/reparent", status_code=204)
-async def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> None:
+def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> None:
     """Move a goal under a new parent — or to the root (``parent_id: null``).
 
     Refuses self-parenting and any move that would create a cycle (the new
@@ -13772,7 +13772,7 @@ async def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> 
 
 
 @router.post("/goals/{goal_id}/children", response_model=GoalOut, status_code=201)
-async def create_child_goal(request: Request, goal_id: int, payload: ChildIn) -> GoalOut:
+def create_child_goal(request: Request, goal_id: int, payload: ChildIn) -> GoalOut:
     """Create a child goal under ``goal_id`` (graph editor "add child").
 
     Structural only: the child is created ``pending`` and is NOT queued to
@@ -13809,7 +13809,7 @@ _COMPOSE_PRIORITIES = ("low", "normal", "high")
 
 
 @router.post("/goals/compose", response_model=GoalOut, status_code=201)
-async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> GoalOut:
+def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> GoalOut:
     """Goal-builder submit: blocks -> structured brief -> create + run.
 
     The goals table has no metadata columns (see ``WorldModel.create_goal``),
@@ -14322,7 +14322,7 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
 
 
 @router.post("/goals/{goal_id}/resume", status_code=204)
-async def resume_goal(
+def resume_goal(
     goal_id: int, request: Request, bg: BackgroundTasks, payload: GoalResumeIn | None = None
 ) -> None:
     """Resume a blocked / cancelled goal.
@@ -14542,7 +14542,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
 
 
 @router.get("/departments/{key}/review")
-async def department_review_api(request: Request, key: str) -> dict:
+def department_review_api(request: Request, key: str) -> dict:
     """A governed performance review: delivery + authority + learning."""
     require_suite(request, key)
     from maverick.worker_review import review
@@ -14554,7 +14554,7 @@ async def department_review_api(request: Request, key: str) -> dict:
 
 
 @router.get("/outcomes")
-async def outcomes_api(request: Request, top: int = 0) -> dict:
+def outcomes_api(request: Request, top: int = 0) -> dict:
     """Per-worker delivery cards + a firm-wide rollup, from the Operating Record."""
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals, worker_cards
@@ -14726,7 +14726,7 @@ async def learning_api(request: Request) -> dict:
 
 
 @router.post("/learning")
-async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
+def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
     """Turn the whole self-learning loop on or off in one action (writes the
     learning knobs to the config overlay). Returns the refreshed snapshot so the
     caller sees the new state.
@@ -14753,7 +14753,7 @@ async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> 
 
 
 @router.post("/learning/dgm")
-async def set_dgm_endpoint(request: Request, payload: DgmToggleIn) -> dict:
+def set_dgm_endpoint(request: Request, payload: DgmToggleIn) -> dict:
     """Arm/disarm research-only DGM without starting a cycle.
 
     This deployment-global control changes only ``[self_modify] enable``. The
@@ -14808,7 +14808,7 @@ async def set_dgm_endpoint(request: Request, payload: DgmToggleIn) -> dict:
 
 
 @router.post("/learning/flow-autonomy")
-async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) -> dict:
+def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) -> dict:
     """Turn the AUTONOMOUS flow self-improvement loop on/off -- its own opt-in,
     kept off the blanket learning button because autonomously rewriting a live
     workflow is a heavier consequence than passive learning.
@@ -14850,7 +14850,7 @@ async def marketplace_packs_api(request: Request, q: str = "") -> dict:
 
 
 @router.get("/run-tree/{goal_id}")
-async def run_tree_api(request: Request, goal_id: int) -> dict:
+def run_tree_api(request: Request, goal_id: int) -> dict:
     """One run's fork tree: the branch that shipped and the counterfactuals
     recorded beside it, nested under their common root.
 

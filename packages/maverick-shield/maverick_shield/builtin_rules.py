@@ -234,6 +234,29 @@ def _candidates(text: str) -> list[str]:
 #   critical -> blocks at all enforcing profiles (incl. 'permissive')
 RULES: list[Rule] = [
     # Prompt injection / override
+    # Anchor directional/context overrides to the conversation. Ordinary
+    # edits such as "ignore everything above row 10" must remain allowed.
+    Rule("discard_conversation", "high",
+         _compile(
+             r"\b(?:ignore|disregard|forget|discard)\s+"
+             r"(?:everything|all(?:\s+(?:the\s+)?(?:text|content|instructions?))?)\s+"
+             r"(?:above|before)(?:\s+(?:this|my|the)\s+(?:line|message|request|prompt))?"
+             r"\s*(?=[,.;:!?\n\u2014\u2013]|$|(?:and|then|now|instead)\b)"),
+         "Instruction override: discard the preceding conversation"),
+    Rule("configured_directives_leak", "medium",
+         _compile(
+             r"\b(?:paste|show|print|repeat|output|quote|dump|share|reveal)\s+"
+             r"(?:back\s+)?(?:me\s+)?(?:the\s+|your\s+)?"
+             r"(?:directives?|instructions?|rules?|prompt|guidance)\s+"
+             r"(?:that\s+)?you\s+were\s+(?:configured|initiali[sz]ed|set\s+up)\s+with\b"),
+         "System prompt extraction: request the assistant's startup directives"),
+    Rule("cancel_setup_limits", "high",
+         _compile(
+             r"\b(?:treat|consider|regard)\s+(?:the\s+|your\s+)?(?:setup\s+)?"
+             r"(?:limits?|constraints?|rules?|instructions?|directives?|guidelines?|guardrails?)\s+"
+             r"(?:that\s+)?you\s+(?:started|began)\s+with\s+as\s+(?:now\s+)?"
+             r"(?:cancelled|canceled|void|invalid|revoked|inapplicable|nullified)\b"),
+         "Instruction override: cancel the assistant's initial constraints"),
     Rule("ignore_previous", "high",
          _compile(r"\b(ignore|disregard|forget)\s+(all|every|the)?\s*(previous|prior|above|earlier|preceding)\s+(instructions?|prompts?|rules?|context)"),
          "Classic prompt-injection: instruction override"),

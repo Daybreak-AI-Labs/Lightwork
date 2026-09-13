@@ -53,6 +53,7 @@ class _Approval:
     decided_by: str | None = None
     requested_by: str | None = None
     claimed_by: str | None = None
+    department: str = ""
 
 
 class _World:
@@ -203,7 +204,7 @@ def test_sla_no_data_is_not_a_false_breach():
     world = _World(goals=[])  # a scoping-stage function with no work yet
     fn = _fn([
         SLATarget("Exceptions", "max_exception_rate_pct", 5.0),
-        SLATarget("Turnaround", "max_turnaround_hours", 24.0),  # unmeasured in v1
+        SLATarget("Turnaround", "max_turnaround_hours", 24.0),
     ])
     rows = {r["metric"]: r for r in shoring.sla_status(fn, world, now=now)}
     assert rows["max_exception_rate_pct"]["status"] == "no_data"
@@ -228,15 +229,17 @@ def test_measurement_scoped_by_department():
 # --------------------------------------------------------------------------- #
 def test_exception_desk_filters_by_department():
     pending = [
-        _Approval(1, "wire.transfer", scope="finance_ap payment run"),
-        _Approval(2, "post.tweet", scope="marketing campaign"),
-        _Approval(3, "vendor.add", provenance="finance_ap onboarding"),
+        _Approval(1, "wire.transfer", department="finance_ap"),
+        _Approval(2, "post.tweet", department="marketing", detail="mentions finance_ap"),
+        _Approval(3, "vendor.add", department="finance_ap"),
+        _Approval(4, "vendor.add", scope="finance_ap", provenance="finance_ap"),
     ]
     world = _World(pending=pending)
     fn = _fn([])
     st = shoring.function_status(fn, world, now=time.time())
     assert st["exception_count"] == 2
     assert {e["id"] for e in st["exceptions"]} == {1, 3}
+    assert st["unassigned_exception_count"] == 1
 
 
 def test_overall_rolls_up_worst_sla():

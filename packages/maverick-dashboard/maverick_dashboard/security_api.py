@@ -176,7 +176,7 @@ async def regulatory_clock_packs(request: Request) -> dict:
 
 
 @router.get("/config")
-async def security_config(request: Request) -> dict:
+def security_config(request: Request) -> dict:
     """Admin-only effective booleans and enabled connector names; never credentials."""
     require_global_permission(request, "admin")
     from maverick.config import config_source_errors, load_global_config
@@ -267,7 +267,7 @@ async def update_security_config(
             "security hunter scheduler reconciliation failed: %s",
             type(exc).__name__,
         )
-    result = await security_config(request)
+    result = await run_in_threadpool(security_config, request)
     if scheduler_degraded:
         result["scheduler_degraded"] = scheduler_degraded
     return result

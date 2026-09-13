@@ -3839,6 +3839,49 @@ class ConsentPreferenceStore:
             **counts,
         }
 
+    @staticmethod
+    def _policy_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        purposes = _loads(row["purposes_json"], "policy purposes")
+        if not isinstance(purposes, dict):
+            raise ConsentPreferencesError("stored policy purposes are invalid")
+        return {
+            "policy_id": str(row["policy_id"]),
+            "version": int(row["version"]),
+            "purposes": purposes,
+            "notice_sha256": str(row["notice_sha256"]),
+            "policy_sha256": str(row["policy_sha256"]),
+            "effective_at": float(row["effective_at"]),
+            "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
+            "created_at": float(row["created_at"]),
+        }
+
+    def get_active_policy(
+        self, tenant_id: str, policy_id: str, *, at: float, version: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve one policy independently of the bounded history listing.
+
+        Without ``version``, return the newest version effective at ``at``.
+        A specified version supports historical receipt checks without
+        confusing a still-effective old version with current client authority.
+        """
+        tenant = self._tenant(tenant_id)
+        policy = _text(policy_id, "policy_id")
+        evaluated_at = _timestamp(at, "at")
+        assert evaluated_at is not None
+        if version is not None:
+            version = _positive_version(version)
+        with self._connect() as conn:
+            if version is None:
+                row = self._active_policy(conn, tenant, policy, evaluated_at)
+            else:
+                row = conn.execute(
+                    "SELECT * FROM consent_policies WHERE tenant = ? AND policy_id = ? "
+                    "AND version = ? AND effective_at <= ? "
+                    "AND (expires_at IS NULL OR expires_at > ?)",
+                    (tenant, policy, version, evaluated_at, evaluated_at),
+                ).fetchone()
+        return self._policy_from_row(row) if row is not None else None
+
     def list_policies(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
         tenant = self._tenant(tenant_id)
         page_size = _limit(limit)
@@ -3850,27 +3893,7 @@ class ConsentPreferenceStore:
                 "ORDER BY policy_id, version DESC LIMIT ?",
                 (tenant, page_size + 1),
             ).fetchall()
-        policies: list[dict[str, Any]] = []
-        for row in rows[:page_size]:
-            purposes = _loads(row["purposes_json"], "policy purposes")
-            if not isinstance(purposes, dict):
-                raise ConsentPreferencesError("stored policy purposes are invalid")
-            policies.append(
-                {
-                    "policy_id": str(row["policy_id"]),
-                    "version": int(row["version"]),
-                    "purposes": purposes,
-                    "notice_sha256": str(row["notice_sha256"]),
-                    "policy_sha256": str(row["policy_sha256"]),
-                    "effective_at": float(row["effective_at"]),
-                    "expires_at": (
-                        float(row["expires_at"])
-                        if row["expires_at"] is not None
-                        else None
-                    ),
-                    "created_at": float(row["created_at"]),
-                }
-            )
+        policies = [self._policy_from_row(row) for row in rows[:page_size]]
         return {"policies": policies, "truncated": len(rows) > page_size}
 
     def list_profiles(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:

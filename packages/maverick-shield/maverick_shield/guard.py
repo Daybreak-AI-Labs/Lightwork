@@ -115,7 +115,7 @@ class Shield:
     def __init__(
         self,
         profile: str = "balanced",
-        block_threshold: str = "high",
+        block_threshold: str | None = None,
         backend: str = "auto",
         warn_if_missing: bool = True,
         scan_input: bool = True,
@@ -132,7 +132,8 @@ class Shield:
         # before strip/lower so truthy non-string TOML values (for example
         # profile = true or block_threshold = 1) cannot crash Shield startup.
         profile = _normalize_config_token(profile, "balanced")
-        block_threshold = _normalize_config_token(block_threshold, "high")
+        default_threshold = {"strict": "medium", "permissive": "critical"}.get(profile, "high")
+        block_threshold = _normalize_config_token(block_threshold, default_threshold)
         backend = _normalize_config_token(backend, "auto")
         self.profile = profile
         self.block_threshold = block_threshold
@@ -208,7 +209,7 @@ class Shield:
             required = bool(safety.get("require_shield", False))
         return cls(
             profile=safety.get("profile", "balanced"),
-            block_threshold=safety.get("block_threshold", "high"),
+            block_threshold=safety.get("block_threshold"),
             scan_input=safety.get("scan_input", True),
             scan_tool_calls=safety.get("scan_tool_calls", True),
             scan_output=safety.get("scan_output", True),
@@ -261,9 +262,18 @@ class Shield:
                         reason="; ".join(reasons) or "blocked",
                         raw=result,
                     )
-                return ShieldVerdict.allow()
+                verdict = ShieldVerdict.allow()
             except Exception as e:
-                return self._scan_failure("SDK", e)
+                verdict = self._scan_failure("SDK", e)
+            if not verdict.allowed:
+                return verdict
+            # An SDK allow (or optional SDK outage) cannot weaken the local
+            # floor. Previously only decoded variants received this check,
+            # leaving literal attacks uncovered under an allowing SDK.
+            floor = self._scan_builtin_floor(text)
+            floor.scan_error = floor.scan_error or verdict.scan_error
+            floor.reasons = verdict.reasons + floor.reasons
+            return floor
         # builtin
         try:
             blocked, severity, names = builtin_scan(text, block_threshold=self.block_threshold)

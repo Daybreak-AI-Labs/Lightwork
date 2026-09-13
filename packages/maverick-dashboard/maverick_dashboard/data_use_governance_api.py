@@ -247,7 +247,7 @@ async def _call(ops, function, *args, **kwargs):
 
 
 @router.get("/status")
-async def status(request: Request) -> dict:
+def status(request: Request) -> dict:
     require_permission(request, "view")
     _ops_module, _tenant, store = _authority()
     result = store.status()
