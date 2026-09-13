@@ -14,9 +14,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import Tool
+from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
+_MAX_PDF_BYTES = 100 * 1024 * 1024
 
 
 _PDF_INPUT_SCHEMA: dict[str, Any] = {
@@ -36,7 +37,9 @@ _PDF_INPUT_SCHEMA: dict[str, Any] = {
         },
         "max_chars": {
             "type": "integer",
-            "description": "Truncate output (default 100_000).",
+            "description": "Truncate output (default 100_000; maximum 1_000_000).",
+            "minimum": 1,
+            "maximum": 1_000_000,
         },
     },
     "required": ["source"],
@@ -66,14 +69,13 @@ def _parse_pages(spec: str, total: int) -> list[int]:
                 n = int(chunk)
                 if 1 <= n <= total:
                     out.add(n - 1)
-    except ValueError:
-        # Non-numeric spec (e.g. 'a-b'): fall back to all pages rather than
-        # letting ValueError escape the tool.
-        return list(range(total))
+    except ValueError as exc:
+        # Never silently expand an invalid selection to the whole document.
+        raise ValueError("invalid PDF page selection; use ranges such as 1-5,8,10-") from exc
     return sorted(out)
 
 
-def _load_bytes(source: str) -> bytes | None:
+def _load_bytes(source: str, workdir: Path | None = None) -> bytes | None:
     """Get PDF bytes from a workspace-local path or safe URL."""
     if source.startswith(("http://", "https://")):
         try:
@@ -85,7 +87,7 @@ def _load_bytes(source: str) -> bytes | None:
         # validated public IP (SSRF / DNS-rebinding), AND we stream with a
         # hard byte ceiling so a model-supplied URL can't exhaust memory with
         # a multi-GB / endless body.
-        _MAX = 100 * 1024 * 1024  # 100 MiB
+        _MAX = _MAX_PDF_BYTES
         try:
             with safe_client(source, timeout=30.0) as client:
                 with client.stream("GET", source) as resp:
@@ -108,7 +110,7 @@ def _load_bytes(source: str) -> bytes | None:
             log.warning("pdf fetch failed: %s", e)
             return None
 
-    workdir = Path.cwd().resolve()
+    workdir = Path(workdir or Path.cwd()).resolve()
     p = Path(os.path.expanduser(source))
     if not p.is_absolute():
         p = (workdir / p).resolve()
@@ -120,7 +122,9 @@ def _load_bytes(source: str) -> bytes | None:
         return None
     if not p.exists() or not p.is_file():
         return None
-    return p.read_bytes()
+    with p.open("rb") as stream:
+        data = stream.read(_MAX_PDF_BYTES + 1)
+    return data if len(data) <= _MAX_PDF_BYTES else None
 
 
 def _extract_with_pdfplumber(data: bytes, pages: str | None, include_tables: bool) -> str | None:
@@ -193,15 +197,25 @@ def extract_text_from_bytes(data: bytes, *, pages: str = "",
     return text
 
 
-def _run_read_pdf(args: dict[str, Any]) -> str:
-    source = (args.get("source") or "").strip()
+def _run_read_pdf(args: dict[str, Any], sandbox=None) -> str:
+    source = args.get("source")
+    if not isinstance(source, str):
+        return "ERROR: source must be a PDF path or URL string"
+    source = source.strip()
     if not source:
         return "ERROR: source is required"
     pages = args.get("pages") or ""
-    include_tables = bool(args.get("include_tables"))
-    max_chars = int(args.get("max_chars") or 100_000)
+    if not isinstance(pages, str):
+        return "ERROR: pages must be a page-range string"
+    include_tables = as_bool(args.get("include_tables"))
+    max_chars = args.get("max_chars", 100_000)
+    if type(max_chars) is not int or not 1 <= max_chars <= 1_000_000:
+        return "ERROR: max_chars must be an integer between 1 and 1000000"
 
-    data = _load_bytes(source)
+    try:
+        data = _load_bytes(source, getattr(sandbox, "workdir", None))
+    except (OSError, ValueError):
+        return "ERROR: PDF file could not be opened"
     if data is None:
         return f"ERROR: could not read PDF from {source!r}"
 
@@ -216,20 +230,25 @@ def _run_read_pdf(args: dict[str, Any]) -> str:
             # re-parsing the same bytes in-process (that defeats the isolation)
             return f"ERROR: isolated PDF parse failed: {e}"
     else:
-        text = extract_text_from_bytes(data, pages=pages,
-                                       include_tables=include_tables)
+        try:
+            text = extract_text_from_bytes(data, pages=pages,
+                                           include_tables=include_tables)
+        except Exception as exc:
+            return f"ERROR: PDF parse failed ({type(exc).__name__}); check the document and page selection"
     if text is None:
         return (
             "ERROR: no PDF parser available. Run: "
             "python -m pip install -e './packages/maverick-core[pdf]'"
         )
+    if not text:
+        return "ERROR: no text found in the selected PDF pages; check the range or provide OCR text"
 
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n\n[... truncated at {max_chars} chars]"
     return text
 
 
-def read_pdf() -> Tool:
+def read_pdf(sandbox=None) -> Tool:
     """Factory: builds the read_pdf tool."""
     return Tool(
         name="read_pdf",
@@ -240,5 +259,5 @@ def read_pdf() -> Tool:
             "pypdf. Install with: python -m pip install -e './packages/maverick-core[pdf]'."
         ),
         input_schema=_PDF_INPUT_SCHEMA,
-        fn=_run_read_pdf,
+        fn=lambda args: _run_read_pdf(args, sandbox),
     )

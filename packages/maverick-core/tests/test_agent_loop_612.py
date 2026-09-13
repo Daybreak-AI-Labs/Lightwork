@@ -305,7 +305,7 @@ class TestReleaseSpawns:
 
 class TestToolDispatchWallClockGuard:
     @pytest.mark.asyncio
-    async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path):
+    async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path, monkeypatch):
         # W1-31: a tool with no timeout of its own (a plugin, an MCP server,
         # a browser/file-watcher wait) previously had no equivalent to
         # _complete_guarded's wall-clock/killswitch polling -- it could hold
@@ -342,11 +342,45 @@ class TestToolDispatchWallClockGuard:
             fn=_never_returns,
         ))
 
-        t0 = time.monotonic()
+        # Exercise expiration during dispatch, independently of cold setup or
+        # scheduler delays before it. The actual guard still runs against the
+        # event loop's real monotonic deadline and cancels the actual tool.
+        armed_at = None
+        guarded = agent._await_wall_clock_guarded
+
+        def elapsed():
+            return 0.0 if armed_at is None else time.monotonic() - armed_at
+
+        async def arm_at_tool_dispatch(make_coro, *, in_flight_note):
+            nonlocal armed_at
+            if in_flight_note == "mid-tool-execution":
+                armed_at = time.monotonic()
+            return await guarded(make_coro, in_flight_note=in_flight_note)
+
+        monkeypatch.setattr(ctx.budget, "elapsed", elapsed)
+        monkeypatch.setattr(agent, "_await_wall_clock_guarded", arm_at_tool_dispatch)
         with pytest.raises(BudgetExceeded, match="mid-tool-execution"):
             await agent.run()
-        elapsed = time.monotonic() - t0
 
         # Aborted near the cap, not left hanging toward the 3600s sleep.
-        assert elapsed < 5.0
+        assert armed_at is not None
+        assert time.monotonic() - armed_at < 5.0
         assert hung["cancelled"] is True
+        assert llm.last_messages is not None
+        _assert_no_orphan_tool_use(llm.last_messages)
+
+    @pytest.mark.asyncio
+    async def test_wall_cap_exhausted_during_setup_stops_before_dispatch(self, tmp_path):
+        # A startup that consumes the cap has a different, valid outcome from
+        # a mid-tool timeout: the turn boundary returns a structured stop.
+        llm = _CapturingLLM([])
+        ctx = _ctx(tmp_path, llm, max_wall_seconds=1.0)
+        agent = Agent(ctx=ctx, role="researcher", brief="...")
+        ctx.budget._started_monotonic -= 2.0
+
+        result = await agent.run()
+
+        assert result.stop_kind == "budget"
+        assert "wall" in result.stop_detail
+        assert llm.last_messages is None
+        assert ctx.budget.tool_calls == 0

@@ -106,7 +106,7 @@
       <fieldset id="xa-add-controls" data-feature-enabled="{{ 'true' if external_agents_can_manage else 'false' }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %} style="display:grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-3); border:0; margin:0; padding:0; min-width:0;">
       <legend class="sr-only">External-agent enrollment controls</legend>
       <label>Agent id (letters, numbers, dots, dashes)
-        <input class="input" name="id" required maxlength="64" pattern="[a-z0-9][a-z0-9._-]*" placeholder="sf-quotebot">
+        <input class="input" name="id" required maxlength="64" pattern="[a-z0-9][a-z0-9._\-]*" placeholder="sf-quotebot">
       </label>
       <label>Platform
         <select class="select" name="platform">

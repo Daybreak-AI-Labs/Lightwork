@@ -307,7 +307,7 @@
             <label>Items JSON<textarea name="items_json" maxlength="49152" spellcheck="false" required>[{"item_id":"export-1","profile_id":"profile-1","receipt_limit":100}]</textarea></label>
             <div class="cbj-form-grid">
               <label>Schedule (optional)<input class="input" name="scheduled_for" type="datetime-local"></label>
-              <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
+              <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,191}" required></label>
             </div>
             <button class="btn btn--primary" type="submit">Create export</button>
           </fieldset>
@@ -324,7 +324,7 @@
             <label>Items JSON<textarea name="items_json" maxlength="49152" spellcheck="false" required>[{"item_id":"edit-1","profile_id":"profile-1","expected_revision":1,"policy_id":"policy-1","policy_version":1,"context":{"jurisdiction":"us","country_code":"US","region_code":"","collection_point":"admin","asserted_source":"operator"},"choices":[{"purpose_id":"analytics","action":"deny","channel":"all","vendor_id":"all","expires_at":null}]}]</textarea></label>
             <div class="cbj-form-grid">
               <label>Schedule (optional)<input class="input" name="scheduled_for" type="datetime-local"></label>
-              <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
+              <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,191}" required></label>
             </div>
             <button class="btn btn--primary" type="submit">Create action</button>
           </fieldset>
@@ -334,10 +334,10 @@
       <section class="cbj-card cbj-glass" aria-labelledby="cbj-job-control-title">
         <p class="cbj-kicker">Lifecycle</p><h2 id="cbj-job-control-title">Inspect or control one job</h2>
         <form class="cbj-form" id="cbj-job-control-form" autocomplete="off" novalidate>
-          <label>Job ID<input class="input" name="job_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
+          <label>Job ID<input class="input" name="job_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
           <div class="cbj-form-grid">
             <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1"></label>
-            <label hidden>Cancel idempotency key<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}"></label>
+            <label hidden>Cancel idempotency key<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,191}"></label>
           </div>
           <div class="cbj-actions">
             <button class="btn" id="cbj-load-detail" type="button">Detail</button>
@@ -363,7 +363,7 @@
               <label>Grant amount<input class="input" name="amount" type="number" min="1" max="1000000000" step="1" required></label>
               <label>Expected credit revision<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required></label>
             </div>
-            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
+            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,191}" required></label>
             <button class="btn btn--primary" type="submit">Grant credits</button>
           </fieldset>
         </form>

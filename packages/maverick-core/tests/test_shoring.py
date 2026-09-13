@@ -61,8 +61,8 @@ class _World:
         self._approvals = approvals or []
         self._pending = pending or []
 
-    def list_goals(self, *, limit=500, order="desc", owner=None):
-        return list(self._goals)[:limit]
+    def list_goals(self, *, limit=500, order="desc", owner=None, domain=None):
+        return [g for g in self._goals if domain is None or g.domain == domain][:limit]
 
     def list_episodes(self, *, limit=2000, owner=None):
         return [_Episode(g.id) for g in self._goals]

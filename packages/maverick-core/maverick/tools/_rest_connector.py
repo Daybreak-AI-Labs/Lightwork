@@ -27,6 +27,11 @@ from . import Tool, as_bool
 _WRITE_OPS = {"post", "put", "patch", "delete"}
 _GQL_MUTATION_TOKEN = re.compile(r"(?<![A-Za-z0-9_])mutation(?![A-Za-z0-9_])")
 _ENV_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+_RESPONSE_LIMIT = 4000
+_RESPONSE_FORMAT = {
+    "type": "string", "enum": ["body", "metadata"], "default": "body",
+    "description": "metadata includes HTTP status and ETag for a reviewed If-Match update. Large responses are explicitly truncated; request smaller pages.",
+}
 
 
 class _ConnectorConfigError(RuntimeError):
@@ -183,6 +188,7 @@ _SCHEMA: dict[str, Any] = {
         "path": {"type": "string", "description": "API path beginning with /..."},
         "params": {"type": "object", "description": "query params (get)."},
         "body": {"type": "object", "description": "JSON body (write ops)."},
+        "response_format": _RESPONSE_FORMAT,
         "if_match": {
             "type": "string",
             "maxLength": 512,
@@ -207,6 +213,7 @@ _READ_SCHEMA: dict[str, Any] = {
         "op": {"type": "string", "enum": ["get"], "description": "read-only: get."},
         "path": {"type": "string", "description": "API path beginning with /..."},
         "params": {"type": "object", "description": "query params."},
+        "response_format": _RESPONSE_FORMAT,
     },
     "required": ["path"],
 }
@@ -233,6 +240,11 @@ def _rest_validate(
     path = str(args.get("path") or "").strip()
     if not path:
         return "ERROR: path is required"
+    if args.get("response_format", "body") not in ("body", "metadata"):
+        return "ERROR: response_format must be body or metadata"
+    for field in ("params", "body"):
+        if field in args and not isinstance(args[field], dict):
+            return f"ERROR: {field} must be a JSON object"
     if read_only and not read_path_allowed(path):
         allowed = ", ".join(read_prefixes) or "(none)"
         return f"ERROR: {name} read path is not allowed. Allowed prefixes: {allowed}"
@@ -257,6 +269,40 @@ def _rest_validate(
     if op in _WRITE_OPS and not as_bool(args.get("confirm")):
         return f"DRY RUN: would {op.upper()} {norm(path)}. Re-run with confirm=true."
     return op, path
+
+
+def _rest_response(response, data: Any, args: dict[str, Any], token: str) -> str:
+    """Preserve small legacy bodies; never pass a cut JSON document as complete."""
+    rendered = json.dumps(data, default=str)
+    metadata = args.get("response_format") == "metadata" or response.status_code == 202
+    if not metadata and len(rendered) <= _RESPONSE_LIMIT:
+        return rendered
+    headers = {}
+    # Deliberately exclude cookies, authorization, arbitrary headers and URLs
+    # carrying signed query strings. ETags provide the existing If-Match input.
+    for name in ("etag", "last-modified", "retry-after"):
+        value = getattr(response, "headers", {}).get(name)
+        if (isinstance(value, str) and len(value) <= 512
+                and not any(ord(c) < 32 or ord(c) == 127 for c in value)
+                and not (token and token in value)):
+            headers[name] = value
+    payload = {"status_code": response.status_code, "headers": headers,
+               "truncated": False, "body": data}
+    if response.status_code == 202:
+        payload["pending"] = True
+        payload["note"] = "Accepted for processing; completion has not been verified."
+    result = json.dumps(payload, default=str)
+    if len(result) <= _RESPONSE_LIMIT:
+        return result
+    del payload["body"]
+    payload.update(truncated=True, response_chars=len(rendered),
+                   note="Partial response only; request smaller pages before drawing conclusions.",
+                   preview=rendered[:_RESPONSE_LIMIT])
+    result = json.dumps(payload)
+    while len(result) > _RESPONSE_LIMIT:
+        payload["preview"] = payload["preview"][:max(0, len(payload["preview"]) - (len(result) - _RESPONSE_LIMIT))]
+        result = json.dumps(payload)
+    return result
 
 
 def _rest_execute(
@@ -311,12 +357,14 @@ def _rest_execute(
             data = r.json()
         except ValueError:
             data = r.text or ""
+        if 300 <= r.status_code < 400:
+            return f"ERROR: {op} ({r.status_code}): redirect or conditional response; no completed result returned"
         if r.status_code >= 400:
             # Never echo a credentialed upstream failure body: providers often
             # reflect headers/query params, and arbitrary active tokens cannot
             # be recognized reliably by a pattern-only secret detector.
             return f"ERROR: {op} ({r.status_code}): upstream request failed"
-        return json.dumps(data, default=str)[:4000]
+        return _rest_response(r, data, args, tok)
     except _ConnectorConfigError as e:
         return f"ERROR: {e}"
     except RuntimeError:
@@ -593,6 +641,7 @@ _GQL_SCHEMA: dict[str, Any] = {
         "op": {"type": "string", "enum": ["query"]},
         "query": {"type": "string", "description": "GraphQL query or mutation."},
         "variables": {"type": "object"},
+        "response_format": _RESPONSE_FORMAT,
         "confirm": {"type": "boolean", "description": "required for mutations."},
     },
     "required": ["op", "query"],
@@ -621,6 +670,10 @@ def make_graphql_tool(
         q = str(args.get("query") or "").strip()
         if not q:
             return "ERROR: query is required"
+        if "variables" in args and not isinstance(args["variables"], dict):
+            return "ERROR: variables must be a JSON object"
+        if args.get("response_format", "body") not in ("body", "metadata"):
+            return "ERROR: response_format must be body or metadata"
         try:
             import httpx  # noqa: F401
         except ImportError:
@@ -630,6 +683,8 @@ def make_graphql_tool(
         variables = args.get("variables") if isinstance(args.get("variables"), dict) else {}
         try:
             base, tok = _config()
+            if deny := _capability_egress_denial(base, args, name=name):
+                return f"ERROR: {deny}"
             # Enterprise mode: a GraphQL connector POSTs agent-supplied query +
             # variables to a third-party host -- hold it to the egress boundary
             # too (the REST factory already does this).
@@ -656,9 +711,11 @@ def make_graphql_tool(
                 data = r.json()
             except ValueError:
                 return f"ERROR: graphql ({r.status_code}): invalid upstream response"
-            if r.status_code >= 400 or (isinstance(data, dict) and data.get("errors")):
+            if r.status_code >= 300 or (isinstance(data, dict) and data.get("errors")):
                 return f"ERROR: graphql ({r.status_code}): upstream request failed"
-            return json.dumps(data.get("data", data), default=str)[:4000]
+            if not isinstance(data, dict):
+                return f"ERROR: graphql ({r.status_code}): invalid upstream response"
+            return _rest_response(r, data.get("data", data), args, tok)
         except _ConnectorConfigError as e:
             return f"ERROR: {e}"
         except RuntimeError:

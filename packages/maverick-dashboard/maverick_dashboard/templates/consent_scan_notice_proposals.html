@@ -58,7 +58,7 @@
           </select>
         </label>
         <label class="csnp-wide">Proposal ID or accepted rollback proposal ID
-          <input class="input" name="proposal_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" autocomplete="off">
+          <input class="input" name="proposal_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" autocomplete="off">
         </label>
         <label>Current proposal version
           <input class="input" name="expected_proposal_revision" type="number" min="1" max="2147483647" value="1">
@@ -70,7 +70,7 @@
           <input class="input" name="expected_approval_revision" type="number" min="1" max="2147483647" value="1">
         </label>
         <label hidden>Request reference (reuse when retrying)
-          <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" autocomplete="off">
+          <input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,191}" autocomplete="off">
         </label>
         <label class="csnp-wide"><span><input name="acknowledge_local" type="checkbox"> I understand that acceptance is a local metadata baseline only and performs no legal-copy generation, site/app mutation, provider write, or notice publication.</span></label>
         <div class="csnp-actions">

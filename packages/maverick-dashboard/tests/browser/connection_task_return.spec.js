@@ -1,5 +1,11 @@
 // Actual local dashboard and case store; synthetic provider consent and renewal.
 const {test,expect}=require('@playwright/test');
+function expectUnchangedCase(after,original){
+  // The attention observation clock advances on every GET; persisted revision,
+  // effective time, state, assessment and every other field must remain equal.
+  expect(after.attention.as_of).toBeGreaterThanOrEqual(original.attention.as_of);
+  expect({...after,attention:{...after.attention,as_of:original.attention.as_of}}).toEqual(original);
+}
 test.skip(process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP!=='1','Requires the explicit synthetic setup fixture.');
 test.beforeEach(async({page,context,baseURL})=>{
   page.__errors=[];page.__failures=[];page.on('pageerror',error=>page.__errors.push(error.message));
@@ -39,7 +45,7 @@ test('denied sign-in returns to the same saved request without a credential or w
   await expect(page.locator('#cs-authorize-confirm')).not.toBeChecked();await expect(page.locator('#cs-task-return')).toBeVisible();
   await info.attach('denied-connection',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
   await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference')).toContainText(fixture.case_id);
-  const after=await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json();expect(after).toEqual(original);
+  const after=await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json();expectUnchangedCase(after,original);
   const stateAfter=await(await request.get('/__browser_fixture')).json();expect(stateAfter.connection_exchanges).toBe(fixture.connection_exchanges);expect(stateAfter.ticket_creates).toBe(fixture.ticket_creates);
 });
 test('unavailable renewal gives a usable reconnect choice and a failed refresh keeps it until readback',async({page,request},info)=>{
@@ -54,5 +60,5 @@ test('unavailable renewal gives a usable reconnect choice and a failed refresh k
   const bounds=await page.locator('#connection-setup').evaluate(node=>({scroll:node.scrollWidth,client:node.clientWidth}));expect(bounds.scroll).toBeLessThanOrEqual(bounds.client+1);
   await info.attach('renewal-recovery-mobile',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
   await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference')).toContainText(fixture.case_id);
-  expect(await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json()).toEqual(original);
+  expectUnchangedCase(await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json(),original);
 });

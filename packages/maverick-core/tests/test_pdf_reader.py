@@ -1,6 +1,7 @@
 """Regression tests for pdf_reader._parse_pages page-range clamping."""
 import time
 
+import pytest
 from maverick.tools.pdf_reader import _parse_pages
 
 
@@ -31,9 +32,9 @@ def test_start_greater_than_clamped_end_is_empty():
     assert _parse_pages("5-2", total=3) == []
 
 
-def test_non_numeric_spec_falls_back_to_all_pages():
-    # Must not raise ValueError out of the tool.
-    assert _parse_pages("a-b", total=3) == [0, 1, 2]
+def test_non_numeric_spec_does_not_silently_expand_to_all_pages():
+    with pytest.raises(ValueError, match="invalid PDF page selection"):
+        _parse_pages("a-b", total=3)
 
 
 def test_normal_ranges_still_work():

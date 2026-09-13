@@ -80,6 +80,25 @@ jobs:
             packages/maverick-dashboard/tests/browser/test-results/results.json
           retention-days: 14
 
+      - name: Explicit synthetic setup and connection recovery journeys
+        working-directory: packages/maverick-dashboard/tests/browser
+        env:
+          LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP: '1'
+          LIGHTWORK_BROWSER_OUTPUT: ${{ runner.temp }}/lightwork-setup-browser-results
+        run: >-
+          npx playwright test connection_task_return.spec.js
+          customer_setup_recovery.spec.js vendor_setup_readiness.spec.js
+      - name: Preserve setup recovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: customer-setup-browser-journeys
+          path: |
+            ${{ runner.temp }}/lightwork-setup-browser-results
+            packages/maverick-dashboard/tests/browser/browser-report
+            packages/maverick-dashboard/tests/browser/test-results/results.json
+          retention-days: 14
+
   dashboard-and-splash:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

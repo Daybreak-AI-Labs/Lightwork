@@ -43,7 +43,7 @@
     </div>
     <div class="cd-adapter-layout">
       <form id="cd-adapter-form" class="cd-form">
-        <label class="cd-wide">Configured destination ID<input class="input" name="destination_id" value="salesforce" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
+        <label class="cd-wide">Configured destination ID<input class="input" name="destination_id" value="salesforce" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
         <label class="cd-wide">Message SHA-256<input class="input" name="message_sha256" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" autocomplete="off"></label>
         <label class="cd-wide">Request SHA-256<input class="input" name="request_sha256" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" autocomplete="off"></label>
         <div class="cd-actions"><button class="btn" id="cd-adapter-ambiguous" type="button">List ambiguities</button><button class="btn" id="cd-adapter-operation" type="button">Load receipt</button><button class="btn btn--primary" id="cd-adapter-reconcile" type="button">Reconcile independently</button><button class="btn" id="cd-adapter-integrity" type="button">Verify ledger</button></div>

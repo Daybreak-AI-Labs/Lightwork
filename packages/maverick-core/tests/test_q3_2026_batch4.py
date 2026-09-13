@@ -118,7 +118,7 @@ def test_k8s_copies_workspace_into_pod_before_running(monkeypatch, tmp_path):
     backend.exec("true")
 
     cp_in = _calls_with(calls, "cp")[0]
-    assert cp_in[cp_in.index("cp") + 1] == f"{tmp_path}/."
+    assert cp_in[cp_in.index("cp") + 1] == "./."
     dest = cp_in[cp_in.index("cp") + 2]
     assert dest.startswith("ci/") and dest.endswith(":/workspace")
 
@@ -132,7 +132,7 @@ def test_k8s_copies_pod_workspace_back_out_after_running(monkeypatch, tmp_path):
     cp_out = _calls_with(calls, "cp")[1]
     src = cp_out[cp_out.index("cp") + 1]
     assert src.startswith("ci/") and src.endswith(":/workspace/.")
-    assert cp_out[cp_out.index("cp") + 2] == str(tmp_path)
+    assert cp_out[cp_out.index("cp") + 2] == "."
 
 
 def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_path):
@@ -237,10 +237,14 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     pod_sc = overrides["spec"]["securityContext"]
     assert pod_sc["runAsNonRoot"] is True
     assert pod_sc["runAsUser"] == 1000
+    assert pod_sc["fsGroup"] == 1000
+    assert pod_sc["runAsGroup"] == 1000
+    assert "--override-type=strategic" in run_args
+    assert "--command" in run_args
     container = overrides["spec"]["containers"][0]
     assert container["securityContext"]["allowPrivilegeEscalation"] is False
     assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
-    assert container["resources"]["limits"] == {"memory": "2g", "cpu": "1"}
+    assert container["resources"]["limits"] == {"memory": "2Gi", "cpu": "1"}
     assert overrides["spec"]["automountServiceAccountToken"] is False
     assert container["volumeMounts"] == [{"name": "workspace", "mountPath": "/workspace"}]
     assert overrides["spec"]["volumes"] == [{"name": "workspace", "emptyDir": {}}]

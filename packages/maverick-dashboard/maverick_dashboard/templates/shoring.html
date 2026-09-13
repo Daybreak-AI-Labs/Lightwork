@@ -78,8 +78,9 @@
       <p class="sh-meta">
         Department <code>{{ f.department or '—' }}</code>
         · owner {{ f.owner or '—' }}
-        · {{ f.delivered }} delivered / {{ f.blocked }} blocked
+        · {% if not f.measurement_complete %}sample only: {% endif %}{{ f.delivered }} delivered / {{ f.blocked }} blocked
         · {{ f.exception_count }} awaiting sign-off
+        {% if not f.measurement_complete %}<br>More than 2,000 department goals exist. Counts are partial; SLA status is unavailable for this sample.{% endif %}
         {% if f.scope %}<br>{{ f.scope }}{% endif %}
       </p>
       {% if f.slas %}
@@ -114,7 +115,7 @@
       <div class="field">
         <label for="sh-key">Key (slug, stable id)</label>
         <input id="sh-key" name="key" type="text" required
-               pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64"
+               pattern="[a-z0-9][a-z0-9_\-]{0,63}" maxlength="64"
                placeholder="accounts_payable">
       </div>
       <div class="field">
