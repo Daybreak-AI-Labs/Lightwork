@@ -82,7 +82,8 @@ def test_kubeconfig_refuses_host_command_and_file_credential_sources(field, valu
 
 @pytest.mark.parametrize("field,value", [("insecure-skip-tls-verify", True),
     ("certificate-authority", "/private/file"), ("proxy-url", "https://proxy.invalid"),
-    ("server", "http://cluster.invalid"), ("server", "https://user:password@cluster.invalid"),
+    ("server", "http://cluster.invalid"),
+    ("server", "https://user:password@cluster.invalid"),  # pragma: allowlist secret -- invalid-host fixture
     ("certificate-authority-data", ""), ("server", ["invalid"])])
 def test_kubeconfig_requires_direct_verified_tls(field, value):
     credential = _credential()
