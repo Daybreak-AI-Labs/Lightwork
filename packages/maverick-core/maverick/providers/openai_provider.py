@@ -581,22 +581,33 @@ class OpenAIClient:
             if effort is not None:
                 kwargs["reasoning_effort"] = effort
         oai_tools = self._to_openai_tools(tools)
+        mapped_choice, no_parallel = self._to_openai_tool_choice(tool_choice) if oai_tools else (None, False)
         if oai_tools and len(oai_tools) > _OPENAI_MAX_TOOLS:
             # OpenAI's Chat Completions API hard-caps `tools` at 128 and 400s the
             # whole request otherwise ("array too long"). A goal that assembles
             # more (many MCP servers / enabled capabilities) would fail entirely.
             # base_registry registers core/orchestration tools BEFORE MCP and
             # extension tools, so keeping the first _OPENAI_MAX_TOOLS preserves the
-            # essential ones and drops the excess tail. Operators who need the
+            # essential ones and drops the excess tail. An explicitly selected
+            # function takes precedence over the last retained tool. Operators who need the
             # dropped tools should reduce enabled MCP servers/capabilities or run
             # the orchestrator on a provider with a higher tool ceiling.
             log.warning(
                 "openai: %d tools exceed the API's %d-tool limit; sending the "
-                "first %d (core tools kept, excess MCP/extension tools dropped). "
+                "first %d, retaining any explicitly selected function. "
                 "Trim enabled MCP servers/capabilities to expose the rest.",
                 len(oai_tools), _OPENAI_MAX_TOOLS, _OPENAI_MAX_TOOLS,
             )
-            oai_tools = oai_tools[:_OPENAI_MAX_TOOLS]
+            retained = oai_tools[:_OPENAI_MAX_TOOLS]
+            if isinstance(mapped_choice, dict):
+                forced_name = mapped_choice["function"]["name"]
+                forced = next(
+                    (item for item in oai_tools if item["function"]["name"] == forced_name),
+                    None,
+                )
+                if forced is not None and forced not in retained:
+                    retained[-1] = forced
+            oai_tools = retained
         if (
             oai_tools
             and self._has_auto_prompt_cache(chosen_model)
@@ -612,23 +623,41 @@ class OpenAIClient:
             )
         if oai_tools:
             kwargs["tools"] = oai_tools
-            # Chat Completions rejects a reasoning effort together with function
-            # tools for gpt-5.x reasoning models: "Function tools with
-            # reasoning_effort are not supported ... use /v1/responses or set
-            # reasoning_effort to 'none'." Omitting the param is NOT enough --
-            # the model applies a default effort server-side and still refuses
-            # the tools -- so it must be set to the explicit "none" the API
-            # names. A tool-using agent must keep its tools, so force "none"
-            # whenever we set an effort above (i.e. for reasoning models).
-            if "reasoning_effort" in kwargs:
-                kwargs["reasoning_effort"] = "none"
             # W1-11: forced / restricted tool selection and serialised calls.
-            mapped_choice, no_parallel = self._to_openai_tool_choice(tool_choice)
             if mapped_choice is not None:
                 kwargs["tool_choice"] = mapped_choice
             if no_parallel:
                 kwargs["parallel_tool_calls"] = False
         return kwargs
+
+    @staticmethod
+    def _disable_rejected_tool_reasoning(kwargs: dict[str, Any], exc: Exception) -> bool:
+        """Apply the provider's explicit compatibility remedy once, after a 400.
+
+        Reasoning support is model-specific. Forcing ``none`` before every
+        tool call breaks older reasoning models and discards requested effort.
+        Only honor the precise rejection that explicitly offers ``none``;
+        unrelated validation, authentication and transport errors propagate.
+        """
+        if (
+            getattr(exc, "status_code", None) != 400
+            or not kwargs.get("tools")
+            or kwargs.get("reasoning_effort") == "none"
+        ):
+            return False
+        from openai import BadRequestError
+
+        if not isinstance(exc, BadRequestError):
+            return False
+        message = str(exc.message).lower()
+        if (
+            "function tools with reasoning_effort are not supported" not in message
+            or not any(value in message for value in ("'none'", '"none"'))
+        ):
+            return False
+        log.warning("openai: provider requires reasoning_effort=none with function tools; retrying once")
+        kwargs["reasoning_effort"] = "none"
+        return True
 
     def complete(
         self,
@@ -650,7 +679,15 @@ class OpenAIClient:
             system, messages, tools, max_tokens, model, thinking_budget,
             **({"tool_choice": tool_choice} if tool_choice else {}),
         )
-        resp = sync_retry(lambda: self._sync.chat.completions.create(**kwargs))
+        def request():
+            try:
+                return self._sync.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if not self._disable_rejected_tool_reasoning(kwargs, exc):
+                    raise
+                return self._sync.chat.completions.create(**kwargs)
+
+        resp = sync_retry(request)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,
@@ -672,7 +709,15 @@ class OpenAIClient:
             system, messages, tools, max_tokens, model, thinking_budget,
             **({"tool_choice": tool_choice} if tool_choice else {}),
         )
-        resp = await async_retry(lambda: self._async.chat.completions.create(**kwargs))
+        async def request():
+            try:
+                return await self._async.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if not self._disable_rejected_tool_reasoning(kwargs, exc):
+                    raise
+                return await self._async.chat.completions.create(**kwargs)
+
+        resp = await async_retry(request)
         return self._from_response(
             resp, budget, model=kwargs.get("model"),
             price_model_prefix=self.PRICE_MODEL_PREFIX,

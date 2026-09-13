@@ -7,6 +7,8 @@ operator-only (matching approve/deny/claim).
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
@@ -91,6 +93,20 @@ def test_spend_auth_off_unchanged():
     _spend_goal("", 3.00)
     data = client.get("/api/v1/spend").json()
     assert data["total"]["dollars"] == pytest.approx(5.00)
+
+
+@pytest.mark.parametrize("user,total", [("alice", 1.0), ("bob", 9.0), ("root", 10.0)])
+def test_spend_html_scopes_episodes_and_totals_to_authenticated_user(monkeypatch, user, total):
+    _enable_oidc(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    alice_goal = _spend_goal("user:alice", 1.0)
+    bob_goal = _spend_goal("user:bob", 9.0)
+    response = client.get("/spend", headers=_as(user))
+    assert response.status_code == 200
+    assert f"${total:,.2f} total spent" in response.text
+    expected = {"alice": {alice_goal}, "bob": {bob_goal}, "root": {alice_goal, bob_goal}}
+    rendered_goals = {int(value) for value in re.findall(r"<td>\s*#(\d+)\s*</td>", response.text)}
+    assert rendered_goals == expected[user]
 
 
 # ---- /approvals operator gate ---------------------------------------------

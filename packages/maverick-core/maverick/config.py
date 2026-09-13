@@ -39,23 +39,13 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+# Initialize encryption before a worker resolves sealed dashboard settings.
+from . import crypto_at_rest
+
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
-
-# Eagerly bind crypto_at_rest at import time so it is fully initialized before
-# any worker thread reaches _unseal_config_tree's `from .crypto_at_rest import
-# deployment_key_scope, ...`. That lazy import races a partially-initialized
-# crypto_at_rest whenever client binding -> load_config -> unseal a sealed
-# config value (e.g. a dashboard-set provider key) first triggers the module's
-# import from inside a goal-execution thread, raising "cannot import name
-# 'deployment_key_scope' from partially initialized module 'maverick.
-# crypto_at_rest'" and failing open_world() so goals never leave 'pending'.
-# The edge is one-directional: crypto_at_rest imports only file_lock + paths at
-# module level (neither imports config), so this cannot re-form a cycle.
-from . import crypto_at_rest  # noqa: E402,F401
-
 
 # Note: do not cache the default at module import time. Both the platform home
 # and the documented MAVERICK_HOME override can change in test/embedded
@@ -301,15 +291,12 @@ def _unseal_config_tree(value: object) -> object:
         return value
     token = _UNSEALING.set(True)
     try:
-        from .crypto_at_rest import (
-            deployment_key_scope,
-            is_sealed_str,
-            unseal_from_str,
-        )
-
         def walk(item: object) -> object:
             if isinstance(item, str):
-                return unseal_from_str(item) if is_sealed_str(item) else item
+                return (
+                    crypto_at_rest.unseal_from_str(item)
+                    if crypto_at_rest.is_sealed_str(item) else item
+                )
             if isinstance(item, dict):
                 return {key: walk(child) for key, child in item.items()}
             if isinstance(item, list):
@@ -318,7 +305,7 @@ def _unseal_config_tree(value: object) -> object:
                 return tuple(walk(child) for child in item)
             return item
 
-        with deployment_key_scope():
+        with crypto_at_rest.deployment_key_scope():
             return walk(value)
     finally:
         _UNSEALING.reset(token)
@@ -333,7 +320,7 @@ def _load_config_file(path: Path) -> dict:
     loaded = _interp(_read_toml_raw(path))
     if path.name == DASHBOARD_OVERRIDES_BASENAME:
         try:
-            return _unseal_config_tree(loaded)  # type: ignore[return-value]
+            unsealed = _unseal_config_tree(loaded)
         except Exception as exc:
             # An undecryptable sealed overlay value (e.g. after a
             # MAVERICK_ENCRYPTION_KEY rotation leaves dashboard-config.toml
@@ -349,6 +336,12 @@ def _load_config_file(path: Path) -> dict:
                 path, exc,
             )
             return {}
+        # A corrected key can recover the same cached TOML without a file edit.
+        # Only clear a decryption error after a complete unseal; plaintext or
+        # recursive reads must not erase parse errors or a prior failed unseal.
+        if _tree_contains_sealed_value(loaded) and not _UNSEALING.get():
+            _toml_errors.pop(str(path), None)
+        return unsealed  # type: ignore[return-value]
     return loaded
 
 

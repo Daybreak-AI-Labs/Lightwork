@@ -186,7 +186,9 @@ class _ContextFilter(logging.Filter):
         # formatter emits the scrubbed version. exc_info is left intact so the
         # JsonFormatter (which re-derives and independently scrubs it) still
         # renders a traceback in JSON mode.
-        if record.exc_info and not record.exc_text:
+        if record.exc_text:
+            record.exc_text = _scrub_value(record.exc_text)
+        elif record.exc_info:
             try:
                 import traceback as _tb
                 record.exc_text = _scrub_value(
@@ -194,6 +196,8 @@ class _ContextFilter(logging.Filter):
                 )
             except Exception:  # pragma: no cover
                 pass
+        if record.stack_info:
+            record.stack_info = _scrub_value(record.stack_info)
         return True
 
 

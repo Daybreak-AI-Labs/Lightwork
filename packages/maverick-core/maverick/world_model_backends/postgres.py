@@ -30,6 +30,7 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import threading
 import time
@@ -1109,6 +1110,31 @@ def _dec_question_row(r):
     return Question(r[0], r[1], _unseal(r[2]), r[3], _unseal(r[4]), r[5])
 
 
+def _connection_kwargs(dsn: str) -> dict:
+    """Preserve operator libpq options while bounding unattended transactions."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    options = conninfo_to_dict(dsn).get("options", os.environ.get("PGOPTIONS", ""))
+    defaults = (
+        ("statement_timeout", "MAVERICK_PG_STATEMENT_TIMEOUT_MS", 30_000),
+        ("idle_in_transaction_session_timeout", "MAVERICK_PG_IDLE_TX_TIMEOUT_MS", 60_000),
+    )
+    additions = []
+    for setting, env_name, default in defaults:
+        # Parse only the options value, not credentials or database names that
+        # happen to contain a setting name. Accept -c foo=N, -cfoo=N and --foo=N.
+        if re.search(r"(?:^|\s)(?:-c\s*|--)?" + setting + r"\s*=", options):
+            continue
+        try:
+            timeout = int(os.environ.get(env_name, str(default)))
+        except ValueError:
+            timeout = default
+        if not 0 <= timeout <= 2_147_483_647:
+            timeout = default
+        additions.append(f"-c {setting}={timeout}")
+    return {"autocommit": False, "options": " ".join([options, *additions]).strip()}
+
+
 class PostgresWorldModel:
     """Postgres adapter. Public surface mirrors SQLite WorldModel.
 
@@ -1145,26 +1171,9 @@ class PostgresWorldModel:
         # single-connection + RLock model byte-for-byte.
         self._pool = None
         size = _pool_size()
-        # Bound server-side timeouts so a stalled statement raises
-        # OperationalError (which _tx handles by closing + reconnecting) instead
-        # of holding the shared RLock forever and wedging the replica. Defaulted
-        # only when the operator's DSN hasn't already set them; env-overridable.
-        def _timeout_ms(name: str, default: int) -> int:
-            raw = os.environ.get(name, "")
-            try:
-                return max(0, int(raw)) if raw else default
-            except (TypeError, ValueError):
-                return default
-        _opts = []
-        if "statement_timeout" not in self._dsn:
-            _opts.append("-c statement_timeout="
-                         + str(_timeout_ms("MAVERICK_PG_STATEMENT_TIMEOUT_MS", 30000)))
-        if "idle_in_transaction_session_timeout" not in self._dsn:
-            _opts.append("-c idle_in_transaction_session_timeout="
-                         + str(_timeout_ms("MAVERICK_PG_IDLE_TX_TIMEOUT_MS", 60000)))
-        _conn_kwargs: dict = {"autocommit": False}
-        if _opts:
-            _conn_kwargs["options"] = " ".join(_opts)
+        # A statement timeout is rolled back by _tx; a terminated idle
+        # transaction closes the connection. Retain these options on reconnect.
+        self._connect_kwargs = _connection_kwargs(self._dsn)
         if size > 0:
             try:
                 from psycopg_pool import ConnectionPool
@@ -1175,11 +1184,11 @@ class PostgresWorldModel:
                 ) from e
             self._pool = ConnectionPool(
                 self._dsn, min_size=1, max_size=size, open=True,
-                kwargs=dict(_conn_kwargs),
+                kwargs=dict(self._connect_kwargs),
             )
             self.conn = None
         else:
-            self.conn = psycopg.connect(self._dsn, **_conn_kwargs)
+            self.conn = psycopg.connect(self._dsn, **self._connect_kwargs)
         # One long-lived connection shared across this object (non-pooled mode).
         # psycopg connections are NOT safe for concurrent use by multiple
         # threads, and the kernel drives this from FastAPI's threadpool + the
@@ -1218,7 +1227,7 @@ class PostgresWorldModel:
         if self.conn is not None and not self.conn.closed:
             return
         import psycopg
-        self.conn = psycopg.connect(self._dsn, autocommit=False)
+        self.conn = psycopg.connect(self._dsn, **self._connect_kwargs)
 
     @contextmanager
     def _tx(self) -> Iterator:

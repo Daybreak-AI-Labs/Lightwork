@@ -2399,7 +2399,8 @@ async def run_goal(
     # A prepared outcome-pilot task is still a normal goal row and can be
     # reached from the CLI, queue, API, or another internal dispatcher.  Keep
     # the admission check at this common boundary, before sandbox setup,
-    # recovery markers, episodes, provider clients, or goal-state mutation.
+    # recovery markers, episodes, or provider clients. An authorized failed
+    # start may mark runnable work blocked, but must preserve recovery state.
     # Work without an exact tenant-scoped pilot claim takes the fast no-op path.
     goal = world.get_goal(goal_id)
     if goal is not None:
@@ -2412,15 +2413,16 @@ async def run_goal(
             require_work_item_admission("goal", str(goal_id))
         except OutcomePilotAdmissionRequired as exc:
             reason = _safe_exception_text(exc, fallback="pilot admission required")
-            # Persist the terminal state. Without this the goal row stays
-            # 'pending' forever and the dashboard shows a perpetual "Working…"
-            # (the CLI surfaces the returned string, but background/dashboard
-            # callers only observe status). Mark it blocked so the block is
-            # visible and the run is not silently stranded.
-            try:
-                world.set_goal_status(goal_id, "blocked", result=reason)
-            except Exception:  # pragma: no cover - status write must not mask the block
-                log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
+            # Preserve existing blocked/terminal results, including the exact
+            # prepared-pilot marker needed for admission recovery. Only the
+            # goal's execution principal may persist a failed start.
+            if goal.status in {"pending", "active", "in_progress", "running"}:
+                try:
+                    principal = _execution_principal(user_id=user_id, capability=capability)
+                    if _bind_goal_execution_principal(world, goal, principal):
+                        world.set_goal_status(goal_id, "blocked", result=reason)
+                except Exception:  # pragma: no cover - status write must not mask the block
+                    log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
             return f"BLOCKED: {reason}"
     from .task_file_recovery import run_scope
     sandbox = sandbox or LocalBackend()
