@@ -32,6 +32,11 @@ provider is contacted, and no customer data is used.
 
 Coverage includes:
 
+- Actual first-owner enrollment and login without injected request identity,
+  traversing every rendered default sidebar destination, phone-width sign-out
+  and refusal of private pages after the cookie is removed. Navigation waits
+  for the shell's initialization signal; it does not equate network idle with
+  workflow or provider readiness.
 - A private flow recovery copy across independent browser contexts, explicit
   keyboard confirmation, and competing edits without automatic execution.
 - A failed workflow recovery save, exact-operation retry, reload and restore.

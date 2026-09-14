@@ -181,3 +181,38 @@ def test_admin_api_returns_explicit_authority_stale_code(client):
         "code": "global_opt_out_authority_stale",
         "message": "publication changed",
     }
+
+
+def test_store_creation_runs_off_event_loop_with_the_requested_identity(client):
+    import asyncio
+
+    http, store = client
+    calls = []
+
+    def factory(**kwargs):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        calls.append(kwargs)
+        return store
+
+    http.app.state.global_opt_out_admin_store_factory = factory
+    response = http.get("/api/v1/consent/global-opt-out/configurations")
+    assert response.status_code == 200
+    assert calls[0]["tenant_id"] == "alpha"
+    assert calls[0]["principal_ref"].startswith("global-opt-out-admin-")
+
+
+@pytest.mark.parametrize("failure,status,code", [
+    (goo.GlobalOptOutDisabled("module is disabled"), 403, "global_opt_out_disabled"),
+    (goo.GlobalOptOutIntegrityError("authority is unavailable"), 503, "global_opt_out_integrity_failure"),
+])
+def test_store_creation_errors_use_the_operation_error_contract(client, failure, status, code):
+    http, _store = client
+
+    def factory(**_kwargs):
+        raise failure
+
+    http.app.state.global_opt_out_admin_store_factory = factory
+    response = http.get("/api/v1/consent/global-opt-out/configurations")
+    assert response.status_code == status
+    assert response.json()["detail"]["code"] == code

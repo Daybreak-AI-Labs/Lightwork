@@ -8,10 +8,13 @@ Provider accounts, licensing and network-dependent product features retain
 their normal requirements. The engineering `Package.wxs` bootstrap is separate.
 
 **Status: implemented candidate path, not yet an accepted customer release.**
-The runtime has been built and exercised locally. The new Windows workflow has
-not yet passed on a native CI runner, no recognized publisher certificate has
-been supplied, and no clean-VM acceptance has been performed. Local frozen
-runtime checks do not establish those gates. This workflow produces candidates;
+The [Windows candidate workflow at the source merged in PR #2512](https://github.com/Daybreak-AI-Labs/Lightwork/actions/runs/34777432941)
+passed native installation, repair, synthetic upgrade/rollback and WebView
+journeys. Those runs used disposable signing identities and the same frozen
+runtime under different fixture versions. They do not qualify a recognized
+customer publisher, a clean customer computer or a real release migration.
+As checked on September 14, 2026, the repository has no published releases or
+recorded real release-pair acceptance run. This workflow produces candidates;
 it does not publish an installer or activate an update channel.
 
 ## Customer maintenance

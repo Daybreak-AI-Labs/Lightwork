@@ -21,21 +21,19 @@ install, verify the script, and set `MAVERICK_REF` to that lowercase, full
 40-character commit SHA before running it. Mutable branch/tag refs are always
 rejected.
 
-## Native bundles (planned)
+## Windows customer package candidate
 
-The long-term plan ships native bundles per platform so users don't
-need Python installed at all:
+The implemented Windows x64 path is a Tauri **MSI** containing a PyInstaller
+frozen runtime with all eight Lightwork packages and an offline WebView2
+installer. It opens the local dashboard and has native update, repair and
+guarded recovery controls. The customer machine does not need Python, Git,
+Node or a source checkout for this candidate.
 
-| Platform | Tool | Format | Auto-update |
-|---|---|---|---|
-| macOS | Tauri | Notarized DMG, signed `.app` | Sparkle via Tauri updater |
-| Windows | Tauri | Signed MSIX | Tauri updater |
-| Linux | Tauri | AppImage + `.deb` + `.rpm` | AppImageUpdate |
+See [`apps/installer-msi/CUSTOMER.md`](../../apps/installer-msi/CUSTOMER.md)
+for the implementation, CI evidence and remaining publisher/clean-machine
+acceptance. A passed synthetic CI installer is not an accepted customer release;
+the source-bootstrap scripts above are a separate engineering installation.
 
-The Tauri shell ships an embedded Python runtime via
-[PyOxidizer](https://pyoxidizer.readthedocs.io/) or
-[python-build-standalone](https://github.com/indygreg/python-build-standalone),
-and the wizard runs as a Svelte UI talking to a sidecar Python process.
-
-See [`apps/installer-desktop/`](../../apps/installer-desktop/README.md)
-for the scaffold and milestones.
+The macOS and Linux desktop projects have their own build and device acceptance
+requirements. This page does not establish a notarized macOS release or
+qualified Linux native package.

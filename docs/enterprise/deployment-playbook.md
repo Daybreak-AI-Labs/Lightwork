@@ -4,7 +4,7 @@ A step-by-step runbook for standing up Lightwork for an enterprise customer:
 what to **collect from them**, what to **provision**, how to **install**, how to
 **harden**, how to **verify**, and how to **operate** day-2. Every command and
 config key below is real; anything not yet implemented is called out explicitly
-in [§10 Known gaps](#10-known-gaps-to-track).
+in [§10 Gap status](#10-gap-status).
 
 > TL;DR ordering: **decide the shape → collect inputs → provision deps →
 > install → harden (do not skip §6) → provision tenants → verify → operate.**
@@ -16,7 +16,7 @@ in [§10 Known gaps](#10-known-gaps-to-track).
 | Question | Options | Drives |
 |---|---|---|
 | Who runs it? | Customer self-hosts **(recommended)** / we host | Data boundary, sub-processor list |
-| Tenancy | One instance **per customer** (recommended) / shared multi-tenant | Channels, OIDC, isolation model |
+| Tenancy | One instance **per customer**, with workspaces inside it | Channels, OIDC, isolation model; shared hosting is not qualified by this runbook |
 | World-model backend | SQLite / **Postgres** (managed HA, pooling, RLS) | Backups, DB isolation; control plane remains 1 replica |
 | Trust of agent-run code | Trusted ops only / **untrusted/multi-tenant** | Sandbox backend (§6.1) — **blocker if wrong** |
 | LLM | Cloud (Anthropic/OpenAI/…) / **self-hosted** (vLLM/Ollama/TGI) | Egress lock, data residency |
@@ -283,7 +283,11 @@ maverick backup restore /backups/acme-2026-06-18.tgz         # transactional; au
 
 The signing key is not stored in the archive. Provision the same key through
 the active and standby hosts' secret manager. `--force` never bypasses manifest
-authentication, archive limits, or path/type validation.
+authentication, forward-schema checks, archive limits, or path/type validation.
+The default archive excludes raw encryption and audit-signing `.key` files.
+Retain and restore them through separate key custody. Also recover global
+administration/configuration and any external stores; prove decryption and
+application use on the standby before calling the deployment recovered.
 
 **Upgrade:** a pre-migration snapshot is written automatically
 (`world.db.pre-migration-v<N>.bak`); migrations are forward-only and CI-gated
@@ -349,7 +353,7 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
 | Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared yet. | Enforced at runtime: the control plane takes an exclusive lock on its data root at startup, and a second process refuses to serve and names the holder. Helm additionally refuses `replicaCount > 1` and control-plane HPA. `/readyz` reports the replica-safety posture. Scale remote workers separately. |
 | MCP | Shared bearer grants full tool access; per-tenant gating only via Agent Trust Plane (opt-in). | `[agent_trust] enforce=true` with per-agent tokens. |
 | Plugins | Granted plugins run **in-process** — no runtime syscall/network sandbox (load-time grants only). | Vet + code-review allowlisted plugins. |
-| Firecracker | Silently falls back to Docker if the VM layer is unavailable. | Monitor logs; alert on fallback. |
+| Local Firecracker | The local scaffold is unsupported; it does not qualify customer execution and is not a silent Docker fallback. | Select and qualify a supported execution backend. Managed AWS requires the separate Kubernetes executor in [`deploy/aws/EXECUTOR.md`](../../deploy/aws/EXECUTOR.md). |
 | Billing | Metering + idempotent invoicing exist; **no card-checkout by design** (enterprise contract + AR motion). See [`../billing.md`](../billing.md). | Export usage (`billing invoice --json`); bill via AR, or wire a processor keyed on `invoice_id`. |
 | Compliance | **DPA / sub-processor / SLA templates** now ship in `docs/enterprise/legal/`; **SOC 2 Type II + penetration test require external auditors** (not code). | Engage auditor/pen-test firm; complete the templates with counsel. |
 
