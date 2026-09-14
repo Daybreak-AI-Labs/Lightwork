@@ -230,10 +230,13 @@ and renders the actual platform collectors through an isolated registry.
 Staging and installed Windows acceptance already run that command inside the
 frozen executable; missing or broken dependencies now fail that gate.
 
-Thirteen new regression cases cover actual dependencies without customer network
+Twenty-seven release-runtime regression cases cover actual dependencies without customer network
 connections, missing dependencies, a missing native binary implementation,
-missing converter data, omitted/degraded metrics collectors and nonzero CLI
-failure. All **78 related tests passed in each security posture** locally.
+missing converter data, omitted/degraded metrics collectors, native library
+security-version boundaries and nonzero CLI failure. The initial package suite
+passed 78 cases per posture. After the native dependency update, **238 package,
+database and knowledge tests passed per posture**, with two live PostgreSQL cases
+reserved for CI in this local environment. Counts overlap.
 Immutable Windows build/acceptance results are recorded in the PR; these local
 results do not themselves establish success inside the frozen executable.
 The [release runtime profile](../release-runtime-profile.md) declares the included
@@ -245,6 +248,55 @@ acceptance remain required under R1/R3/R4/R5. Source tests and the eight-package
 inventory must not advertise every optional connector as ready. The selected
 profile does not include every SQL driver, OpenTelemetry/Sentry SDK, research
 dependency or external document engine.
+
+### Native PostgreSQL dependency hardening
+
+The Python dependency audit passed while the pinned Psycopg 3.3.4 Windows wheel
+loaded libpq **18.3**. That native library precedes the vendor's fix for
+[CVE-2026-6477](https://www.postgresql.org/support/security/CVE-2026-6477/).
+The advisory concerns native client large-object functions using `PQfn` and
+malicious responses from a database server controlled by its superuser. No call
+to those affected native functions was found in the reviewed Lightwork Python/
+Rust paths or Psycopg wrappers. The SQL tool's `lo_export` classification is a
+different, server-side SQL operation. This is dependency/artifact hardening;
+**a reachable Lightwork exploit has not been established**.
+
+The patch updates Psycopg and its binary wheel to **3.3.5**, keeps pool 3.3.1,
+and raises all three binary extras' minimums, including the knowledge pgvector
+extra. The release check reads the **loaded** `pq.version()`, refuses affected
+versions, retains each fixed older major branch, and prints the accepted native
+version. The actual old Windows library was refused by the changed CLI; the
+actual new wheel loaded **18.4** and passed the full isolated offline check.
+Both checks used the reviewed source CLI with the respective real library,
+not a fabricated version return or a malicious database payload.
+
+Verification covers syntax/Ruff, native version refusal and legitimate fixed
+versions, SQL transactions, actual closed-pool construction, host grants,
+connection timeout/recovery and knowledge-store controls. Repository gates,
+full interpreter/security CI, live PostgreSQL and the frozen Windows acceptance
+results are recorded for the final immutable revision in the PR. The native
+floor tests simulate branch boundaries in addition to the actual Windows
+library comparison. Source deployments using system/C libpq and signed customer
+release artifacts require their own qualification; this diagnostic does not
+prove every independently installed database driver's safety.
+
+### Release platform setup and frozen qualification
+
+The release binary matrix requested Python 3.12.13 on Linux, macOS and Windows.
+The official [Actions Python manifest](https://github.com/actions/python-versions/blob/main/versions-manifest.json)
+has that version only for Linux/RHEL; the macOS and Windows jobs could not reach
+their build steps. The matrix now selects 3.12.10 for those two platforms and
+explicitly requests the artifact's architecture. Linux retains 3.12.13.
+
+A nonpublishing PR workflow now builds the actual release spec on Linux x86-64
+and macOS arm64 and runs the packaged feature checks, all eight cohort version
+checks, CLI entry points and local voice-engine availability. Checks use
+disposable configuration and remove developer paths. They retain logs, the
+binary hash, platform and reviewed/checkout revisions. Windows continues through
+the installed MSI acceptance workflow. Actual results for each final revision
+are linked in the PR; adding the workflow alone is not a passing result.
+Production signing, macOS notarization, clean customer-machine acceptance and
+live integrations remain separate release/deployment requirements.
 
 ### CI signature-tampering fixture
 

@@ -898,7 +898,7 @@ def release_runtime_check() -> None:
     try:
         verify_release_runtime()
         verify_release_document_runtime()
-        verify_release_database_runtime()
+        libpq_version = verify_release_database_runtime()
         verify_release_mathml_runtime()
         verify_release_metrics_runtime()
     except Exception as exc:
@@ -908,7 +908,9 @@ def release_runtime_check() -> None:
     click.echo(
         "release runtime ready: Anthropic and OpenAI-compatible provider "
         "SDKs, document parsers and document worker source are available; "
-        "offline SQL, bundled PostgreSQL driver, MathML and metrics checks passed"
+        "offline SQL, bundled PostgreSQL driver "
+        f"(libpq {libpq_version // 10000}.{libpq_version % 10000}), "
+        "MathML and metrics checks passed"
     )
 
 

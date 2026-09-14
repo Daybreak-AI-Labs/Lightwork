@@ -9,14 +9,30 @@ from __future__ import annotations
 import importlib
 import xml.etree.ElementTree as ET
 
+_LIBPQ_SECURITY_FLOORS = {
+    14: 140023, 15: 150018, 16: 160014, 17: 170010, 18: 180004,
+}
 
-def verify_release_database_runtime() -> None:
+
+def verify_release_database_runtime() -> int:
     """Exercise SQL execution, the selected PostgreSQL dialect and bundled libpq."""
     sqlalchemy = importlib.import_module("sqlalchemy")
     pq = importlib.import_module("psycopg.pq")
     pool_module = importlib.import_module("psycopg_pool")
-    if pq.__impl__ != "binary" or pq.version() <= 0:
-        raise RuntimeError("release PostgreSQL driver requires bundled binary libpq")
+    version = pq.version()
+    if pq.__impl__ != "binary" or type(version) is not int or version <= 0:
+        raise RuntimeError(
+            f"release PostgreSQL driver requires bundled binary libpq (observed {version!r})"
+        )
+    # Check the actual loaded library, not the Python wheel's version. These
+    # are the vendor's fixed branches for CVE-2026-6477; subsequent major
+    # releases include prior fixes. Unsupported older branches are refused.
+    minimum = _LIBPQ_SECURITY_FLOORS.get(version // 10000, 190000)
+    if version < minimum:
+        raise RuntimeError(
+            f"bundled libpq {version} predates required client security fixes; "
+            "rebuild with the reviewed release dependencies (CVE-2026-6477)"
+        )
 
     engine = sqlalchemy.create_engine("sqlite:///:memory:")
     try:
@@ -43,6 +59,7 @@ def verify_release_database_runtime() -> None:
         pool.close()
     finally:
         engine.dispose()
+    return version
 
 
 def verify_release_mathml_runtime() -> None:

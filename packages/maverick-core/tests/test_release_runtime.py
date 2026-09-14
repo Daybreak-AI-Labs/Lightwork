@@ -57,7 +57,9 @@ def test_missing_release_dependency_is_not_reported_ready(
         probe()
 
 
-@pytest.mark.parametrize("implementation,version", [("python", 180000), ("binary", 0)])
+@pytest.mark.parametrize("implementation,version", [
+    ("python", 180004), ("binary", 0), ("binary", -1),
+])
 def test_release_cannot_rely_on_system_libpq(
     release_dependencies, monkeypatch, implementation, version,
 ):
@@ -66,6 +68,38 @@ def test_release_cannot_rely_on_system_libpq(
     monkeypatch.setattr(pq, "__impl__", implementation)
     monkeypatch.setattr(pq, "version", lambda: version)
     with pytest.raises(RuntimeError, match="bundled binary libpq"):
+        release_runtime.verify_release_database_runtime()
+
+
+@pytest.mark.parametrize("version,accepted", [
+    (130999, False),
+    (140022, False), (140023, True),
+    (150017, False), (150018, True),
+    (160013, False), (160014, True),
+    (170009, False), (170010, True),
+    (180003, False), (180004, True), (190000, True),
+])
+def test_release_checks_the_loaded_libpq_security_boundary(
+    release_dependencies, monkeypatch, version, accepted,
+):
+    from psycopg import pq
+
+    monkeypatch.setattr(pq, "version", lambda: version)
+    if accepted:
+        assert release_runtime.verify_release_database_runtime() == version
+    else:
+        with pytest.raises(RuntimeError, match=f"bundled libpq {version} predates"):
+            release_runtime.verify_release_database_runtime()
+
+
+def test_release_checks_the_actual_closed_pool(release_dependencies, monkeypatch):
+    import psycopg_pool
+
+    def unavailable_pool(*args, **kwargs):
+        raise RuntimeError("packaged PostgreSQL pool unavailable")
+
+    monkeypatch.setattr(psycopg_pool, "ConnectionPool", unavailable_pool)
+    with pytest.raises(RuntimeError, match="packaged PostgreSQL pool unavailable"):
         release_runtime.verify_release_database_runtime()
 
 

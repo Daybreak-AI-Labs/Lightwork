@@ -1024,7 +1024,7 @@ jobs:
           pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge
           pip install \
-            'psycopg==3.3.4' 'psycopg-binary==3.3.4' \
+            'psycopg==3.3.5' 'psycopg-binary==3.3.5' \
             'psycopg-pool==3.3.1' 'sqlalchemy==2.0.52'
           pip install pytest pytest-asyncio pytest-timeout
           python -m pip check

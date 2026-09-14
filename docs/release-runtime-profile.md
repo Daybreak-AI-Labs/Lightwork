@@ -23,12 +23,26 @@ if provider/parser imports, document worker source, or the checks below fail:
 - Render the actual platform collectors in a private Prometheus registry,
   checking that tool latency, provider error rate and latency-budget series exist.
 
+The command reports the loaded libpq version and rejects native versions before
+the fixed branches for [CVE-2026-6477](https://www.postgresql.org/support/security/CVE-2026-6477/):
+14.23, 15.18, 16.14, 17.10 and 18.4. Subsequent major versions include prior
+fixes. The reviewed Psycopg and binary wheel pin is 3.3.5; the connection pool
+remains 3.3.1. This is a release-artifact dependency gate, not a check on every
+database operation in an independently configured source installation.
+
 These checks do not connect to a remote database, start a metrics listener,
 request a model response or change customer records. Staging and installed
 Windows acceptance invoke this command inside the actual frozen executable.
 The release/container and SBOM workflows also verify the profile. Hosted-run
 results belong to their recorded revision and artifact; a source test alone
 does not prove that the frozen artifact contains the necessary native libraries.
+
+The nonpublishing `Frozen runtime` PR workflow builds the same PyInstaller spec
+on Linux x86-64 and macOS arm64. It runs the CLI checks with disposable homes and
+an empty developer PATH, and retains command logs and a binary hash tied to the
+checkout. The release matrix uses Python 3.12.13 on Linux and 3.12.10 on Windows
+and macOS, matching available official `actions/python-versions` binaries.
+These are engineering checks, not signed/notarized customer release acceptance.
 
 The reviewed dependency constraints include the new libraries. PyInstaller
 retains their dynamically selected modules, binary-driver hooks, distribution
