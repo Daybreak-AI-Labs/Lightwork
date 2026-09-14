@@ -120,6 +120,39 @@ index/search/delete and default local-model index/search/reset/reindex. It used
 synthetic documents and the downloaded local embedding model. It is not a test
 of customer data, remote vector services or the usefulness of customer recall.
 
+### Further follow-up: database destination grants
+
+An allowed hostname label did not fully constrain the database connection.
+PostgreSQL's `hostaddr` option could select a different network address, and a
+comma-separated host list could match a wildcard grant as one string even when
+one destination was outside the grant. Blank host overrides could also select
+the driver's local default. The gate now checks every explicit destination,
+including alternate addresses and repeated host parameters, and refuses empty
+or indirect destinations under a host-scoped grant. SQL Server address aliases
+and failover partners receive the same case-insensitive parameter check; an
+ODBC authority that names a local DSN or Oracle authority that names a TNS alias
+cannot masquerade as a hostname. Approved host entries with ports are parsed as
+hostnames, so valid fallback configurations remain usable.
+Opaque DSN, service and socket options require an unscoped operator connection;
+they cannot borrow a URL hostname's authorization. The existing authenticated
+enterprise restriction on ambient-credential tools remains unchanged.
+
+The regressions exercise both model-supplied and operator-supplied URLs. Actual
+SQLAlchemy/Psycopg driver captures reproduce the alternate-address and host-list
+cases without opening an outside connection, then verify admission when every
+destination is explicitly granted. Actual SQLAlchemy ODBC translation also
+confirms the native connection-string options and implicit DSN interpretation;
+the Oracle dialect confirms the corresponding TNS alias interpretation.
+Other-driver cases intercept engine creation; no ODBC connection is opened.
+These are not live Oracle, SQL Server or MySQL deployment acceptance.
+The PostgreSQL CI job runs the new suite in both security configurations.
+These checks follow
+the documented [libpq destination semantics](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS);
+SQL Server options are checked against the documented
+[ODBC connection keywords](https://learn.microsoft.com/en-us/sql/connect/odbc/dsn-connection-string-attribute?view=sql-server-ver17)
+and [SQLAlchemy DSN rules](https://docs.sqlalchemy.org/en/20/dialects/mssql.html#dsn-connections).
+This repair does not establish DNS pinning or network-layer isolation.
+
 ### Initial fresh-customer pass
 
 The Python environment independently installs all eight packages from this
