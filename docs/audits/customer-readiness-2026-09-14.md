@@ -54,6 +54,15 @@ suites overlap and include passing controls; their counts must not be added as
 distinct defects or treated as live customer acceptance. The final full CI and
 native acceptance runs for the published revision are linked in the pull request.
 
+CI subsequently identified the desktop updater's Rustls 0.23.43 dependency as
+affected by [GHSA-2mjx-qc3c-rqvc / RUSTSEC-2026-0285](https://github.com/rustls/rustls/security/advisories/GHSA-2mjx-qc3c-rqvc),
+published on September 14. The upstream fix rejects TLS 1.3 handshake messages
+crossing encryption-level boundaries. Cargo updated this dependency to the
+patched 0.23.45 release; the locked Windows dependency graph resolves that
+version through the updater's Reqwest/Tokio/Rustls stack. The advisory remains
+enforced by CI. Native tests and dependency audit results for the updated lock
+are recorded in the PR.
+
 ### Initial fresh-customer pass
 
 The Python environment independently installs all eight packages from this
