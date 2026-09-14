@@ -32,7 +32,7 @@ today. A successful tagged release is configured to publish three single-file
 PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
 [release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
 the exact operating-system file before relying on one. The engineering
-bootstrap packages and the [self-contained Windows customer candidate](../apps/installer-msi/CUSTOMER.md)
+bootstrap packages and the Windows customer package candidate
 are separate paths. The customer candidate includes the frozen runtime and
 offline WebView2 installer, but still requires publisher and clean-machine
 acceptance before release. Engineering bootstrap packages are
