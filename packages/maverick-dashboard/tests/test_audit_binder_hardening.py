@@ -322,10 +322,14 @@ def test_binder_detached_signature_verifies_with_saved_public_key(
         str(artifact["digest"]),
         str(artifact["signature"]),
     )
+    tampered = bytearray.fromhex(str(artifact["signature"]))
+    # Replacing the first byte with zero leaves a valid signature unchanged
+    # when it already starts with 00. Flip a bit so tampering is guaranteed.
+    tampered[0] ^= 1
     assert not signing.verify_detached_digest(
         public_key,
         str(artifact["digest"]),
-        "00" + str(artifact["signature"])[2:],
+        tampered.hex(),
     )
     # W2-46: the signature is over a domain-separated message, not the bare
     # digest -- a plain verify_ed25519 against the raw digest bytes (what a
