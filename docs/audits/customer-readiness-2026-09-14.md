@@ -207,6 +207,36 @@ separate serial concurrency phase, native document tests and live PostgreSQL
 tests. This is regression evidence, not proof of customer installation or a
 real model/business-system transaction.
 
+## Open Windows feature-packaging gap
+
+The eight-package release cohort is not an inventory of every optional feature's
+runtime dependencies. The current
+[`release-runtime` extra](https://github.com/Daybreak-AI-Labs/Lightwork/blob/3e0bfe634af4f6c4cfed93d12eb3fac448f54cb0/packages/maverick-core/pyproject.toml#L48)
+includes provider and document-parser libraries. The clean Windows build's
+installed dependency list omits the following examples:
+
+| Missing optional dependency | Affected operation | What the existing passing tests establish |
+| --- | --- | --- |
+| SQLAlchemy and Psycopg | Relational database tool; optional PostgreSQL-backed platform storage | Source-deployment behavior with the actual libraries installed, including live PostgreSQL and connection/grant recovery. These tests do not run those operations inside the MSI's frozen runtime. |
+| `latex2mathml` | LaTeX-to-MathML conversion | Converter correctness and error handling in configured Python environments. This does not qualify MathML conversion in the Windows package. |
+| `prometheus-client` | Prometheus collectors and metrics export | Six local export/degraded-scrape tests passed in each security posture with `prometheus-client` 0.26.0 installed. This is not packaged metrics export or production alert delivery. |
+
+This is an open delivery gap, not a reason to install every optional or research
+dependency indiscriminately. R1 and R3 must declare the features supported by each
+delivery mode, include their selected prerequisites, and exercise them inside
+the actual distributed package. For the examples above, closure means a packaged
+SQL query against a disposable authorized database plus connection-failure
+recovery, packaged valid/invalid MathML conversion, and a successful packaged
+metrics scrape with degraded-collector handling. Customer-account and useful-work
+acceptance remain additional requirements.
+
+The source regression evidence and eight-package inventory must not be used to
+advertise every optional connector as ready in a self-contained Windows install.
+An error that tells a frozen-app customer to install a Python package is not a
+completed self-service installation path. The dependency omissions were verified
+against the clean build log and unchanged build inputs; this audit does not claim
+they have been packaged or repaired.
+
 ## Acceptance matrix
 
 | Customer need | Repository/local evidence | Still required for customer acceptance |
@@ -230,7 +260,7 @@ real model/business-system transaction.
 
 | ID | Required work | Accountable owner | Closure evidence |
 | --- | --- | --- | --- |
-| R1 | Prepare the actual customer release, signing trust and distribution. | Release owner | Reviewed source, immutable artifact/checksums, customer publisher identity, protected signing/acceptance environments and clean-machine first-release results. GitHub currently has no releases or recorded real release-pair run; only `github-pages` and `pypi` environments were returned. |
+| R1 | Prepare the actual customer release, signing trust and distribution. | Release owner | Reviewed source, immutable artifact/checksums, declared supported features and their packaged dependencies, customer publisher identity, protected signing/acceptance environments and clean-machine first-release results. GitHub currently has no releases or recorded real release-pair run; only `github-pages` and `pypi` environments were returned. |
 | R2 | Qualify each deployment being offered. | Deployment operator | Windows evidence under R1; for AWS, a running isolated control plane and qualified executor with recorded image/cluster/CNI identities, isolation denials, timeout and file-recovery results. |
 | R3 | Prove the selected model and account integrations in the intended environment. | Product owner plus customer account administrator | Approved test accounts, exact scopes/configuration, successful authorized work and readback, denied access, expired credentials and safe reconnect/retry without duplicate side effects. |
 | R4 | Demonstrate useful work and accepted outcomes. | Workflow owner and customer reviewer | Representative tasks with expected outcomes, observed corrections/effort/cost, accepted output and explicit limitations. Cover the business workflows being sold, not just vendor onboarding. |
