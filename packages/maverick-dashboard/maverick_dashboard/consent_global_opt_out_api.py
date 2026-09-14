@@ -181,9 +181,16 @@ def _http_error(exc: opt_out.GlobalOptOutError) -> HTTPException:
     return HTTPException(status_code=status, detail=_detail(exc))
 
 
-async def _call(function: Any, /, *args: Any, **kwargs: Any) -> Any:
+async def _call(request: Request, method: str, /, *args: Any, **kwargs: Any) -> Any:
+    def invoke():
+        # Construct the tenant store inside both the error boundary and worker
+        # thread. Disabled/missing authority can fail before a method is bound.
+        return getattr(_store(request), method)(*args, **kwargs)
+
     try:
-        return await run_in_threadpool(function, *args, **kwargs)
+        return await run_in_threadpool(invoke)
+    except HTTPException:
+        raise
     except opt_out.GlobalOptOutError as exc:
         raise _http_error(exc) from exc
     except Exception as exc:
@@ -222,10 +229,9 @@ async def create_configuration(
     request: Request,
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
-    store = _store(request)
     payload = body.model_dump()
     application_ref = payload.pop("application_ref")
-    return await _call(store.create_configuration, application_ref, **payload)
+    return await _call(request, "create_configuration", application_ref, **payload)
 
 
 @router.get("/configurations")
@@ -234,7 +240,7 @@ async def list_configurations(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, Any]:
     require_global_permission(request, "view")
-    return await _call(_store(request).list_configurations, limit=limit)
+    return await _call(request, "list_configurations", limit=limit)
 
 
 @router.get("/configurations/{configuration_id}")
@@ -243,7 +249,7 @@ async def get_configuration(
     request: Request,
 ) -> dict[str, Any]:
     require_global_permission(request, "view")
-    return await _call(_store(request).get_configuration, configuration_id)
+    return await _call(request, "get_configuration", configuration_id)
 
 
 @router.put("/configurations/{configuration_id}")
@@ -254,7 +260,7 @@ async def update_configuration(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     return await _call(
-        _store(request).update_configuration,
+        request, "update_configuration",
         configuration_id,
         **body.model_dump(),
     )
@@ -268,7 +274,7 @@ async def activate_configuration(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     return await _call(
-        _store(request).activate_configuration,
+        request, "activate_configuration",
         configuration_id,
         **body.model_dump(),
     )
@@ -282,7 +288,7 @@ async def revoke_configuration(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     return await _call(
-        _store(request).revoke_configuration,
+        request, "revoke_configuration",
         configuration_id,
         **body.model_dump(),
     )
@@ -294,7 +300,7 @@ async def configuration_history(
     request: Request,
 ) -> dict[str, Any]:
     require_global_permission(request, "audit")
-    return await _call(_store(request).configuration_history, configuration_id)
+    return await _call(request, "configuration_history", configuration_id)
 
 
 @router.get("/integrity")
@@ -303,7 +309,7 @@ async def verify_integrity(
     limit: int = Query(default=10_000, ge=1, le=10_000),
 ) -> dict[str, Any]:
     require_global_permission(request, "audit")
-    return await _call(_store(request).verify_integrity, limit=limit)
+    return await _call(request, "verify_integrity", limit=limit)
 
 
 @router.post("/maintenance/purge")
@@ -312,7 +318,7 @@ async def purge_retained(
     request: Request,
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
-    return await _call(_store(request).purge_retained, limit=body.limit)
+    return await _call(request, "purge_retained", limit=body.limit)
 
 
 @router.post("/maintenance/retry-audit")
@@ -321,7 +327,7 @@ async def retry_audit(
     request: Request,
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
-    return await _call(_store(request).retry_pending_audit, limit=body.limit)
+    return await _call(request, "retry_pending_audit", limit=body.limit)
 
 
 __all__ = [

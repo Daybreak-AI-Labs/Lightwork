@@ -1,10 +1,10 @@
 # Lightwork performance SLA (self-hosted)
 
-Lightwork is self-hosted, so this SLA is not a hosted-service uptime promise —
-it is the set of **measurable performance properties each release certifies
-on reference hardware**, with the harness that proves them
-(`python -m maverick.perf_sla --ci`, run in CI). A release that regresses a
-threshold does not ship.
+These are **engineering performance gates**, checked by
+`python -m maverick.perf_sla --ci` and the reliability harnesses below.
+They are not a customer deployment's measured service level or a release
+certification. Record the intended artifact, hardware, workload and results
+before using them in release acceptance or a customer commitment.
 
 The thresholds are deliberately conservative (they must hold on a cold
 2-vCPU CI runner, not a tuned workstation). On typical developer hardware the

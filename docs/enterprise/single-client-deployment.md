@@ -1,14 +1,14 @@
 # Single-Client Deployment — one Lightwork per enterprise
 
 **Delivery model (decided, non-negotiable): one Lightwork instance per enterprise
-client, always.** There is no shared, hosted, multi-tenant service. Cross-client
-data mingling is therefore a *deployment* guarantee — separate instances,
-separate hosts, separate storage — not something the application has to enforce
-at request time.
+client, always.** This runbook uses separate instances, hosts and storage.
+Application authorization and workspace isolation remain required within each
+instance. Client binding does not provision or prove physical isolation.
 
 On top of that physical isolation, every instance is **bound to exactly one
-client** and stamps all state with that client id, so isolation is *provable*
-and a misconfiguration can never silently write client data to a shared root.
+client**. Tenant-aware stores use that binding as their default scope. Global
+configuration, account administration and some keys live outside the tenant
+root; include them in installation recovery and offboarding planning.
 
 This document is (1) the architecture + guarantee, (2) the remediation roadmap
 to get fully enterprise-ready, and (3) the per-client deployment runbook.
@@ -21,7 +21,7 @@ to get fully enterprise-ready, and (3) the per-client deployment runbook.
 |---|---|
 | **Deployment** | One Lightwork process/host/volume per client. Two clients never share a host. |
 | **Client binding** | `[client] id` / `MAVERICK_CLIENT_ID` binds the instance. `[client] enforce = true` (auto-on under enterprise mode) makes serving **fail closed** if unbound. |
-| **Tenant floor** (`maverick.client` + `maverick.paths`) | The client id is the tenant *floor*: every `data_dir()` path — world DB, audit chain + keys, cross-session memory, fleet memory — resolves under `~/.maverick/tenants/<client>/…`. There is no un-scoped global location for client data. |
+| **Tenant floor** (`maverick.client` + `maverick.paths`) | The client id supplies the default tenant for `data_dir()`, including the world DB, audit and memory. Explicit workspace scopes remain distinct. Global administration/configuration and operator-configured external stores require separate inventory. |
 | **At-rest encryption** | Per-tenant DEK wrapped by a KEK, with the client id bound into the AEAD context (`tenant/kms.py`), so a key cannot decrypt another scope's data. Enable with `[encryption] at_rest = true` + `per_tenant = true`. |
 | **Audit** | Signed, hash-chained, per-client audit dir + signing key; `maverick doctor` shows the bound client + data root. |
 
@@ -68,15 +68,17 @@ Sequenced by leverage. Each phase is independently shippable.
 ### Phase 3 — Backup / restore / failover (HA for single-node) ✅
 - `maverick backup create` snapshots the **client-scoped data root** — world DB
   (via the SQLite **online backup API**, consistent under WAL), signed **audit
-  chain + anchors + keys**, memory, fleet, and the managed trust registry — into
+  chain + public verification material**, memory, fleet, and the managed trust registry — into
   a portable `.tgz` with a HMAC-authenticated manifest (client id, time, schema,
   exact size and SHA-256 per file). Set a separately custodied, 32-byte
   `MAVERICK_BACKUP_SIGNING_KEY` on both the active and standby nodes; the key is
-  never included in the archive. `maverick backup info` authenticates and
+  never included in the archive. Raw encryption and audit signing `.key` files
+  are excluded by default and need separate custody and restoration.
+  `maverick backup info` authenticates and
   inspects it; `maverick backup restore` authenticates, verifies, and applies it.
 - **Fail-closed restore**: refuses an unsigned, forged, oversized, structurally
-  unsafe, wrong-client, or forward-schema archive. `--force` can override only
-  client/schema compatibility, never authentication. Restore uses private
+  unsafe, wrong-client, or forward-schema archive. `--force` does not bypass
+  forward-schema checks, manifest authentication or archive validation. Restore uses private
   staging plus a durable transaction journal and rolls every file and SQLite
   sidecar back if publication is interrupted.
 - **Warm standby**: cron `backup create`, ship the `.tgz` offsite + to a standby
@@ -113,11 +115,11 @@ Sequenced by leverage. Each phase is independently shippable.
 - **Per-client export + erasure** ✅: `maverick client export` (full data
   portability / DSAR — a consistent snapshot of the client's data root) and
   `maverick client erase --confirm [--keep-audit]` (right-to-erasure /
-  offboarding). Because one deployment = one client = one data root, erase is
-  **provably complete** (no other on-node location) and **fail-closed** (refuses
-  unless a client is bound, so it can never wipe the shared root). External
-  stores (a remote Postgres/Qdrant/Redis a deployment may add) are erased via
-  their own admin path — documented caveat.
+  offboarding). Erase refuses unless a client is bound and targets that client's
+  tenant root. It does not erase global account/configuration records, separate
+  workspaces, workspace files outside that root, offsite archives, or remote
+  Postgres/Qdrant/Redis data. Inventory and handle those locations separately;
+  keeping audit records also retains the selected audit data.
 - Residual-plaintext (`[privacy] anonymous = true`) and `[audit] retention`
   remain config knobs as before.
 - **Certification track** (organizational, not code): SOC 2 Type II, HIPAA BAA,
@@ -140,17 +142,24 @@ install -d -o maverick -g maverick -m 0700 /var/lib/maverick/.maverick
 
 # 2. Install (per-package wheels; pre-built, no build-time network).
 python3 -m pip install --no-index --find-links /opt/maverick/wheels \
-  maverick-core maverick-shield maverick-channels maverick-dashboard \
-  maverick-mcp maverick-knowledge agent-shield
+  'maverick-agent[release-runtime,grpc]' maverick-shield maverick-channels \
+  maverick-evolve maverick-dashboard maverick-mcp-server \
+  maverick-knowledge maverick-installer
 
 # 3. Pre-generate gRPC stubs (so the runtime never compiles on a read-only FS),
 #    then provision config non-interactively.
 maverick gen-stubs
-maverick init --from-file /opt/maverick/<client>.toml
+sudo -u maverick env MAVERICK_HOME=/var/lib/maverick/.maverick \
+  maverick init --from-file /opt/maverick/<client>.toml
 ```
 
 Set `MAVERICK_NO_RUNTIME_PROTOC=1` in the service unit so a missing stub fails
 fast at boot rather than invoking `protoc` at request time.
+Use one reviewed, complete wheelhouse with the eight versions from
+`release-cohort.toml` and their dependencies. Include the `oidc`, `postgres`,
+`saml` or other provider extras if that deployment uses them. The optional
+external Agent Shield SDK has its own supply and acceptance requirements;
+installing the in-repo `maverick-shield` distribution does not qualify that SDK.
 
 ### 3.2 Bind the client (the critical step)
 
@@ -211,10 +220,11 @@ After=network-online.target
 [Service]
 User=maverick
 Environment=MAVERICK_HOME=/var/lib/maverick/.maverick
-Environment=MAVERICK_CLIENT_ID=acme-corp          # belt-and-suspenders: floor set in env
+# Also set the client floor in the service environment.
+Environment=MAVERICK_CLIENT_ID=acme-corp
 Environment=MAVERICK_CLIENT_ENFORCE=1
-Environment=MAVERICK_DASHBOARD_TOKEN=%d/dashboard_token   # from a credential, not the file
-LoadCredential=dashboard_token:/run/secrets/maverick_dashboard_token
+EnvironmentFile=/etc/maverick/dashboard.env
+Environment=MAVERICK_NO_RUNTIME_PROTOC=1
 ExecStart=/usr/local/bin/maverick dashboard --host 127.0.0.1 --port 8770
 # TLS terminated by the front proxy (Phase 1 adds native TLS for gRPC/federation)
 Restart=on-failure
@@ -227,6 +237,12 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 ```
+
+Provision `/etc/maverick/dashboard.env` through the host's secret manager,
+owned by root with mode `0600`, containing `MAVERICK_DASHBOARD_TOKEN=<secret>`.
+Systemd reads the file and supplies the value to the service. An environment
+assignment to `%d/dashboard_token` supplies a pathname, not the credential's
+contents; do not use that pathname as the authentication token.
 
 ### 3.4 Verify the binding (gate before go-live)
 
@@ -243,8 +259,9 @@ sudo -u maverick MAVERICK_HOME=/var/lib/maverick/.maverick \
 
 If it shows `✗ client  (client binding ENFORCED but no client id set …)`, the
 deployment will refuse to serve — fix the binding before exposing it. The whole
-data tree must live under `…/tenants/acme-corp/`; nothing for this client should
-appear directly under `…/.maverick/`.
+default tenant data tree should resolve under `…/tenants/acme-corp/`.
+Inventory explicit workspaces, shared administration/configuration, separately
+custodied keys and configured external stores as additional recovery scopes.
 
 ### 3.6 Backup & warm-standby failover
 
@@ -260,11 +277,25 @@ sudo -u maverick MAVERICK_HOME=/var/lib/maverick/.maverick \
   maverick backup create --out /backups/acme.tgz
 aws s3 cp /backups/acme.tgz s3://acme-maverick-dr/   # or rsync to standby
 
-# On the STANDBY (same MAVERICK_CLIENT_ID), restore + start on failover:
-maverick backup info  /backups/acme.tgz              # confirm client_id = acme-corp
-maverick backup restore /backups/acme.tgz            # fail-closed if client mismatches
+# On the STANDBY, use the same service identity, home, binding and retained key.
+# Stop its dashboard before restoring state; do not serve two active instances.
+systemctl stop maverick-dashboard
+sudo -u maverick env MAVERICK_HOME=/var/lib/maverick/.maverick \
+  MAVERICK_CLIENT_ID=acme-corp \
+  MAVERICK_BACKUP_SIGNING_KEY="$MAVERICK_BACKUP_SIGNING_KEY" \
+  maverick backup info /backups/acme.tgz
+sudo -u maverick env MAVERICK_HOME=/var/lib/maverick/.maverick \
+  MAVERICK_CLIENT_ID=acme-corp \
+  MAVERICK_BACKUP_SIGNING_KEY="$MAVERICK_BACKUP_SIGNING_KEY" \
+  maverick backup restore /backups/acme.tgz
 systemctl start maverick-dashboard
 ```
+
+This archive covers the bound tenant's local data. Before starting the standby,
+restore its separately retained encryption/audit signing keys and installation
+configuration, and recover external databases through their own backup system.
+Test reading encrypted customer records on the standby; archive authentication
+alone cannot demonstrate decryption or complete application recovery.
 
 The restore first authenticates the manifest with the standby's
 `MAVERICK_BACKUP_SIGNING_KEY`, then refuses a backup whose `client_id` differs
@@ -273,6 +304,8 @@ from the standby's binding. The CLI has no unsigned-restore bypass.
 ### 3.7 Offboard a client (right-to-erasure)
 
 ```bash
+# Run these as the maverick service user with the same MAVERICK_HOME,
+# MAVERICK_CLIENT_ID and required retained keys as the service/backup commands.
 # Optional: hand the client their data first (portability / DSAR).
 maverick client export --out /secure/acme-final-export.tgz
 # Irreversible wipe of this client's entire data root (keep audit for retention):
@@ -293,10 +326,10 @@ without it). One image template → one instance per client at launch.
 ## 4. Pre-go-live checklist (per client)
 
 - [ ] `[client] id` set and `enforce = true`; `doctor` shows the bound client.
-- [ ] Data tree is entirely under `tenants/<client>/`; shared root empty of client data.
+- [ ] Default tenant paths resolve correctly; additional workspaces, global administration, keys and external stores are inventoried.
 - [ ] TLS on every listener (Phase 1); no plaintext gRPC/federation.
 - [ ] Tokens injected from secrets (not literal in `config.toml`); config is `0600`.
 - [ ] `[encryption] at_rest + per_tenant`, `[audit] sign` on; `maverick audit verify` passes.
-- [ ] Backup job runs and a restore has been tested (Phase 3).
+- [ ] Backup job runs; a separate-host restore reads encrypted records and restores configuration plus any external stores (Phase 3).
 - [ ] Trust registry populated; `doctor` not RED on an empty engaged registry.
 - [ ] Shield present and (Phase 4) mandatory.

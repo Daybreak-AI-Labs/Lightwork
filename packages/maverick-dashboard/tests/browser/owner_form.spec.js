@@ -30,7 +30,10 @@ test('fresh owner setup and login submit real browser origin without header inje
     await expect(page).toHaveURL(origin+'/start');
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     await page.screenshot({path:info.outputPath('first-owner.png'),fullPage:true});
-    await context.clearCookies();await page.goto(origin+'/auth/local-login');
+    await page.getByRole('link',{name:'Sign out',exact:true}).click();
+    expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(false);
+    await page.goto(origin+'/goals');
+    await expect(page).toHaveURL(/\/auth\/local-login/);
     await page.locator('input[name="email"]').fill('native-owner@example.test');
     await page.locator('input[name="password"]').fill(password);
     const login=page.waitForResponse(response=>response.request().method()==='POST'&&response.url()===origin+'/auth/local-login');

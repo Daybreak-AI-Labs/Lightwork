@@ -10,8 +10,12 @@ For most users.
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
+python -m pip install -c requirements/ci.txt \
+  -e './packages/maverick-core[release-runtime]' \
+  -e ./packages/maverick-shield -e ./packages/maverick-channels \
+  -e ./packages/maverick-evolve -e ./packages/maverick-dashboard \
+  -e ./packages/maverick-mcp -e ./packages/maverick-knowledge \
+  -e ./apps/installer-cli
 maverick init
 ```
 
@@ -27,9 +31,14 @@ network port unless you enable a channel that needs one (WhatsApp/SMS).
 today. A successful tagged release is configured to publish three single-file
 PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
 [release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
-the exact operating-system file before relying on one. The Tauri and MSI
-projects are authenticated source-bootstrap/build engineering artifacts, not
-self-contained product installers, and are not attached to product releases.
+the exact operating-system file before relying on one. The engineering
+bootstrap packages and the Windows customer package candidate
+are separate paths. The customer candidate includes the frozen runtime and
+offline WebView2 installer, but still requires publisher and clean-machine
+acceptance before release. Engineering bootstrap packages are
+not attached to product releases. As checked on September 14, 2026, the repository
+has no published release assets; source installation remains an engineering
+setup, not a qualified customer delivery.
 
 ## Docker
 

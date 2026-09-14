@@ -624,8 +624,18 @@ def _idp_logout_url(cfg) -> str | None:
     return end_session + ("?" + urlencode(params) if params else "")
 
 
+def browser_session_enabled() -> bool:
+    """Whether this installation supports a browser session that can end."""
+    if login_enabled():
+        return True
+    from .invites import local_login_mode
+    from .saml import saml_enabled
+
+    return saml_enabled() or local_login_mode()
+
+
 @router.get("/auth/logout")
-async def auth_logout(request: Request):
+def auth_logout(request: Request):
     """Clear the session cookie and return to ``/``.
 
     ``?all=1`` (log out everywhere) additionally bumps the principal's revocation
@@ -634,9 +644,8 @@ async def auth_logout(request: Request):
     gated on a same-origin Origin/Referer so a cross-site page cannot force a
     global sign-out (session-revocation CSRF); the local cookie is always
     cleared regardless."""
-    if not login_enabled():
+    if not browser_session_enabled():
         raise HTTPException(status_code=404)
-    cfg = load_oidc_config()
     if request.query_params.get("all") and _is_same_origin_get(request):
         # Derive the sub from the verified session payload DIRECTLY, not via
         # _principal_from_request_session -- that returns None for an
@@ -651,7 +660,11 @@ async def auth_logout(request: Request):
     # cookie -- otherwise the next /auth/login silently re-authenticates and the
     # user never actually logs out. Falls back to "/" when the IdP advertises no
     # end_session_endpoint. The local cookie is cleared either way.
-    response = RedirectResponse(_idp_logout_url(cfg) or "/", status_code=303)
+    # Local-owner, invite and SAML cookies also need a working local sign-out.
+    # Only an enabled OIDC login can supply an OIDC end-session redirect. This
+    # does not claim to end the upstream SAML identity-provider session.
+    destination = _idp_logout_url(load_oidc_config()) if login_enabled() else None
+    response = RedirectResponse(destination or "/", status_code=303)
     _clear_cookie(response, SESSION_COOKIE)
     return response
 
@@ -660,15 +673,28 @@ def _session_sub_unchecked(request: Request) -> str | None:
     """The ``sub`` from a validly-signed, unexpired session cookie, WITHOUT the
     revocation check -- so "log out everywhere" can revoke even when the session
     is already revoked. Returns None when the cookie is absent/tampered/expired."""
-    if not login_enabled():
-        return None
     raw = request.cookies.get(SESSION_COOKIE)
-    cfg = load_oidc_config()
-    if not raw or not cfg.session_secret:
+    if not raw:
         return None
-    payload = verify_session(raw, cfg.session_secret)
-    sub = payload.get("sub") if payload else None
-    return sub if isinstance(sub, str) and sub else None
+    from maverick.oidc import validate_subject
+
+    from .invites import local_login_mode, local_session_secret
+    from .saml import saml_enabled
+
+    secrets = []
+    oidc = login_enabled()
+    if oidc or saml_enabled():
+        secrets.append(load_oidc_config().session_secret)
+    if not oidc and local_login_mode():
+        secrets.append(local_session_secret())
+    for secret in secrets:
+        payload = verify_session(raw, secret) if secret else None
+        if payload:
+            try:
+                return validate_subject(payload.get("sub"))
+            except ValueError:
+                return None
+    return None
 
 
 @router.get("/auth/error")

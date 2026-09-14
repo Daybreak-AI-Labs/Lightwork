@@ -41,10 +41,13 @@ def _tenant_id() -> str:
 
 
 def _delivery_store(tenant_id: str):
-    from maverick.consent_delivery import ConsentDeliveryStore
     from maverick.paths import data_dir
 
-    return ConsentDeliveryStore(
+    from .consent_delivery_api import _ops
+
+    # Share the ordinary delivery API's feature/configuration refusal before
+    # constructing a store; a disabled module is not an internal server error.
+    return _ops().ConsentDeliveryStore(
         data_dir(
             "consent_preferences",
             "consent-delivery.sqlite3",
