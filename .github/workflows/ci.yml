@@ -37,7 +37,17 @@ jobs:
         with:
           python-version: "3.12.13"
       - name: Install document test dependencies
-        run: python -m pip install -e './packages/maverick-core[spreadsheet,pdf]' pytest pytest-timeout pillow
+        run: python -m pip install -e './packages/maverick-core[spreadsheet,pdf,latex]' pytest pytest-timeout pillow
+      - name: Test LaTeX conversion and failure recovery
+        run: >-
+          python -m pytest -q packages/maverick-core/tests/test_latex_tool.py
+          --timeout=30 --junitxml=latex-tool-results.xml
+      - name: Test LaTeX recovery under secure defaults
+        env:
+          MAVERICK_TEST_SECURE_DEFAULT: "1"
+        run: >-
+          python -m pytest -q packages/maverick-core/tests/test_latex_tool.py
+          --timeout=30 --junitxml=latex-tool-secure-results.xml
       - name: Build the offline native document worker
         run: docker build -f deploy/docker/Dockerfile.documents -t lightwork-documents:test .
       - name: Exercise actual Calc and scanned-PDF OCR
@@ -51,7 +61,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: document-engine-results
-          path: document-engine-results.xml
+          path: |
+            document-engine-results.xml
+            latex-tool-results.xml
+            latex-tool-secure-results.xml
           retention-days: 14
 
   lint:

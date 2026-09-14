@@ -85,6 +85,25 @@ the built Windows wheel previously passed all 66 native parity cases; that
 one-off evidence now has a continuing CI path. Final counts and immutable runs
 for this follow-up are recorded in the PR.
 
+### Further follow-up: optional document conversion
+
+An additional run with the actual channel, gRPC, telemetry and math-conversion
+dependencies exposed a LaTeX tool regression that ordinary CI had masked by
+omitting its converter. Non-string input was silently converted rather than
+refused. Malformed math could escape as a converter exception, and an incomplete
+fraction could produce invalid MathML without a denominator. The tool now
+enforces its source type, reports parser failures, and refuses malformed
+fraction output. This is not a claim of complete validation of arbitrary LaTeX.
+
+The PDF path also retained temporary customer document sources after both
+successful and failed execution. It now cleans its scratch directory on every
+covered outcome, refuses an escaping destination before launching the engine,
+and returns recoverable storage errors. Regression cases preserve an existing
+report when the engine fails. These PDF tests use a fixture engine; they do not
+qualify Tectonic or pdflatex in every deployment or sandbox backend. The CI
+document job now installs the actual MathML converter and runs these tests in
+normal and secure-default configurations. Final evidence is linked in the PR.
+
 ### Initial fresh-customer pass
 
 The Python environment independently installs all eight packages from this

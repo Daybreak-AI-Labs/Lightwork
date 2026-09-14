@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 
 import pytest
+from maverick.tools import latex_tool as latex_module
 from maverick.tools.latex_tool import latex_tool, to_mathml
 
 
@@ -83,3 +84,63 @@ def test_non_string_latex_does_not_crash(tmp_path):
     fn = latex_tool(_FakeSandbox(tmp_path)).fn
     assert fn({"op": "mathml", "latex": 5}).startswith("ERROR")
     assert fn({"op": "mathml", "latex": [1, 2]}).startswith("ERROR")
+
+
+@pytest.mark.parametrize("op", ["mathml", "render"])
+@pytest.mark.parametrize("source", [5, [1, 2], {"latex": "x"}, True])
+def test_invalid_source_is_refused_before_conversion(monkeypatch, tmp_path, op, source):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid source reached the converter or document engine")
+
+    monkeypatch.setattr(latex_module, "to_mathml", unexpected)
+    monkeypatch.setattr(latex_module, "sandbox_run", unexpected)
+    out = latex_tool(_FakeSandbox(tmp_path)).fn({"op": op, "latex": source})
+    assert out.startswith("ERROR") and "string" in out
+
+
+@pytest.mark.parametrize("source", [r"\frac{1}", "x^", r"\sqrt{"])
+def test_malformed_math_returns_actionable_error(source, tmp_path):
+    pytest.importorskip("latex2mathml")
+    out = latex_tool(_FakeSandbox(tmp_path)).fn({"op": "mathml", "latex": source})
+    assert out.startswith("ERROR") and "LaTeX" in out
+
+
+@pytest.mark.parametrize("outcome", ["success", "engine-error", "io-error"])
+def test_render_cleans_private_scratch_on_every_outcome(monkeypatch, tmp_path, outcome):
+    paths = []
+
+    def engine(sandbox, argv, timeout):
+        tex = Path(argv[-1])
+        paths.append(tex.parent)
+        assert tex.read_text(encoding="utf-8") == "private customer document"
+        if outcome == "io-error":
+            raise OSError("temporary output storage unavailable")
+        if outcome == "engine-error":
+            return 127, "", "engine unavailable"
+        tex.with_suffix(".pdf").write_bytes(b"%PDF-1.4 fixture")
+        return 0, "", ""
+
+    monkeypatch.setattr(latex_module, "sandbox_run", engine)
+    dest = tmp_path / "out.pdf"
+    dest.write_bytes(b"prior reviewed report")
+    out = latex_tool(_FakeSandbox(tmp_path)).fn({
+        "op": "render", "latex": "private customer document", "out": "out.pdf",
+    })
+    assert paths and all(not path.exists() for path in paths)
+    if outcome == "success":
+        assert out.startswith("rendered PDF")
+        assert dest.read_bytes() == b"%PDF-1.4 fixture"
+    else:
+        assert out.startswith("ERROR")
+        assert dest.read_bytes() == b"prior reviewed report"
+
+
+def test_invalid_destination_is_refused_before_engine(monkeypatch, tmp_path):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid destination reached the document engine")
+
+    monkeypatch.setattr(latex_module, "sandbox_run", unexpected)
+    out = latex_tool(_FakeSandbox(tmp_path)).fn({
+        "op": "render", "latex": "customer document", "out": "../escaped.pdf",
+    })
+    assert out.startswith("ERROR") and "escape" in out.lower()
