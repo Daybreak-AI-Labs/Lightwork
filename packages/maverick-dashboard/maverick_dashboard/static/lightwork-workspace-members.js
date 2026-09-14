@@ -1,10 +1,12 @@
 (function(){
   "use strict";
   const root=document.getElementById("wm-root");if(!root||!root.dataset.tenant)return;
-  const el=id=>document.getElementById("wm-"+id),base="/api/v1/admin/tenants/"+encodeURIComponent(root.dataset.tenant)+"/roles";let busy=false;
+  const el=id=>document.getElementById("wm-"+id),base="/api/v1/admin/tenants/"+encodeURIComponent(root.dataset.tenant)+"/roles";let busy=false,denied=false;
   function node(tag,text){const item=document.createElement(tag);item.textContent=text;return item;}
+  function lock(){denied=true;el("list").replaceChildren();el("principal").value="";el("role").selectedIndex=0;root.querySelectorAll("button,input,select").forEach(control=>control.disabled=true);}
   async function api(path,options={}){
     const response=await fetch(base+path,{...options,credentials:"same-origin",headers:{"Content-Type":"application/json","X-Lightwork-Expected-Tenant":root.dataset.tenant}});
+    if([401,403].includes(response.status)){lock();throw new Error("Your sign-in or administrator access changed. Sign in again and reload Users.");}
     if(response.status===204)return null;
     let data;try{data=await response.json();}catch(_){throw new Error("The workspace member service returned an unreadable response.");}
     if(!response.ok)throw new Error(typeof data.detail==="string"?data.detail:"Workspace membership could not be changed.");return data;
@@ -20,7 +22,7 @@
     if(!Object.keys(members).length)el("list").append(node("li","No workspace-specific member assignments yet."));
     el("status").textContent="Current workspace membership loaded.";
   }
-  async function action(work){if(busy)return;busy=true;const controls=Array.from(root.querySelectorAll("button,input,select"));controls.forEach(value=>value.disabled=true);try{await work();}catch(error){el("status").textContent=error.message;}finally{busy=false;controls.forEach(value=>value.disabled=false);}}
+  async function action(work){if(busy||denied)return;busy=true;const controls=Array.from(root.querySelectorAll("button,input,select"));controls.forEach(value=>value.disabled=true);try{await work();}catch(error){el("status").textContent=error.message;}finally{busy=false;if(!denied)controls.forEach(value=>value.disabled=false);}}
   el("refresh").addEventListener("click",()=>action(load));
   el("form").addEventListener("submit",event=>{event.preventDefault();action(async()=>{
     const principal=el("principal").value.trim(),role=el("role").value;

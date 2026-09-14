@@ -63,11 +63,11 @@ def _locked(path: Path):
 
     ensure_private_directory(maverick_home())
     ensure_private_directory(path.parent)
-    stack = ExitStack()
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(_RBAC_LOCK)
-    stack.enter_context(cross_process_lock(path))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(_RBAC_LOCK)
+        stack.enter_context(cross_process_lock(path))
+        return stack.pop_all()
 
 # Permission lattice. The "audit" permission gates the audit-trail read surface
 # (/api/v1/audit/*): the who-did-what-when record that can name principals, tool

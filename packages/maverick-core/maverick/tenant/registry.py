@@ -392,11 +392,11 @@ def _locked(*, strict: bool = False):
 
     ensure_private_directory(maverick_home())
     ensure_private_directory(_registry_path().parent)
-    stack = ExitStack()
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(_REGISTRY_LOCK)
-    stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(_REGISTRY_LOCK)
+        stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
+        return stack.pop_all()
 
 
 def list_tenants() -> list[TenantRecord]:

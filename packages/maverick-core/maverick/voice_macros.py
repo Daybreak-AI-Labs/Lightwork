@@ -55,10 +55,10 @@ def _locked(path: Path | None):
         ensure_private_directory(target.parent)
     else:
         prepare_private_directory(target.parent)
-    stack = ExitStack()
-    stack.enter_context(_MACROS_LOCK)
-    stack.enter_context(cross_process_lock(target))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(_MACROS_LOCK)
+        stack.enter_context(cross_process_lock(target))
+        return stack.pop_all()
 
 MAX_STEPS = 16
 

@@ -101,10 +101,10 @@ class VoiceGate:
 
         from .file_lock import cross_process_lock
         self._ensure_parent()
-        stack = ExitStack()
-        stack.enter_context(self._lock)
-        stack.enter_context(cross_process_lock(self._path, strict=True))
-        return stack
+        with ExitStack() as stack:
+            stack.enter_context(self._lock)
+            stack.enter_context(cross_process_lock(self._path, strict=True))
+            return stack.pop_all()
 
     # -- store --------------------------------------------------------------
 

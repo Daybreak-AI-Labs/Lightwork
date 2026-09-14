@@ -29,6 +29,27 @@ capabilities.
 
 ## What was actually exercised
 
+### Follow-up: interrupted saves and access changes
+
+The additional failure-recovery pass reproduced four further defect families.
+The table groups related failures across the affected customer paths.
+
+| Failure | Customer impact | Repair and regression evidence |
+| --- | --- | --- |
+| Failed lock acquisition stranded previously acquired locks | A recoverable file error or cancellation could leave later workspace, membership, invitation, trigger, trust, federation or voice-store operations stuck. | Seventeen helpers now unwind partial acquisition and transfer successfully acquired guards to the caller. The original lock order and strict-lock flags remain intact. Tests retain the failure traceback, verify cleanup after both I/O errors and cancellation, then acquire again. An actual obstructed workspace lock file is removed and the public selection operation successfully saves and clears state without restarting. |
+| Blocking administration handlers | A slow Settings save, role/grant operation, user-list read or invitation email could stall unrelated requests on the same dashboard event loop. | Eighteen affected handlers now use synchronous worker routes or explicitly await worker-thread I/O. Nineteen concurrent-request scenarios include the already-correct provider probe as a control; they check that another request completes before the injected slow operation is released and that the tenant context is preserved. No live email or provider request is made by these tests. |
+| Partially applied Settings selections | Capability and feature forms published one intermediate configuration per checkbox. File errors and malformed section data produced raw 500 responses. | Each form now commits its full selection under one settings lock and one atomic file replacement. Tests observe only the complete new selection, preserve the original file when storage is unavailable, retry successfully, and retain malformed data for recovery with a 503 response. Existing single-switch callers retain their interface. |
+| Stale workspace-member screen after access loss | The loaded roster and pending colleague identity remained visible after a 401/403, and editing controls were re-enabled. | The controller clears private state and locks further actions until a fresh authenticated page load. Twelve response cases cover refresh/save/remove, both status codes and JSON/HTML bodies. Temporary 503 failures continue to preserve the editable form for retry. |
+
+The lock suite passed 37 cases, the administration recovery suite passed 25,
+and the complete dashboard DOM suite passed 757. A broader affected-store suite
+passed 557 cases in each of normal and secure-default configurations. These
+suites overlap and include passing controls; their counts must not be added as
+distinct defects or treated as live customer acceptance. The final full CI and
+native acceptance runs for the published revision are linked in the pull request.
+
+### Initial fresh-customer pass
+
 The Python environment independently installs all eight packages from this
 checkout. Imported core/dashboard module paths were checked before testing.
 

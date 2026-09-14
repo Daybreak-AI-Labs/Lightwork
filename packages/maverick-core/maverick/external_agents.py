@@ -248,13 +248,13 @@ def _sidecar_locked():
     from .authority_effects import authority_effect_fence
     from .file_lock import cross_process_lock
 
-    stack = ExitStack()
     # The enrollment/containment/budget/execution sidecar is authority.  Keep
     # its mutation order aligned with the trust registry and provider paths:
     # global authority fence first, then the store-specific lock.
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(cross_process_lock(registry_path()))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(cross_process_lock(registry_path()))
+        return stack.pop_all()
 
 
 def _month_key(now: float | None = None) -> str:
