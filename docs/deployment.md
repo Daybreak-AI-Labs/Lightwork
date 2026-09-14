@@ -35,7 +35,8 @@ the exact operating-system file before relying on one. The engineering
 bootstrap packages and the [self-contained Windows customer candidate](../apps/installer-msi/CUSTOMER.md)
 are separate paths. The customer candidate includes the frozen runtime and
 offline WebView2 installer, but still requires publisher and clean-machine
-acceptance before release. As checked on September 14, 2026, the repository
+acceptance before release. Engineering bootstrap packages are
+not attached to product releases. As checked on September 14, 2026, the repository
 has no published release assets; source installation remains an engineering
 setup, not a qualified customer delivery.
 
