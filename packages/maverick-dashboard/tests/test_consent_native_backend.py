@@ -101,21 +101,18 @@ class _Preferences:
         self.records = []
         self.created = []
 
-    def list_policies(self, _tenant, *, limit):
-        assert limit == 500
+    def get_active_policy(self, tenant, policy_id, *, at):
+        assert tenant == self.authority.tenant_id
+        assert policy_id == self.authority.policy_id
+        assert at == 1_000.0
         return {
-            "truncated": False,
-            "policies": [
-                {
-                    "policy_id": self.authority.policy_id,
-                    "version": self.authority.policy_version,
-                    "policy_sha256": self.authority.policy_sha256,
-                    "notice_sha256": _digest("notice"),
-                    "purposes": {"analytics": "consent", "sale": "consent"},
-                    "effective_at": 1,
-                    "expires_at": None,
-                }
-            ],
+            "policy_id": self.authority.policy_id,
+            "version": self.authority.policy_version,
+            "policy_sha256": self.authority.policy_sha256,
+            "notice_sha256": _digest("notice"),
+            "purposes": {"analytics": "consent", "sale": "consent"},
+            "effective_at": 1,
+            "expires_at": None,
         }
 
     def create_profile(self, tenant, profile_id, identity_kind, subject, idempotency_key):

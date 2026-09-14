@@ -886,18 +886,20 @@ def version() -> None:
 
 @main.command("release-runtime-check")
 def release_runtime_check() -> None:
-    """Verify provider SDKs bundled in a full release artifact."""
+    """Verify provider SDKs and document parsers in a full release artifact."""
     from ..providers import verify_release_runtime
+    from ..tools.document_processing import verify_release_document_runtime
 
     try:
         verify_release_runtime()
+        verify_release_document_runtime()
     except Exception as exc:
         raise click.ClickException(
-            f"full release provider runtime is unavailable: {exc}"
+            f"full release runtime is unavailable: {exc}"
         ) from exc
     click.echo(
         "release runtime ready: Anthropic and OpenAI-compatible provider "
-        "SDKs are available"
+        "SDKs, document parsers and document worker source are available"
     )
 
 

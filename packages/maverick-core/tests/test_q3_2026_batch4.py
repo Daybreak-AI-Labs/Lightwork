@@ -3,8 +3,18 @@ context compactor, OTEL span wiring."""
 from __future__ import annotations
 
 import sys
+import tarfile
 import types
 from unittest.mock import MagicMock
+
+import pytest
+
+from .test_kubernetes_workspace_transfer import _capture_using_fake_run
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_archive_capture(monkeypatch):
+    monkeypatch.setattr("maverick.sandbox.workspace_transfer.capture_archive", _capture_using_fake_run)
 
 # ---------- Kubernetes sandbox ----------
 #
@@ -58,6 +68,11 @@ def _fake_kubectl(monkeypatch, *, run_rc=0, wait_rc=0, cp_in_rc=0, cp_out_rc=0,
                 return MagicMock(returncode=cp_out_rc, stdout="", stderr=cp_out_stderr)
             return MagicMock(returncode=cp_in_rc, stdout="", stderr=cp_in_stderr)
         if sub == "exec":
+            if "tar" in args:
+                if cp_out_rc == 0:
+                    with tarfile.open(fileobj=k["stdout"], mode="w"):
+                        pass
+                return MagicMock(returncode=cp_out_rc, stdout=b"", stderr=cp_out_stderr.encode())
             return MagicMock(returncode=exec_rc, stdout=exec_stdout, stderr=exec_stderr)
         if sub == "delete":
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -91,13 +106,14 @@ def test_k8s_exec_pipeline_order_and_no_rm(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch, exec_stdout="hi\n")
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(image="alpine", namespace="ci", allow_network=True,
-                                workdir=tmp_path)
+                                workdir=tmp_path / "workspace")
+    (backend.workdir / "input.txt").write_text("input")
     result = backend.exec("echo hi")
     assert result.ok
     assert result.stdout == "hi\n"
 
     assert [_subcommand(c) for c in calls] == [
-        "version", "run", "wait", "cp", "exec", "cp", "delete",
+        "version", "run", "wait", "cp", "exec", "exec", "delete",
     ]
 
     run_args = _calls_with(calls, "run")[0]
@@ -114,7 +130,8 @@ def test_k8s_exec_pipeline_order_and_no_rm(monkeypatch, tmp_path):
 def test_k8s_copies_workspace_into_pod_before_running(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch)
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(namespace="ci", allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(namespace="ci", allow_network=True, workdir=tmp_path / "workspace")
+    (backend.workdir / "input.txt").write_text("input")
     backend.exec("true")
 
     cp_in = _calls_with(calls, "cp")[0]
@@ -126,13 +143,12 @@ def test_k8s_copies_workspace_into_pod_before_running(monkeypatch, tmp_path):
 def test_k8s_copies_pod_workspace_back_out_after_running(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch)
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(namespace="ci", allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(namespace="ci", allow_network=True, workdir=tmp_path / "workspace")
     backend.exec("true")
 
-    cp_out = _calls_with(calls, "cp")[1]
-    src = cp_out[cp_out.index("cp") + 1]
-    assert src.startswith("ci/") and src.endswith(":/workspace/.")
-    assert cp_out[cp_out.index("cp") + 2] == "."
+    export = _calls_with(calls, "exec")[1]
+    assert export[-6:] == ["tar", "-C", "/workspace", "-cf", "-", "."]
+    assert 'kill -s STOP -1' in export[export.index("-c") + 1]
 
 
 def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_path):
@@ -140,7 +156,8 @@ def test_k8s_copy_in_failure_skips_exec_and_still_deletes_pod(monkeypatch, tmp_p
     command against an empty directory (the original bug) -- fail closed."""
     calls = _fake_kubectl(monkeypatch, cp_in_rc=1, cp_in_stderr="no such file or directory")
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
+    (backend.workdir / "input.txt").write_text("input")
     result = backend.exec("echo hi")
     assert result.exit_code != 0
     assert "kubectl cp" in result.stderr
@@ -153,18 +170,19 @@ def test_k8s_copy_out_failure_does_not_claim_workspace_delivery(monkeypatch, tmp
     calls = _fake_kubectl(monkeypatch, exec_stdout="hi\n", cp_out_rc=1,
                           cp_out_stderr="connection refused")
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
     result = backend.exec("echo hi")
     assert result.exit_code == 74
     assert result.stdout == "hi\n"
-    assert "kubectl cp (pod -> workspace) failed" in result.stderr
+    assert "workspace export failed" in result.stderr
+    assert not _calls_with(calls, "delete"), "failed export must retain the pod"
     assert calls  # sanity: the fake actually ran
 
 
 def test_k8s_pod_not_ready_fails_without_running_command(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch, wait_rc=1, wait_stderr="timed out waiting for condition")
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
     result = backend.exec("echo hi")
     assert result.exit_code != 0
     assert "Ready" in result.stderr
@@ -176,7 +194,7 @@ def test_k8s_pod_not_ready_fails_without_running_command(monkeypatch, tmp_path):
 def test_k8s_passes_context(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch)
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(context="minikube", allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(context="minikube", allow_network=True, workdir=tmp_path / "workspace")
     backend.exec("true")
     run_args = _calls_with(calls, "run")[0]
     assert "--context" in run_args and "minikube" in run_args
@@ -228,7 +246,7 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch, exec_stdout="ok\n")
     from maverick.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(image="alpine", allow_network=True,
-                                memory="2g", cpus="1", workdir=tmp_path)
+                                memory="2g", cpus="1", workdir=tmp_path / "workspace")
     backend.exec("echo hi")
     run_args = _calls_with(calls, "run")[0]
     assert "--overrides" in run_args
@@ -246,7 +264,8 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     assert container["resources"]["limits"] == {"memory": "2Gi", "cpu": "1"}
     assert overrides["spec"]["automountServiceAccountToken"] is False
     assert container["volumeMounts"] == [{"name": "workspace", "mountPath": "/workspace"}]
-    assert overrides["spec"]["volumes"] == [{"name": "workspace", "emptyDir": {}}]
+    assert overrides["spec"]["volumes"] == [{"name": "workspace", "emptyDir": {"sizeLimit": str(512 * 1024 * 1024)}}]
+    assert overrides["spec"]["activeDeadlineSeconds"] >= 3600
 
 
 def test_k8s_disallow_network_emits_networkpolicy_hint(monkeypatch, caplog):
@@ -279,7 +298,7 @@ def _assert_deleted_pod(deletes):
 def test_k8s_deletes_pod_on_success(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch, exec_stdout="ok\n")
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
     out = backend.exec("echo hi")
     assert out.exit_code == 0
     _assert_deleted_pod(_calls_with(calls, "delete"))
@@ -288,7 +307,7 @@ def test_k8s_deletes_pod_on_success(monkeypatch, tmp_path):
 def test_k8s_deletes_pod_on_nonzero_exit(monkeypatch, tmp_path):
     calls = _fake_kubectl(monkeypatch, exec_rc=7, exec_stdout="", exec_stderr="boom")
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
     out = backend.exec("false")
     assert out.exit_code == 7
     _assert_deleted_pod(_calls_with(calls, "delete"))
@@ -303,12 +322,16 @@ def test_k8s_deletes_pod_on_timeout(monkeypatch, tmp_path):
         calls.append(list(args))
         sub = _subcommand(args)
         if sub == "exec":
+            if "tar" in args:
+                with tarfile.open(fileobj=k["stdout"], mode="w"):
+                    pass
+                return MagicMock(returncode=0, stderr=b"")
             raise subprocess.TimeoutExpired(cmd=args, timeout=1)
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
     out = backend.exec("sleep 999")
     assert out.exit_code == 124
     _assert_deleted_pod(_calls_with(calls, "delete"))
@@ -328,14 +351,9 @@ def test_k8s_deletes_pod_on_unexpected_error(monkeypatch, tmp_path):
 
     monkeypatch.setattr("subprocess.run", _fake_run)
     from maverick.sandbox.kubernetes import KubernetesBackend
-    backend = KubernetesBackend(allow_network=True, workdir=tmp_path)
-    try:
-        backend.exec("echo hi")
-    except OSError:
-        pass
-    else:
-        raise AssertionError("expected OSError to propagate")
-    # Pod is still cleaned up even though the error propagates.
+    backend = KubernetesBackend(allow_network=True, workdir=tmp_path / "workspace")
+    assert backend.exec("echo hi").exit_code == 74
+    # No command started, so the empty pod can be cleaned up.
     _assert_deleted_pod(_calls_with(calls, "delete"))
 
 
@@ -607,6 +625,6 @@ def test_huggingface_registers(tmp_path):
         def open_questions(self, gid):
             return []
 
-    reg = base_registry(_W(), LocalBackend(workdir=tmp_path))
+    reg = base_registry(_W(), LocalBackend(workdir=tmp_path / "workspace"))
     names = {t.name for t in reg.all()}
     assert "huggingface" in names

@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -233,23 +232,11 @@ def resolve_consent_pairing_context(
         raise ConsentIdentityFederationConflict("published consent authority changed")
 
     preferences = public.preference_store_for(client.tenant_id)
-    policies = preferences.list_policies(client.tenant_id, limit=500)
-    if policies.get("truncated") is not False or not isinstance(policies.get("policies"), list):
-        raise ConsentIdentityFederationConflict("policy authority is incomplete")
-    now = public.clock()
-    active = [
-        item
-        for item in policies["policies"]
-        if isinstance(item, Mapping)
-        and item.get("policy_id") == client.policy_id
-        and float(item.get("effective_at", math.inf)) <= now
-        and (item.get("expires_at") is None or float(item["expires_at"]) > now)
-    ]
-    active.sort(key=lambda item: int(item.get("version", 0)), reverse=True)
+    policy = preferences.get_active_policy(client.tenant_id, client.policy_id, at=public.clock())
     if (
-        not active
-        or active[0].get("version") != client.policy_version
-        or not hmac.compare_digest(str(active[0].get("policy_sha256", "")), client.policy_sha256)
+        not isinstance(policy, Mapping)
+        or policy.get("version") != client.policy_version
+        or not hmac.compare_digest(str(policy.get("policy_sha256", "")), client.policy_sha256)
     ):
         raise ConsentIdentityFederationConflict("policy authority changed")
     content = configuration.get("configuration")
@@ -267,9 +254,9 @@ def resolve_consent_pairing_context(
         if purpose_id in published_purposes:
             raise ConsentIdentityFederationConflict("published consent authority changed")
         published_purposes[purpose_id] = str(item.get("lawful_basis", ""))
-    if published_purposes != active[0].get("purposes") or not hmac.compare_digest(
+    if published_purposes != policy.get("purposes") or not hmac.compare_digest(
         str(notice.get("document_sha256", "")),
-        str(active[0].get("notice_sha256", "")),
+        str(policy.get("notice_sha256", "")),
     ):
         raise ConsentIdentityFederationConflict("published policy authority changed")
     profile_authority = preferences.get_profile_authority(

@@ -12,12 +12,15 @@ _datas = (
     collect_data_files('maverick')
     + collect_data_files('maverick_dashboard')
     + collect_data_files('maverick_shield')
+    # Copied into the offline worker at runtime; PYZ bytecode is not a source
+    # resource. Retain this one reviewed standalone script in frozen builds.
+    + collect_data_files('maverick', includes=['sandbox/document_engine.py'], include_py_files=True)
 )
 for _dist in (
     'maverick-agent', 'maverick-shield', 'maverick-channels',
     'maverick-evolve', 'maverick-dashboard', 'maverick-mcp-server',
     'maverick-knowledge', 'maverick-installer', 'pywhispercpp',
-    'openai',
+    'openai', 'openpyxl', 'lxml', 'pypdf', 'pdfplumber', 'pdfminer.six', 'pypdfium2',
 ):
     try:
         _datas += copy_metadata(_dist)
@@ -60,7 +63,11 @@ a = Analysis(
       + collect_submodules('maverick_knowledge')
       + collect_submodules('maverick_installer')
       + collect_submodules('pywhispercpp')
-      + collect_submodules('openai'),
+      + collect_submodules('openai')
+      + collect_submodules('openpyxl')
+      + collect_submodules('lxml')
+      + collect_submodules('pypdf')
+      + collect_submodules('pdfplumber'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

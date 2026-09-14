@@ -180,7 +180,7 @@ def _container_backend_required(full_cfg: dict | None = None) -> bool:
     require_container = true``, or enterprise mode is on. Off by default so
     single-tenant/dev installs keep the (warned) local backend.
     """
-    if _config_truthy_env("MAVERICK_REQUIRE_CONTAINER_BACKEND"):
+    if os.environ.get("MAVERICK_DEPLOYMENT_ISOLATION") or _config_truthy_env("MAVERICK_REQUIRE_CONTAINER_BACKEND"):
         return True
     if full_cfg and _config_bool(full_cfg.get("require_container"), False):
         return True
@@ -320,6 +320,21 @@ def _read_only_paths_for_backend(chosen: str, full_cfg: dict | None):
     return paths
 
 
+def _deployment_policy(cfg, full_cfg, backend, sandbox_config):
+    from .kubernetes_authority import deployment_kubernetes_config
+    try:
+        deployment = deployment_kubernetes_config()
+    except ValueError as exc:
+        raise SandboxPolicyError(str(exc)) from exc
+    if deployment is None:
+        return cfg, full_cfg
+    if backend is not None and str(backend).strip().lower() != "kubernetes":
+        raise SandboxPolicyError("Production execution is pinned to the separate Kubernetes executor")
+    if sandbox_config is not None and str(sandbox_config.get("backend", "local")).strip().lower() != "kubernetes":
+        raise SandboxPolicyError("The pinned evaluator policy does not match the production Kubernetes executor")
+    return {**cfg, **deployment}, {**(full_cfg or {}), **deployment}
+
+
 def build_sandbox(
     workdir: str | Path | None = None,
     backend: str | None = None,
@@ -349,6 +364,8 @@ def build_sandbox(
         except Exception:
             cfg = {}
             full_cfg = {}
+
+    cfg, full_cfg = _deployment_policy(cfg, full_cfg, backend, sandbox_config)
 
     # Normalize the backend selector: it comes from user-typed TOML (or a CLI
     # flag) and is matched case-sensitively against the literals below, so
@@ -477,6 +494,7 @@ def build_sandbox(
             image=_resolve_image(full_cfg),
             namespace=full_cfg.get("namespace", "default"),
             context=full_cfg.get("context"),
+            kubeconfig=full_cfg.get("kubeconfig"),
             # HOST directory, same as every other container backend -- it's
             # streamed into the pod's emptyDir via `kubectl cp`, not used as
             # an in-pod path (see KubernetesBackend's module docstring).

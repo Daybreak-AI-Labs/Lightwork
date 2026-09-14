@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import math
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -158,24 +157,13 @@ class LightworkNativeConsentBackend:
         ):
             raise NativeConsentConflict("published native consent configuration changed")
         preferences = self.public.preference_store_for(authority.tenant_id)
-        listed = preferences.list_policies(authority.tenant_id, limit=500)
-        policies = listed.get("policies") if isinstance(listed, Mapping) else None
-        if listed.get("truncated") is not False or not isinstance(policies, list):
-            raise NativeConsentConflict("native policy authority is incomplete")
-        now = self.clock()
-        active = [
-            item
-            for item in policies
-            if isinstance(item, Mapping)
-            and item.get("policy_id") == authority.policy_id
-            and float(item.get("effective_at", math.inf)) <= now
-            and (item.get("expires_at") is None or float(item["expires_at"]) > now)
-        ]
-        active.sort(key=lambda item: int(item.get("version", 0)), reverse=True)
+        policy = preferences.get_active_policy(
+            authority.tenant_id, authority.policy_id, at=self.clock(),
+        )
         if (
-            not active
-            or active[0].get("version") != authority.policy_version
-            or not self._same(active[0].get("policy_sha256"), authority.policy_sha256)
+            not isinstance(policy, Mapping)
+            or policy.get("version") != authority.policy_version
+            or not self._same(policy.get("policy_sha256"), authority.policy_sha256)
         ):
             raise NativeConsentConflict("native policy authority changed")
         content = configuration.get("configuration")
@@ -190,11 +178,11 @@ class LightworkNativeConsentBackend:
             if item["id"] in published:
                 raise NativeConsentConflict("published native consent purposes repeat")
             published[item["id"]] = str(item.get("lawful_basis", ""))
-        if published != active[0].get("purposes") or not self._same(
-            notice.get("document_sha256"), active[0].get("notice_sha256")
+        if published != policy.get("purposes") or not self._same(
+            notice.get("document_sha256"), policy.get("notice_sha256")
         ):
             raise NativeConsentConflict("published native consent policy changed")
-        return dict(configuration), dict(active[0])
+        return dict(configuration), dict(policy)
 
     def _context(self, authority: NativeApplicationAuthority, client: object) -> ConsentContext:
         return ConsentContext(

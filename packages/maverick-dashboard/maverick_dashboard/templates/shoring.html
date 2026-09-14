@@ -81,6 +81,7 @@
         · {% if not f.measurement_complete %}sample only: {% endif %}{{ f.delivered }} delivered / {{ f.blocked }} blocked
         · {{ f.exception_count }} awaiting sign-off
         {% if not f.measurement_complete %}<br>More than 2,000 department goals exist. Counts are partial; SLA status is unavailable for this sample.{% endif %}
+        {% if f.legacy_completion_count %}<br>{{ f.legacy_completion_count }} older completion records have no recorded finish time. Turnaround is unavailable for this window.{% endif %}
         {% if f.scope %}<br>{{ f.scope }}{% endif %}
       </p>
       {% if f.slas %}
@@ -184,7 +185,11 @@
     The human sign-offs awaiting a decision for each shored function's department —
     the same queue behind <a href="{{ approvals_path }}">Approvals</a>, seen through
     the shoring lens. Act on an item in Approvals.
+    Items without a recorded department remain in <a href="{{ approvals_path }}">the shared approval queue</a>.
   </p>
+  {% if functions and functions[0].unassigned_exception_count %}
+    <p class="sh-note">{{ functions[0].unassigned_exception_count }} pending items have no recorded department and need review in the shared queue.</p>
+  {% endif %}
   {% set ns = namespace(any=false) %}
   {% for f in functions %}
     {% if f.exceptions %}

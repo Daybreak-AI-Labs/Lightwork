@@ -2819,7 +2819,7 @@ def _load_skills():
 
 
 @app.get("/demo", response_class=HTMLResponse)
-async def public_demo(request: Request) -> HTMLResponse:
+def public_demo(request: Request) -> HTMLResponse:
     """Redacted public-demo page for the reference demo-cluster proxy.
 
     The demo proxy exposes this route to the internet. Keep it intentionally
@@ -2873,7 +2873,7 @@ async def public_demo(request: Request) -> HTMLResponse:
 
 
 @app.get("/overview", response_class=HTMLResponse)
-async def overview(request: Request) -> HTMLResponse:
+def overview(request: Request) -> HTMLResponse:
     w = _world()
     # Use SQL aggregation instead of pulling every goal into Python. Owner-scope
     # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
@@ -2910,7 +2910,7 @@ async def redact_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/workforce", response_class=HTMLResponse)
-async def workforce_page(request: Request) -> HTMLResponse:
+def workforce_page(request: Request) -> HTMLResponse:
     """The workforce: specialist packs as departments, with delivery outcomes.
 
     Presents the 1,000+ packs as buyable teams (charter + headcount), a
@@ -3003,20 +3003,20 @@ async def perf_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/goals", response_class=HTMLResponse)
-async def goals_page(request: Request) -> HTMLResponse:
+def goals_page(request: Request) -> HTMLResponse:
     goals = _world().list_goals(owner=goal_owner_filter(request), limit=200, order="desc")
     return templates.TemplateResponse(request, "goals.html", {"goals": goals})
 
 
 @app.get("/projects", response_class=HTMLResponse)
-async def projects_page(request: Request) -> HTMLResponse:
+def projects_page(request: Request) -> HTMLResponse:
     """Projects ("matters") -- workspaces grouping related goals."""
     projects = _world().list_projects(owner=goal_owner_filter(request))
     return templates.TemplateResponse(request, "projects.html", {"projects": projects})
 
 
 @app.post("/projects")
-async def projects_create(
+def projects_create(
     request: Request, name: str = Form(...), description: str = Form(""), domain: str = Form("")
 ) -> RedirectResponse:
     """Create a project, then redirect to it. Same-origin; owned by the caller."""
@@ -3034,7 +3034,7 @@ async def projects_create(
 
 
 @app.get("/projects/{project_id}", response_class=HTMLResponse)
-async def project_detail(request: Request, project_id: int) -> HTMLResponse:
+def project_detail(request: Request, project_id: int) -> HTMLResponse:
     w = _world()
     project = w.get_project(project_id)
     if project is None:
@@ -3055,7 +3055,7 @@ async def project_detail(request: Request, project_id: int) -> HTMLResponse:
 
 
 @app.post("/chat/goal/{goal_id}/project")
-async def goal_set_project(
+def goal_set_project(
     request: Request, goal_id: int, project_id: str = Form("")
 ) -> RedirectResponse:
     """File a goal under a project (empty value clears it). Same-origin; the
@@ -3139,7 +3139,7 @@ def _deliverable_specs() -> list[dict]:
 
 
 @app.get("/deliverables", response_class=HTMLResponse)
-async def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
+def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     """The persona inbox: runs grouped by the deliverable their pack declares,
     scoped to the role that consumes them -- "my forecasts", "assessments
     awaiting my sign-off" -- instead of the flat ``/goals`` stream.
@@ -3403,12 +3403,12 @@ async def learned_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/facts", response_class=HTMLResponse)
-async def facts_page(request: Request) -> HTMLResponse:
+def facts_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "facts.html", {"facts": _world().get_facts()})
 
 
 @app.get("/spend", response_class=HTMLResponse)
-async def spend_page(request: Request) -> HTMLResponse:
+def spend_page(request: Request) -> HTMLResponse:
     # The burn/outcome/top-goal charts render client-side from
     # GET /api/v1/dashboards/spend; the page keeps the episode table + hero.
     # Scope both reads to the caller (matches /api/v1/spend and the on-page
@@ -5176,7 +5176,7 @@ async def finance_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/savings", response_class=HTMLResponse)
-async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
+def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     """The value dashboard: money saved vs the typical human cost, computed
     from real completed work and the client's OWN cost/value inputs (their
     hourly rate + human hours per task, editable right on the page)."""
@@ -5202,7 +5202,7 @@ async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
 
 
 @app.get("/billing")
-async def billing_page(request: Request, format: str = "", period: str = "", receipt_offset: int = 0):
+def billing_page(request: Request, format: str = "", period: str = "", receipt_offset: int = 0):
     """Tenant billing statement: accrued charges for the current period, a
     period-over-period trend, and an itemized CSV invoice.
 
@@ -5447,7 +5447,7 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
 
 
 @app.get("/replay", response_class=HTMLResponse)
-async def replay_page(request: Request) -> HTMLResponse:
+def replay_page(request: Request) -> HTMLResponse:
     """Flight recorder: reconstruct a run's action timeline from the signed
     audit log, verify the tamper-evident chain, and offer an evidence export.
 
@@ -5736,7 +5736,7 @@ async def agents_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/assessments", response_class=HTMLResponse)
-async def assessments_page(request: Request) -> HTMLResponse:
+def assessments_page(request: Request) -> HTMLResponse:
     """Govern → Assessments: the privacy / security / AI-risk register. Every
     agent and flow can be auto-assessed from its declared capability surface,
     reviewed and signed off per lens, and re-assessed when it changes. The
@@ -5929,7 +5929,7 @@ def _audit_event_visible_to_caller(
 
 
 @app.get("/oversight", response_class=HTMLResponse)
-async def oversight_page(request: Request) -> HTMLResponse:
+def oversight_page(request: Request) -> HTMLResponse:
     """Operator mission-control: every control-plane intervention in one pane.
 
     Unifies what each guardrail did to the fleet -- org-policy DENY /
@@ -6541,7 +6541,7 @@ async def mcp_test(request: Request, name: str = Form(...)) -> RedirectResponse:
 
 
 @app.get("/tools", response_class=HTMLResponse)
-async def tools_page(
+def tools_page(
     request: Request,
     q: str = Query(default="", max_length=128),
     page: int = Query(default=1, ge=1, le=100_000),
@@ -7130,7 +7130,7 @@ def _approval_queue_context(approvals: list) -> dict:
 
 
 @app.get("/approvals", response_class=HTMLResponse)
-async def approvals_page(request: Request) -> HTMLResponse:
+def approvals_page(request: Request) -> HTMLResponse:
     """Pending high-risk actions awaiting approve/deny.
 
     Populated when an agent runs with ``MAVERICK_CONSENT_MODE=dashboard``:
@@ -7220,7 +7220,7 @@ def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int 
 
 
 @app.get("/fleets", response_class=HTMLResponse)
-async def fleets_page(request: Request) -> HTMLResponse:
+def fleets_page(request: Request) -> HTMLResponse:
     """Operator console: the per-employee agent fleets + their oversight.
 
     Layer C of the enterprise control plane (see
@@ -7341,7 +7341,7 @@ async def templates_market_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/channels", response_class=HTMLResponse)
-async def channels_page(request: Request, saved: str = "") -> HTMLResponse:
+def channels_page(request: Request, saved: str = "") -> HTMLResponse:
     """Channels: manage the common ones (enable + credentials) from the form
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay, never config.toml; effective on the next
@@ -7445,7 +7445,7 @@ async def channels_save(request: Request) -> RedirectResponse:
 
 
 @app.post("/channels/clear")
-async def channels_clear(request: Request, channel: str = Form(...)) -> RedirectResponse:
+def channels_clear(request: Request, channel: str = Form(...)) -> RedirectResponse:
     """Remove a channel's dashboard overlay (reverts to config.toml / env)."""
     _require_same_origin(request)
     require_global_permission(request, "admin")
@@ -7584,7 +7584,7 @@ async def run_events_firehose(
 
 
 @app.get("/api/v1/goals/{goal_id}/cost-preview")
-async def goal_cost_preview(request: Request, goal_id: int, iterations: int = 1) -> JSONResponse:
+def goal_cost_preview(request: Request, goal_id: int, iterations: int = 1) -> JSONResponse:
     """Inline cost preview: project a pending goal's cost before running it.
 
     Treats the goal description as one step per non-empty line (or the whole
@@ -7619,7 +7619,7 @@ async def goal_cost_preview(request: Request, goal_id: int, iterations: int = 1)
 
 
 @app.get("/api/v1/goals/{goal_id}/cost-breakdown")
-async def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
+def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
     """'Why this cost' drill-down: a run's spend split by agent role/outcome.
 
     Buckets the goal's episodes (cost, tokens, count) so the dollar figure on
@@ -7650,7 +7650,7 @@ async def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.get("/api/v1/cost/anomalies")
-async def cost_anomalies(
+def cost_anomalies(
     request: Request,
     threshold_sigma: float = 3.0,
     limit: int = 500,
@@ -7745,7 +7745,7 @@ async def pins_list(request: Request) -> JSONResponse:
 
 
 @app.post("/api/v1/pins/{goal_id}")
-async def pins_add(request: Request, goal_id: int) -> JSONResponse:
+def pins_add(request: Request, goal_id: int) -> JSONResponse:
     g = _world().get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
@@ -7804,7 +7804,7 @@ async def views_delete(request: Request, name: str) -> JSONResponse:
 
 
 @app.get("/api/v1/gallery")
-async def gallery_list(request: Request) -> JSONResponse:
+def gallery_list(request: Request) -> JSONResponse:
     """Run gallery: the deployment's featured runs, enriched with live goal
     state and links to the tutorial/explain exports."""
     from maverick.ux_store import shared as _ux
@@ -7851,7 +7851,7 @@ async def gallery_add(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.delete("/api/v1/gallery/{goal_id}")
-async def gallery_remove(request: Request, goal_id: int) -> JSONResponse:
+def gallery_remove(request: Request, goal_id: int) -> JSONResponse:
     require_permission(request, "operate")
     g = _world().get_goal(goal_id)
     if g is None:
@@ -7865,7 +7865,7 @@ async def gallery_remove(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.get("/api/v1/goals/{goal_id}/annotations")
-async def annotations_list(request: Request, goal_id: int) -> JSONResponse:
+def annotations_list(request: Request, goal_id: int) -> JSONResponse:
     """Trace annotations: human notes pinned to replay-trace steps (seq)."""
     g = _world().get_goal(goal_id)
     if g is None:
@@ -7900,7 +7900,7 @@ async def annotations_add(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.get("/api/v1/goals/{goal_id}/anomalies")
-async def goal_anomalies(request: Request, goal_id: int, history: int = 50) -> JSONResponse:
+def goal_anomalies(request: Request, goal_id: int, history: int = 50) -> JSONResponse:
     """Cross-run anomaly signals for one run vs the deployment baseline."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -7926,7 +7926,7 @@ async def goal_anomalies(request: Request, goal_id: int, history: int = 50) -> J
 
 
 @app.get("/api/v1/goals/{goal_id}/tutorial.md")
-async def goal_tutorial(request: Request, goal_id: int) -> PlainTextResponse:
+def goal_tutorial(request: Request, goal_id: int) -> PlainTextResponse:
     """Run-as-tutorial export: the run rendered as step-by-step markdown."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -7941,7 +7941,7 @@ async def goal_tutorial(request: Request, goal_id: int) -> PlainTextResponse:
 
 
 @app.get("/api/v1/goals/{goal_id}/replay-storyboard")
-async def goal_replay_storyboard(request: Request, goal_id: int) -> JSONResponse:
+def goal_replay_storyboard(request: Request, goal_id: int) -> JSONResponse:
     """Replay-to-MP4 storyboard: the ordered captioned frames + durations and
     the exact ffmpeg command an operator runs to encode the video.
 
@@ -7978,7 +7978,7 @@ async def goal_replay_storyboard(request: Request, goal_id: int) -> JSONResponse
 
 
 @app.get("/api/v1/goals/{goal_id}/explain")
-async def goal_explain(request: Request, goal_id: int) -> JSONResponse:
+def goal_explain(request: Request, goal_id: int) -> JSONResponse:
     """Plain-language narrative of a run (deterministic, no LLM)."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -7992,7 +7992,7 @@ async def goal_explain(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.get("/api/v1/runs/compare")
-async def runs_compare(request: Request, ids: str) -> JSONResponse:
+def runs_compare(request: Request, ids: str) -> JSONResponse:
     """Multi-run dashboard: side-by-side summary of up to 8 runs."""
     try:
         goal_ids = [int(x) for x in ids.split(",") if x.strip()][:8]
@@ -8028,7 +8028,7 @@ async def runs_compare(request: Request, ids: str) -> JSONResponse:
 
 
 @app.get("/api/v1/cost/by-tag")
-async def cost_by_tag_api(
+def cost_by_tag_api(
     request: Request,
     tag_field: str = "tag",
     limit: int = 500,
@@ -8075,7 +8075,7 @@ async def shield_calibration_api() -> JSONResponse:
 
 
 @app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request) -> HTMLResponse:
+def chat_page(request: Request) -> HTMLResponse:
     from .onboarding_state import selected_model_routes_ready
 
     recent = _world().list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
@@ -8103,9 +8103,9 @@ async def chat_page(request: Request) -> HTMLResponse:
 async def home(request: Request) -> HTMLResponse | RedirectResponse:
     from .onboarding_state import selected_model_routes_ready
 
-    if not selected_model_routes_ready():
+    if not await run_in_threadpool(selected_model_routes_ready):
         return RedirectResponse("/start", status_code=303)
-    return await chat_page(request)
+    return await run_in_threadpool(chat_page, request)
 
 
 @app.post("/chat/send")
@@ -9241,7 +9241,7 @@ def _goal_deliverable(g):
 
 
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
-async def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
+def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -9299,7 +9299,7 @@ def _goal_artifacts(w, goal_id: int) -> list[dict]:
 
 
 @app.get("/share/{token}", response_class=HTMLResponse)
-async def shared_goal(request: Request, token: str) -> HTMLResponse:
+def shared_goal(request: Request, token: str) -> HTMLResponse:
     """Public, read-only view of a goal's deliverable behind a share token.
 
     Auth-exempt (the token IS the credential): an unknown, revoked, or expired
@@ -9364,7 +9364,7 @@ async def shared_goal(request: Request, token: str) -> HTMLResponse:
 
 
 @app.get("/api/goal/{goal_id}")
-async def api_goal_legacy(request: Request, goal_id: int) -> dict:
+def api_goal_legacy(request: Request, goal_id: int) -> dict:
     g = _world().get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
@@ -9454,7 +9454,7 @@ def _build_plan_tree(world, goal_id: int, depth_cap: int = 6) -> dict:
 
 
 @app.get("/api/v1/goals/{goal_id}/tree")
-async def api_plan_tree(request: Request, goal_id: int) -> dict:
+def api_plan_tree(request: Request, goal_id: int) -> dict:
     """Plan-tree JSON: root + recursive children with status + cost."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -9465,7 +9465,7 @@ async def api_plan_tree(request: Request, goal_id: int) -> dict:
 
 
 @app.get("/api/v1/goals/{goal_id}/minimap", response_class=PlainTextResponse)
-async def goal_minimap(request: Request, goal_id: int, depth: int = 3) -> PlainTextResponse:
+def goal_minimap(request: Request, goal_id: int, depth: int = 3) -> PlainTextResponse:
     """Plan-tree minimap: the goal's subtree as compact one-line-per-node text.
 
     Pure render via ``maverick.plan_minimap`` (status glyphs, depth
@@ -9522,7 +9522,7 @@ def _render_tree_html(node: dict) -> str:
 
 
 @app.get("/goals/{goal_id}/plan", response_class=HTMLResponse)
-async def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
+def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
     """HTML plan-tree visualization."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -9539,7 +9539,7 @@ async def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
 
 
 @app.get("/goals/{goal_id}/trajectory", response_class=HTMLResponse)
-async def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
+def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
     """Trajectory replay: timeline of every event with a scrubber."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -9555,7 +9555,7 @@ async def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
 
 
 @app.get("/goals/{goal_id}/errors", response_class=HTMLResponse)
-async def errors_page(request: Request, goal_id: int) -> HTMLResponse:
+def errors_page(request: Request, goal_id: int) -> HTMLResponse:
     """Error inspector: every failed turn for a goal, with full content."""
     w = _world()
     g = w.get_goal(goal_id)
@@ -9571,7 +9571,7 @@ async def errors_page(request: Request, goal_id: int) -> HTMLResponse:
 
 
 @app.get("/api/v1/cost.csv")
-async def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
+def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     """CSV rollup of episode spend, streamed.
 
     Council perf finding: prior version fetched up to 100k episodes
@@ -9687,7 +9687,7 @@ async def cost_csv(request: Request, month: str | None = None) -> StreamingRespo
 
 
 @app.get("/api/goal/{goal_id}/events")
-async def api_goal_events_legacy(
+def api_goal_events_legacy(
     request: Request,
     goal_id: int,
     since: int = 0,
@@ -10372,7 +10372,7 @@ async def shell_font(name: str) -> FileResponse:
 
 
 @app.get("/graph-editor", response_class=HTMLResponse)
-async def graph_editor_page(request: Request) -> HTMLResponse:
+def graph_editor_page(request: Request) -> HTMLResponse:
     """Visual graph editor: the goal forest as an editable SVG node graph.
 
     Layout comes from the server (GET /api/v1/goal-tree); the page JS only
@@ -10495,7 +10495,7 @@ async def workflow_builder_page(
 
 
 @app.get("/start", response_class=HTMLResponse)
-async def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse:
+def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse:
     """First-run guide: a live checklist from zero to a running AI workforce.
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
@@ -10524,7 +10524,7 @@ async def get_started_page(request: Request, use_case: str = "deliverable") -> H
 
 
 @app.get("/workflows", response_class=HTMLResponse)
-async def workflows_index_page(request: Request) -> HTMLResponse:
+def workflows_index_page(request: Request) -> HTMLResponse:
     """Your saved workflows: templates you authored + agent playbooks you built,
     with quick edit / automate actions. The builder is reached via 'New'. (This
     is the management index; /templates remains the browse-the-catalog page.)"""
@@ -10643,7 +10643,7 @@ async def flow_run_page(request: Request, flow_id: str, run_id: str) -> HTMLResp
 
 
 @app.get("/automations", response_class=HTMLResponse)
-async def automations_page(request: Request) -> HTMLResponse:
+def automations_page(request: Request) -> HTMLResponse:
     """One place to see and manage every automation: cron schedules and inbound
     webhook triggers. The page lists the existing /api/v1/schedules and
     /api/v1/triggers; each section is hidden when its [features] knob is off."""
@@ -10754,7 +10754,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/walkthroughs", response_class=HTMLResponse)
-async def walkthroughs_page(request: Request) -> HTMLResponse:
+def walkthroughs_page(request: Request) -> HTMLResponse:
     """Locally exported run walkthrough videos (no external hosting).
 
     Lists the MP4s under the walkthroughs dir with native <video> embeds and
@@ -10827,7 +10827,7 @@ async def walkthrough_media(request: Request, name: str) -> FileResponse:
 
 
 @app.get("/plan-tree-3d", response_class=HTMLResponse)
-async def plan_tree_3d_page(request: Request) -> HTMLResponse:
+def plan_tree_3d_page(request: Request) -> HTMLResponse:
     """The goal forest in 3D (vanilla WebGL; no three.js, no CDN).
 
     Progressive enhancement: without WebGL (or JS) the server-rendered text

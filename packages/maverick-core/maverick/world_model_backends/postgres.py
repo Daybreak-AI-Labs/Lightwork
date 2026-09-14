@@ -677,6 +677,13 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
         " singleton SMALLINT PRIMARY KEY CHECK(singleton = 1),"
         " completed BOOLEAN NOT NULL CHECK(completed))",
     ]),
+    (36, [
+        "ALTER TABLE goals ADD COLUMN IF NOT EXISTS completed_at DOUBLE PRECISION",
+        "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS goal_id INTEGER",
+        "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS department TEXT NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS idx_pg_goals_domain_completed "
+        "ON goals(tenant_id, domain, completed_at)",
+    ]),
 ]
 
 # Highest migration version = the reported schema version.
@@ -1086,7 +1093,9 @@ def _dec_approval_row(r):
     return Approval(r[0], _unseal(r[1]), r[2], _unseal(r[3]), _unseal(r[4]),
                     r[5], r[6], r[7], r[8], r[9], r[10], r[11],
                     int(r[12]) if len(r) > 12 and r[12] is not None else 1,
-                    r[13] if len(r) > 13 else None)
+                    r[13] if len(r) > 13 else None,
+                    r[14] if len(r) > 14 else None,
+                    r[15] if len(r) > 15 else "")
 
 
 def _dec_approval_audit_row(r):
@@ -1529,10 +1538,13 @@ class PostgresWorldModel:
         sql = (
             # COALESCE so a status-only update (result=None) doesn't wipe
             # an existing result -- matches the SQLite backend.
-            "UPDATE goals SET status=%s, result=COALESCE(%s, result), "
+            "UPDATE goals SET completed_at=CASE WHEN %s <> 'done' THEN NULL "
+            "WHEN status='done' THEN completed_at "
+            "ELSE GREATEST(updated_at + 0.000001, %s) END, "
+            "status=%s, result=COALESCE(%s, result), "
             "updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         )
-        params: list = [status, _seal(result), now, goal_id]
+        params: list = [status, now, status, _seal(result), now, goal_id]
         if frag:
             sql += " AND " + frag
             params += fparams
@@ -1543,6 +1555,19 @@ class PostgresWorldModel:
             # mutation, after tenant-scoped UPDATE proves this goal is ours.
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+
+    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+        """Complete department totals, bound to this request's tenant."""
+        from ..shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
+
+        sql = AGGREGATE_SQL + f" WHERE domain = %s AND {EVENT_TIME_SQL} >= %s AND {EVENT_TIME_SQL} <= %s"
+        frag, fparams = _tenant_scope()
+        if frag:
+            sql += " AND " + frag
+        with self._tx() as cur:
+            cur.execute(sql, tuple([department, since, until, *fparams]))
+            row = cur.fetchone()
+        return measurements(row)
 
     def bind_goal_execution_principal(self, goal_id: int, principal: str) -> bool:
         """Atomically bind a goal's execution authority and tenant.
@@ -1793,7 +1818,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
-            "approvals_required, requested_by "
+            "approvals_required, requested_by, goal_id, department "
             "FROM approvals"
         )
         p: list = list(params) if frag else []
@@ -3446,14 +3471,23 @@ class PostgresWorldModel:
         is not inferred from ``detail`` (which may carry untrusted text).
         ``approvals_required`` is the N-of-M quorum; ``requested_by`` the
         requester (so a multi-party approval can bar self-approval)."""
+        from ..logging_config import current_goal_id
+
+        context_goal = current_goal_id()
+        frag, fparams = _tenant_scope()
+        goal_sql = "SELECT id, domain FROM goals WHERE id=%s"
+        if frag:
+            goal_sql += " AND " + frag
         with self._tx() as cur:
+            cur.execute(goal_sql, tuple([context_goal, *fparams]))
+            goal = cur.fetchone()
             cur.execute(
                 "INSERT INTO approvals(action, risk, scope, detail, provenance, status, "
-                "requested_at, tenant_id, approvals_required, requested_by) "
-                "VALUES(%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id",
+                "requested_at, tenant_id, approvals_required, requested_by, goal_id, department) "
+                "VALUES(%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s) RETURNING id",
                 (_seal(action), risk, _seal(scope), _seal(detail), provenance,
                  time.time(), _active_tenant(), max(1, int(approvals_required)),
-                 (requested_by or None)),
+                 (requested_by or None), goal[0] if goal else None, goal[1] if goal else ""),
             )
             row = cur.fetchone()
         return int(row[0])
@@ -3463,7 +3497,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
-            "approvals_required, requested_by "
+            "approvals_required, requested_by, goal_id, department "
             "FROM approvals WHERE id = %s"
         )
         p: list = [approval_id]
@@ -3480,7 +3514,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
-            "approvals_required, requested_by "
+            "approvals_required, requested_by, goal_id, department "
             "FROM approvals WHERE status = 'pending'"
         )
         if frag:

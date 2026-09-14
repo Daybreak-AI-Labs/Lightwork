@@ -1046,9 +1046,11 @@ def get_features() -> dict:
 def get_safety() -> dict:
     """Return safety section with sensible defaults filled in."""
     cfg = load_config().get("safety", {})
+    profile = str(cfg.get("profile", "balanced")).strip().lower()
+    default_threshold = {"strict": "medium", "permissive": "critical"}.get(profile, "high")
     return {
         "profile": cfg.get("profile", "balanced"),
-        "block_threshold": cfg.get("block_threshold", "high"),
+        "block_threshold": cfg.get("block_threshold", default_threshold),
         "scan_input": cfg.get("scan_input", True),
         "scan_tool_calls": cfg.get("scan_tool_calls", True),
         "scan_output": cfg.get("scan_output", True),
@@ -1102,10 +1104,37 @@ def get_skills() -> dict:
     }
 
 
+def get_document_tools() -> dict:
+    """Explicit opt-ins for macro-preserving edits and offline native engines."""
+    cfg = load_config().get("documents", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    image = cfg.get("engine_image", "lightwork-documents:local")
+    if not isinstance(image, str) or not image or image.startswith("-") or any(c.isspace() for c in image):
+        raise ValueError("documents.engine_image must be a single container image reference")
+    language = cfg.get("ocr_language", "eng")
+    if not isinstance(language, str) or not re.fullmatch(r"[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*", language):
+        raise ValueError("documents.ocr_language must name installed Tesseract language packs")
+    def bounded(key, default, low, high):
+        value = cfg.get(key, default)
+        if type(value) is not int or not low <= value <= high:
+            raise ValueError(f"documents.{key} must be an integer between {low} and {high}")
+        return value
+    return {
+        "macro_cell_edits": _strict_config_bool(cfg, "macro_cell_edits", False),
+        "native_recalculation": _strict_config_bool(cfg, "native_recalculation", False),
+        "pdf_ocr": _strict_config_bool(cfg, "pdf_ocr", False),
+        "engine_image": image,
+        "ocr_language": language,
+        "ocr_max_pages": bounded("ocr_max_pages", 20, 1, 100),
+        "timeout": bounded("timeout", 120, 10, 600),
+    }
+
+
 def get_sandbox() -> dict:
     cfg = load_config().get("sandbox", {})
     return {
-        "backend": cfg.get("backend", "local"),
+        "backend": "kubernetes" if os.environ.get("MAVERICK_DEPLOYMENT_ISOLATION") == "kubernetes" else cfg.get("backend", "local"),
         "workdir": cfg.get("workdir", "~/maverick-workspace"),
         "timeout": cfg.get("timeout", 60),
     }

@@ -2,13 +2,12 @@
 
 Spawns a transient pod per ``exec()`` call: the pod is started detached
 (running ``sleep``) with an emptyDir volume mounted at ``/workspace``, the
-host ``workdir`` is streamed in via ``kubectl cp``, the command runs via
-``kubectl exec``, any files it wrote are streamed back out via ``kubectl
-cp``, and the pod is deleted on exit -- so exec() semantics (a workspace
-that persists across calls, host-visible after each command) match the
-other container backends for copied-in and exported files despite Kubernetes
-having no host bind-mount primitive. This copy transport does not mirror
-deletions back to the host; use a bind-mounted backend for that requirement.
+host workspace snapshot is streamed in via ``kubectl cp``, and the command
+runs via ``kubectl exec``. A bounded archive is validated before publishing
+changed files and deletions. Concurrent local edits cause a recoverable
+conflict. Validated exports and pre-publication originals survive publication
+failure; failed exports retain the pod for a bounded recovery window.
+See docs/sandbox-kubernetes-recovery.md for the recovery contract.
 
 Why kubectl-driven instead of the official Python client?
   - The Python client adds 50+ MB of generated code + grpcio + a
@@ -50,6 +49,7 @@ common base image (python/node/ubuntu/alpine slim variants all ship it).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -59,6 +59,9 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..file_lock import cross_process_lock, ensure_private_directory
+from ..paths import maverick_home
+from . import workspace_transfer
 from .local import ExecResult, scrub_env
 
 log = logging.getLogger(__name__)
@@ -112,6 +115,7 @@ class KubernetesBackend:
     # user-facing capability (contrast ``timeout``, which bounds the command).
     pod_ready_timeout: float = 60.0
     transfer_timeout: float = 120.0
+    kubeconfig: str | None = None
 
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir).expanduser().resolve()
@@ -208,6 +212,7 @@ class KubernetesBackend:
                     "runAsUser": int(self.run_as_user),
                     "runAsGroup": int(self.run_as_user),
                     "fsGroup": int(self.run_as_user),
+                    "seccompProfile": {"type": "RuntimeDefault"},
                 },
                 "containers": [container],
                 # emptyDir: node-local scratch space for the copied-in
@@ -220,6 +225,8 @@ class KubernetesBackend:
 
     def _kubectl_prefix(self) -> list[str]:
         args = ["kubectl"]
+        if self.kubeconfig:
+            args.extend(["--kubeconfig", self.kubeconfig])
         if self.context:
             args.extend(["--context", self.context])
         args.extend(["-n", self.namespace])
@@ -243,11 +250,9 @@ class KubernetesBackend:
         """Best-effort force-delete a pod; never raises.
 
         ``kubectl run --rm`` deletes the pod only on a clean exit. Any other
-        outcome -- a timeout, a kubectl crash, the process being killed, or
-        an unexpected exception mid-run -- can orphan the pod and leak
-        cluster resources, so we always issue an explicit delete on the way
-        out. ``--ignore-not-found`` makes the common (already-removed-by-rm)
-        case a no-op.
+        completed export gets an explicit delete. Failed exports deliberately
+        retain the pod until recovery or its active deadline. This helper is
+        called only when the workspace is safe locally or execution never began.
         """
         try:
             subprocess.run(
@@ -258,7 +263,7 @@ class KubernetesBackend:
         except Exception:
             pass
 
-    def _start_and_wait(self, pod_name: str) -> ExecResult | None:
+    def _start_and_wait(self, pod_name: str, execution_timeout: float | None = None) -> ExecResult | None:
         """Start the pod detached (long-lived ``sleep``, not ``--rm -i``) and
         block until it's Ready. Returns None on success, else an ExecResult
         describing the failure.
@@ -272,7 +277,12 @@ class KubernetesBackend:
         # Long enough to outlive the command timeout plus both cp legs; the
         # pod is force-deleted explicitly once exec() is done with it, so
         # this is just a backstop against an orphaned sleep outliving us.
-        sleep_budget = int(self.timeout) + int(2 * self.transfer_timeout) + 60
+        # Retain a one-hour recovery window when export fails. Normal runs
+        # delete immediately; the deadline stops an orphaned container.
+        sleep_budget = int(execution_timeout or self.timeout) + int(2 * self.transfer_timeout) + 3600
+        overrides = self._pod_overrides(pod_name)
+        overrides["spec"]["activeDeadlineSeconds"] = sleep_budget + int(self.pod_ready_timeout)
+        overrides["spec"]["volumes"][0]["emptyDir"]["sizeLimit"] = str(workspace_transfer.MAX_TOTAL_BYTES)
         run_args = [
             *self._kubectl_prefix(),
             "run", pod_name,
@@ -281,7 +291,7 @@ class KubernetesBackend:
             # Merge lists by container name; JSON merge replaces the generated
             # container and would discard its image and command arguments.
             "--override-type=strategic", "--command",
-            "--overrides", json.dumps(self._pod_overrides(pod_name)),
+            "--overrides", json.dumps(overrides),
             "--",
             "sleep", str(sleep_budget),
         ]
@@ -322,7 +332,7 @@ class KubernetesBackend:
             )
         return None
 
-    def _copy_in(self, pod_name: str) -> ExecResult | None:
+    def _copy_in(self, pod_name: str, source: Path | None = None) -> ExecResult | None:
         """Stream the host workdir into the pod's emptyDir. Returns None on
         success, else an ExecResult describing the failure.
 
@@ -337,9 +347,15 @@ class KubernetesBackend:
         dest = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}"
         args = [*self._kubectl_prefix(), "cp", src, dest]
         try:
+            # kubectl archives an empty source as the destination directory
+            # itself. Restoring that header can chmod the root-owned emptyDir
+            # mount, which a non-root worker cannot do. There is no input to
+            # transfer on a first run; retain the volume's kubelet permissions.
+            if not any((source or self.workdir).iterdir()):
+                return None
             proc = subprocess.run(
                 args, capture_output=True, text=True,
-                timeout=self.transfer_timeout, env=scrub_env(), cwd=self.workdir,
+                timeout=self.transfer_timeout, env=scrub_env(), cwd=source or self.workdir,
             )
         except subprocess.TimeoutExpired:
             return ExecResult(
@@ -376,24 +392,30 @@ class KubernetesBackend:
                 exit_code=124,
             )
 
-    def _copy_out(self, pod_name: str) -> str:
-        """Best-effort: stream files the command wrote/modified back to the
-        host workdir. Returns "" on success, else a short note to append to
-        the command's stderr. ``exec()`` retains its output and original
-        failure code, but promotes a successful command to an I/O failure if
-        its files could not be returned.
+    def _copy_out(self, pod_name: str, baseline: dict, recovery: Path) -> str:
+        """Validate a private staged archive before reconciling host files.
+
+        Tar metadata lets us reject links before interpreting missing entries
+        as deletions. kubectl cp's symlink-skipping extraction cannot do that.
         """
-        src = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}/."
-        args = [*self._kubectl_prefix(), "cp", src, "."]
+        # Linux kill(-1) stops other same-user processes in this pod's private
+        # PID namespace (not PID 1 or this shell). Freeze leftover/background
+        # writers before tar; an empty process set may return ESRCH. The shell
+        # then becomes the exporter. No host PID namespace is requested.
+        args = [*self._kubectl_prefix(), "exec", pod_name, "--", "sh", "-c",
+                'kill -s STOP -1 2>/dev/null || :; exec "$@"', "workspace-export",
+                "tar", "-C", _POD_WORKDIR, "-cf", "-", "."]
         try:
-            proc = subprocess.run(
-                args, capture_output=True, text=True,
-                timeout=self.transfer_timeout, env=scrub_env(), cwd=self.workdir,
-            )
+            archive = recovery / "export.tar"
+            if workspace_transfer.capture_archive(args, archive, self.transfer_timeout) != 0:
+                return "; workspace export failed; pod retained for recovery"
+            workspace_transfer.extract_archive(archive, recovery / "exported")
+            (recovery / "export.complete").touch()
+            workspace_transfer.publish(self.workdir, baseline, recovery / "exported", recovery / "originals")
         except subprocess.TimeoutExpired:
-            return "; kubectl cp (pod -> workspace) timed out"
-        if proc.returncode != 0:
-            return f"; kubectl cp (pod -> workspace) failed: {proc.stderr.strip()[-500:]}"
+            return "; workspace export timed out; pod retained for recovery"
+        except Exception as exc:
+            return f"; workspace export/publication failed ({type(exc).__name__}: {str(exc)[:300]})"
         return ""
 
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
@@ -431,30 +453,64 @@ class KubernetesBackend:
                     exit_code=2,
                 )
 
-        # Always force-delete the pod on the way out, whichever step failed:
-        # the pod is never started with --rm now (it has to survive past a
-        # single command for kubectl cp to reach it), so nothing else cleans
-        # it up.
+        key = hashlib.sha256(str(self.workdir).encode()).hexdigest()
+        locks = ensure_private_directory(maverick_home() / "sandbox-workspace-locks")
+        with cross_process_lock(locks / (key + ".lock"), strict=True):
+            return self._exec_with_workspace(pod_name, cmd, effective)
+
+    def _exec_with_workspace(self, pod_name: str, cmd: str, effective: float) -> ExecResult:
+        if maverick_home().resolve().is_relative_to(self.workdir):
+            return ExecResult(stdout="", exit_code=74,
+                              stderr="Choose a dedicated workspace outside the folder containing Lightwork settings and recovery storage.")
+        recovery = workspace_transfer.recovery_directory()
+        command_started = complete = False
         try:
-            failure = self._start_and_wait(pod_name)
+            baseline = workspace_transfer.snapshot(self.workdir, recovery / "input")
+            workspace_transfer.save_manifest(recovery, {
+                "namespace": self.namespace, "context": self.context, "pod": pod_name,
+                "workdir": str(self.workdir), "baseline": baseline,
+            })
+            failure = self._start_and_wait(pod_name, effective)
             if failure is not None:
                 return failure
-            failure = self._copy_in(pod_name)
+            failure = self._copy_in(pod_name, recovery / "input")
             if failure is not None:
                 return failure
+            command_started = True
             result = self._run_command(pod_name, cmd, effective)
-            copy_out_note = self._copy_out(pod_name)
+            copy_out_note = self._copy_out(pod_name, baseline, recovery)
             if copy_out_note:
                 result = ExecResult(
                     stdout=result.stdout,
-                    stderr=result.stderr + copy_out_note,
+                    stderr=result.stderr + copy_out_note + self._recovery_note(pod_name, recovery),
                     # The command may have run successfully, but its output
                     # files were not delivered. Do not advertise overall success.
                     exit_code=result.exit_code or 74,
                 )
+            else:
+                complete = True
             return result
+        except Exception as exc:
+            return ExecResult(stdout="", exit_code=74,
+                              stderr=f"workspace transfer failed ({type(exc).__name__})"
+                              + (self._recovery_note(pod_name, recovery) if command_started else ""))
         finally:
-            self._delete_pod(pod_name)
+            if not command_started or complete or (recovery / "export.complete").exists():
+                self._delete_pod(pod_name)
+            if not command_started or complete:
+                try:
+                    workspace_transfer.cleanup(recovery)
+                except OSError:
+                    log.warning("kubernetes transfer cache could not be removed: %s", recovery)
+
+    def _recovery_note(self, pod_name: str, recovery: Path) -> str:
+        note = f"; saved transfer files: {recovery}"
+        if not (recovery / "export.complete").exists():
+            note += (f"; recover pod {self.namespace}/{pod_name} within one hour using the configured "
+                     "kubectl context; see docs/sandbox-kubernetes-recovery.md")
+        else:
+            note += "; exported files and any pre-publication originals are retained for review"
+        return note
 
 
 __all__ = ["KubernetesBackend"]

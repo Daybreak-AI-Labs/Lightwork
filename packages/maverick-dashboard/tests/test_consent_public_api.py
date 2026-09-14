@@ -1096,9 +1096,18 @@ def test_rights_intake_context_is_immutable_and_detects_digest_corruption(
         )
 
 
+@pytest.mark.parametrize("large_history", [False, True])
 def test_public_roundtrip_is_digest_bound_idempotent_and_private(
-    environment: _Environment,
+    environment: _Environment, large_history: bool,
 ) -> None:
+    if large_history:
+        for version in range(1, 502):
+            environment.preferences.publish_policy(
+                "tenant-a", "aaa-unrelated", version, {"analytics": "consent"},
+                _sha256("unrelated notice"), 1,
+                expected_current_version=version - 1,
+            )
+        assert environment.preferences.list_policies("tenant-a", limit=500)["truncated"]
     configuration_response = environment.client.get(
         "/api/v1/public/consent/configuration",
         headers={**_browser_headers(), "Accept-Language": "en-US"},

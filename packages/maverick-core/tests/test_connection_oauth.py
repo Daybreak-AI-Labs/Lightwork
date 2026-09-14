@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event, current_thread
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -118,6 +119,65 @@ def test_renewal_keeps_review_generation_and_rotation_is_singleflight(monkeypatc
     assert len(calls) == 1
     assert all(row["token"] == "new-synthetic-access" and row["revision"] == saved["revision"] for row in values)
     assert connections.get_connection("evidence")["oauth"]["refresh_token"] == "rotated-synthetic-refresh"
+
+
+@pytest.mark.parametrize("registry", ["connections", "oauth"])
+def test_sealed_registry_reader_excludes_rotation_during_file_verification(monkeypatch, registry):
+    from maverick import file_lock
+
+    app()
+    exchange(start(), monkeypatch)
+    store = connections if registry == "connections" else oauth
+    path = store._path()
+    verifying, release, attempting, acquired = Event(), Event(), Event(), Event()
+    real_check = file_lock.ensure_private_file
+
+    def hold_verification(candidate, *args, **kwargs):
+        result = real_check(candidate, *args, **kwargs)
+        if Path(candidate) == path and current_thread().name.startswith("registry-reader"):
+            verifying.set()
+            assert release.wait(5), "reader was not released"
+        return result
+
+    monkeypatch.setattr(file_lock, "ensure_private_file", hold_verification)
+    monkeypatch.setattr(oauth, "ensure_private_file", hold_verification)
+
+    def read():
+        with tenant_scope(tenant="tenant-a"):
+            return store._load()
+
+    def rotate():
+        with tenant_scope(tenant="tenant-a"):
+            attempting.set()
+            with connections._mutation_lock():
+                acquired.set()
+                records = store._load()
+                if registry == "connections":
+                    records["evidence"]["token"] = "synthetic-rotated-token"
+                else:
+                    records["applications"][oauth._app_key(OWNER, "google")]["client_id"] = "rotated-client"
+                store._save(records)
+
+    with (ThreadPoolExecutor(max_workers=1, thread_name_prefix="registry-reader") as readers,
+          ThreadPoolExecutor(max_workers=1, thread_name_prefix="registry-writer") as writers):
+        reader = readers.submit(read)
+        try:
+            assert verifying.wait(5), "reader did not reach file verification"
+            writer = writers.submit(rotate)
+            assert attempting.wait(5), "writer did not attempt rotation"
+            assert not acquired.wait(.2), "rotation raced the file verification/read boundary"
+        finally:
+            release.set()
+        snapshot = reader.result(timeout=5)
+        writer.result(timeout=5)
+    latest = store._load()
+    if registry == "connections":
+        assert snapshot["evidence"]["token"] == "synthetic-access-token"
+        assert latest["evidence"]["token"] == "synthetic-rotated-token"
+    else:
+        key = oauth._app_key(OWNER, "google")
+        assert snapshot["applications"][key]["client_id"] == "synthetic-client-id"
+        assert latest["applications"][key]["client_id"] == "rotated-client"
 
 
 def test_wrong_origin_or_revoked_grant_refuses_before_token_refresh(monkeypatch):

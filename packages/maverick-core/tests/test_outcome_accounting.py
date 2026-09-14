@@ -634,6 +634,53 @@ def test_estimate_only_token_charge_stays_estimated_with_rate_evidence(
     assert event["pricing_evidence"]["confidence"] == 0.1
 
 
+def test_expiring_rate_is_recorded_and_historical_receipt_survives_expiry(accounting, monkeypatch):
+    from datetime import datetime, timezone
+
+    from maverick import pricing
+
+    clock = [datetime(2026, 9, 14, tzinfo=timezone.utc)]
+    class ReceiptClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0]
+    monkeypatch.setattr(pricing, "datetime", ReceiptClock)
+    record = admit(accounting)
+    record = accounting.account_tokens(
+        record["id"], expected_revision=record["revision"],
+        operation_id="expiring-rate-accounting", actor="user:alice",
+        budget=Budget(max_dollars=100), in_tokens=1000, out_tokens=100,
+        source_ref="model-call:expiring-rate", source_version="b" * 64,
+        model="openai:gpt-5.6-sol",
+    )
+    clock[0] = datetime(2027, 1, 1, tzinfo=timezone.utc)
+    event = accounting.report(record["id"])["costs"]["events"][0]
+    assert event["attempt_state"] == "succeeded"
+    assert event["pricing_evidence"]["valid_until"] == "2026-11-21"
+    assert Decimal(event["amount"]) > 0
+
+
+def test_nonexpiring_price_evidence_preserves_legacy_canonical_form():
+    from maverick.budget import _lookup_price_quote
+
+    evidence = _lookup_price_quote("claude-sonnet-4-6").metadata()
+    normalized = outcome_module._pricing_evidence(evidence)
+    evidence.pop("valid_until")
+    assert normalized == outcome_module._pricing_evidence(evidence)
+    assert "valid_until" not in normalized
+
+
+@pytest.mark.parametrize("expiry", [True, 20260101, "2026-02-30", "2020-01-01", "x" * 10000],
+                         ids=["boolean", "integer", "invalid-date", "backdated", "oversized"])
+def test_price_evidence_rejects_malformed_or_backdated_expiry(expiry):
+    from maverick.budget import _lookup_price_quote
+
+    evidence = _lookup_price_quote("claude-sonnet-4-6").metadata()
+    evidence["valid_until"] = expiry
+    with pytest.raises(ValueError):
+        outcome_module._pricing_evidence(evidence)
+
+
 def test_concurrent_direct_budget_charge_cannot_pollute_accounted_call(accounting):
     record = admit(accounting)
     charged = Event()

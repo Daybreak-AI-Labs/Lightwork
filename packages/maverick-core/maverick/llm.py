@@ -80,7 +80,7 @@ ROLE_MODELS: dict[str, str] = {
 # and verification status that justify those floats. Every row must exactly
 # match the tracked evidence pack. Rows whose current official source could not
 # be captured remain available for planning, but cannot cross the billing gate.
-MODEL_RATE_CARD_VERSION = "2026-09-07.1"
+MODEL_RATE_CARD_VERSION = "2026-09-13.1"
 _PRICING_EVIDENCE = load_pricing_evidence_pack()
 
 
@@ -105,6 +105,7 @@ def _model_price(
         evidence_id=evidence_id,
         pricing_basis=evidence.pricing_basis,
         applicability=evidence.applicability,
+        valid_until=evidence.valid_until,
     )
 
 
@@ -175,6 +176,11 @@ MODEL_PRICING_PROVIDER = VersionedPricingProvider(
         # published price varies by context length and processing region.
         # The evidence pack records both the direct list prices and the exact
         # ceiling policy, so a flat ModelPrice cannot undercount either tier.
+        _model_price("gpt-6-astra", (27.5, 82.5), evidence_id="openai-standard-ceiling-2026-09-13"),
+        _model_price("gpt-5.6-sol", (11.0, 33.0), evidence_id="openai-sol-promo-ceiling-2026-09-13"),
+        _model_price("gpt-5.6", (11.0, 33.0), evidence_id="openai-sol-promo-ceiling-2026-09-13"),
+        _model_price("gpt-5.6-terra", (5.5, 19.8), evidence_id="openai-standard-ceiling-2026-09-13"),
+        _model_price("gpt-5.6-luna", (0.55, 1.98), evidence_id="openai-standard-ceiling-2026-09-13"),
         _model_price(
             "gpt-5.5",
             (11.0, 49.5),
@@ -349,7 +355,7 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
 # in a picker but cannot be billed.
 MODEL_CATALOG: dict[str, list[str]] = {
     "anthropic":  [MODEL_OPUS, MODEL_OPUS_FAST, MODEL_SONNET, MODEL_HAIKU],
-    "openai":     ["gpt-5.5", "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano"],
+    "openai":     ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano"],
     "gemini":     ["gemini-3.5-pro", "gemini-3.5-flash", "gemini-3-pro", "gemini-3-flash"],
     "xai":        ["grok-4.5", "grok-build-0.1", "grok-4.3", "grok-code-fast", "grok-4-latest", "grok-4-mini", "grok-3"],
     "deepseek":   ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],

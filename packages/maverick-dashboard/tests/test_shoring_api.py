@@ -155,13 +155,20 @@ def test_sla_for_one_function():
 
 def test_exception_desk_counts_department_approvals():
     from maverick import world_model
+    from maverick.logging_config import reset_goal_context, set_goal_context
     w = world_model.WorldModel(world_model.DEFAULT_DB)
-    w.create_approval("wire.transfer", risk="high", scope="finance_ap run")
+    goal = w.create_goal("Invoice", domain="finance_ap")
+    tokens = set_goal_context(goal_id=goal)
+    try:
+        w.create_approval("wire.transfer", risk="high", scope="payment")
+    finally:
+        reset_goal_context(tokens)
     w.create_approval("post.tweet", risk="low", scope="marketing")
     client.post("/api/v1/shoring/function", json=_payload())
     fn = client.get("/api/v1/shoring/book").json()["functions"][0]
     assert fn["exception_count"] == 1
     assert fn["exceptions"][0]["action"] == "wire.transfer"
+    assert fn["unassigned_exception_count"] == 1
 
 
 # ---- RBAC: view reads, operate writes -------------------------------------

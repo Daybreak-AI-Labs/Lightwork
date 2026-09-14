@@ -16,6 +16,7 @@ import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
 from functools import wraps
 from typing import Any
@@ -317,7 +318,8 @@ def _pricing_evidence(value: object | None) -> dict[str, object] | None:
 
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) != _PRICING_EVIDENCE_FIELDS:
+    if (not isinstance(value, dict) or not set(value).issuperset(_PRICING_EVIDENCE_FIELDS)
+            or set(value) - _PRICING_EVIDENCE_FIELDS - {"valid_until"}):
         raise ValueError("pricing evidence must contain the complete rate-card contract")
     verified = value["verified"]
     if type(verified) is not bool:
@@ -331,7 +333,7 @@ def _pricing_evidence(value: object | None) -> dict[str, object] | None:
         raise ValueError("pricing evidence confidence must be a finite number") from exc
     if not math.isfinite(confidence) or not 0 <= confidence <= 1:
         raise ValueError("pricing evidence confidence must be between zero and one")
-    return {
+    normalized = {
         "model_id": _opaque(value["model_id"], "pricing model_id", 512),
         "input_per_mtok": _money(value["input_per_mtok"], "input token rate"),
         "output_per_mtok": _money(value["output_per_mtok"], "output token rate"),
@@ -348,6 +350,17 @@ def _pricing_evidence(value: object | None) -> dict[str, object] | None:
         "pricing_basis": _required(value["pricing_basis"], "pricing_basis", 1000),
         "applicability": _required(value["applicability"], "pricing applicability", 1000),
     }
+    expiry = value.get("valid_until")
+    if expiry is not None:
+        # Preserve the date that governed the original charge, including when
+        # replaying receipts after expiry. Admission/charging enforces expiry;
+        # historical evidence must remain readable. Omit absent/None values so
+        # legacy non-expiring receipts retain their canonical representation.
+        if (not isinstance(expiry, str) or len(expiry) != 10
+                or date.fromisoformat(expiry) < date.fromisoformat(normalized["as_of"])):
+            raise ValueError("pricing valid_until must be an ISO date on or after as_of")
+        normalized["valid_until"] = expiry
+    return normalized
 
 
 def _record_id(admission_id: str, prefix: str) -> str:

@@ -35,6 +35,10 @@ _PDF_INPUT_SCHEMA: dict[str, Any] = {
             "type": "boolean",
             "description": "Try to extract tables as markdown (pdfplumber path).",
         },
+        "ocr": {
+            "type": "boolean",
+            "description": "Force OCR for scanned or mixed image/text pages; requires documents.pdf_ocr and the offline document engine.",
+        },
         "max_chars": {
             "type": "integer",
             "description": "Truncate output (default 100_000; maximum 1_000_000).",
@@ -213,6 +217,19 @@ def extract_text_from_bytes(data: bytes, *, pages: str = "",
     return text
 
 
+def _selected_text(data, pages, include_tables):
+    from ..parser_isolation import parse_isolated, should_isolate
+    if should_isolate():
+        try:
+            return parse_isolated("pdf_text", data, pages=pages, include_tables=include_tables)
+        except (RuntimeError, ValueError) as exc:
+            return f"ERROR: isolated PDF parse failed: {exc}"
+    try:
+        return extract_text_from_bytes(data, pages=pages, include_tables=include_tables)
+    except Exception as exc:
+        return f"ERROR: PDF parse failed ({type(exc).__name__}); check the document and page selection"
+
+
 def _run_read_pdf(args: dict[str, Any], sandbox=None) -> str:
     source = args.get("source")
     if not isinstance(source, str):
@@ -224,6 +241,9 @@ def _run_read_pdf(args: dict[str, Any], sandbox=None) -> str:
     if not isinstance(pages, str):
         return "ERROR: pages must be a page-range string"
     include_tables = as_bool(args.get("include_tables"))
+    force_ocr = args.get("ocr", False)
+    if type(force_ocr) is not bool:
+        return "ERROR: ocr must be a boolean"
     max_chars = args.get("max_chars", 100_000)
     if type(max_chars) is not int or not 1 <= max_chars <= 1_000_000:
         return "ERROR: max_chars must be an integer between 1 and 1000000"
@@ -235,29 +255,24 @@ def _run_read_pdf(args: dict[str, Any], sandbox=None) -> str:
     if data is None:
         return f"ERROR: could not read PDF from {source!r}"
 
-    from ..parser_isolation import parse_isolated, should_isolate
-    text = None
-    if should_isolate():
+    text = "" if force_ocr else _selected_text(data, pages, include_tables)
+    if text == "":
         try:
-            text = parse_isolated("pdf_text", data, pages=pages,
-                                  include_tables=include_tables)
-        except (RuntimeError, ValueError) as e:
-            # the child died on hostile bytes / timed out: refuse rather than
-            # re-parsing the same bytes in-process (that defeats the isolation)
-            return f"ERROR: isolated PDF parse failed: {e}"
-    else:
-        try:
-            text = extract_text_from_bytes(data, pages=pages,
-                                           include_tables=include_tables)
-        except Exception as exc:
-            return f"ERROR: PDF parse failed ({type(exc).__name__}); check the document and page selection"
+            from ..config import get_document_tools
+            if force_ocr or get_document_tools()["pdf_ocr"]:
+                from .document_processing import ocr_pdf
+                text = ocr_pdf(data, pages, sandbox)
+                if include_tables:
+                    text += "\n[OCR returns plain text; table structure was not reconstructed.]"
+        except (RuntimeError, ValueError, OSError) as exc:
+            return f"ERROR: PDF OCR failed: {exc}"
     if text is None:
         return (
             "ERROR: no PDF parser available. Run: "
             "python -m pip install -e './packages/maverick-core[pdf]'"
         )
     if not text:
-        return "ERROR: no text found in the selected PDF pages; check the range or provide OCR text"
+        return "ERROR: no text found in the selected PDF pages; check the range or enable OCR (documents.pdf_ocr) with the offline document engine"
 
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n\n[... truncated at {max_chars} chars]"
@@ -272,7 +287,8 @@ def read_pdf(sandbox=None) -> Tool:
             "Read text from a PDF (local path or http(s) URL). Supports "
             "pages='1-5,8,10-' for ranges, include_tables=true to extract "
             "tables as markdown. Tries pdfplumber first, falls back to "
-            "pypdf. Install with: python -m pip install -e './packages/maverick-core[pdf]'."
+            "pypdf. Enabled offline OCR handles scans; use ocr=true for mixed image/text pages. "
+            "Install with: python -m pip install -e './packages/maverick-core[pdf]'."
         ),
         input_schema=_PDF_INPUT_SCHEMA,
         fn=lambda args: _run_read_pdf(args, sandbox),

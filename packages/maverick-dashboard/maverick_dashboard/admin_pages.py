@@ -30,7 +30,7 @@ def _app():
 
 
 @router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
+def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     """Operator settings: appearance (theme/density/font/language) + which model
     Lightwork uses by default. Appearance is applied via the existing
     persist_theme middleware (the form GETs back here with the params); the
@@ -289,7 +289,7 @@ def _webhook_secret_configured() -> bool:
 
 
 @router.post("/settings/webhooks")
-async def settings_set_webhooks(
+def settings_set_webhooks(
     request: Request,
     secret: str = Form(""),
 ) -> RedirectResponse:
@@ -343,7 +343,7 @@ async def settings_set_provider(
 
 
 @router.post("/settings/providers/clear")
-async def settings_clear_provider(request: Request, provider: str = Form(...)) -> RedirectResponse:
+def settings_clear_provider(request: Request, provider: str = Form(...)) -> RedirectResponse:
     """Remove a provider's dashboard-set key (config.toml / env unaffected)."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")

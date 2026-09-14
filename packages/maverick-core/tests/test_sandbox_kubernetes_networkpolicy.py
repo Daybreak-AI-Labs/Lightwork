@@ -9,11 +9,18 @@ with the manifest to apply -- when none is present.
 from __future__ import annotations
 
 import json
+import tarfile
 from unittest.mock import MagicMock
 
 import pytest
 
+from .test_kubernetes_workspace_transfer import _capture_using_fake_run
 from .test_q3_2026_batch4 import _calls_with, _subcommand
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_archive_capture(monkeypatch):
+    monkeypatch.setattr("maverick.sandbox.workspace_transfer.capture_archive", _capture_using_fake_run)
 
 
 def _policy(*, pod_selector=None, policy_types=("Ingress", "Egress"), egress=None):
@@ -37,10 +44,15 @@ def _fake_kubectl(monkeypatch, *, policies, get_rc=0, get_stdout=None):
         if sub in ("run", "wait", "cp", "delete"):
             return MagicMock(returncode=0, stdout="", stderr="")
         if sub == "exec":
+            if "tar" in args:
+                with tarfile.open(fileobj=k["stdout"], mode="w"):
+                    pass
+                return MagicMock(returncode=0, stderr=b"")
             return MagicMock(returncode=0, stdout="ran\n", stderr="")
         raise AssertionError(f"unexpected kubectl invocation: {args}")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
+    monkeypatch.setattr("maverick.sandbox.workspace_transfer.capture_archive", _capture_using_fake_run)
     return calls
 
 
@@ -48,7 +60,7 @@ def test_runs_under_a_present_deny_all_policy(monkeypatch, tmp_path):
     from maverick.sandbox.kubernetes import KubernetesBackend
 
     calls = _fake_kubectl(monkeypatch, policies=[_policy()])
-    backend = KubernetesBackend(namespace="agents", workdir=tmp_path)  # allow_network=False
+    backend = KubernetesBackend(namespace="agents", workdir=tmp_path / "workspace")  # allow_network=False
     first = backend.exec("echo hi")
     assert first.exit_code == 0 and first.stdout == "ran\n"
     get = _calls_with(calls, "get")[0]
@@ -57,14 +69,14 @@ def test_runs_under_a_present_deny_all_policy(monkeypatch, tmp_path):
     # Verify each command: administrators can change policy between calls.
     backend.exec("echo again")
     assert len(_calls_with(calls, "get")) == 2
-    assert len(_calls_with(calls, "exec")) == 2
+    assert len(_calls_with(calls, "exec")) == 4  # command + archive per run
 
 
 def test_fails_closed_with_the_manifest_when_no_policy_exists(monkeypatch, tmp_path):
     from maverick.sandbox.kubernetes import KubernetesBackend
 
     calls = _fake_kubectl(monkeypatch, policies=[])
-    backend = KubernetesBackend(namespace="agents", workdir=tmp_path)
+    backend = KubernetesBackend(namespace="agents", workdir=tmp_path / "workspace")
     result = backend.exec("echo hi")
     assert result.exit_code == 2
     assert "kind: NetworkPolicy" in result.stderr
@@ -85,7 +97,7 @@ def test_policies_that_do_not_deny_all_egress_do_not_count(monkeypatch, tmp_path
     from maverick.sandbox.kubernetes import KubernetesBackend
 
     _fake_kubectl(monkeypatch, policies=[policy])
-    backend = KubernetesBackend(namespace="agents", workdir=tmp_path)
+    backend = KubernetesBackend(namespace="agents", workdir=tmp_path / "workspace")
     assert backend.exec("echo hi").exit_code == 2
 
 
@@ -93,15 +105,15 @@ def test_kubectl_failure_or_garbage_counts_as_absent(monkeypatch, tmp_path):
     from maverick.sandbox.kubernetes import KubernetesBackend
 
     _fake_kubectl(monkeypatch, policies=[], get_rc=1)
-    assert KubernetesBackend(namespace="a", workdir=tmp_path).exec("true").exit_code == 2
+    assert KubernetesBackend(namespace="a", workdir=tmp_path / "workspace").exec("true").exit_code == 2
     _fake_kubectl(monkeypatch, policies=[], get_stdout="not json")
-    assert KubernetesBackend(namespace="a", workdir=tmp_path).exec("true").exit_code == 2
+    assert KubernetesBackend(namespace="a", workdir=tmp_path / "workspace").exec("true").exit_code == 2
 
 
 def test_allow_network_true_skips_the_check(monkeypatch, tmp_path):
     from maverick.sandbox.kubernetes import KubernetesBackend
 
     calls = _fake_kubectl(monkeypatch, policies=[])
-    backend = KubernetesBackend(namespace="agents", allow_network=True, workdir=tmp_path)
+    backend = KubernetesBackend(namespace="agents", allow_network=True, workdir=tmp_path / "workspace")
     assert backend.exec("echo hi").exit_code == 0
     assert not _calls_with(calls, "get")

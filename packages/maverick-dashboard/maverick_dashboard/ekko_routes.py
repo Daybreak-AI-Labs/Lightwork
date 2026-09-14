@@ -345,7 +345,7 @@ async def ekko_status(
 
 
 @router.put("/api/v1/ekko/control")
-async def ekko_control(request: Request, payload: EkkoControlIn) -> dict:
+def ekko_control(request: Request, payload: EkkoControlIn) -> dict:
     _app()._require_same_origin(request)
     # The dashboard overlay is deployment-global, so a tenant-local admin must
     # not change it for other clients.
@@ -365,7 +365,7 @@ async def ekko_control(request: Request, payload: EkkoControlIn) -> dict:
 
 
 @router.get("/api/v1/ekko/sessions")
-async def ekko_sessions(
+def ekko_sessions(
     request: Request,
     device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64),
 ) -> dict:
@@ -380,7 +380,7 @@ async def ekko_sessions(
 
 
 @router.post("/api/v1/ekko/sessions", status_code=201)
-async def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
+def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
     _app()._require_same_origin(request)
     auth.require_permission(request, "operate")
     if not payload.acknowledge_capture_scope:
@@ -485,7 +485,7 @@ def _candidate_response(store, policy: dict) -> dict:
 
 
 @router.get("/api/v1/ekko/candidates")
-async def ekko_candidates(
+def ekko_candidates(
     request: Request,
     device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64),
 ) -> dict:
@@ -496,7 +496,7 @@ async def ekko_candidates(
 
 
 @router.post("/api/v1/ekko/candidates/mine")
-async def ekko_mine_candidates(request: Request, payload: DeviceIn) -> dict:
+def ekko_mine_candidates(request: Request, payload: DeviceIn) -> dict:
     _app()._require_same_origin(request)
     auth.require_permission(request, "operate")
     from maverick.audit import EventKind
@@ -508,7 +508,7 @@ async def ekko_mine_candidates(request: Request, payload: DeviceIn) -> dict:
 
 
 @router.post("/api/v1/ekko/candidates/{opportunity_id}/handoff")
-async def ekko_candidate_handoff(
+def ekko_candidate_handoff(
     request: Request, opportunity_id: str, payload: HandoffIn,
 ) -> dict:
     _app()._require_same_origin(request)
@@ -541,7 +541,7 @@ async def ekko_candidate_handoff(
 
 
 @router.delete("/api/v1/ekko/sessions/{session_id}")
-async def ekko_erase_session(
+def ekko_erase_session(
     request: Request,
     session_id: str,
     device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64),
@@ -560,7 +560,7 @@ async def ekko_erase_session(
 
 
 @router.delete("/api/v1/ekko/data")
-async def ekko_erase_data(
+def ekko_erase_data(
     request: Request,
     device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64),
 ) -> dict:
@@ -574,7 +574,7 @@ async def ekko_erase_data(
 
 
 @router.delete("/api/v1/ekko/device")
-async def ekko_forget_device(
+def ekko_forget_device(
     request: Request,
     device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64),
 ) -> dict:

@@ -2729,29 +2729,12 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             ):
                 raise PublicConsentConflict(_CONTRACT_DETAIL)
             preferences = deps.preference_store_for(binding.tenant_id)
-            listed = await run_in_threadpool(
-                preferences.list_policies,
-                binding.tenant_id,
-                limit=500,
+            policy = await run_in_threadpool(
+                preferences.get_active_policy,
+                binding.tenant_id, binding.policy_id, at=deps.clock(),
             )
-            if listed.get("truncated") is not False:
+            if not isinstance(policy, dict):
                 raise PublicConsentConflict(_CONTRACT_DETAIL)
-            policies = listed.get("policies")
-            if not isinstance(policies, list):
-                raise PublicConsentConflict(_CONTRACT_DETAIL)
-            now = deps.clock()
-            active = [
-                item
-                for item in policies
-                if isinstance(item, dict)
-                and item.get("policy_id") == binding.policy_id
-                and float(item.get("effective_at", math.inf)) <= now
-                and (item.get("expires_at") is None or float(item["expires_at"]) > now)
-            ]
-            active.sort(key=lambda item: int(item.get("version", 0)), reverse=True)
-            if not active:
-                raise PublicConsentConflict(_CONTRACT_DETAIL)
-            policy = active[0]
             if policy.get("version") != binding.policy_version or not hmac.compare_digest(
                 str(policy.get("policy_sha256", "")),
                 binding.policy_sha256,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import secrets
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -143,24 +142,10 @@ def _active_policy(
     version: int,
     evaluated_at: float,
 ) -> dict[str, Any]:
-    listed = store.list_policies(tenant, limit=500)
-    if listed.get("truncated") is not False:
-        raise RuntimeError("policy authority exceeds the enrollment read bound")
-    matches = [
-        row
-        for row in listed.get("policies", [])
-        if isinstance(row, dict)
-        and row.get("policy_id") == policy_id
-        and row.get("version") == version
-        and float(row.get("effective_at", math.inf)) <= evaluated_at
-        and (
-            row.get("expires_at") is None
-            or float(row["expires_at"]) > evaluated_at
-        )
-    ]
-    if len(matches) != 1:
+    policy = store.get_active_policy(tenant, policy_id, version=version, at=evaluated_at)
+    if not isinstance(policy, dict):
         raise ValueError("the requested policy version is not active")
-    return matches[0]
+    return policy
 
 
 def _derive_binding(tenant: str, body: PublicClientCreateIn) -> dict[str, Any]:

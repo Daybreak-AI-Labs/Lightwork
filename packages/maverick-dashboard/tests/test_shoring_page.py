@@ -80,8 +80,14 @@ def test_page_shows_book_and_sla_indicator():
 
 def test_page_exception_desk_lists_department_approvals():
     from maverick import world_model
+    from maverick.logging_config import reset_goal_context, set_goal_context
     w = world_model.WorldModel(world_model.DEFAULT_DB)
-    w.create_approval("wire.transfer", risk="high", scope="finance_ap payment")
+    goal = w.create_goal("Invoice", domain="finance_ap")
+    tokens = set_goal_context(goal_id=goal)
+    try:
+        w.create_approval("wire.transfer", risk="high", scope="payment")
+    finally:
+        reset_goal_context(tokens)
     _add_function()
     html = client.get("/shoring").text
     assert "awaiting sign-off" in html

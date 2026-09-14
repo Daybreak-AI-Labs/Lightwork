@@ -1558,29 +1558,14 @@ def _active_policy(
     *,
     evaluated_at: float,
 ) -> Mapping[str, Any]:
-    listed = public.preference_store_for(client.tenant_id).list_policies(
-        client.tenant_id, limit=500
+    policy = public.preference_store_for(client.tenant_id).get_active_policy(
+        client.tenant_id, client.policy_id, version=client.policy_version, at=evaluated_at,
     )
-    policies = listed.get("policies") if isinstance(listed, Mapping) else None
-    if listed.get("truncated") is not False or not isinstance(policies, list):
-        raise NativeConsentCompositionError("native consent policy authority is incomplete")
-    matches = [
-        item
-        for item in policies
-        if isinstance(item, Mapping)
-        and item.get("policy_id") == client.policy_id
-        and item.get("version") == client.policy_version
-        and float(item.get("effective_at", math.inf)) <= evaluated_at
-        and (
-            item.get("expires_at") is None
-            or float(item["expires_at"]) > evaluated_at
-        )
-    ]
-    if len(matches) != 1 or not _same(
-        matches[0].get("policy_sha256"), client.policy_sha256
+    if not isinstance(policy, Mapping) or not _same(
+        policy.get("policy_sha256"), client.policy_sha256
     ):
         raise NativeConsentConflict("native consent policy authority changed")
-    return matches[0]
+    return policy
 
 
 def _derive_application_authority(

@@ -104,6 +104,36 @@ def _profile(
     )
 
 
+def test_policy_authority_does_not_depend_on_history_page(store):
+    for version in range(1, 502):
+        _policy(store, policy_id="aaa-history", version=version, expected=version - 1)
+    current = _policy(store, policy_id="zzz-client")
+    assert store.list_policies("tenant-a", limit=500)["truncated"]
+    assert store.get_active_policy("tenant-a", "zzz-client", at=NOW)["policy_sha256"] == current["policy_sha256"]
+    assert store.get_active_policy("tenant-a", "aaa-history", at=NOW)["version"] == 501
+    assert store.get_active_policy("tenant-a", "aaa-history", version=1, at=NOW)["version"] == 1
+    assert store.get_active_policy("tenant-b", "zzz-client", at=NOW) is None
+    assert store.get_active_policy("tenant-a", "missing", at=NOW) is None
+
+
+def test_policy_lookup_distinguishes_current_historical_future_and_expired(store):
+    for version, effective, expiry in [(1, NOW - 20, NOW), (2, NOW - 10, None),
+                                       (3, NOW + 10, None)]:
+        store.publish_policy("tenant-a", "notice", version, {"analytics": "consent"},
+                             DIGEST_A, effective, expires_at=expiry,
+                             expected_current_version=version - 1)
+    assert store.get_active_policy("tenant-a", "notice", at=NOW - 11)["version"] == 1
+    assert store.get_active_policy("tenant-a", "notice", at=NOW)["version"] == 2
+    assert store.get_active_policy("tenant-a", "notice", at=NOW + 10)["version"] == 3
+    assert store.get_active_policy("tenant-a", "notice", version=1, at=NOW) is None
+    assert store.get_active_policy("tenant-a", "notice", version=3, at=NOW) is None
+    assert store.get_active_policy("tenant-a", "notice", version=2, at=NOW + 10)["version"] == 2
+    with pytest.raises(ConsentValidationError):
+        store.get_active_policy("tenant-a", "notice", at=float("nan"))
+    with pytest.raises(ConsentValidationError):
+        store.get_active_policy("tenant-a", "notice", version=0, at=NOW)
+
+
 def _context() -> ConsentContext:
     return ConsentContext(
         jurisdiction="us-state-ca",

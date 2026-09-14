@@ -2,7 +2,7 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  secret_arns = [
+  secret_arns = concat([
     aws_secretsmanager_secret.pg_dsn.arn,
     aws_secretsmanager_secret.dashboard_token.arn,
     aws_secretsmanager_secret.anthropic_api_key.arn,
@@ -10,7 +10,7 @@ locals {
     aws_secretsmanager_secret.oidc_client_secret.arn,
     aws_secretsmanager_secret.at_rest_key.arn,
     aws_secretsmanager_secret.consent_receipt_root.arn,
-  ]
+  ], var.executor_kubeconfig_secret_arn == "" ? [] : [var.executor_kubeconfig_secret_arn])
 }
 
 # ---- ECS task execution role (pulls the image, writes logs, reads secrets) ----

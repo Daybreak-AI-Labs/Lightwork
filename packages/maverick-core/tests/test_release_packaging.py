@@ -401,7 +401,7 @@ def test_core_wheel_includes_tracked_pricing_evidence():
     )
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     assert evidence["schema_version"] == 1
-    assert evidence["rate_card_version"] == "2026-09-07.1"
+    assert evidence["rate_card_version"] == "2026-09-13.1"
 
 
 def _literal_source_version(path: Path) -> str:
@@ -495,8 +495,9 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
         f"maverick-knowledge>={release_version}"
     ]
     release_runtime = [Requirement(value) for value in core_extras["release-runtime"]]
-    assert len(release_runtime) == 1
-    assert _normalise_project_name(release_runtime[0].name) == "openai"
+    assert {"openai", "openpyxl", "lxml", "pypdf", "pdfplumber"} <= {
+        _normalise_project_name(requirement.name) for requirement in release_runtime
+    }
     assert core_extras["postgres"] == ["psycopg[binary,pool]>=3.1"]
     assert "tzdata>=2026.3" in core["dependencies"]
 
