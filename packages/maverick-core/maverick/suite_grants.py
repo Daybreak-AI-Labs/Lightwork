@@ -63,10 +63,10 @@ def _locked(path: Path):
 
     ensure_private_directory(maverick_home())
     ensure_private_directory(path.parent)
-    stack = ExitStack()
-    stack.enter_context(_GRANTS_LOCK)
-    stack.enter_context(cross_process_lock(path))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(_GRANTS_LOCK)
+        stack.enter_context(cross_process_lock(path))
+        return stack.pop_all()
 
 
 def store_path() -> Path:

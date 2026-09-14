@@ -288,7 +288,7 @@ def _initialize() -> None:
             log.info("observability: Prometheus /metrics on %s:%d", addr, port)
 
 
-def _register_computed_collector() -> None:
+def _register_computed_collector(registry=None) -> None:
     """Export the profiles this process already computes but never published.
 
     ``tool_latency`` keeps per-tool p50/p95/p99 in a ring buffer and
@@ -368,7 +368,8 @@ def _register_computed_collector() -> None:
             yield breaches
 
     try:
-        REGISTRY.register(_ComputedProfiles())
+        target = REGISTRY if registry is None else registry
+        target.register(_ComputedProfiles())
     except Exception:  # pragma: no cover -- duplicate registration on re-init
         log.debug("observability: computed collector already registered",
                   exc_info=True)

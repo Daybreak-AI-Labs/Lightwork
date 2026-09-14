@@ -18,6 +18,7 @@ on:
       - "packages/maverick-core/maverick/safety/unicode_filter.py"
       - "packages/maverick-core/maverick/safety/secret_detector.py"
       - "packages/maverick-core/maverick/safety/pii_detector.py"
+      - "packages/maverick-core/maverick/perceptual_hash.py"
       - "packages/maverick-core/maverick/__init__.py"
       - "packages/maverick-core/maverick/safety/__init__.py"
       - "packages/maverick-core/pyproject.toml"
@@ -26,6 +27,7 @@ on:
       - "packages/maverick-core/maverick/audit/signing.py"
       - "packages/maverick-core/tests/test_native_unicode_parity.py"
       - "packages/maverick-core/tests/test_native_detect_parity.py"
+      - "packages/maverick-core/tests/test_native_phash_parity.py"
       - "requirements/ci.txt"
       - "scripts/verify_constraint_closure.py"
       - "rust-toolchain.toml"
@@ -262,7 +264,12 @@ jobs:
           # — see rust/README.md), so assert the extension functions merely exist.
           "$parity_python" -I - <<'PY'
           import maverick_native as n
+          from maverick import perceptual_hash as ph
           from maverick.safety import unicode_filter as uf
+          assert ph._native is not None, "image hash shim did not pick up maverick_native"
+          assert ph.average_hash_from_pixels is not ph._average_hash_from_pixels_py, (
+              "native image hash not engaged"
+          )
           assert uf._native is not None, "shim did not pick up maverick_native"
           assert uf.normalize is not uf._normalize_py, "native normalize not engaged"
           assert uf.has_dangerous_unicode is not uf._has_dangerous_unicode_py, (
@@ -275,6 +282,7 @@ jobs:
           "$parity_python" -I -m pytest \
             packages/maverick-core/tests/test_native_unicode_parity.py \
             packages/maverick-core/tests/test_native_detect_parity.py \
+            packages/maverick-core/tests/test_native_phash_parity.py \
             -vv
           "$parity_python" -I - <<'PY'
           import hashlib

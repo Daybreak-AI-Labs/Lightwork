@@ -495,10 +495,21 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
         f"maverick-knowledge>={release_version}"
     ]
     release_runtime = [Requirement(value) for value in core_extras["release-runtime"]]
-    assert {"openai", "openpyxl", "lxml", "pypdf", "pdfplumber"} <= {
+    assert {"openai", "openpyxl", "lxml", "pypdf", "pdfplumber", "sqlalchemy",
+            "psycopg", "latex2mathml", "prometheus-client"} <= {
         _normalise_project_name(requirement.name) for requirement in release_runtime
     }
-    assert core_extras["postgres"] == ["psycopg[binary,pool]>=3.1"]
+    postgres_runtime = next(req for req in release_runtime if req.name == "psycopg")
+    assert {"binary", "pool"} <= postgres_runtime.extras
+    constraints = _ci_constraints()
+    for requirement in release_runtime:
+        name = _normalise_project_name(requirement.name)
+        assert Version(constraints[name]) in requirement.specifier
+    assert core_extras["postgres"] == ["psycopg[binary,pool]>=3.3.5,<4"]
+    knowledge = tomllib.loads(
+        (REPO_ROOT / "packages/maverick-knowledge/pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    assert knowledge["optional-dependencies"]["pgvector"] == ["psycopg[binary]>=3.3.5,<4"]
     assert "tzdata>=2026.3" in core["dependencies"]
 
 
@@ -755,6 +766,38 @@ def test_release_cohort_dependency_environments_are_complete():
     )
     assert "pip install --no-deps" not in ci
     assert ci.count("python -m pip check") >= 3
+
+
+def test_frozen_platforms_use_available_python_and_nonpublishing_checks():
+    import yaml
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+    release = yaml.load((workflows / "release.yml").read_text(), Loader=yaml.BaseLoader)
+    smoke = yaml.load((workflows / "frozen-runtime.yml").read_text(), Loader=yaml.BaseLoader)
+    release_job = release["jobs"]["binaries"]
+    smoke_job = smoke["jobs"]["freeze-and-check"]
+    release_matrix = {item["os"]: item for item in release_job["strategy"]["matrix"]["include"]}
+    for job in (release_job, smoke_job):
+        setup = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/setup-python@"))
+        assert setup["with"]["python-version"] == "${{ matrix.python }}"
+        assert setup["with"]["architecture"] == "${{ matrix.architecture }}"
+        for item in job["strategy"]["matrix"]["include"]:
+            # actions/python-versions has no Windows/macOS builds after the
+            # last full 3.12 release. Linux receives subsequent security builds.
+            version = Version(item["python"])
+            assert version.release[:2] == (3, 12)
+            if item["os"].startswith(("windows-", "macos-")):
+                assert version <= Version("3.12.10")
+            assert item["python"] == release_matrix[item["os"]]["python"]
+            assert item["architecture"] == release_matrix[item["os"]]["architecture"]
+    assert smoke["permissions"] == {"contents": "read"}
+    assert set(smoke["on"]) == {"pull_request", "workflow_dispatch"}
+    steps = smoke_job["steps"]
+    probe = next(step["run"] for step in steps if "Exercise the frozen executable" in step.get("name", ""))
+    compile(probe.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0], "frozen-runtime probe", "exec")
+    assert "runtime_check_environment" in probe
+    assert "['release-runtime-check']" in probe
+    assert "timeout=120" in probe
 
 
 def test_release_verifier_accepts_canonical_and_historical_signers():
@@ -1204,7 +1247,8 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
         "cyclonedx-bom": "7.3.1",
         "detect-secrets": "1.5.0",
         "pip-audit": "2.10.1",
-        "psycopg": "3.3.4",
+        "psycopg": "3.3.5",
+        "psycopg-binary": "3.3.5",
         "psycopg-pool": "3.3.1",
         "ruff": "0.16.4",
         "vulture": "2.16",

@@ -31,11 +31,11 @@ def _locked(path: Path) -> ExitStack:
     from maverick.file_lock import cross_process_lock, ensure_private_directory
 
     ensure_private_directory(path.parent)
-    stack = ExitStack()
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(_LOCK)
-    stack.enter_context(cross_process_lock(path))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(_LOCK)
+        stack.enter_context(cross_process_lock(path))
+        return stack.pop_all()
 
 
 def _load() -> dict[str, dict[str, object]]:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -41,39 +42,49 @@ def to_mathml(latex: str) -> str:
         raise RuntimeError(
             "mathml needs the 'latex2mathml' package. Install it with: "
             "python -m pip install -e './packages/maverick-core[latex]'") from e
-    return converter.convert(latex)
+    try:
+        mathml = converter.convert(latex)
+        # The converter accepts an incomplete \frac{...} and emits a one-child
+        # mfrac, which is invalid MathML and silently loses the denominator.
+        root = ET.fromstring(mathml)
+        for fraction in root.iter("{http://www.w3.org/1998/Math/MathML}mfrac"):
+            if len(fraction) != 2:
+                raise ValueError("fraction requires a numerator and denominator")
+        return mathml
+    except Exception as e:  # noqa: BLE001 -- converter-specific parse errors
+        raise RuntimeError(f"invalid LaTeX expression: {type(e).__name__}: {e}") from e
 
 
 def _render_pdf(latex: str, sandbox, engine: str, out: str) -> str:
     eng = engine if engine in ("tectonic", "pdflatex") else "tectonic"
-    workdir = Path(tempfile.mkdtemp(prefix="mvk-latex-"))
-    tex = workdir / "doc.tex"
-    tex.write_text(latex, encoding="utf-8")
-    if eng == "tectonic":
-        argv = ["tectonic", "--outdir", str(workdir), str(tex)]
-    else:
-        argv = ["pdflatex", "-interaction=nonstopmode",
-                "-output-directory", str(workdir), str(tex)]
-    code, stdout, stderr = sandbox_run(sandbox, argv, timeout=120.0)
-    pdf = workdir / "doc.pdf"
-    if code != 0 or not pdf.exists():
-        tail = (stderr or stdout or "").strip()[-500:]
-        return (f"ERROR: {eng} failed (exit {code}); is it installed in the "
-                f"sandbox? {tail}")
     # Confine the model-supplied destination to the sandbox workspace; an
-    # unconfined `out` would let the tool overwrite arbitrary host files.
-    try:
-        dest = Path(_safe_path(sandbox, out or "doc.pdf"))
-    except ValueError as e:
-        return f"ERROR: {e}"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(pdf, dest)
-    return f"rendered PDF -> {dest}"
+    # invalid destination must be refused before starting the document engine.
+    dest = Path(_safe_path(sandbox, out or "doc.pdf"))
+    with tempfile.TemporaryDirectory(prefix="mvk-latex-") as temporary:
+        workdir = Path(temporary)
+        tex = workdir / "doc.tex"
+        tex.write_text(latex, encoding="utf-8")
+        if eng == "tectonic":
+            argv = ["tectonic", "--outdir", str(workdir), str(tex)]
+        else:
+            argv = ["pdflatex", "-interaction=nonstopmode",
+                    "-output-directory", str(workdir), str(tex)]
+        code, stdout, stderr = sandbox_run(sandbox, argv, timeout=120.0)
+        pdf = workdir / "doc.pdf"
+        if code != 0 or not pdf.exists():
+            tail = (stderr or stdout or "").strip()[-500:]
+            return (f"ERROR: {eng} failed (exit {code}); is it installed in the "
+                    f"sandbox? {tail}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(pdf, dest)
+        return f"rendered PDF -> {dest}"
 
 
 def _run(args: dict[str, Any], sandbox) -> str:
     op = args.get("op") or "mathml"
-    latex = str(args.get("latex") or "")
+    latex = args.get("latex")
+    if not isinstance(latex, str):
+        return "ERROR: latex source must be a string"
     if not latex.strip():
         return "ERROR: latex source is required"
     try:
@@ -82,7 +93,7 @@ def _run(args: dict[str, Any], sandbox) -> str:
         if op == "render":
             return _render_pdf(latex, sandbox, args.get("engine") or "tectonic",
                                args.get("out") or "")
-    except RuntimeError as e:
+    except (RuntimeError, ValueError, OSError) as e:
         return f"ERROR: {e}"
     return f"ERROR: unknown op {op!r}"
 

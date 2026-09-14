@@ -39,10 +39,10 @@ def _locked():
     from contextlib import ExitStack
 
     from maverick.file_lock import cross_process_lock
-    stack = ExitStack()
-    stack.enter_context(_LOCK)
-    stack.enter_context(cross_process_lock(_path(), strict=True))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(_LOCK)
+        stack.enter_context(cross_process_lock(_path(), strict=True))
+        return stack.pop_all()
 
 
 def _tomllib():

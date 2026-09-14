@@ -170,11 +170,11 @@ def _locked_users():
     from maverick.authority_effects import authority_effect_fence
 
     ensure_private_directory(maverick_home())
-    stack = ExitStack()
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(_USERS_LOCK)
-    stack.enter_context(cross_process_lock(_store_path()))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(_USERS_LOCK)
+        stack.enter_context(cross_process_lock(_store_path()))
+        return stack.pop_all()
 
 
 def _reject_json_constant(value: str):
@@ -795,11 +795,11 @@ def _locked_groups():
     from maverick.authority_effects import authority_effect_fence
 
     ensure_private_directory(maverick_home())
-    stack = ExitStack()
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(_GROUPS_LOCK)
-    stack.enter_context(cross_process_lock(_groups_path()))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(_GROUPS_LOCK)
+        stack.enter_context(cross_process_lock(_groups_path()))
+        return stack.pop_all()
 
 
 def _validated_groups(raw: dict) -> dict[str, dict]:

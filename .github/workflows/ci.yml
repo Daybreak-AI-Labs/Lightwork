@@ -37,7 +37,17 @@ jobs:
         with:
           python-version: "3.12.13"
       - name: Install document test dependencies
-        run: python -m pip install -e './packages/maverick-core[spreadsheet,pdf]' pytest pytest-timeout pillow
+        run: python -m pip install -e './packages/maverick-core[spreadsheet,pdf,latex]' pytest pytest-timeout pillow
+      - name: Test LaTeX conversion and failure recovery
+        run: >-
+          python -m pytest -q packages/maverick-core/tests/test_latex_tool.py
+          --timeout=30 --junitxml=latex-tool-results.xml
+      - name: Test LaTeX recovery under secure defaults
+        env:
+          MAVERICK_TEST_SECURE_DEFAULT: "1"
+        run: >-
+          python -m pytest -q packages/maverick-core/tests/test_latex_tool.py
+          --timeout=30 --junitxml=latex-tool-secure-results.xml
       - name: Build the offline native document worker
         run: docker build -f deploy/docker/Dockerfile.documents -t lightwork-documents:test .
       - name: Exercise actual Calc and scanned-PDF OCR
@@ -51,7 +61,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: document-engine-results
-          path: document-engine-results.xml
+          path: |
+            document-engine-results.xml
+            latex-tool-results.xml
+            latex-tool-secure-results.xml
           retention-days: 14
 
   lint:
@@ -549,7 +562,7 @@ jobs:
         with:
           python-version: "3.12.13"
       - name: Install release verification tools
-        run: python -m pip install build pytest
+        run: python -m pip install build pytest pyyaml
       - name: Verify the release cohort manifest and package metadata
         env:
           PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
@@ -1011,8 +1024,8 @@ jobs:
           pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge
           pip install \
-            'psycopg==3.3.4' 'psycopg-binary==3.3.4' \
-            'psycopg-pool==3.3.1'
+            'psycopg==3.3.5' 'psycopg-binary==3.3.5' \
+            'psycopg-pool==3.3.1' 'sqlalchemy==2.0.52'
           pip install pytest pytest-asyncio pytest-timeout
           python -m pip check
           python scripts/verify_constraint_closure.py
@@ -1023,11 +1036,24 @@ jobs:
           timeout --verbose --signal=ABRT --kill-after=30s 10m
           python -m pytest -vvs --timeout=180 --timeout-method=signal
           packages/maverick-core/tests/test_postgres_world.py
+          packages/maverick-core/tests/test_database_tool.py
+          packages/maverick-core/tests/test_database_connection_timeouts.py
+          packages/maverick-core/tests/test_database_connection_hosts.py
           packages/maverick-core/tests/test_production_runtime_regressions.py
           packages/maverick-core/tests/test_pgvector_isolation_pg.py
           packages/maverick-core/tests/test_postgres_fact_history.py
           packages/maverick-core/tests/test_postgres_facts_trust.py
           packages/maverick-core/tests/test_postgres_governed_records_capacity.py
+      - name: Test database connection recovery under secure defaults
+        env:
+          MAVERICK_TEST_SECURE_DEFAULT: "1"
+        run: >-
+          timeout --verbose --signal=ABRT --kill-after=30s 5m
+          python -m pytest -vvs --timeout=45 --timeout-method=signal
+          packages/maverick-core/tests/test_database_tool.py
+          packages/maverick-core/tests/test_database_connection_timeouts.py
+          packages/maverick-core/tests/test_database_connection_hosts.py
+          packages/maverick-core/tests/test_production_runtime_regressions.py
       - name: Test pgvector knowledge store
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test

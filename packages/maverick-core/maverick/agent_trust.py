@@ -90,17 +90,17 @@ def _managed_locked():
     from .authority_effects import authority_effect_fence
     from .file_lock import cross_process_lock
 
-    stack = ExitStack()
     # Authority changes and external effects share one global-then-store lock
     # order.  An effect re-resolves the trust record while it owns this fence,
     # so a revoke, removal, rotation, or attenuation can either land first and
     # block the effect or wait until the already-authorized provider boundary
     # has completed.  Never acquire the managed lock before this fence: doing
     # so would invert the execution path's lock order.
-    stack.enter_context(authority_effect_fence())
-    stack.enter_context(_MANAGED_LOCK)
-    stack.enter_context(cross_process_lock(managed_path()))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
+        stack.enter_context(_MANAGED_LOCK)
+        stack.enter_context(cross_process_lock(managed_path()))
+        return stack.pop_all()
 
 
 class AgentTrustError(ValueError):

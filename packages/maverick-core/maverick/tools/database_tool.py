@@ -20,7 +20,8 @@ database server, credentials embedded in the URL. A model-supplied
 ``sqlite:`` URL is refused unconditionally either way: it has no host for
 ``allow_hosts`` to scope, and an agent has no legitimate need to open its own
 local database file (including this deployment's own world.db).
-``DATABASE_URL`` itself is operator-set and always trusted.
+``DATABASE_URL`` is operator-set, so it bypasses the model-URL opt-in. An active
+capability host grant still limits its destinations.
 
 ops:
   - query(sql, url, limit, confirm)
@@ -28,6 +29,7 @@ ops:
 from __future__ import annotations
 
 import fnmatch
+import ipaddress
 import json
 import logging
 import os
@@ -36,6 +38,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from .._envparse import coerce_bool, is_truthy
+from ..db_timeouts import postgres_connect_timeout
 from . import Tool, as_bool
 from .sql_safety import has_unconfirmed_statement_separator
 
@@ -190,29 +193,97 @@ def _denial(host: str) -> str:
     )
 
 
+def _connection_hosts(value: str) -> list[str]:
+    """Split explicit host lists without letting a glob span two destinations."""
+    hosts = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item or any(char in item for char in (";", "=", "\\", "\x00")):
+            raise ValueError("database destination is empty or indirect")
+        try:
+            ipaddress.ip_address(item)
+        except ValueError:
+            parsed = urlsplit("//" + item)
+            if (
+                not parsed.hostname or parsed.username is not None
+                or parsed.path or parsed.query or parsed.fragment
+            ):
+                raise ValueError("database destination is not a host") from None
+            # Accessing port validates a supplied port without including it in
+            # the hostname grant (including bracketed IPv6 destinations).
+            if parsed.port is not None and parsed.port == 0:
+                raise ValueError("database destination port is invalid") from None
+            hosts.append(parsed.hostname)
+        else:
+            hosts.append(item.lower())
+    return hosts
+
+
 def _host_denial(url: str, allow_hosts: tuple[str, ...]) -> str | None:
     if not allow_hosts:
         return None
     try:
         split = urlsplit(url)
+        params = parse_qs(split.query, keep_blank_values=True)
+        # These parameters can select a different destination through an
+        # opaque driver DSN, service definition, or local socket. A hostname
+        # label cannot authorize that indirection under a host-scoped grant.
+        indirect = {
+            "dsn", "filedsn", "odbc_connect", "service", "servicefile", "unix_socket",
+            "unix_sock", "read_default_file", "read_default_group",
+        }.intersection(name.lower() for name in params)
+        if indirect:
+            return _denial("indirect destination: " + ", ".join(sorted(indirect)))
+        authority = split.netloc.rsplit("@", 1)[-1]
+        # SQLAlchemy interprets a pyodbc authority without a database as a
+        # client-side DSN name, even when it looks like a granted hostname.
+        dialect = split.scheme.lower()
+        if (
+            (dialect == "mssql" or dialect.endswith(("+pyodbc", "+aioodbc")))
+            and (authority or "host" in params) and not split.path.lstrip("/")
+            and "database" not in params
+        ):
+            return _denial("indirect destination: ODBC DSN")
+        # The Oracle dialect similarly treats a bare authority as a local
+        # TNS alias unless an explicit SID or service selects hostname mode.
+        if (
+            dialect.split("+", 1)[0] == "oracle"
+            and not split.path.lstrip("/")
+            and not any(params.get("service_name", ()))
+        ):
+            return _denial("indirect destination: Oracle TNS alias")
+        candidates = _connection_hosts(authority) if authority else []
+        # libpq's hostaddr overrides host for the actual network address;
+        # SQLAlchemy also accepts repeated/comma-separated host entries.
+        destination_params = {
+            "host", "hostaddr", "server", "address", "addr", "failover_partner",
+        }
+        for name, values in params.items():
+            if name.lower() in destination_params:
+                for value in values:
+                    candidates.extend(_connection_hosts(value))
     except ValueError:
         return _denial("<unparseable>")
-    host = split.hostname
-    # libpq/SQLAlchemy honor a ``host=`` connection parameter passed in the URL
-    # query string (and unix-socket URLs carry no netloc host at all), so an
-    # empty netloc host must NOT fail open — check every host the connection
-    # could actually resolve to and fail closed when none is allowed.
-    candidates = [host] if host else []
-    try:
-        candidates += parse_qs(split.query).get("host", [])
-    except ValueError:
-        pass
     if not candidates:
         return _denial("<none>")
     for cand in candidates:
         if not any(fnmatch.fnmatch(cand, pat) for pat in allow_hosts):
             return _denial(cand)
     return None
+
+
+def _postgres_connect_args(url: str) -> dict[str, int]:
+    """Bound libpq handshakes; other SQLAlchemy drivers have different options."""
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in {
+        "postgresql", "postgresql+psycopg", "postgresql+psycopg2",
+        "postgresql+psycopg2cffi", "cockroachdb", "cockroachdb+psycopg2",
+    }:
+        return {}
+    values = parse_qs(parsed.query, keep_blank_values=True).get("connect_timeout", [None])
+    if len(values) != 1:
+        raise ValueError("database connect_timeout must be specified only once")
+    return {"connect_timeout": postgres_connect_timeout(values[0])}
 
 
 def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
@@ -244,7 +315,7 @@ def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
     limit = max(1, min(limit, _max_rows()))
     engine = None
     try:
-        engine = create_engine(url)
+        engine = create_engine(url, connect_args=_postgres_connect_args(url))
         with engine.connect() as conn:
             result = conn.execute(text(sql))
             if result.returns_rows:

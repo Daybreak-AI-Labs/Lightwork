@@ -12,6 +12,7 @@ _datas = (
     collect_data_files('maverick')
     + collect_data_files('maverick_dashboard')
     + collect_data_files('maverick_shield')
+    + collect_data_files('latex2mathml')
     # Copied into the offline worker at runtime; PYZ bytecode is not a source
     # resource. Retain this one reviewed standalone script in frozen builds.
     + collect_data_files('maverick', includes=['sandbox/document_engine.py'], include_py_files=True)
@@ -21,6 +22,8 @@ for _dist in (
     'maverick-evolve', 'maverick-dashboard', 'maverick-mcp-server',
     'maverick-knowledge', 'maverick-installer', 'pywhispercpp',
     'openai', 'openpyxl', 'lxml', 'pypdf', 'pdfplumber', 'pdfminer.six', 'pypdfium2',
+    'sqlalchemy', 'psycopg', 'psycopg-binary', 'psycopg-pool',
+    'latex2mathml', 'prometheus-client',
 ):
     try:
         _datas += copy_metadata(_dist)
@@ -50,6 +53,10 @@ a = Analysis(
         'asyncio.subprocess',
         'multipart',
         '_pywhispercpp',
+        # SQLAlchemy loads URL-selected dialects dynamically; Psycopg loads
+        # its native libpq implementation dynamically. Their hooks retain DLLs.
+        'sqlalchemy.dialects.sqlite',
+        'sqlalchemy.dialects.postgresql.psycopg',
     ] + collect_submodules('maverick')
       # The maverick_* siblings are separate top-level packages imported only
       # inside function bodies (cli.py: `from maverick_dashboard...`), which
@@ -67,7 +74,12 @@ a = Analysis(
       + collect_submodules('openpyxl')
       + collect_submodules('lxml')
       + collect_submodules('pypdf')
-      + collect_submodules('pdfplumber'),
+      + collect_submodules('pdfplumber')
+      + collect_submodules('psycopg')
+      + collect_submodules('psycopg_binary')
+      + collect_submodules('psycopg_pool')
+      + collect_submodules('latex2mathml')
+      + collect_submodules('prometheus_client'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

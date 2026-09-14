@@ -69,10 +69,10 @@ class PushRegistry:
         from contextlib import ExitStack
 
         from .file_lock import cross_process_lock
-        stack = ExitStack()
-        stack.enter_context(self._lock)
-        stack.enter_context(cross_process_lock(path))
-        return stack
+        with ExitStack() as stack:
+            stack.enter_context(self._lock)
+            stack.enter_context(cross_process_lock(path))
+            return stack.pop_all()
 
     # -- registry -------------------------------------------------------------
 

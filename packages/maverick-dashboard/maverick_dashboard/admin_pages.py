@@ -178,21 +178,21 @@ async def settings_set_model(request: Request) -> RedirectResponse:
 
     from maverick_dashboard.model_pickers import chosen
     model = chosen(await request.form(), "model")
-    allow = allowed_models()
+    allow = await run_in_threadpool(allowed_models)
     if model and allow and model not in allow:
         raise HTTPException(status_code=400, detail="model not in the allowed list")
     try:
         if model:
-            set_default_model(model)
+            await run_in_threadpool(set_default_model, model)
         else:
-            clear_default_model()
+            await run_in_threadpool(clear_default_model)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     return RedirectResponse("/settings?saved=models", status_code=303)
 
 
 @router.post("/settings/budget")
-async def settings_set_budget(request: Request, max_dollars: str = Form("")) -> RedirectResponse:
+def settings_set_budget(request: Request, max_dollars: str = Form("")) -> RedirectResponse:
     """Set (or clear) the dashboard's per-goal spend cap via the runtime
     overlay. An empty value clears it, reverting to config.toml / defaults.
     config.toml is never written."""
@@ -224,14 +224,14 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
     from maverick_dashboard.model_pickers import chosen
     form = await request.form()
     updates = {r: chosen(form, r) for r in roles}
-    allow = allowed_models()
+    allow = await run_in_threadpool(allowed_models)
     if allow:
         for spec in updates.values():
             if spec and spec not in allow:
                 raise HTTPException(
                     status_code=400, detail="model not in the allowed list")
     try:
-        set_role_models(updates)
+        await run_in_threadpool(set_role_models, updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     return RedirectResponse("/settings?saved=roles", status_code=303)
@@ -247,7 +247,7 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     from maverick.runtime_overrides import set_allowed_models
     form = await request.form()
     try:
-        set_allowed_models(form.getlist("models"))
+        await run_in_threadpool(set_allowed_models, form.getlist("models"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     return RedirectResponse("/settings?saved=allowed", status_code=303)
@@ -325,7 +325,8 @@ async def settings_set_provider(
     key_value = api_key.strip()
     base_value = base_url.strip()
     try:
-        settings_store.rotate_provider(
+        await run_in_threadpool(
+            settings_store.rotate_provider,
             provider_name,
             api_key=key_value,
             base_url=base_value,
@@ -368,7 +369,7 @@ async def settings_test_provider(
 
     name = provider.strip().lower()
     try:
-        state = config.provider_configuration_state(name)
+        state = await run_in_threadpool(config.provider_configuration_state, name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
     if not state["configured"]:
@@ -385,8 +386,15 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     form = await request.form()
-    for name in settings_store.CAPABILITY_DEFAULTS:
-        settings_store.set_toggle("capabilities", name, name in form)
+    try:
+        await run_in_threadpool(settings_store.set_toggles, "capabilities", {
+            name: name in form for name in settings_store.CAPABILITY_DEFAULTS
+        })
+    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Settings are unavailable. Retry after storage is restored.",
+        ) from exc
     return RedirectResponse("/settings?saved=capabilities", status_code=303)
 
 
@@ -397,8 +405,15 @@ async def settings_set_features(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     form = await request.form()
-    for name in settings_store.FEATURE_DEFAULTS:
-        settings_store.set_toggle("features", name, name in form)
+    try:
+        await run_in_threadpool(settings_store.set_toggles, "features", {
+            name: name in form for name in settings_store.FEATURE_DEFAULTS
+        })
+    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Settings are unavailable. Retry after storage is restored.",
+        ) from exc
     return RedirectResponse("/settings?saved=features", status_code=303)
 
 
@@ -413,12 +428,12 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     form = await request.form()
-    ui_visibility.apply_selection(set(form.getlist("cell")))
+    await run_in_threadpool(ui_visibility.apply_selection, set(form.getlist("cell")))
     return RedirectResponse("/settings?saved=visibility#ui-visibility", status_code=303)
 
 
 @router.post("/settings/ui-visibility/reset")
-async def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
+def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     """Reset every page x role cell to its default visibility (admin)."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
@@ -486,7 +501,7 @@ def _users_context(request: Request) -> dict:
 
 
 @router.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request) -> HTMLResponse:
+def users_page(request: Request) -> HTMLResponse:
     """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
     auth.require_permission(request, "admin")
     return _app().templates.TemplateResponse(request, "users.html",
@@ -494,7 +509,7 @@ async def users_page(request: Request) -> HTMLResponse:
 
 
 @router.post("/users/set")
-async def users_set_role(
+def users_set_role(
     request: Request, principal: str = Form(...), role: str = Form(...),
 ) -> RedirectResponse:
     """Assign a dashboard role to a user principal (admin only)."""
@@ -512,7 +527,7 @@ async def users_set_role(
 
 
 @router.post("/users/remove")
-async def users_remove(request: Request, principal: str = Form(...)) -> RedirectResponse:
+def users_remove(request: Request, principal: str = Form(...)) -> RedirectResponse:
     """Remove a user's explicit role assignment (admin only). A bootstrap admin
     pinned in config is unaffected — it can't be removed here."""
     auth.require_global_permission(request, "admin")
@@ -527,7 +542,7 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
 
 
 @router.post("/users/roles/save")
-async def users_save_custom_role(
+def users_save_custom_role(
     request: Request,
     name: str = Form(...),
     permissions: list[str] = Form([]),
@@ -554,7 +569,7 @@ async def users_save_custom_role(
 
 
 @router.post("/users/roles/delete")
-async def users_delete_custom_role(
+def users_delete_custom_role(
     request: Request, name: str = Form(...)
 ) -> RedirectResponse:
     """Delete a custom role (admin only). Refused while anyone still holds it."""
@@ -571,8 +586,8 @@ async def users_delete_custom_role(
 
 
 @router.post("/users/invite", response_class=HTMLResponse)
-async def users_invite(request: Request, email: str = Form(...),
-                       role: str = Form(...)) -> HTMLResponse:
+def users_invite(request: Request, email: str = Form(...),
+                 role: str = Form(...)) -> HTMLResponse:
     """Mint a single-use invite link (admin only) and show it ONCE.
 
     The token is never stored (only its hash), so this response is the only
@@ -600,8 +615,8 @@ async def users_invite(request: Request, email: str = Form(...),
 
 
 @router.post("/users/invite/revoke")
-async def users_invite_revoke(request: Request,
-                              invite_id: str = Form(...)) -> RedirectResponse:
+def users_invite_revoke(request: Request,
+                       invite_id: str = Form(...)) -> RedirectResponse:
     """Revoke a pending invite link (admin only)."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
@@ -626,15 +641,17 @@ async def users_set_suites(request: Request) -> RedirectResponse:
     principal = str(form.get("principal", "")).strip()
     suites = [str(s) for s in form.getlist("suites")]
     try:
-        suite_grants.set_suites(principal, suites,
-                                actor=auth.caller_principal(request) or "local")
+        await run_in_threadpool(
+            suite_grants.set_suites, principal, suites,
+            actor=auth.caller_principal(request) or "local",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or department") from exc
     return RedirectResponse("/users?saved=suites", status_code=303)
 
 
 @router.post("/users/suites/remove")
-async def users_remove_suites(
+def users_remove_suites(
     request: Request, principal: str = Form(...),
 ) -> RedirectResponse:
     """Remove a department override without broadening access."""

@@ -200,10 +200,10 @@ def _import_locked(path: Path):
     from contextlib import ExitStack
 
     from ..file_lock import cross_process_lock
-    stack = ExitStack()
-    stack.enter_context(_IMPORT_LOCK)
-    stack.enter_context(cross_process_lock(path))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(_IMPORT_LOCK)
+        stack.enter_context(cross_process_lock(path))
+        return stack.pop_all()
 
 
 def _moderate(name: str, summary: str, kind: str) -> dict:

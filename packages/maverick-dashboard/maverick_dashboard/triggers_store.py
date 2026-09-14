@@ -34,10 +34,10 @@ def _locked():
     from contextlib import ExitStack
 
     from maverick.file_lock import cross_process_lock
-    stack = ExitStack()
-    stack.enter_context(_TRIGGERS_LOCK)
-    stack.enter_context(cross_process_lock(_path(), strict=True))
-    return stack
+    with ExitStack() as stack:
+        stack.enter_context(_TRIGGERS_LOCK)
+        stack.enter_context(cross_process_lock(_path(), strict=True))
+        return stack.pop_all()
 
 # Trigger names are URL/TOML-safe slugs: they appear in the signed webhook body
 # and as a bare TOML table key, so keep them to [a-z0-9-].

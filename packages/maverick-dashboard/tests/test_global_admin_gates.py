@@ -52,7 +52,7 @@ GLOBAL_SINK_MODULES = frozenset({
 
 #: Mutators on those modules. Read-only helpers are irrelevant here.
 MUTATOR_PREFIXES = ("set_", "clear_", "remove_", "revoke_", "create_",
-                    "delete_", "update_", "save_", "write_")
+                    "delete_", "update_", "save_", "write_", "rotate_", "apply_")
 
 MUTATING_METHODS = frozenset({"post", "put", "patch", "delete"})
 
@@ -74,24 +74,45 @@ def _routes() -> list[tuple[str, str, ast.AST]]:
 
 def _global_sinks_written(fn: ast.AST) -> set[str]:
     """Global-sink mutators this handler calls, as ``module.function``."""
+    imports = {}
+    for imp in ast.walk(fn):
+        if isinstance(imp, ast.ImportFrom) and imp.module:
+            module = imp.module.rsplit(".", 1)[-1]
+            if module in GLOBAL_SINK_MODULES:
+                for item in imp.names:
+                    imports[item.asname or item.name] = (module, item.name)
     found = set()
     for c in ast.walk(fn):
         if not isinstance(c, ast.Call):
             continue
-        # module.mutator(...)
-        if isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name):
-            mod, name = c.func.value.id, c.func.attr
-            if mod in GLOBAL_SINK_MODULES and name.startswith(MUTATOR_PREFIXES):
-                found.add(f"{mod}.{name}")
-        # bare mutator(...) imported from a global-sink module inside the handler
-        elif isinstance(c.func, ast.Name) and c.func.id.startswith(MUTATOR_PREFIXES):
-            for imp in ast.walk(fn):
-                if isinstance(imp, ast.ImportFrom) and imp.module:
-                    tail = imp.module.rsplit(".", 1)[-1]
-                    if tail in GLOBAL_SINK_MODULES and any(
-                            a.name == c.func.id for a in imp.names):
-                        found.add(f"{tail}.{c.func.id}")
+        target = c.func
+        # Moving blocking I/O off the event loop must not hide its write sink.
+        call_name = getattr(target, "id", None) or getattr(target, "attr", None)
+        if call_name in {"run_in_threadpool", "to_thread", "run_sync"} and c.args:
+            target = c.args[0]
+        if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            mod, name = target.value.id, target.attr
+        elif isinstance(target, ast.Name) and target.id in imports:
+            mod, name = imports[target.id]
+        else:
+            continue
+        if mod in GLOBAL_SINK_MODULES and name.startswith(MUTATOR_PREFIXES):
+            found.add(f"{mod}.{name}")
     return found
+
+
+@pytest.mark.parametrize("body,expected", [
+    ("rbac.set_role('user:alice', 'viewer')", {"rbac.set_role"}),
+    ("await run_in_threadpool(rbac.set_role, 'user:alice', 'viewer')", {"rbac.set_role"}),
+    ("await run_in_threadpool(settings_store.rotate_provider, 'provider')", {"settings_store.rotate_provider"}),
+    ("await asyncio.to_thread(ui_visibility.apply_selection, set())", {"ui_visibility.apply_selection"}),
+    ("from maverick.runtime_overrides import set_budget as save\nawait run_in_threadpool(save, 10)", {"runtime_overrides.set_budget"}),
+    ("from maverick.runtime_overrides import clear_budget\nawait anyio.to_thread.run_sync(clear_budget)", {"runtime_overrides.clear_budget"}),
+    ("await run_in_threadpool(settings_store.state)", set()),
+])
+def test_global_sink_scan_follows_worker_calls(body, expected):
+    handler = ast.parse("async def handler():\n" + "\n".join("    " + line for line in body.splitlines())).body[0]
+    assert _global_sinks_written(handler) == expected
 
 
 def _gates(fn: ast.AST) -> set[str]:

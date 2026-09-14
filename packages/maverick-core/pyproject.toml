@@ -48,6 +48,10 @@ openai     = ["openai>=1.30,<4"]
 release-runtime = [
     "openai>=1.30,<4",
     "openpyxl>=3.1", "lxml>=5.0", "pypdf>=6.14.2", "pdfplumber>=0.10",
+    # Frozen customers cannot add Python packages to the executable. Include
+    # the supported SQL driver, local MathML conversion and metrics collector.
+    "sqlalchemy>=2.0,<3", "psycopg[binary,pool]>=3.3.5,<4",
+    "latex2mathml>=3.77", "prometheus-client>=0.20",
 ]
 azure      = ["openai>=1.30,<4", "azure-identity>=1.25.3,<2"]
 openrouter = ["openai>=1.30,<4"]
@@ -61,7 +65,7 @@ vllm       = ["openai>=1.30,<4"]
 chroma     = ["chromadb>=0.4"]
 qdrant     = ["qdrant-client>=1.6", "fastembed>=0.3"]
 weaviate   = ["weaviate-client>=4.5"]
-postgres   = ["psycopg[binary,pool]>=3.1"]
+postgres   = ["psycopg[binary,pool]>=3.3.5,<4"]
 saml       = ["pysaml2>=7.3"]
 grpc       = ["grpcio>=1.60", "grpcio-tools>=1.60"]
 queue      = ["arq>=0.25"]

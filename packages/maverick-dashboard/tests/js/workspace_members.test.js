@@ -16,3 +16,25 @@ test("workspace removal stays explicit and failure preserves the form",async t=>
   const ui=await fixture();t.after(()=>ui.window.close());ui.el("refresh").click();await ui.settle();ui.window.confirm=()=>false;ui.el("list").querySelectorAll("button")[1].click();await ui.settle();assert.equal(ui.calls.some(row=>row.method==="DELETE"),false);
   ui.el("principal").value="user:reviewer";ui.window.confirm=()=>true;ui.window.fetch=async()=>new Response('{"detail":"Membership unavailable"}',{status:503});ui.el("form").dispatchEvent(new ui.window.Event("submit",{bubbles:true,cancelable:true}));await ui.settle();assert.equal(ui.el("principal").value,"user:reviewer");assert.match(ui.el("status").textContent,/Membership unavailable/);
 });
+
+for(const status of [401,403])for(const format of ["json","html"])for(const operation of ["refresh","save","remove"]){
+  test(`workspace ${operation} clears private data and locks editing after ${format} ${status}`,async t=>{
+    const ui=await fixture();t.after(()=>ui.window.close());
+    ui.el("refresh").click();await ui.settle();assert.match(ui.el("list").textContent,/user:reviewer/);
+    ui.el("principal").value="user:private-colleague";ui.el("role").value="viewer";
+    const failures=[];ui.window.fetch=async(url,options={})=>{
+      failures.push({url,...options});
+      return new Response(format==="json"?'{"detail":"Access changed"}':"<html>Sign in</html>",{status});
+    };
+    const submit=()=>ui.el("form").dispatchEvent(new ui.window.Event("submit",{bubbles:true,cancelable:true}));
+    if(operation==="refresh")ui.el("refresh").click();
+    else if(operation==="save")submit();
+    else ui.el("list").querySelectorAll("button")[1].click();
+    await ui.settle();
+    assert.equal(failures.length,1);assert.equal(ui.el("list").textContent,"");assert.equal(ui.el("principal").value,"");
+    assert.match(ui.el("status").textContent,/sign in again.*reload/i);
+    assert.ok(Array.from(ui.window.document.querySelectorAll("button,input,select")).every(control=>control.disabled));
+    ui.el("principal").value="user:retry";submit();ui.el("refresh").dispatchEvent(new ui.window.Event("click"));await ui.settle();
+    assert.equal(failures.length,1,"a locked screen must require a new authenticated page load");
+  });
+}

@@ -858,12 +858,23 @@ def set_webhooks_secret(secret: str | None) -> None:
 
 def set_toggle(section: str, name: str, enabled: bool) -> None:
     """Override a [capabilities] or [features] flag in the overlay."""
+    set_toggles(section, {name: enabled})
+
+
+def set_toggles(section: str, updates: dict[str, bool]) -> None:
+    """Commit a complete group of flag changes in one atomic overlay write."""
     defaults = {"capabilities": CAPABILITY_DEFAULTS, "features": FEATURE_DEFAULTS}.get(section)
-    if defaults is None or name not in defaults:
+    if defaults is None or not isinstance(updates, dict) or any(name not in defaults for name in updates):
         raise ValueError("unknown setting")
+    clean = {name: bool(enabled) for name, enabled in updates.items()}
     with _locked():
         data = _load_overlay_for_update()
-        data.setdefault(section, {})[name] = bool(enabled)
+        flags = data.setdefault(section, {})
+        if not isinstance(flags, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        flags.update(clean)
         _write(data)
 
 
@@ -1690,6 +1701,6 @@ __all__ = [
     "research_execution_state", "set_research_execution",
     "security_suite_revision",
     "set_dgm", "set_ekko", "set_security_suite",
-    "set_toggle", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
+    "set_toggle", "set_toggles", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
     "channels_state",
 ]

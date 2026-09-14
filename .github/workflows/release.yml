@@ -216,10 +216,16 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
+            python: "3.12.13"
+            architecture: x64
             artifact: maverick-linux-x86_64
           - os: macos-15
+            python: "3.12.10"
+            architecture: arm64
             artifact: maverick-macos-arm64
           - os: windows-2022
+            python: "3.12.10"
+            architecture: x64
             artifact: maverick-windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
@@ -229,7 +235,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.13"
+          # 3.12.10 is the last official Windows/macOS binary in this branch.
+          # Later 3.12 security releases in actions/python-versions are Linux-only.
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.architecture }}
       - name: Install Lightwork + deps
         shell: bash
         run: |

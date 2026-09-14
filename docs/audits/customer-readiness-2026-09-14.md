@@ -29,6 +29,132 @@ capabilities.
 
 ## What was actually exercised
 
+### Follow-up: interrupted saves and access changes
+
+The additional failure-recovery pass reproduced four further defect families.
+The table groups related failures across the affected customer paths.
+This batch is based on main `2f93808897f89caed311e12fffb7e31648d2073d`,
+after the initial review and repairs were merged in #2513, and is developed on
+`codex/customer-recovery-20260914`.
+
+| Failure | Customer impact | Repair and regression evidence |
+| --- | --- | --- |
+| Failed lock acquisition stranded previously acquired locks | A recoverable file error or cancellation could leave later workspace, membership, invitation, trigger, trust, federation or voice-store operations stuck. | Seventeen helpers now unwind partial acquisition and transfer successfully acquired guards to the caller. The original lock order and strict-lock flags remain intact. Tests retain the failure traceback, verify cleanup after both I/O errors and cancellation, then acquire again. An actual obstructed workspace lock file is removed and the public selection operation successfully saves and clears state without restarting. |
+| Blocking administration handlers | A slow Settings save, role/grant operation, user-list read or invitation email could stall unrelated requests on the same dashboard event loop. | Eighteen affected handlers now use synchronous worker routes or explicitly await worker-thread I/O. Nineteen concurrent-request scenarios include the already-correct provider probe as a control; they check that another request completes before the injected slow operation is released and that the tenant context is preserved. No live email or provider request is made by these tests. |
+| Partially applied Settings selections | Capability and feature forms published one intermediate configuration per checkbox. File errors and malformed section data produced raw 500 responses. | Each form now commits its full selection under one settings lock and one atomic file replacement. Tests observe only the complete new selection, preserve the original file when storage is unavailable, retry successfully, and retain malformed data for recovery with a 503 response. Existing single-switch callers retain their interface. |
+| Stale workspace-member screen after access loss | The loaded roster and pending colleague identity remained visible after a 401/403, and editing controls were re-enabled. | The controller clears private state and locks further actions until a fresh authenticated page load. Twelve response cases cover refresh/save/remove, both status codes and JSON/HTML bodies. Temporary 503 failures continue to preserve the editable form for retry. |
+
+The lock suite passed 37 cases, the administration recovery suite passed 25,
+and the complete dashboard DOM suite passed 757. A broader affected-store suite
+passed 557 cases in each of normal and secure-default configurations. The
+administration/permission suites passed 237 cases in each configuration after
+their static scanner was extended to recognize worker-thread writes. Seven
+serial concurrency cases and 104 benchmark/verifier tests also passed. These
+suites overlap and include passing controls; their counts must not be added as
+distinct defects or treated as live customer acceptance. The final full CI and
+native acceptance runs for the published revision are linked in the pull request.
+
+CI subsequently identified the desktop updater's Rustls 0.23.43 dependency as
+affected by [GHSA-2mjx-qc3c-rqvc / RUSTSEC-2026-0285](https://github.com/rustls/rustls/security/advisories/GHSA-2mjx-qc3c-rqvc),
+published on September 14. The upstream fix rejects TLS 1.3 handshake messages
+crossing encryption-level boundaries. Cargo updated this dependency to the
+patched 0.23.45 release; the locked Windows dependency graph resolves that
+version through the updater's Reqwest/Tokio/Rustls stack. The advisory remains
+enforced by CI. Native tests and dependency audit results for the updated lock
+are recorded in the PR.
+
+### Further follow-up: optional database execution
+
+Installing the actual optional SQLAlchemy dependency exposed an unbounded
+PostgreSQL connection attempt hidden by the dependency-absent test path. A
+local TCP fixture that accepts a connection but never completes the database
+handshake reproduced the stall in both the `database` tool and Postgres-backed
+platform startup. The repair applies a finite, configurable libpq connection
+timeout while preserving operator connection options; reconnects and pool
+workers retain that bound. This is a per-host connection limit, not a claim
+that arbitrary SQL statements or every third-party database driver have a
+complete execution deadline.
+
+The new regression exercises actual SQLAlchemy/Psycopg connection attempts and
+captures the parameters delivered to the driver. The ordinary CI configuration
+previously omitted SQLAlchemy; the PostgreSQL job now installs its reviewed
+version and runs the connector and timeout suites. The native wheel workflow
+also includes the image-hash parity tests, asserts that acceleration is engaged,
+and triggers when the image-hash wrapper or tests change. Local checks against
+the built Windows wheel previously passed all 66 native parity cases; that
+one-off evidence now has a continuing CI path. Final counts and immutable runs
+for this follow-up are recorded in the PR.
+
+### Further follow-up: optional document conversion
+
+An additional run with the actual channel, gRPC, telemetry and math-conversion
+dependencies exposed a LaTeX tool regression that ordinary CI had masked by
+omitting its converter. Non-string input was silently converted rather than
+refused. Malformed math could escape as a converter exception, and an incomplete
+fraction could produce invalid MathML without a denominator. The tool now
+enforces its source type, reports parser failures, and refuses malformed
+fraction output. This is not a claim of complete validation of arbitrary LaTeX.
+
+The PDF path also retained temporary customer document sources after both
+successful and failed execution. It now cleans its scratch directory on every
+covered outcome, refuses an escaping destination before launching the engine,
+and returns recoverable storage errors. Regression cases preserve an existing
+report when the engine fails. These PDF tests use a fixture engine; they do not
+qualify Tectonic or pdflatex in every deployment or sandbox backend. The CI
+document job now installs the actual MathML converter and runs these tests in
+normal and secure-default configurations. Final evidence is linked in the PR.
+
+### Further follow-up: prior-work recall recovery
+
+A failed refresh of an encrypted goal's semantic index could delete its existing
+search entry before discovering that the local embedder or encryption step was
+unavailable. Three regressions reproduced loss of the prior entry for a missing
+embedding result, an embedding exception and an encryption exception. Replacement
+preparation now completes before the old entry is removed. The cases retain the
+exact existing encrypted entry, search it after recovery, and successfully retry
+the update. This repair covers preparation failures; it does not introduce a
+transaction across every external backend's delete/add interface.
+
+Separately, an actual local Chroma 1.5.9 exercise passed precomputed-vector
+index/search/delete and default local-model index/search/reset/reindex. It used
+synthetic documents and the downloaded local embedding model. It is not a test
+of customer data, remote vector services or the usefulness of customer recall.
+
+### Further follow-up: database destination grants
+
+An allowed hostname label did not fully constrain the database connection.
+PostgreSQL's `hostaddr` option could select a different network address, and a
+comma-separated host list could match a wildcard grant as one string even when
+one destination was outside the grant. Blank host overrides could also select
+the driver's local default. The gate now checks every explicit destination,
+including alternate addresses and repeated host parameters, and refuses empty
+or indirect destinations under a host-scoped grant. SQL Server address aliases
+and failover partners receive the same case-insensitive parameter check; an
+ODBC authority that names a local DSN or Oracle authority that names a TNS alias
+cannot masquerade as a hostname. Approved host entries with ports are parsed as
+hostnames, so valid fallback configurations remain usable.
+Opaque DSN, service and socket options require an unscoped operator connection;
+they cannot borrow a URL hostname's authorization. The existing authenticated
+enterprise restriction on ambient-credential tools remains unchanged.
+
+The regressions exercise both model-supplied and operator-supplied URLs. Actual
+SQLAlchemy/Psycopg driver captures reproduce the alternate-address and host-list
+cases without opening an outside connection, then verify admission when every
+destination is explicitly granted. Actual SQLAlchemy ODBC translation also
+confirms the native connection-string options and implicit DSN interpretation;
+the Oracle dialect confirms the corresponding TNS alias interpretation.
+Other-driver cases intercept engine creation; no ODBC connection is opened.
+These are not live Oracle, SQL Server or MySQL deployment acceptance.
+The PostgreSQL CI job runs the new suite in both security configurations.
+These checks follow
+the documented [libpq destination semantics](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS);
+SQL Server options are checked against the documented
+[ODBC connection keywords](https://learn.microsoft.com/en-us/sql/connect/odbc/dsn-connection-string-attribute?view=sql-server-ver17)
+and [SQLAlchemy DSN rules](https://docs.sqlalchemy.org/en/20/dialects/mssql.html#dsn-connections).
+This repair does not establish DNS pinning or network-layer isolation.
+
+### Initial fresh-customer pass
+
 The Python environment independently installs all eight packages from this
 checkout. Imported core/dashboard module paths were checked before testing.
 
@@ -81,6 +207,106 @@ separate serial concurrency phase, native document tests and live PostgreSQL
 tests. This is regression evidence, not proof of customer installation or a
 real model/business-system transaction.
 
+## Windows feature packaging repair and remaining acceptance
+
+The eight-package release cohort is not an inventory of every optional feature's
+runtime dependencies. The earlier
+[`release-runtime` extra](https://github.com/Daybreak-AI-Labs/Lightwork/blob/3e0bfe634af4f6c4cfed93d12eb3fac448f54cb0/packages/maverick-core/pyproject.toml#L48)
+included provider and document-parser libraries. Its clean Windows build's
+installed dependency list omitted the following examples:
+
+| Missing optional dependency | Affected operation | What the existing passing tests establish |
+| --- | --- | --- |
+| SQLAlchemy and Psycopg | Relational database tool; optional PostgreSQL-backed platform storage | Source-deployment behavior with the actual libraries installed, including live PostgreSQL and connection/grant recovery. These tests do not run those operations inside the MSI's frozen runtime. |
+| `latex2mathml` | LaTeX-to-MathML conversion | Converter correctness and error handling in configured Python environments. This does not qualify MathML conversion in the Windows package. |
+| `prometheus-client` | Prometheus collectors and metrics export | Six local export/degraded-scrape tests passed in each security posture with `prometheus-client` 0.26.0 installed. This is not packaged metrics export or production alert delivery. |
+
+The repair adds those dependencies to the reviewed release profile, including
+Psycopg's binary implementation and connection pool. PyInstaller retains the
+dynamic SQL dialect, native driver modules and MathML symbol data. The existing
+`release-runtime-check` now executes an in-memory SQL write/commit/read, loads
+the bundled PostgreSQL driver and closed pool, converts valid/invalid MathML,
+and renders the actual platform collectors through an isolated registry.
+Staging and installed Windows acceptance already run that command inside the
+frozen executable; missing or broken dependencies now fail that gate.
+
+Twenty-seven release-runtime regression cases cover actual dependencies without customer network
+connections, missing dependencies, a missing native binary implementation,
+missing converter data, omitted/degraded metrics collectors, native library
+security-version boundaries and nonzero CLI failure. The initial package suite
+passed 78 cases per posture. After the native dependency update, **238 package,
+database and knowledge tests passed per posture**, with two live PostgreSQL cases
+reserved for CI in this local environment. Counts overlap.
+Immutable Windows build/acceptance results are recorded in the PR; these local
+results do not themselves establish success inside the frozen executable.
+The [release runtime profile](../release-runtime-profile.md) declares the included
+operations and additional deployment prerequisites.
+
+Live packaged PostgreSQL queries and connection-failure recovery, the customer's
+metrics listener and alert delivery, and actual customer-account/useful-work
+acceptance remain required under R1/R3/R4/R5. Source tests and the eight-package
+inventory must not advertise every optional connector as ready. The selected
+profile does not include every SQL driver, OpenTelemetry/Sentry SDK, research
+dependency or external document engine.
+
+### Native PostgreSQL dependency hardening
+
+The Python dependency audit passed while the pinned Psycopg 3.3.4 Windows wheel
+loaded libpq **18.3**. That native library precedes the vendor's fix for
+[CVE-2026-6477](https://www.postgresql.org/support/security/CVE-2026-6477/).
+The advisory concerns native client large-object functions using `PQfn` and
+malicious responses from a database server controlled by its superuser. No call
+to those affected native functions was found in the reviewed Lightwork Python/
+Rust paths or Psycopg wrappers. The SQL tool's `lo_export` classification is a
+different, server-side SQL operation. This is dependency/artifact hardening;
+**a reachable Lightwork exploit has not been established**.
+
+The patch updates Psycopg and its binary wheel to **3.3.5**, keeps pool 3.3.1,
+and raises all three binary extras' minimums, including the knowledge pgvector
+extra. The release check reads the **loaded** `pq.version()`, refuses affected
+versions, retains each fixed older major branch, and prints the accepted native
+version. The actual old Windows library was refused by the changed CLI; the
+actual new wheel loaded **18.4** and passed the full isolated offline check.
+Both checks used the reviewed source CLI with the respective real library,
+not a fabricated version return or a malicious database payload.
+
+Verification covers syntax/Ruff, native version refusal and legitimate fixed
+versions, SQL transactions, actual closed-pool construction, host grants,
+connection timeout/recovery and knowledge-store controls. Repository gates,
+full interpreter/security CI, live PostgreSQL and the frozen Windows acceptance
+results are recorded for the final immutable revision in the PR. The native
+floor tests simulate branch boundaries in addition to the actual Windows
+library comparison. Source deployments using system/C libpq and signed customer
+release artifacts require their own qualification; this diagnostic does not
+prove every independently installed database driver's safety.
+
+### Release platform setup and frozen qualification
+
+The release binary matrix requested Python 3.12.13 on Linux, macOS and Windows.
+The official [Actions Python manifest](https://github.com/actions/python-versions/blob/main/versions-manifest.json)
+has that version only for Linux/RHEL; the macOS and Windows jobs could not reach
+their build steps. The matrix now selects 3.12.10 for those two platforms and
+explicitly requests the artifact's architecture. Linux retains 3.12.13.
+
+A nonpublishing PR workflow now builds the actual release spec on Linux x86-64
+and macOS arm64 and runs the packaged feature checks, all eight cohort version
+checks, CLI entry points and local voice-engine availability. Checks use
+disposable configuration and remove developer paths. They retain logs, the
+binary hash, platform and reviewed/checkout revisions. Windows continues through
+the installed MSI acceptance workflow. Actual results for each final revision
+are linked in the PR; adding the workflow alone is not a passing result.
+Production signing, macOS notarization, clean customer-machine acceptance and
+live integrations remain separate release/deployment requirements.
+
+### CI signature-tampering fixture
+
+After the Actions budget was increased, the rerun exposed a nondeterministic
+audit-binder test. It replaced the first signature byte with `00`, which leaves
+one out of 256 possible byte values unchanged. The failed run's signature already
+began with `00`; verification correctly accepted the unchanged bytes. The test
+now flips a bit, so the tampered input always differs. Runtime signature
+verification was not weakened or changed.
+
 ## Acceptance matrix
 
 | Customer need | Repository/local evidence | Still required for customer acceptance |
@@ -104,7 +330,7 @@ real model/business-system transaction.
 
 | ID | Required work | Accountable owner | Closure evidence |
 | --- | --- | --- | --- |
-| R1 | Prepare the actual customer release, signing trust and distribution. | Release owner | Reviewed source, immutable artifact/checksums, customer publisher identity, protected signing/acceptance environments and clean-machine first-release results. GitHub currently has no releases or recorded real release-pair run; only `github-pages` and `pypi` environments were returned. |
+| R1 | Prepare the actual customer release, signing trust and distribution. | Release owner | Reviewed source, immutable artifact/checksums, declared supported features and their packaged dependencies, customer publisher identity, protected signing/acceptance environments and clean-machine first-release results. GitHub currently has no releases or recorded real release-pair run; only `github-pages` and `pypi` environments were returned. |
 | R2 | Qualify each deployment being offered. | Deployment operator | Windows evidence under R1; for AWS, a running isolated control plane and qualified executor with recorded image/cluster/CNI identities, isolation denials, timeout and file-recovery results. |
 | R3 | Prove the selected model and account integrations in the intended environment. | Product owner plus customer account administrator | Approved test accounts, exact scopes/configuration, successful authorized work and readback, denied access, expired credentials and safe reconnect/retry without duplicate side effects. |
 | R4 | Demonstrate useful work and accepted outcomes. | Workflow owner and customer reviewer | Representative tasks with expected outcomes, observed corrections/effort/cost, accepted output and explicit limitations. Cover the business workflows being sold, not just vendor onboarding. |
