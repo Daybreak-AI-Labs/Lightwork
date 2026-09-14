@@ -213,10 +213,8 @@ def index_goal(goal, *, store: Any | None = None) -> bool:
         "status": getattr(goal, "status", None),
     }]
     try:
-        try:
-            store.delete([doc_id])
-        except Exception:  # pragma: no cover -- delete of absent id may raise
-            pass
+        document = text
+        embedding_args: dict[str, Any] = {}
         if _sealed_recall():
             vecs = _embed_texts([text])
             if vecs is None:
@@ -225,10 +223,15 @@ def index_goal(goal, *, store: Any | None = None) -> bool:
                 # embedding -- skip so the caller falls back to lexical recall.
                 return False
             from .crypto_at_rest import seal_to_str
-            store.add([seal_to_str(text)], ids=[doc_id], metadatas=metas,
-                      embeddings=vecs)
-        else:
-            store.add([text], ids=[doc_id], metadatas=metas)
+            document = seal_to_str(text)
+            embedding_args["embeddings"] = vecs
+        # Preparing a replacement must not erase a previously searchable goal
+        # when the embedder or encryption key is temporarily unavailable.
+        try:
+            store.delete([doc_id])
+        except Exception:  # pragma: no cover -- delete of absent id may raise
+            pass
+        store.add([document], ids=[doc_id], metadatas=metas, **embedding_args)
         return True
     except Exception as e:  # pragma: no cover -- backend write error
         log.debug("semantic index of goal failed: %s", e)

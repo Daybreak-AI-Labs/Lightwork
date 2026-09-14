@@ -104,6 +104,22 @@ qualify Tectonic or pdflatex in every deployment or sandbox backend. The CI
 document job now installs the actual MathML converter and runs these tests in
 normal and secure-default configurations. Final evidence is linked in the PR.
 
+### Further follow-up: prior-work recall recovery
+
+A failed refresh of an encrypted goal's semantic index could delete its existing
+search entry before discovering that the local embedder or encryption step was
+unavailable. Three regressions reproduced loss of the prior entry for a missing
+embedding result, an embedding exception and an encryption exception. Replacement
+preparation now completes before the old entry is removed. The cases retain the
+exact existing encrypted entry, search it after recovery, and successfully retry
+the update. This repair covers preparation failures; it does not introduce a
+transaction across every external backend's delete/add interface.
+
+Separately, an actual local Chroma 1.5.9 exercise passed precomputed-vector
+index/search/delete and default local-model index/search/reset/reindex. It used
+synthetic documents and the downloaded local embedding model. It is not a test
+of customer data, remote vector services or the usefulness of customer recall.
+
 ### Initial fresh-customer pass
 
 The Python environment independently installs all eight packages from this

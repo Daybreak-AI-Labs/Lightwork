@@ -355,6 +355,34 @@ class TestAtRestSealing:
         assert sr.index_goal(_Goal(1, "x y z"), store=store) is False
         assert store.count() == 0
 
+    @requires_crypto
+    @pytest.mark.parametrize("failure", ["unavailable-embedder", "embedding-error", "sealing-error"])
+    def test_failed_preparation_preserves_prior_index_and_allows_retry(
+        self, _sealed, monkeypatch, failure,
+    ):
+        store = FakeStore()
+        assert sr.index_goal(_Goal(1, "prior reviewed report"), store=store)
+        previous = dict(store.docs)
+
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("temporary preparation failure")
+
+        with monkeypatch.context() as patch:
+            if failure == "unavailable-embedder":
+                patch.setattr("maverick.skill.embeddings.embed", lambda texts: None)
+            elif failure == "embedding-error":
+                patch.setattr("maverick.skill.embeddings.embed", unavailable)
+            else:
+                patch.setattr("maverick.crypto_at_rest.seal_to_str", unavailable)
+            assert sr.index_goal(_Goal(1, "revised report"), store=store) is False
+            assert store.docs == previous
+
+        hits = sr.search("prior reviewed report", store=store)
+        assert hits and hits[0][1]["goal_id"] == 1
+        assert sr.index_goal(_Goal(1, "revised report"), store=store)
+        assert store.count() == 1
+        assert store.docs != previous
+
     def test_at_rest_off_stores_plaintext_unchanged(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
         store = FakeStore()
