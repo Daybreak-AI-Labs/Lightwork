@@ -63,6 +63,28 @@ version through the updater's Reqwest/Tokio/Rustls stack. The advisory remains
 enforced by CI. Native tests and dependency audit results for the updated lock
 are recorded in the PR.
 
+### Further follow-up: optional database execution
+
+Installing the actual optional SQLAlchemy dependency exposed an unbounded
+PostgreSQL connection attempt hidden by the dependency-absent test path. A
+local TCP fixture that accepts a connection but never completes the database
+handshake reproduced the stall in both the `database` tool and Postgres-backed
+platform startup. The repair applies a finite, configurable libpq connection
+timeout while preserving operator connection options; reconnects and pool
+workers retain that bound. This is a per-host connection limit, not a claim
+that arbitrary SQL statements or every third-party database driver have a
+complete execution deadline.
+
+The new regression exercises actual SQLAlchemy/Psycopg connection attempts and
+captures the parameters delivered to the driver. The ordinary CI configuration
+previously omitted SQLAlchemy; the PostgreSQL job now installs its reviewed
+version and runs the connector and timeout suites. The native wheel workflow
+also includes the image-hash parity tests, asserts that acceleration is engaged,
+and triggers when the image-hash wrapper or tests change. Local checks against
+the built Windows wheel previously passed all 66 native parity cases; that
+one-off evidence now has a continuing CI path. Final counts and immutable runs
+for this follow-up are recorded in the PR.
+
 ### Initial fresh-customer pass
 
 The Python environment independently installs all eight packages from this

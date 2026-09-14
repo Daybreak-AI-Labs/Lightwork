@@ -1123,7 +1123,10 @@ def _connection_kwargs(dsn: str) -> dict:
     """Preserve operator libpq options while bounding unattended transactions."""
     from psycopg.conninfo import conninfo_to_dict
 
-    options = conninfo_to_dict(dsn).get("options", os.environ.get("PGOPTIONS", ""))
+    from ..db_timeouts import postgres_connect_timeout
+
+    parameters = conninfo_to_dict(dsn)
+    options = parameters.get("options", os.environ.get("PGOPTIONS", ""))
     defaults = (
         ("statement_timeout", "MAVERICK_PG_STATEMENT_TIMEOUT_MS", 30_000),
         ("idle_in_transaction_session_timeout", "MAVERICK_PG_IDLE_TX_TIMEOUT_MS", 60_000),
@@ -1141,7 +1144,11 @@ def _connection_kwargs(dsn: str) -> dict:
         if not 0 <= timeout <= 2_147_483_647:
             timeout = default
         additions.append(f"-c {setting}={timeout}")
-    return {"autocommit": False, "options": " ".join([options, *additions]).strip()}
+    return {
+        "autocommit": False,
+        "options": " ".join([options, *additions]).strip(),
+        "connect_timeout": postgres_connect_timeout(parameters.get("connect_timeout")),
+    }
 
 
 class PostgresWorldModel:

@@ -157,7 +157,7 @@ def test_row_returning_read_classified_sql_is_not_committed(monkeypatch):
             pass
 
     fake_sa = types.ModuleType("sqlalchemy")
-    fake_sa.create_engine = lambda url: _Engine()
+    fake_sa.create_engine = lambda url, **kwargs: _Engine()
     fake_sa.text = lambda s: s
     monkeypatch.setitem(sys.modules, "sqlalchemy", fake_sa)
 
@@ -281,7 +281,7 @@ def test_row_limit_is_clamped(monkeypatch):
             disposed["called"] = True
 
     fake_sa = types.ModuleType("sqlalchemy")
-    fake_sa.create_engine = lambda url: _Engine()
+    fake_sa.create_engine = lambda url, **kwargs: _Engine()
     fake_sa.text = lambda s: s
     monkeypatch.setitem(__import__("sys").modules, "sqlalchemy", fake_sa)
 

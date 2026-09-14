@@ -36,6 +36,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from .._envparse import coerce_bool, is_truthy
+from ..db_timeouts import postgres_connect_timeout
 from . import Tool, as_bool
 from .sql_safety import has_unconfirmed_statement_separator
 
@@ -215,6 +216,20 @@ def _host_denial(url: str, allow_hosts: tuple[str, ...]) -> str | None:
     return None
 
 
+def _postgres_connect_args(url: str) -> dict[str, int]:
+    """Bound libpq handshakes; other SQLAlchemy drivers have different options."""
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in {
+        "postgresql", "postgresql+psycopg", "postgresql+psycopg2",
+        "postgresql+psycopg2cffi", "cockroachdb", "cockroachdb+psycopg2",
+    }:
+        return {}
+    values = parse_qs(parsed.query, keep_blank_values=True).get("connect_timeout", [None])
+    if len(values) != 1:
+        raise ValueError("database connect_timeout must be specified only once")
+    return {"connect_timeout": postgres_connect_timeout(values[0])}
+
+
 def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
               allow_hosts: tuple[str, ...] = ()) -> str:
     if not sql:
@@ -244,7 +259,7 @@ def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
     limit = max(1, min(limit, _max_rows()))
     engine = None
     try:
-        engine = create_engine(url)
+        engine = create_engine(url, connect_args=_postgres_connect_args(url))
         with engine.connect() as conn:
             result = conn.execute(text(sql))
             if result.returns_rows:

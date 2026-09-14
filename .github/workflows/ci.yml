@@ -1012,7 +1012,7 @@ jobs:
           pip install -e ./packages/maverick-knowledge
           pip install \
             'psycopg==3.3.4' 'psycopg-binary==3.3.4' \
-            'psycopg-pool==3.3.1'
+            'psycopg-pool==3.3.1' 'sqlalchemy==2.0.52'
           pip install pytest pytest-asyncio pytest-timeout
           python -m pip check
           python scripts/verify_constraint_closure.py
@@ -1023,6 +1023,8 @@ jobs:
           timeout --verbose --signal=ABRT --kill-after=30s 10m
           python -m pytest -vvs --timeout=180 --timeout-method=signal
           packages/maverick-core/tests/test_postgres_world.py
+          packages/maverick-core/tests/test_database_tool.py
+          packages/maverick-core/tests/test_database_connection_timeouts.py
           packages/maverick-core/tests/test_production_runtime_regressions.py
           packages/maverick-core/tests/test_pgvector_isolation_pg.py
           packages/maverick-core/tests/test_postgres_fact_history.py
