@@ -495,9 +495,16 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
         f"maverick-knowledge>={release_version}"
     ]
     release_runtime = [Requirement(value) for value in core_extras["release-runtime"]]
-    assert {"openai", "openpyxl", "lxml", "pypdf", "pdfplumber"} <= {
+    assert {"openai", "openpyxl", "lxml", "pypdf", "pdfplumber", "sqlalchemy",
+            "psycopg", "latex2mathml", "prometheus-client"} <= {
         _normalise_project_name(requirement.name) for requirement in release_runtime
     }
+    postgres_runtime = next(req for req in release_runtime if req.name == "psycopg")
+    assert {"binary", "pool"} <= postgres_runtime.extras
+    constraints = _ci_constraints()
+    for requirement in release_runtime:
+        name = _normalise_project_name(requirement.name)
+        assert Version(constraints[name]) in requirement.specifier
     assert core_extras["postgres"] == ["psycopg[binary,pool]>=3.1"]
     assert "tzdata>=2026.3" in core["dependencies"]
 

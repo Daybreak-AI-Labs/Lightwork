@@ -886,20 +886,29 @@ def version() -> None:
 
 @main.command("release-runtime-check")
 def release_runtime_check() -> None:
-    """Verify provider SDKs and document parsers in a full release artifact."""
+    """Verify packaged providers, parsers, SQL, MathML and metrics offline."""
     from ..providers import verify_release_runtime
+    from ..release_runtime import (
+        verify_release_database_runtime,
+        verify_release_mathml_runtime,
+        verify_release_metrics_runtime,
+    )
     from ..tools.document_processing import verify_release_document_runtime
 
     try:
         verify_release_runtime()
         verify_release_document_runtime()
+        verify_release_database_runtime()
+        verify_release_mathml_runtime()
+        verify_release_metrics_runtime()
     except Exception as exc:
         raise click.ClickException(
             f"full release runtime is unavailable: {exc}"
         ) from exc
     click.echo(
         "release runtime ready: Anthropic and OpenAI-compatible provider "
-        "SDKs, document parsers and document worker source are available"
+        "SDKs, document parsers and document worker source are available; "
+        "offline SQL, bundled PostgreSQL driver, MathML and metrics checks passed"
     )
 
 

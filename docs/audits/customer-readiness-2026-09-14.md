@@ -207,13 +207,13 @@ separate serial concurrency phase, native document tests and live PostgreSQL
 tests. This is regression evidence, not proof of customer installation or a
 real model/business-system transaction.
 
-## Open Windows feature-packaging gap
+## Windows feature packaging repair and remaining acceptance
 
 The eight-package release cohort is not an inventory of every optional feature's
-runtime dependencies. The current
+runtime dependencies. The earlier
 [`release-runtime` extra](https://github.com/Daybreak-AI-Labs/Lightwork/blob/3e0bfe634af4f6c4cfed93d12eb3fac448f54cb0/packages/maverick-core/pyproject.toml#L48)
-includes provider and document-parser libraries. The clean Windows build's
-installed dependency list omits the following examples:
+included provider and document-parser libraries. Its clean Windows build's
+installed dependency list omitted the following examples:
 
 | Missing optional dependency | Affected operation | What the existing passing tests establish |
 | --- | --- | --- |
@@ -221,21 +221,39 @@ installed dependency list omits the following examples:
 | `latex2mathml` | LaTeX-to-MathML conversion | Converter correctness and error handling in configured Python environments. This does not qualify MathML conversion in the Windows package. |
 | `prometheus-client` | Prometheus collectors and metrics export | Six local export/degraded-scrape tests passed in each security posture with `prometheus-client` 0.26.0 installed. This is not packaged metrics export or production alert delivery. |
 
-This is an open delivery gap, not a reason to install every optional or research
-dependency indiscriminately. R1 and R3 must declare the features supported by each
-delivery mode, include their selected prerequisites, and exercise them inside
-the actual distributed package. For the examples above, closure means a packaged
-SQL query against a disposable authorized database plus connection-failure
-recovery, packaged valid/invalid MathML conversion, and a successful packaged
-metrics scrape with degraded-collector handling. Customer-account and useful-work
-acceptance remain additional requirements.
+The repair adds those dependencies to the reviewed release profile, including
+Psycopg's binary implementation and connection pool. PyInstaller retains the
+dynamic SQL dialect, native driver modules and MathML symbol data. The existing
+`release-runtime-check` now executes an in-memory SQL write/commit/read, loads
+the bundled PostgreSQL driver and closed pool, converts valid/invalid MathML,
+and renders the actual platform collectors through an isolated registry.
+Staging and installed Windows acceptance already run that command inside the
+frozen executable; missing or broken dependencies now fail that gate.
 
-The source regression evidence and eight-package inventory must not be used to
-advertise every optional connector as ready in a self-contained Windows install.
-An error that tells a frozen-app customer to install a Python package is not a
-completed self-service installation path. The dependency omissions were verified
-against the clean build log and unchanged build inputs; this audit does not claim
-they have been packaged or repaired.
+Thirteen new regression cases cover actual dependencies without customer network
+connections, missing dependencies, a missing native binary implementation,
+missing converter data, omitted/degraded metrics collectors and nonzero CLI
+failure. All **78 related tests passed in each security posture** locally.
+Immutable Windows build/acceptance results are recorded in the PR; these local
+results do not themselves establish success inside the frozen executable.
+The [release runtime profile](../release-runtime-profile.md) declares the included
+operations and additional deployment prerequisites.
+
+Live packaged PostgreSQL queries and connection-failure recovery, the customer's
+metrics listener and alert delivery, and actual customer-account/useful-work
+acceptance remain required under R1/R3/R4/R5. Source tests and the eight-package
+inventory must not advertise every optional connector as ready. The selected
+profile does not include every SQL driver, OpenTelemetry/Sentry SDK, research
+dependency or external document engine.
+
+### CI signature-tampering fixture
+
+After the Actions budget was increased, the rerun exposed a nondeterministic
+audit-binder test. It replaced the first signature byte with `00`, which leaves
+one out of 256 possible byte values unchanged. The failed run's signature already
+began with `00`; verification correctly accepted the unchanged bytes. The test
+now flips a bit, so the tampered input always differs. Runtime signature
+verification was not weakened or changed.
 
 ## Acceptance matrix
 
