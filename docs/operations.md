@@ -94,37 +94,55 @@ work is on the roadmap. Today the cap is per-goal; any user can drain
 it. **Don't expose channel webhooks to the open internet unless you
 trust everyone who can DM the bot.**
 
-## Restoring `world.db`
+## Restoring the local application state
 
-`~/.maverick/world.db` is SQLite in WAL mode. A naive `cp` while the
-writer is running produces a torn copy. To back up safely:
+The world database path depends on the active client/workspace and any explicit
+operator override. A client-bound installation normally uses
+`$MAVERICK_HOME/tenants/<client>/world.db`; do not assume that
+`~/.maverick/world.db` is the database the customer is using. Run `maverick doctor`
+with the service's account, home, configuration and binding, and inventory each
+workspace and external store before choosing the recovery scope.
+
+Use the authenticated backup CLI for the bound client's local state. Run these
+commands as the service user with the same `MAVERICK_HOME` and client binding.
+Provision `MAVERICK_BACKUP_SIGNING_KEY` from the secret manager first; retain
+the same 32-byte key independently for the standby. Never generate a different
+key when attempting to authenticate an existing archive.
 
 ```sh
 umask 077
-sqlite3 "$HOME/.maverick/world.db" ".backup $HOME/maverick-backup-$(date +%Y%m%d).db"
-chmod 600 "$HOME/maverick-backup-$(date +%Y%m%d).db"
+install -d -m 700 "$HOME/maverick-backups"
+maverick backup create --out "$HOME/maverick-backups/client.tgz"
+maverick backup info "$HOME/maverick-backups/client.tgz"
 ```
 
-The `sqlite3 ... ".backup ..."` dot-command uses
-`sqlite3.Connection.backup()` under the hood — online +
-concurrent-write-safe. If `sqlite3` isn't installed, stop the writers
-and copy:
+The snapshot uses SQLite's online backup API to include committed WAL data.
+Copying one live `world.db` file can miss committed data and does not recover
+the other application stores. A single database copy is not an installation
+backup.
+
+For recovery, stop all writers first (`maverick serve`, the dashboard and any
+service wrapping them). With the standby's actual service identity, home,
+configuration, binding and retained key selected:
 
 ```sh
-# Stop the writers first.
-systemctl stop maverick
-cp ~/.maverick/world.db ~/maverick-backup.db
-systemctl start maverick
+maverick backup restore "$HOME/maverick-backups/client.tgz"
 ```
 
-To restore: stop the writers, replace `world.db`, restart.
+Restore authenticates and validates the archive, stages it privately, and
+journals publication and SQLite sidecars. `--force` can override client/live-world
+admission checks; it does not authenticate an unsigned archive, bypass archive
+validation or permit a forward-schema restore. A quiet WAL is not proof that
+another writer has stopped. Do not use direct file replacement to bypass the
+restore safeguards.
 
-`maverick backup restore` (the CLI's own DR path, see `maverick backup
---help`) enforces this: it refuses when `world.db`'s WAL/SHM sidecars were
-touched within the last few seconds, since a running process silently loses
-every write made after the restore until it's stopped. Stop `maverick
-serve` / the dashboard before restoring; `--force` overrides the check for
-cases the heuristic can't see (e.g. a process on another host).
+The default archive excludes raw encryption and audit-signing `.key` files.
+Restore these from separate custody, plus installation configuration, global
+account/administration state, additional workspaces and any external stores
+through their own recovery procedure. Before returning the service to use,
+verify customer records can be decrypted and a representative workflow can
+resume with its protected spending and action history intact. Measure recovery
+on a separate host; archive integrity alone does not establish that result.
 
 ## Postgres backup & disaster recovery
 
