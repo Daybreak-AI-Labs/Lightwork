@@ -33,6 +33,9 @@ capabilities.
 
 The additional failure-recovery pass reproduced four further defect families.
 The table groups related failures across the affected customer paths.
+This batch is based on main `2f93808897f89caed311e12fffb7e31648d2073d`,
+after the initial review and repairs were merged in #2513, and is developed on
+`codex/customer-recovery-20260914`.
 
 | Failure | Customer impact | Repair and regression evidence |
 | --- | --- | --- |
@@ -43,7 +46,10 @@ The table groups related failures across the affected customer paths.
 
 The lock suite passed 37 cases, the administration recovery suite passed 25,
 and the complete dashboard DOM suite passed 757. A broader affected-store suite
-passed 557 cases in each of normal and secure-default configurations. These
+passed 557 cases in each of normal and secure-default configurations. The
+administration/permission suites passed 237 cases in each configuration after
+their static scanner was extended to recognize worker-thread writes. Seven
+serial concurrency cases and 104 benchmark/verifier tests also passed. These
 suites overlap and include passing controls; their counts must not be added as
 distinct defects or treated as live customer acceptance. The final full CI and
 native acceptance runs for the published revision are linked in the pull request.
