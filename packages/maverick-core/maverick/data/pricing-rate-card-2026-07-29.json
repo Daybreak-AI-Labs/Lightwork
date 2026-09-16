@@ -274,6 +274,20 @@
       "rates": {},
       "model_pattern": "(ollama|vllm|tgi):.+",
       "pattern_rates": [0.0, 0.0]
+    },
+    {
+      "evidence_id": "openrouter-advertised-free-tier-policy-2026-09-16",
+      "source_url": "https://openrouter.ai/api/v1/models",
+      "retrieved_at": "2026-09-16T16:00:00Z",
+      "as_of": "2026-09-16",
+      "currency": "USD",
+      "confidence": 1.0,
+      "verified": true,
+      "pricing_basis": "Metered external API-token charge only; OpenRouter's own model listing advertises $0 prompt and $0 completion for the model",
+      "applicability": "OpenRouter models whose pricing in the provider's /api/v1/models listing, as cached by model discovery with the operator's key, is zero for both prompt and completion; excludes any OpenRouter account fee and a rate the provider changes after the cached listing",
+      "rates": {},
+      "model_pattern": "openrouter:.+",
+      "pattern_rates": [0.0, 0.0]
     }
   ]
 }

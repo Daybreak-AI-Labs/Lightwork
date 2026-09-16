@@ -204,6 +204,44 @@ def _ids(candidates: Iterable[object]) -> list[str]:
     return sorted(valid)
 
 
+def _zero_price(value: object) -> bool:
+    """True when a provider-advertised price field is exactly zero."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == 0
+    if isinstance(value, str):
+        try:
+            return float(value.strip()) == 0.0
+        except ValueError:
+            return False
+    return False
+
+
+def parse_free_models(style: str, payload: object) -> list[str]:
+    """Model ids an OpenAI-shaped listing prices at $0 for prompt AND completion.
+
+    OpenRouter's ``GET /api/v1/models`` carries a ``pricing`` object per row; a
+    model it lists at zero incurs no metered token charge. Rows without a
+    pricing object, or with any non-zero price, are never free.
+    """
+    if style != "openai" or not isinstance(payload, dict):
+        return []
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        return []
+    free = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        pricing = row.get("pricing")
+        if not isinstance(pricing, dict):
+            continue
+        if _zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion")):
+            free.append(row.get("id"))
+    return _ids(free)
+
+
 def parse_models(style: str, payload: object) -> tuple[list[str], str | None]:
     """Model ids (sorted, unique, well-formed) and the next page token, if any."""
     if not isinstance(payload, dict):
@@ -270,11 +308,21 @@ def _fetch(url: str, headers: dict[str, str], *, allow_loopback: bool) -> tuple[
     return run()
 
 
-def _entry(provider: str, status: str, models: list[str], detail: str, fetched_at: float | None) -> dict[str, Any]:
+def _entry(
+    provider: str,
+    status: str,
+    models: list[str],
+    detail: str,
+    fetched_at: float | None,
+    free_models: list[str] | None = None,
+) -> dict[str, Any]:
     return {
         "provider": provider,
         "status": status,
         "models": list(models),
+        # Ids the provider's own listing priced at $0 (OpenRouter today); the
+        # budget prices those at zero instead of refusing them as unpriced.
+        "free_models": list(free_models or []),
         "detail": detail[:MAX_DETAIL_CHARS],
         "fetched_at": fetched_at,
     }
@@ -304,6 +352,7 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
         class BlockedHost(Exception):  # type: ignore[no-redef]
             pass
     models: list[str] = []
+    free: list[str] = []
     seen: set[str] = set()
     token: str | None = None
     try:
@@ -311,7 +360,10 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
             status, body = fetch(_page_url(url, style, token), headers, allow_loopback=allow_loopback)
             if not 200 <= int(status) < 300:
                 return _entry(name, "unavailable", [], f"provider returned HTTP {int(status)} for the model list", now)
-            ids, token = parse_models(style, json.loads(body.decode("utf-8")))
+            payload = json.loads(body.decode("utf-8"))
+            ids, token = parse_models(style, payload)
+            if name == "openrouter":
+                free.extend(parse_free_models(style, payload))
             if name == "gemini":
                 ids = [i.removeprefix("models/") for i in ids]
             for model_id in ids:
@@ -329,7 +381,15 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
     except Exception as exc:
         return _entry(name, "unavailable", [], f"model list request failed ({type(exc).__name__})", now)
     models = sorted(models)[:MAX_MODELS_PER_PROVIDER]
-    return _entry(name, "live", models, f"{len(models)} models reachable with the configured key", now)
+    kept = set(models)
+    return _entry(
+        name,
+        "live",
+        models,
+        f"{len(models)} models reachable with the configured key",
+        now,
+        free_models=[m for m in _ids(free) if m in kept],
+    )
 
 
 def cache_path() -> Path:
@@ -356,8 +416,9 @@ def _load_cache() -> dict[str, dict[str, Any]]:
         fetched_at = row.get("fetched_at")
         fetched = float(fetched_at) if isinstance(fetched_at, (int, float)) and not isinstance(fetched_at, bool) else None
         models = row.get("models") if isinstance(row.get("models"), list) else []
+        free = row.get("free_models") if isinstance(row.get("free_models"), list) else []
         detail = row.get("detail") if isinstance(row.get("detail"), str) else ""
-        out[name] = _entry(name, status, _ids(models), detail, fetched)
+        out[name] = _entry(name, status, _ids(models), detail, fetched, free_models=_ids(free))
     return out
 
 
@@ -398,3 +459,17 @@ def reachable(provider: str) -> list[str]:
     """Model ids the cached discovery says this provider's key can reach."""
     entry = snapshot().get(_canonical(provider))
     return list(entry["models"]) if entry and entry["status"] == "live" else []
+
+
+def free_models(provider: str) -> list[str]:
+    """Model ids the cached discovery says ``provider`` advertises at $0.
+
+    Only OpenRouter publishes per-model prices in its listing today, so this is
+    empty for every other provider. Staleness does not clear it: the rate is the
+    provider's own published one, fetched with the operator's key, and the pin
+    was chosen from that same list.
+    """
+    entry = snapshot().get(_canonical(provider))
+    if not entry or entry["status"] != "live":
+        return []
+    return [m for m in entry.get("free_models") or [] if isinstance(m, str)]

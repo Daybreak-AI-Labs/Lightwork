@@ -422,6 +422,18 @@ def _bedrock_estimate_quote(
     )
 
 
+def _openrouter_advertised_free(model_id: str) -> bool:
+    """Whether OpenRouter's own listing, as cached by model discovery, prices
+    ``model_id`` at $0 for both prompt and completion. Any cache trouble prices
+    nothing: the strict path then refuses as before."""
+    try:
+        from .model_discovery import free_models
+
+        return model_id in free_models("openrouter")
+    except Exception:  # discovery cache problems never invent a price
+        return False
+
+
 def _lookup_price_quote(
     model: str | None,
     *,
@@ -537,6 +549,17 @@ def _lookup_price_quote(
             requested,
             (0.0, 0.0),
             evidence_id="self-hosted-api-metering-policy-2026-07-29",
+        )
+
+    # OpenRouter publishes a per-model price list; a model it lists at $0 for
+    # prompt and completion incurs no metered charge. The discovery cache holds
+    # that list as fetched with the operator's own key, so the $0 rate is the
+    # provider's published one, not an estimate, and strict pricing honours it.
+    if ":" in requested and provider == "openrouter" and _openrouter_advertised_free(bare):
+        return _tracked_policy_price(
+            requested,
+            (0.0, 0.0),
+            evidence_id="openrouter-advertised-free-tier-policy-2026-09-16",
         )
 
     if not estimate_only:

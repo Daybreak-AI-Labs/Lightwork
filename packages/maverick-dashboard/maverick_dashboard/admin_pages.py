@@ -442,6 +442,50 @@ def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 
 
+def _invite_labels(all_invites) -> dict[str, str]:
+    """Email per sign-in id for people who arrived through an accepted invite.
+
+    An accepted invite is the one record that ties the address the owner typed
+    to the federated subject the person actually signed in with, so the roster
+    can read as people instead of provider id fragments."""
+    labels: dict[str, str] = {}
+    for inv in all_invites:
+        if inv.used_by and inv.email:
+            labels.setdefault(inv.used_by, inv.email)
+    return labels
+
+
+def _workspace_options(request: Request) -> tuple[list[dict], str]:
+    """Active workspaces the caller may assign members to, and the one the
+    Members section should start on (the caller's current selection when it is
+    among them, else the first). Global admins see every active workspace;
+    anyone else only the workspaces they hold a membership in."""
+    principal = auth.caller_principal(request)
+    options: list[dict] = []
+    try:
+        from maverick.tenant.registry import list_tenants
+
+        from . import workspace_tenants
+        visible = None
+        if principal and not auth.has_global_permission(request, "admin"):
+            visible = workspace_tenants.accessible_tenant_ids(principal)
+        options = [
+            {"id": rec.id, "name": (getattr(rec, "display_name", "") or rec.id)}
+            for rec in list_tenants()
+            if rec.active and (visible is None or rec.id in visible)
+        ]
+    except Exception:
+        options = []
+    try:
+        from maverick.paths import current_tenant_id
+        current = current_tenant_id() or ""
+    except Exception:
+        current = ""
+    ids = [w["id"] for w in options]
+    start = current if current in ids else (ids[0] if ids else "")
+    return options, start
+
+
 def _users_context(request: Request) -> dict:
     """Template context for the /users page (shared with the invite handler)."""
     import os as _os
@@ -478,6 +522,11 @@ def _users_context(request: Request) -> dict:
         custom_roles = sorted(rbac.list_custom_roles().items())
     except rbac.RbacStoreError:
         custom_roles = []
+    try:
+        all_invites = invites.list_invites()
+    except Exception:
+        all_invites = []
+    workspace_options, wm_tenant = _workspace_options(request)
     return {
         "users": sorted(rbac.list_users().items()),
         "roles": rbac.known_roles(),
@@ -496,7 +545,10 @@ def _users_context(request: Request) -> dict:
         "default_suites": (sorted(default_suites)
                            if default_suites is not None else None),
         "invites_on": invites.invites_enabled(),
-        "pending_invites": [i for i in invites.list_invites() if i.pending],
+        "pending_invites": [i for i in all_invites if i.pending],
+        "invite_labels": _invite_labels(all_invites),
+        "workspace_options": workspace_options,
+        "wm_tenant": wm_tenant,
     }
 
 

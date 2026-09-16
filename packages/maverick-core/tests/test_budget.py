@@ -96,6 +96,40 @@ def test_strict_pricing_allows_known_and_selfhosted(monkeypatch):
     assert _lookup_price("ollama:llama-4-maverick") == (0.0, 0.0)
 
 
+def test_strict_pricing_prices_openrouter_models_the_provider_lists_as_free(monkeypatch):
+    """OpenRouter's own listing says a model costs $0 for prompt and completion
+    (its ``:free`` and stealth preview models). That published rate must price
+    the run at zero under strict billing instead of refusing it as unpriced,
+    while anything OpenRouter prices above zero, or never listed, still fails
+    closed, and the same id on another provider is not free by association."""
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    from maverick import model_discovery
+    monkeypatch.setattr(
+        model_discovery, "free_models",
+        lambda provider: ["stealth/union-alpha"] if provider == "openrouter" else [],
+    )
+    assert _lookup_price("openrouter:stealth/union-alpha") == (0.0, 0.0)
+    quote = budget_mod._lookup_price_quote("openrouter:stealth/union-alpha")
+    assert quote.evidence_id == "openrouter-advertised-free-tier-policy-2026-09-16"
+    assert quote.verified is True and quote.rates == (0.0, 0.0)
+    with pytest.raises(UnpricedModelError, match="no verified"):
+        _lookup_price("openrouter:vendor/paid-model")
+    with pytest.raises(UnpricedModelError, match="no verified"):
+        _lookup_price("openai:stealth/union-alpha")
+
+
+def test_strict_pricing_survives_a_broken_discovery_cache(monkeypatch):
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    from maverick import model_discovery
+
+    def boom(_provider):
+        raise RuntimeError("cache unreadable")
+
+    monkeypatch.setattr(model_discovery, "free_models", boom)
+    with pytest.raises(UnpricedModelError, match="no verified"):
+        _lookup_price("openrouter:stealth/union-alpha")
+
+
 def test_strict_pricing_via_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
     monkeypatch.setattr("maverick.config.get_budget_overrides",

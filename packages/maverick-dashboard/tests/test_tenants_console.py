@@ -45,3 +45,18 @@ def test_lists_provisioned_tenants(monkeypatch, tmp_path):
     assert "$100/day" in text
     # beta is suspended.
     assert "beta" in text and "suspended" in text
+
+
+def test_roster_lets_an_admin_change_each_daily_limit_in_place(monkeypatch, tmp_path):
+    """The limit used to be set only at creation and shown read-only after;
+    now every row is an editor bound to the existing quota API (0 = unlimited)."""
+    _isolate(monkeypatch, tmp_path)
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", display_name="Acme Inc", max_daily_dollars=100)
+    tr.create_tenant("free", max_daily_dollars=0)
+    text = _client().get("/tenants").text
+    assert 'class="tenant-quota" data-tenant="acme"' in text
+    assert 'name="max_daily_dollars" type="number" min="0" step="0.01"\n                         value="100"' in text
+    assert 'class="tenant-quota" data-tenant="free"' in text and "unlimited" in text
+    assert "/api/v1/admin/tenants/' + encodeURIComponent(id) + '/quota" in text
+    assert "Enter 0 for no daily limit" in text
