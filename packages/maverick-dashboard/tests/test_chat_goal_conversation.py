@@ -42,8 +42,12 @@ def test_goal_page_folds_the_kernels_withheld_markers_and_renders_prose(page_env
     assert 'id="events" role="log" aria-live="polite" aria-label="Goal progress" tabindex="0"' in text
     assert "class=\"steps\"" in text
     assert "'[' + fmtAgent(e.agent) + '] '" not in text
-    # Status reads in plain words while the raw status stays machine-readable.
-    assert 'class="badge done" data-status="done">done<' in text
+    # Status stays machine-readable for the scripts; the page shows no raw badge.
+    assert 'id="status" class="badge done" data-status="done" hidden>done<' in text
+    # The chat shell, not the product shell: no product navigation or top bar.
+    assert 'class="chat-shell' in text
+    assert 'aria-label="Chats"' in text
+    assert 'id="nav-toggle"' not in text and 'class="topbar"' not in text
 
 
 def test_blocked_goal_reads_as_paused_and_keeps_the_question_in_the_conversation(page_env):
@@ -53,7 +57,7 @@ def test_blocked_goal_reads_as_paused_and_keeps_the_question_in_the_conversation
     world.ask("Which audience first?", goal_id=gid)
 
     text = client.get(f"/chat/goal/{gid}").text
-    assert 'class="badge blocked" data-status="blocked">paused<' in text
+    assert 'id="status" class="badge blocked" data-status="blocked" hidden>paused<' in text
     assert "Lightwork needs one thing from you" in text
     assert 'id="qa-thread"' in text
     # Answering re-opens the live stream instead of leaving the page on a

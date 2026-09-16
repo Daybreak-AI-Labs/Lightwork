@@ -15,9 +15,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   questions as bubbles, earlier answers as prose with a link to the work
   behind each), keeps one composer pinned at the bottom that answers an open
   question or sends the next message (Enter sends, Shift+Enter breaks a
-  line, attachments and dictation inline, Stop while Lightwork works), and
-  the sidebar lists the person's chats on the chat pages. The stopped-run
-  notice is a quiet "Try again" with the spending limit tucked away.
+  line, attachments and dictation inline, Stop while Lightwork works). The
+  chat pages now render in their own shell (`chat_base.html`): a chat list on
+  the left (New chat, Search chats, Dashboard, Recents, account), a clean
+  canvas with no top bar, product navigation or footer, and the composer
+  docked at the bottom, the way a chat client lays itself out. The stopped-run
+  notice is a quiet "Try again" with the spending limit tucked away, and a
+  finished answer carries thumbs, Copy, Read aloud and Edit with sharing,
+  task files and project under More.
 - **Goal page reads as a conversation** — the work log is a list of steps in
   plain words (what was planned, which tool was used, what was found) instead
   of a monospace `[agent] kind` trace; when the evidence gateway withholds

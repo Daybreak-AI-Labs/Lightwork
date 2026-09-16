@@ -1,25 +1,11 @@
-{% extends "base.html" %}
-{% from "_assets.html" import asset %}
-{% from "_chat_threads.html" import chat_threads %}
+{% extends "chat_base.html" %}
 {% block title %}{{ thread_title or ('Goal #' ~ goal.id) }} · Lightwork{% endblock %}
-{% block nav_extra %}{{ chat_threads(threads or []) }}{% endblock %}
-{% block content %}
-{% macro agent_mark() -%}
-      <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
-        <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
-        <circle cx="11" cy="11" r="3.2" fill="none" stroke="#fff" stroke-width="1.8"/>
-      </svg>
-{%- endmacro %}
+{% block head_extra %}
 <style>
   /* Goal as a conversation — same column + composer language as /chat, so
      arriving here from the composer reads as the conversation continuing
      rather than a jump to a different screen. */
-  .convo { max-width: 760px; margin-inline: auto; padding-bottom: var(--space-7); }
-  .convo__head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0 var(--space-5); }
-  .convo__title {
-    margin: 0; margin-inline-end: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--font-serif); font-weight: 500; font-size: var(--text-lg); color: var(--text);
-  }
+  .convo { padding-bottom: var(--space-4); }
   .msg--user .bubble__text { white-space: pre-wrap; overflow-wrap: anywhere; }
   .turn__meta { margin: var(--space-2) 0 0; font-size: var(--text-xs); }
 
@@ -111,8 +97,14 @@
   .signoff textarea.input { width: 100%; margin-bottom: var(--space-3); }
 
   /* Feedback: the always-available thumbs up/down on any finished result. */
-  .feedback { margin-top: var(--space-4); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  .feedback { margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
   .feedback__q { font-size: var(--text-sm); }
+  .feedback .btn { font-size: var(--text-xs); padding: 0.25rem 0.5rem; border-color: transparent; color: var(--muted); }
+  .feedback .btn:hover { color: var(--text); border-color: var(--border); }
+  .more { margin-top: var(--space-3); }
+  .more > summary { cursor: pointer; list-style: none; width: max-content; color: var(--muted); font-size: var(--text-xs); }
+  .more > summary::-webkit-details-marker { display: none; }
+  .more[open] > summary { color: var(--text); }
   .feedback .btn.is-active { border-color: var(--accent); background: var(--surface-sunken); }
 
   /* Artifacts: a goal's versioned, kind-tagged outputs. */
@@ -145,13 +137,7 @@
 
   /* The reply composer appears (sticky, at the bottom) only when the agent
      needs an answer — Lightwork goals run autonomously between asks. */
-  .ask {
-    position: sticky; bottom: var(--space-4); margin-top: var(--space-5);
-    border: 1px solid var(--border);
-    border-radius: 16px; box-shadow: var(--shadow-md); padding: var(--space-3) var(--space-4);
-    transition: border-color 0.16s ease, box-shadow 0.16s ease;
-  }
-  .ask:focus-within { border-color: var(--brand-border); box-shadow: 0 0 0 4px var(--brand-subtle), var(--shadow-md); }
+  .ask { margin-top: 0; }
   .ask__eyebrow { margin: 0 0 var(--space-1); color: var(--muted); font-size: var(--text-xs); font-weight: var(--font-semibold); text-transform: uppercase; letter-spacing: 0.08em; }
   .ask__text { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-base); line-height: 1.55; }
   .ask__question { margin-bottom: var(--space-2); }
@@ -201,13 +187,14 @@
      glass "Show work" strip and the answer becomes the hero. Kept as an
      additive block so every element id the scripts use is untouched. ---- */
   /* Collapsible activity ("Show work") wrapping the live trace. */
+  /* A quiet line, not a card: "Working…" with the steps a click away. */
   .activity {
-    border: 1px solid var(--glass-border, var(--border)); border-radius: var(--radius-lg);
-    overflow: hidden; margin-bottom: var(--space-4);
+    border: 0; border-radius: var(--radius-md); overflow: hidden; margin-bottom: var(--space-3);
+    background-image: none; background-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
   }
   .activity__bar {
     display: flex; align-items: center; gap: var(--space-3);
-    padding: 0.65rem var(--space-4); cursor: pointer; list-style: none;
+    padding: var(--space-2) 0; cursor: pointer; list-style: none; color: var(--muted); font-size: var(--text-sm);
   }
   .activity__bar::-webkit-details-marker { display: none; }
   .activity__now { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
@@ -227,7 +214,7 @@
   .activity[open] .activity__caret { transform: rotate(180deg); }
   /* The worklog now lives inside the collapsible; drop its own chrome so it
      reads as the expanded body, not a nested box. */
-  .activity .worklog { background: transparent; border: 0; border-top: 1px solid var(--hairline); border-radius: 0; }
+  .activity .worklog { border: 0; border-top: 1px solid var(--hairline); border-radius: 0; padding-inline: 0; background-image: none; background-color: transparent; }
   /* The finished answer: the hero of the agent turn. */
   #result-section.answer { font-size: var(--text-md); line-height: 1.7; }
   /* Glass-lift the user bubble + deliverable/artifact cards to match. */
@@ -238,13 +225,18 @@
     margin-top: var(--space-4); color: var(--muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .runmeta .zero { color: var(--accent); }
 </style>
+{% endblock %}
 
+{% block chat %}
+{% macro agent_mark() -%}
+      <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
+        <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
+        <circle cx="11" cy="11" r="3.2" fill="none" stroke="#fff" stroke-width="1.8"/>
+      </svg>
+{%- endmacro %}
 <div class="convo">
-  <div class="convo__head">
-    <h1 class="convo__title" title="{{ thread_title }}">{{ thread_title }}</h1>
-    {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
-    <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}">{{ status_labels.get(goal.status, goal.status) }}</span>
-  </div>
+  {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
+  <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ status_labels.get(goal.status, goal.status) }}</span>
 
   {# Earlier turns of this chat: what was asked before, and what Lightwork answered. #}
   {% for t in thread_turns or [] %}
@@ -355,6 +347,7 @@
                   data-rating="up" aria-label="Yes, useful">👍</button>
           <button id="feedback-down" class="btn btn--ghost" type="button"
                   data-rating="down" aria-label="No, not useful">👎</button>
+          <button id="copy-result" class="btn btn--ghost" type="button" aria-label="Copy the answer">⧉ Copy</button>
           <button id="read-aloud" class="btn btn--ghost" type="button"
                   aria-label="Read the result aloud" aria-pressed="false">🔊 Read aloud</button>
           <button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>
@@ -404,6 +397,8 @@
       {% endfor %}
     </div>
     {% endif %}
+    <details class="more">
+      <summary>More</summary>
     {% if projects %}
     <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
       <label class="muted" for="goal-project-sel">Project</label>
@@ -429,6 +424,7 @@
         {% endfor %}
       </ul>
     </div>
+    </details>
     <div id="halt-card" class="halt-card" style="display: none;">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
       <div class="halt-card__title">{{ 'Ready to start' if pilot_prepared else 'Lightwork stopped' }}</div>
@@ -454,6 +450,10 @@
     </div>
   </div>
 
+</div>
+{% endblock %}
+
+{% block dock %}
   {# One composer for the whole chat: it answers the agent's open question
      when there is one, and otherwise sends the next message of this thread
      (a follow-up goal run with the earlier turns as context). #}
@@ -464,7 +464,8 @@
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
       <textarea id="answer-input" name="message" rows="1" required
-                placeholder="Message Lightwork…" aria-label="Your answer to the agent's question, or your next message"
+                placeholder="{{ 'Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…' }}"
+                aria-label="Your answer to the agent's question, or your next message"
                 aria-describedby="question-text" class="ask__field"></textarea>
       <input type="file" name="files" id="reply-files" multiple aria-label="Attach files to your message" tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
@@ -484,11 +485,8 @@
     </form>
     <p id="composer-hint" class="ask__hint" role="status" aria-live="polite"></p>
   </div>
-</div>
-
 {% endblock %}
 {% block scripts_extra %}
-  <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script>
     (function() {
       const goalId = {{ goal.id }};
@@ -513,7 +511,9 @@
       const haltReasonEl = document.getElementById('halt-reason');
       let sinceId = 0;
       let lastSeenId = 0;  // highest event id rendered; dedups SSE replays
-      let done = false;
+      // A goal that finished before this page loaded starts settled, so the
+      // composer never flashes the working state on a finished chat.
+      let done = {{ (not run_open|default(true))|tojson }};
       let pollDelay = 2000;
       let currentQuestionId = null;
       let currentStatus = {{ goal.status|tojson }};
@@ -947,7 +947,10 @@
 
       syncComposer();
       // A thread with earlier turns opens on its latest message, like a chat.
-      if ({{ (thread_turns or [])|length }} > 0) window.scrollTo(0, document.body.scrollHeight);
+      if ({{ (thread_turns or [])|length }} > 0) {
+        var scroller = document.getElementById('cs-scroll');
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      }
       openStream();
       // A goal already 'blocked' on load resolves to either a question or a
       // halt card right away, instead of waiting for the next poll tick.
@@ -1078,6 +1081,17 @@
       }
       if (up) up.addEventListener('click', function () { submit('up'); });
       if (down) down.addEventListener('click', function () { submit('down'); });
+      var copy = document.getElementById('copy-result');
+      if (copy) copy.addEventListener('click', function () {
+        var src = document.getElementById('result') || document.getElementById('result-section');
+        var text = src ? (src.innerText || '').trim() : '';
+        if (!text || !navigator.clipboard) return;
+        navigator.clipboard.writeText(text).then(function () {
+          msg.style.color = 'var(--muted)'; msg.textContent = 'Copied.';
+        }).catch(function () {
+          msg.style.color = 'var(--danger)'; msg.textContent = 'Could not copy.';
+        });
+      });
     })();
   </script>
 
