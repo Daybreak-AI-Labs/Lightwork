@@ -53,6 +53,8 @@
     }
     .cs-item:hover { background: var(--row-hover); text-decoration: none; }
     .cs-item svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+    .cs-item--button { width: 100%; border: 0; background: transparent; font: inherit; text-align: start; cursor: pointer; }
+    .cs-item kbd { margin-inline-start: auto; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 0.35rem; }
     .cs-search { display: flex; align-items: center; gap: var(--space-3); padding: 0.35rem var(--space-3); border-radius: var(--radius-md); }
     .cs-search:focus-within { background: var(--row-hover); }
     .cs-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--text-base); outline: none; }
@@ -166,6 +168,12 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="2.6" y="8.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="8.6" width="4.8" height="4.8" rx="1.2"/></svg>
       Dashboard
     </a>
+    <button type="button" class="cs-item cs-item--button" id="navfinder-open"
+            aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
+      Find a page
+      <kbd aria-hidden="true">Ctrl K</kbd>
+    </button>
     <div class="cs-recents">
       <div class="cs-label">Recents</div>
       {% from "_chat_threads.html" import chat_threads %}
@@ -178,6 +186,7 @@
       {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
     </div>
   </aside>
+  {% include "_navfinder.html" %}
   <main id="content" tabindex="-1">
     <div class="cs-scroll" id="cs-scroll">
       <div class="cs-column">
@@ -207,6 +216,8 @@
   <script src="{{ asset('lightwork-ui.js') }}"></script>
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script>
     // Filter the recents list as you type. Titles only, on the client.
     (function () {
