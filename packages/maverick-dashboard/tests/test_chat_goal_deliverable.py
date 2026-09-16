@@ -46,7 +46,7 @@ def test_generic_goal_keeps_plain_prose(tmp_path, monkeypatch):
     w.set_goal_status(gid, "done", result="A short prose summary.")
 
     t = client.get(f"/chat/goal/{gid}").text
-    assert '<pre id="result"' in t
+    assert 'id="result" tabindex="0" aria-label="Goal result" class="prose" data-markdown' in t
     assert "A short prose summary." in t
     # No deliverable card is rendered (the .deliverable__table *style* is always
     # present in the page's <style> block; assert on the rendered markup).

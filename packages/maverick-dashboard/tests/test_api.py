@@ -289,6 +289,59 @@ class TestAnswer:
         resp = client.post(f"/api/v1/goals/{gid}/answer")
         assert resp.status_code == 422
 
+    @staticmethod
+    def _parked_goal(tmp_path, monkeypatch, *questions, status="blocked"):
+        """A goal the agent parked with ``ask_user``: 'blocked', no result, and
+        the given open questions. Returns (world, goal id, question ids, runner
+        calls) with the background runner stubbed out."""
+        from maverick import world_model
+        w = world_model.WorldModel(tmp_path / "world.db")
+        gid = w.create_goal("plan the launch", "")
+        w.set_goal_status(gid, status)
+        qids = [w.ask(q, goal_id=gid) for q in questions]
+        calls = []
+
+        async def run(*args, **kwargs):
+            calls.append((args, kwargs))
+
+        monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
+        return w, gid, qids, calls
+
+    def test_answering_the_last_open_question_resumes_the_goal(self, tmp_path, monkeypatch):
+        w, gid, (qid,), calls = self._parked_goal(tmp_path, monkeypatch, "Which market first?")
+        resp = client.post(
+            f"/api/v1/goals/{gid}/answer",
+            json={"question_id": qid, "answer": "Small businesses in the US"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert w.open_questions(goal_id=gid) == []
+        # The turn closes on its own: back to pending and handed to the runner.
+        assert w.get_goal(gid).status == "pending"
+        assert [c[0] for c in calls] == [(gid,)]
+
+    def test_answering_one_of_several_questions_keeps_waiting(self, tmp_path, monkeypatch):
+        w, gid, (first, second), calls = self._parked_goal(
+            tmp_path, monkeypatch, "Which market first?", "What is the budget?"
+        )
+        resp = client.post(
+            f"/api/v1/goals/{gid}/answer", json={"question_id": first, "answer": "US"}
+        )
+        assert resp.status_code == 204, resp.text
+        assert [q.id for q in w.open_questions(goal_id=gid)] == [second]
+        assert w.get_goal(gid).status == "blocked"
+        assert calls == []
+
+    def test_answering_while_the_goal_still_runs_does_not_requeue(self, tmp_path, monkeypatch):
+        w, gid, (qid,), calls = self._parked_goal(
+            tmp_path, monkeypatch, "Which market first?", status="running"
+        )
+        resp = client.post(
+            f"/api/v1/goals/{gid}/answer", json={"question_id": qid, "answer": "US"}
+        )
+        assert resp.status_code == 204, resp.text
+        assert w.get_goal(gid).status == "running"
+        assert calls == []
+
 
 class TestAttachments:
     def test_upload_text_then_list(self, tmp_path, monkeypatch):
