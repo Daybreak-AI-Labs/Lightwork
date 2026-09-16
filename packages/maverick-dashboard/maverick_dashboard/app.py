@@ -9272,8 +9272,22 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "artifacts": artifacts,
             "projects": projects,
             "share_links": share_links,
+            "withheld_markers": _withheld_event_markers(),
         },
     )
+
+
+def _withheld_event_markers() -> list[str]:
+    """The placeholder texts the kernel writes in place of a model-derived
+    run event (evidence gateway on, or secret redaction unavailable). The goal
+    page folds a run of those into one progress line instead of repeating the
+    same sentence once per step."""
+    try:
+        from maverick.blackboard import Blackboard
+
+        return [Blackboard._WITHHELD_CONTENT, Blackboard._REDACTION_UNAVAILABLE_CONTENT]
+    except Exception:  # pragma: no cover -- a page must render without the kernel constant
+        return []
 
 
 def _goal_artifacts(w, goal_id: int) -> list[dict]:
@@ -9954,6 +9968,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-project-reviews.js")
 @app.get("/static/lightwork-workspace-members.js")
 @app.get("/static/lightwork-consent-picker.js")
+@app.get("/static/lightwork-markdown.js")
 @app.get("/static/lightwork-draft-recovery.css")
 async def in_app_ui_asset(request: Request) -> FileResponse:
     """Serve only the explicitly registered in-app form assets."""

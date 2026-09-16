@@ -1684,7 +1684,9 @@ async def goal_events_stream(
 
 
 @router.post("/goals/{goal_id}/answer", status_code=204)
-def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> None:
+def answer_question(
+    request: Request, goal_id: int, payload: AnswerIn, bg: BackgroundTasks
+) -> None:
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -1698,6 +1700,13 @@ def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> None:
     if not any(q.id == payload.question_id for q in qs):
         raise HTTPException(status_code=404, detail="no such open question for this goal")
     w.answer(payload.question_id, answer)
+    # Close the human-in-the-loop turn here. ``ask_user`` parks the goal as
+    # 'blocked' with no result; once every question it filed has an answer,
+    # the run picks back up on its own (the resumed brief carries the Q&A, see
+    # orchestrator.qa_block) instead of sitting blocked until someone finds
+    # the Resume button. A goal that is still running keeps running.
+    if g.status == "blocked" and not w.open_questions(goal_id=goal_id):
+        _requeue_goal(request, bg, goal_id)
 
 
 @router.post(
@@ -14350,6 +14359,22 @@ def resume_goal(
             status_code=400,
             detail=f"The spending limit for this attempt cannot exceed ${DEFAULT_MAX_DOLLARS:g}.",
         )
+    _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
+
+
+def _requeue_goal(
+    request: Request,
+    bg: BackgroundTasks,
+    goal_id: int,
+    *,
+    max_dollars: float | None = None,
+) -> None:
+    """Flip a parked goal back to 'pending' and hand it to the runner.
+
+    Shared by the explicit Resume button and by answering the last open
+    question, so both paths pass the same admission gate and the same
+    execution identity / suite scoping into the run.
+    """
     from maverick.outcome_pilot_start_gate import (
         OutcomePilotAdmissionRequired,
         require_work_item_admission,
@@ -14371,7 +14396,7 @@ def resume_goal(
                 ),
             },
         ) from exc
-    w.set_goal_status(goal_id, "pending", result=None)
+    _world().set_goal_status(goal_id, "pending", result=None)
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)

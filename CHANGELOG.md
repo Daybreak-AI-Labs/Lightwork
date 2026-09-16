@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Goal page reads as a conversation** — the work log is a list of steps in
+  plain words (what was planned, which tool was used, what was found) instead
+  of a monospace `[agent] kind` trace; when the evidence gateway withholds
+  model-derived events, the page folds every placeholder into one progress
+  line ("13 steps completed…") rather than repeating the sentence once per
+  step. The result and any prose deliverable render as formatted text
+  (headings, lists, tables, code, links) through a new dependency-free,
+  DOM-only renderer at `/static/lightwork-markdown.js`; raw HTML and
+  `javascript:` links in model output stay inert text. The status badge
+  reads *queued / working / paused / done*, and the chat landing opens on a
+  greeting and the composer instead of a hero panel.
 - **Workspaces page edits the daily spend limit** — each workspace row now
   carries its limit as an editable field (0 for no daily limit) saved through
   the existing `POST /api/v1/admin/tenants/{id}/quota`, instead of a value that
@@ -76,6 +87,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **Answering the agent's question continues the run** — a goal parked by
+  `ask_user` sat `blocked` after the answer was recorded until someone found
+  "Resume this goal". `POST /api/v1/goals/{id}/answer` now re-queues the run
+  (same admission gate and execution identity as Resume) once every open
+  question has an answer, and the page keeps following the live stream with
+  the question and your reply kept in the conversation.
 - **Free OpenRouter models run under strict pricing.** OpenRouter's model
   listing publishes a price per model; a model it lists at $0 for prompt and
   completion (its `:free` and stealth preview models) was still refused as an
