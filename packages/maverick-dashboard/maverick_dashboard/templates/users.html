@@ -3,7 +3,8 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {# Render a principal as a person, never as a raw sign-in subject. #}
-  {% macro who(principal) %}{% set p = principal | identity %}<span title="{{ p.raw }}">{{ p.name }}{% if p.detail %} <span class="muted" style="font-weight: normal;">· {{ p.detail }}</span>{% endif %}</span>{% endmacro %}
+  {# An accepted invite ties the typed email to the sign-in id; show that email first. #}
+  {% macro who(principal, labels={}) %}{% set p = principal | identity %}{% set label = labels.get(principal) %}<span title="{{ p.raw }}">{% if label %}{{ label }} <span class="muted" style="font-weight: normal;">· {{ p.name }}{% if p.detail %} {{ p.detail }}{% endif %}</span>{% else %}{{ p.name }}{% if p.detail %} <span class="muted" style="font-weight: normal;">· {{ p.detail }}</span>{% endif %}{% endif %}</span>{% endmacro %}
   {% call hero('Administration', 'Users &amp; roles',
                subtitle='Access, one roster',
                lede='Who can use this workspace and what each person is
@@ -224,28 +225,30 @@
   {% endif %}
 
   <div class="section-head"><h2>Assigned users</h2></div>
-  <section id="wm-root" class="panel" data-tenant="{{ workspace_tenant_id }}" aria-labelledby="wm-title">
-    <h2 id="wm-title">Members of this workspace</h2>
-    <p>A workspace role applies only to <strong>{{ workspace_tenant_id or 'the workspace you select' }}</strong>. Project owners can invite these members to review selected results. Global roles and department permissions still apply.</p>
-    {% if workspace_tenant_id %}
+  <section id="wm-root" class="panel" data-tenant="{{ wm_tenant }}" data-expected="{{ workspace_tenant_selection }}" data-labels='{{ invite_labels | tojson }}' aria-labelledby="wm-title">
+    <h2 id="wm-title">Members of a workspace</h2>
+    <p>A workspace role applies only inside the workspace chosen here. Project owners can invite these members to review selected results. Global roles and department permissions still apply.</p>
+    {% if workspace_options %}
+    <label for="wm-tenant">Workspace</label>
+    <select id="wm-tenant" class="input">{% for w in workspace_options %}<option value="{{ w.id }}"{% if w.id == wm_tenant %} selected{% endif %}>{{ w.name }}{% if w.name != w.id %} ({{ w.id }}){% endif %}</option>{% endfor %}</select>
     <p id="wm-status" role="status" aria-live="polite">Select Refresh members to load the workspace roster.</p>
     <button id="wm-refresh" type="button" class="btn">Refresh members</button>
     <ul id="wm-list"></ul>
     <form id="wm-form" data-draft-recovery="off">
       <label for="wm-principal">Colleague's sign-in ID</label><input id="wm-principal" class="input" list="wm-known" placeholder="user:sign-in-subject" required maxlength="256">
-      <datalist id="wm-known">{% for principal, role in users %}<option value="{{ principal }}">{{ principal | identity }}</option>{% endfor %}</datalist>
+      <datalist id="wm-known">{% for principal, role in users %}<option value="{{ principal }}">{{ invite_labels.get(principal) or (principal | identity) }}</option>{% endfor %}</datalist>
       <label for="wm-role">Role in this workspace</label><select id="wm-role" class="input">{% for r in roles %}<option value="{{ r }}"{% if r == 'operator' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select>
       <button type="submit" class="btn btn--primary">Save workspace member</button>
     </form>
-    <p>Use a current signed-in colleague's exact identity. Review decisions require permission to operate. Removing a workspace assignment may restore a broader global role; use an explicit read-only role when you intend to reduce access.</p>
-    {% else %}<p><a href="/workspace/tenant">Select a workspace</a> before managing its members.</p>{% endif %}
+    <p>Pick the colleague from the list (everyone with a role above is in it) or paste their exact sign-in ID. Review decisions require permission to operate. Removing a workspace assignment may restore a broader global role; use an explicit read-only role when you intend to reduce access.</p>
+    {% else %}<p>No active workspace yet. <a href="/tenants">Create one on the Workspaces page</a>, then assign members here.</p>{% endif %}
   </section>
   <script src="/static/lightwork-workspace-members.js" defer></script>
   <div class="panel">
     {% if users %}
     {% for principal, role in users %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
-      <span style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</span>
+      <span style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ who(principal, invite_labels) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</span>
       <form method="post" action="/users/set" style="display: flex; gap: var(--space-2); align-items: center;">
         <input type="hidden" name="principal" value="{{ principal }}" />
         <select class="ctl" name="role" aria-label="Role for {{ principal | identity }}">
@@ -281,7 +284,7 @@
 
     {% for principal, suites in suite_grants %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
-      <span style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</span>
+      <span style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ who(principal, invite_labels) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</span>
       <form method="post" action="/users/suites/set" style="display: flex; gap: var(--space-2); align-items: flex-start;">
         <input type="hidden" name="principal" value="{{ principal }}" />
         <select class="ctl" name="suites" aria-label="Departments for {{ principal | identity }}" multiple size="4">

@@ -243,3 +243,59 @@ def test_snapshot_survives_a_corrupt_or_missing_cache(monkeypatch, tmp_path):
     assert set(loaded) == {"openai"}
     assert loaded["openai"]["models"] == ["ok-model"]
     assert len(loaded["openai"]["detail"]) <= 200
+
+
+def test_parse_free_models_keeps_only_rows_priced_at_zero_for_prompt_and_completion():
+    payload = {"data": [
+        {"id": "stealth/union-alpha", "pricing": {"prompt": "0", "completion": "0", "request": "0"}},
+        {"id": "vendor/paid", "pricing": {"prompt": "0.000001", "completion": "0"}},
+        {"id": "vendor/no-pricing"},
+        {"id": "vendor/numeric-zero", "pricing": {"prompt": 0, "completion": 0.0}},
+        {"id": "vendor/bool-zero", "pricing": {"prompt": False, "completion": False}},
+        {"id": "bad id!", "pricing": {"prompt": "0", "completion": "0"}},
+        "not-a-row",
+    ]}
+    assert discovery.parse_free_models("openai", payload) == ["stealth/union-alpha", "vendor/numeric-zero"]
+    assert discovery.parse_free_models("anthropic", payload) == []
+    assert discovery.parse_free_models("openai", {"data": "nope"}) == []
+    assert discovery.parse_free_models("openai", "nope") == []
+
+
+def test_openrouter_discovery_records_the_models_it_advertises_as_free(monkeypatch):
+    monkeypatch.setattr(discovery, "_provider_material", _material(key="or-key"))
+    fetch = FakeFetch({"https://openrouter.ai/api/v1/models": (200, {"data": [
+        {"id": "stealth/union-alpha", "pricing": {"prompt": "0", "completion": "0"}},
+        {"id": "openai/gpt-5.5", "pricing": {"prompt": "0.00000125", "completion": "0.00001"}},
+    ]})})
+    entry = discovery.discover("openrouter", fetch=fetch)
+    assert entry["status"] == "live"
+    assert entry["models"] == ["openai/gpt-5.5", "stealth/union-alpha"]
+    assert entry["free_models"] == ["stealth/union-alpha"]
+    # No other provider claims a free tier from the same payload shape.
+    monkeypatch.setattr(discovery, "_provider_material", _material(key="oa-key"))
+    fetch = FakeFetch({"https://api.openai.com/v1/models": (200, {"data": [
+        {"id": "gpt-5.5", "pricing": {"prompt": "0", "completion": "0"}}]})})
+    assert discovery.discover("openai", fetch=fetch)["free_models"] == []
+
+
+def test_free_models_round_trip_through_the_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", dict)
+    monkeypatch.delenv("MAVERICK_MODEL_DISCOVERY", raising=False)
+    monkeypatch.setattr(discovery, "_provider_material",
+                        lambda provider: {"configured": provider == "openrouter", "api_key": "k", "base_url": ""})
+    fetch = FakeFetch({"https://openrouter.ai/api/v1/models": (200, {"data": [
+        {"id": "stealth/union-alpha", "pricing": {"prompt": "0", "completion": "0"}},
+        {"id": "openai/gpt-5.5", "pricing": {"prompt": "0.00000125", "completion": "0.00001"}},
+    ]})})
+    monkeypatch.setattr(discovery, "_fetch", fetch)
+    discovery.refresh(["openrouter"])
+    stored = json.loads(discovery.cache_path().read_text(encoding="utf-8"))
+    assert stored["providers"]["openrouter"]["free_models"] == ["stealth/union-alpha"]
+    assert discovery.free_models("openrouter") == ["stealth/union-alpha"]
+    assert discovery.free_models("openai") == []
+    # A hand-edited cache cannot smuggle an id the listing never returned as well-formed.
+    stored["providers"]["openrouter"]["free_models"] = ["stealth/union-alpha", "bad id!", 7]
+    discovery.cache_path().write_text(json.dumps(stored), encoding="utf-8")
+    assert discovery.free_models("openrouter") == ["stealth/union-alpha"]

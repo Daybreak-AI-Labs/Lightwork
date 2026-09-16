@@ -136,14 +136,49 @@
                 {% endif %}
               </td>
               <td>{{ t.plan | capitalize }}</td>
-              <td class="muted">
-                {% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}unlimited{% endif %}
+              <td>
+                <form class="tenant-quota" data-tenant="{{ t.id }}" style="display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center;">
+                  <input class="input" name="max_daily_dollars" type="number" min="0" step="0.01"
+                         value="{{ '%g' % (t.max_daily_dollars or 0) }}" style="width: 7rem;"
+                         aria-label="Daily spend limit for {{ t.display_name or t.id }} in dollars per day; 0 means unlimited">
+                  <button type="submit" class="btn" aria-label="Save daily spend limit for {{ t.display_name or t.id }}">Save</button>
+                  <span class="muted">{% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}unlimited{% endif %}</span>
+                </form>
               </td>
               <td><a href="/tenants/{{ t.id | urlencode }}/features">Manage features</a></td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
+      <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">Daily limit is the most a workspace's runs may spend together in one UTC day; each run reserves its own budget against it when it starts. Enter 0 for no daily limit.</p>
+      <p id="tenant-quota-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;"></p>
     </div>
+    <script>
+    (function () {
+      var msg = document.getElementById('tenant-quota-msg');
+      document.querySelectorAll('form.tenant-quota').forEach(function (form) {
+        form.addEventListener('submit', async function (ev) {
+          ev.preventDefault();
+          var id = form.getAttribute('data-tenant');
+          var value = Number(new FormData(form).get('max_daily_dollars'));
+          if (!isFinite(value) || value < 0) { msg.textContent = 'Enter 0 for no daily limit or a positive dollar amount.'; return; }
+          msg.textContent = 'Saving\u2026';
+          try {
+            var r = await fetch('/api/v1/admin/tenants/' + encodeURIComponent(id) + '/quota', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ max_daily_dollars: value }),
+            });
+            if (!r.ok) {
+              var j = await r.json().catch(function () { return {}; });
+              msg.textContent = j.detail || ('That did not work (error ' + r.status + ').');
+              return;
+            }
+            msg.textContent = 'Daily limit for ' + id + ' is now ' + (value ? '$' + value + '/day' : 'unlimited') + '.';
+            setTimeout(function () { window.location.reload(); }, 350);
+          } catch (e) { msg.textContent = 'Connection lost \u2014 is the dashboard still running?'; }
+        });
+      });
+    })();
+    </script>
   {% endif %}
 {% endblock %}

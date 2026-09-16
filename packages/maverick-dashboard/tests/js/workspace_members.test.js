@@ -38,3 +38,20 @@ for(const status of [401,403])for(const format of ["json","html"])for(const oper
     assert.equal(failures.length,1,"a locked screen must require a new authenticated page load");
   });
 }
+
+test("a workspace picker retargets membership calls while the stale-tab header stays the rendered workspace",async t=>{
+  const dom=new JSDOM('<section id="wm-root" data-tenant="tenant-a" data-expected="tenant-a" data-labels=\'{"user:reviewer":"rev@example.com"}\'><select id="wm-tenant"><option value="tenant-a" selected>A</option><option value="tenant-b">B</option></select><p id="wm-status"></p><button id="wm-refresh">Refresh</button><ul id="wm-list"></ul><form id="wm-form"><input id="wm-principal"><select id="wm-role"><option value="operator">Operator</option><option value="viewer">Viewer</option></select><button>Save</button></form></section>',{url:"https://lightwork.example/users",runScripts:"outside-only"}),{window}=dom,calls=[];
+  t.after(()=>window.close());window.confirm=()=>true;window.fetch=async(url,options={})=>{calls.push({url,...options});return options.method?new Response(null,{status:204}):new Response('{"user:reviewer":"operator"}');};
+  window.eval(source);const el=id=>window.document.getElementById("wm-"+id);const settle=async()=>{for(let i=0;i<10;i++)await new Promise(done=>setImmediate(done));};
+  el("refresh").click();await settle();assert.match(el("list").textContent,/rev@example.com \(user:reviewer\)/);assert.equal(calls[0].url,"/api/v1/admin/tenants/tenant-a/roles");
+  el("tenant").value="tenant-b";el("tenant").dispatchEvent(new window.Event("change"));assert.equal(el("list").textContent,"");assert.match(el("status").textContent,/tenant-b/);
+  el("principal").value="user:reviewer";el("role").value="viewer";el("form").dispatchEvent(new window.Event("submit",{bubbles:true,cancelable:true}));await settle();
+  const write=calls.find(row=>row.method==="PUT");assert.equal(write.url,"/api/v1/admin/tenants/tenant-b/roles/user%3Areviewer");assert.equal(write.headers["X-Lightwork-Expected-Tenant"],"tenant-a");
+});
+
+test("an empty rendered workspace sends no stale-tab header",async t=>{
+  const dom=new JSDOM('<section id="wm-root" data-tenant="tenant-a" data-expected=""><p id="wm-status"></p><button id="wm-refresh">Refresh</button><ul id="wm-list"></ul><form id="wm-form"><input id="wm-principal"><select id="wm-role"><option value="operator">Operator</option></select><button>Save</button></form></section>',{url:"https://lightwork.example/users",runScripts:"outside-only"}),{window}=dom,calls=[];
+  t.after(()=>window.close());window.fetch=async(url,options={})=>{calls.push({url,...options});return new Response('{}');};
+  window.eval(source);window.document.getElementById("wm-refresh").click();for(let i=0;i<10;i++)await new Promise(done=>setImmediate(done));
+  assert.equal(calls.length,1);assert.equal("X-Lightwork-Expected-Tenant" in calls[0].headers,false);
+});

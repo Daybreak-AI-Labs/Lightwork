@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Workspaces page edits the daily spend limit** — each workspace row now
+  carries its limit as an editable field (0 for no daily limit) saved through
+  the existing `POST /api/v1/admin/tenants/{id}/quota`, instead of a value that
+  could only be set at creation. The row also explains that every run reserves
+  its own budget against the day's allowance when it starts.
+- **Users page assigns members to any workspace** — the Members section gets a
+  workspace picker (every active workspace for a global administrator, the
+  member's own workspaces otherwise), so assigning someone to a workspace no
+  longer requires first switching your own selected workspace. People who
+  arrived through an accepted invite are shown by the email the invite was sent
+  to, with the sign-in identity as the detail, on the roster, in the member
+  list and in the colleague picker.
 - **Settings offers the models your keys can reach** — a new
   `maverick.model_discovery` module asks each configured provider's own
   model-list endpoint (Anthropic, OpenAI, Gemini, xAI, DeepSeek, Moonshot,
@@ -64,6 +76,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **Free OpenRouter models run under strict pricing.** OpenRouter's model
+  listing publishes a price per model; a model it lists at $0 for prompt and
+  completion (its `:free` and stealth preview models) was still refused as an
+  "unpriced model" because the rate card had no row for it. Model discovery
+  now records the ids OpenRouter advertises at zero, and the budget prices them
+  at $0 through a tracked evidence entry that cites the provider listing, so
+  such a run starts instead of stopping before its first call. Any non-zero or
+  unknown OpenRouter price still fails closed as before.
 - **A sealed value in the dashboard Settings overlay no longer stops the
   process from starting.** Once Settings had encrypted a provider key into
   `dashboard-config.toml`, the next boot died before listening: the first
