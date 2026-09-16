@@ -8073,7 +8073,8 @@ async def shield_calibration_api() -> JSONResponse:
 def chat_page(request: Request) -> HTMLResponse:
     from .onboarding_state import selected_model_routes_ready
 
-    recent = _world().list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
+    w = _world()
+    recent = w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
     # "Use template" on /templates links here with ?title=&description= to
     # prefill the form (never auto-start; the user reviews, edits, submits).
     prefill_title = (request.query_params.get("title") or "")[:200]
@@ -8083,11 +8084,138 @@ def chat_page(request: Request) -> HTMLResponse:
         "chat.html",
         {
             "recent": recent,
+            "threads": _chat_threads(request, w),
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
             "model_route_ready": selected_model_routes_ready(),
         },
     )
+
+
+# ---- Chat threads -----------------------------------------------------------
+# A chat is a thread of goals. The first message creates the root goal; every
+# follow-up is a new goal with parent_id = root, run inside ONE world
+# conversation keyed by that root, so the orchestrator threads the earlier
+# turns into the brief exactly as it does for a channel session (see
+# orchestrator.qa_block / history_block). The web conversation's user_id is
+# "<owner>/<root goal id>", which keeps threads apart per person and per chat.
+_THREAD_CHANNEL = "web"
+_THREAD_LIST_LIMIT = 25
+
+
+def _thread_root_id(goal) -> int:
+    return int(goal.parent_id) if goal.parent_id else int(goal.id)
+
+
+def _thread_conversation(w, owner: str, root_id: int):
+    return w.get_or_create_conversation(_THREAD_CHANNEL, f"{owner or 'local'}/{root_id}")
+
+
+def _turn_text(title: str, description: str) -> str:
+    """The message as the person wrote it: the title alone when the details
+    repeat it, otherwise both, with the details kept verbatim."""
+    detail = (description or "").strip()
+    return title if not detail or detail == title.strip() else f"{title}\n\n{description}"
+
+
+def _chat_threads(request: Request, w, *, active_root: int | None = None) -> list[dict]:
+    """The caller's recent chats (root goals) for the sidebar, newest first."""
+    try:
+        goals = w.list_goals(owner=goal_owner_filter(request), limit=80, order="desc")
+    except Exception:  # pragma: no cover -- the sidebar must never 500 a page
+        return []
+    threads: list[dict] = []
+    for g in goals:
+        if g.parent_id:
+            continue  # follow-ups and agent subgoals live inside their thread
+        threads.append({
+            "id": g.id, "title": g.title, "status": g.status,
+            "active": g.id == active_root, "updated_at": g.updated_at,
+        })
+        if len(threads) >= _THREAD_LIST_LIMIT:
+            break
+    return threads
+
+
+def _thread_turns(w, goal, root) -> list:
+    """Earlier turns of the goal's thread (older goals' messages and answers),
+    for the page to render above the live turn. Never blocks the page."""
+    try:
+        conv = _thread_conversation(w, root.owner, root.id)
+        turns = w.recent_turns(conv.id, limit=200)
+    except Exception:  # pragma: no cover -- history is additive, not load-bearing
+        return []
+    return [
+        t for t in turns
+        if t.goal_id != goal.id and (t.goal_id is None or t.goal_id < goal.id)
+    ]
+
+
+async def _store_uploads(w, goal_id: int, files: list[UploadFile], bg: BackgroundTasks) -> None:
+    """Persist uploaded files as goal attachments (size/mime caps in
+    maverick.attachments.store) and queue their text companions."""
+    real_files = [f for f in files if f and (f.filename or "").strip()]
+    if not real_files:
+        return
+    from maverick import attachments as _att
+
+    total = 0
+    for f in real_files:
+        data = await f.read()
+        if not data:
+            continue  # an unfilled file input still posts an empty part
+        try:
+            rec = _att.store(
+                goal_id,
+                f.filename,
+                f.content_type or "application/octet-stream",
+                data,
+                existing_total=total,
+            )
+        except _att.AttachmentRejected as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Attachment '{f.filename}': {exc}",
+            ) from exc
+        w.add_attachment(
+            goal_id, rec.filename, rec.mime, rec.size_bytes, rec.sha256, str(rec.path)
+        )
+        total += rec.size_bytes
+    # Text companions (audio/video transcripts, extracted Office-doc text)
+    # BEFORE the goal runs, so they embed on the agent's first message.
+    # Background tasks run sequentially in add order; generate_companions is
+    # best-effort and never raises.
+    bg.add_task(_att.generate_companions, w, goal_id)
+
+
+def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conversation_id: int | None) -> None:
+    """Hand a goal to the shared runner (same concurrency cap, budget defaults
+    and error handling as the REST API and MCP server)."""
+    from maverick.runner import run_goal_in_background_async
+
+    kwargs: dict = {"allowed_suites": caller_suites(request)}
+    if conversation_id is not None:
+        kwargs["conversation_id"] = conversation_id
+    user_id = execution_user_id_from_request(request)
+    if user_id:
+        bg.add_task(
+            run_goal_in_background_async, goal_id, channel="dashboard", user_id=user_id, **kwargs
+        )
+    else:
+        bg.add_task(run_goal_in_background_async, goal_id, **kwargs)
+
+
+def _open_thread_turn(w, owner: str, root_id: int, goal_id: int, text: str) -> int | None:
+    """Record the person's message on the thread's conversation and return the
+    conversation id the run should carry. History is best-effort: a store that
+    cannot take the turn must not stop the goal from running."""
+    try:
+        conv = _thread_conversation(w, owner, root_id)
+        w.append_turn(conv.id, "user", text, goal_id=goal_id)
+        return int(conv.id)
+    except Exception:  # pragma: no cover -- never block a run on history
+        log.warning("chat thread turn write failed for goal #%s", goal_id, exc_info=True)
+        return None
 
 
 # The dashboard lands on the chat page (the primary working surface), so the
@@ -8133,67 +8261,71 @@ async def chat_send(
     # Preserve the full reviewed brief, including meaningful whitespace.
     description = description if description.strip() else title
     w = _world()
-    goal_id = w.create_goal(
-        title,
-        description,
-        owner=caller_principal(request) or "",
-    )
+    owner = caller_principal(request) or ""
+    goal_id = w.create_goal(title, description, owner=owner)
     # Persist any uploaded files as goal attachments. The agent reaches them
     # via its list_attachments + read_file tools (images are also delivered as
-    # vision blocks). Size/mime caps + on-disk storage live in
-    # maverick.attachments.store; we just record each one against the goal.
-    real_files = [f for f in files if f and (f.filename or "").strip()]
-    if real_files:
-        from maverick import attachments as _att
-
-        total = 0
-        for f in real_files:
-            data = await f.read()
-            if not data:
-                continue  # an unfilled file input still posts an empty part
-            try:
-                rec = _att.store(
-                    goal_id,
-                    f.filename,
-                    f.content_type or "application/octet-stream",
-                    data,
-                    existing_total=total,
-                )
-            except _att.AttachmentRejected as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Attachment '{f.filename}': {exc}",
-                ) from exc
-            w.add_attachment(
-                goal_id, rec.filename, rec.mime, rec.size_bytes, rec.sha256, str(rec.path)
-            )
-            total += rec.size_bytes
-        # Text companions (audio/video transcripts, extracted Office-doc
-        # text) BEFORE the goal runs, so they embed on the agent's first
-        # message. Background tasks run sequentially in add order;
-        # generate_companions is best-effort and never raises.
-        bg.add_task(_att.generate_companions, w, goal_id)
-    # Use the shared runner so this path gets the same concurrency cap,
-    # budget defaults, and error handling as the REST API and MCP server.
-    from maverick.runner import run_goal_in_background_async
-
-    allowed_suites = caller_suites(request)
-    user_id = execution_user_id_from_request(request)
-    if user_id:
-        bg.add_task(
-            run_goal_in_background_async,
-            goal_id,
-            channel="dashboard",
-            user_id=user_id,
-            allowed_suites=allowed_suites,
-        )
-    else:
-        bg.add_task(
-            run_goal_in_background_async,
-            goal_id,
-            allowed_suites=allowed_suites,
-        )
+    # vision blocks).
+    await _store_uploads(w, goal_id, files, bg)
+    # The first message opens a chat thread: this goal is its root.
+    conversation_id = _open_thread_turn(w, owner, goal_id, goal_id, _turn_text(title, description))
+    _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
+
+
+@app.post("/chat/goal/{goal_id}/reply")
+async def chat_reply(
+    request: Request,
+    bg: BackgroundTasks,
+    goal_id: int,
+    message: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+) -> RedirectResponse:
+    """Continue a chat. The message becomes the next goal in the same thread
+    (parent_id = the root goal) and runs inside the thread's conversation, so
+    the agent sees the earlier messages and answers as prior turns."""
+    _require_same_origin(request)
+    require_permission(request, "operate")
+    require_provider_or_400()
+    check_goal_rate_limit(request)
+    w = _world()
+    parent = w.get_goal(goal_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, parent)
+    from ._event_stream import TERMINAL_RUN_STATUSES
+
+    if parent.status not in TERMINAL_RUN_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Lightwork is still working on the previous message. "
+                "Wait for it to finish, or stop it, before sending the next one."
+            ),
+        )
+    message = (message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    if len(message) > GOAL_DESCRIPTION_MAX_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Shorten the message to {GOAL_DESCRIPTION_MAX_LENGTH:,} characters or fewer.",
+        )
+    root_id = _thread_root_id(parent)
+    root = parent if root_id == parent.id else (w.get_goal(root_id) or parent)
+    title = message.splitlines()[0].strip()[:GOAL_TITLE_MAX_LENGTH] or message[:GOAL_TITLE_MAX_LENGTH]
+    new_id = w.create_goal(
+        title,
+        message,
+        parent_id=root_id,
+        owner=caller_principal(request) or root.owner or "",
+        domain=root.domain or "",
+        project_id=root.project_id,
+    )
+    await _store_uploads(w, new_id, files, bg)
+    conversation_id = _open_thread_turn(w, root.owner, root_id, new_id, message)
+    _dispatch_goal(request, bg, new_id, conversation_id=conversation_id)
+    return RedirectResponse(f"/chat/goal/{new_id}", status_code=303)
 
 
 @app.post("/webhook/start")
@@ -9260,11 +9392,19 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         share_links = [s for s in w.share_links_for_goal(goal_id) if s["active"]]
     except Exception:  # pragma: no cover -- never 500 the goal page
         share_links = []
+    root_id = _thread_root_id(g)
+    root = g if root_id == g.id else (w.get_goal(root_id) or g)
+    from ._event_stream import TERMINAL_RUN_STATUSES
+
     return templates.TemplateResponse(
         request,
         "chat_goal.html",
         {
             "goal": g,
+            "thread_title": root.title,
+            "thread_turns": _thread_turns(w, g, root),
+            "threads": _chat_threads(request, w, active_root=root_id),
+            "run_open": g.status not in TERMINAL_RUN_STATUSES,
             "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
             "deliverable": contract,
             "rendered": rendered,

@@ -1,0 +1,20 @@
+{# The caller's chats in the sidebar: one row per thread (a root goal and
+   its follow-ups), newest first, the open one highlighted. Rendered only on
+   the chat pages through base.html's nav_extra block. #}
+{% macro chat_threads(threads) %}
+<div class="navgrp chats" aria-label="Chats">
+  <div class="chats__head"><span class="navgrp__label">Chats</span></div>
+  <ul class="chats__list">
+    {% for t in threads %}
+    <li>
+      <a href="/chat/goal/{{ t.id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">
+        <span class="chats__dot {{ t.status }}" aria-hidden="true"></span>
+        <span class="nav-label chats__title">{{ t.title }}</span>
+      </a>
+    </li>
+    {% else %}
+    <li class="chats__empty">No chats yet</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}

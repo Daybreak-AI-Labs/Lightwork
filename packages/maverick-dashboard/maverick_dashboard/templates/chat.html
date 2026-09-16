@@ -1,5 +1,7 @@
 {% extends "base.html" %}
+{% from "_chat_threads.html" import chat_threads %}
 {% block title %}Chat · Lightwork{% endblock %}
+{% block nav_extra %}{{ chat_threads(threads or []) }}{% endblock %}
 {% block content %}
 <style>
   /* Chat landing — page-scoped. Uses the design-system tokens from base. */
