@@ -33,8 +33,8 @@ from fastapi import (
 from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
-    DEFAULT_MAX_DOLLARS,
     DEFAULT_MAX_WALL_SECONDS,
+    configured_max_dollars,
 )
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import (
@@ -1434,7 +1434,7 @@ def create_goal(
     from maverick.runner import run_goal_in_background_async
 
     # Enforce server-side execution caps even when callers request larger values.
-    max_dollars = min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
+    max_dollars = min(payload.max_dollars, configured_max_dollars())
     max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
 
@@ -13280,10 +13280,11 @@ def run_fleet_agent(
         prof = available_domains().get(agent.domain)
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
+    spend_ceiling = configured_max_dollars()
     max_dollars = (
-        min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
+        min(payload.max_dollars, spend_ceiling)
         if payload.max_dollars is not None
-        else DEFAULT_MAX_DOLLARS
+        else spend_ceiling
     )
 
     w = _world()
@@ -13869,10 +13870,11 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
     )
     from maverick.runner import run_goal_in_background_async
 
+    spend_ceiling = configured_max_dollars()
     max_dollars = (
-        min(payload.budget_dollars, DEFAULT_MAX_DOLLARS)
+        min(payload.budget_dollars, spend_ceiling)
         if payload.budget_dollars is not None
-        else DEFAULT_MAX_DOLLARS
+        else spend_ceiling
     )
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
@@ -14354,10 +14356,14 @@ def resume_goal(
             detail=f"goal is {g.status!r}; only blocked/cancelled/failed goals can resume",
         )
     max_dollars = payload.max_dollars if payload is not None else None
-    if max_dollars is not None and max_dollars > DEFAULT_MAX_DOLLARS:
+    spend_ceiling = configured_max_dollars()
+    if max_dollars is not None and max_dollars > spend_ceiling:
         raise HTTPException(
             status_code=400,
-            detail=f"The spending limit for this attempt cannot exceed ${DEFAULT_MAX_DOLLARS:g}.",
+            detail=(
+                "The spending limit for this attempt cannot exceed "
+                f"${spend_ceiling:,.2f}, this deployment's spend cap."
+            ),
         )
     _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
 

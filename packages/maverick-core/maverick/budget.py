@@ -1042,26 +1042,15 @@ _BUDGET_KEY_TYPES = {
 }
 
 
-def budget_from_config(*, defaults: dict | None = None,
-                       task_class: str | None = None, **overrides) -> Budget:
-    """Build a Budget that honors the ``[budget]`` section of config.toml.
+def resolve_budget_caps(*, defaults: dict | None = None,
+                        task_class: str | None = None, **overrides) -> dict:
+    """Resolve the configured caps without reserving anything.
 
-    Precedence, lowest to highest:
-      learned **self-tuning** suggestion for ``task_class`` (opt-in; only when
-      that class has enough history) < ``defaults`` (a caller's own fallback,
-      e.g. the background runner's conservative caps) < the ``[budget]`` config
-      section < explicit ``overrides`` (e.g. a CLI ``--max-dollars`` flag). A
-      ``None`` value in either ``defaults`` or ``overrides`` is treated as
-      "unset", so a caller can pass an optional flag straight through.
-
-    The self-tuning layer is the *lowest* precedence: it only fills
-    ``max_dollars`` when nothing more explicit set it, so an operator's
-    configured cap always wins. Off by default (``[budget] self_tuning``).
-
-    ``config.get_budget_overrides()`` already existed but was never wired,
-    so the ``[budget]`` section had no effect on any run. This is the single
-    funnel that fixes that; malformed values are skipped (keep prior layer)
-    rather than crashing the run.
+    The precedence :func:`budget_from_config` documents, stopped before the
+    tenant-remainder clamp and reservation, so a caller can learn the
+    deployment's ceiling (for example the largest per-attempt limit the
+    dashboard may accept) without holding tenant allowance for a run that has
+    not started.
     """
     kwargs: dict = {}
     # Lowest precedence: a learned per-task-class default cap (opt-in). Seeds
@@ -1116,6 +1105,33 @@ def budget_from_config(*, defaults: dict | None = None,
     for key, val in overrides.items():
         if val is not None and key in _BUDGET_KEY_TYPES:
             kwargs[key] = val
+    return kwargs
+
+
+def budget_from_config(*, defaults: dict | None = None,
+                       task_class: str | None = None, **overrides) -> Budget:
+    """Build a Budget that honors the ``[budget]`` section of config.toml.
+
+    Precedence, lowest to highest:
+      learned **self-tuning** suggestion for ``task_class`` (opt-in; only when
+      that class has enough history) < ``defaults`` (a caller's own fallback,
+      e.g. the background runner's conservative caps) < the ``[budget]`` config
+      section < explicit ``overrides`` (e.g. a CLI ``--max-dollars`` flag). A
+      ``None`` value in either ``defaults`` or ``overrides`` is treated as
+      "unset", so a caller can pass an optional flag straight through.
+
+    The self-tuning layer is the *lowest* precedence: it only fills
+    ``max_dollars`` when nothing more explicit set it, so an operator's
+    configured cap always wins. Off by default (``[budget] self_tuning``).
+
+    ``config.get_budget_overrides()`` already existed but was never wired,
+    so the ``[budget]`` section had no effect on any run. This is the single
+    funnel that fixes that; malformed values are skipped (keep prior layer)
+    rather than crashing the run.
+    """
+    kwargs = resolve_budget_caps(
+        defaults=defaults, task_class=task_class, **overrides
+    )
     reservation_id, refusal = _clamp_to_tenant_remainder(kwargs)
     budget = Budget(**kwargs)
     if reservation_id:

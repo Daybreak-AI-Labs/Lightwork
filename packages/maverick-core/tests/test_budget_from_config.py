@@ -6,7 +6,7 @@ is the single funnel; precedence is defaults < [budget] config < explicit
 override, with None treated as "unset" and malformed config skipped.
 """
 import pytest
-from maverick.budget import Budget, budget_from_config
+from maverick.budget import Budget, budget_from_config, resolve_budget_caps
 
 
 @pytest.fixture
@@ -92,3 +92,31 @@ def test_empty_env_budget_dollars_ignored(set_budget_cfg, monkeypatch):
     set_budget_cfg({"max_dollars": 1.5})
     monkeypatch.setenv("MAVERICK_BUDGET_DOLLARS", "")
     assert budget_from_config().max_dollars == pytest.approx(1.5)
+
+
+def test_resolve_budget_caps_reports_the_precedence_without_reserving(set_budget_cfg, monkeypatch):
+    set_budget_cfg({"max_dollars": 1.5})
+    monkeypatch.delenv("MAVERICK_BUDGET_DOLLARS", raising=False)
+    caps = resolve_budget_caps(defaults={"max_dollars": 2.0, "max_wall_seconds": 1800.0})
+    assert caps["max_dollars"] == pytest.approx(1.5)
+    assert caps["max_wall_seconds"] == pytest.approx(1800.0)
+    assert resolve_budget_caps(defaults={"max_dollars": 2.0}, max_dollars=9.0)["max_dollars"] == 9.0
+
+
+def test_configured_max_dollars_is_the_settings_cap_then_config_then_fallback(set_budget_cfg, monkeypatch, tmp_path):
+    from maverick import runtime_overrides
+    from maverick.runner import DEFAULT_MAX_DOLLARS, configured_max_dollars
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_BUDGET_DOLLARS", raising=False)
+    set_budget_cfg({})
+    assert configured_max_dollars() == pytest.approx(DEFAULT_MAX_DOLLARS)
+
+    set_budget_cfg({"max_dollars": 40.0})
+    assert configured_max_dollars() == pytest.approx(40.0)
+
+    # The dashboard's Settings spend cap outranks the [budget] section.
+    runtime_overrides.set_budget(25000.01)
+    assert configured_max_dollars() == pytest.approx(25000.01)
+    runtime_overrides.clear_budget()
+    assert configured_max_dollars() == pytest.approx(40.0)

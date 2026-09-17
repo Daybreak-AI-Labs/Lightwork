@@ -120,6 +120,43 @@ async def test_disabled_gateway_preserves_legacy_goal_output(
 
 
 @pytest.mark.asyncio
+async def test_first_goal_in_a_tenant_is_delivered_without_operator_setup(
+    tmp_path: Path,
+    monkeypatch,
+    fake_llm,
+    make_llm_response,
+):
+    """The production failure: a tenant whose operator never published a
+    policy.  The goal completes disclosed and receipted instead of parking
+    on "policy 'default' does not exist"."""
+    _bind_gateway(monkeypatch, "fresh-tenant")
+    assert gateway.get_policy("default") is None
+    fake_llm.scripted = _final_script(make_llm_response)
+    world = WorldModel(path=tmp_path / "world.db")
+    goal_id = world.create_goal("compute the answer", "trivial")
+
+    output = await orchestrator.run_goal(
+        llm=fake_llm,
+        world=world,
+        budget=Budget(max_dollars=1.0),
+        goal_id=goal_id,
+        sandbox=LocalBackend(workdir=tmp_path),
+        max_depth=1,
+        channel="dashboard",
+        conversation_id=20,
+    )
+
+    goal = world.get_goal(goal_id)
+    assert goal is not None
+    assert goal.status == "done"
+    assert gateway.DEFAULT_DISCLOSURE_TEXT in output
+    assert "the answer is 42" in output
+    assert "does not exist" not in str(goal.result)
+    assert gateway.get_policy("default")["revision"] == 1
+    assert gateway._receipt_ledger().state().total_receipts == 1
+
+
+@pytest.mark.asyncio
 async def test_gateway_refusal_blocks_goal_without_releasing_generated_text(
     tmp_path: Path,
     monkeypatch,
@@ -127,6 +164,16 @@ async def test_gateway_refusal_blocks_goal_without_releasing_generated_text(
     make_llm_response,
 ):
     _bind_gateway(monkeypatch, "refusal-tenant")
+    # A tenant with no policy is provisioned one on first delivery, so a
+    # refusal needs the gateway itself to refuse: here the tenant's policy
+    # cannot be provisioned (the same state error a mode-locked namespace
+    # raises), which must block the goal without releasing the answer.
+    def refuse(*args, **kwargs):
+        raise gateway.EvidenceGatewayStateError(
+            "AI evidence policy tenant mode failed validation"
+        )
+
+    monkeypatch.setattr(gateway, "upsert_policy", refuse)
     fake_llm.scripted = _final_script(make_llm_response)
     world = WorldModel(path=tmp_path / "world.db")
     goal_id = world.create_goal("compute the answer", "trivial")

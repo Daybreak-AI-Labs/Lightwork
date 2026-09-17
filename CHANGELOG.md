@@ -103,6 +103,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **A goal is no longer withheld because the evidence policy was never
+  created.** With the AI evidence gateway enabled, every goal in a tenant that
+  had not published a `default` policy stopped with "AI evidence gateway
+  withheld the generated output. Operator action is required: AI evidence
+  policy 'default' does not exist", and a per-user isolation tenant or a
+  session-selected workspace had no way to create one through the static
+  dashboard token (every policy call answered 503). The gateway now provisions
+  the tenant's `default` policy from its built-in defaults on the first
+  delivery, as an audited `policy_created` mutation, so the answer is receipted
+  and disclosed instead of blocked; an explicit non-default policy id must
+  still exist.
+- **"Try again" and goal creation honour the deployment's spend cap.** The
+  dashboard clamped every requested per-goal limit to `MAVERICK_DEFAULT_MAX_DOLLARS`
+  ($2), the fallback for a deployment that configured nothing, so a retry with
+  a limit inside the Settings spend cap was refused with "cannot exceed $2"
+  while the cap itself was set to thousands. The ceiling is now the configured
+  cap (`maverick.runner.configured_max_dollars`: the Settings spend cap, else
+  `[budget] max_dollars`, else `MAVERICK_BUDGET_DOLLARS`, else the fallback)
+  for resume, REST goal creation, compose, the signed webhook, the cost
+  projection, and the halt card, which names the cap in its hint and the
+  refusal message.
 - **Rust MCP client example moves off a vulnerable `rmcp`.** The example
   pinned `rmcp 1.7.0`, which OSV now flags for GHSA-33f5-2c5q-wgwj
   (CVE-2026-63127, OAuth protected-resource metadata not validated) and
