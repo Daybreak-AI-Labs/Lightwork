@@ -103,6 +103,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **Rust MCP client example moves off a vulnerable `rmcp`.** The example
+  pinned `rmcp 1.7.0`, which OSV now flags for GHSA-33f5-2c5q-wgwj
+  (CVE-2026-63127, OAuth protected-resource metadata not validated) and
+  GHSA-9pj6-vhgr-3mwh (CVE-2026-63128, unauthenticated session-table leak in
+  the Streamable HTTP server transport); the `audit` CI job fails on any
+  unfiltered advisory. The example and the quickstart now pin `rmcp 2.0.0`,
+  the first fixed release; the client code is unchanged and still drives
+  `maverick mcp` end-to-end. Neither advisory reached Lightwork itself: the
+  example only uses the stdio client transport, and no shipped package
+  depends on `rmcp`.
 - **Answering the agent's question continues the run** — a goal parked by
   `ask_user` sat `blocked` after the answer was recorded until someone found
   "Resume this goal". `POST /api/v1/goals/{id}/answer` now re-queues the run
