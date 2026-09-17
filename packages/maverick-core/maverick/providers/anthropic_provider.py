@@ -785,6 +785,7 @@ class AnthropicClient:
         model: str | None = None,
         effort: str | None = None,
         tool_choice: dict | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort,
@@ -792,8 +793,16 @@ class AnthropicClient:
         is_fast = kwargs.get("speed") == "fast"
         endpoint = self.aclient.beta.messages if is_fast else self.aclient.messages
         billing_model = model if is_fast else kwargs.get("model")
-        resp = await async_retry(lambda: endpoint.create(**kwargs))
-        return self._parse_response(resp, budget, model=billing_model)
+        if on_delta is None:
+            resp = await async_retry(lambda: endpoint.create(**kwargs))
+            return self._parse_response(resp, budget, model=billing_model)
+        # Streaming mirrors complete(): no retry wrapper, so a mid-stream
+        # failure never replays deltas the caller has already shown.
+        async with endpoint.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                on_delta(text)
+            final = await stream.get_final_message()
+        return self._parse_response(final, budget, model=billing_model)
 
     def prewarm(
         self,

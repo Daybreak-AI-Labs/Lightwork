@@ -643,6 +643,24 @@ async def _stop_privacy_notice_publication_scheduler() -> None:
         pass
 
 
+def _warm_goal_runtime() -> None:
+    """Pay the kernel's once-per-process start-up cost (hook discovery across
+    installed distributions, about 1.5 s cold) now, in the background, instead
+    of on the first chat turn after start. Fail-open: never blocks startup."""
+
+    def _warm() -> None:
+        try:
+            import asyncio as _asyncio
+
+            from maverick import hooks
+
+            _asyncio.run(hooks.ensure_loaded())
+        except Exception:  # pragma: no cover - warm-up is best-effort
+            log.debug("goal runtime warm-up skipped", exc_info=True)
+
+    threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
@@ -694,6 +712,7 @@ async def _lifespan(app: FastAPI):
     await _reclaim_orphans()
     await _install_queue_dispatcher()
     await _install_automation_scheduler()
+    _warm_goal_runtime()
     try:
         from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -9910,7 +9929,11 @@ async def api_goal_events_stream(
 
     TERMINAL = TERMINAL_RUN_STATUSES
     POLL_INTERVAL = 0.5  # server-side cadence
-    MAX_POLL_INTERVAL = 5.0  # cap idle backoff to reduce DB churn
+    # Idle backoff cap. A running goal streams its answer into ``result``
+    # (see agent._PartialAnswerStream), so a quiet stretch is at most one
+    # model turn with nothing to say; two seconds keeps the page close to
+    # live without polling an idle goal every half second.
+    MAX_POLL_INTERVAL = 2.0
     IDLE_HEARTBEAT_EVERY = 30  # send a comment line so proxies don't time out
     MAX_STREAM_SECONDS = 300  # lifetime cap per SSE stream
     MAX_BATCH = _SSE_MAX_BATCH
@@ -9926,6 +9949,9 @@ async def api_goal_events_stream(
         sid = resume_from
         idle_ticks = 0
         poll_interval = POLL_INTERVAL
+        # The answer preview lives in ``result`` and changes without any
+        # event row, so track it and push a result-only payload when it moves.
+        last_result: str | None = None
         # Advertise the reconnect delay (ms) to the client.
         yield "retry: 3000\n\n"
         # Initial flush: anything already on the board since `since`.
@@ -9945,11 +9971,18 @@ async def api_goal_events_stream(
                 if g is None:
                     yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
                     return
+                result_now = g.result or ""
+                result_moved = (
+                    g.status not in TERMINAL
+                    and bool(result_now)
+                    and result_now != last_result
+                )
+                last_result = result_now
                 if events:
                     sid = events[-1].id
                     payload = {
                         "status": g.status,
-                        "result": g.result or "",
+                        "result": result_now,
                         "next_id": sid,
                         "terminal": False,
                         "events": [
@@ -9964,6 +9997,19 @@ async def api_goal_events_stream(
                         ],
                     }
                     yield f"id: {sid}\ndata: {_json.dumps(payload)}\n\n"
+                    idle_ticks = 0
+                    poll_interval = POLL_INTERVAL
+                elif result_moved:
+                    # No id line: nothing new to resume from, the next event
+                    # batch still carries the cursor.
+                    payload = {
+                        "status": g.status,
+                        "result": result_now,
+                        "next_id": sid,
+                        "terminal": False,
+                        "events": [],
+                    }
+                    yield f"data: {_json.dumps(payload)}\n\n"
                     idle_ticks = 0
                     poll_interval = POLL_INTERVAL
                 else:

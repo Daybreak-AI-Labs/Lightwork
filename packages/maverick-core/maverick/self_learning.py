@@ -1959,7 +1959,11 @@ async def preflight(
     for need in needs:
         if len(acquired) >= max(1, max_acquisitions):
             break
-        cands = [c for c in search_capabilities(need, kinds=("skills",)) if c.score >= 0.2]
+        # The catalog host is never on a run's critical path: serve the cached
+        # index (any age) and refresh it in the background.
+        from . import catalog as _catalog
+        with _catalog.cached_first():
+            cands = [c for c in search_capabilities(need, kinds=("skills",)) if c.score >= 0.2]
         if not cands or cands[0].name in have:
             continue
         try:

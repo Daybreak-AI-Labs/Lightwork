@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -1354,7 +1355,9 @@ def _risk_proportional_verify_enabled() -> bool:
         return False
 
 
-def _final_is_low_risk(final: str | None, *, coding: bool, tool_calls: int) -> bool:
+def _final_is_low_risk(
+    final: str | None, *, coding: bool, tool_calls: int, max_chars: int = 800,
+) -> bool:
     """Cheap, conservative test: safe to skip LLM verification on this answer?
 
     Low-risk means a short, prose-only answer the agent reached without
@@ -1362,15 +1365,143 @@ def _final_is_low_risk(final: str | None, *, coding: bool, tool_calls: int) -> b
     use, an embedded code block / diff / edit, or a long multi-part answer
     all fall through to full verification. Intentionally narrow: it gates
     a quality check, so it only fires when skipping is clearly safe.
+    ``max_chars`` is the length past which an answer counts as long-form.
     """
     if coding or not final:
         return False
     if tool_calls > 0:
         return False
     text = final.strip()
-    if len(text) > 800:
+    if len(text) > max_chars:
         return False
     return not any(marker in text for marker in _HIGH_RISK_FINAL_MARKERS)
+
+
+# A chat reply is read by the person who asked; the length cap that marks a
+# standalone goal's answer as long-form deliverable is far too tight for prose.
+_CHAT_LOW_RISK_MAX_CHARS = 12_000
+
+
+def _verify_chat_answers_enabled() -> bool:
+    """Whether a conversational run still waits on the self-verifier for a
+    plain prose answer. Off by default: a chat reply reached with no tool use,
+    no code, and no edit block only gained a second model round trip before
+    the person could read it. ``MAVERICK_VERIFY_CHAT_ANSWERS=1`` or
+    ``[verification] verify_chat_answers = true`` turns it back on. Tool use,
+    code, edit blocks, and long-form answers are always verified."""
+    raw = os.environ.get("MAVERICK_VERIFY_CHAT_ANSWERS", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("verification") or {}
+        return bool(cfg.get("verify_chat_answers"))
+    except Exception:
+        return False
+
+
+def _answer_streaming_enabled() -> bool:
+    """``[chat] stream_answers`` / ``MAVERICK_STREAM_ANSWERS``: on by default."""
+    raw = os.environ.get("MAVERICK_STREAM_ANSWERS", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("chat") or {}).get("stream_answers")
+        return True if value is None else bool(value)
+    except Exception:
+        return True
+
+
+def _accepts_keyword(fn: Any, name: str) -> bool:
+    """True when ``fn`` takes ``name`` (or ``**kwargs``); a scripted stand-in
+    model without the parameter simply gets the buffered call."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
+def _strip_final_marker(text: str) -> str:
+    """The answer after the last ``FINAL:`` marker, or the whole text before
+    one has arrived."""
+    try:
+        from .coding_mode import find_final_marker_end
+        end = find_final_marker_end(text)
+    except Exception:  # pragma: no cover -- preview only, never the turn
+        end = None
+    return text[end:].lstrip() if end is not None else text
+
+
+class _PartialAnswerStream:
+    """Mirror the root agent's answer into the goal's result column while the
+    model is still writing it, so the chat page shows text within a second
+    instead of after the whole turn (and its verification) completes.
+
+    Writes at most once per ``MIN_INTERVAL`` seconds, holds back a
+    ``HOLDBACK``-character tail so a credential split across two deltas is
+    redacted whole, and stops growing at ``MAX_CHARS``. The orchestrator's
+    final write replaces the preview. Fails closed: a redaction or write
+    error ends the preview, never the turn.
+    """
+
+    MIN_INTERVAL = 0.35
+    HOLDBACK = 96
+    MAX_CHARS = 60_000
+
+    def __init__(self, world: Any, goal_id: int) -> None:
+        self._world = world
+        self._goal_id = goal_id
+        self._text = ""
+        self._shown = ""
+        self._last_flush = float("-inf")  # the first flush is never throttled
+        self._failed = False
+        self.writes = 0
+
+    def __call__(self, delta: Any) -> None:
+        if self._failed or not isinstance(delta, str) or not delta:
+            return
+        room = self.MAX_CHARS - len(self._text)
+        if room > 0:
+            self._text += delta[:room]
+        now = time.monotonic()
+        if now - self._last_flush >= self.MIN_INTERVAL:
+            self._flush(now, holdback=self.HOLDBACK)
+
+    def finish(self) -> None:
+        """Flush everything received (no holdback) once the turn has ended."""
+        self._flush(time.monotonic(), holdback=0)
+
+    def _flush(self, now: float, *, holdback: int) -> None:
+        if self._failed:
+            return
+        visible = self._text[: len(self._text) - holdback] if holdback else self._text
+        visible = _strip_final_marker(visible)
+        # A marker cut mid-word ("FI", "FINAL") is not an answer yet.
+        if not visible.strip() or visible == self._shown or "FINAL:".startswith(visible.strip()):
+            return
+        try:
+            from .safety.secret_detector import redact
+            visible, _ = redact(visible)
+        except Exception:
+            self._failed = True  # never show an unredacted preview
+            return
+        try:
+            self._world.set_goal_partial_result(self._goal_id, visible)
+        except Exception:
+            self._failed = True
+            log.debug("answer preview write failed for goal #%s", self._goal_id, exc_info=True)
+            return
+        self._shown = visible
+        self._last_flush = now
+        self.writes += 1
 
 
 class Agent:
@@ -3544,6 +3675,46 @@ class Agent:
                     await task
             raise
 
+    def _answer_stream_for_turn(self) -> _PartialAnswerStream | None:
+        """A live answer preview for this turn, or None when the turn must not
+        stream: only the root agent of a conversational run streams, only to a
+        model client that can stream, and never while the evidence gateway is
+        withholding model-derived text until the result is receipted."""
+        if self.depth != 0 or not _answer_streaming_enabled():
+            return None
+        ctx = self.ctx
+        world = getattr(ctx, "world", None)
+        goal_id = getattr(ctx, "goal_id", None)
+        if (
+            world is None or goal_id is None
+            or getattr(ctx, "conversation_id", None) is None
+            or not hasattr(world, "set_goal_partial_result")
+            or not _accepts_keyword(getattr(ctx.llm, "complete_async", None), "on_delta")
+        ):
+            return None
+        try:
+            from . import ai_evidence_gateway
+            if ai_evidence_gateway.enabled():
+                return None
+        except Exception:
+            return None
+        return _PartialAnswerStream(world, goal_id)
+
+    def _conversational_answer_skips_verification(
+        self, final: str | None, *, coding: bool, tool_calls: int,
+    ) -> bool:
+        """A root chat answer reached with no tools, no code, and no edit block
+        is handed to the person without the self-verifier round trip (see
+        ``_verify_chat_answers_enabled``)."""
+        if self.depth != 0 or getattr(self.ctx, "conversation_id", None) is None:
+            return False
+        if _verify_chat_answers_enabled():
+            return False
+        return _final_is_low_risk(
+            final, coding=coding, tool_calls=tool_calls,
+            max_chars=_CHAT_LOW_RISK_MAX_CHARS,
+        )
+
     async def _complete_guarded(self, **kw):
         """Await an LLM completion, but ABORT the in-flight call when the
         wall-clock budget is exhausted or the killswitch trips — instead of
@@ -3821,8 +3992,12 @@ class Agent:
                 # more (potentially expensive) call.
                 self.ctx.budget.check()
                 # Pass effort only when configured (None by default) so the call
-                # signature is unchanged when the feature is off.
-                _effort_kw = {"effort": self.effort} if self.effort else {}
+                # signature is unchanged when the feature is off. Likewise the
+                # answer preview: the chat's root turn streams, nothing else does.
+                _turn_kw = {"effort": self.effort} if self.effort else {}
+                _preview = self._answer_stream_for_turn()
+                if _preview is not None:
+                    _turn_kw["on_delta"] = _preview
                 resp = await self._complete_guarded(
                     system=self.system,
                     messages=messages,
@@ -3831,8 +4006,10 @@ class Agent:
                     max_tokens=self._turn_max_tokens(),
                     thinking_budget=self._thinking_budget(),
                     model=self._speculative_turn_model(),
-                    **_effort_kw,
+                    **_turn_kw,
                 )
+                if _preview is not None:
+                    _preview.finish()
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")
@@ -4130,6 +4307,7 @@ class Agent:
                     # orchestrator deems the FINAL low-risk and skips the LLM
                     # verifier. Distinct from "attempted but did not complete".
                     verification_skipped = False
+                    _skip_reason = ""
                     # Only the orchestrator's FINAL is verified. Sub-agents
                     # answer to their parent; the parent is their verifier.
                     if (
@@ -4351,19 +4529,30 @@ class Agent:
                                 messages.append({"role": "user", "content": critique})
                                 continue
 
+                        _coding_on = bool(coding_cfg and coding_cfg.enabled)
+                        _tool_calls = self.ctx.budget.tool_calls
                         if (
                             _risk_proportional_verify_enabled()
                             and _final_is_low_risk(
-                                final,
-                                coding=bool(coding_cfg and coding_cfg.enabled),
-                                tool_calls=self.ctx.budget.tool_calls,
+                                final, coding=_coding_on, tool_calls=_tool_calls,
                             )
                         ):
                             verification_skipped = True
+                            _skip_reason = "risk-proportional: low-risk answer"
                             bb.post(
                                 self.name, "verify",
                                 "verification skipped (risk-proportional: "
                                 "low-risk answer, no tools/code)",
+                            )
+                        elif self._conversational_answer_skips_verification(
+                            final, coding=_coding_on, tool_calls=_tool_calls,
+                        ):
+                            verification_skipped = True
+                            _skip_reason = "conversational answer, no tools or code"
+                            bb.post(
+                                self.name, "verify",
+                                "verification skipped (conversational answer: "
+                                "no tools, no code)",
                             )
                         else:
                             try:
@@ -4478,7 +4667,9 @@ class Agent:
                     self._score_step(step_index=step, is_final=True)
                     if verification_skipped:
                         _vconf, _vcrit = 0.9, (
-                            "verification skipped (risk-proportional: low-risk answer)"
+                            "verification skipped ("
+                            + (_skip_reason or "risk-proportional: low-risk answer")
+                            + ")"
                         )
                     elif verdict is not None:
                         _vconf, _vcrit = verdict.confidence, verdict.critique
