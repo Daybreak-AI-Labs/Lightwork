@@ -7,6 +7,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Chat threads** — a chat is now a conversation, not a single goal. The
+  first message opens a thread; every later message from the page's composer
+  becomes a follow-up goal (`POST /chat/goal/{id}/reply`) that runs inside
+  the thread's world conversation, so the agent sees the earlier messages and
+  answers as prior turns. The goal page shows the whole thread (earlier
+  questions as bubbles, earlier answers as prose with a link to the work
+  behind each), keeps one composer pinned at the bottom that answers an open
+  question or sends the next message (Enter sends, Shift+Enter breaks a
+  line, attachments and dictation inline, Stop while Lightwork works). The
+  chat pages now render in their own shell (`chat_base.html`): a chat list on
+  the left (New chat, Search chats, Dashboard, Recents, account), a clean
+  canvas with no top bar, product navigation or footer, and the composer
+  docked at the bottom, the way a chat client lays itself out. The stopped-run
+  notice is a quiet "Try again" with the spending limit tucked away, and a
+  finished answer carries thumbs, Copy, Read aloud and Edit with sharing,
+  task files and project under More.
 - **Goal page reads as a conversation** — the work log is a list of steps in
   plain words (what was planned, which tool was used, what was found) instead
   of a monospace `[agent] kind` trace; when the evidence gateway withholds
@@ -87,6 +103,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **Rust MCP client example moves off a vulnerable `rmcp`.** The example
+  pinned `rmcp 1.7.0`, which OSV now flags for GHSA-33f5-2c5q-wgwj
+  (CVE-2026-63127, OAuth protected-resource metadata not validated) and
+  GHSA-9pj6-vhgr-3mwh (CVE-2026-63128, unauthenticated session-table leak in
+  the Streamable HTTP server transport); the `audit` CI job fails on any
+  unfiltered advisory. The example and the quickstart now pin `rmcp 2.0.0`,
+  the first fixed release; the client code is unchanged and still drives
+  `maverick mcp` end-to-end. Neither advisory reached Lightwork itself: the
+  example only uses the stdio client transport, and no shipped package
+  depends on `rmcp`.
 - **Answering the agent's question continues the run** — a goal parked by
   `ask_user` sat `blocked` after the answer was recorded until someone found
   "Resume this goal". `POST /api/v1/goals/{id}/answer` now re-queues the run

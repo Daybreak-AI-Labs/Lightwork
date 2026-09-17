@@ -1,0 +1,11 @@
+{# The person's chats: one row per thread (a root goal and its follow-ups),
+   newest first, the open one highlighted. Rendered by the chat shell. #}
+{% macro chat_threads(threads) %}
+<ul class="cs-list" id="cs-list">
+  {% for t in threads %}
+  <li><a href="/chat/goal/{{ t.id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">{{ t.title }}</a></li>
+  {% else %}
+  <li class="cs-empty">No chats yet</li>
+  {% endfor %}
+</ul>
+{% endmacro %}
