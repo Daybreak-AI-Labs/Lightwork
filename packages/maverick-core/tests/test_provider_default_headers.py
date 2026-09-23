@@ -56,7 +56,8 @@ def test_llm_reads_default_headers_from_config(monkeypatch):
     assert seen["default_headers"] == {"x-no-retention": "1"}
 
 
-def test_llm_ignores_non_dict_default_headers(monkeypatch):
+def test_llm_rejects_non_dict_default_headers_before_factory(monkeypatch):
+    import pytest
     from maverick.llm import LLM
 
     seen: dict = {}
@@ -69,5 +70,6 @@ def test_llm_ignores_non_dict_default_headers(monkeypatch):
         lambda provider, **kw: seen.update(kw) or object(),
     )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    LLM(model="claude-opus-4-8")._get_client("anthropic")
-    assert seen.get("default_headers") is None
+    with pytest.raises(ValueError, match="default_headers must be a table"):
+        LLM(model="claude-opus-4-8")._get_client("anthropic")
+    assert seen == {}

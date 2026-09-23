@@ -35,6 +35,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .learning_store_pg_schema import LearningSchemaError
+
 log = logging.getLogger(__name__)
 
 # One row per logical file the store replaces.
@@ -126,18 +128,10 @@ def _pg_conn():
     import psycopg  # the [postgres] extra; same dependency rule as the world
     conn = psycopg.connect(_pg_dsn(), autocommit=False)
     try:
+        from .learning_store_pg_schema import ensure_schema
+
         with conn.cursor() as cur:
-            for ddl in _SQLITE_DDL:  # DDL is portable: TEXT/REAL map fine
-                cur.execute(ddl.replace(" REAL ", " DOUBLE PRECISION "))
-            # A single Postgres DSN is shared by every tenant, so each row must
-            # carry the tenant it belongs to -- otherwise one tenant's learning
-            # would surface in another's recall. Idempotent additive column; the
-            # SQLite store needs none (data_dir already scopes world.db per
-            # tenant, so two tenants never share a file).
-            for table in _TENANT_SCOPED_TABLES:
-                cur.execute(
-                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id TEXT"
-                )
+            ensure_schema(cur)
         yield conn
         conn.commit()
     except BaseException:
@@ -260,6 +254,8 @@ def load_addenda_db() -> dict[str, str]:
             return {str(k): str(b) for k, b in
                     _rows(c, f"SELECT key, block FROM harness_addenda{_where(pred)}",
                           params)}
+    except LearningSchemaError:
+        raise
     except Exception:
         log.debug("learning_store: addenda read failed", exc_info=True)
         return {}
@@ -295,6 +291,8 @@ def load_line_meta_db() -> dict[str, dict]:
                         out[str(lid)] = parsed
                 except ValueError:
                     continue
+    except LearningSchemaError:
+        raise
     except Exception:
         log.debug("learning_store: line-meta read failed", exc_info=True)
     return out
@@ -321,6 +319,8 @@ def load_transfer_tried_db() -> dict[str, float]:
                     _rows(c,
                           f"SELECT line_id, ts FROM harness_transfer_tried{_where(pred)}",
                           params)}
+    except LearningSchemaError:
+        raise
     except Exception:
         log.debug("learning_store: tried read failed", exc_info=True)
         return {}
@@ -398,6 +398,8 @@ def load_corpus_db(kind: str) -> dict:
                         out[str(key)] = _decode_corpus_row("extra", row)
                     except ValueError:
                         continue
+    except LearningSchemaError:
+        raise
     except Exception:
         log.debug("learning_store: corpus read failed (%s)", kind, exc_info=True)
         return {}

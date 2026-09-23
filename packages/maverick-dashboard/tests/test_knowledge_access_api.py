@@ -193,6 +193,30 @@ def _ref(reference):
     return asdict(reference)
 
 
+def test_search_continuation_uses_current_context_and_exact_query(customer):
+    client, _service, registry, rights = customer
+    for asset in ("policy-a", "policy-b"):
+        _dataset(registry, rights, "knowledge-a", asset)
+    request = {"context": _context(client), "query": "policy", "purpose": PURPOSE, "limit": 1}
+    first = client.post(BASE + "/search", json=request)
+    assert first.status_code == 200, first.text
+    page = first.json()
+    assert page["status"] == "incomplete"
+    assert page["next_cursor"]
+    second = client.post(BASE + "/search", json=request | {"cursor": page["next_cursor"]})
+    assert second.status_code == 200, second.text
+    assert second.json()["complete"] is True
+    assert second.json()["items"][0]["reference"] != page["items"][0]["reference"]
+    changed_query = client.post(BASE + "/search", json=request | {
+        "query": "invoices", "cursor": page["next_cursor"],
+    })
+    assert changed_query.status_code == 422
+    _select(client, "knowledge-b")
+    stale = client.post(BASE + "/search", json=request | {"cursor": page["next_cursor"]})
+    assert stale.status_code == 409
+    assert "Private knowledge-a" not in stale.text
+
+
 def test_page_assets_navigation_and_customer_language(customer):
     client, _service, _registry, _rights = customer
     page = client.get("/knowledge-access")

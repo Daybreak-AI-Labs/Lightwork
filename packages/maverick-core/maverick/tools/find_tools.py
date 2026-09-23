@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 from . import Tool
+from ._lazy import search_tokens
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -38,11 +39,11 @@ def _query_tokens(s: str) -> set[str]:
 
 
 def _score(query_tokens: set[str], tool: Tool) -> int:
-    body = _tokens(f"{tool.name} {tool.description}")
+    body, name = search_tokens(tool.name, tool.description)
     if not body:
         return 0
     # A name hit is worth more than a description hit.
-    return len(query_tokens & body) + 2 * len(query_tokens & _tokens(tool.name))
+    return len(query_tokens & body) + 2 * len(query_tokens & name)
 
 
 def find_tools(registry) -> Tool:

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import sys
-import types
 
 
 def test_dashboard_main_configures_logging(monkeypatch):
@@ -14,9 +13,8 @@ def test_dashboard_main_configures_logging(monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr("maverick.logging_config.configure_logging",
                         lambda *a, **k: calls.append(1))
-    # Stub uvicorn so main() doesn't actually bind/serve.
-    monkeypatch.setitem(sys.modules, "uvicorn",
-                        types.SimpleNamespace(run=lambda *a, **k: None))
+    # Stub the bounded server entrypoint so main() does not bind a socket.
+    monkeypatch.setattr("maverick_dashboard._server.run_dashboard_server", lambda *a, **k: None)
     monkeypatch.setattr(sys, "argv",
                         ["maverick-dashboard", "--host", "127.0.0.1", "--port", "0"])
     app_mod.main()

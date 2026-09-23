@@ -262,6 +262,7 @@ def test_bluesky_poll_filters_and_advances_cursor(monkeypatch):
                           password="app-pw", allowed_user_ids={"did:plc:owner"})
     chan._session = {"accessJwt": "tok", "did": "did:plc:me"}
 
+    chan._last_seen_indexed_at = "2026-01-01T00:00:00Z"
     new = asyncio.run(chan._poll_once())
     # The like is filtered out; the two mention/reply events come through.
     reasons = sorted(n["reason"] for n in new)
@@ -298,6 +299,7 @@ def test_bluesky_poll_delivers_out_of_order_notification(monkeypatch):
                           password="app-pw", allowed_user_ids={"did:plc:owner"})
     chan._session = {"accessJwt": "tok", "did": "did:plc:me"}
 
+    chan._last_seen_indexed_at = "2026-01-01T00:00:00Z"
     first = asyncio.run(chan._poll_once())
     assert [n["uri"] for n in first] == ["at://newest"]
 

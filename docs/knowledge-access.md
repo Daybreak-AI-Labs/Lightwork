@@ -39,6 +39,45 @@ version. Eligibility is never cached, and the owning store is re-read to verify
 the exact content commitment even on a cache hit. A failed current check evicts
 the summary, and the UI clears its result and export selection immediately.
 
+## Search, continuation, and evidence
+
+Search filters the selected tenant and assigned source/collection boundaries before
+its bounded candidate window. Unrelated newer registry versions cannot displace an
+older assigned source. Each page examines at most 250 selected exact versions and
+ranks their currently authorized title, summary, and asset terms with a local
+lexical BM25 baseline. Question words and common English inflections are normalized;
+this is lexical retrieval, not a claim of semantic or model-answer accuracy.
+
+Results explicitly distinguish `matched`, `no_match`, `incomplete`, and
+`unavailable`. `matched` counts matches **within the candidate page**, and ranking
+is within that page, not across unexamined sources. `complete=false` and
+`incomplete_reasons` identify more matches, more candidate versions, or content that
+could not be checked. An empty incomplete page does not establish that evidence is
+absent. Source outages remain visible across continuation pages.
+
+The Knowledge page offers **Next results** when a continuation exists; it replaces
+the displayed page and clears prepared detail/review state. Every continuation
+rechecks current authority and source content. Editing the query, intended use, or
+limit discards the continuation and ignores an outstanding response for the older
+search. API clients use the returned `next_cursor` as `cursor` with the original
+query, purpose and limit. Agent `knowledge_search` callers also retain the same
+query and `k`. Cursors are bounded query-position hints, not authorization. Later
+registry additions are excluded from that search snapshot; changed rankings within
+an unfinished page require restarting instead of silently skipping or repeating
+matches. Revoked sources and parents can never be restored by a cursor.
+
+The lexical projection cache is bounded and keyed by tenant, exact reference,
+source-content digest and projected text. It caches derived terms, not permissions;
+the owning source is reread even on a cache hit. The agent path rematerializes the
+selected exact versions at job start before returning text.
+
+Agent evidence uses `lightwork.knowledge-evidence.v1`: each passage retains its
+source, asset, exact version, manifest and content digests, provenance kind,
+inferred/verified claim state, observation/verification UTC dates, and correction
+states. A null date means unknown. Conflicting passages remain separate. Excerpts
+are bounded and explicitly marked when shortened. Permission to use a source is
+kept distinct from factual certainty; source metadata and excerpts are quoted data.
+
 ## Existing-store source references
 
 The installed projector currently supports these exact references:

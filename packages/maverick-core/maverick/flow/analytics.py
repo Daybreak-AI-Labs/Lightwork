@@ -16,7 +16,7 @@ from .runner import (
     STATUS_FAILED,
     STATUS_REJECTED,
 )
-from .store import FlowRun, list_runs
+from .store import FlowRun, list_run_metadata
 
 _TOP_ERRORS = 3
 
@@ -35,7 +35,7 @@ def aggregate(*, owner: str | None = None, limit: int = 500) -> dict:
     """Aggregate the most recent ``limit`` runs into per-flow analytics rows
     (sorted by run count): completion/failure/rejection counts, success rate
     over finished runs, p50/p95 completed-run duration, top error messages."""
-    runs = list_runs(owner=owner, limit=limit)
+    runs = list_run_metadata(owner=owner, limit=limit)
     by_flow: dict = defaultdict(lambda: {"runs": 0, "completed": 0, "failed": 0,
                                          "rejected": 0, "paused": 0,
                                          "durations": [], "errors": Counter()})

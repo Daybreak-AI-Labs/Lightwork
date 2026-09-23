@@ -169,12 +169,9 @@ def _new_id() -> str:
 @contextlib.contextmanager
 def _task_tenant_scope(tenant: str):
     """Pin a captured task tenant while its async execution is active."""
-    if not tenant:
-        yield
-        return
     from .paths import reset_tenant, set_tenant
 
-    token = set_tenant(tenant)
+    token = set_tenant(tenant or None)
     try:
         yield
     finally:
@@ -1013,8 +1010,10 @@ class TaskEngine:
         # Directly-constructed engines keep the historical in-memory behavior
         # unless durability is requested. The outward-facing mounted service
         # opts in unconditionally (see a2a._mount_task_endpoint).
+        from .a2a_store import DurableTaskStore
+
         self._store = (
-            _DurableTaskStore(state_path)
+            DurableTaskStore(state_path)
             if durable or state_path is not None else None
         )
 
@@ -1127,6 +1126,28 @@ class TaskEngine:
                 task.id, task.request_digest,
             )
 
+    def _revalidate_cached(self, task: _Task) -> _Task:
+        """A cached object cannot hide lost authority or a pruned result."""
+        if self._store is None:
+            return task
+        try:
+            status, persisted = self._store.load(
+                tenant=task.tenant, principal=task.principal, task_id=task.id,
+            )
+        except Exception as error:
+            raise self._durable_error(
+                "durable A2A task state is unavailable; refusing cached state", error,
+            ) from error
+        if status == "terminal" and persisted is not None:
+            return persisted
+        if status == "in_progress" and task.state not in TERMINAL_STATES:
+            # This engine still owns its live object. Other engines have no
+            # such object and continue to refuse indeterminate remote work.
+            return task
+        if status == "tombstone":
+            raise _RpcError(_SERVER_BUSY, "task result is no longer retained, but its messageId remains consumed")
+        raise _RpcError(_SERVER_BUSY, "cached A2A task authority is unavailable or indeterminate")
+
     def _owned(self, task_id: object, principal: str) -> _Task:
         """Look up a task and enforce principal ownership.
 
@@ -1146,7 +1167,7 @@ class TaskEngine:
                 and task.principal == principal
                 and task.tenant == tenant
             ):
-                return task
+                return self._revalidate_cached(task)
         if self._store is None or not key:
             raise _RpcError(_TASK_NOT_FOUND, "task not found")
         try:
@@ -1520,7 +1541,7 @@ class TaskEngine:
                                 _INVALID_PARAMS,
                                 "messageId was already used with different content",
                             )
-                        return task, False
+                        return self._revalidate_cached(task), False
                     self._message_index.pop(idempotency_key, None)
 
             task = _Task(context_id, user_message, tenant=tenant)

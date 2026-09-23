@@ -408,18 +408,26 @@ def start_finance_scheduler() -> bool:
         return True
 
 
-def stop_finance_scheduler(*, timeout: float = 5.0) -> bool:
+def stop_finance_scheduler(*, timeout: float = 5.0, wait: bool = True) -> bool:
+    """Signal first; retain a stopping worker until its exit is observed."""
     global _scheduler_stop, _scheduler_thread
     with _scheduler_lock:
         stop = _scheduler_stop
         worker = _scheduler_thread
-        _scheduler_stop = None
-        _scheduler_thread = None
+        if stop is not None:
+            stop.set()
     if stop is None or worker is None:
         return False
-    stop.set()
+    if not wait:
+        return not worker.is_alive()
     worker.join(max(0.0, min(float(timeout), 30.0)))
-    return not worker.is_alive()
+    if worker.is_alive():
+        return False
+    with _scheduler_lock:
+        if _scheduler_thread is worker:
+            _scheduler_stop = None
+            _scheduler_thread = None
+    return True
 
 
 __all__ = [

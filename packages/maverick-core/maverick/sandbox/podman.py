@@ -26,13 +26,18 @@ smoke test catches it before the agent runs.
 """
 from __future__ import annotations
 
+import logging
 import subprocess
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from .docker import _kill_container
+from .container_cleanup import CLEANUP_SECONDS, ContainerCleanup, cleanup_container
+from .lease import BackendLease, operation_lease
 from .local import ExecResult, container_user_args, scrub_env
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,6 +60,8 @@ class PodmanBackend:
     # (Rootless podman maps container-uid 0 to the host user already, but an
     # explicit ``--user`` keeps parity with docker and the in-container view.)
     allow_root: bool = False
+    pending_cleanup: dict[str, ContainerCleanup] = field(default_factory=dict, init=False, repr=False)
+    _pool_lease: BackendLease = field(default_factory=BackendLease, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir)
@@ -75,6 +82,14 @@ class PodmanBackend:
             ) from e
 
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
+        with operation_lease(self):
+            return self._exec_owned(cmd, timeout)
+
+    def _exec_owned(self, cmd: str, timeout: float | None = None) -> ExecResult:
+        if getattr(self, "pending_cleanup", {}):
+            self.close()
+            if self.pending_cleanup:
+                raise RuntimeError("previous sandbox container cleanup is unresolved")
         effective = self.timeout if timeout is None else timeout
         container_name = f"maverick-sandbox-{uuid.uuid4().hex}"
         # `:Z` relabels the SELinux context for the mount so rootless
@@ -121,7 +136,7 @@ class PodmanBackend:
             # The timeout killed our local `podman run` client, not the
             # container -- reap it by name. Surface a cleanup failure in stderr
             # instead of swallowing it under a bare except.
-            cleanup_note = _kill_container(container_name, engine="podman")
+            cleanup_note = self._cleanup_owned(container_name).note
             stdout = e.stdout or ""
             if isinstance(stdout, bytes):
                 stdout = stdout.decode("utf-8", errors="replace")
@@ -130,3 +145,23 @@ class PodmanBackend:
                 stderr=f"TIMEOUT after {effective}s{cleanup_note}",
                 exit_code=124,
             )
+
+    def _cleanup_owned(self, name: str, timeout: float = CLEANUP_SECONDS) -> ContainerCleanup:
+        cleanup = cleanup_container(name, "podman", timeout=timeout)
+        if not hasattr(self, "pending_cleanup"):
+            self.pending_cleanup = {}
+        if cleanup.removed:
+            self.pending_cleanup.pop(name, None)
+        else:
+            self.pending_cleanup[name] = cleanup
+            log.warning("sandbox%s", cleanup.note)
+        return cleanup
+
+    def close(self) -> None:
+        with operation_lease(self, cleanup=True):
+            self._close_owned()
+
+    def _close_owned(self) -> None:
+        deadline = time.monotonic() + CLEANUP_SECONDS
+        for name in sorted(getattr(self, "pending_cleanup", {})):
+            self._cleanup_owned(name, max(0.0, deadline - time.monotonic()))

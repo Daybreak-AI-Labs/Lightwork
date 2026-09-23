@@ -357,6 +357,49 @@ def compact_messages(
     return out
 
 
+def digest_cutoff(messages: list[dict], keep_recent: int) -> int:
+    """Expand the preserved tail so a digest cannot orphan a tool exchange.
+
+    Keep incomplete calls and any exchange crossing the digest/tail boundary.
+    An exchange involving the preserved first message prevents middle removal.
+    Supports the internal block shape and OpenAI-style tool call messages.
+    """
+    cutoff = max(1, len(messages) - max(keep_recent, 0))
+    positions: dict[str, list[int]] = {}
+    calls: set[str] = set()
+    results: set[str] = set()
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("type")
+            key = block.get("id") if kind == "tool_use" else block.get("tool_use_id")
+            if kind in {"tool_use", "tool_result"} and isinstance(key, str) and key:
+                positions.setdefault(key, []).append(index)
+                (calls if kind == "tool_use" else results).add(key)
+        for call in message.get("tool_calls") or []:
+            key = call.get("id") if isinstance(call, dict) else None
+            if isinstance(key, str) and key:
+                positions.setdefault(key, []).append(index)
+                calls.add(key)
+        key = message.get("tool_call_id")
+        if message.get("role") == "tool" and isinstance(key, str) and key:
+            positions.setdefault(key, []).append(index)
+            results.add(key)
+    while True:
+        old_cutoff = cutoff
+        for key, indices in positions.items():
+            first, last = min(indices), max(indices)
+            if first == 0 and 0 < last < cutoff:
+                return 1
+            if first < cutoff and (last >= cutoff or key not in calls or key not in results):
+                cutoff = max(1, first)
+        if cutoff == old_cutoff:
+            return cutoff
+
+
 def should_digest(step: int, every: int = DIGEST_EVERY) -> bool:
     """Returns True when the agent should fold prior turns into a digest.
 

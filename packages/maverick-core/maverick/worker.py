@@ -23,7 +23,6 @@ CLI entry: ``maverick worker [--db PATH] [--idle-sleep 2.0]``
 """
 from __future__ import annotations
 
-import json
 import logging
 import signal
 import threading
@@ -34,7 +33,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ._envparse import env_float, env_int
-from .job_queue import Job, JobQueue
+from .job_queue import Job, JobQueue, LeaseLost
 
 log = logging.getLogger(__name__)
 
@@ -59,24 +58,6 @@ Handler = Callable[[Job], None]
 # Exposed so ``maverick schedule add`` can warn on a likely-typo'd kind that
 # would otherwise sit in the queue and fail terminally only at worker time.
 BUILTIN_JOB_KINDS = frozenset({"run_goal", "start_goal"})
-
-# Payload key marking that a cron job's next occurrence has already been armed.
-# Durable (persisted on the job row) so a retry or stale-lease reclaim of the
-# SAME job re-attempts a *failed* re-arm without ever enqueuing a duplicate
-# successor. Stripped from the successor's payload so each occurrence can arm
-# its own.
-_REARMED_KEY = "__rearmed__"
-
-
-def _schedule_key(kind: str, payload: dict) -> str:
-    """A stable identity for a recurring schedule: kind + payload minus the
-    re-arm bookkeeping marker. Two occurrences of ONE schedule share it; two
-    DIFFERENT schedules do not -- even two ``run_goal`` jobs on the same cron
-    expr differ by ``goal_id`` -- so the idempotency guard never deduplicates
-    unrelated schedules."""
-    ident = {k: v for k, v in payload.items() if k != _REARMED_KEY}
-    return kind + "\x00" + json.dumps(ident, sort_keys=True, default=str)
-
 
 def _run_identity_kwargs(payload: dict) -> dict[str, object]:
     """Extract optional runner identity context from a queue payload."""
@@ -264,7 +245,10 @@ class Worker:
                 finally:
                     close_world_if_owned(world)
                 job.payload["goal_id"] = goal_id
-                self.queue.set_payload(job.id, job.payload)
+                if not self.queue.set_payload(
+                    job.id, job.payload, expected_attempts=job.attempts,
+                ):
+                    raise LeaseLost(f"job {job.id}: goal checkpoint lease was lost")
             # Same retry contract as run_goal: only a genuine crash requeues;
             # a missing concurrency slot defers instead (W1-73).
             from .runner import run_goal_in_thread
@@ -295,81 +279,22 @@ class Worker:
         handler(job)
 
     def _maybe_rearm(self, job: Job) -> None:
-        """Re-arm a recurring (cron) job's next occurrence -- durably.
+        """Advance the occurrence in one lease-fenced queue transaction.
 
-        ``maverick schedule add`` stores the cron expression in
-        ``payload['__cron__']``. Re-arm is IDEMPOTENT and RETRYABLE, not
-        best-effort-once: the old code armed only on the first claim
-        (``attempts == 1``) and swallowed any enqueue error, so a single
-        transient ``database is locked`` (or a crash between claim-commit and
-        re-arm) silently and permanently killed the schedule -- it just ended as
-        a ``done`` row with no successor and no signal. Now:
-
-        * skip if this occurrence already armed its successor (a durable
-          ``__rearmed__`` marker persisted on the job survives ``fail()``'s
-          requeue and a stale-lease reclaim), or if one is already pending (a
-          backstop for a marker whose write was lost), so a retry or reclaim
-          never enqueues a duplicate future occurrence;
-        * otherwise arm the next occurrence, and on enqueue failure RAISE
-          ``RearmFailed`` (surfaced by ``run_once`` through ``fail()`` ->
-          retry/dead-letter) instead of logging and moving on, so a later
-          attempt re-arms and a persistent failure becomes a visible ``failed``
-          row rather than a silently-dropped schedule.
+        Even an already-armed occurrence verifies ownership and reloads its
+        checkpoint. A lost lease stops dispatch; transient transaction failures
+        still use the normal retry/dead-letter path without losing a schedule.
         """
-        expr = job.payload.get("__cron__")
-        if not expr:
-            return
-        if job.payload.get(_REARMED_KEY):
-            return  # this occurrence already armed its successor (durable)
-        if self._successor_armed(job):
-            # A successor is already pending but our marker was lost (its write
-            # failed): record it now and stop, rather than arming a duplicate.
-            self._mark_rearmed(job)
-            return
-        from .scheduler import schedule_cron
-        # The successor starts a clean occurrence: strip our bookkeeping marker
-        # (it must be free to arm its own successor) but keep the rest of the
-        # payload verbatim -- run_goal's fixed goal_id, start_goal's prompt, the
-        # cron expr and __tz__ all carry forward unchanged.
-        successor = {k: v for k, v in job.payload.items() if k != _REARMED_KEY}
         try:
-            _jid, run_at = schedule_cron(self.queue, expr, job.kind, successor)
+            current = self.queue.rearm(job.id, expected_attempts=job.attempts)
+        except LeaseLost:
+            raise
         except Exception as err:
             raise RearmFailed(
-                f"failed to re-arm cron job {job.id} ({expr!r}): {err}"
+                f"failed to re-arm job {job.id} ({type(err).__name__})"
             ) from err
-        log.info("worker: re-armed cron job %d kind=%s next=%.0f",
-                 job.id, job.kind, run_at)
-        self._mark_rearmed(job)
-
-    def _successor_armed(self, job: Job) -> bool:
-        """True if a pending job for the SAME schedule as ``job`` already exists.
-
-        Idempotency backstop for the durable ``__rearmed__`` marker: a schedule
-        is keyed on kind + payload (minus the marker), so two distinct schedules
-        that share a cron expression -- e.g. two ``run_goal`` jobs with different
-        ``goal_id`` -- keep independent successors and never dedup each other,
-        while a re-entry for the same schedule (marker lost) is caught. Only
-        'pending' rows are scanned, and ``job`` itself is 'running' when
-        ``run_once`` calls this, so the claimed job never matches itself. A large
-        limit avoids ``JobQueue.list``'s default 100-row cap silently missing an
-        armed successor in a big backlog."""
-        key = _schedule_key(job.kind, job.payload)
-        for other in self.queue.list(status="pending", limit=100_000):
-            if _schedule_key(other.kind, other.payload) == key:
-                return True
-        return False
-
-    def _mark_rearmed(self, job: Job) -> None:
-        """Persist the durable 'successor armed' marker on ``job`` (and mirror it
-        in ``job.payload`` so a later ``set_payload`` in the same run keeps it).
-        A lost write only costs the ``_successor_armed`` backstop a scan, never a
-        duplicate, so a failure here is logged, not fatal."""
-        job.payload[_REARMED_KEY] = True
-        try:
-            self.queue.set_payload(job.id, job.payload)
-        except Exception:
-            log.exception("worker: could not persist re-arm marker for job %d", job.id)
+        job.payload = current.payload
+        job.successor_id = current.successor_id
 
     def run_once(self, *, ready_at: float | None = None) -> bool:
         """Process at most one job. Returns True if a job ran.
@@ -406,6 +331,9 @@ class Worker:
                 # It is idempotent, so a retry never duplicates the successor.
                 self._maybe_rearm(job)
                 self._dispatch(job)
+        except LeaseLost:
+            # The new owner, not this stale attempt, controls retry/checkpoints.
+            log.warning("worker: job %d lease lost; stopped bookkeeping", job.id)
         except UnknownJobKind as e:
             # No retry — terminal.
             self.queue.fail(job.id, f"no handler for kind {e}",
@@ -466,8 +394,10 @@ class Worker:
         delay = 0.05
         for attempt in range(1, attempts + 1):
             try:
-                self.queue.complete(job.id, expected_attempts=job.attempts)
-                log.info("worker: job %d done", job.id)
+                if self.queue.complete(job.id, expected_attempts=job.attempts):
+                    log.info("worker: job %d done", job.id)
+                else:
+                    log.warning("worker: job %d completion ignored after lease loss", job.id)
                 return
             except Exception:
                 if attempt == attempts:

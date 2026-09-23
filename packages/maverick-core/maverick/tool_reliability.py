@@ -9,10 +9,11 @@ every call through this one policy:
     already uses (``retry_classifier``). A generic tool exception (bad args,
     missing file, a logic bug) classifies as UNKNOWN and is **not** retried:
     re-running a deterministic failure just burns budget and wall-clock.
-  * Only low/medium-risk tools are auto-retried. High-risk tools (writes,
-    payments, messaging, infra, device control, spawn -- per
-    ``safety.tool_risk``) run exactly once: a transient error raised *after*
-    a partial side-effect must never be silently re-fired.
+  * Ordinary exceptions require a classified low/medium-risk tool. Shared
+    connector outcomes additionally identify explicit REST GET operations,
+    including a GET on a mixed read/write tool. Writes and arbitrary GraphQL
+    documents never qualify for that override. Ambiguous writes require
+    reconciliation; each extra attempt spends another bound Agent tool slot.
 
 Fail-open: the risk lookup never blocks a call, and a non-retryable error or
 tool re-raises so the registry keeps its own error-to-string handling.
@@ -24,6 +25,11 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
+from .connector_attempts import (
+    CONTROL_ERRORS,
+    ConnectorResult,
+    invocation_scope,
+)
 from .retry import classifier as retry_classifier
 
 log = logging.getLogger(__name__)
@@ -66,25 +72,56 @@ async def run_with_retry(name: str, call: Callable[[], Awaitable[T]]) -> T:
     transient, or the tool isn't retry-safe -- the caller keeps its own
     error handling.
     """
-    if not is_retry_safe(name):
-        return await call()
     attempts = 0
-    while True:
-        try:
-            return await call()
-        except Exception as e:
-            klass = retry_classifier.classify(e)
-            if klass not in _RETRYABLE or not retry_classifier.should_retry(
-                e, attempts_so_far=attempts
-            ):
+    with invocation_scope() as invocation:
+        while True:
+            try:
+                result = await call()
+            except CONTROL_ERRORS:
                 raise
-            delay = retry_classifier.next_delay(e, attempts_so_far=attempts)
+            except Exception as exc:
+                if getattr(exc, "tool_execution_unknown", False):
+                    raise  # partial stream/cleanup failure is never replay-safe
+                klass = retry_classifier.classify(exc)
+                if not is_retry_safe(name) or klass not in _RETRYABLE or not retry_classifier.should_retry(
+                    exc, attempts_so_far=attempts
+                ):
+                    raise
+                delay = retry_classifier.next_delay(exc, attempts_so_far=attempts)
+            else:
+                if not isinstance(result, ConnectorResult) or not result.attempt.retryable:
+                    return result
+                outcome = result.attempt
+                if (outcome.request_id != invocation.request_id
+                        or outcome.attempt != invocation.attempts or outcome.attempt < 1):
+                    return result  # Foreign, cached or forged attempt metadata.
+                if invocation.attempts >= invocation.limits.max_attempts:
+                    return result
+                # Only a trusted shared engine's explicit safe-read outcome
+                # overrides a mixed connector's name-level risk for retry.
+                # Arbitrary GraphQL documents and writes never qualify.
+                error = _ConnectorRetryError(outcome.error_class, outcome.status_code)
+                delay = retry_classifier.next_delay(error, attempts_so_far=attempts)
+                if outcome.retry_after is not None:
+                    delay = max(delay, outcome.retry_after)
+                if delay >= invocation.remaining():
+                    return result
             attempts += 1
-            log.warning(
-                "tool %s transient failure (%s); retry %d in %.1fs",
-                name, klass.value, attempts, delay,
-            )
+            log.warning("tool %s transient failure; retry %d in %.1fs", name, attempts, delay)
             await asyncio.sleep(delay)
+            invocation.check()
+            # The initial tool invocation was already accounted by Agent. Each
+            # additional physical attempt must spend another tool-call slot.
+            if invocation.budget is not None:
+                invocation.budget.record_tool_call()
+
+
+class _ConnectorRetryError(Exception):
+    """Fixed class marker for the existing backoff calculator; no raw error."""
+
+    def __init__(self, error_class: str | None, status_code: int | None):
+        self.status_code = status_code
+        super().__init__("connection error" if error_class == "transient_network" else error_class)
 
 
 __all__ = ["is_retry_safe", "run_with_retry"]

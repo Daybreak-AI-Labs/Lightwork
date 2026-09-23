@@ -13,8 +13,7 @@ def _run_main(monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(sys, "argv", ["dashboard", "--host", "127.0.0.1", "--port", "0"])
     monkeypatch.setattr("maverick.logging_config.configure_logging", lambda *a, **k: None)
-    import uvicorn
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: captured.update(k))
+    monkeypatch.setattr("maverick_dashboard._server.run_dashboard_server", lambda *a, **k: captured.update(k))
     appmod.main()
     return captured
 

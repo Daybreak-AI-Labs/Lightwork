@@ -18,6 +18,10 @@ def workspace(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_BACKUP_SIGNING_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", raising=False)
+    # This fixture exercises local recovery; an independently configured live
+    # PostgreSQL test fixture must not turn it into an external-store restore.
+    monkeypatch.delenv("MAVERICK_PG_DSN", raising=False)
+    monkeypatch.delenv("MAVERICK_KNOWLEDGE_DSN", raising=False)
     monkeypatch.setattr(config, "load_config", lambda: {"features": {"workspace_recovery": True}})
     monkeypatch.setattr(config, "config_source_errors", lambda **_: [])
     monkeypatch.setattr(recovery_api.recovery, "application_identity", lambda: "test-build-one")

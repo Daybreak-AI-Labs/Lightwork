@@ -31,7 +31,8 @@ from pathlib import Path
 from ..context_compactor import _message_text
 from ..llm import model_for_role
 from ..paths import data_dir
-from . import KEEP_RECENT_TURNS, compact_messages
+from . import KEEP_RECENT_TURNS, compact_messages, digest_cutoff
+from .requests import request, run_async, run_sync
 
 log = logging.getLogger(__name__)
 
@@ -254,6 +255,18 @@ class LearnedSummarizer:
     def compact(
         self, messages: list[dict], *, keep_recent: int = KEEP_RECENT_TURNS,
     ) -> list[dict]:
+        """Synchronous entry for the shared compaction algorithm."""
+        return run_sync(self._compact_steps(messages, keep_recent=keep_recent))
+
+    async def compact_async(
+        self, messages: list[dict], *, keep_recent: int = KEEP_RECENT_TURNS,
+    ) -> list[dict]:
+        """Native async entry; cancellation never falls back to sync I/O."""
+        return await run_async(self._compact_steps(messages, keep_recent=keep_recent))
+
+    def _compact_steps(
+        self, messages: list[dict], *, keep_recent: int = KEEP_RECENT_TURNS,
+    ):
         """Fold ``messages[1:-keep_recent]`` into one learned digest message.
 
         The first message (the brief) and the recent tail pass through
@@ -264,14 +277,16 @@ class LearnedSummarizer:
             return list(messages)
         if self.llm is None:
             return compact_messages(messages, keep_recent=keep_recent)
-        cutoff = len(messages) - keep_recent
+        cutoff = digest_cutoff(messages, keep_recent)
+        if cutoff <= 1:
+            return list(messages)
         middle = messages[1:cutoff]
         kind = classify_kind(middle)
         if self.scope:
             kind = f"{self.scope}|{kind}"
         template_id = self.ledger.pick_template(kind, self._rng)
         try:
-            resp = self.llm.complete(
+            resp = yield request(self.llm,
                 system=TEMPLATES[template_id],
                 messages=[{"role": "user", "content": _transcript(middle)}],
                 max_tokens=_DIGEST_MAX_TOKENS,

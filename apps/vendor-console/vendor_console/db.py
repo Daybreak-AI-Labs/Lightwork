@@ -7,10 +7,12 @@ to the platform's postgres backend is a swap of this module, not the callers).
 from __future__ import annotations
 
 import os
+import secrets
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS staff (
@@ -142,32 +144,119 @@ def default_db_path() -> Path:
     return Path(os.environ.get("DAYBREAK_HOME", Path.home() / ".daybreak")) / "vendor-console.db"
 
 
+class _Connection(sqlite3.Connection):
+    """Keep connection coordinates for independent transaction ownership."""
+
+    database_target: str
+    database_uri: bool
+
+
+def _open(target: str, *, uri: bool = False) -> _Connection:
+    conn = sqlite3.connect(
+        target, check_same_thread=False, timeout=5.0, uri=uri, factory=_Connection)
+    conn.database_target = target
+    conn.database_uri = uri
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
     p = Path(path) if path else default_db_path()
     if str(p) != ":memory:":
         p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(p), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    return conn
+    if str(p) == ":memory:":
+        # A unique private shared-memory database permits an owned transaction
+        # connection while this anchor keeps it alive. Separate connect calls
+        # still create separate databases.
+        return _open(f"file:vendor-console-{secrets.token_hex(16)}?mode=memory&cache=shared", uri=True)
+    return _open(str(p.resolve()))
+
+
+@contextmanager
+def transaction(source: sqlite3.Connection):
+    """A dedicated writer owns its BEGIN IMMEDIATE through commit/rollback.
+
+    Other handlers may share ``source`` and commit their own operations. They
+    cannot commit or join this connection's transaction. SQLite serializes
+    writers across processes, including the audit read-tail/insert sequence.
+    There is no write retry after an uncertain commit.
+    """
+    if isinstance(source, _Connection):
+        target, uri = source.database_target, source.database_uri
+    else:
+        rows = source.execute("PRAGMA database_list").fetchall()
+        target = next((row[2] for row in rows if row[1] == "main"), "")
+        if not target:
+            raise ValueError("in-memory transactions require vendor_console.db.connect")
+        uri = False
+    owned = _open(target, uri=uri)
+    try:
+        owned.execute("BEGIN IMMEDIATE")
+        yield owned
+        owned.commit()
+    except BaseException:
+        owned.rollback()
+        raise
+    finally:
+        owned.close()
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    if conn.execute("SELECT name FROM sqlite_master WHERE name='meta'").fetchone():
+        version = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        if version is not None and not 1 <= int(version[0]) <= SCHEMA_VERSION:
+            raise ValueError("unsupported vendor console schema version")
     conn.executescript(SCHEMA)
     # Additive column migrations (CREATE TABLE IF NOT EXISTS won't alter an
     # existing table). Each is idempotent — a duplicate-column error means it's
     # already there. Add new columns here as the schema grows.
-    for stmt in (
-        "ALTER TABLE customers ADD COLUMN channel TEXT NOT NULL DEFAULT 'stable'",
-    ):
-        try:
-            conn.execute(stmt)
-        except sqlite3.OperationalError:
-            pass
-    conn.execute(
-        "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),))
-    conn.execute(
-        "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
-        (str(SCHEMA_VERSION),))
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(customers)")}
+    if "channel" not in columns:
+        conn.execute("ALTER TABLE customers ADD COLUMN channel TEXT NOT NULL DEFAULT 'stable'")
     conn.commit()
+    with transaction(conn) as tx:
+        _migrate_support_intake(tx)
+        tx.execute(
+            "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def _migrate_support_intake(conn: sqlite3.Connection) -> None:
+    """Add a customer-scoped active identity without deleting legacy tickets.
+
+    For existing duplicate active tickets the newest id is the deterministic
+    intake target; the others remain visible for staff reconciliation.
+    """
+    version = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    if version is not None and not 1 <= int(version[0]) <= SCHEMA_VERSION:
+        raise ValueError("unsupported vendor console schema version")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_ticket_intake_lookup "
+                 "ON tickets(customer_id,correlation_id,status,id)")
+    conn.execute("CREATE TABLE IF NOT EXISTS support_intake_keys ("
+                 "customer_scope TEXT NOT NULL, correlation_id TEXT NOT NULL, "
+                 "ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE, "
+                 "PRIMARY KEY(customer_scope,correlation_id))")
+    if version is None or int(version[0]) < 3:
+        conn.execute("INSERT INTO support_intake_keys(customer_scope,correlation_id,ticket_id) "
+                     "SELECT CASE WHEN customer_id IS NULL THEN 'unassigned' ELSE 'customer:' || customer_id END, "
+                     "correlation_id, MAX(id) FROM tickets "
+                     "WHERE correlation_id<>'' AND status NOT IN ('closed','resolved') "
+                     "GROUP BY customer_id,correlation_id")
+    # Triggers keep the lookup aligned even for existing internal store callers.
+    # A closed ticket may reopen only if no newer active identity owns the key.
+    scope = "CASE WHEN NEW.customer_id IS NULL THEN 'unassigned' ELSE 'customer:' || NEW.customer_id END"
+    for name, event, removal in (
+        ("support_intake_insert", "INSERT", ""),
+        ("support_intake_update", "UPDATE OF customer_id,correlation_id,status",
+         "DELETE FROM support_intake_keys WHERE ticket_id=OLD.id;"),
+    ):
+        conn.execute(f"CREATE TRIGGER IF NOT EXISTS {name} AFTER {event} ON tickets BEGIN "
+                     f"{removal} INSERT INTO support_intake_keys(customer_scope,correlation_id,ticket_id) "
+                     f"SELECT {scope}, NEW.correlation_id, NEW.id "
+                     "WHERE NEW.correlation_id<>'' AND NEW.status NOT IN ('closed','resolved'); END")

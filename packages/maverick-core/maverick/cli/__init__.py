@@ -6491,7 +6491,7 @@ def _require_day_opt(day: str | None) -> None:
 
 
 @audit.command("tail")
-@click.option("-n", "--num", default=50, type=int, help="Lines to tail.")
+@click.option("-n", "--num", default=50, type=click.IntRange(0, 10000), help="Lines to tail (bounded to 10000).")
 @click.option("--day", default=None, help="YYYY-MM-DD (default: today).")
 def audit_tail(num: int, day: str | None) -> None:
     """Print the last N audit events."""
@@ -6499,8 +6499,12 @@ def audit_tail(num: int, day: str | None) -> None:
 
     _require_day_opt(day)
     from ..audit import default_audit_log
-    for ev in default_audit_log().tail(num, day=day):
+    from ..audit.segments import ReadReport
+    report = ReadReport()
+    for ev in default_audit_log().tail(num, day=day, report=report):
         click.echo(_json.dumps(ev, default=str))
+    if report.failures:
+        raise click.ClickException(f"audit tail is {report.state}; this is not complete evidence")
 
 
 @audit.command("grep")
@@ -6885,6 +6889,15 @@ def audit_rotate_key() -> None:
                "'maverick serve' to sign new entries with it.")
 
 
+def _require_safe_audit_destination(path, tenant):
+    from ..audit.export import validate_export_destination
+
+    try:
+        validate_export_destination(path, tenant=tenant)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @audit.command("export")
 @click.option("--format", "fmt", type=click.Choice(["json", "cef"]), default="json",
               help="Output format for SIEM ingestion (default: json).")
@@ -6899,9 +6912,12 @@ def audit_rotate_key() -> None:
               help="Tenant whose audit dir to export (default: active/none).")
 @click.option("-o", "--output", "output", default=None, type=click.Path(),
               help="Write to FILE (mode 0600; may contain PII). Default: stdout.")
+@click.option("--verify", is_flag=True, help="Verify selected segment signatures and chains before export; anchors/checkpoints require audit verify/binder.")
+@click.option("--read-report", default=None, type=click.Path(), help="Write a separate JSON read-coverage receipt; raw event rows are unchanged.")
 def audit_export(
     fmt: str, day: str | None, all_days: bool, since: str | None,
     until: str | None, tenant: str | None, output: str | None,
+    verify: bool = False, read_report: str | None = None,
 ) -> None:
     """Export the audit log as JSONL or ArcSight CEF for a SIEM.
 
@@ -6943,10 +6959,34 @@ def audit_export(
         sys.exit(2)
 
     from ..audit.export import audit_event_paths, iter_audit_events, to_cef, to_jsonl
+    from ..audit.segments import ReadReport
+
+    coverage = ReadReport()
+    source_paths = audit_event_paths(day=day, all_days=all_days, since=since, until=until, tenant=tenant)
+    if read_report:
+        receipt_path = _Path(read_report)
+        _require_safe_audit_destination(receipt_path, tenant)
+        for protected in [*source_paths, *([_Path(output)] if output else [])]:
+            if (receipt_path.resolve(strict=False) == protected.resolve(strict=False)
+                    or (receipt_path.exists() and protected.exists() and _os.path.samefile(receipt_path, protected))):
+                raise click.ClickException("read report must not overwrite an audit source or event export")
+
+    def finish_report():
+        if read_report:
+            import json
+
+            from ..file_lock import atomic_write_text
+            atomic_write_text(_Path(read_report), json.dumps(coverage.as_dict(), sort_keys=True) + "\n")
+        if coverage.failures:
+            click.echo(f"WARNING: audit export is {coverage.state}; {coverage.failures} read/verification failure(s). This is not complete evidence.", err=True)
+            raise click.exceptions.Exit(1)
+        if verify:
+            click.echo(f"audit read: {coverage.state}; segment chains only; anchors/checkpoints not verified", err=True)
 
     render = to_cef if fmt == "cef" else to_jsonl
     lines = (render(ev) for ev in iter_audit_events(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
+        report=coverage, verify=verify,
     ))
 
     if output:
@@ -6962,6 +7002,7 @@ def audit_export(
                 raise click.ClickException(
                     "refusing to write audit export over a source audit log file"
                 )
+        _require_safe_audit_destination(output_path, tenant)
 
         # Private from creation on POSIX *and* Windows: os.open(..., 0o600)
         # only adjusts POSIX mode bits and can inherit a broad Windows DACL.
@@ -6979,6 +7020,7 @@ def audit_export(
             click.echo("no audit events to export", err=True)
         else:
             click.echo(f"exported {n} event(s) to {output}", err=True)
+        finish_report()
         return
 
     n = 0
@@ -6987,6 +7029,7 @@ def audit_export(
         n += 1
     if n == 0:
         click.echo("no audit events to export", err=True)
+    finish_report()
 
 
 @audit.command("forward")
@@ -7064,6 +7107,9 @@ def audit_forward(
 
     from ..audit import forwarder
     from ..audit.export import iter_audit_events, to_cef, to_jsonl
+    from ..audit.segments import ReadReport
+
+    coverage = ReadReport()
 
     # Validate the destination up front so a typo fails before we read the log.
     try:
@@ -7075,10 +7121,13 @@ def audit_forward(
     render = to_cef if fmt == "cef" else to_jsonl
     lines = (render(ev) for ev in iter_audit_events(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
+        report=coverage,
     ))
 
     if dry_run:
         n = sum(1 for _ in lines)
+        if coverage.failures:
+            raise click.ClickException(f"audit read is {coverage.state}; forwarding would omit unreadable evidence")
         click.echo(f"dry-run: {n} event(s) would ship to {dest}", err=True)
         return
 
@@ -7087,6 +7136,8 @@ def audit_forward(
     except Exception as e:
         click.echo(f"ERROR: SIEM forward failed: {e}", err=True)
         sys.exit(1)
+    if coverage.failures:
+        raise click.ClickException(f"audit read is {coverage.state}; {sent} event(s) sent, but forwarding is incomplete")
     if sent == 0:
         click.echo("no audit events to forward", err=True)
     else:
@@ -7153,25 +7204,44 @@ def audit_worm_verify() -> None:
 
 @main.command()
 @click.option("--reason", default="manual halt", help="Why you're halting.")
-def halt(reason: str) -> None:
-    """Halt all in-flight goals by writing the HALT file."""
-    from ..killswitch import _halt_file_path
+@click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
+def halt(reason: str, json_output: bool = False) -> None:
+    """Request a local halt at upcoming execution checkpoints."""
+    import json
+
+    from ..killswitch import _halt_file_generation, _halt_file_path
     p = _halt_file_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(reason + "\n")
-    click.echo(f"halt set: {p}")
+    if _halt_file_generation(p) is None:
+        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
+    if json_output:
+        click.echo(json.dumps({"command": "halt", "acknowledged": True,
+                               "halt_file_present": True, "scope": "local", "work_stopped": False}))
+    else:
+        click.echo(f"halt set: {p}")
 
 
 @main.command("unhalt")
-def unhalt() -> None:
+@click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
+def unhalt(json_output: bool = False) -> None:
     """Remove the HALT file to allow goals to run again."""
-    from ..killswitch import _halt_file_path
+    import json
+
+    from ..killswitch import _halt_file_generation, _halt_file_path
     p = _halt_file_path()
     if p.exists():
         p.unlink()
-        click.echo(f"cleared: {p}")
+        message = f"cleared: {p}"
     else:
-        click.echo(f"no halt file at {p}")
+        message = f"no halt file at {p}"
+    if _halt_file_generation(p) is not None:
+        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
+    if json_output:
+        click.echo(json.dumps({"command": "unhalt", "acknowledged": True,
+                               "halt_file_present": False, "scope": "local", "work_stopped": False}))
+    else:
+        click.echo(message)
 
 
 # ----- Cost / export / logs --------------------------------------------
@@ -7338,6 +7408,7 @@ def _soc2_posture_ready(evidence) -> bool:
 # so every shared helper and `main` is defined before the submodule decorators
 # run (@main.group/@main.command register onto `main` on import).
 from . import (  # noqa: E402,F401
+    _a2a_groups,
     _agent_control_plane_groups,
     _codec_groups,
     _compliance_groups,

@@ -472,7 +472,7 @@ def require_current_paused_operation(
         require_current_approval_card,
         validate_approval_card,
     )
-    from .redact import cap, redact
+    from .payloads import approval_data
 
     submitted = dict(inputs or {})
     try:
@@ -497,7 +497,7 @@ def require_current_paused_operation(
             if next_node is not None
             else f"complete flow {flow.id}"
         )
-        persisted_data = redact(cap(run.data or {}))
+        persisted_data = approval_data(run.data or {}, card)
         runtime_authority = current_flow_runtime_authority(
             owner=str(run.owner or ""),
             execution_user_id=str(run.execution_user_id or ""),
@@ -534,6 +534,8 @@ def require_current_paused_operation(
                 "runtime_authority_sha256": runtime_authority["authority_sha256"],
             },
             input_versions={
+                **({"run_data_format": card["inputs"]["run_data_format"]}
+                   if "run_data_format" in card["inputs"] else {}),
                 "run_data_sha256": digest(persisted_data),
                 "definition_revision": run.definition_revision or flow.revision,
             },

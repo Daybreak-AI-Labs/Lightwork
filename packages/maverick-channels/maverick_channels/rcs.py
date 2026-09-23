@@ -57,16 +57,13 @@ import hmac
 import json
 import logging
 import os
-import uuid
 
 from .base import (
     Channel,
     IncomingMessage,
     add_webhook_body_limit,
-    claim_processed_message,
     is_allowed,
     normalize_allowlist,
-    release_processed_message,
 )
 
 log = logging.getLogger(__name__)
@@ -243,41 +240,33 @@ class RcsChannel(Channel):
             log.warning("unauthorized rcs access: from=%s", sender)
             return {"status": "ok"}
 
-        # Claim the messageId atomically BEFORE processing so Google's
-        # redelivery can't double-run a goal (same pattern as whatsapp_cloud).
-        claimed = False
-        if msg_id:
-            try:
-                claimed = claim_processed_message("rcs", msg_id)
-                if not claimed:
-                    log.info("rcs message %s already claimed; skipping", msg_id)
-                    return {"status": "ok"}
-            except Exception as exc:  # pragma: no cover
-                log.exception("rcs dedup claim failed; asking provider to retry")
-                raise HTTPException(
-                    status_code=503, detail="message claim store unavailable"
-                ) from exc
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="message identity required")
+        from starlette.background import BackgroundTask
+        from starlette.responses import JSONResponse
 
-        incoming = IncomingMessage(
-            user_id=sender, text=text, channel="rcs", message_id=msg_id or None,
-        )
+        incoming = IncomingMessage(user_id=sender, text=text, channel="rcs", message_id=msg_id)
+        account = self.agent_id
+        def authority():
+            return account == self.agent_id and is_allowed(sender, self.allowed_user_ids)
         try:
-            reply = await self.dispatch_text(incoming)
-        except Exception:
-            log.exception("handler error")
-            if claimed:
-                try:
-                    release_processed_message("rcs", msg_id)
-                except Exception:  # pragma: no cover
-                    # The claim remains durable, so a provider retry cannot
-                    # execute this failed delivery a second time.
-                    log.exception("rcs dedup release failed; claim remains held")
-            # Generic user-facing text; raw exception detail (which can embed a
-            # secret) stays in the log only.
-            reply = "⚠ An internal error occurred."
-        if reply:
-            await self.send(sender, reply)
-        return {"status": "ok"}
+            receipt = await self.admit_message(incoming, external_id=msg_id, account=account, authorize=authority)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="message intake unavailable") from exc
+
+        async def send_saved(reply):
+            if reply.text:
+                return await self.send(sender, reply.text)
+            return None
+
+        async def process():
+            try:
+                await self.process_message(incoming, external_id=msg_id, account=account, authorize=authority,
+                                           send=send_saved, receipt=receipt, idempotent=True)
+            except Exception:
+                log.warning("RCS durable processing requires review: %s", receipt["id"])
+
+        return JSONResponse({"status": "ok", "receipt": receipt["id"]}, background=BackgroundTask(process))
 
     # -- outbound ------------------------------------------------------------
 
@@ -306,23 +295,38 @@ class RcsChannel(Channel):
 
     async def send(self, user_id: str, text: str) -> None:
         import httpx
+
         # _bearer_token() may do a blocking OAuth2 credentials.refresh() (a
         # network round-trip) when the token has expired (~hourly). Run it off
         # the event loop so a refresh doesn't stall every other channel/handler.
-        token = await asyncio.to_thread(self._bearer_token)
+        from .delivery import (
+            DeliveryNotSent,
+            DeliveryUnknown,
+            chunk_idempotency_key,
+            delivery_active,
+            send_chunk,
+        )
+
+        try:
+            token = await asyncio.to_thread(self._bearer_token)
+        except Exception as exc:
+            if not delivery_active():
+                raise
+            raise DeliveryNotSent("Provider authorization unavailable before sending") from exc
         url = f"{RBM_BASE}/v1/phones/{user_id}/agentMessages"
-        for chunk in [text[i:i + TEXT_LIMIT] for i in range(0, max(len(text), 1), TEXT_LIMIT)]:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(
-                    url,
-                    # messageId is the agent-generated dedup id RBM requires
-                    # on every create call.
-                    params={"agentId": self.agent_id, "messageId": str(uuid.uuid4())},
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"contentMessage": {"text": chunk}},
-                )
-                if r.status_code >= 400:
-                    log.warning("rcs send failed (%s): %s", r.status_code, r.text[:200])
+        for index, chunk in enumerate([text[i:i + TEXT_LIMIT] for i in range(0, max(len(text), 1), TEXT_LIMIT)]):
+            key = f"text-{index}"
+            async def create(chunk=chunk, key=key):
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.post(url,
+                        params={"agentId": self.agent_id, "messageId": chunk_idempotency_key(key)},
+                        headers={"Authorization": f"Bearer {token}"}, json={"contentMessage": {"text": chunk}})
+                if 400 <= response.status_code < 500 and response.status_code not in {408, 409}:
+                    raise DeliveryNotSent("Provider rejected the message")
+                if response.status_code >= 400:
+                    raise DeliveryUnknown("Provider acceptance could not be confirmed")
+                return chunk_idempotency_key(key)
+            await send_chunk(key, chunk, create, idempotent=True)
 
     async def start(self) -> None:
         import uvicorn
@@ -331,7 +335,15 @@ class RcsChannel(Channel):
         )
         self._uvicorn_server = uvicorn.Server(config)
         log.info("RCS webhook on %s:%d", self.bind_host, self.port)
-        await self._uvicorn_server.serve()
+        account = self.agent_id
+        def authorize(message):
+            return self.agent_id == account and is_allowed(message.principal_id, self.allowed_user_ids)
+        async def send_saved(message, reply, route):
+            if reply.text:
+                return await self.send(message.user_id, reply.text)
+            return None
+        async with self.recovery_worker(account=account, authorize=authorize, send=send_saved, idempotent=True):
+            await self._uvicorn_server.serve()
 
     async def stop(self) -> None:
         if self._uvicorn_server is not None:

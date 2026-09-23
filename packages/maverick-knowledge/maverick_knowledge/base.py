@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 
 from .embed import DeterministicEmbedder
-from .parse import extract_text
+from .parse import extract_document
 from .provider_accounting import operation_scope
 from .store import SqliteVectorStore
 
@@ -465,6 +465,7 @@ class KnowledgeBase:
         chunk carries the provenance passed here (subject / trust_tier /
         sensitivity / ingested_by)."""
         from .parse import is_image
+        extraction_meta = None
         if is_image(path):
             if self.image_describer is None:
                 log.info("knowledge: skipping image %s (no image_describer set)", path)
@@ -480,10 +481,17 @@ class KnowledgeBase:
                 log.warning("knowledge: image describer failed on %s: %s", path, e)
                 return 0
         else:
-            text = extract_text(path)
+            extraction = extract_document(path)
+            if extraction.status in {"unsupported", "unavailable", "failed"}:
+                raise RuntimeError("; ".join(extraction.warnings))
+            if extraction.status == "rejected":
+                raise ValueError("; ".join(extraction.warnings))
+            text = extraction.text
+            extraction_meta = {"extraction": extraction.metadata()}
         return self.ingest_text(
             collection, text, source=str(path), subject=subject,
-            trust_tier=trust_tier, sensitivity=sensitivity, ingested_by=ingested_by)
+            trust_tier=trust_tier, sensitivity=sensitivity, ingested_by=ingested_by,
+            extra_meta=extraction_meta)
 
     # --- governance: erasure + verification over provenance -------------------
 

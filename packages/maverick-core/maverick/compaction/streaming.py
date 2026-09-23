@@ -3,8 +3,8 @@
 Digest-style compaction re-summarizes the WHOLE prefix every time it runs —
 O(history) summarizer input per compaction. This strategy instead maintains a
 *running summary* plus a *cursor* per conversation, persisted to a small
-sidecar (``data_dir("compaction_stream.json")``, atomic write, chmod 600 —
-the async_compaction scheduler is stateless, so the sidecar is the store).
+sidecar (``data_dir("compaction_stream.json")``, atomic write, chmod 600).
+The separate history feature cache never stores these summaries.
 Each call folds only the turns the cursor hasn't seen yet:
 
     summary' = fold(summary, new_turns)        # O(new) per call
@@ -34,7 +34,8 @@ from pathlib import Path
 from ..context_compactor import _message_text
 from ..llm import model_for_role
 from ..paths import data_dir
-from . import KEEP_RECENT_TURNS
+from . import KEEP_RECENT_TURNS, digest_cutoff
+from .requests import request, run_async, run_sync
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +154,10 @@ class StreamingCompactor:
 
     def _state_entry(self, conversation_id: str) -> tuple[int, str, str]:
         """The persisted ``(cursor, summary, fingerprint)`` for a conversation."""
-        st = self._load().get(conversation_id)
+        return self._decode_state(self._load().get(conversation_id))
+
+    @staticmethod
+    def _decode_state(st) -> tuple[int, str, str]:
         if not isinstance(st, dict):
             return 0, "", ""
         try:
@@ -189,10 +193,14 @@ class StreamingCompactor:
     # ---- folding ----
 
     def _fold_once(self, summary: str, new_turns: list[dict]) -> str:
+        """Synchronous entry for the shared compaction algorithm."""
+        return run_sync(self._fold_once_steps(summary, new_turns))
+
+    def _fold_once_steps(self, summary: str, new_turns: list[dict]):
         rendered = "\n".join(_turn_line(t) for t in new_turns)
         if self.llm is not None:
             try:
-                resp = self.llm.complete(
+                resp = yield request(self.llm,
                     system=_FOLD_SYSTEM,
                     messages=[{
                         "role": "user",
@@ -215,6 +223,14 @@ class StreamingCompactor:
         return "\n".join(lines[-_MAX_SUMMARY_LINES:])
 
     def fold(self, conversation_id: str, turns: list[dict]) -> str:
+        """Synchronous entry for the shared compaction algorithm."""
+        return run_sync(self._fold_steps(conversation_id, turns))
+
+    async def fold_async(self, conversation_id: str, turns: list[dict]) -> str:
+        """Native async entry; cancellation never falls back to sync I/O."""
+        return await run_async(self._fold_steps(conversation_id, turns))
+
+    def _fold_steps(self, conversation_id: str, turns: list[dict]):
         """Fold the turns the cursor hasn't seen into the running summary.
 
         ``turns`` is the conversation prefix so far (oldest first); only
@@ -223,7 +239,8 @@ class StreamingCompactor:
         than the cursor means the conversation was rewound: state resets and
         everything is refolded.
         """
-        cursor, summary, fingerprint = self._state_entry(conversation_id)
+        initial_state = self._load().get(conversation_id)
+        cursor, summary, fingerprint = self._decode_state(initial_state)
         prefix_matches = (
             cursor == 0
             or (fingerprint and fingerprint == _turns_fingerprint(turns[:cursor]))
@@ -232,11 +249,16 @@ class StreamingCompactor:
             cursor, summary = 0, ""
         new_turns = turns[cursor:]
         if new_turns:
-            summary = self._fold_once(summary, new_turns)
+            summary = yield from self._fold_once_steps(summary, new_turns)
         # Reload-merge-save under the cross-process lock (the LLM fold above ran
         # outside it) so a concurrent fold on another conversation isn't lost.
         with self._cplock():
             data = self._load()
+            if data.get(conversation_id) != initial_state:
+                # Another fold/reset won while native async I/O yielded. This
+                # caller's result is valid for its own source, but it cannot
+                # overwrite the newer sidecar cursor or resurrect reset state.
+                return summary
             data[conversation_id] = {
                 "cursor": len(turns),
                 "summary": summary,
@@ -297,6 +319,28 @@ def compact_streaming(
     path: Path | None = None,
     budget=None,
 ) -> list[dict]:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_compact_streaming_steps(messages, conversation_id=conversation_id, keep_recent=keep_recent, llm=llm, path=path, budget=budget))
+
+async def compact_streaming_async(
+    messages: list[dict], *,
+    conversation_id: str | None = None,
+    keep_recent: int = KEEP_RECENT_TURNS,
+    llm=None,
+    path: Path | None = None,
+    budget=None,
+) -> list[dict]:
+    """Native async entry; cancellation never falls back to sync I/O."""
+    return await run_async(_compact_streaming_steps(messages, conversation_id=conversation_id, keep_recent=keep_recent, llm=llm, path=path, budget=budget))
+
+def _compact_streaming_steps(
+    messages: list[dict], *,
+    conversation_id: str | None = None,
+    keep_recent: int = KEEP_RECENT_TURNS,
+    llm=None,
+    path: Path | None = None,
+    budget=None,
+):
     """Strategy entry: replace the old middle with the running summary.
 
     The first message and the last ``keep_recent`` pass through verbatim;
@@ -305,10 +349,12 @@ def compact_streaming(
     """
     if len(messages) <= keep_recent + 1:
         return list(messages)
-    cutoff = len(messages) - keep_recent
+    cutoff = digest_cutoff(messages, keep_recent)
+    if cutoff <= 1:
+        return list(messages)
     key = conversation_id or _default_key(messages)
     compactor = StreamingCompactor(llm=llm, path=path, budget=budget)
-    summary = compactor.fold(key, messages[1:cutoff])
+    summary = yield from compactor._fold_steps(key, messages[1:cutoff])
     summary_msg = {
         "role": "user",
         "content": (

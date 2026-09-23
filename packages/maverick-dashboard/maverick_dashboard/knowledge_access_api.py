@@ -140,6 +140,7 @@ class SearchIn(_Bound):
     query: str = Field(default="", max_length=512)
     purpose: Purpose
     limit: int = Field(default=20, ge=1, le=50)
+    cursor: str | None = Field(default=None, min_length=1, max_length=2048)
 
 
 class DetailIn(_Bound):
@@ -346,6 +347,7 @@ async def search(payload: SearchIn, request: Request, response: Response):
         query=payload.query,
         purpose=payload.purpose,
         limit=payload.limit,
+        cursor=payload.cursor,
     )
     return {"context": context, **result}
 

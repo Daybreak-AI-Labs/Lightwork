@@ -1,15 +1,19 @@
 """Extract plain text from uploaded documents, dispatched by extension.
 
 text / markdown / HTML need no extra deps (HTML via stdlib ``html.parser``).
-PDF and DOCX use the ``parsers`` extra (pypdf / python-docx), imported lazily so
-the package imports clean without them.
+PDF uses the optional ``parsers`` extra (pypdf), imported lazily. DOCX/XLSX use
+a bounded OOXML text projection with explicit omitted-region metadata.
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
+
+from .extraction import DocumentExtraction, ExtractionBuilder
 
 # Cap the on-disk size of a document read into memory. Without it a single huge
 # file (a multi-GB .txt/.pdf) OOMs the process during extract_text -- mirroring
@@ -84,7 +88,7 @@ class _TextExtractor(HTMLParser):
         self._skip = 0
         self.parts: list[str] = []
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag, _attrs):
         if tag in ("script", "style"):
             self._skip += 1
 
@@ -115,43 +119,81 @@ def is_image(path: str | Path) -> bool:
     return Path(path).suffix.lower() in IMAGE_EXTS
 
 
-def extract_text(path: str | Path) -> str:
-    """Return the document's text. Raises only when an optional parser extra is
-    required (PDF/DOCX) but not installed, or for an image (route via a describer)."""
+_TEXT_EXTS = frozenset({".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".log",
+                        ".json", ".jsonl", ".yaml", ".yml", ".toml", ".xml", ".html", ".htm"})
+_EXTRACTOR_VERSION = "lightwork-normalized-extraction:1"
+
+
+def extract_document(path: str | Path) -> DocumentExtraction:
+    """Extract with explicit failure/coverage instead of decoding unknown binaries.
+
+    Native OCR is never enabled by this parser. Original bytes are hashed before
+    parsing, so the normalized document and its coverage remain bound to source.
+    """
     path = Path(path)
     suffix = path.suffix.lower()
-    # Bound the on-disk size before any read/parse loads the file into memory.
-    if not is_image(path):
+    format = suffix.lstrip(".") or "unknown"
+    digest = ""
+    try:
         _check_on_disk_size(path)
-    if suffix in (".html", ".htm"):
-        return _html_to_text(path.read_text(encoding="utf-8", errors="replace"))
-    if suffix == ".pdf":
-        try:
+        cap = _int_env("MAVERICK_KNOWLEDGE_MAX_DOC_BYTES", DEFAULT_MAX_DOC_BYTES)
+        with path.open("rb") as stream:
+            data = stream.read(cap + 1) if cap > 0 else stream.read()
+        if cap > 0 and len(data) > cap:
+            raise ValueError("document too large during read")
+        digest = hashlib.sha256(data).hexdigest()
+        builder = ExtractionBuilder()
+        if suffix == ".pdf":
+            if not data.startswith(b"%PDF-"):
+                raise ValueError("PDF signature does not match its extension")
             from pypdf import PdfReader
-        except ModuleNotFoundError as e:
-            raise RuntimeError(
-                "PDF parsing needs the 'parsers' extra: "
-                "From the reviewed checkout run: python -m pip install -e "
-                "'./packages/maverick-knowledge[parsers]'"
-            ) from e
-        reader = PdfReader(str(path))
-        _check_pdf_page_count(reader)
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
-    if suffix == ".docx":
-        try:
-            import docx  # python-docx
-        except ModuleNotFoundError as e:
-            raise RuntimeError(
-                "DOCX parsing needs the 'parsers' extra: "
-                "From the reviewed checkout run: python -m pip install -e "
-                "'./packages/maverick-knowledge[parsers]'"
-            ) from e
-        _check_docx_uncompressed_size(path)
-        return "\n".join(p.text for p in docx.Document(str(path)).paragraphs)
-    if is_image(path):
-        raise RuntimeError(
-            "images need an image_describer (OCR or a vision model); the "
-            "KnowledgeBase routes them there before extract_text"
-        )
-    # text / markdown / unknown -> read as UTF-8 text.
-    return path.read_text(encoding="utf-8", errors="replace")
+            reader = PdfReader(io.BytesIO(data))
+            _check_pdf_page_count(reader)
+            for index, page in enumerate(reader.pages, 1):
+                text = page.extract_text() or ""
+                location = f"pdf/page[{index}]"
+                if text.strip():
+                    builder.append(text, location, "page")
+                else:
+                    builder.omit(location + ": no extracted text; blank/image-only/unsupported content unresolved")
+            builder.warnings.append("PDF text extraction only; OCR is not configured or invoked by this parser.")
+        elif suffix in {".docx", ".xlsx"}:
+            from .office_extract import extract_office
+            builder = extract_office(data, format, _int_env(
+                "MAVERICK_KNOWLEDGE_MAX_DOCX_UNCOMPRESSED_BYTES", DEFAULT_MAX_DOCX_UNCOMPRESSED_BYTES))
+        elif suffix in _TEXT_EXTS:
+            if data.startswith((b"PK\x03\x04", b"%PDF-", b"\xd0\xcf\x11\xe0")):
+                raise ValueError("Binary container does not match its text extension")
+            text = data.decode("utf-8-sig", errors="strict")
+            if any(ord(c) < 32 and c not in "\n\r\t" for c in text):
+                raise ValueError("Text document contains binary control bytes")
+            if suffix in {".html", ".htm"}:
+                text = _html_to_text(text)
+                builder.warnings.append("HTML visible text projection; scripts, styles and layout omitted.")
+            builder.append(text, "text/character-stream")
+        else:
+            warning = ("Images require an explicitly configured image_describer; no OCR was attempted."
+                       if is_image(path) else "No qualified extractor is available for this format.")
+            return DocumentExtraction("unsupported", format, digest, _EXTRACTOR_VERSION,
+                                      omitted_regions=("whole-source",), warnings=(warning,))
+        return builder.finish(format, digest, _EXTRACTOR_VERSION)
+    except ModuleNotFoundError:
+        return DocumentExtraction("unavailable", format, digest, _EXTRACTOR_VERSION,
+                                  omitted_regions=("whole-source",),
+                                  warnings=("Optional parser unavailable; install maverick-knowledge[parsers].",))
+    except (ValueError, UnicodeError, zipfile.BadZipFile) as exc:
+        return DocumentExtraction("rejected", format, digest, _EXTRACTOR_VERSION,
+                                  omitted_regions=("whole-source",), warnings=(str(exc)[:500],))
+    except Exception as exc:
+        return DocumentExtraction("failed", format, digest, _EXTRACTOR_VERSION,
+                                  omitted_regions=("whole-source",), warnings=(f"Parser failed: {type(exc).__name__}",))
+
+
+def extract_text(path: str | Path) -> str:
+    """Legacy text convenience API; structured callers should use extract_document."""
+    result = extract_document(path)
+    if result.status in {"unsupported", "unavailable", "failed"}:
+        raise RuntimeError("; ".join(result.warnings))
+    if result.status == "rejected":
+        raise ValueError("; ".join(result.warnings))
+    return result.text

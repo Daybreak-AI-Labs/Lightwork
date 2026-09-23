@@ -24,20 +24,19 @@ def _cron_successors(q, parent_id):
 
 
 def test_transient_rearm_failure_is_retried_not_permanently_dead(tmp_path, monkeypatch):
-    import maverick.scheduler as scheduler
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    real = scheduler.schedule_cron
+    real = JobQueue._advance_recurrence
     calls = {"n": 0}
 
-    def flaky(queue, expr, kind, payload=None, *, after=None):
+    def flaky(queue, connection, row, *, now):
         calls["n"] += 1
         if calls["n"] == 1:
             raise sqlite3.OperationalError("database is locked")
-        return real(queue, expr, kind, payload, after=after)
+        return real(queue, connection, row, now=now)
 
-    monkeypatch.setattr("maverick.scheduler.schedule_cron", flaky)
+    monkeypatch.setattr(JobQueue, "_advance_recurrence", flaky)
 
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {"__cron__": CRON}, run_at=1000.0)
@@ -85,10 +84,10 @@ def test_persistent_rearm_failure_is_surfaced_as_failed_row(tmp_path, monkeypatc
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    def always_fail(queue, expr, kind, payload=None, *, after=None):
+    def always_fail(queue, connection, row, *, now):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr("maverick.scheduler.schedule_cron", always_fail)
+    monkeypatch.setattr(JobQueue, "_advance_recurrence", always_fail)
 
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {"__cron__": CRON}, run_at=1000.0)

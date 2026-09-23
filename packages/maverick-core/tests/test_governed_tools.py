@@ -892,6 +892,40 @@ class TestEnterpriseBoundary:
         assert "reconcile" in out
         assert receipts == ["PREPARE", "INDETERMINATE"]
 
+    @pytest.mark.parametrize("stop_name", ["BudgetExceeded", "UsageAccountingError", "Halted", "CancelledError"])
+    @pytest.mark.parametrize("receipt_fails", [None, "OSError", "UsageAccountingError", "CancelledError"])
+    def test_connector_stop_keeps_indeterminate_receipt_and_original_exception(
+        self, monkeypatch, stop_name, receipt_fails,
+    ):
+        import maverick.budget as budget
+        import maverick.governed_actions as actions
+        import maverick.killswitch as killswitch
+
+        _grant_human(monkeypatch)
+        error_type = {"Halted": killswitch.Halted, "CancelledError": asyncio.CancelledError}.get(
+            stop_name, getattr(budget, stop_name, None))
+        original = (error_type("original stop", "test") if stop_name == "Halted"
+                    else error_type("original stop"))
+        receipts = []
+
+        def record(*_args, **kwargs):
+            receipts.append(kwargs["phase"])
+            if receipt_fails and kwargs["phase"] == "INDETERMINATE":
+                reporting_type = {"OSError": OSError, "UsageAccountingError": budget.UsageAccountingError,
+                                  "CancelledError": asyncio.CancelledError}[receipt_fails]
+                raise reporting_type("receipt unavailable")
+            return True
+
+        def fail(_args):
+            raise original
+
+        monkeypatch.setattr(actions, "record_tool_lineage", record)
+        wrapped = wrap_connector_tool(Tool("acme", "fixture", _SCHEMA, fail), enterprise=True)
+        with pytest.raises(error_type) as raised:
+            wrapped.fn({"op": "post", "path": "/accounts"})
+        assert raised.value is original
+        assert receipts == ["PREPARE", "INDETERMINATE"]
+
     @pytest.mark.parametrize("failure_kind", ["raise", "error-result"])
     def test_connector_failure_never_returns_secret_detail_to_model(
         self, monkeypatch, failure_kind,

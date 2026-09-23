@@ -996,8 +996,8 @@ async def _build_orchestrator_brief(
                 default=_cs.compact_target_tokens(_orch_model))
             from . import async_compaction as _ac
             if _ac.enabled():
-                # Off-hot-path compaction: use the background-precomputed
-                # prefix when it matches; schedule a refresh either way.
+                # Reuse immutable token/lexical features; rank the complete
+                # current source again for this query and token budget.
                 _kept = _ac.compact_with_precompute(
                     f"conv:{conversation_id}", _msgs,
                     target_tokens=_target)

@@ -798,29 +798,13 @@ class AuditLog:
                     total += n
             return total
 
-    def tail(self, n: int = 50, day: str | None = None) -> list[dict[str, Any]]:
+    def tail(self, n: int = 50, day: str | None = None, *, report=None) -> list[dict[str, Any]]:
         """Return the last ``n`` events from ``day`` (default today)."""
         if day is None:
             day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = self._path_for(day)
-        if not path.exists():
-            return []
-        # Route through segment_text so a sealed (closed, at-rest-encrypted)
-        # past day decrypts transparently. Reading it as raw UTF-8 would hit
-        # UnicodeDecodeError on the ciphertext -- not an OSError, so it would
-        # escape the guard and crash the caller.
-        from .sealing import segment_text
-        lines = segment_text(path).splitlines()
-        out: list[dict[str, Any]] = []
-        for line in lines[-n:]:
-            try:
-                out.append(json.loads(line))
-            except (json.JSONDecodeError, RecursionError):
-                # RecursionError: a line nested past the json recursion limit
-                # (>=1000) must skip that line, not crash tail() for the whole
-                # day-file (user-testing finding).
-                continue
-        return out
+        from .reader import tail_events
+        return tail_events(path, n, report=report)
 
     def grep(self, pattern: str, day: str | None = None) -> list[dict[str, Any]]:
         """Crude regex grep over the day's events."""
@@ -835,16 +819,20 @@ class AuditLog:
         path = self._path_for(day)
         if not path.exists():
             return []
-        # See tail(): segment_text decrypts a sealed past day transparently and
-        # fail-softs, so grep over a closed/sealed segment can't crash.
-        from .sealing import segment_text
+        from .segments import ReadReport, SegmentSnapshot
         out: list[dict[str, Any]] = []
-        for line in segment_text(path).splitlines():
-            if rx.search(line):
-                try:
-                    out.append(json.loads(line))
-                except (json.JSONDecodeError, RecursionError):
-                    continue
+        try:
+            with SegmentSnapshot(path, ReadReport()) as snapshot:
+                for line in snapshot.lines():
+                    if rx.search(line):
+                        try:
+                            event = json.loads(line)
+                            if isinstance(event, dict):
+                                out.append(event)
+                        except (json.JSONDecodeError, RecursionError):
+                            continue
+        except (OSError, ValueError, RuntimeError) as error:
+            log.warning("audit grep incomplete: %s (%s)", path.name, type(error).__name__)
         return out
 
 

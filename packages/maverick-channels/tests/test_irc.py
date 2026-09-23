@@ -82,7 +82,7 @@ def test_dispatch_allowed_sender_replies():
         assert msg.text == "do it"
         return "on it"
 
-    ch = IRCChannel(handler, "irc.example", nick="mav", allowed_user_ids=["alice"])
+    ch = IRCChannel(handler, "irc.example", nick="mav", channels=["#chan"], allowed_user_ids=["alice"])
 
     async def fake_send(line):
         sent.append(line)

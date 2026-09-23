@@ -36,6 +36,7 @@ def test_send_passes_text_via_argv_not_interpolation():
 
     import asyncio
     with patch("maverick_channels.imessage.subprocess.run") as run_mock:
+        run_mock.return_value.returncode = 0
         asyncio.run(chan.send(
             "+1555",
             'malicious"; tell app "Finder" to delete every file',
@@ -98,7 +99,7 @@ def test_start_survives_send_failure():
             chan._stop = True
             return []
         fetched["done"] = True
-        return [("+1555", "hi", 1)]
+        return [("+1555", "hi", 1, "GUID-1")]
 
     sent = {"attempts": 0}
 
@@ -111,7 +112,7 @@ def test_start_survives_send_failure():
 
     chan._fetch_new = _fetch_new
     chan._latest_rowid = lambda: 0
-    chan.dispatch_text = _dispatch
+    chan.handler = _dispatch
     chan.send = _send
 
     # Without the fix this raises TimeoutExpired out of start(); with the fix
@@ -134,7 +135,7 @@ def test_start_skips_empty_reply():
             chan._stop = True
             return []
         fetched["done"] = True
-        return [("+1555", "hi", 1)]
+        return [("+1555", "hi", 1, "GUID-1")]
 
     async def _dispatch(_msg):
         return ""
@@ -146,7 +147,7 @@ def test_start_skips_empty_reply():
 
     chan._fetch_new = _fetch_new
     chan._latest_rowid = lambda: 0
-    chan.dispatch_text = _dispatch
+    chan.handler = _dispatch
     chan.send = _send
 
     asyncio.run(asyncio.wait_for(chan.start(), timeout=5))

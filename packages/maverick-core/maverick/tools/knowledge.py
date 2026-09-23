@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable, Sequence
 
 from ..knowledge_access import KnowledgeAccessService
+from ..knowledge_retrieval import render_evidence
 from . import Tool
 
 
@@ -63,28 +64,18 @@ def knowledge_search_tool(
                 purpose=purpose,
                 source_selectors=selectors,
                 limit=k,
+                cursor=args.get("cursor"),
                 job_id=(
                     job_id_resolver()
                     if job_id_resolver is not None
                     else f"knowledge-{uuid.uuid4().hex}"
                 ),
             )
-            blocks = []
-            for item in result["items"]:
-                reference = item["reference"]
-                citation = (
-                    f"{item['source']['source_ref']} · {reference['asset_id']} "
-                    f"· version {reference['version']}"
-                )
-                blocks.append(f"[{citation}]\n{str(item['summary']).strip()}")
-            if not blocks:
-                return (
-                    "No currently eligible governed knowledge matched. "
-                    "Request fresh access or evidence in Knowledge."
-                )
-            return "\n\n".join(blocks)
+            return render_evidence(result)
         except (KeyboardInterrupt, SystemExit):
             raise
+        except ValueError:
+            return "knowledge_search unavailable: invalid or changed search; restart without cursor."
         except Exception as exc:
             return f"knowledge_search unavailable: {type(exc).__name__}"
 
@@ -99,6 +90,10 @@ def knowledge_search_tool(
             "properties": {
                 "query": {"type": "string", "description": "What to look for."},
                 "k": {"type": "integer", "description": "Max passages (default 5)."},
+                "cursor": {
+                    "type": "string", "maxLength": 2048,
+                    "description": "next_cursor from an incomplete result; keep query and k unchanged.",
+                },
             },
             "required": ["query"],
         },

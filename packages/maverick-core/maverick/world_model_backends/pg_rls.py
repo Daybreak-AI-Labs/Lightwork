@@ -34,6 +34,7 @@ from typing import Any
 
 from .postgres import _TENANT_TABLES
 
+_PREFLIGHT_TABLES = (*_TENANT_TABLES, "attachment_submissions")
 
 def resolve_dsn(dsn: str | None = None) -> str:
     """Resolve the Postgres DSN: explicit arg > ``MAVERICK_PG_DSN`` > config
@@ -77,7 +78,7 @@ def preflight(conn) -> dict[str, Any]:
     role = cur.fetchone()[0]
     tables: dict[str, dict[str, Any]] = {}
     ready = True
-    for t in _TENANT_TABLES:
+    for t in _PREFLIGHT_TABLES:
         # to_regclass returns NULL (no error) for a table that isn't there yet,
         # so a pre-migration DB reports cleanly instead of raising.
         cur.execute("SELECT to_regclass(%s)", (t,))
@@ -112,7 +113,7 @@ def backfill(conn, tenant_id: str, *, dry_run: bool = False) -> dict[str, int]:
         raise ValueError("backfill requires a non-empty tenant id")
     cur = conn.cursor()
     report: dict[str, int] = {}
-    for t in _TENANT_TABLES:
+    for t in _PREFLIGHT_TABLES:
         cur.execute("SELECT to_regclass(%s)", (t,))
         if cur.fetchone()[0] is None:
             report[t] = 0  # table not migrated yet -- nothing to assign

@@ -9,9 +9,13 @@ mcp_client.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
+from collections.abc import Callable
 
+from .connector_attempts import CONTROL_ERRORS
+from .mcp_catalog import bind_call_guard
 from .mcp_client import MCPClient
 from .tools import Tool
 
@@ -28,7 +32,7 @@ _VALID_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _MAX_SCHEMA_SCAN_DEPTH = 64
 
 
-def tools_from_mcp(client: MCPClient) -> list[Tool]:
+def tools_from_mcp(client: MCPClient, *, authorize: Callable[[str], bool] | None = None, binding_guards: dict[str, Callable[[], bool]] | None = None) -> list[Tool]:
     """Return a Tool per MCP-exposed tool, namespaced by server.
 
     Council finding (Tier 0): MCP tool descriptions and inputSchema
@@ -40,7 +44,14 @@ def tools_from_mcp(client: MCPClient) -> list[Tool]:
     """
     out: list[Tool] = []
     shield = _try_shield()
-    for spec in client.tools:
+    if hasattr(client, "catalog"):
+        # Read metadata and its identity from ONE immutable generation, even
+        # if another thread publishes a refresh while Shield inspects it.
+        generation = client.catalog.generation
+        descriptors = [(json.loads(encoded), identity) for _, encoded, identity in generation.entries]
+    else:
+        descriptors = [(spec, None) for spec in client.tools]
+    for spec, identity in descriptors:
         name = spec.get("name")
         if not name:
             continue
@@ -60,7 +71,11 @@ def tools_from_mcp(client: MCPClient) -> list[Tool]:
             )
             continue
         prefixed = f"mcp_{client.spec.name}__{name}"
-        out.append(_build_tool(client, prefixed, name, spec))
+        if hasattr(client, "catalog") and client.catalog.identity(name) != identity:
+            continue
+        out.append(_build_tool(client, prefixed, name, spec, identity=identity, authorize=authorize))
+        if binding_guards is not None and identity is not None:
+            binding_guards[prefixed] = lambda c=client.catalog, n=name, i=identity: c.identity(n) == i
     return out
 
 
@@ -142,13 +157,22 @@ def _spec_passes_shield(name: str, spec: dict, shield) -> bool:
         return False
 
 
-def _build_tool(client: MCPClient, prefixed: str, original: str, spec: dict) -> Tool:
+def _build_tool(client: MCPClient, prefixed: str, original: str, spec: dict, *, identity: str | None = None, authorize: Callable[[str], bool] | None = None) -> Tool:
     description = spec.get("description", "") or "(no description)"
     schema = spec.get("inputSchema") or {"type": "object", "properties": {}}
 
     async def fn(args: dict) -> str:
         try:
-            return await client.call_tool(original, args)
+            def admitted() -> bool:
+                return (
+                    (identity is None or client.catalog.identity(original) == identity)
+                    and (authorize is None or authorize(prefixed))
+                )
+
+            with bind_call_guard(admitted):
+                return await client.call_tool(original, args)
+        except CONTROL_ERRORS:
+            raise
         except Exception as e:
             log.exception("mcp tool %s failed", prefixed)
             return f"ERROR: {type(e).__name__}: {e}"

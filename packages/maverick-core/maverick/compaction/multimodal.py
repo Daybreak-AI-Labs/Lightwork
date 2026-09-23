@@ -25,6 +25,7 @@ import struct
 
 from ..llm import model_for_role
 from . import KEEP_RECENT_TURNS
+from .requests import request, run_async, run_sync
 
 log = logging.getLogger(__name__)
 
@@ -87,11 +88,15 @@ def _human_size(n: int) -> str:
 
 
 def _describe(block: dict, llm, budget=None) -> str:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_describe_steps(block, llm, budget))
+
+def _describe_steps(block: dict, llm, budget=None):
     """One-line description via the injected llm seam; "" on any failure."""
     if llm is None:
         return ""
     try:
-        resp = llm.complete(
+        resp = yield request(llm,
             system=_DESCRIBE_SYSTEM,
             messages=[{
                 "role": "user",
@@ -108,6 +113,14 @@ def _describe(block: dict, llm, budget=None) -> str:
 
 
 def stub_for_block(block: dict, llm=None, budget=None) -> dict:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_stub_for_block_steps(block, llm, budget))
+
+async def stub_for_block_async(block: dict, llm=None, budget=None) -> dict:
+    """Native async entry; cancellation never falls back to sync I/O."""
+    return await run_async(_stub_for_block_steps(block, llm, budget))
+
+def _stub_for_block_steps(block: dict, llm=None, budget=None):
     """Compact text block standing in for one media block.
 
     Always records that media existed, its type and byte size; adds sniffed
@@ -121,7 +134,7 @@ def stub_for_block(block: dict, llm=None, budget=None) -> dict:
     dims = _dimensions(data) if kind == "image" else None
     if dims:
         parts.append(f"{dims[0]}x{dims[1]}")
-    described = _describe(block, llm, budget=budget)
+    described = yield from _describe_steps(block, llm, budget=budget)
     head = " ".join(parts)
     if described:
         text = f"[{head}, described: {described}]"
@@ -131,6 +144,10 @@ def stub_for_block(block: dict, llm=None, budget=None) -> dict:
 
 
 def _compact_block_list(blocks: list, llm, budget=None) -> tuple[list, bool]:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_compact_block_list_steps(blocks, llm, budget))
+
+def _compact_block_list_steps(blocks: list, llm, budget=None):
     """Replace media blocks in a content list (recursing into tool_results)."""
     out: list = []
     changed = False
@@ -141,12 +158,12 @@ def _compact_block_list(blocks: list, llm, budget=None) -> tuple[list, bool]:
         btype = blk.get("type")
         if btype in MEDIA_BLOCK_TYPES:
             try:
-                out.append(stub_for_block(blk, llm, budget=budget))
+                out.append((yield from _stub_for_block_steps(blk, llm, budget=budget)))
                 changed = True
             except Exception:  # fail-open: keep the original block
                 out.append(blk)
         elif btype == "tool_result" and isinstance(blk.get("content"), list):
-            inner, inner_changed = _compact_block_list(
+            inner, inner_changed = yield from _compact_block_list_steps(
                 blk["content"], llm, budget=budget)
             if inner_changed:
                 new_blk = dict(blk)
@@ -166,6 +183,24 @@ def compact_media(
     llm=None,
     budget=None,
 ) -> list[dict]:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_compact_media_steps(messages, keep_recent=keep_recent, llm=llm, budget=budget))
+
+async def compact_media_async(
+    messages: list[dict], *,
+    keep_recent: int = KEEP_RECENT_TURNS,
+    llm=None,
+    budget=None,
+) -> list[dict]:
+    """Native async entry; cancellation never falls back to sync I/O."""
+    return await run_async(_compact_media_steps(messages, keep_recent=keep_recent, llm=llm, budget=budget))
+
+def _compact_media_steps(
+    messages: list[dict], *,
+    keep_recent: int = KEEP_RECENT_TURNS,
+    llm=None,
+    budget=None,
+):
     """Return a copy of ``messages`` with old heavy media replaced by stubs.
 
     Mirrors ``compact_messages`` boundaries: the first message and the last
@@ -181,7 +216,7 @@ def compact_media(
         if i == 0 or i >= cutoff or not isinstance(content, list):
             out.append(msg)
             continue
-        new_content, changed = _compact_block_list(content, llm, budget=budget)
+        new_content, changed = yield from _compact_block_list_steps(content, llm, budget=budget)
         if changed:
             new_msg = dict(msg)
             new_msg["content"] = new_content

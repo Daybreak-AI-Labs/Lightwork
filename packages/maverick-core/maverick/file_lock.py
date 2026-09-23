@@ -49,9 +49,12 @@ __all__ = [
     "atomic_read_bytes",
     "atomic_create_text",
     "atomic_create_bytes",
+    "atomic_create_bytes_chunks",
     "atomic_write_text",
     "atomic_write_text_chunks",
     "atomic_write_bytes",
+    "atomic_write_bytes_chunks",
+    "open_private_read",
     "open_private_append",
     "ensure_private_directory",
     "prepare_private_directory",
@@ -1268,6 +1271,13 @@ def atomic_create_bytes(
     mode: int = 0o600,
 ) -> None:
     """Byte-for-byte sibling of :func:`atomic_create_text`."""
+    atomic_create_bytes_chunks(path, (data,), mode=mode)
+
+
+def atomic_create_bytes_chunks(
+    path: str | Path, chunks: Iterable[bytes], *, mode: int = 0o600,
+) -> None:
+    """Publish bounded byte chunks privately without replacing any destination."""
     path = Path(path)
     _prepare_parent_directory(path.parent)
     fd, tmp = _secure_mkstemp(
@@ -1279,7 +1289,8 @@ def atomic_create_bytes(
     try:
         with os.fdopen(fd, "wb") as f:
             fd = -1
-            f.write(data)
+            for chunk in chunks:
+                f.write(chunk)
             f.flush()
             os.fsync(f.fileno())
             _publish_new_private_temp(f.fileno(), tmp, path)
@@ -1293,6 +1304,38 @@ def atomic_create_bytes(
             os.unlink(tmp)
         except OSError:
             pass
+        raise
+
+
+def open_private_read(path: str | Path, *, mode: int = 0o600) -> int:
+    """Open a private single-link regular file and bind custody to its descriptor.
+
+    Caller owns descriptor closure and snapshot/change detection. This does not
+    create a missing source or claim that another process cannot append to it.
+    """
+    path = Path(path)
+    ensure_private_directory(path.parent)
+    ensure_private_file(path, mode)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(str(path), flags)
+    try:
+        visible, opened = path.lstat(), os.fstat(fd)
+        if (
+            _unsafe_lock_alias(path, visible) or _unsafe_lock_alias(path, opened)
+            or not stat.S_ISREG(visible.st_mode) or not stat.S_ISREG(opened.st_mode)
+            or visible.st_nlink != 1 or opened.st_nlink != 1
+            or (visible.st_dev, visible.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            raise PermissionError(f"read path is not a stable single-link regular file: {path}")
+        if os.name == "nt":
+            restricted = _windows_open_private_file_is_restricted(path, opened, mode)
+        else:
+            restricted = (opened.st_mode & 0o777) == mode
+        if not restricted:
+            raise PermissionError(f"read file is not private: {path}")
+        return fd
+    except BaseException:
+        os.close(fd)
         raise
 
 
@@ -1560,6 +1603,17 @@ def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> N
     """Byte-for-byte sibling of :func:`atomic_write_text` for binary payloads
     (e.g. an at-rest-sealed blob): unique temp in the same directory, then
     ``os.replace`` into position; the temp is cleaned up on any failure."""
+    atomic_write_bytes_chunks(path, (data,), mode=mode)
+
+
+def atomic_write_bytes_chunks(
+    path: str | Path, chunks: Iterable[bytes], *, mode: int = 0o600,
+) -> int:
+    """Publish a private binary stream atomically after all chunks and fsync.
+
+    Generator/read/cancellation failures leave the previous destination intact
+    and remove the unpublished temporary file. Memory is owned by one chunk.
+    """
     path = Path(path)
     _prepare_parent_directory(path.parent)
     fd, tmp = _secure_mkstemp(
@@ -1568,10 +1622,13 @@ def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> N
         suffix=".tmp",
         mode=mode,
     )
+    count = 0
     try:
         with os.fdopen(fd, "wb") as f:
             fd = -1
-            f.write(data)
+            for chunk in chunks:
+                f.write(chunk)
+                count += 1
             f.flush()
             os.fsync(f.fileno())
             if os.name == "nt":
@@ -1589,3 +1646,4 @@ def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> N
         except OSError:
             pass
         raise
+    return count

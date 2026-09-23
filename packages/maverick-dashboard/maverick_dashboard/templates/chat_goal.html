@@ -235,6 +235,21 @@
       </svg>
 {%- endmacro %}
 <div class="convo">
+  {% if submission and (goal.status == 'draft' or submission.detail.coverage) %}
+  <section class="panel" id="submission-status" role="status">
+    {% if goal.status == 'draft' %}<h2>Submission saved as a draft</h2>{% endif %}
+    <p>{{ submission.detail.message }}</p>
+    {% if submission.detail.coverage %}
+    <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: text companion {{ item.status }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if goal.status == 'draft' %}
+    <p>AI work has not started. If all files were admitted, retry preparation using this saved draft.</p>
+    <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
+      <button class="btn" type="submit">Retry preparation</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
   {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
   <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ status_labels.get(goal.status, goal.status) }}</span>
 
@@ -285,7 +300,7 @@
       Lightwork
     </div>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
-    <details class="activity" id="work-activity">
+    <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
       <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
         <span class="spinner" id="work-spin" aria-hidden="true"></span>
         <span class="activity__now is-live" id="work-now">Working…</span>
@@ -463,6 +478,7 @@
       <p id="question-text" class="ask__text"></p>
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
+      <input type="hidden" name="submission_key" value="{{ submission_key }}" />
       <textarea id="answer-input" name="message" rows="1" required
                 placeholder="{{ 'Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…' }}"
                 aria-label="Your answer to the agent's question, or your next message"

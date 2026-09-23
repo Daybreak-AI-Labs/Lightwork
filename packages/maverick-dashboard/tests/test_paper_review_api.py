@@ -80,6 +80,9 @@ def test_upload_produces_a_review_a_memo_and_a_redline():
     assert rec["gaps"] >= 1 and rec["high_severity_gaps"] >= 1
     assert rec["recommendation"] == "do_not_sign_without_changes"
     assert rec["redline_bytes"] > 500
+    assert len(rec["redline"]["source_sha256"]) == 64
+    assert rec["redline"]["edit_results"]
+    assert all(outcome["scope"] == "paragraph" for outcome in rec["redline"]["edit_results"])
 
     # The memo quotes their actual wording and states the governance line.
     memo = client.get(f"/api/v1/privacy/paper-reviews/{rec['id']}/memo")

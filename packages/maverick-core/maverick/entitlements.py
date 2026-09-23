@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -473,6 +474,7 @@ _MIN_REFRESH_INTERVAL = 30.0      # floor so a config typo can't hammer the API
 
 _REFRESHER_STOP = None            # threading.Event of the live refresher, else None
 _REFRESHER_THREAD = None
+_REFRESHER_LOCK = threading.RLock()
 
 
 def refresh_interval_seconds() -> float:
@@ -509,44 +511,51 @@ def start_refresher(interval: float | None = None, *, refresh=None):
     never raises — so the loop can't die on a network blip, and a failed poll
     simply leaves the last-known-good license file in charge (fail-open)."""
     global _REFRESHER_STOP, _REFRESHER_THREAD
-    if _REFRESHER_THREAD is not None and _REFRESHER_THREAD.is_alive():
-        return None
-    # An explicit interval argument is caller-controlled (tests use tiny ones);
-    # config-sourced values are already floor-clamped in refresh_interval_seconds.
-    every = float(interval) if interval is not None else refresh_interval_seconds()
-    if every <= 0:
-        return None
-    import logging
-    import threading
-    log = logging.getLogger(__name__)
-    stop = threading.Event()
-    do_refresh = refresh or refresh_from_server
+    with _REFRESHER_LOCK:
+        if _REFRESHER_THREAD is not None and _REFRESHER_THREAD.is_alive():
+            return None
+        # An explicit interval argument is caller-controlled (tests use tiny ones);
+        # config-sourced values are already floor-clamped in refresh_interval_seconds.
+        every = float(interval) if interval is not None else refresh_interval_seconds()
+        if every <= 0:
+            return None
+        import logging
+        import threading
+        log = logging.getLogger(__name__)
+        stop = threading.Event()
+        do_refresh = refresh or refresh_from_server
 
-    def _loop() -> None:
-        while not stop.wait(every):
-            try:
-                res = do_refresh()
-            except Exception:  # noqa: BLE001 - belt+braces; the loop must survive
-                log.debug("license refresh raised unexpectedly", exc_info=True)
-                continue
-            if getattr(res, "changed", False):
-                reset_cache()
-                log.info("entitlements updated from server: %s", current().summary())
+        def _loop() -> None:
+            while not stop.wait(every):
+                try:
+                    res = do_refresh()
+                except Exception:  # noqa: BLE001 - belt+braces; the loop must survive
+                    log.debug("license refresh raised unexpectedly", exc_info=True)
+                    continue
+                if getattr(res, "changed", False):
+                    reset_cache()
+                    log.info("entitlements updated from server: %s", current().summary())
 
-    t = threading.Thread(target=_loop, name="maverick-license-refresh", daemon=True)
-    _REFRESHER_STOP, _REFRESHER_THREAD = stop, t
-    t.start()
-    return t
+        t = threading.Thread(target=_loop, name="maverick-license-refresh", daemon=True)
+        _REFRESHER_STOP, _REFRESHER_THREAD = stop, t
+        t.start()
+        return t
 
 
-def stop_refresher(timeout: float = 2.0) -> None:
-    """Signal the refresher to exit and join it briefly (safe to call anytime)."""
+def stop_refresher(timeout: float = 2.0, *, wait: bool = True) -> None:
+    """Signal now; retain a stopping refresher until its thread has exited."""
     global _REFRESHER_STOP, _REFRESHER_THREAD
-    if _REFRESHER_STOP is not None:
-        _REFRESHER_STOP.set()
-    if _REFRESHER_THREAD is not None and _REFRESHER_THREAD.is_alive():
-        _REFRESHER_THREAD.join(timeout=timeout)
-    _REFRESHER_STOP = _REFRESHER_THREAD = None
+    with _REFRESHER_LOCK:
+        stop, thread = _REFRESHER_STOP, _REFRESHER_THREAD
+        if stop is not None:
+            stop.set()
+    if not wait:
+        return
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=max(0.0, float(timeout)))
+    with _REFRESHER_LOCK:
+        if _REFRESHER_THREAD is thread and (thread is None or not thread.is_alive()):
+            _REFRESHER_STOP = _REFRESHER_THREAD = None
 
 
 # ---- license authoring helpers (shared by the CLIs) ------------------------

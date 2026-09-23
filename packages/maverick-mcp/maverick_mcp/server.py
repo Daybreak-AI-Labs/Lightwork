@@ -546,10 +546,15 @@ class MCPServer:
         # our outbound request ids so they never collide with the client's.
         self._client_capabilities: dict = {}
         self._stdio = False
+        self._stdio_session = None
         self._elicit_seq = 0
         # MCP Tasks: lazily built on first task-augmented call so a transport
         # that never uses tasks doesn't spin up an executor.
         self._tasks = None
+        self._tasks_lock = threading.Lock()
+        from .execution import RequestExecutions
+
+        self._requests = RequestExecutions()
         # Whether async tasks are offered on this transport. stdio sets it in
         # run(); the HTTP transport sets it from MAVERICK_MCP_HTTP_TASKS in
         # build_app (opt-in, since multi-client task isolation is bearer-scoped).
@@ -1266,6 +1271,9 @@ class MCPServer:
         caller_credential_fingerprint: str | None = None,
         capability=None,
     ) -> dict:
+        from .execution import ExecutionCancelled, check_execution
+
+        check_execution()
         name = params.get("name")
         # A non-hashable `name` (list/dict) raises TypeError on the set-membership
         # test below, escaping as a scrubbed -32603; coerce to -32602 like the
@@ -1341,6 +1349,7 @@ class MCPServer:
             capability,
         ):
             try:
+                check_execution()
                 if capability is not None and name in (
                     "maverick_start", "maverick_resume",
                 ):
@@ -1348,7 +1357,8 @@ class MCPServer:
                         name, arguments, capability=capability)
                 else:
                     result = self._dispatch_tool(name, arguments)
-            except (_ProtocolError, TaskError):
+                check_execution()
+            except (_ProtocolError, TaskError, ExecutionCancelled):
                 # Control-flow errors carry an explicit JSON-RPC (code, message) and
                 # MUST surface as a structured protocol error -- both transports
                 # convert them (stdio _dispatch_stdio_message, http _exception_to_
@@ -1774,8 +1784,15 @@ class MCPServer:
     def _next_elicit_id(self) -> str:
         # String ids namespace our server->client requests so they can never be
         # confused with the client's own (integer) request ids on the wire.
-        self._elicit_seq += 1
-        return f"elicit-{self._elicit_seq}"
+        with self._send_lock:
+            self._elicit_seq += 1
+            return f"elicit-{self._elicit_seq}"
+
+    def _exchange_elicitation(self, message: dict) -> dict | None:
+        if self._stdio_session is not None:
+            return self._stdio_session.elicit(message, _elicit_timeout())
+        self._send(message)
+        return self._await_elicit_response(message["id"], _elicit_timeout())
 
     def _elicit(self, message: str, requested_schema: dict) -> dict | None:
         """Send one elicitation/create and block for the client's response.
@@ -1786,13 +1803,12 @@ class MCPServer:
         if not self._client_supports_elicitation():
             return None
         req_id = self._next_elicit_id()
-        self._send({
+        return self._exchange_elicitation({
             "jsonrpc": "2.0",
             "id": req_id,
             "method": "elicitation/create",
             "params": {"message": message, "requestedSchema": requested_schema},
         })
-        return self._await_elicit_response(req_id, _elicit_timeout())
 
     def _elicit_url(self, message: str, url: str) -> dict | None:
         """URL-mode elicitation (Phase 3): point the user at ``url`` to provide a
@@ -1817,13 +1833,12 @@ class MCPServer:
             )
         safe_message = self._screen_elicit_prompt(message)
         req_id = self._next_elicit_id()
-        self._send({
+        return self._exchange_elicitation({
             "jsonrpc": "2.0",
             "id": req_id,
             "method": "elicitation/create",
             "params": {"message": safe_message, "mode": "url", "url": url},
         })
-        return self._await_elicit_response(req_id, _elicit_timeout())
 
     def elicit_url_action(self, message: str, url: str) -> str:
         """Run a URL-mode elicitation and return the outcome action:
@@ -1852,7 +1867,7 @@ class MCPServer:
         return message
 
     def _await_elicit_response(self, req_id: str, timeout: float) -> dict | None:
-        """Read stdin until the matching elicitation response arrives.
+        """Legacy direct-embedding wait; run() uses StdioSession's sole reader.
 
         The client is awaiting our tools/call result, so the only traffic we
         expect meanwhile is that response (plus the odd keep-alive ping). We
@@ -1949,9 +1964,13 @@ class MCPServer:
                     break
                 answered = False
                 for q in questions:
+                    from .execution import check_execution
+
+                    check_execution()
                     reply = self._elicit_question(q.question)
                     if reply is None:
                         return final_answer  # declined / blocked / timed out
+                    check_execution()
                     if owner is not None:
                         if not world.answer(q.id, reply, expected_owner=owner):
                             return final_answer
@@ -2007,12 +2026,13 @@ class MCPServer:
     # ---- MCP tasks (stdio: async, pollable tool execution) ----------------
 
     def _task_store(self):
-        if self._tasks is None:
-            from .tasks import TaskStore
-            self._tasks = TaskStore(
-                lambda name, arguments: self._task_runner(name, arguments),
-                context_runner=self._task_runner,
-                on_status_change=self._emit_task_status)
+        with self._tasks_lock:
+            if self._tasks is None:
+                from .tasks import TaskStore
+                self._tasks = TaskStore(
+                    lambda name, arguments: self._task_runner(name, arguments),
+                    context_runner=self._task_runner,
+                    on_status_change=self._emit_task_status)
         return self._tasks
 
     # ---- task JSON-RPC methods (shared by stdio + HTTP transports) --------
@@ -2087,7 +2107,7 @@ class MCPServer:
             ),
         )
 
-    def handle_tasks_result(
+    def _task_result_arguments(
         self,
         params: dict,
         *,
@@ -2108,23 +2128,37 @@ class MCPServer:
                 credential_fingerprint=caller_credential_fingerprint,
                 capability=capability,
             )
-        return self._task_store().result(
-            params.get("taskId"),
-            owner=task_owner,
-            authorize=self._task_authorizer(
+        return {
+            "task_id": params.get("taskId"),
+            "owner": task_owner,
+            "authorize": self._task_authorizer(
                 capability,
                 caller_identity,
                 caller_trust_principal,
                 audit_denial=True,
             ),
-            reauthorize=self._task_authorizer(
+            "reauthorize": self._task_authorizer(
                 capability,
                 caller_identity,
                 caller_trust_principal,
                 audit_denial=True,
                 refresh_context=refresh_context,
             ),
-        )
+        }
+
+    def handle_tasks_result(self, params: dict, **kwargs) -> dict:
+        arguments = self._task_result_arguments(params, **kwargs)
+        return self._task_store().result(**arguments)
+
+    async def handle_tasks_result_async(self, params: dict, **kwargs) -> dict:
+        arguments = self._task_result_arguments(params, **kwargs)
+        return await self._task_store().result_async(**arguments)
+
+    def shutdown(self) -> None:
+        self._requests.shutdown()
+        with self._tasks_lock:
+            if self._tasks is not None:
+                self._tasks.shutdown()
 
     def handle_tasks_cancel(
         self,
@@ -2351,6 +2385,8 @@ class MCPServer:
         if not isinstance(msg, dict):
             self._send_error(None, -32600, "Invalid Request: expected a JSON-RPC object")
             return
+        if self._stdio_session is not None and self._stdio_session.route(msg):
+            return
         method = msg.get("method")
         # Distinguish a MISSING id (notification, no reply) from an explicit
         # `"id": null` (a request still owed a response). `_NO_ID` is the
@@ -2389,23 +2425,34 @@ class MCPServer:
                 self._send_error(request_id, -32603, f"internal error: {detail}")
 
     def run(self) -> None:
+        from .execution import RequestExecutions
+        from .stdio_transport import StdioSession
+
+        if self._requests.snapshot():
+            raise RuntimeError("cannot restart stdio while prior request execution is active")
+        self._requests.shutdown()
+        # Preserve serial ordinary tool effects while the independent reader
+        # continues serving cancellation, task controls and elicitation replies.
+        self._requests = RequestExecutions(workers=1)
         log.info("Lightwork MCP server starting (protocol %s)", PROTOCOL_VERSION)
         # Mark the stdio transport: server-initiated elicitation is only valid
-        # here (it needs the bidirectional pipe; the HTTP path can't do a
-        # mid-call server->client request). Read via readline() rather than
-        # `for line in sys.stdin` so a tool handler can do a nested read for an
-        # elicitation response without the iterator's read-ahead buffer
-        # swallowing the following messages.
+        # here (it needs the bidirectional pipe). This loop is the sole reader;
+        # owned tool workers wait for elicitation replies routed by the session.
         self._stdio = True
         self._tasks_enabled = True
-        while True:
-            line = sys.stdin.readline()
-            if not line:  # EOF -- client closed the pipe
-                break
-            line = line.strip()
-            if not line:
-                continue
-            self._handle_stdio_line(line)
+        self._stdio_session = StdioSession(self)
+        try:
+            while True:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if line:
+                    self._handle_stdio_line(line)
+        finally:
+            self._stdio_session.close()
+            self._stdio_session = None
+            self._stdio = False
 
 
 def main() -> None:
@@ -2426,7 +2473,11 @@ def main() -> None:
         from .http_transport import serve
         serve(host=args.host, port=args.port)
     else:
-        MCPServer().run()
+        server = MCPServer()
+        try:
+            server.run()
+        finally:
+            server.shutdown()
 
 
 if __name__ == "__main__":

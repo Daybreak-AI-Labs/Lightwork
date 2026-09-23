@@ -36,34 +36,46 @@ ts = [["node", "/abs/path/to/plugin.js"]]
 
 `maverick.ts_plugin_host.load_ts_plugin(command)` runs `command --describe` to
 read the manifest and builds one Lightwork tool per entry. Tool calls go to a
-single persistent child process, started lazily; if it crashes mid-call it is
-restarted and the call retried once, and a call that exceeds the timeout kills
-it and returns an `ERROR:` string.
+single persistent child process, started lazily. Each call has one deadline,
+including lock waiting, input writes and response reads. A crash after possible
+dispatch returns an unknown outcome and is never automatically replayed. A new,
+deliberate invocation can start a fresh child. Reconcile uncertain external
+effects before making that decision.
 
-## Wire protocol (`maverick-plugin/1`)
+## Wire protocol (`maverick-plugin/2`)
 
-NDJSON: one JSON object per line, UTF-8.
+NDJSON uses UTF-8, with a 1-MiB request/response frame cap. The manifest advertises
+version 2 and `execution.replay: "never"`. Requests and replies look like:
 
-- `plugin --describe` prints the manifest and exits:
+```json
+{"protocol":"maverick-plugin/2","id":"logical-call-id","attempt":1,"replay":"never","deadline_unix_ms":1893456000000,"tool":"greet","args":{"who":"Lightwork"}}
+{"id":"logical-call-id","attempt":1,"effect":"completed","result":"Hello, Lightwork!"}
+```
 
-  ```json
-  {"protocol": "maverick-plugin/1", "tools": [{"name": "greet", "description": "...", "inputSchema": {...}}]}
-  ```
+The deadline is an absolute Unix time in milliseconds; a caller must supply a
+future deadline for each invocation. The example is illustrative, not a preset.
+Replies distinguish `not_started`, `completed` and `unknown`. An exception after
+handler entry has an unknown effect outcome even when an error message is
+available. IDs correlate calls; the SDK provides no durable deduplication and
+does not automatically retry. A protocol failure has an `error` field; a handler
+failure retains the `ERROR:` result convention.
 
-- Otherwise the plugin reads requests on stdin and answers on stdout, echoing
-  back each request's `id`:
+Handlers may accept a second `InvocationContext` argument with `requestId`,
+`attempt`, `deadlineUnixMs`, `signal` and `replay`. Pass `signal` into cancellable
+I/O. The SDK signals deadline expiry but continues to own that handler until its
+cleanup finishes, preserving serialized effects. The Python host owns hard
+process termination if the deadline is exceeded. Neither action rolls back
+already completed external effects.
 
-  ```json
-  {"id": 1, "tool": "greet", "args": {"who": "Lightwork"}}
-  {"id": 1, "result": "Hello, Lightwork!"}
-  ```
+Version 1 requests still receive version 1 responses, and existing one-argument
+handlers keep working. The host also accepts legacy version 1 plugins with the
+same conservative no-replay policy. Arbitrary stdout logs are not protocol
+messages: use stderr, which the host drains and bounds without exposing it.
+Output backpressure is awaited before another handler starts; oversized or
+unterminated frames are rejected.
 
-  Protocol-level failures (unknown tool, malformed request) use
-  `{"id": 1, "error": "..."}` instead; the host renders both shapes as
-  `ERROR:` strings for the model. stdin closing means shut down.
-
-The protocol is language-neutral — anything that speaks it can be loaded the
-same way; this SDK is just the TypeScript implementation.
+See [process ownership and limitations](../../docs/operations/owned-cli-and-plugins.md)
+for host limits, cleanup behavior and operating-system constraints.
 
 ## Structured page context
 

@@ -243,6 +243,7 @@
     <p>Pick the colleague from the list (everyone with a role above is in it) or paste their exact sign-in ID. Review decisions require permission to operate. Removing a workspace assignment may restore a broader global role; use an explicit read-only role when you intend to reduce access.</p>
     {% else %}<p>No active workspace yet. <a href="/tenants">Create one on the Workspaces page</a>, then assign members here.</p>{% endif %}
   </section>
+  <script src="/static/lightwork-access-state.js" defer></script>
   <script src="/static/lightwork-workspace-members.js" defer></script>
   <div class="panel">
     {% if users %}

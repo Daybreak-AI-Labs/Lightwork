@@ -10,18 +10,20 @@ world model uses). The DB path is confined to the sandbox workspace.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from ..query_execution import QueryExecution
+from ..query_results import QueryResult, render_effect
 from . import Tool
 from .ffmpeg_tool import _safe_path
 
 log = logging.getLogger(__name__)
 
 _MAX_ROWS_CAP = 1000
-_MAX_OUTPUT = 50_000
 _WRITE_KEYWORDS = frozenset({
     "insert", "update", "delete", "replace", "drop", "alter", "create",
     "truncate", "attach", "detach", "reindex", "vacuum",
@@ -79,6 +81,8 @@ _SQL_QUERY_SCHEMA: dict[str, Any] = {
             "type": "boolean",
             "description": "Reject writes and open the DB read-only. Default true.",
         },
+        "response_format": {"type": "string", "enum": ["text", "json"],
+                            "description": "Readable preview (default) or structured bounded result."},
     },
     "required": ["database", "query"],
 }
@@ -130,14 +134,57 @@ def _write_authorizer(action: int, _arg1: str | None, _arg2: str | None,
     return sqlite3.SQLITE_OK
 
 
-def _format_rows(cols: list[str], rows: list[tuple]) -> str:
-    header = " | ".join(cols)
-    sep = "-+-".join("-" * len(c) for c in cols)
-    body = [
-        " | ".join("NULL" if v is None else str(v) for v in row)
-        for row in rows
-    ]
-    return "\n".join([header, sep, *body])
+def _execute_sqlite_query(path, query, params, read_only, max_rows, response_format):
+    conn = None
+    cur = None
+    with QueryExecution(mutation=not read_only) as execution:
+        try:
+            if read_only:
+                conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True,
+                                       timeout=min(10, execution.remaining()))
+                conn.set_authorizer(_read_only_authorizer)
+            else:
+                conn = sqlite3.connect(str(path), timeout=min(10, execution.remaining()))
+                conn.set_authorizer(_write_authorizer)
+            execution.bind_sqlite(conn)
+            # Explicit ownership covers SQLite DDL as well as implicit DML.
+            # Nontransactional maintenance is not admitted through this tool.
+            conn.execute("BEGIN").close()
+            execution.started()
+            cur = conn.execute(query, params)
+            if cur.description is None:
+                affected = cur.rowcount
+                cur.close()
+                cur = None
+                execution.commit(conn)
+                return render_effect(affected, execution.state, execution.cancellation_support,
+                                     response_format=response_format, style="sqlite")
+            cols = [column[0] for column in cur.description]
+            rows = cur.fetchmany(max_rows + 1)
+            cur.close()
+            cur = None
+            execution.check()
+            if not read_only:
+                execution.commit(conn)
+            else:
+                conn.rollback()
+                execution.state = "read_only"
+            result = QueryResult.from_rows(cols, rows, row_limit=max_rows,
+                                           transaction_status=execution.state,
+                                           cancellation_support=execution.cancellation_support)
+            execution.check()
+            return result.render(style="sqlite", response_format=response_format)
+        except BaseException as exc:
+            if cur is not None:
+                with contextlib.suppress(Exception):
+                    cur.close()
+            if conn is not None:
+                execution.rollback(conn)
+            return execution.failure(exc)
+        finally:
+            execution.stop_monitor()
+            if conn is not None:
+                conn.close()
 
 
 def _run_sql_query(args: dict[str, Any], sandbox) -> str:
@@ -147,6 +194,9 @@ def _run_sql_query(args: dict[str, Any], sandbox) -> str:
         return "ERROR: database is required"
     if not query:
         return "ERROR: query is required"
+    response_format = args.get("response_format", "text")
+    if response_format not in {"text", "json"}:
+        return "ERROR: response_format must be text or json"
     read_only = args.get("read_only")
     read_only = True if read_only is None else bool(read_only)
     try:
@@ -169,43 +219,7 @@ def _run_sql_query(args: dict[str, Any], sandbox) -> str:
     if read_only and _looks_like_write(query):
         return "ERROR: write statement rejected in read-only mode (set read_only=false to allow)"
 
-    conn = None
-    try:
-        if read_only:
-            # mode=ro protects the main DB; the authorizer also denies SQLite
-            # operations that could write through attached/temp databases or
-            # filesystem paths embedded in SQL (for example ATTACH/VACUUM INTO).
-            conn = sqlite3.connect(f"{p.resolve().as_uri()}?mode=ro", uri=True, timeout=10)
-            conn.set_authorizer(_read_only_authorizer)
-        else:
-            conn = sqlite3.connect(str(p), timeout=10)
-            # Confine writes to the checked database path: deny ATTACH/DETACH so
-            # a statement can't reach an arbitrary filesystem path.
-            conn.set_authorizer(_write_authorizer)
-        cur = conn.execute(query, params)
-        if cur.description is None:
-            conn.commit()
-            return f"OK: {cur.rowcount} row(s) affected"
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchmany(max_rows)
-        truncated = cur.fetchone() is not None
-        # A write with a RETURNING clause (INSERT/UPDATE/DELETE ... RETURNING)
-        # produces a cursor description, so it lands here rather than the branch
-        # above -- but it still opened an implicit transaction that sqlite rolls
-        # back on close unless we commit. In read-only mode nothing mutated, so
-        # committing is a harmless no-op; do it for writes to persist RETURNING.
-        if not read_only:
-            conn.commit()
-        out = _format_rows(cols, rows)
-        summary = f"\n({len(rows)} row(s)" + (f", truncated at {max_rows}" if truncated else "") + ")"
-        return (out + summary)[:_MAX_OUTPUT]
-    except (sqlite3.Error, sqlite3.Warning) as e:
-        # sqlite3.Warning (not a subclass of Error) is what Python <=3.10
-        # raises for a multi-statement execute(); 3.11+ raises ProgrammingError.
-        return f"ERROR: sqlite: {e}"
-    finally:
-        if conn is not None:
-            conn.close()
+    return _execute_sqlite_query(p, query, params, read_only, max_rows, response_format)
 
 
 def sql_query(sandbox=None) -> Tool:

@@ -35,7 +35,7 @@ async def test_agent_exception_scores_zero():
 
     cases = [EvalCase(prompt="x", check=lambda o: o == "ok")]
     rep = await evaluate(agent, cases)
-    assert rep.score == 0.0  # raised -> "" -> check fails, harness doesn't crash
+    assert rep.score == 0.0  # Failed execution is ungraded and contributes zero.
 
 
 @pytest.mark.asyncio

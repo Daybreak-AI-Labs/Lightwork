@@ -37,8 +37,10 @@ def test_sync_generator_streams_and_joins():
     reg.set_chunk_listener(lambda name, chunk: seen.append((name, chunk)))
     out = asyncio.run(reg.run("streamer", {}))
     assert out == "chunk-1 chunk-2 chunk-3"
-    assert seen == [("streamer", "chunk-1 "), ("streamer", "chunk-2 "),
-                    ("streamer", "chunk-3")]
+    assert len(seen) == 1 and "Buffering" in seen[0][1]
+    assert "chunk-1" not in str(seen)
+    reg.deliver_screened("streamer", out)
+    assert seen[-1] == ("streamer", out)
 
 
 def test_async_generator_streams_and_joins():
@@ -47,7 +49,9 @@ def test_async_generator_streams_and_joins():
     reg.set_chunk_listener(lambda name, chunk: seen.append(chunk))
     out = asyncio.run(reg.run("astreamer", {}))
     assert out == "a1 a2 "
-    assert seen == ["a1 ", "a2 "]
+    assert len(seen) == 1 and "Buffering" in seen[0]
+    reg.deliver_screened("astreamer", out)
+    assert seen[-1] == out
 
 
 def test_streaming_without_listener_still_joins():
@@ -84,4 +88,4 @@ def test_clearing_listener():
     asyncio.run(reg.run("streamer", {}))
     reg.set_chunk_listener(None)
     asyncio.run(reg.run("streamer", {}))
-    assert len(seen) == 3  # second run streamed to no one
+    assert len(seen) == 1  # second run sent progress to no one

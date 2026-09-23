@@ -28,6 +28,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
+from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from .file_lock import (
     atomic_create_bytes,
     cross_process_lock,
@@ -47,7 +48,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 39
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -644,6 +645,13 @@ MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE approvals ADD COLUMN department TEXT NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_goals_domain_completed ON goals(domain, completed_at)",
     ],
+    37: [
+        "CREATE INDEX IF NOT EXISTS idx_goals_root_owner ON goals(owner, id DESC) WHERE parent_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_goals_root_id ON goals(id DESC) WHERE parent_id IS NULL",
+    ],
+    38: [_ATTACHMENT_SUBMISSION_SCHEMA],
+    # PostgreSQL v39 scopes learning keys by tenant; SQLite files already do.
+    39: [],
 }
 
 
@@ -2187,6 +2195,37 @@ class WorldModel:
         rows = self._read_all(sql, params)
         return [_goal_from_row(r) for r in rows]
 
+    def conversation_summaries(self, *, owner: str | None = None,
+                               limit: int = 25, before_id: int | None = None):
+        """Root creation order, newest first; children never consume the limit."""
+        from .goal_views import ConversationSummary
+
+        sql = "SELECT id,title,status,updated_at,owner FROM goals WHERE parent_id IS NULL"
+        params: list[Any] = []
+        if owner is not None:
+            sql += " AND owner=?"
+            params.append(owner)
+        if before_id is not None:
+            sql += " AND id<?"
+            params.append(int(before_id))
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, min(100, int(limit))))
+        rows = self._read_all(sql, tuple(params))
+        titles = _dec_fields([row["title"] for row in rows])
+        return [ConversationSummary(row["id"], title, row["status"], row["updated_at"], row["owner"])
+                for row, title in zip(rows, titles, strict=True)]
+
+    def goal_stream_state(self, goal_id: int, *, include_result: bool = False):
+        """Read authorization/status fields; decrypt the result only on demand."""
+        from .goal_views import GoalStreamState
+
+        columns = "id,status,owner,result" if include_result else "id,status,owner"
+        row = self._read_one(f"SELECT {columns} FROM goals WHERE id=?", (goal_id,))
+        if row is None:
+            return None
+        return GoalStreamState(row["id"], row["status"], row["owner"],
+                               _dec_field(row["result"]) if include_result else "")
+
     def search_goals(
         self,
         query: str,
@@ -2951,7 +2990,7 @@ class WorldModel:
         """All approvals, newest first (the Operating Record's human-decision
         feed); ``pending_approvals`` remains the queue view."""
         rows = self._read_all(
-            "SELECT * FROM approvals ORDER BY requested_at DESC LIMIT ?",
+            "SELECT * FROM approvals ORDER BY requested_at DESC, id DESC LIMIT ?",
             (max(1, int(limit)),),
         )
         return [_approval_from_row(r) for r in rows]
@@ -4419,13 +4458,11 @@ class WorldModel:
         sha256: str,
         path: str,
     ) -> int:
-        with self._writing() as conn:
-            cur = conn.execute(
-                "INSERT INTO attachments(goal_id, filename, mime, size_bytes, sha256, path, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?)",
-                (goal_id, filename, mime, size_bytes, sha256, path, time.time()),
-            )
-            return cur.lastrowid
+        from .attachment_submissions import AttachmentAdmission, SubmissionStore
+
+        return SubmissionStore(self).admit(
+            goal_id, [AttachmentAdmission(filename, mime, size_bytes, sha256, path)],
+        )[0]
 
     def list_attachments(self, goal_id: int) -> list[Attachment]:
         rows = self._read_all(

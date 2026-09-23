@@ -134,6 +134,24 @@ def test_pgvector_add_upserts_with_vectors(monkeypatch):
     assert inserts[0][1][-1].startswith("[") and inserts[0][1][-1].endswith("]")
 
 
+def test_atomic_single_record_contract_prepares_before_sql(monkeypatch):
+    conn = _install_fake_psycopg(monkeypatch)
+    from maverick.vector_store.pgvector_store import PgVectorStore
+
+    store = PgVectorStore(dsn="postgresql://x", embedder=_embedder(), dim=3)
+    before = len(conn.executed)
+    with pytest.raises(ValueError):
+        store.upsert_one("bad", id="same", metadata={"goal_id": 1}, embedding=[float("nan"), 0.0, 0.0])
+    assert len(conn.executed) == before
+    store.upsert_one("prior", id="same", metadata={"goal_id": 1}, embedding=[1.0, 0.0, 0.0])
+    conn.error_match, conn.error = "insert", OSError("write unavailable")
+    with pytest.raises(Exception, match="write unavailable"):
+        store.upsert_one("replacement", id="same", metadata={"goal_id": 1}, embedding=[0.0, 1.0, 0.0])
+    statements = [sql for sql, _ in conn.executed[before:]]
+    assert not any("DELETE" in sql for sql in statements)
+    assert sum("ON CONFLICT (collection, id) DO UPDATE" in sql for sql in statements) == 2
+
+
 def test_pgvector_add_empty_noop(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
     from maverick.vector_store.pgvector_store import PgVectorStore

@@ -308,6 +308,30 @@ class Channel(ABC):
             )
         return reply.text
 
+    async def admit_message(self, msg: IncomingMessage, **kwargs):
+        """Persist an authorized inbound message before acknowledging intake."""
+        from .delivery import admit_message
+
+        return await admit_message(msg, **kwargs)
+
+    async def process_message(self, msg: IncomingMessage, **kwargs):
+        """Execute once and deliver only the durable saved reply on retry."""
+        from .delivery import process_message
+
+        return await process_message(self, msg, **kwargs)
+
+    async def recover_messages(self, **kwargs):
+        """Recover a bounded fair window under adapter-owned current policy."""
+        from .delivery import recover_messages
+
+        return await recover_messages(self, **kwargs)
+
+    def recovery_worker(self, **kwargs):
+        """Own a periodic recovery task for the surrounding transport lifetime."""
+        from .delivery import recovery_worker
+
+        return recovery_worker(self, **kwargs)
+
     async def send_threaded(
         self, user_id: str, text: str, *, reply_to: str | None = None,
     ) -> None:

@@ -40,6 +40,12 @@
                    prove complete instrumentation or independent custody.') }}
   {% endcall %}
 
+  {% if audit_read_report and audit_read_report.failures %}
+  <p role="alert">Audit records could only be read partially or were unreadable.
+    This view is incomplete. Check the source files and encryption keys before
+    using an export as evidence.</p>
+  {% endif %}
+
   <section class="panel" aria-labelledby="audit-custody-title">
     <div class="aud-custody-actions">
       <div style="flex: 1 1 32rem;">
@@ -237,7 +243,7 @@
         <tbody>
         {% for ev in events %}
           <tr>
-            <td class="muted" style="white-space: nowrap;">{{ ev.ts | datetime }}</td>
+            <td class="muted" style="white-space: nowrap;">{{ ev.get('ts') | datetime }}</td>
             <td><code>{{ ev.kind }}</code></td>
             <td class="muted">{{ ev.agent or '-' }}</td>
             <td class="muted">{{ ev.goal_id if ev.goal_id is not none else '-' }}</td>

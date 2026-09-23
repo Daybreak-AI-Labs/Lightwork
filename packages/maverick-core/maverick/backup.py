@@ -56,6 +56,7 @@ _RESTORE_TX_ROOT = ".restore-transactions"
 _RESTORE_LOCK_TARGET = ".restore-transaction"
 _JOURNAL = "journal.json"
 _DB_SIDECARS = ("-wal", "-shm", "-journal")
+_DERIVED_REBUILD_MARKER_BYTES = b"rebuild from canonical rows\n"
 
 # A live WorldModel touches its WAL/SHM sidecars on every write and only holds
 # its own cross_process_lock briefly during __init__ (world_model.py), so
@@ -1304,6 +1305,22 @@ def _verify_restored(root: Path, expected: dict) -> None:
                 connection.close()
 
 
+def _flow_index_restore_markers(targets: set[str]) -> set[str]:
+    """Journal derived-cache invalidation alongside restored canonical rows."""
+    markers = set()
+    for relative in targets:
+        path = PurePosixPath(relative)
+        if path.parent.name == "runs" and path.parent.parent.name == "flows":
+            markers.add((path.parent.parent / ".run-index-rebuild").as_posix())
+        elif path.name == "run-index.sqlite3" and path.parent.name == "flows":
+            markers.add((path.parent / ".run-index-rebuild").as_posix())
+        if path.parent.name == "vendor_management" and path.suffix == ".json":
+            markers.add((path.parent / ".record-lookup-rebuild").as_posix())
+        elif path.parent.name == ".record-lookup" and path.parent.parent.name == "vendor_management":
+            markers.add((path.parent.parent / ".record-lookup-rebuild").as_posix())
+    return markers
+
+
 def _apply_transaction(
     root: Path,
     stage: Path,
@@ -1323,6 +1340,8 @@ def _apply_transaction(
     committed = False
     try:
         targets = _replacement_targets(root, expected) if replace_existing else set(expected)
+        flow_markers = _flow_index_restore_markers(targets)
+        targets.update(flow_markers)
         entries = [_capture_original(root, tx, rel) for rel in sorted(targets)]
         body["entries"] = entries
         body["state"] = "prepared"
@@ -1341,6 +1360,10 @@ def _apply_transaction(
                         sidecar.unlink()
             if rel in expected:
                 _publish_staged_file(source, destination)
+            elif rel in flow_markers:
+                # This is part of the same rollback journal, not a post-commit
+                # hook that could turn successful restore into ambiguous failure.
+                file_lock.atomic_write_bytes(destination, _DERIVED_REBUILD_MARKER_BYTES)
             elif destination.exists():
                 destination.unlink()
         if replace_existing:

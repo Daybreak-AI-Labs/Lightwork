@@ -7,7 +7,6 @@ without patching the kernel.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import json
 import logging
@@ -2825,6 +2824,7 @@ class Agent:
 
         effect_completed = False
         execution_status = "error"
+        execution_unknown = False
         try:
             # W1-31: enforce the wall-clock cap and killswitch DURING
             # dispatch, not only at turn boundaries -- a tool with no timeout
@@ -2832,15 +2832,18 @@ class Agent:
             # browser/file-watcher wait) could otherwise hold the goal
             # 'active' past max_wall_seconds and ignore `maverick halt`
             # until it happened to return.
-            output = await self._await_wall_clock_guarded(
-                lambda: self.tools.run(name, args),
-                in_flight_note="mid-tool-execution")
+            from .connector_attempts import bind_tool_budget
+            with bind_tool_budget(self.ctx.budget):
+                output = await self._await_wall_clock_guarded(
+                    lambda: self.tools.run(name, args),
+                    in_flight_note="mid-tool-execution")
             # From this point onward the connector returned normally and may
             # already have committed an external mutation.  Keep that fact
             # separate from failures in hooks, screening, framing, or other
             # post-effect processing so none of those failures can recast the
             # completed call as replay-safe.
             effect_completed = True
+            execution_unknown = getattr(output, "tool_execution_unknown", False)
             execution_status = _tool_status(output)
             await _dispatch_hooks(HookContext(
                 event=HookEvent.POST_TOOL_USE,
@@ -2853,20 +2856,17 @@ class Agent:
             if shield is not None:
                 try:
                     out_verdict = shield.scan_output(output)
-                except Exception as exc:  # scanner bugs are observable fail-open
+                except Exception as exc:  # configured screening must finish before release
                     log.warning(
-                        "shield.scan_output raised on tool=%s output "
-                        "(fail-open): %s: %s",
-                        name,
+                        "shield output screening failed (%s); content withheld",
                         type(exc).__name__,
-                        exc,
                     )
                     self.ctx.blackboard.post(
-                        self.name,
-                        "warning",
-                        f"tool={name} shield output-scan errored (fail-open): "
-                        f"{type(exc).__name__}",
+                        self.name, "error",
+                        "tool output-scan errored; content withheld "
+                        f"({type(exc).__name__}); reconcile without replay",
                     )
+                    raise
                 else:
                     if not out_verdict.allowed:
                         reason = "; ".join(out_verdict.reasons)
@@ -2894,15 +2894,37 @@ class Agent:
                             f"({out_verdict.severity}): {reason}. Result withheld; "
                             "do not retry solely to recover the output."
                         )
-            try:
-                from .safety.secret_detector import redact as _redact_secrets
-                output, _redacted = _redact_secrets(output)
-            except Exception:  # pragma: no cover - detector errors are fail-open
-                pass
-            output = _cap_tool_output(output, limit=_tool_result_limit(self.model))
+            from .safety.secret_detector import redact as _redact_secrets
+            from .tool_result_stream import needs_complete_output, result_bytes
+
+            # Scan/redact the complete bounded value, including secrets split
+            # across producer chunks. No listener receives producer content.
+            result_bytes(output)
+            output, _redacted = _redact_secrets(output)
+            result_bytes(output)
+            safe_name, _ = _redact_secrets(str(name)[:128])
+            complete_output = output
+            limit = _tool_result_limit(self.model)
+            if not needs_complete_output() and len(output) > limit:
+                from .tool_result_artifacts import publish
+
+                ref = publish(output, goal_id=self.ctx.goal_id,
+                              principal=self.tools._principal, tool=safe_name)
+                # Keep the existing preview/error-prefix contract. The reference
+                # binds immutable full data; a preview is never executable data.
+                output = _cap_tool_output(output, limit=limit)
+                reader_allowed = self.tools._acl_allows("read_tool_result")
+                output += (
+                    "\n[Complete screened result retained: artifact_id="
+                    f"{ref['artifact_id']}; bytes={ref['bytes']}; "
+                    f"expires_at={ref['expires_at']}. "
+                    + ("Read with read_tool_result using offset/next_offset."
+                       if reader_allowed else "Artifact reading is denied by the current tool ACL.")
+                    + " Do not repeat the original action to recover omitted data.]"
+                )
             nonce = _secrets.token_hex(8)
             framed = (
-                f"<tool_output tool={name!r} id={nonce}>\n"
+                f"<tool_output tool={safe_name!r} id={nonce}>\n"
                 f"{output}\n"
                 f"</tool_output {nonce}>"
             )
@@ -2914,6 +2936,7 @@ class Agent:
             if not record_terminal(
                 status=execution_status,
                 disposition=(
+                    "execution_unknown" if execution_unknown else
                     "completed" if execution_status == "ok" else "tool_error"
                 ),
                 output_summary=_audit_summary(output),
@@ -2922,6 +2945,14 @@ class Agent:
                     "INDETERMINATE: the tool ran, but its terminal audit evidence "
                     "could not be written; reconcile state and do not retry"
                 )
+            # Observation is optional for compatible run-only registries, and
+            # cannot change an already completed, screened and audited effect.
+            try:
+                deliver = getattr(self.tools, "deliver_screened", None)
+                if callable(deliver):
+                    deliver(safe_name, complete_output)
+            except Exception as exc:
+                log.warning("tool output observer failed (%s)", type(exc).__name__)
             return framed + guard_note
         except BaseException as exc:
             if not terminal_attempted:
@@ -2939,6 +2970,8 @@ class Agent:
                         "Halted": "halted",
                         "CancelledError": "cancelled",
                     }.get(type(exc).__name__, "exception")
+                    if getattr(exc, "tool_execution_unknown", False):
+                        disposition = "execution_unknown"
                     record_terminal(
                         status="error",
                         disposition=disposition,
@@ -3534,14 +3567,17 @@ class Agent:
                         f"wall-clock cap {budget.max_wall_seconds:.0f}s reached "
                         f"{in_flight_note}")
                 killswitch.check()  # raises killswitch.Halted if tripped
-        except BaseException:
+        except BaseException as stop_signal:
             # Wall cap, halt, or an upstream cancellation: cancel the in-flight
             # call (aborts the provider HTTP request / tool coroutine) before
             # propagating.
             if not task.done():
                 task.cancel()
-                with contextlib.suppress(BaseException):
+                try:
                     await task
+                except BaseException as cancelled:
+                    if getattr(cancelled, "tool_execution_unknown", False):
+                        stop_signal.tool_execution_unknown = True
             raise
 
     async def _complete_guarded(self, **kw):
@@ -3803,18 +3839,22 @@ class Agent:
                 messages.append({"role": "user", "content": _prm_note})
                 self._last_prm_nudge_step = step
 
-            from .compaction.plugins import compact_with
-            # Some opt-in strategies make provider calls, so apply the same
-            # pre-spend gate and budget object to compaction as the main turn.
-            self.ctx.budget.check()
-            messages = compact_with(
-                messages, llm=self.ctx.llm,
-                conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
-                budget=self.ctx.budget,
-                scope=self.domain,
-            )
-
+            from .compaction.plugins import compact_with_async
             try:
+                # Optional strategy I/O shares the same wall/halt guard and
+                # caller budget as the primary completion. No detached calls.
+                self.ctx.budget.check()
+                messages = await self._await_wall_clock_guarded(
+                    lambda messages=messages: compact_with_async(
+                        messages, llm=self.ctx.llm,
+                        conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
+                        budget=self.ctx.budget, scope=self.domain,
+                    ),
+                    in_flight_note="compacting context",
+                )
+                # Check even when compaction finished in the same poll as a
+                # halt: a completed optional request cannot authorize another.
+                killswitch.check()
                 # Stop BEFORE spending another call when the cap is already
                 # hit. record_tokens() only checks AFTER the response lands,
                 # so a goal at 99% of budget would otherwise still fire one

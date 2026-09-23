@@ -112,3 +112,49 @@ def test_real_macro_preserving_edit_and_calculation(worker):
         assert wb.active["B1"].value == 500
     finally:
         wb.close()
+
+
+def test_real_office_export_returns_verified_pdf_and_preserves_source(worker):
+    from maverick.tools.office_convert import office_convert
+    from pypdf import PdfReader
+
+    source = worker.workdir / "revenue.rtf"
+    raw = br"{\rtf1\ansi Revenue 120000\par Customer count 12}"
+    source.write_bytes(raw)
+    result = office_convert(worker).fn({"op": "to_pdf", "input_path": "revenue.rtf"})
+    assert result.startswith("wrote ") and "SHA-256" in result, result
+    assert source.read_bytes() == raw
+    text = "\n".join(page.extract_text() for page in PdfReader(worker.workdir / "revenue.pdf").pages)
+    assert "120000" in text and "Customer count 12" in text
+
+
+def test_real_pdflatex_verified_pdf_and_failure_preserves_output(worker):
+    from maverick.tools.latex_tool import latex_tool
+    from pypdf import PdfReader
+
+    tool = latex_tool(worker)
+    result = tool.fn({"op": "render", "engine": "pdflatex", "out": "revenue.pdf",
+                      "latex": r"\documentclass{article}\begin{document}Revenue 120000\end{document}"})
+    assert result.startswith("rendered PDF") and "SHA-256" in result, result
+    path = worker.workdir / "revenue.pdf"
+    original = path.read_bytes()
+    assert "120000" in "\n".join(page.extract_text() for page in PdfReader(path).pages)
+    failure = tool.fn({"op": "render", "engine": "pdflatex", "out": "revenue.pdf",
+                       "latex": r"\documentclass{article}\begin{document}\undefinedRevenueCommand\end{document}"})
+    assert failure.startswith("ERROR"), failure
+    assert path.read_bytes() == original
+
+
+def test_real_image_ocr_uses_verified_text_job(worker):
+    from maverick.tools.ocr import ocr
+    from PIL import Image, ImageDraw, ImageFont
+
+    path = worker.workdir / "revenue.png"
+    raster = Image.new("RGB", (1200, 300), "white")
+    font = ImageFont.truetype("DejaVuSans.ttf", 44)
+    ImageDraw.Draw(raster).text((40, 80), "Revenue 120000", font=font, fill="black")
+    raster.save(path)
+    original = path.read_bytes()
+    result = ocr(worker).fn({"op": "extract", "path": "revenue.png"})
+    assert "120000" in result, result
+    assert path.read_bytes() == original

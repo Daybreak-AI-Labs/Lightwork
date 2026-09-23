@@ -27,6 +27,11 @@ def test_file_watcher_baseline_then_diff(tmp_path: Path):
     from maverick.tools.file_watcher import file_watcher
     (tmp_path / "a.txt").write_text("a")
     (tmp_path / "b.txt").write_text("b")
+    # Native file mtimes can round above time.time() on Windows. Make these
+    # existing files clearly older than the baseline; keep later changes real.
+    old_ts = time.time() - 60
+    for name in ("a.txt", "b.txt"):
+        os.utime(tmp_path / name, (old_ts, old_ts))
     tool = file_watcher(_sandbox(tmp_path))
 
     baseline_out = tool.fn({"path": str(tmp_path)})

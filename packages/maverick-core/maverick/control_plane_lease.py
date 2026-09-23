@@ -49,9 +49,10 @@ shape the invariant is about, since the state lives on a ReadWriteOnce volume
 attached to one node. Two pods on different nodes with genuinely separate
 volumes are separate deployments and share no state to corrupt. The dangerous
 in-between is a network filesystem where ``flock`` is silently a no-op: there
-the lock would appear to succeed while providing no exclusion at all. That
-case fails closed -- if the backend cannot demonstrate locking, the process
-refuses to start rather than assume it is alone.
+the lock would appear to succeed while providing no exclusion at all. Explicit
+unsupported-lock errors fail closed. This local acquisition cannot detect a
+filesystem falsely reporting success and does not qualify cross-host exclusion;
+use the supported local volume and retain the deployment singleton guard.
 """
 
 from __future__ import annotations
@@ -61,6 +62,7 @@ import json
 import logging
 import os
 import socket
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -252,6 +254,21 @@ class Lease:
     def fencing_token(self) -> int:
         return self._holder.fencing_token
 
+    def assert_owned(self) -> None:
+        """Refuse a released or replaced local lock, without claiming DB fencing."""
+        if os.getpid() != self._holder.pid:
+            raise LeaseUnavailable("control-plane root ownership belongs to another process; inherited leases cannot authorize work")
+        if self._released:
+            raise LeaseUnavailable("control-plane root ownership was released")
+        try:
+            opened, visible = os.fstat(self._fd), self._path.stat()
+        except OSError as exc:
+            raise LeaseUnavailable("control-plane root ownership cannot be verified") from exc
+        if ((opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
+                or opened.st_nlink != 1 or visible.st_nlink != 1
+                or self._path.is_symlink()):
+            raise LeaseUnavailable("control-plane root lock identity changed")
+
     def release(self) -> None:
         """Drop ownership. The kernel does this anyway if the process dies."""
         if self._released:
@@ -265,6 +282,17 @@ class Lease:
 
 #: The lease this process holds, if any. One control plane per process.
 _held: Lease | None = None
+_admission_lock = threading.RLock()
+
+
+def _require_single_replica() -> None:
+    raw = os.environ.get("MAVERICK_REPLICA_COUNT", "1").strip()
+    if raw != "1":
+        raise LeaseUnavailable(
+            "MAVERICK_REPLICA_COUNT must remain 1: shared records and A2A claims "
+            "do not yet qualify the remaining control-plane authorities for "
+            "multiple replicas. Keep the single-owner deployment guard."
+        )
 
 
 def acquire(
@@ -276,11 +304,23 @@ def acquire(
     :class:`ControlPlaneBusy` if another process owns the root and
     :class:`LeaseUnavailable` if exclusivity cannot be established at all.
     """
+    with _admission_lock:
+        return _acquire(root, role=role)
+
+
+def _acquire(root: Path | None, *, role: str) -> Lease | None:
     global _held
-    if _held is not None:
-        return _held
+    _require_single_replica()
 
     path = lock_path(root)
+    if _held is not None:
+        if _held._released:
+            _held = None
+        else:
+            _held.assert_owned()
+            if _held.path.resolve() != path.resolve():
+                raise LeaseUnavailable("this process already owns a different control-plane data root")
+            return _held
     if override_enabled():
         log.warning(
             "control-plane lease: single-writer enforcement is DISABLED via "
@@ -291,10 +331,15 @@ def acquire(
         )
         return None
 
-    from .file_lock import ensure_private_directory
+    from .file_lock import ensure_private_directory, ensure_private_file
     ensure_private_directory(path.parent)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
+        ensure_private_file(path, 0o600)
+        opened, visible = os.fstat(fd), path.stat()
+        if ((opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
+                or opened.st_nlink != 1 or visible.st_nlink != 1 or path.is_symlink()):
+            raise LeaseUnavailable("control-plane root lock identity cannot be verified")
         if not _try_lock(fd):
             other = _read_holder(holder_path(path.parent))
             who = other.describe() if other else "an unidentified process"
@@ -336,15 +381,16 @@ def acquire(
 
 def current() -> Lease | None:
     """The lease this process holds, or None."""
-    return _held
+    return _held if _held is not None and not _held._released else None
 
 
 def release() -> None:
     """Drop this process's lease. Primarily for tests and clean shutdown."""
     global _held
-    if _held is not None:
-        _held.release()
-        _held = None
+    with _admission_lock:
+        if _held is not None:
+            _held.release()
+            _held = None
 
 
 def posture(root: Path | None = None) -> dict:
@@ -355,12 +401,21 @@ def posture(root: Path | None = None) -> dict:
     (nothing acquired -- which for the dashboard means startup did not run the
     guard, not that the root is free).
     """
-    if _held is not None:
+    try:
+        _require_single_replica()
+        owned = current()
+        if owned is not None:
+            owned.assert_owned()
+            if owned.path.resolve() != lock_path(root).resolve():
+                raise LeaseUnavailable("this process owns a different data root")
+    except LeaseUnavailable as exc:
+        return {"state": "unavailable", "single_writer_enforced": False, "detail": str(exc)}
+    if owned is not None:
         return {
             "state": "owned",
             "single_writer_enforced": True,
-            "fencing_token": _held.fencing_token,
-            "holder": _held.holder.describe(),
+            "fencing_token": owned.fencing_token,
+            "holder": owned.holder.describe(),
         }
     if override_enabled():
         return {

@@ -124,10 +124,14 @@ def test_timeout_returns_error(fake_cmd):
     assert "timed out" in out
 
 
-def test_crashed_child_restarted_once(fake_cmd):
+def test_crashed_child_is_not_replayed(fake_cmd):
     by_name = _by_name(load_ts_plugin(fake_cmd))
-    # First request kills the child before it replies; the host restarts the
-    # child and retries, and the fresh child (sentinel now present) succeeds.
+    # The first call changed the sentinel, then died without a response.
+    # Restarting is allowed only for a separate, deliberate new invocation.
+    first = by_name["flaky"].fn({})
+    assert "outcome unknown" in first
+    assert first.attempt.outcome_unknown
+    assert not first.attempt.retryable
     assert by_name["flaky"].fn({}) == "recovered"
 
 

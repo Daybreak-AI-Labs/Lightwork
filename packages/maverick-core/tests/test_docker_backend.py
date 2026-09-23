@@ -91,7 +91,7 @@ def test_timeout_cleanup_failure_surfaced(monkeypatch, tmp_path):
     def _fake_run(args, **kwargs):
         if args[:2] == ["docker", "run"]:
             raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0), output=b"x")
-        if args[:2] == ["docker", "kill"]:
+        if args[0] == "docker" and args[1] in {"kill", "rm", "ps"}:
             raise OSError("daemon wedged")
         raise AssertionError(f"unexpected: {args}")
 
@@ -287,6 +287,8 @@ def test_warm_timeout_removes_container(monkeypatch, tmp_path):
             return subprocess.CompletedProcess(args, 0, stdout="warm", stderr="")
         if args[:2] == ["docker", "exec"]:
             raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0), output=b"partial")
+        if args[:2] == ["docker", "kill"]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         if args[:3] == ["docker", "rm", "-f"]:
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         raise AssertionError(f"unexpected docker call: {args}")

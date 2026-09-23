@@ -1,166 +1,88 @@
-"""Tests for the office_convert tool (LibreOffice headless conversion).
-
-Offline: the LibreOffice binary is faked via shutil.which, and the shell is a
-recording sandbox so we assert the argv that would run, never executing it.
-"""
+"""Office entry-point contracts; selected-backend fake, no native conversion."""
 from __future__ import annotations
-
-from types import SimpleNamespace
 
 import pytest
 from maverick.tools.office_convert import office_convert
 
-
-class RecordingSandbox:
-    """Routes sandbox_run through .exec and records the shell string."""
-
-    def __init__(self, workdir, *, exit_code=0, stdout="", stderr=""):
-        self.workdir = str(workdir)
-        self._res = SimpleNamespace(exit_code=exit_code, stdout=stdout, stderr=stderr)
-        self.commands: list[str] = []
-
-    def exec(self, cmd, timeout=None):
-        self.commands.append(cmd)
-        return self._res
+from test_support.document_jobs import install_backend
 
 
-@pytest.fixture
-def have_lo(monkeypatch):
-    monkeypatch.setattr(
-        "maverick.tools.office_convert.shutil.which",
-        lambda name: "/usr/bin/libreoffice" if name == "libreoffice" else None,
-    )
+@pytest.mark.parametrize("op,target,expected", [
+    ("convert", "PDF", "PDF"), ("to_pdf", None, "pdf"), ("to_text", None, "txt"),
+])
+def test_conversion_uses_private_backend_job_and_verified_output(monkeypatch, tmp_path, op, target, expected):
+    backend, state = install_backend(monkeypatch, tmp_path)
+    source = tmp_path / "report.docx"
+    source.write_bytes(b"immutable Office input fixture")
+    args = {"op": op, "input_path": "report.docx"}
+    if target:
+        args["to"] = target
+    out = office_convert(backend).fn(args)
+    assert out.startswith("wrote ") and "SHA-256" in out and "test-only-1" in out
+    assert source.read_bytes() == b"immutable Office input fixture"
+    assert state["requests"][0]["target"] == expected
+    assert state["requests"][0]["operation"] == "convert"
+    assert all(not path.exists() for path in state["stages"])
 
 
-def test_missing_binary(monkeypatch):
-    monkeypatch.setattr("maverick.tools.office_convert.shutil.which", lambda name: None)
-    t = office_convert()
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
-    assert out.startswith("ERROR") and "libreoffice not on PATH" in out
-
-
-def test_convert_builds_headless_command(tmp_path, have_lo):
-    sb = RecordingSandbox(tmp_path, stdout="convert report.docx -> report.pdf")
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
-    assert len(sb.commands) == 1
-    cmd = sb.commands[0]
-    assert "--headless" in cmd
-    assert "--convert-to pdf" in cmd
-    assert "--outdir" in cmd
-    assert out.startswith("wrote ")
-    assert out.endswith("report.pdf") or "report.pdf" in out
-
-
-def test_to_pdf_shortcut(tmp_path, have_lo):
-    sb = RecordingSandbox(tmp_path)
-    t = office_convert(sandbox=sb)
-    t.fn({"op": "to_pdf", "input_path": "sheet.xlsx"})
-    assert "--convert-to pdf" in sb.commands[0]
-
-
-def test_to_text_shortcut(tmp_path, have_lo):
-    sb = RecordingSandbox(tmp_path)
-    t = office_convert(sandbox=sb)
-    t.fn({"op": "to_text", "input_path": "deck.pptx"})
-    assert "--convert-to txt" in sb.commands[0]
-
-
-def test_outdir_honored(tmp_path, have_lo):
-    (tmp_path / "out").mkdir()
-    sb = RecordingSandbox(tmp_path)
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx",
-                "to": "pdf", "outdir": "out"})
-    assert "/out" in sb.commands[0].replace("\\", "/")
+def test_outdir_honored(monkeypatch, tmp_path):
+    backend, _ = install_backend(monkeypatch, tmp_path)
+    (tmp_path / "report.docx").write_bytes(b"source fixture")
+    out = office_convert(backend).fn({"op": "convert", "input_path": "report.docx", "to": "pdf", "outdir": "out"})
     assert "out/report.pdf" in out.replace("\\", "/")
+    assert (tmp_path / "out/report.pdf").read_bytes() == b"%PDF-1.4 fixture"
 
 
-def test_rejects_bad_format(tmp_path, have_lo):
-    sb = RecordingSandbox(tmp_path)
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "-flag"})
-    assert out.startswith("ERROR") and "invalid target format" in out
-    assert sb.commands == []  # never reached the shell
+@pytest.mark.parametrize("mode", ["missing_engine", "missing_output", "nonzero", "bad_digest", "timeout"])
+def test_no_success_claim_or_overwrite_on_failed_job(monkeypatch, tmp_path, mode):
+    backend, state = install_backend(monkeypatch, tmp_path, mode=mode)
+    (tmp_path / "report.docx").write_bytes(b"source fixture")
+    destination = tmp_path / "report.pdf"
+    destination.write_bytes(b"previous reviewed output")
+    out = office_convert(backend).fn({"op": "to_pdf", "input_path": "report.docx"})
+    assert out.startswith("ERROR"), out
+    assert destination.read_bytes() == b"previous reviewed output"
+    assert state["stages"] and all(not path.exists() for path in state["stages"])
 
 
-def test_rejects_dash_path_without_sandbox(have_lo):
-    t = office_convert()  # sandbox=None
-    out = t.fn({"op": "convert", "input_path": "-evil.docx", "to": "pdf"})
-    assert out.startswith("ERROR") and "may not begin with '-'" in out
+@pytest.mark.parametrize("args,reason", [
+    ({"op": "convert", "input_path": "report.docx", "to": "-flag"}, "invalid target format"),
+    ({"op": "convert", "input_path": "-evil.docx", "to": "pdf"}, "may not begin"),
+    ({"op": "to_pdf", "input_path": "../escaped.docx"}, "escapes"),
+    ({"op": "convert", "to": "pdf"}, "input_path"),
+    ({"op": "to_pdf", "input_path": "report.docx", "outdir": "../escape"}, "escapes"),
+])
+def test_invalid_request_stops_before_execution(monkeypatch, tmp_path, args, reason):
+    backend, state = install_backend(monkeypatch, tmp_path)
+    out = office_convert(backend).fn(args)
+    assert out.startswith("ERROR") and reason in out
+    assert state["calls"] == []
 
 
-def test_path_escape_blocked(tmp_path, have_lo):
-    sb = RecordingSandbox(tmp_path)
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "../../etc/passwd", "to": "pdf"})
-    assert out.startswith("ERROR") and "escapes the sandbox workdir" in out
-
-
-def test_requires_input(have_lo):
-    t = office_convert()
-    out = t.fn({"op": "convert", "to": "pdf"})
-    assert out.startswith("ERROR") and "input_path" in out
-
-
-def test_container_sandbox_reports_unverified(tmp_path, have_lo):
-    """A non-host-visible (container/remote) sandbox can't be stat'd from here,
-    so we report the path without claiming to have confirmed it."""
-    sb = RecordingSandbox(tmp_path)  # no host_visible_fs -> treated as container
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
-    assert out.startswith("wrote ")
-    assert "not host-visible to verify" in out
-
-
-def test_host_visible_confirms_existing_output(tmp_path, have_lo):
-    """A host-visible backend stats the real output and reports its size."""
-    (tmp_path / "report.pdf").write_bytes(b"%PDF-1.4 fake")
-    sb = RecordingSandbox(tmp_path)
-    sb.host_visible_fs = True
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
-    assert out.startswith("wrote ")
-    assert "report.pdf" in out
-    assert "bytes)" in out  # size-confirmed
-
-
-def test_host_visible_warns_when_output_missing(tmp_path, have_lo):
-    """Exit 0 but no output file (e.g. an unexpected name) must not read as success."""
-    sb = RecordingSandbox(tmp_path)
-    sb.host_visible_fs = True
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
-    assert out.startswith("WARNING")
-    assert "not present" in out
-
-
-def test_nonzero_exit_surfaces_stderr(tmp_path, have_lo):
-    sb = RecordingSandbox(tmp_path, exit_code=1, stderr="source file could not be loaded")
-    t = office_convert(sandbox=sb)
-    out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
-    assert out.startswith("ERROR: libreoffice (1)") and "could not be loaded" in out
+def test_missing_input_is_actionable(monkeypatch, tmp_path):
+    backend, state = install_backend(monkeypatch, tmp_path)
+    out = office_convert(backend).fn({"op": "to_pdf", "input_path": "missing.docx"})
+    assert out.startswith("ERROR") and "FileNotFoundError" in out
+    assert state["calls"] == []
 
 
 def test_formats_lists_common():
-    t = office_convert()
-    out = t.fn({"op": "formats"})
+    out = office_convert().fn({"op": "formats"})
     assert "pdf" in out and "docx" in out and "input formats" in out
 
 
 def test_unknown_op():
-    t = office_convert()
-    assert t.fn({"op": "frobnicate"}).startswith("ERROR: unknown op")
+    assert office_convert().fn({"op": "frobnicate"}).startswith("ERROR: unknown op")
 
 
 def test_registered():
     from maverick.tools import base_registry
 
-    class _W:
+    class World:
         pass
 
-    class _S:
+    class Sandbox:
         workdir = "."
 
-    names = set(getattr(base_registry(world=_W(), sandbox=_S()), "_tools", {}).keys())
+    names = set(getattr(base_registry(world=World(), sandbox=Sandbox()), "_tools", {}).keys())
     assert "office_convert" in names

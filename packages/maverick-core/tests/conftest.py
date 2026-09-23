@@ -13,10 +13,41 @@ from __future__ import annotations
 
 import hashlib
 import os
+import uuid
 from dataclasses import dataclass, field
 
 import pytest
 from maverick.llm import LLMResponse, ToolCall  # noqa: F401 - re-exported for tests
+
+
+@pytest.fixture
+def postgres_test_dsn(monkeypatch, request):
+    """Own one disposable database, including for per-test encryption keys.
+
+    Live PG suites require the dedicated test service's CREATEDB/admin role.
+    Sharing its public tables across independent secure-posture key fixtures
+    makes later scans attempt to decrypt a prior test's ciphertext.
+    """
+    dsn = os.environ.get("MAVERICK_PG_DSN", "")
+    if not dsn:
+        pytest.skip("MAVERICK_PG_DSN not set (no dedicated Postgres test service)")
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+
+    database = "mvk_test_" + uuid.uuid4().hex
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
+    isolated = make_conninfo(dsn, dbname=database)
+    monkeypatch.setenv("MAVERICK_PG_DSN", isolated)
+    if hasattr(request.module, "_DSN"):
+        monkeypatch.setattr(request.module, "_DSN", isolated)
+    try:
+        yield isolated
+    finally:
+        # Exactly the database created above; never a caller-supplied name.
+        with psycopg.connect(dsn, autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(database)))
 
 
 @pytest.fixture(autouse=True)

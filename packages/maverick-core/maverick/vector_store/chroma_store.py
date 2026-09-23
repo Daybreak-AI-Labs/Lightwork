@@ -11,6 +11,7 @@ plugins follow this shape.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -77,6 +78,18 @@ class ChromaStore:
             embedding_function=embedding_function,
         )
         self._collection_name = collection
+        self.recall_identity = hashlib.sha256(f"{store_path.resolve()}:{collection}".encode()).hexdigest()
+        self.requires_precomputed_embeddings = embedding_function is None
+
+    def upsert_one(self, document: str, *, id: str, metadata: dict,
+                   embedding: list[float] | None = None) -> None:
+        """Replace one record natively; preparation failure never deletes it."""
+        from ..skill.embeddings import validate_vectors
+
+        kwargs: dict[str, Any] = {"documents": [document], "ids": [id], "metadatas": [metadata]}
+        if embedding is not None:
+            kwargs["embeddings"] = validate_vectors([embedding], 1)
+        self._collection.upsert(**kwargs)
 
     def add(
         self,

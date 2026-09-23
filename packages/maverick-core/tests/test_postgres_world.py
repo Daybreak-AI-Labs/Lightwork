@@ -10,13 +10,14 @@ from __future__ import annotations
 import importlib.util
 import os
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
 _DSN = os.environ.get("MAVERICK_PG_DSN")
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.usefixtures("postgres_test_dsn"), pytest.mark.skipif(
     not _DSN, reason="MAVERICK_PG_DSN not set (no Postgres service)"
-)
+)]
 
 
 @pytest.fixture
@@ -66,7 +67,7 @@ def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkey
     marker = "shoring-" + uuid.uuid4().hex
     other = marker + "-other"
     clock = [1_800_000_000.0]
-    monkeypatch.setattr(postgres.time, "time", lambda: clock[0])
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: clock[0]))
     try:
         with tenant_scope(tenant=marker):
             goal = world.create_goal("Invoice", domain="finance_ap")
@@ -307,7 +308,7 @@ def test_facts_newest_write_order_survives_clock_rollback(
     prefix = f"pg:order:{uuid.uuid4().hex}:"
     key_a, key_b = prefix + "a", prefix + "b"
     times = iter((1_000.0, 1_001.0, 999.0))
-    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: next(times)))
 
     world.upsert_fact(key_a, "first")
     world.upsert_fact(key_b, "second")
@@ -804,12 +805,17 @@ def test_lookup_processed_message_null_goal_returns_zero(world):
     assert world.lookup_processed_message("email", "msg-1") == 0
 
 
-def test_prune_goal_events(world):
+def test_prune_goal_events(world, monkeypatch):
     from maverick.paths import tenant_scope
+    from maverick.world_model_backends import postgres
+
+    clock = [1_000.0]
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: clock[0]))
 
     with tenant_scope(tenant="retention-test"):
         g = world.create_goal("eventful-prune")
         world.append_event(g, "orch", "note", "old")
+        clock[0] += 1
         removed = world.prune_goal_events(older_than_seconds=0)
         assert removed >= 1
         assert world.goal_events(g) == []
@@ -826,6 +832,7 @@ def test_prune_processed_messages(world):
 
 
 def test_erase_conversations_deletes_pg_rows(world, monkeypatch):
+    from maverick.attachment_submissions import SubmissionStore
     from maverick.erasure_receipts import (
         RECEIPT_STORES,
         build_manifest,
@@ -836,7 +843,10 @@ def test_erase_conversations_deletes_pg_rows(world, monkeypatch):
     from maverick.paths import current_tenant_id
 
     conv = world.get_or_create_conversation("gdpr-pg", "erase-me")
-    parent = world.create_goal("parent-delete")
+    parent = SubmissionStore(world).create(
+        token="private-submission", fingerprint="private-content-fingerprint",
+        owner="erase-me", title="parent-delete", description="private request", manifest=[],
+    )["goal_id"]
     child = world.create_goal("child-delete", parent_id=parent)
     grandchild = world.create_goal("grandchild-delete", parent_id=child)
     world.append_turn(conv.id, "user", "private text", goal_id=parent)
@@ -1002,6 +1012,9 @@ def test_rls_enforces_tenant_isolation_at_db_level(monkeypatch):
     from psycopg.conninfo import make_conninfo
 
     monkeypatch.setenv("MAVERICK_PG_RLS", "1")
+    # Install/apply the owner schema before granting rights on existing tables.
+    # Each test now starts from its own empty database.
+    PostgresWorldModel(dsn=_DSN).close()
     # 1. Create a non-superuser app role with DML rights (as the owner/superuser).
     with psycopg.connect(_DSN, autocommit=True) as c, c.cursor() as cur:
         cur.execute("DROP ROLE IF EXISTS mvk_rls_app")
@@ -1110,12 +1123,18 @@ def test_count_facts_and_stale_keys(world):
     assert k not in world.stale_fact_keys(_t.time() - 10_000)  # cutoff in past
 
 
-def test_list_approvals_newest_first(world):
+def test_list_approvals_newest_first(world, monkeypatch):
+    from maverick.world_model_backends import postgres
+
+    # Equal timestamps need a deterministic tie-breaker, including on clocks
+    # with coarse resolution. Do not sleep to make an unstable query pass.
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: 1_000.0))
     a1 = world.create_approval("act-one", risk="high")
     a2 = world.create_approval("act-two", risk="low")
     ids = [a.id for a in world.list_approvals()]
     assert a1 in ids and a2 in ids
     assert ids.index(a2) < ids.index(a1)  # newest (a2) first
+    assert [row.id for row in world.list_approvals(limit=1)] == [a2]
 
 
 def test_release_processed_message_allows_retry(world):
@@ -1453,7 +1472,7 @@ def test_history_precedence_projects_effective_legacy_and_tenant_timeline(
     monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
     times = iter((100.0, 200.0, 300.0))
-    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: next(times)))
     subject = f"sms:{uuid.uuid4().hex}"
     key = f"user:{subject}:email"
 
@@ -1501,7 +1520,7 @@ def test_history_limit_applies_after_effective_precedence_projection(
     monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
     times = iter((100.0, 105.0, 110.0, 120.0))
-    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: next(times)))
     subject = f"sms:{uuid.uuid4().hex}"
     key = f"user:{subject}:email"
 

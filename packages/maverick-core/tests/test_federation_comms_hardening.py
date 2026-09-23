@@ -202,6 +202,9 @@ def test_signed_mode_new_signature_same_correlation_is_idempotent(monkeypatch):
         return payload
 
     first_payload = signed_payload()
+    # Ed25519 is deterministic and consecutive calls can share one Windows
+    # wall-clock tick. Advance only signing time while retaining fresh input.
+    monkeypatch.setattr(fed.time, "time", lambda: first_payload["created_at"] + 0.001)
     second_payload = signed_payload()
     assert first_payload["sig"] != second_payload["sig"]
 

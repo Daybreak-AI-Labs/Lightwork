@@ -2045,6 +2045,26 @@ def vendor_questionnaire(action, vendor_id, assessment_type, actor) -> None:
         raise click.ClickException(str(e)) from e
 
 
+@vendor_group.command("questionnaire-index")
+@click.option("--rebuild", is_flag=True, help="Restart the derived index from canonical vendor records.")
+@click.option("--batches", type=click.IntRange(1, 1000), default=1, show_default=True,
+              help="Maximum 100-record maintenance batches to advance.")
+def vendor_questionnaire_index(rebuild, batches) -> None:
+    """Prepare existing questionnaire links before exposing hosted forms."""
+    from .. import vendor_management as vm
+
+    try:
+        for index in range(batches):
+            result = vm.maintain_questionnaire_index(rebuild=rebuild and index == 0)
+            if result["ready"]:
+                break
+    except (ValueError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"ready={str(result['ready']).lower()}  scanned={result['scanned']}")
+    if not result["ready"]:
+        click.echo("Continue without --rebuild; hosted lookups remain temporarily unavailable until ready.")
+
+
 @vendor_group.command("note")
 @click.argument("note")
 @click.option("--vendor", "vendor_id", required=True, help="Vendor id (VMR-...).")

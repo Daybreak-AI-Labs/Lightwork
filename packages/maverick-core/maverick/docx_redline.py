@@ -20,10 +20,10 @@ Two entry points, because a vendor sends either format:
 
 Edits are matched on normalized paragraph text, so run-splitting inside Word
 (which shatters a sentence across arbitrary ``w:r`` elements) cannot cause a
-miss. A matched paragraph is replaced wholesale: the full original text struck,
-the full new text inserted. That is a legitimate and unambiguous revision --
-and far safer than trying to compute an intra-run character diff that Word may
-render as gibberish.
+miss. Only a unique full-paragraph match is replaced wholesale. Containment,
+ambiguous duplicates and unsupported inline structures are reported for manual
+review instead of expanding a clause edit into surrounding prose. An immutable
+source location can disambiguate an exact paragraph in the same document.
 
 Stdlib only (``zipfile`` + string templating): no python-docx, so this ships
 everywhere the kernel ships and adds no dependency.
@@ -34,6 +34,9 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass, field
+from hashlib import sha256
+from html import unescape
+from xml.etree import ElementTree as ET
 
 # Untrusted-input bounds. A vendor .docx is attacker-controlled: mirror the
 # zip-bomb ceilings privacy_ops uses for extraction so redlining one cannot
@@ -51,12 +54,25 @@ _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _PARA_RE = re.compile(r"<w:p(?:\s[^>]*)?>.*?</w:p>|<w:p(?:\s[^>]*)?/>",
                       re.DOTALL)
 _TEXT_RE = re.compile(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", re.DOTALL)
-_PPR_RE = re.compile(r"<w:pPr>.*?</w:pPr>", re.DOTALL)
+_PPR_RE = re.compile(r"<w:pPr(?:\s[^>]*)?>.*?</w:pPr>|<w:pPr(?:\s[^>]*)?/>", re.DOTALL)
 _BODY_CLOSE_RE = re.compile(r"</w:body>")
 
 
 class RedlineError(ValueError):
     """The upload is not a document we can redline."""
+
+
+@dataclass(frozen=True)
+class ParagraphLocation:
+    """Zero-based paragraph index bound to the exact source package bytes.
+
+    For a synthesized document the digest covers the generated, unedited
+    document XML instead. This is a location, never permission to edit a
+    substring or to ignore a mismatched full-paragraph anchor.
+    """
+
+    source_sha256: str
+    paragraph_index: int
 
 
 @dataclass
@@ -67,12 +83,18 @@ class ClauseEdit:
     insertion, appended as a proposed new clause). ``replace`` is the language
     we require (empty = a pure deletion). ``note`` is the reviewer-facing
     reason, carried into the analysis report rather than into the document.
+    Only ``scope="paragraph"`` is currently supported: both anchor and proposed
+    replacement describe the entire paragraph. Partial anchors are refused.
+    ``location`` can disambiguate duplicate full paragraphs but cannot broaden
+    scope, bypass a stale source or permit unsupported inline rewriting.
     """
 
     find: str = ""
     replace: str = ""
     note: str = ""
     clause_key: str = ""
+    scope: str = "paragraph"
+    location: ParagraphLocation | None = None
 
     @property
     def is_insertion(self) -> bool:
@@ -93,6 +115,8 @@ class RedlineResult:
     unmatched: list[ClauseEdit] = field(default_factory=list)
     inserted: list[ClauseEdit] = field(default_factory=list)
     synthesized: bool = False
+    source_sha256: str = ""
+    edit_results: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -101,6 +125,8 @@ class RedlineResult:
             "inserted": len(self.inserted),
             "unmatched": [e.find[:120] for e in self.unmatched],
             "synthesized": self.synthesized,
+            "source_sha256": self.source_sha256,
+            "edit_results": self.edit_results,
         }
 
 
@@ -121,9 +147,7 @@ def _para_text(para_xml: str) -> str:
 
 
 def _unescape(text: str) -> str:
-    return (text.replace("&lt;", "<").replace("&gt;", ">")
-            .replace("&quot;", '"').replace("&#39;", "'")
-            .replace("&amp;", "&"))
+    return unescape(text)
 
 
 class _Ids:
@@ -160,7 +184,8 @@ def _revised_paragraph(para_xml: str, original_text: str, new_text: str,
     ppr = _PPR_RE.search(para_xml)
     body = (_del_run(original_text, ids, author, date)
             + _ins_run(new_text, ids, author, date))
-    return f"<w:p>{ppr.group(0) if ppr else ''}{body}</w:p>"
+    opening = re.match(r"<w:p(?:\s[^>]*)?>", para_xml)
+    return f"{opening.group(0) if opening else '<w:p>'}{ppr.group(0) if ppr else ''}{body}</w:p>"
 
 
 def _plain_paragraph(text: str) -> str:
@@ -183,59 +208,117 @@ def _inserted_paragraph(text: str, ids: _Ids, author: str, date: str) -> str:
 
 
 def _apply_edits_to_document_xml(
-    xml: str, edits: list[ClauseEdit], *, author: str, date: str,
-) -> tuple[str, list[ClauseEdit], list[ClauseEdit], list[ClauseEdit]]:
-    ids = _Ids()
-    replacements = [e for e in edits if not e.is_insertion]
-    insertions = [e for e in edits if e.is_insertion]
-    # Anchor -> edit. Later duplicates lose; a document with the same clause
-    # text twice gets the edit applied to the first occurrence only, which is
-    # reported through `applied` counts rather than guessed at.
-    wanted: dict[str, ClauseEdit] = {}
-    for e in replacements:
-        key = _norm(e.find)
-        if key and key not in wanted:
-            wanted[key] = e
-
+    xml: str, edits: list[ClauseEdit], *, author: str, date: str, source_sha256: str,
+) -> tuple[str, list[ClauseEdit], list[ClauseEdit], list[ClauseEdit], list[dict]]:
+    existing_ids = re.findall(r'\bw:id=[\'"](\d{1,10})[\'"]', xml)
+    ids = _Ids(start=max([9000, *(int(value) for value in existing_ids)]))
+    paragraphs = list(_PARA_RE.finditer(xml))
+    texts = [_unescape(_para_text(match.group(0))) for match in paragraphs]
+    keys = [_norm(text) for text in texts]
+    positions: dict[str, list[int]] = {}
+    for index, key in enumerate(keys):
+        positions.setdefault(key, []).append(index)
+    selected: dict[int, ClauseEdit] = {}
     applied: list[ClauseEdit] = []
-    matched_keys: set[str] = set()
+    unmatched: list[ClauseEdit] = []
+    insertions: list[ClauseEdit] = []
+    results: list[dict] = []
+    for edit_index, edit in enumerate(edits):
+        index, reason = _resolve_edit(edit, keys, positions, source_sha256)
+        if not reason and index is not None:
+            if index in selected:
+                reason = "conflicting_edit"
+            elif not _plain_editable_paragraph(paragraphs[index].group(0)):
+                reason = "unsupported_inline_structure"
+        if reason:
+            unmatched.append(edit)
+        elif edit.is_insertion:
+            insertions.append(edit)
+        else:
+            assert index is not None
+            selected[index] = edit
+            applied.append(edit)
+        results.append({
+            "edit_index": edit_index, "scope": edit.scope,
+            "status": "needs_review" if reason else "inserted" if edit.is_insertion else "applied",
+            "reason": reason or "", "source_sha256": source_sha256,
+            "paragraph_index": index,
+        })
 
-    def _sub(match: re.Match) -> str:
-        para = match.group(0)
-        text = _unescape(_para_text(para))
-        key = _norm(text)
-        if not key or key in matched_keys:
-            return para
-        edit = wanted.get(key)
-        if edit is None:
-            # Fall back to containment: a vendor paragraph often wraps the
-            # clause in surrounding prose, so an exact-equality-only match
-            # would miss real hits.
-            for wkey, cand in wanted.items():
-                if wkey in matched_keys:
-                    continue
-                if len(wkey) >= 24 and wkey in key:
-                    edit, key = cand, wkey
-                    break
-        if edit is None:
-            return para
-        matched_keys.add(key)
-        applied.append(edit)
-        return _revised_paragraph(para, text, edit.replace, ids, author, date)
-
-    out = _PARA_RE.sub(_sub, xml)
-    # Identity, not equality: two edits can carry identical field values, and
-    # dataclass __eq__ would then report both as applied when only one was.
-    done = {id(e) for e in applied}
-    unmatched = [e for e in replacements if id(e) not in done]
+    # Select against the original document, then replace without re-matching a
+    # previous edit's output. Untouched paragraph bytes and all package parts stay intact.
+    chunks: list[str] = []
+    end = 0
+    for index, match in enumerate(paragraphs):
+        chunks.append(xml[end:match.start()])
+        edit = selected.get(index)
+        chunks.append(match.group(0) if edit is None else _revised_paragraph(
+            match.group(0), texts[index], edit.replace, ids, author, date))
+        end = match.end()
+    chunks.append(xml[end:])
+    out = "".join(chunks)
 
     if insertions:
         block = [_heading_paragraph(
             "Proposed additional clauses (Lightwork privacy review)")]
         block += [_inserted_paragraph(e.replace, ids, author, date)
                   for e in insertions if e.replace]
-        out = _BODY_CLOSE_RE.sub("".join(block) + "</w:body>", out, count=1)
-    return out, applied, unmatched, insertions
+        # Section properties must remain the final body child. This also
+        # preserves the synthesized document's existing section layout.
+        body = ET.fromstring(out).find(f"{{{_W_NS}}}body")
+        if body is not None and len(body) and body[-1].tag == f"{{{_W_NS}}}sectPr":
+            sections = list(re.finditer(r"<w:sectPr(?=[\s>/])", out))
+            offset = sections[-1].start()
+            out = out[:offset] + "".join(block) + out[offset:]
+        else:
+            out = _BODY_CLOSE_RE.sub("".join(block) + "</w:body>", out, count=1)
+    return out, applied, unmatched, insertions, results
+
+
+def _resolve_edit(edit, keys, positions, source_sha256) -> tuple[int | None, str]:
+    if edit.scope != "paragraph":
+        return None, "unsupported_scope"
+    if edit.location is not None:
+        location = edit.location
+        if not isinstance(location, ParagraphLocation):
+            return None, "invalid_location"
+        if location.source_sha256 != source_sha256:
+            return None, "stale_source"
+        index = location.paragraph_index
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(keys):
+            return None, "invalid_location"
+        if edit.is_insertion or keys[index] != _norm(edit.find):
+            return index, "scope_mismatch"
+        return index, ""
+    if edit.is_insertion:
+        return None, "" if edit.replace else "empty_edit"
+    key = _norm(edit.find)
+    matches = positions.get(key, [])
+    if len(matches) > 1:
+        return None, "ambiguous_match"
+    if matches:
+        return matches[0], ""
+    return None, "scope_mismatch" if any(key in target for target in keys) else "not_found"
+
+
+def _plain_editable_paragraph(xml: str) -> bool:
+    """Reject fields, links, bookmarks, prior revisions and styled runs.
+
+    The current full-paragraph writer cannot preserve those inline structures
+    faithfully. Paragraph properties and split plain text runs are supported.
+    """
+    try:
+        paragraph = ET.fromstring(f'<root xmlns:w="{_W_NS}">{xml}</root>')[0]
+    except ET.ParseError:
+        return False
+    for child in paragraph:
+        if child.tag == f"{{{_W_NS}}}pPr":
+            continue
+        if child.tag != f"{{{_W_NS}}}r":
+            return False
+        if any(node.tag != f"{{{_W_NS}}}t" for node in child):
+            return False
+    return True
 
 
 def _safe_docx_entries(data: bytes) -> zipfile.ZipFile:
@@ -279,10 +362,17 @@ def redline_docx(
             raw = fh.read(_MAX_DOCUMENT_XML + 1)
         if len(raw) > _MAX_DOCUMENT_XML:
             raise RedlineError("document body too large to redline")
-        xml = raw.decode("utf-8", errors="ignore")
+        try:
+            xml = raw.decode("utf-8")
+            if "<!DOCTYPE" in xml.upper() or "<!ENTITY" in xml.upper():
+                raise RedlineError("document entity declarations are unsupported")
+            ET.fromstring(xml)
+        except (UnicodeError, ET.ParseError) as exc:
+            raise RedlineError("document body is not valid UTF-8 XML") from exc
 
-        revised, applied, unmatched, inserted = _apply_edits_to_document_xml(
-            xml, edits, author=author, date=date)
+        source_sha256 = sha256(original).hexdigest()
+        revised, applied, unmatched, inserted, results = _apply_edits_to_document_xml(
+            xml, edits, author=author, date=date, source_sha256=source_sha256)
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
@@ -296,7 +386,8 @@ def redline_docx(
     finally:
         zf.close()
     return RedlineResult(content=buf.getvalue(), applied=applied,
-                         unmatched=unmatched, inserted=inserted)
+                         unmatched=unmatched, inserted=inserted,
+                         source_sha256=source_sha256, edit_results=results)
 
 
 _CONTENT_TYPES = (
@@ -360,14 +451,6 @@ def build_redlined_docx(
     rebuild the text we could read and mark our changes on it. The header says
     so explicitly -- this is a reconstruction for negotiation, not a claim to
     have modified their original file."""
-    ids = _Ids()
-    wanted: dict[str, ClauseEdit] = {}
-    for e in edits:
-        if not e.is_insertion:
-            key = _norm(e.find)
-            if key and key not in wanted:
-                wanted[key] = e
-
     body: list[str] = []
     if title:
         body.append(_heading_paragraph(title))
@@ -375,40 +458,19 @@ def build_redlined_docx(
             "Reconstructed from the supplied PDF for redlining; the vendor's "
             "original file was not modified. Tracked changes below are the "
             "edits required by our standard position."))
-    applied: list[ClauseEdit] = []
-    matched: set[str] = set()
     for para in paragraphs:
         text = (para or "").strip()
-        if not text:
-            continue
-        key = _norm(text)
-        edit = wanted.get(key)
-        if edit is None:
-            for wkey, cand in wanted.items():
-                if wkey not in matched and len(wkey) >= 24 and wkey in key:
-                    edit, key = cand, wkey
-                    break
-        if edit is not None and key not in matched:
-            matched.add(key)
-            applied.append(edit)
-            body.append(
-                f"<w:p>{_del_run(text, ids, author, date)}"
-                f"{_ins_run(edit.replace, ids, author, date)}</w:p>")
-        else:
+        if text:
             body.append(_plain_paragraph(text))
-
-    insertions = [e for e in edits if e.is_insertion and e.replace]
-    if insertions:
-        body.append(_heading_paragraph(
-            "Proposed additional clauses (Lightwork privacy review)"))
-        body += [_inserted_paragraph(e.replace, ids, author, date)
-                 for e in insertions]
 
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<w:document xmlns:w="{_W_NS}"><w:body>{"".join(body)}{_SECT_PR}'
         "</w:body></w:document>"
     )
+    source_sha256 = sha256(document.encode("utf-8")).hexdigest()
+    document, applied, unmatched, insertions, results = _apply_edits_to_document_xml(
+        document, edits, author=author, date=date, source_sha256=source_sha256)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
         out.writestr("[Content_Types].xml", _CONTENT_TYPES)
@@ -416,12 +478,10 @@ def build_redlined_docx(
         out.writestr("word/_rels/document.xml.rels", _DOCUMENT_RELS)
         out.writestr("word/settings.xml", _SETTINGS)
         out.writestr("word/document.xml", document)
-    done = {id(e) for e in applied}
-    unmatched = [e for e in edits
-                 if not e.is_insertion and id(e) not in done]
     return RedlineResult(content=buf.getvalue(), applied=applied,
                          unmatched=unmatched, inserted=insertions,
-                         synthesized=True)
+                         synthesized=True, source_sha256=source_sha256,
+                         edit_results=results)
 
 
 # --- plain document builder (generated deliverables) -----------------------

@@ -62,6 +62,7 @@ _LOCK = threading.RLock()   # reentrant: start()/stop() call queue(), which also
 _queue = None
 _worker = None
 _worker_threads: list = []
+_worker_stopping = False
 
 
 def _db_path():
@@ -563,14 +564,9 @@ def enqueue_published_flow_run(
 
 def _flow_job_for_run(run_id: str):
     """Find any durable queue row for ``run_id`` (pending through terminal)."""
-    q = queue()
-    total = sum(q.counts().values())
-    # Queue history is normally purged; cap a corrupt/unbounded database scan.
-    for job in q.list(limit=min(max(1, total), 100_000)):
-        if (job.kind == FLOW_RUN_KIND
-                and str((job.payload or {}).get("run_id") or "") == run_id):
-            return job
-    return None
+    from maverick.paths import current_tenant_id
+
+    return queue().find_for_run(FLOW_RUN_KIND, run_id, current_tenant_id() or "")
 
 
 def _ensure_queued_flow_job(run, *, tenant: str = "") -> None:
@@ -619,11 +615,13 @@ def _repair_queued_flow_outbox() -> None:
     from maverick.paths import current_tenant_id
 
     def _repair() -> None:
+        from maverick.flow.payloads import FlowPayloadError
+
         tenant = current_tenant_id() or ""
-        runs = store.list_runs(limit=None)  # newest first
+        store.rebuild_run_index()  # legacy import / offline restore reconciliation
         # One bounded startup pass indexes pre-claim legacy runs. Afterwards a
         # random idempotency key never forces an attacker-amplifiable full scan.
-        for run in runs:
+        for run in store.iter_run_metadata():
             if run.idem_key:
                 with store.idempotency_lock(
                     run.flow_id,
@@ -640,9 +638,13 @@ def _repair_queued_flow_outbox() -> None:
                         owner=run.owner,
                         overwrite=False,
                     )
-        for run in runs:
             if run.status == "queued":
-                _ensure_queued_flow_job(run, tenant=tenant)
+                try:
+                    _ensure_queued_flow_job(run, tenant=tenant)
+                except FlowPayloadError:
+                    # Preserve the affected reservation for explicit recovery;
+                    # it must not prevent unrelated complete runs from arming.
+                    log.warning("queued flow checkpoint requires recovery: %s", run.run_id)
 
     # A reconcile invoked inside a tenant-pinned request must not republish that
     # reservation as a tenantless job before the global sweep clears ambient
@@ -929,7 +931,7 @@ def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
         validate_approval_card,
     )
     from maverick.flow import store
-    from maverick.flow.redact import cap, redact
+    from maverick.flow.payloads import approval_data
 
     try:
         raw_card = (run.human or {}).get("approval_card")
@@ -948,7 +950,7 @@ def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
             if next_node is not None
             else {"kind": "complete", "id": "end"}
         )
-        persisted_data = redact(cap(run.data or {}))
+        persisted_data = approval_data(run.data or {}, card)
         expected_target = digest({
             "flow_id": flow.id,
             "pause_node": paused.id,
@@ -1324,8 +1326,8 @@ def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
     from maverick.flow import store
     from maverick.flow.runner import ACTIVE_STATUSES
     occupying = ACTIVE_STATUSES - {"queued"}
-    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=None)
-               if r.run_id != exclude_run_id and r.status in occupying)
+    return sum(1 for r in store.iter_run_metadata(flow_id=flow_id, statuses=occupying)
+               if r.run_id != exclude_run_id)
 
 
 def _defer_for_slot(payload: dict) -> bool:
@@ -1697,27 +1699,30 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
 
 
 def _handle_flow_sweep(_job=None) -> None:
-    """Re-arm flow runs whose delay has elapsed. A delay node persists the run as
-    paused_delay with a resume_at; this cron (every minute when flows are on) is
-    the driver that continues it -- without it, 'wait N seconds' never resumes.
-    Fail-open + idempotent (a stale resume is a no-op)."""
+    """Recover due legacy delays/expiries missed by durable continuation jobs.
+
+    Normal pauses already schedule durable jobs. Keyset paging includes every
+    due record regardless of newer completed history; stale resumes are no-ops.
+    """
     from maverick import flow
     if not flow.enabled():
         return
 
     def _sweep_current_tenant() -> None:
         from maverick.flow import runner, store
+        from maverick.flow.payloads import FlowPayloadError
 
         now = time.time()
-        for run in store.list_runs(owner=None, limit=1000):
-            if not (run.resume_at and run.resume_at <= now):
-                continue
+        for run in store.iter_run_metadata(
+            statuses={runner.STATUS_PAUSED_DELAY, runner.STATUS_PAUSED_APPROVAL},
+            due_before=now,
+        ):
             if run.status == runner.STATUS_PAUSED_DELAY:
                 try:
                     enqueue_flow_resume(
                         run.flow_id, run.run_id, owner=run.owner,
                     )
-                except store.FlowSnapshotError:
+                except (store.FlowSnapshotError, FlowPayloadError):
                     continue
             elif run.status == runner.STATUS_PAUSED_APPROVAL:
                 # An approval whose node set an expiry resolves once it lapses.
@@ -1731,7 +1736,7 @@ def _handle_flow_sweep(_job=None) -> None:
                         owner=run.owner,
                         expired=True,
                     )
-                except store.FlowSnapshotError:
+                except (store.FlowSnapshotError, FlowPayloadError):
                     continue
             # paused_event runs are NEVER swept -- only their event resumes them.
 
@@ -2066,14 +2071,15 @@ def start() -> bool:
     """Start the automation worker pool + seed cron jobs. No-op when none of
     event triggers, dreaming, the data engine, or flows is enabled, and
     idempotent. Returns whether the pool was started."""
-    global _worker, _worker_threads
+    global _worker, _worker_threads, _worker_stopping
     from maverick import automation_events, data_engine, dreaming, flow
     if not (automation_events.enabled() or dreaming.enabled()
             or data_engine.enabled() or flow.enabled()):
         return False
     with _LOCK:
-        if _worker_threads:
-            return True
+        if any(thread.is_alive() for thread in _worker_threads):
+            return not _worker_stopping
+        _worker, _worker_threads = None, []
         from maverick.worker import Worker
         w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
@@ -2097,25 +2103,39 @@ def start() -> bool:
             threading.Thread(target=w.run_forever, name=f"automation-worker-{i}", daemon=True)
             for i in range(_worker_count())
         ]
-        for t in threads:
-            t.start()
         _worker = w
-        _worker_threads = threads
+        _worker_stopping = False
+        try:
+            for t in threads:
+                t.start()
+                _worker_threads.append(t)
+        except BaseException:
+            # Started writers remain owned even if a later thread failed to
+            # start. Shutdown can observe them; a retry cannot overlap them.
+            _worker_stopping = True
+            w.stop()
+            raise
     log.info("automation worker started (%d threads, db=%s)", len(threads), _db_path())
     return True
 
 
-def stop() -> None:
-    global _worker, _worker_threads
+def stop(*, timeout: float = 5.0, wait: bool = True) -> None:
+    global _worker, _worker_threads, _worker_stopping
     with _LOCK:
         w = _worker
         threads = list(_worker_threads)
-        _worker = None
-        _worker_threads = []
-    if w is not None:
-        w.stop()
+        _worker_stopping = True
+        if w is not None:
+            w.stop()
+    if not wait:
+        return
+    deadline = time.monotonic() + max(0.0, min(float(timeout), 30.0))
     for t in threads:
-        t.join(timeout=5.0)
+        t.join(timeout=max(0.0, deadline - time.monotonic()))
+    with _LOCK:
+        if _worker is w and not any(t.is_alive() for t in threads):
+            _worker = None
+            _worker_threads = []
 
 
 __all__ = ["start", "stop", "reconcile", "queue",

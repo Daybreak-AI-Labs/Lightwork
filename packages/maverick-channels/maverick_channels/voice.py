@@ -35,6 +35,7 @@ Requires::
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -165,9 +166,9 @@ class VoiceChannel(Channel):
         if ev_type == "transcript":
             transcript = msg_data.get("transcript", "")
             role = msg_data.get("role", "user")
-            if role != "user" or not transcript:
+            if role != "user" or not transcript or msg_data.get("transcriptType") == "partial":
                 return Response(content="{}", media_type="application/json")
-            call = payload.get("call")
+            call = msg_data.get("call") or payload.get("call")
             call = call if isinstance(call, dict) else {}
             customer = call.get("customer")
             customer = customer if isinstance(customer, dict) else {}
@@ -180,24 +181,48 @@ class VoiceChannel(Channel):
             if self.allowed_callers and not is_allowed(str(user_id), self.allowed_callers):
                 log.warning("unauthorized voice caller: %s", user_id)
                 return {"response": "Sorry, this number isn't authorized to use this assistant."}
-            msg = IncomingMessage(
-                user_id=str(user_id),
-                text=transcript,
-                channel="voice",
-                raw=payload,
-            )
+            from .delivery import DeliveryUnknown
+
+            call_id = str(call.get("id") or "")
+            event_id = str(msg_data.get("id") or msg_data.get("timestamp") or "")
+            if not call_id or not event_id:
+                raise HTTPException(status_code=400, detail="stable call and transcript event identity required")
+            identity = f"{len(call_id)}:{call_id}:{event_id}"
+            account = self._delivery_account()
+            msg = IncomingMessage(user_id=str(user_id), sender_id=str(user_id), text=transcript,
+                                  channel=self.name, message_id=identity)
+            def authorize():
+                return (account == self._delivery_account() and self._check_webhook_auth(authorization)
+                        and (not self.allowed_callers or is_allowed(str(user_id), self.allowed_callers)))
+            async def prepare_response(reply):
+                # Returning a response object cannot confirm provider receipt
+                # or spoken delivery. Repeated callbacks read the saved result.
+                raise DeliveryUnknown("Voice HTTP response acceptance is unconfirmed")
             try:
-                reply = await self.dispatch_text(msg)
-            except Exception:  # pragma: no cover
-                # Spoken back to the caller -- never voice the raw exception
-                # (possible secret/internal path); detail is logged above.
-                log.exception("voice handler error")
-                reply = "Sorry, I ran into an internal error."
-            return {"response": reply}
+                row = await self.process_message(msg, external_id=identity, account=account,
+                    authorize=authorize, send=prepare_response, route={"response_transport": "http"})
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail="voice caller authority changed") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="invalid or conflicting voice input") from exc
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="voice intake or receipt unavailable") from exc
+            if row.get("reply"):
+                return {"response": row["reply"]["text"]}
+            from fastapi.responses import JSONResponse
+
+            pending = row["execution"] in {"received", "execution_started_unconfirmed"}
+            return JSONResponse({"response": "Your request is still processing." if pending else
+                                 "This request needs review before it can be repeated.",
+                                 "status": row["execution"]}, status_code=202 if pending else 409)
 
         # Other events (end-of-call, status updates) are informational.
         # Acknowledge with empty body so Vapi doesn't retry.
         return Response(content="{}", media_type="application/json")
+
+    def _delivery_account(self):
+        return ":".join((self.provider, self.assistant_id or "", self.phone_number or "",
+                         hashlib.sha256(self.api_key.encode()).hexdigest()))
 
     async def start(self) -> None:
         import uvicorn
@@ -221,10 +246,10 @@ class VoiceChannel(Channel):
         """Build the provider-specific outbound-call HTTP request.
 
         Returns a dict with ``url`` / ``headers`` / ``json``. Contracts
-        come from each vendor's public API docs — Vapi is live-tested;
-        Retell and Bland are wired from docs and want a real smoke test
-        before you rely on them. Raises ValueError for an unknown
-        provider so ``send()`` can fail soft.
+        come from the existing provider integrations. Local transport fixtures
+        verify request construction; live provider acceptance needs separate
+        qualification. Raises ValueError for an unknown provider so ``send()``
+        can report definitive nonacceptance.
         """
         if self.provider == "vapi":
             return {
@@ -263,24 +288,31 @@ class VoiceChannel(Channel):
             }
         raise ValueError(f"unsupported voice provider {self.provider!r}")
 
-    async def send(self, user_id: str, text: str) -> None:
+    async def send(self, user_id: str, text: str) -> str:
         """Outbound: place a call to `user_id` (a phone number) via the
         configured provider and have the assistant deliver `text`."""
+        from .delivery import DeliveryNotSent, DeliveryUnknown, send_chunk
+
         if not self.assistant_id:
-            log.warning("voice send: no assistant_id configured; skipping outbound")
-            return
+            raise DeliveryNotSent("Voice outbound assistant is not configured")
         try:
             req = self._outbound_request(user_id, text)
-        except ValueError as e:
-            log.warning("voice send: %s", e)
-            return
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(
-                req["url"], headers=req["headers"], json=req["json"],
-            )
-            if r.status_code >= 300:
-                log.warning("voice outbound call failed (%s): %s %s",
-                            self.provider, r.status_code, r.text[:200])
+        except ValueError as exc:
+            raise DeliveryNotSent("Voice outbound provider is unsupported") from exc
+        async def create():
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(req["url"], headers=req["headers"], json=req["json"])
+            if 400 <= response.status_code < 500 and response.status_code != 408:
+                raise DeliveryNotSent("Voice provider rejected the outbound call")
+            if response.status_code >= 300:
+                raise DeliveryUnknown("Voice outbound acceptance is unconfirmed")
+            result = response.json()
+            identity = result.get("id") or result.get("call_id")
+            if not identity:
+                raise DeliveryUnknown("Voice provider returned no call identity")
+            return str(identity)
+        return await send_chunk("voice-call-0", {"provider": self.provider, "to": user_id,
+                                "text": text, "assistant": self.assistant_id}, create)
 
     async def stop(self) -> None:
         if self._uvicorn_server is not None:

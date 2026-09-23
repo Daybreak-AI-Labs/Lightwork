@@ -45,19 +45,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import shutil
-import subprocess  # list argv only; never a shell (the CI grep gate enforces this)
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..budget import Budget
+from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
+from ..owned_process import ProcessOutputLimit, run_owned, run_sync
 from ..secrets import scrub
 
 # Pricing qualifier: unknown ids behind this prefix bill $0 (subscription
@@ -67,6 +69,13 @@ PRICE_MODEL_PREFIX = "codex_cli:"
 DEFAULT_BINARY = "codex"
 DEFAULT_SANDBOX_MODE = "read-only"
 DEFAULT_TIMEOUT_SECONDS = 600.0
+LAST_MESSAGE_BYTES = 4 * 1024 * 1024
+
+
+class CodexExecutionError(UsageAccountingError):
+    """Failed invocation: no final usage receipt, and no automatic replay."""
+
+    usage_status = "unknown"
 
 _ENV_ALLOWLIST = (
     "HOME",
@@ -115,7 +124,58 @@ def codex_home(env: dict | None = None) -> Path:
     """The Codex CLI state dir: ``$CODEX_HOME`` or ``~/.codex``."""
     e = os.environ if env is None else env
     raw = (e.get("CODEX_HOME") or "").strip()
-    return Path(raw) if raw else Path.home() / ".codex"
+    home = e.get("USERPROFILE" if os.name == "nt" else "HOME")
+    if raw:
+        return Path(raw)
+    if home and home.strip():
+        return Path(home) / ".codex"
+    if env is not None:
+        raise RuntimeError(
+            "Codex provider environment requires CODEX_HOME or a captured "
+            "home directory; refusing live authentication-directory discovery"
+        )
+    return Path.home() / ".codex"
+
+
+def _snapshot_binary(command: str, environment: dict[str, str]) -> str | None:
+    """Resolve only the admitted PATH/PATHEXT without changing process globals.
+
+    Windows ``shutil.which(..., path=...)`` still reads live PATHEXT and may
+    prepend the current directory according to ambient Win32 policy. An explicit
+    snapshot searches only its PATH entries (or the configured binary path).
+    Relative entries are pinned to absolute paths at construction.
+    """
+    if os.name != "nt":
+        resolved = shutil.which(command, path=environment.get("PATH", os.defpath))
+        return os.path.abspath(resolved) if resolved is not None else None
+    extensions = [
+        extension for extension in environment.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
+        if extension
+    ]
+    if any(command.lower().endswith(extension.lower()) for extension in extensions):
+        candidates = [command]
+    else:
+        candidates = [command + extension for extension in extensions]
+    if os.path.dirname(command):
+        directories = [""]
+    else:
+        # Windows' os.defpath includes '.', which would silently widen a
+        # snapshot that omitted PATH to the current working directory.
+        path = environment.get("PATH", "")
+        if not path:
+            return None
+        directories = path.split(os.pathsep)
+    seen: set[str] = set()
+    for directory in directories:
+        normalized = os.path.normcase(os.path.abspath(directory or os.curdir))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        for candidate in candidates:
+            filename = os.path.join(directory, candidate)
+            if os.path.isfile(filename) and os.access(filename, os.F_OK | os.X_OK):
+                return os.path.abspath(filename)
+    return None
 
 
 def _auth_file_present(env: dict | None = None) -> bool:
@@ -143,16 +203,26 @@ class CodexCLIClient:
     # event must not abort the turn (mirrors the self-hosted providers).
     USAGE_REQUIRED = False
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        # base_url accepted for registry-signature parity; codex exec has no
-        # endpoint knob we expose (the CLI owns its backend).
-        del base_url
-        token = (api_key or os.environ.get("CODEX_ACCESS_TOKEN") or "").strip()
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None, provider_options=None):
+        if base_url:
+            raise ValueError("providers.codex_cli.base_url is unsupported; the CLI owns its endpoint")
+        self._environment = dict(os.environ if environment is None else environment)
+        # Admission, login and execution must all use the same authentication
+        # directory, including Windows where USERPROFILE is deliberately not
+        # forwarded to the subprocess. A direct constructor may discover its
+        # default once; an explicit snapshot may never consult a later home.
+        self._environment["CODEX_HOME"] = str(
+            codex_home(None if environment is None else self._environment).absolute()
+        )
+        token = (api_key or self._environment.get("CODEX_ACCESS_TOKEN") or "").strip()
         self._access_token = token or None
-        self._login_attempted = False
+        self._login_succeeded = False
         self._login_lock = threading.Lock()
 
-        cfg = self._provider_config()
+        cfg = self._provider_config() if provider_options is None else dict(provider_options)
+        from .configuration import adapter_options, validate_fields
+        validate_fields("codex_cli", cfg)
+        cfg = dict(adapter_options("codex_cli", cfg))
         self.binary = str(cfg.get("binary") or DEFAULT_BINARY)
         sandbox_mode = str(cfg.get("sandbox_mode") or DEFAULT_SANDBOX_MODE)
         if sandbox_mode not in _SANDBOX_MODES:
@@ -163,10 +233,12 @@ class CodexCLIClient:
         self.sandbox_mode = sandbox_mode
         try:
             self.timeout_seconds = float(
-                cfg.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS
+                cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
             )
         except (TypeError, ValueError):
             self.timeout_seconds = DEFAULT_TIMEOUT_SECONDS
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError("[providers.codex_cli] timeout_seconds must be finite and positive")
         cwd = cfg.get("cwd")
         self.cwd = str(cwd) if isinstance(cwd, str) and cwd.strip() else None
 
@@ -177,7 +249,9 @@ class CodexCLIClient:
         # the shim. Resolving + routing the shim (see `_launch_prefix`) fixes
         # that. shutil.which also accepts an already-absolute path, so an
         # operator-set `binary` pointing straight at codex.exe works too.
-        resolved = shutil.which(self.binary)
+        resolved = shutil.which(self.binary) if environment is None else _snapshot_binary(
+            self.binary, self._environment,
+        )
         if resolved is None:
             raise RuntimeError(
                 f"Codex CLI binary {self.binary!r} not found on PATH. Install it "
@@ -185,11 +259,11 @@ class CodexCLIClient:
                 "[providers.codex_cli] binary in ~/.maverick/config.toml."
             )
         self._binary_path = resolved
-        if not self._access_token and not _auth_file_present():
+        if not self._access_token and not _auth_file_present(self._environment):
             raise RuntimeError(
                 "Codex CLI is not authenticated: no CODEX_ACCESS_TOKEN env var, "
                 "no [providers.codex_cli] api_key, and no "
-                f"{codex_home() / 'auth.json'}. Run `codex login`, or export "
+                f"{codex_home(self._environment) / 'auth.json'}. Run `codex login`, or export "
                 "CODEX_ACCESS_TOKEN (kept out of logs and argv)."
             )
 
@@ -240,7 +314,7 @@ class CodexCLIClient:
         """
         path = self._binary_path
         if os.name == "nt" and path.lower().endswith((".cmd", ".bat")):
-            comspec = os.environ.get("COMSPEC") or "cmd.exe"
+            comspec = self._environment.get("COMSPEC") or "cmd.exe"
             command = " ".join(self._cmd_quote(part) for part in (path, *args))
             return [comspec, "/d", "/s", "/c", command]
         return [path, *args]
@@ -251,20 +325,23 @@ class CodexCLIClient:
 
     # ------------------------------------------------------------------ auth
 
-    def _ensure_login(self) -> None:
+    async def _ensure_login(self, deadline: float, check: Callable[[], None]) -> None:
         """One-shot ``codex login --with-access-token`` when we hold a token
         but the CLI has no stored login. Token travels on STDIN only."""
-        if _auth_file_present() or not self._access_token:
+        if _auth_file_present(self._environment) or not self._access_token:
             return
-        with self._login_lock:
-            if self._login_attempted or _auth_file_present():
+        while not self._login_lock.acquire(blocking=False):
+            check()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("codex login queue deadline exceeded")
+            await asyncio.sleep(0.005)
+        try:
+            if self._login_succeeded or _auth_file_present(self._environment):
                 return
-            self._login_attempted = True
-            proc = subprocess.run(  # fixed argv, no shell
+            proc = await run_owned(
                 self._launch_cmd("login", "--with-access-token"),
                 input=self._access_token,
-                capture_output=True, text=True, timeout=60,
-                encoding="utf-8", errors="replace",
+                deadline=min(deadline, time.monotonic() + 60), check=check,
                 env=self._subprocess_env(),
             )
             if proc.returncode != 0:
@@ -272,6 +349,9 @@ class CodexCLIClient:
                     "codex login --with-access-token failed "
                     f"(exit {proc.returncode}): {self._scrub(proc.stderr)[-500:]}"
                 )
+            self._login_succeeded = True
+        finally:
+            self._login_lock.release()
 
     def _subprocess_env(self) -> dict[str, str]:
         """Minimal environment for Codex subprocesses.
@@ -282,7 +362,7 @@ class CodexCLIClient:
         provider subprocess even if a prompt injection convinces Codex to run
         read-only commands such as ``env`` or ``printenv``.
         """
-        env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
+        env = {k: v for k, v in self._environment.items() if k in _ENV_ALLOWLIST}
         if "PATH" not in env:
             env["PATH"] = os.defpath
         return env
@@ -385,7 +465,7 @@ class CodexCLIClient:
             ):
                 for name in theirs:
                     v = u.get(name)
-                    if isinstance(v, (int, float)) and v >= 0:
+                    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0:
                         usage[ours] = int(v)
                         break
 
@@ -435,9 +515,11 @@ class CodexCLIClient:
 
     # ------------------------------------------------------------------- exec
 
-    def _run_exec(self, prompt: str, model: str) -> tuple[str, str]:
+    async def _run_exec(
+        self, prompt: str, model: str, deadline: float, check: Callable[[], None],
+    ) -> tuple[str, str]:
         """Run one ``codex exec`` turn; return (final text, stdout JSONL)."""
-        self._ensure_login()
+        await self._ensure_login(deadline, check)
         with tempfile.TemporaryDirectory(prefix="mav-codex-") as tmp:
             last_msg = Path(tmp) / "last-message.txt"
             cmd = self._launch_cmd(
@@ -450,16 +532,8 @@ class CodexCLIClient:
                 "-",  # prompt on STDIN: no argv-size limit, not in `ps` output
             )
             try:
-                proc = subprocess.run(  # fixed argv, no shell
-                    cmd,
-                    input=prompt,
-                    capture_output=True, text=True,
-                    # Codex speaks UTF-8 on stdin/stdout. Pin it explicitly:
-                    # text=True otherwise uses the locale default (cp1252 on
-                    # Windows), which raised UnicodeEncodeError on prompts /
-                    # replies containing non-Latin-1 chars (e.g. U+2192 "→").
-                    encoding="utf-8", errors="replace",
-                    timeout=self.timeout_seconds,
+                proc = await run_owned(
+                    cmd, input=prompt, deadline=deadline, check=check,
                     cwd=self.cwd or tmp,
                     env=self._subprocess_env(),
                 )
@@ -467,20 +541,26 @@ class CodexCLIClient:
                 raise RuntimeError(
                     f"Codex CLI binary {self._binary_path!r} disappeared from PATH"
                 ) from e
-            except subprocess.TimeoutExpired as e:
-                raise RuntimeError(
+            except TimeoutError as e:
+                raise CodexExecutionError(
                     f"codex exec timed out after {self.timeout_seconds:.0f}s "
                     "(raise [providers.codex_cli] timeout_seconds if the task "
-                    "legitimately needs longer)"
+                    "legitimately needs longer); usage is unknown"
                 ) from e
+            except ProcessOutputLimit as e:
+                raise CodexExecutionError("codex exec exceeded output limits; usage is unknown") from e
             if proc.returncode != 0:
-                raise RuntimeError(
+                raise CodexExecutionError(
                     f"codex exec failed (exit {proc.returncode}): "
                     f"{self._scrub(proc.stderr)[-800:]}"
                 )
             file_text = ""
             try:
-                file_text = last_msg.read_text().strip()
+                with last_msg.open("rb") as stream:
+                    content = stream.read(LAST_MESSAGE_BYTES + 1)
+                if len(content) > LAST_MESSAGE_BYTES:
+                    raise CodexExecutionError("codex final message exceeded its byte limit; usage is unknown")
+                file_text = content.decode("utf-8", errors="replace").strip()
             except OSError:
                 pass
             return file_text, proc.stdout or ""
@@ -496,13 +576,16 @@ class CodexCLIClient:
         model: str | None = None,
         on_delta: Callable[[str], None] | None = None,
     ) -> LLMResponse:
+        del on_delta  # This provider has no delta stream.
+        return run_sync(lambda: self.complete_async(
+            system, messages, tools=tools, budget=budget, max_tokens=max_tokens,
+            thinking_budget=thinking_budget, model=model,
+        ))
+
+    def _response(self, file_text, stdout, chosen_model, tools, budget) -> LLMResponse:
         # max_tokens / thinking_budget / on_delta accepted for Provider-protocol
         # parity; codex exec exposes no per-call output cap, no thinking knob,
         # and no delta stream. Budget's token caps still enforce at record time.
-        del max_tokens, thinking_budget, on_delta
-        chosen_model = model or self.DEFAULT_MODEL
-        prompt = self._compose_prompt(system, messages, tools)
-        file_text, stdout = self._run_exec(prompt, chosen_model)
         event_text, usage = self._parse_events(stdout)
         text = file_text or event_text or ""
         if not text.strip():
@@ -541,8 +624,22 @@ class CodexCLIClient:
         thinking_budget: int | None = None,
         model: str | None = None,
     ) -> LLMResponse:
-        return await asyncio.to_thread(
-            self.complete,
-            system, messages, tools=tools, budget=budget,
-            max_tokens=max_tokens, thinking_budget=thinking_budget, model=model,
-        )
+        from .. import killswitch
+
+        def check() -> None:
+            killswitch.check()
+            if budget is not None:
+                budget.check()
+
+        check()
+        deadline = time.monotonic() + self.timeout_seconds
+        chosen_model = model or self.DEFAULT_MODEL
+        prompt = self._compose_prompt(system, messages, tools)
+        try:
+            file_text, stdout = await self._run_exec(prompt, chosen_model, deadline, check)
+        except BaseException as exc:
+            # Keep cancellation, halt and Budget exceptions unchanged. An absent
+            # final receipt cannot be presented as a zero-token completion.
+            exc.usage_status = "unknown"
+            raise
+        return self._response(file_text, stdout, chosen_model, tools, budget)

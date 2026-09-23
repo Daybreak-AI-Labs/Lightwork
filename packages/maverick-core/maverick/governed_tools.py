@@ -19,6 +19,7 @@ available, or from connector-specific record identifiers for bespoke tools.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -28,6 +29,7 @@ import uuid
 from urllib.parse import urlsplit, urlunsplit
 
 from .approval_cards import ApprovalCardError, digest
+from .connector_attempts import CONTROL_ERRORS
 from .safety.consent import ConsentDenied
 from .tools import Tool
 
@@ -478,6 +480,21 @@ def _connector_target(
     }
 
 
+def _wrap_lazy_connector_tool(tool, *, goal_id, actor, enterprise):
+    from .tools._lazy import GOVERNED_DESCRIPTION_NOTE
+    # Discovery needs exactly the governed schema/description, but not the
+    # thousands of executor/receipt closures. Bind this registry's actor,
+    # goal and enterprise snapshot; the existing wrapper is constructed
+    # around the real connector before its first invocation.
+    strict = _enterprise_mode() if enterprise is None else bool(enterprise)
+    return tool.with_wrapper(
+        lambda resolved: wrap_connector_tool(
+            resolved, goal_id=goal_id, actor=actor, enterprise=strict,
+        ),
+        description=(tool.description + GOVERNED_DESCRIPTION_NOTE)[:1024],
+    )
+
+
 def wrap_connector_tool(
     tool: Tool,
     *,
@@ -491,6 +508,39 @@ def wrap_connector_tool(
     A missing COMMIT receipt after the effect produces an explicit
     ``INDETERMINATE`` outcome so callers do not blindly retry a write.
     """
+    from .tools._lazy import LazyTool
+
+    if isinstance(tool, LazyTool):
+        return _wrap_lazy_connector_tool(
+            tool, goal_id=goal_id, actor=actor, enterprise=enterprise,
+        )
+    return _wrap_connector_executor(tool, goal_id=goal_id, actor=actor, enterprise=enterprise)
+
+
+def _preserve_connector_failure(exc, receipt):
+    """Record an uncertain effect without consuming the originating stop."""
+    detail = type(exc).__name__[:120]
+    stopping = isinstance(exc, (*CONTROL_ERRORS, asyncio.CancelledError))
+    try:
+        receipt(detail)
+    except (Exception, asyncio.CancelledError) as reporting_error:
+        # Preserve the original stop even when its receipt separately fails.
+        # A newly raised stop still propagates when the original was ordinary.
+        if not stopping and isinstance(reporting_error, (*CONTROL_ERRORS, asyncio.CancelledError)):
+            raise
+    if stopping:
+        raise exc
+    return detail
+
+
+def _wrap_connector_executor(
+    tool: Tool,
+    *,
+    goal_id: int | None,
+    actor: str,
+    enterprise: bool | None,
+) -> Tool:
+    """Bind the existing governed boundary around a materialized executor."""
     from .governed_actions import (
         ActionError,
         ActionSpec,
@@ -660,14 +710,13 @@ def wrap_connector_tool(
             with consume_operation_consent(permit):
                 try:
                     result = tool.fn(receipt_args)
-                except Exception as exc:  # noqa: BLE001 -- preserve failure receipt
+                except (Exception, asyncio.CancelledError) as exc:
                     # Exception messages from HTTP/database libraries routinely
                     # embed credentialed URLs, headers, and DSNs. Receipts and the
                     # model-visible result get only a bounded type marker; the
                     # transaction id is sufficient for privileged reconciliation.
-                    detail = type(exc).__name__[:120]
-                    try:
-                        _receipt(
+                    detail = _preserve_connector_failure(
+                        exc, lambda detail: _receipt(
                             action=f"{action}.indeterminate",
                             args=receipt_args,
                             effect=preview.effect,
@@ -676,9 +725,8 @@ def wrap_connector_tool(
                             transaction_id=transaction_id,
                             phase="INDETERMINATE",
                             strict_write=False,
-                        )
-                    except Exception:  # receipt is best-effort after ambiguity
-                        pass
+                        ),
+                    )
                     return (
                         "INDETERMINATE (governed): the connector raised after its "
                         "external-effect boundary; reconcile before retrying. "
@@ -735,6 +783,8 @@ def wrap_connector_tool(
                     f"transaction_id={transaction_id}; do not retry automatically."
                 )
             return safe_result
+        except CONTROL_ERRORS:
+            raise
         except ConsentDenied:
             return (
                 f"REFUSED (governed): approval was denied for target {path!r}; "
@@ -764,10 +814,11 @@ def wrap_connector_tool(
     # Preserve connector provenance used by registry inventory and credential
     # scoping checks while the closure still supplies the governed boundary.
     _fn.__module__ = getattr(tool.fn, "__module__", _fn.__module__)
-    note = " [governed: writes simulated, human-gated, and transaction-receipted]"
+    _fn.__qualname__ = "wrap_connector_tool.<locals>._fn"
+    from .tools._lazy import GOVERNED_DESCRIPTION_NOTE
     return Tool(
         name=tool.name,
-        description=(tool.description + note)[:1024],
+        description=(tool.description + GOVERNED_DESCRIPTION_NOTE)[:1024],
         input_schema=tool.input_schema,
         fn=_fn,
         parallel_safe=False,

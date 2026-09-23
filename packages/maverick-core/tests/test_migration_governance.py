@@ -139,6 +139,54 @@ def test_regen_allows_additive_new_version():
     assert mg.regen_blockers(lads, existing) == []
 
 
+def test_reviewed_learning_key_replacement_is_exactly_pinned():
+    from maverick.learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+
+    existing = mg.fingerprint({"sqlite": {1: []}, "postgres": {1: []}})
+    lads = {"sqlite": {1: [], 39: []}, "postgres": {1: [], 39: LEARNING_TENANT_MIGRATION}}
+    assert mg._destructive_statements(LEARNING_TENANT_MIGRATION)
+    assert mg.regen_blockers(lads, existing) == []
+    assert all("destructive" not in item for item in mg.lock_problems(existing, lads))
+
+
+@pytest.mark.parametrize("change", ["append_drop", "modify_sql", "different_version", "different_backend"])
+def test_learning_key_exception_cannot_admit_other_destructive_ddl(change):
+    from maverick.learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+
+    statements = list(LEARNING_TENANT_MIGRATION)
+    backend, version = "postgres", 39
+    if change == "append_drop":
+        statements.append("DROP TABLE goals")
+    elif change == "modify_sql":
+        statements[-1] = statements[-1].replace("DROP CONSTRAINT", "DROP COLUMN")
+    elif change == "different_version":
+        version = 40
+    else:
+        backend = "sqlite"
+    lads = {"sqlite": {1: []}, "postgres": {1: []}}
+    existing = mg.fingerprint(lads)
+    lads[backend][version] = statements
+    assert any("destructive" in item for item in mg.regen_blockers(lads, existing))
+    assert any("destructive" in item for item in mg.lock_problems(existing, lads))
+
+
+def test_learning_key_exception_does_not_repin_an_existing_checksum(tmp_path, monkeypatch):
+    from maverick.learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+
+    path = tmp_path / "migrations.lock.json"
+    old = {"sqlite": {1: [], 39: []}, "postgres": {1: [], 39: ["SELECT 1"]}}
+    import json
+
+    path.write_text(json.dumps(mg.fingerprint(old)))
+    before = path.read_bytes()
+    current = {"sqlite": {1: [], 39: []}, "postgres": {1: [], 39: LEARNING_TENANT_MIGRATION}}
+    monkeypatch.setattr(mg, "lock_path", lambda: path)
+    monkeypatch.setattr(mg, "ladders", lambda: current)
+    with pytest.raises(ValueError, match="silently re-pin"):
+        mg.write_lock()
+    assert path.read_bytes() == before
+
+
 # ---- the base SCHEMA is governed by the ratchet ---------------------------
 
 def test_base_schema_is_fingerprinted():

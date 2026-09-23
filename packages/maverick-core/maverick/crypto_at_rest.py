@@ -73,6 +73,7 @@ _MAGIC_V2 = b"MVKAR2\n"       # v2: keyring header -- MAGIC || keyid(8) || nonce
 # test asserts this); duplicated here so is_sealed() stays cheap and we avoid a
 # crypto_at_rest <-> tenant_kms import cycle (tenant_kms imports from this module).
 _TENANT_MAGIC = b"MVKTEN1\n"
+_STREAM_MAGIC = b"MVKASF1\n"  # bounded authenticated audit frames
 _NONCE_BYTES = 12
 _KEY_BYTES = 32              # AES-256
 _KEYID_BYTES = 8             # short key fingerprint embedded in v2 blobs
@@ -801,6 +802,7 @@ def is_sealed(blob: bytes) -> bool:
         blob[: len(_MAGIC)] == _MAGIC
         or blob[: len(_MAGIC_V2)] == _MAGIC_V2
         or blob[: len(_TENANT_MAGIC)] == _TENANT_MAGIC
+        or blob[: len(_STREAM_MAGIC)] == _STREAM_MAGIC
     )
 
 
@@ -853,6 +855,13 @@ def _unseal_with_key_cache(
     unchanged — plaintext written before encryption was enabled (transparent
     migration). Raises :class:`EncryptionUnavailable` only when a genuinely
     sealed blob can't be opened."""
+    if blob.startswith(_STREAM_MAGIC):
+        from .sealed_stream import SealedStreamError, decode_stream
+
+        try:
+            return decode_stream(blob, lambda frame: _unseal_with_key_cache(frame, key_cache))
+        except SealedStreamError as exc:
+            raise EncryptionUnavailable("authenticated audit frames are invalid") from exc
     # A per-tenant envelope is opened with the tenant's data key regardless of
     # whether per-tenant mode is currently on (so reads keep working after the
     # mode is toggled). The current tenant must match the one it was sealed under

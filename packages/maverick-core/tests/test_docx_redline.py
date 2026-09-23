@@ -191,15 +191,18 @@ def test_duplicate_valued_edits_are_tracked_by_identity():
     assert len(res.applied) == 1 and len(res.unmatched) == 1
 
 
-def test_containment_match_handles_surrounding_prose():
+def test_containment_cannot_replace_surrounding_prose():
     wrapped = ("8.2 Sub-processing. " + CLAUSE + " This section survives "
                "termination.")
     original = _make_docx([wrapped])
     res = dr.redline_docx(original, [dr.ClauseEdit(find=CLAUSE, replace=FIXED)],
                           date=DATE)
-    assert len(res.applied) == 1
-    # The WHOLE paragraph is struck and replaced -- an unambiguous revision.
-    assert wrapped in _document_xml(res.content)
+    assert not res.applied and len(res.unmatched) == 1
+    assert res.edit_results[0]["reason"] == "scope_mismatch"
+    # The accepted active text, including qualifiers, is unchanged.
+    root = ET.fromstring(_document_xml(res.content))
+    assert "".join(t.text or "" for t in root.iter(f"{W}t")) == wrapped
+    assert _document_xml(res.content) == _document_xml(original)
 
 
 def test_synthesized_redline_for_a_pdf_upload():

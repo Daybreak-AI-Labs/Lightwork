@@ -23,14 +23,16 @@ class GeminiClient(OpenAIClient):
     # over-charge cached input ~2x.
     CACHE_READ_MULT = 0.25
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
+        env = os.environ if environment is None else environment
+        key = api_key or env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
         super().__init__(
             api_key=key,
             base_url=base_url or "https://generativelanguage.googleapis.com/v1beta/openai/",
             # Don't silently fall back to OPENAI_API_KEY when no Gemini key is
             # set -- that would send the OpenAI key to Google's endpoint.
             allow_openai_env_fallback=False,
+            environment=environment,
         )
 
     @staticmethod

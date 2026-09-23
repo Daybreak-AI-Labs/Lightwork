@@ -12,7 +12,14 @@ from importlib.metadata import version as _distribution_version
 from . import config_space
 from .agent_adapter import evolve_live, make_agent_factory
 from .archive import Archive, Candidate
-from .eval_harness import EvalCase, EvalReport, evaluate, evaluate_case
+from .eval_harness import (
+    EvalCase,
+    EvalObservation,
+    EvalReport,
+    evaluate,
+    evaluate_case,
+    observe_case,
+)
 from .loop import evolve_continuous
 from .metaproductive import (
     CladeNode,
@@ -41,8 +48,10 @@ except PackageNotFoundError:  # source tree without installed metadata
 __all__ = [
     "EvalCase",
     "EvalReport",
+    "EvalObservation",
     "evaluate",
     "evaluate_case",
+    "observe_case",
     "Archive",
     "Candidate",
     "evolve",

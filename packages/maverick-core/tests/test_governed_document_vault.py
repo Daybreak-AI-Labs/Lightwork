@@ -152,6 +152,73 @@ def test_revoke_invalidates_authority_and_outstanding_grant(store):
         authority.consume_delivery_grant(issued.grant, principal_ref="principal-a")
 
 
+def test_listing_reads_document_heads_once_and_preserves_order_filters_limits(store, monkeypatch):
+    authority, clock = store
+    records = []
+    for index in range(12):
+        records.append(ingest(store, f"evidence {index}".encode()))
+        clock.advance(1)
+    authority.revoke(records[3].document_ref, principal_ref="actor-a", expected_revision=1)
+    queries = []
+    connect = authority._connect
+
+    def traced_connect(**kwargs):
+        connection = connect(**kwargs)
+        connection.set_trace_callback(queries.append)
+        return connection
+
+    monkeypatch.setattr(authority, "_connect", traced_connect)
+    listed = authority.list_documents(state="active", limit=7)
+    assert [record.document_ref for record in listed] == [
+        record.document_ref for record in reversed(records[5:])
+    ]
+    head_reads = [query for query in queries if "SELECT" in query.upper()
+                  and "FROM GOVERNED_DOCUMENTS" in query.upper()]
+    assert len(head_reads) == 1
+    assert "BEGIN" in queries and "COMMIT" in queries
+    assert [record.document_ref for record in authority.list_documents(state="revoked")] == [
+        records[3].document_ref
+    ]
+    assert len(authority.list_documents()) == 12
+
+
+def test_listing_ties_are_deterministic_and_tampering_fails_closed(store):
+    authority, _clock = store
+    records = [ingest(store) for _ in range(3)]
+    assert [record.document_ref for record in authority.list_documents()] == sorted(
+        record.document_ref for record in records
+    )
+    with sqlite3.connect(authority.path) as connection:
+        connection.execute("UPDATE governed_documents SET safe_display_name='tampered.pdf' WHERE document_ref=?",
+                           (records[1].document_ref,))
+    with pytest.raises(vault.VaultIntegrityError, match="document_integrity_invalid"):
+        authority.list_documents()
+    with pytest.raises(vault.VaultIntegrityError, match="document_integrity_invalid"):
+        authority.get(records[1].document_ref)
+
+
+def test_listing_retains_selected_snapshot_while_fresh_authority_observes_revoke(store, monkeypatch):
+    authority, _clock = store
+    records = [ingest(store) for _ in range(3)]
+    validate = authority._validate_document_row
+    revoked = False
+
+    def revoke_during_validation(row):
+        nonlocal revoked
+        if not revoked:
+            revoked = True
+            authority.revoke(records[-1].document_ref, principal_ref="actor-a", expected_revision=1)
+        validate(row)
+
+    monkeypatch.setattr(authority, "_validate_document_row", revoke_during_validation)
+    listed = authority.list_documents(state="active")
+    assert {record.document_ref for record in listed} == {record.document_ref for record in records}
+    assert all(record.state == "active" and record.authority_revision == 1 for record in listed)
+    current = authority.resolve_authority("tenant-a", "principal-a", records[-1].document_ref)
+    assert current.download_allowed is False
+    assert current.authority_revision == 2
+
+
 def test_claim_recovery_restores_only_an_unexpired_stale_lease(store, monkeypatch):
     authority, clock = store
     record = ingest(store)

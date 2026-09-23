@@ -1405,8 +1405,8 @@
             '<p><span class="badge ' + verdict[0] + '">' + verdict[1] + '</span></p>' +
             ((rec.redline && rec.redline.unmatched && rec.redline.unmatched.length)
               ? '<p class="muted">' + rec.redline.unmatched.length +
-                ' change(s) could not be anchored to a paragraph and must be ' +
-                'applied by hand — the memo lists them.</p>' : '') +
+                ' change(s) need manual review before they can be applied ' +
+                'safely — the memo explains each one.</p>' : '') +
             '<p><a class="btn" href="/api/v1/privacy/paper-reviews/' + rec.id +
             '/memo" target="_blank">Read the memo</a> ' +
             '<a class="btn btn--primary" href="/api/v1/privacy/paper-reviews/' +

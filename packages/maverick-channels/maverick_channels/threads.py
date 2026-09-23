@@ -15,12 +15,9 @@ edge needs an extra permission grant and misses replies that don't
 allowlist-checked (default-deny), and replies authored by the configured
 account itself are skipped so the bot can never loop on its own replies.
 
-Dedup: polling re-sees recent replies every cycle, so reply ids are claimed
-atomically (``mark_message_processed``) BEFORE processing and released if
-the handler fails — the same pattern as whatsapp_cloud. One deliberate
-difference: if the claim infrastructure is unavailable the reply is SKIPPED
-(fail-closed) and retried next poll, because with no poll cursor "process
-anyway" would re-run the same goal every ``poll_seconds``.
+Polling persists bounded continuation only after durable inbox admission.
+Execution claims remain held after an unknown outcome; saved replies retry
+only definitively rejected delivery operations, preserving container ids.
 
 Outbound is the documented two-step publish: create a TEXT media container
 (``POST /{user_id}/threads``, with ``reply_to_id`` when the target looks
@@ -52,11 +49,11 @@ from .base import (
     Handler,
     IncomingMessage,
     backoff_delay,
-    claim_processed_message,
     is_allowed,
     normalize_allowlist,
-    release_processed_message,
 )
+from .delivery import DeliveryNotSent, DeliveryUnknown, send_chunk
+from .polling import PollCheckpoint, PollPage, parse_timestamp, utc_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -101,73 +98,83 @@ class ThreadsChannel(Channel):
     # -- inbound (poll loop) ---------------------------------------------------
 
     async def _poll_once(self) -> list[dict]:
-        """Fetch recent replies in the user's threads (newness is decided by
-        the dedup claim, not a cursor — the edge re-serves recent replies)."""
-        try:
-            import httpx
-        except ImportError as e:
-            raise RuntimeError(
-                "httpx not installed. From the reviewed checkout run: "
-                "python -m pip install -e './packages/maverick-channels[threads]'"
-            ) from e
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{THREADS_BASE}/{API_VERSION}/{self.user_id}/replies",
-                headers=self._headers(),
-                params={"fields": "id,text,username,from"},
-            )
-            resp.raise_for_status()
-            return (resp.json() or {}).get("data") or []
+        import httpx
 
-    async def _dispatch(self, reply: dict) -> None:
-        reply_id = str(reply.get("id") or "")
-        text = str(reply.get("text") or "")
+        account = self.user_id
+        checkpoint = PollCheckpoint(self.name, account)
+        async def initialize():
+            return {"initial_page": True, "floor": None}
+        row = await checkpoint.load(initialize)
+        async def fetch(state):
+            if account != self.user_id:
+                raise PermissionError("Threads configured account changed during polling")
+            params = {"fields": "id,text,username,from,timestamp", "limit": 25}
+            if state["cursor"]:
+                params["after"] = state["cursor"]
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(f"{THREADS_BASE}/{API_VERSION}/{account}/replies",
+                                             headers=self._headers(), params=params)
+                response.raise_for_status()
+                payload = response.json() or {}
+            items = payload.get("data") or []
+            paging = payload.get("paging") or {}
+            cursor = (paging.get("cursors") or {}).get("after") if paging.get("next") else None
+            if paging.get("next") and not cursor:
+                raise ValueError("Threads next page has no bounded opaque cursor")
+            if state["initial_page"]:
+                timestamps = [parse_timestamp(item.get("timestamp", "")) for item in items]
+                floor = (min(timestamps).isoformat() if all(timestamps) and timestamps else
+                         (utc_timestamp() if not items else None))
+                if cursor and floor is None:
+                    raise ValueError("Threads startup page requires timestamps before safe pagination")
+                # Preserve the existing startup scope: only its first page is
+                # eligible. A durable fixed floor prevents later history backfill.
+                return PollPage(items, updates={"floor": floor, "initial_page": False})
+            if cursor and not state["floor"]:
+                raise ValueError("Threads pagination has no established history boundary")
+            return PollPage(items, cursor)
+        async def admit(item, state):
+            if not state["initial_page"] and state["floor"]:
+                timestamp = parse_timestamp(item.get("timestamp", ""))
+                if timestamp is None:
+                    raise ValueError("Threads reply has no valid history boundary")
+                if timestamp < parse_timestamp(state["floor"]):
+                    return False
+            return await self._admit(item) is not None
+        results = await checkpoint.drain(row, fetch, admit)
+        self.poll_status = (await asyncio.to_thread(checkpoint.store.get, checkpoint.record_id))["status"]
+        return results
+
+    def _input(self, reply):
+        reply_id, text = str(reply.get("id") or ""), str(reply.get("text") or "")
         sender = reply.get("from") or {}
         username = str(reply.get("username") or sender.get("username") or "")
-        if not reply_id or not text:
-            return
-        if str(sender.get("id") or "") == str(self.user_id):
-            return  # our own reply; never respond to ourselves (loop guard)
-        if not is_allowed(username, self.allowed_user_ids):
-            log.warning("unauthorized threads access: username=%s", username)
-            return
+        if not text or str(sender.get("id") or "") == str(self.user_id) or not is_allowed(username, self.allowed_user_ids):
+            return None
+        if not reply_id:
+            raise ValueError("Threads reply requires a stable provider identity")
+        return IncomingMessage(user_id=reply_id, text=text, channel=self.name,
+                               message_id=reply_id, sender_id=username)
 
-        # Claim the reply id atomically BEFORE processing (same pattern as
-        # whatsapp_cloud). Polling has no cursor — every poll re-sees recent
-        # replies — so unlike the webhook adapters we fail CLOSED when the
-        # claim infrastructure is down: skip now, retry next poll. "Process
-        # anyway" here would re-run the goal every poll_seconds.
-        try:
-            if not claim_processed_message("threads", reply_id):
-                return  # already handled (this run or an earlier one)
-        except Exception:
-            log.exception(
-                "threads dedup claim failed; deferring reply %s to next poll",
-                reply_id,
-            )
-            return
+    async def _admit(self, reply):
+        incoming = self._input(reply)
+        if incoming is None:
+            return None
+        account = self.user_id
+        return await self.admit_message(incoming, external_id=incoming.message_id, account=account,
+            authorize=lambda: account == self.user_id and is_allowed(incoming.sender_id, self.allowed_user_ids))
 
-        incoming = IncomingMessage(
-            user_id=reply_id,  # the media id send() replies to
-            text=text,
-            channel="threads",
-            message_id=reply_id,
-            sender_id=username,
-            raw=reply,
-        )
-        try:
-            reply_text = await self.dispatch_text(incoming)
-        except Exception:
-            log.exception("threads handler error")
-            try:
-                release_processed_message("threads", reply_id)
-            except Exception:  # pragma: no cover
-                # The claim remains durable, so the next poll cannot execute
-                # this failed delivery a second time.
-                log.exception("threads dedup release failed; claim remains held")
+    async def _dispatch(self, reply: dict) -> None:
+        receipt = await self._admit(reply)
+        if receipt is None:
             return
-        if reply_text:
-            await self.send(reply_id, reply_text)
+        incoming, account = self._input(reply), self.user_id
+        async def send_saved(result):
+            if result.text:
+                return await self.send(incoming.user_id, result.text)
+        return await self.process_message(incoming, external_id=incoming.message_id, account=account,
+            authorize=lambda: account == self.user_id and is_allowed(incoming.sender_id, self.allowed_user_ids),
+            receipt=receipt, send=send_saved)
 
     async def start(self) -> None:
         self._running = True
@@ -183,7 +190,19 @@ class ThreadsChannel(Channel):
                     log.warning("threads poll failed: %s", e)
                     replies = []
                 for reply in replies:
-                    await self._dispatch(reply)
+                    try:
+                        await self._dispatch(reply)
+                    except Exception:
+                        log.warning("threads admitted input requires recovery")
+                account = self.user_id
+                async def send_saved(msg, reply, route):
+                    if reply.text:
+                        return await self.send(msg.user_id, reply.text)
+                try:
+                    await self.recover_messages(account=account, send=send_saved,
+                        authorize=lambda msg, account=account: account == self.user_id and is_allowed(msg.sender_id, self.allowed_user_ids))
+                except Exception:
+                    log.warning("threads saved delivery recovery remains incomplete")
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),
@@ -217,34 +236,35 @@ class ThreadsChannel(Channel):
         reply_to = user_id if str(user_id or "").isdigit() else None
         chunks = [text[i:i + TEXT_LIMIT] for i in range(0, max(len(text), 1), TEXT_LIMIT)]
         for idx, chunk in enumerate(chunks):
-            # Bail on the first failed chunk: the publish edge is sequential and
-            # a half-sent multi-chunk reply can't be recovered. Log how many
-            # chunks went undelivered so a truncated reply is visible in the
-            # logs instead of vanishing silently.
-            dropped = len(chunks) - idx
             data = {"media_type": "TEXT", "text": chunk}
             if reply_to:
                 data["reply_to_id"] = reply_to
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                r = await client.post(f"{base}/threads", headers=self._headers(), data=data)
-                if r.status_code >= 400:
-                    log.warning("threads create failed (%s): %s [%d/%d chunk(s) undelivered]",
-                                r.status_code, r.text[:200], dropped, len(chunks))
-                    return
-                creation_id = (r.json() or {}).get("id")
-                if not creation_id:
-                    log.warning("threads create returned no creation id "
-                                "[%d/%d chunk(s) undelivered]", dropped, len(chunks))
-                    return
-                r2 = await client.post(
-                    f"{base}/threads_publish",
-                    headers=self._headers(),
-                    data={"creation_id": creation_id},
-                )
-                if r2.status_code >= 400:
-                    log.warning("threads publish failed (%s): %s [%d/%d chunk(s) undelivered]",
-                                r2.status_code, r2.text[:200], dropped, len(chunks))
-                    return
+            async def create(data=data):
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(f"{base}/threads", headers=self._headers(), data=data)
+                self._check_send(response)
+                identity = (response.json() or {}).get("id")
+                if not identity:
+                    raise DeliveryUnknown("Threads container identity is unconfirmed")
+                return identity
+            creation_id = await send_chunk(f"create-{idx}", data, create)
+            async def publish(creation_id=creation_id):
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(f"{base}/threads_publish", headers=self._headers(),
+                                                  data={"creation_id": creation_id})
+                self._check_send(response)
+                identity = (response.json() or {}).get("id")
+                if not identity:
+                    raise DeliveryUnknown("Threads published identity is unconfirmed")
+                return identity
+            await send_chunk(f"publish-{idx}", {"creation_id": creation_id}, publish)
+
+    @staticmethod
+    def _check_send(response):
+        if 400 <= response.status_code < 500 and response.status_code != 408:
+            raise DeliveryNotSent("Threads rejected the request")
+        if response.status_code >= 400:
+            raise DeliveryUnknown("Threads request acceptance is unconfirmed")
 
     async def stop(self) -> None:
         self._stop_event.set()

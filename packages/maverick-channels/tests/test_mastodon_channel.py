@@ -141,6 +141,7 @@ def test_mastodon_dispatch_allows_member_and_shapes_reply(monkeypatch):
                            access_token="tok", allowed_user_ids={"owner@host"})
 
     notif = {
+        "id": "notification-42",
         "account": {"acct": "owner@host", "username": "owner"},
         "status": {"id": "42", "content": "<p>are you &amp; there?</p>",
                    "visibility": "unlisted"},
@@ -180,7 +181,7 @@ def test_mastodon_poll_advances_since_id_cursor(monkeypatch):
 
     def _responder(method, url, params):
         if url.endswith("/api/v1/notifications"):
-            return _FakeResponse(json_data=batch)
+            return _FakeResponse(json_data=sorted(batch, key=lambda item: int(item["id"]), reverse=True))
         return _FakeResponse()
 
     calls = []
@@ -189,12 +190,12 @@ def test_mastodon_poll_advances_since_id_cursor(monkeypatch):
     chan = MastodonChannel(handler=_noop, instance="mastodon.social",
                            access_token="tok", allowed_user_ids={"owner@host"})
 
+    chan._last_seen_id = "0"  # Already initialized; startup no-backfill is tested separately.
     first = asyncio.run(chan._poll_once())
     assert len(first) == 3
-    # Cursor is the lexicographic max of the ids returned.
+    # Cursor is the numeric max, committed after all page receipts exist.
     assert chan._last_seen_id == "103"
-    # First request did NOT carry since_id.
-    assert "since_id" not in calls[0]["params"]
+    assert calls[0]["params"]["since_id"] == "0"
     # The request targeted mention notifications.
     assert calls[0]["params"]["types[]"] == "mention"
 
@@ -244,13 +245,14 @@ def test_mastodon_cursor_uses_numeric_not_lexicographic_max(monkeypatch):
 
     def _responder(method, url, params):
         if url.endswith("/api/v1/notifications"):
-            return _FakeResponse(json_data=batch)
+            return _FakeResponse(json_data=sorted(batch, key=lambda item: int(item["id"]), reverse=True))
         return _FakeResponse()
 
     calls = []
     _install_fake_httpx(monkeypatch, calls, _responder)
     chan = MastodonChannel(handler=_noop, instance="mastodon.social",
                            access_token="tok", allowed_user_ids={"owner@host"})
+    chan._last_seen_id = "0"
     asyncio.run(chan._poll_once())
     # Numeric max is 10000001; a lexicographic max would wrongly pick 9999999.
     assert chan._last_seen_id == "10000001"

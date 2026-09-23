@@ -593,7 +593,6 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         if paused_node is not None:
             from ..approval_cards import build_approval_card, digest
             from .approvals import current_flow_runtime_authority
-            from .redact import cap, redact
 
             next_node = flow.node(paused_node.next) if paused_node.next else None
             continuation = next_node.to_dict() if next_node is not None else {
@@ -609,7 +608,10 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 if res.resume_at is not None
                 else time.time() + 7 * 24 * 3600
             )
-            persisted_data = redact(cap(res.data or {}))
+            from .payloads import SCHEMA as data_format
+            from .payloads import approval_data
+
+            persisted_data = approval_data(res.data or {})
             runtime_authority = current_flow_runtime_authority(
                 owner=str(owner or ""),
                 execution_user_id=str(execution_user_id or ""),
@@ -648,6 +650,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                     ],
                 },
                 input_versions={
+                    "run_data_format": data_format,
                     "run_data_sha256": digest(persisted_data),
                     "definition_revision": definition_revision or flow.revision,
                 },

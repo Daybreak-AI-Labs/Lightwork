@@ -15,7 +15,7 @@ sandbox sessions -- a separate effort. Here the tool calls are resolved up front
 
 Safety:
   - Declared tool calls go through ``agent._run_tool``, so the shield, PreToolUse
-    / PostToolUse hooks, secret redaction, the per-result size cap, and the tool
+    / PostToolUse hooks, secret redaction, the complete-result byte quota, and the tool
     ACL all apply exactly as for a normal call; each is budget-accounted.
   - The script runs in the sandbox (CLAUDE.md rule #4) -- same isolation as the
     ``shell`` tool -- never in-process.
@@ -51,9 +51,21 @@ def code_exec_tool(agent) -> Tool:
 
         from ..agent import unframe_tool_output
         from ..budget import BudgetExceeded
+        from ..tool_result_stream import (
+            MAX_RESULT_BYTES,
+            ToolOutputLimit,
+            execution_output_scope,
+            result_bytes,
+        )
+
+        try:
+            result_bytes(code)
+        except ToolOutputLimit:
+            return "ERROR: script exceeds the complete-result byte quota; no tool was dispatched"
 
         # 1. Run the declared tool calls FIRST, through the shielded path.
         tool_outputs: dict[str, str] = {}
+        retained_bytes = 0
         for i, call in enumerate(declared):
             if not isinstance(call, dict):
                 return f"ERROR: tool_calls[{i}] must be an object with name + arguments."
@@ -70,10 +82,26 @@ def code_exec_tool(agent) -> Tool:
                 agent.ctx.budget.record_tool_call()
             except BudgetExceeded as e:
                 return f"ERROR: budget exhausted before running {name!r}: {e}"
-            framed = await agent._run_tool(str(name), cargs)
-            tool_outputs[var] = unframe_tool_output(framed)
+            with execution_output_scope():
+                framed = await agent._run_tool(str(name), cargs)
+            value = unframe_tool_output(framed)
+            if not framed.startswith("<tool_output ") or value.startswith("INDETERMINATE:"):
+                return (
+                    "INDETERMINATE: a declared tool did not provide a complete screened value. "
+                    "Script withheld; reconcile prior tool calls and do not repeat them blindly."
+                )
+            try:
+                retained_bytes += result_bytes(value)
+                if retained_bytes > MAX_RESULT_BYTES:
+                    raise ToolOutputLimit("combined inputs exceed quota")
+            except ToolOutputLimit:
+                return (
+                    "INDETERMINATE: complete declared results exceed the combined 16 MiB input quota. "
+                    "Script withheld; prior calls may have executed, so do not retry blindly."
+                )
+            tool_outputs[var] = value
 
-        # 2. Build the script: the (already shielded + capped) outputs as a dict,
+        # 2. Build the script: the complete screened outputs as a dict,
         # then the model's code. json.dumps of a str->str dict is valid Python.
         preamble = (
             "# Injected by code_exec: outputs of the tool_calls you declared,\n"
@@ -81,6 +109,13 @@ def code_exec_tool(agent) -> Tool:
             "tools = " + json.dumps(tool_outputs) + "\n\n"
         )
         script = preamble + code
+        try:
+            result_bytes(script)
+        except ToolOutputLimit:
+            return (
+                "INDETERMINATE: encoded script and complete inputs exceed the 16 MiB byte quota. "
+                "Script withheld; prior calls may have executed, so do not retry blindly."
+            )
 
         # 3. Run the script in the sandbox (off the event loop). stdin carries
         # the script to `python3 -`; only its stdout returns to the model.

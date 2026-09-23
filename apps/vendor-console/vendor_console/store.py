@@ -7,6 +7,7 @@ import json
 import sqlite3
 import time
 
+from . import audit, db
 from .models import Customer, License, Release, Staff, Ticket, TicketComment
 
 # ---- staff -----------------------------------------------------------------
@@ -273,13 +274,103 @@ def get_ticket(conn: sqlite3.Connection, ticket_id: int) -> Ticket | None:
     return Ticket.from_row(r) if r else None
 
 
-def ticket_by_correlation(conn: sqlite3.Connection, correlation_id: str) -> Ticket | None:
+def ticket_by_correlation(conn: sqlite3.Connection, correlation_id: str, *,
+                          customer_id: int | None) -> Ticket | None:
+    """Latest ticket in an explicitly selected customer (or unassigned) scope."""
     if not correlation_id:
         return None
     r = conn.execute(
-        "SELECT * FROM tickets WHERE correlation_id = ? ORDER BY id DESC LIMIT 1",
-        (correlation_id,)).fetchone()
+        "SELECT * FROM tickets WHERE customer_id IS ? AND correlation_id = ? "
+        "ORDER BY id DESC LIMIT 1", (customer_id, correlation_id)).fetchone()
     return Ticket.from_row(r) if r else None
+
+
+class SupportIntakeConflict(RuntimeError):
+    """The active intake key conflicts with the canonical ticket state."""
+
+
+def _active_intake_ticket(conn, customer_id, correlation_id) -> Ticket | None:
+    if not correlation_id:
+        return None
+    scope = "unassigned" if customer_id is None else f"customer:{customer_id}"
+    key = conn.execute(
+        "SELECT ticket_id FROM support_intake_keys WHERE customer_scope=? AND correlation_id=?",
+        (scope, correlation_id)).fetchone()
+    if key:
+        ticket = get_ticket(conn, key["ticket_id"])
+        if (ticket is None or not ticket.open or ticket.customer_id != customer_id
+                or ticket.correlation_id != correlation_id):
+            raise SupportIntakeConflict("support intake index requires reconciliation")
+        return ticket
+    # Reconcile a missing derived key or an older duplicate whose selected
+    # sibling was closed. Canonical ownership/status is always checked first.
+    row = conn.execute(
+        "SELECT * FROM tickets WHERE customer_id IS ? AND correlation_id=? "
+        "AND status NOT IN ('resolved','closed') ORDER BY id DESC LIMIT 1",
+        (customer_id, correlation_id)).fetchone()
+    if row is None:
+        return None
+    conn.execute("INSERT INTO support_intake_keys VALUES (?,?,?)",
+                 (scope, correlation_id, row["id"]))
+    return Ticket.from_row(row)
+
+
+def intake_ticket(conn: sqlite3.Connection, *, customer_id: int | None,
+                  correlation_id: str, subject: str, priority: str, tier: str,
+                  agent_version: str, summary: dict, bundle: dict,
+                  actor: str, resend_note: str, allow_unassigned: bool = False) -> Ticket:
+    """One customer-scoped create/append and audit commit, with no hidden commits.
+
+    A closed/resolved ticket is historical; the next bundle starts a new active
+    ticket. Each successful resend appends one note and one chained audit event.
+    Staff-only unassigned intake requires explicit opt-in from a trusted caller.
+    """
+    if customer_id is None:
+        if not allow_unassigned:
+            raise ValueError("unassigned support intake requires explicit staff scope")
+    elif type(customer_id) is not int or customer_id <= 0:
+        raise ValueError("authenticated customer id is required")
+    with db.transaction(conn) as tx:
+        now = time.time()
+        ticket = _active_intake_ticket(tx, customer_id, correlation_id)
+        if ticket is not None:
+            tid = ticket.id
+            tx.execute("INSERT INTO ticket_comments(ticket_id,author,body,kind,created_at) "
+                       "VALUES (?,?,?,'note',?)", (tid, actor, resend_note, now))
+            tx.execute("UPDATE tickets SET updated_at=? WHERE id=?", (now, tid))
+            action = "ticket.bundle_appended"
+        else:
+            cursor = tx.execute(
+                "INSERT INTO tickets(customer_id,correlation_id,subject,status,priority,tier,"
+                "agent_version,summary_json,bundle_json,created_at,updated_at) "
+                "VALUES (?,?,?,'open',?,?,?,?,?,?,?)",
+                (customer_id, correlation_id, subject, priority, tier, agent_version,
+                 json.dumps(summary), json.dumps(bundle), now, now))
+            tid = cursor.lastrowid
+            action = "ticket.create"
+        audit.record_in_transaction(
+            tx, actor=actor, action=action, target=correlation_id or str(tid),
+            detail={"ticket": tid, "customer_id": customer_id,
+                    "failing": summary.get("readiness_failing") or []})
+        result = get_ticket(tx, tid)
+        assert result is not None
+        return result  # Context manager commits before the result is returned.
+
+
+def intake_conflicts(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict]:
+    """Bounded staff report; migration never deletes or closes duplicates."""
+    rows = conn.execute(
+        "SELECT customer_id,correlation_id,COUNT(*) AS active_count FROM tickets "
+        "WHERE correlation_id<>'' AND status NOT IN ('resolved','closed') "
+        "GROUP BY customer_id,correlation_id HAVING COUNT(*)>1 "
+        "ORDER BY customer_id,correlation_id LIMIT ?", (max(1, min(int(limit), 100)),)).fetchall()
+    result = []
+    for row in rows:
+        ids = conn.execute("SELECT id FROM tickets WHERE customer_id IS ? AND correlation_id=? "
+                           "AND status NOT IN ('resolved','closed') ORDER BY id DESC LIMIT 100",
+                           (row["customer_id"], row["correlation_id"])).fetchall()
+        result.append({**dict(row), "ticket_ids": [item["id"] for item in ids]})
+    return result
 
 
 def list_tickets(conn: sqlite3.Connection, *, status: str = "",

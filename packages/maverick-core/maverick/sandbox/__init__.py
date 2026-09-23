@@ -433,9 +433,9 @@ def build_sandbox(
             allow_root=_config_bool(full_cfg.get("allow_root"), False),
         )
         # Opt-in cross-run pooling (default OFF -> this block is dead and
-        # behavior is byte-identical): reuse a parked, still-healthy backend
-        # for the same engine + image digest + security flags. See pool.py
-        # for the scrub contract. Docker's reuse_container is the WITHIN-run
+        # behavior is unchanged): consume an explicitly transferred policy
+        # into a fresh backend with the same image digest + security flags.
+        # Ordinary runner teardown does not park. Docker's reuse_container is the WITHIN-run
         # warm knob and is not cross-run pool eligible because it keeps a live
         # container mounted to the run workdir.
         reuse_container = _config_bool(full_cfg.get("reuse_container"), False)

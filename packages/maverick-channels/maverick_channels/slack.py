@@ -19,6 +19,7 @@ import logging
 import os
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
+from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +73,21 @@ class SlackChannel(Channel):
         self._sm = SocketModeClient(app_token=self.app_token, web_client=self._web)
         self._sm.socket_mode_request_listeners.append(self._on_request)
         self._stop_event = asyncio.Event()
+        self._account_id = ""
+        self._team_id = ""
+
+    def _authorized(self, msg, account):
+        return bool(account and account == self._account_id
+                    and is_allowed(msg.principal_id, self.allowed_user_ids))
+
+    async def _prepare(self, msg, route):
+        msg.attachments = await self._download_files({"files": route.get("files", [])})
+        return msg
+
+    async def _send_saved(self, msg, reply, route):
+        if reply.text:
+            return await self.send_threaded(msg.user_id, reply.text,
+                                            reply_to=route.get("reply_to"))
 
     async def _download_files(self, event: dict) -> list[dict]:
         """Download a message's shared files into IncomingMessage.attachments.
@@ -117,81 +133,88 @@ class SlackChannel(Channel):
         return out
 
     async def _on_request(self, client, req):
-        # Ack IMMEDIATELY, before doing any work. Slack redelivers an event
-        # (up to ~3x) if the Socket Mode ack doesn't arrive within ~3s, and the
-        # handler below runs a full agent swarm that routinely takes far longer
-        # -- so acking at the end caused Slack to redeliver and the agent to run
-        # (and bill) 2-3x per message. Acking first trades at-least-once for
-        # at-most-once delivery, which is the right call for an expensive,
-        # side-effecting handler.
+        event = req.payload.get("event", {}) if req.type == "events_api" else {}
+        sender = event.get("user", "")
+        accepted = (event.get("type") == "message" and "bot_id" not in event
+                    and is_allowed(sender, self.allowed_user_ids))
+        if accepted:
+            # auth_test binds this transport to its immutable workspace/bot.
+            # Persist only the envelope before ACK; file downloads and agent
+            # work happen afterward. A failed/slow save permits redelivery.
+            if (not self._account_id or req.payload.get("team_id") != self._team_id
+                    or not event.get("channel") or not event.get("ts")):
+                raise PermissionError("Slack event has no verified account/message identity")
+            files = [{key: value for key, value in item.items() if key in {
+                "id", "name", "mimetype", "size", "url_private", "url_private_download",
+            }} for item in (event.get("files") or [])[:10]]
+            msg = IncomingMessage(
+                user_id=event["channel"], text=event.get("text") or
+                ("Process the attached file(s)." if files else ""), channel=self.name,
+                sender_id=sender, message_id=event["ts"],
+            )
+            account = self._account_id
+            route = {"reply_to": event["ts"] if self.thread_replies else None, "files": files}
+            external_id = event["channel"] + ":" + event["ts"]
+            receipt = await self.admit_message(msg, external_id=external_id, account=account,
+                authorize=lambda: self._authorized(msg, account), route=route)
         await client.send_socket_mode_response(
             SocketModeResponse(envelope_id=req.envelope_id)
         )
-        if req.type == "events_api":
-            event = req.payload.get("event", {})
-            if event.get("type") == "message" and "bot_id" not in event:
-                # Gate on the SENDER (event["user"]); user_id below is the
-                # channel we reply to, not the author. Unlisted senders are
-                # silently ignored.
-                sender = event.get("user", "")
-                if not is_allowed(sender, self.allowed_user_ids):
-                    log.warning("unauthorized slack access: user=%s", sender)
-                else:
-                    # Authorized sender: pull any shared files so they become
-                    # goal attachments (auth first — downloads for unlisted
-                    # senders would be free resource burn).
-                    attachments = await self._download_files(event)
-                    text = event.get("text", "")
-                    if not text.strip() and attachments:
-                        # File-only share: give the swarm a working brief.
-                        text = "Process the attached file(s)."
-                    msg = IncomingMessage(
-                        user_id=event.get("channel", ""),
-                        text=text,
-                        channel="slack",
-                        raw=event,
-                        sender_id=sender,
-                        message_id=event.get("ts"),
-                        attachments=attachments,
-                    )
-                    try:
-                        reply = await self.dispatch_text(msg)
-                    except Exception:  # pragma: no cover
-                        log.exception("handler error")
-                        reply = "⚠ An internal error occurred."
-                    # An empty reply (action-only goal, or a Reply whose text
-                    # dispatch dropped) must not be sent: chat_postMessage(text="")
-                    # is rejected by Slack with `no_text`, raising out of the
-                    # handler. Guard with `if reply:` like the other channels.
-                    if reply and self.thread_replies and event.get("ts"):
-                        await self.send_threaded(
-                            event["channel"], reply, reply_to=event["ts"])
-                    elif reply:
-                        # Route through send() so the reply gets to_slack_mrkdwn
-                        # + mrkdwn=True like every other outbound path; the raw
-                        # chat_postMessage here left markdown unrendered whenever
-                        # thread_replies was off.
-                        await self.send(event["channel"], reply)
+        if accepted:
+            return await self.process_message(msg, external_id=external_id, account=account,
+                authorize=lambda: self._authorized(msg, account), route=route, receipt=receipt,
+                prepare=lambda incoming: self._prepare(incoming, route),
+                send=lambda reply: self._send_saved(msg, reply, route))
 
     async def start(self) -> None:
+        identity = await self._web.auth_test()
+        if not identity.get("team_id") or not identity.get("user_id"):
+            raise PermissionError("Slack account identity unavailable")
+        self._team_id = identity["team_id"]
+        self._account_id = self._team_id + ":" + identity["user_id"]
+        account = self._account_id
         await self._sm.connect()
         log.info("Slack channel connected")
-        await self._stop_event.wait()
+        async with self.recovery_worker(account=account,
+                authorize=lambda msg: self._authorized(msg, account),
+                send=self._send_saved, prepare=self._prepare):
+            await self._stop_event.wait()
 
     async def send(self, user_id: str, text: str) -> None:
-        from .formatting import to_slack_mrkdwn
-        await self._web.chat_postMessage(
-            channel=user_id, text=to_slack_mrkdwn(text), mrkdwn=True,
-        )
+        return await self.send_threaded(user_id, text)
 
     async def send_threaded(
         self, user_id: str, text: str, *, reply_to: str | None = None,
     ) -> None:
-        from .formatting import to_slack_mrkdwn
-        kwargs = {"channel": user_id, "text": to_slack_mrkdwn(text), "mrkdwn": True}
-        if reply_to:
-            kwargs["thread_ts"] = reply_to
-        await self._web.chat_postMessage(**kwargs)
+        from .formatting import split_for_discord, to_slack_mrkdwn
+        rejected = {"not_authed", "invalid_auth", "account_inactive", "token_revoked",
+                    "missing_scope", "channel_not_found", "not_in_channel", "is_archived",
+                    "msg_too_long", "no_text", "restricted_action", "ratelimited"}
+        receipt = None
+        # Format before splitting so escaping cannot expand a chunk past its
+        # bound. Slack otherwise silently truncates a long successful post.
+        for index, chunk in enumerate(split_for_discord(to_slack_mrkdwn(text), limit=4000)):
+            kwargs = {"channel": user_id, "text": chunk, "mrkdwn": True}
+            if reply_to:
+                kwargs["thread_ts"] = reply_to
+            async def post(kwargs=kwargs):
+                try:
+                    result = await self._web.chat_postMessage(**kwargs)
+                except Exception as exc:
+                    response = getattr(exc, "response", None)
+                    if response is not None and response.get("error") in rejected:
+                        raise DeliveryNotSent("Slack rejected the reply") from exc
+                    raise
+                if result.get("ok") is False:
+                    if result.get("error") in rejected:
+                        raise DeliveryNotSent("Slack rejected the reply")
+                    raise DeliveryUnknown("Slack reply acceptance is uncertain")
+                provider_id = result.get("ts")
+                if delivery_active() and not isinstance(provider_id, str):
+                    raise DeliveryUnknown("Slack reply acknowledgement has no message id")
+                return provider_id
+            receipt = await send_chunk("text-" + str(index), kwargs, post)
+        return receipt
 
     async def stop(self) -> None:
         self._stop_event.set()

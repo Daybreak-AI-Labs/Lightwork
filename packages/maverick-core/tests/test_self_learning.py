@@ -599,7 +599,7 @@ class TestSemanticSearch:
         monkeypatch.setattr("maverick.catalog.load_catalog", self._two_skills())
         import maverick.skill.embeddings as se
         monkeypatch.setattr(se, "_have_fastembed", lambda: True)
-        monkeypatch.setattr(se, "embed", lambda texts: [[1.0], [1.0], [0.0]])
+        monkeypatch.setattr(se, "embed", lambda texts: [[1.0] for _ in texts])
 
         def boom(a, b):
             raise RuntimeError("bad vector")

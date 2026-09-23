@@ -198,7 +198,7 @@ function fixture(records = [], intercept = null, search = "", returning = null, 
     navigations.push(target);
     location.search = new URL(target, "https://lightwork.test").search;
   }};
-  vm.runInNewContext(fs.readFileSync(
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8') + "\n" + fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
   ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
@@ -240,6 +240,35 @@ test("initial and refreshed lists describe reads accurately and expose selection
   assert.match(ui.byId("message").textContent, /^Requests refreshed/);
   assert.equal(ui.byId("rationale").value, "Current review draft");
   assert.equal(ui.calls.every(call => call.method === "GET"), true);
+});
+
+for (const format of ["json", "html"]) test(`${format} vendor session loss clears all private views and cannot re-enable stale actions`, async () => {
+  let deny = false;
+  const ui = fixture([record("one")], call => deny ? {status:401, ok:false,
+    json:async()=> { if(format==="html")throw new Error("not JSON");return {detail:"Sign in"}; }} : undefined);
+  await ui.settle(); await ui.load("one");
+  ui.byId("purpose").value="private unsent draft";deny=true;
+  await ui.click("refresh");
+  assert.equal(ui.byId("case-title").textContent,"");assert.equal(ui.byId("cases").children.length,0);
+  assert.equal(ui.byId("purpose").value,"");assert.equal(ui.byId("create").disabled,true);
+  const count=ui.calls.length;await ui.click("refresh");assert.equal(ui.calls.length,count);
+});
+
+test("vendor context change rejects a delayed successful response and locks the old page", async () => {
+  let resolve;
+  const ui=fixture([record("one")],call=>call.url.endsWith('/cases/one')?new Promise(done=>{resolve=done;}):undefined);
+  await ui.settle();ui.caseButton("one").listeners.click();await new Promise(setImmediate);
+  ui.root.dataset.workspaceContext="b".repeat(64);resolve(response(record("one")));await ui.settle();
+  assert.equal(ui.byId("case-title").textContent,"");assert.equal(ui.byId("refresh").disabled,true);
+});
+
+test("vendor action denial preserves readable case and drafts but disables the denied action", async () => {
+  const ui=fixture([record("one")],call=>call.method==="POST"?response({detail:{code:"permission_denied",message:"Collection unavailable"}},403):undefined);
+  await ui.settle();await ui.load("one");ui.byId("purpose").value="keep this draft";
+  await ui.click("collect");
+  assert.match(ui.byId("case-title").textContent,/one/);assert.equal(ui.byId("purpose").value,"keep this draft");
+  assert.equal(ui.byId("collect").disabled,true);assert.equal(ui.byId("refresh").disabled,false);
+  const count=ui.calls.length;await ui.click("collect");assert.equal(ui.calls.length,count);
 });
 
 test("prepared action shows exact authority effects assumptions and full payload", async () => {
@@ -333,7 +362,9 @@ test("a server authority denial stays visible and never retries approval", async
   assert.equal(ui.calls.filter(call => call.url.endsWith("/approve-action")).length, 1);
   assert.match(ui.byId("message").textContent, /role cannot approve/i);
   assert.match(ui.byId("message").textContent, /workspace administrator/i);
-  assert.equal(ui.byId("approve").disabled, false);
+  assert.equal(ui.byId("approve").disabled, true);
+  await ui.click("approve");
+  assert.equal(ui.calls.filter(call => call.url.endsWith("/approve-action")).length, 1);
 });
 
 test("bounded queue controls navigate three pages and reset the cursor for a stable filter", async () => {

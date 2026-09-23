@@ -14,7 +14,10 @@ def _prep(monkeypatch, tmp_path, events):
     class _Log:
         signing_enabled = False
 
-        def tail(self, n, day=None):
+        def tail(self, n, day=None, *, report=None):
+            if report is not None:
+                report.finished = True
+                report.events = len(events)
             return list(events)
 
     monkeypatch.setattr(audit, "default_audit_log", lambda: _Log())

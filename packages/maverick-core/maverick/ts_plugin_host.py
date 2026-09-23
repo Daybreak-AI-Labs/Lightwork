@@ -22,10 +22,9 @@ operator config -- like the MCP stdio client (``mcp_client``), not model-driven
 shell -- so it spawns the child directly rather than through ``sandbox.exec``,
 always with a scrubbed env (``scrub_child_env``) so provider keys and connector
 tokens never reach plugin code. Failures follow the built-in tool convention:
-the model sees an ``"ERROR: ..."`` string, never an exception. A child that
-dies mid-call is restarted and the call retried once; a call that exceeds the
-timeout kills the child (a late reply would desync the stream) so the next
-call gets a fresh process.
+the model sees an ``"ERROR: ..."`` string for operational failures. Control
+exceptions propagate unchanged. A child that dies mid-call is never replayed;
+its effects are unknown. A later independent invocation may start a fresh child.
 """
 from __future__ import annotations
 
@@ -33,22 +32,30 @@ import atexit
 import hashlib
 import json
 import logging
+import math
 import os
+import queue
 import re
 import shutil
-import subprocess
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any
+from typing import Any
 
+from .connector_attempts import ConnectorAttempt, ConnectorResult, current_invocation
+from .owned_process import OwnedProcess, ProcessOutputLimit, run_owned, run_sync
 from .tools import Tool, scrub_child_env
 
 log = logging.getLogger(__name__)
 
 DESCRIBE_TIMEOUT = 10.0
 DEFAULT_CALL_TIMEOUT = 60.0
+MAX_FRAME_BYTES = 1024 * 1024
+MAX_CALL_OUTPUT_BYTES = 2 * 1024 * 1024
+PROTOCOL = "maverick-plugin/2"
+LEGACY_PROTOCOL = "maverick-plugin/1"
 
 # Same constraint the model-facing tool catalog imposes (Anthropic tool names).
 _TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -59,7 +66,7 @@ class TsPluginError(Exception):
 
 
 class _ChildDied(Exception):
-    """Child exited / closed its pipes mid-call (retried once by ``call``)."""
+    """Child exited / closed its pipes mid-call; effects may have happened."""
 
 
 @dataclass(frozen=True)
@@ -119,125 +126,153 @@ class _PinnedCommand:
 
 
 class _PluginChild:
-    """One persistent NDJSON child shared by every tool of a plugin.
+    """One serialized invocation owner; restarting a process never replays work."""
 
-    Calls are serialized under a lock (the tools share one stdio pipe). The
-    child starts lazily on first call and is restarted at most once per call
-    if it dies mid-request.
-    """
-
-    def __init__(self, command: _PinnedCommand, call_timeout: float):
+    def __init__(self, command: _PinnedCommand, call_timeout: float, protocol: str):
+        if not math.isfinite(call_timeout) or call_timeout <= 0:
+            raise TsPluginError("ts plugin call_timeout must be finite and positive")
         self.command = command.command
-        self._pinned_command = command
         self.call_timeout = call_timeout
-        self._proc: subprocess.Popen | None = None
-        self._req_id = 0
+        self.protocol = protocol
+        self._pinned_command = command
+        self._proc: OwnedProcess | None = None
         self._lock = threading.Lock()
+        self._buffer = bytearray()
 
-    def _ensure_started(self) -> None:
-        if self._proc is None or self._proc.poll() is not None:
+    def _ensure_started(self) -> OwnedProcess:
+        if self._proc is not None and self._proc.proc.poll() is not None:
+            self.close()
+        if self._proc is None:
             self._pinned_command.verify()
-            self._proc = subprocess.Popen(
-                self.command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                # DEVNULL, not PIPE: nothing drains stderr here, so a chatty
-                # plugin would fill the pipe buffer and deadlock mid-call.
-                stderr=subprocess.DEVNULL,
-                env=scrub_child_env(),
-                text=True,
-            )
+            self._proc = OwnedProcess(self.command, env=scrub_child_env())
+        return self._proc
 
     def close(self) -> None:
         proc, self._proc = self._proc, None
-        if proc is None:
-            return
-        try:
-            proc.kill()
-            proc.wait(timeout=5)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        self._buffer.clear()
+        if proc is not None:
+            proc.close()
+
+    def _response(self, child: OwnedProcess, rid: str, deadline: float, check) -> dict:
+        received = len(self._buffer)
+        while True:
+            check()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("ts plugin call timed out")
+            for output in (child.stdout, child.stderr):
+                for _ in range(16):
+                    try:
+                        chunk = output.get_nowait()
+                    except queue.Empty:
+                        break
+                    if chunk is None:
+                        if output is child.stdout:
+                            raise _ChildDied
+                        break
+                    received += len(chunk)
+                    if received > MAX_CALL_OUTPUT_BYTES:
+                        raise ProcessOutputLimit("ts plugin output byte limit exceeded")
+                    if output is child.stderr:
+                        continue  # Never expose raw child diagnostics/secrets.
+                    self._buffer.extend(chunk)
+                    while b"\n" in self._buffer:
+                        line, _, remaining = self._buffer.partition(b"\n")
+                        self._buffer = bytearray(remaining)
+                        if len(line) > MAX_FRAME_BYTES:
+                            raise ProcessOutputLimit("ts plugin response frame too large")
+                        try:
+                            response = json.loads(line)
+                        except (ValueError, UnicodeDecodeError):
+                            continue  # Bounded legacy console output is tolerated.
+                        if not isinstance(response, dict) or response.get("id") != rid:
+                            continue
+                        if self.protocol == PROTOCOL and (
+                            response.get("attempt") != 1
+                            or response.get("effect") not in {"not_started", "completed", "unknown"}
+                        ):
+                            raise TsPluginError("ts plugin response has invalid execution metadata")
+                        if ("result" in response) == ("error" in response):
+                            raise TsPluginError("ts plugin response must contain exactly one result or error")
+                        return response
+                    if len(self._buffer) > MAX_FRAME_BYTES:
+                        raise ProcessOutputLimit("ts plugin response frame too large")
+            if child.proc.poll() is not None:
+                # The reader may still be draining its last bounded chunk.
+                child.stop_tree()
+            time.sleep(0.005)
 
     @staticmethod
-    def _read_line(stdout: IO[str], timeout: float) -> str | None:
-        """Blocking readline in a side thread; None on timeout.
-
-        After a timeout the caller kills the child, which EOFs the orphaned
-        readline so the thread exits instead of leaking.
-        """
-        got: list[str] = []
-
-        def _read() -> None:
-            try:
-                got.append(stdout.readline())
-            except (ValueError, OSError):
-                got.append("")
-
-        t = threading.Thread(target=_read, daemon=True)
-        t.start()
-        t.join(timeout)
-        return got[0] if got else None
-
-    def _roundtrip(self, tool: str, args: dict[str, Any]) -> dict[str, Any] | None:
-        """Send one request; return the matching response, or None on timeout."""
-        proc = self._proc
-        assert proc is not None and proc.stdin is not None and proc.stdout is not None
-        self._req_id += 1
-        rid = self._req_id
-        try:
-            proc.stdin.write(json.dumps({"id": rid, "tool": tool, "args": args}) + "\n")
-            proc.stdin.flush()
-        except (BrokenPipeError, OSError) as e:
-            raise _ChildDied from e
-        deadline = time.monotonic() + self.call_timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return None
-            reply = self._read_line(proc.stdout, remaining)
-            if reply is None:
-                return None
-            if reply == "":
-                raise _ChildDied  # EOF: child exited
-            try:
-                resp = json.loads(reply)
-            except ValueError:
-                continue  # not protocol output (e.g. a stray console.log); skip
-            if isinstance(resp, dict) and resp.get("id") == rid:
-                return resp
+    def _result(text: str, rid: str, *, dispatched: bool, unknown: bool, failed: bool) -> ConnectorResult:
+        return ConnectorResult(text, ConnectorAttempt(
+            request_id=rid, attempt=1, operation="plugin",
+            dispatch_may_have_happened=dispatched, outcome_unknown=unknown,
+            error_class="plugin_failure" if failed else None,
+        ))
 
     def call(self, tool: str, args: dict[str, Any]) -> str:
-        with self._lock:
-            for attempt in (1, 2):
-                try:
-                    self._ensure_started()
-                    resp = self._roundtrip(tool, args)
-                except _ChildDied:
-                    self.close()
-                    if attempt == 1:
-                        log.warning(
-                            "ts plugin %s died during %r; restarting once",
-                            self.command, tool,
-                        )
-                        continue
-                    return f"ERROR: ts plugin tool {tool!r} crashed (child exited twice)"
-                except TsPluginError as e:
-                    self.close()
-                    return f"ERROR: {e}"
-                except OSError as e:
-                    self.close()
-                    return f"ERROR: ts plugin {self.command} failed to start: {e}"
-                if resp is None:
-                    self.close()  # stream is desynced; next call gets a fresh child
-                    return (
-                        f"ERROR: ts plugin tool {tool!r} timed out "
-                        f"after {self.call_timeout}s"
-                    )
-                if "error" in resp:
-                    return f"ERROR: ts plugin tool {tool!r}: {resp['error']}"
-                result = resp.get("result")
-                return result if isinstance(result, str) else json.dumps(result)
-        return f"ERROR: ts plugin tool {tool!r} failed"  # pragma: no cover
+        deadline = time.monotonic() + self.call_timeout
+        invocation = current_invocation()
+        rid = uuid.uuid4().hex
+        # Include lock wait, executable verification, spawn and blocked writes
+        # in the same deadline. Control failures remain original exceptions.
+        while not self._lock.acquire(blocking=False):
+            invocation.check()
+            if time.monotonic() >= deadline:
+                return self._result("ERROR: ts plugin queue timed out; not dispatched", rid,
+                                    dispatched=False, unknown=False, failed=True)
+            time.sleep(0.005)
+        write = None
+        try:
+            invocation.check()
+            request = {"id": rid, "tool": tool, "args": args}
+            if self.protocol == PROTOCOL:
+                request.update(protocol=PROTOCOL, attempt=1, replay="never",
+                               deadline_unix_ms=int((time.time() + max(0, deadline - time.monotonic())) * 1000))
+            payload = (json.dumps(request, ensure_ascii=True) + "\n").encode("utf-8")
+            if len(payload) > MAX_FRAME_BYTES:
+                raise TsPluginError("ts plugin request frame too large")
+            child = self._ensure_started()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("ts plugin call timed out before dispatch")
+            write = child.write(payload, deadline=deadline)
+            response = self._response(child, rid, deadline, invocation.check)
+            effect = response.get("effect") if self.protocol == PROTOCOL else None
+            failed = "error" in response or str(response.get("result", "")).startswith("ERROR:")
+            if "error" in response:
+                text = f"ERROR: ts plugin tool {tool!r}: {response['error']}"
+            else:
+                result = response["result"]
+                text = result if isinstance(result, str) else json.dumps(result)
+            unknown = effect == "unknown" or (failed and effect != "not_started")
+            if unknown:
+                if not text.startswith("ERROR:"):
+                    text = "ERROR: ts plugin did not confirm completion. " + text
+                text += "\nOutcome unknown; reconcile before any new invocation."
+            return self._result(text, rid, dispatched=effect != "not_started", unknown=unknown, failed=failed)
+        except (TsPluginError, OSError, TimeoutError, ProcessOutputLimit, _ChildDied) as exc:
+            self.close()  # A late reply cannot be accepted for the next request.
+            # Join the writer before deciding "not dispatched": it may have
+            # started concurrently with the failure on the reading side.
+            dispatched = write is not None and write.started.is_set()
+            if isinstance(exc, _ChildDied):
+                reason = "child crashed or closed its output"
+            elif isinstance(exc, TimeoutError):
+                reason = "call timed out"
+            elif isinstance(exc, (TsPluginError, ProcessOutputLimit)):
+                reason = str(exc)
+            else:
+                reason = "child process transport failed"
+            state = "outcome unknown; reconcile before any new invocation" if dispatched else "not dispatched"
+            return self._result(f"ERROR: ts plugin {reason}; {state}", rid,
+                                dispatched=dispatched, unknown=dispatched, failed=True)
+        except BaseException:
+            try:
+                self.close()
+            except Exception:
+                log.error("ts plugin cleanup failed while propagating the original stop")
+            raise
+        finally:
+            self._lock.release()
 
 
 # Children live as long as the process (tools have no lifecycle hooks); kill
@@ -253,31 +288,29 @@ def _close_all_children() -> None:
 atexit.register(_close_all_children)
 
 
-def _fetch_manifest(command: _PinnedCommand) -> list[Any]:
+def _fetch_manifest(command: _PinnedCommand) -> tuple[str, list[Any]]:
     command.verify()
     try:
-        r = subprocess.run(
-            [*command.command, "--describe"],
-            capture_output=True, text=True,
-            timeout=DESCRIBE_TIMEOUT, env=scrub_child_env(),
-        )
-    except OSError as e:
-        raise TsPluginError(f"ts plugin {command.command} failed to run: {e}") from e
-    except subprocess.TimeoutExpired as e:
-        raise TsPluginError(f"ts plugin {command.command} --describe timed out") from e
-    if r.returncode != 0:
-        raise TsPluginError(
-            f"ts plugin {command.command} --describe exited {r.returncode}: {r.stderr.strip()[:500]}"
-        )
-    for line in r.stdout.splitlines():
+        result = run_sync(lambda: run_owned(
+            [*command.command, "--describe"], input="",
+            deadline=time.monotonic() + DESCRIBE_TIMEOUT, env=scrub_child_env(),
+            stdout_limit=MAX_FRAME_BYTES, stderr_limit=MAX_FRAME_BYTES,
+        ))
+    except (OSError, TimeoutError, ProcessOutputLimit) as exc:
+        raise TsPluginError(f"ts plugin --describe failed: {type(exc).__name__}") from exc
+    if result.returncode != 0:
+        raise TsPluginError(f"ts plugin --describe exited {result.returncode}")
+    for line in result.stdout.splitlines():
         try:
             manifest = json.loads(line)
         except ValueError:
             continue
         if isinstance(manifest, dict) and isinstance(manifest.get("tools"), list):
-            return manifest["tools"]
-    command.verify()
-    raise TsPluginError(f"ts plugin {command.command} --describe printed no manifest")
+            protocol = manifest.get("protocol", LEGACY_PROTOCOL)
+            if protocol not in {PROTOCOL, LEGACY_PROTOCOL}:
+                raise TsPluginError("ts plugin manifest protocol is unsupported")
+            return protocol, manifest["tools"]
+    raise TsPluginError("ts plugin --describe printed no manifest")
 
 
 def load_ts_plugin(
@@ -290,9 +323,9 @@ def load_ts_plugin(
     with an invalid name are skipped with a warning.
     """
     pinned_command = _PinnedCommand.from_command(command)
-    manifest = _fetch_manifest(pinned_command)
+    protocol, manifest = _fetch_manifest(pinned_command)
     pinned_command.verify()
-    child = _PluginChild(pinned_command, call_timeout)
+    child = _PluginChild(pinned_command, call_timeout, protocol)
     tools: list[Tool] = []
     for entry in manifest:
         if not isinstance(entry, dict):

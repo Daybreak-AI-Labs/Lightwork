@@ -46,6 +46,8 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Iterable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -977,6 +979,8 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     pubkey_hex: str | None = None,
     *,
     segment: str | None = None,
+    lines: Iterable[str] | None = None,
+    max_breaks: int | None = None,
 ) -> list[ChainBreak]:
     """Walk every line; verify chain links + signatures.
 
@@ -986,8 +990,12 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     Returns a list of breaks. Empty list = chain intact. Proof-producing
     callers that already opened a sealed segment may pass its authenticated
     plaintext through ``segment`` so verification and aggregation operate on
-    the exact same immutable bytes rather than reading the file twice.
+    the exact same immutable bytes rather than reading the file twice. ``lines``
+    supports bounded caller-owned snapshot iteration; its read failures propagate
+    so the caller cannot turn a partial scan into an intact-chain result.
     """
+    if max_breaks is not None and (type(max_breaks) is not int or not 1 <= max_breaks <= 1000):
+        raise ValueError("max_breaks must be an integer from 1 to 1000")
     if not _have_crypto():
         return [ChainBreak(0, "no_crypto", "cryptography not installed")]
     from cryptography.exceptions import InvalidSignature
@@ -1032,7 +1040,9 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
         pubkey_cache[key_id] = obj
         return obj
 
-    if segment is None:
+    if lines is not None and segment is not None:
+        raise ValueError("supply audit segment or lines, not both")
+    if segment is None and lines is None:
         try:
             text = _segment_text(path)
         # failure-policy: fail_closed
@@ -1041,13 +1051,15 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     else:
         text = segment
 
-    with io.StringIO(text) as f:
+    with (nullcontext(lines) if lines is not None else io.StringIO(text)) as f:
         for n, line in enumerate(f, start=1):
+            if max_breaks is not None and len(breaks) >= max_breaks:
+                break  # nonempty failure result; never claim the remaining scan passed
             if not line.strip():
                 continue
             try:
                 data = json.loads(line)
-            except json.JSONDecodeError as e:
+            except (ValueError, RecursionError) as e:
                 breaks.append(ChainBreak(n, "malformed", str(e)))
                 continue
             if not isinstance(data, dict):
@@ -1103,9 +1115,13 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
                     )
                 )
             payload_for_hash = {k: v for k, v in data.items() if k not in ("hash", "sig")}
-            expected_hash = hashlib.sha256(
-                json.dumps(payload_for_hash, sort_keys=True, default=str).encode("utf-8")
-            ).hexdigest()
+            try:
+                expected_hash = hashlib.sha256(
+                    json.dumps(payload_for_hash, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()
+            except (ValueError, RecursionError, UnicodeError) as e:
+                breaks.append(ChainBreak(n, "malformed", str(e)))
+                continue
             if expected_hash != row_hash:
                 breaks.append(ChainBreak(n, "bad_hash", "content rehash != row hash"))
             pub = _load_pubkey(key_id)
@@ -1201,9 +1217,12 @@ def day_files(audit_dir: Path) -> list[Path]:
     The single definition of "what counts as an audit day-file"; the read-side
     consumers (export / dsar / soc2) reach it via :mod:`maverick.audit.reader`.
     """
-    return sorted(
-        p for p in audit_dir.glob("*.ndjson") if _DAY_RE.fullmatch(p.stem)
-    )
+    try:
+        return sorted(
+            p for p in audit_dir.iterdir() if p.suffix == ".ndjson" and _DAY_RE.fullmatch(p.stem)
+        )
+    except FileNotFoundError:
+        return []
 
 
 def _anchored_days(audit_dir: Path) -> set[str]:

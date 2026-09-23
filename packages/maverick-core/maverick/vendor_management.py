@@ -15,12 +15,14 @@ security rating, a certification of any vendor, or advice.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import secrets
 import time
 from collections.abc import Mapping
 from typing import Any
 
+from .governed_record_lookup import RecordLookupSpec, RecordLookupUnavailable, lookup_digest
 from .governed_records import GovernedRecordStore
 
 VENDOR_SCHEMA = "lightwork.vendor-record.v1"
@@ -39,9 +41,8 @@ CONTRACT_KINDS = ("dpa", "msa", "sla", "addendum", "other")
 #: Severity ladder for questionnaire scoring; "clear" = no risk findings.
 _SEVERITY_ORDER = ("low", "medium", "high", "critical")
 
-_VENDORS = GovernedRecordStore("vendor_management", "VMR", "vendor_record")
 #: Store capacity and the matching full-scan window. Projections that carry
-#: correctness (token lookup, renewals, posture) must scan the WHOLE store:
+#: correctness (renewals and posture) must scan the WHOLE store:
 #: a smaller window silently drops exactly the stale vendors most likely to
 #: hold overdue paper, and 404s valid questionnaire links.
 _MAX_RECORDS = 10_000
@@ -51,6 +52,28 @@ _MAX_LINKS = 50
 _MAX_NOTES = 50
 _MAX_QUESTIONNAIRES = 20
 _MAX_CONTRACTS = 20
+
+
+def _questionnaire_digests(record):
+    entries = record.get("questionnaires") or []
+    if not isinstance(entries, list) or len(entries) > _MAX_QUESTIONNAIRES:
+        raise RecordLookupUnavailable("vendor questionnaire collection is invalid")
+    digests = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RecordLookupUnavailable("vendor questionnaire entry is invalid")
+        token = entry.get("token") or ""
+        if not isinstance(token, str) or len(token) > 512:
+            raise RecordLookupUnavailable("vendor questionnaire token is invalid")
+        if token:
+            digests.append(lookup_digest(token))
+    return digests
+
+
+_VENDORS = GovernedRecordStore(
+    "vendor_management", "VMR", "vendor_record",
+    lookup_spec=RecordLookupSpec("vendor-questionnaires-v1", _questionnaire_digests),
+)
 
 
 class VendorManagementError(RuntimeError):
@@ -530,27 +553,31 @@ def questionnaire_for_token(token: str) -> dict[str, Any] | None:
     if not enabled():
         return None
     needle = str(token or "").strip()
-    if not needle:
+    if not needle or len(needle) > 512:
         return None
-    for row in _VENDORS.list(limit=_SCAN_LIMIT):
-        for entry in row.get("questionnaires") or []:
-            if str(entry.get("token") or "") != needle:
-                continue
-            kind = str(entry.get("assessment_type") or "")
-            return {
-                "vendor_id": row.get("id"),
-                "vendor": row.get("name"),
-                "assessment_type": kind,
-                "questions": [
-                    {
-                        "qid": question.id,
-                        "section": question.section,
-                        "text": question.text,
-                    }
-                    for question in _template_questions(kind)
-                ],
-            }
-    return None
+    row = _VENDORS.lookup(lookup_digest(needle))
+    if row is None:
+        return None
+    matches = [entry for entry in row.get("questionnaires") or []
+               if hmac.compare_digest(str(entry.get("token") or "").encode(), needle.encode())]
+    if len(matches) != 1:
+        raise RecordLookupUnavailable("vendor questionnaire association is ambiguous")
+    kind = str(matches[0].get("assessment_type") or "")
+    from . import form_store
+    questions = _template_questions(kind)
+    if len(questions) > int(getattr(form_store, "_MAX_FIELDS", 50)) - 1:
+        raise RecordLookupUnavailable("vendor questionnaire exceeds the current submission field bound")
+    return {
+        "vendor_id": row.get("id"), "vendor": row.get("name"), "assessment_type": kind,
+        "questions": [{"qid": question.id, "section": question.section, "text": question.text}
+                      for question in questions],
+    }
+
+
+def maintain_questionnaire_index(*, limit: int = 100, rebuild: bool = False):
+    """Advance one bounded migration batch without rewriting canonical vendors."""
+    _require_enabled()
+    return _VENDORS.maintain_lookup(limit=limit, rebuild=rebuild)
 
 
 def get_vendor(vendor_id: str) -> dict[str, Any] | None:

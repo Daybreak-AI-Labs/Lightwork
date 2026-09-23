@@ -55,6 +55,7 @@ jobs:
           MAVERICK_TEST_DOCUMENT_IMAGE: lightwork-documents:test
         run: >-
           python -m pytest -q packages/maverick-core/tests/test_native_document_engines.py
+          packages/maverick-core/tests/test_native_container_cleanup.py
           --timeout=180 --junitxml=document-engine-results.xml
       - name: Retain native engine results
         if: always()

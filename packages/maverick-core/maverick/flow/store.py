@@ -1,10 +1,9 @@
 """Persistence for flow definitions and their (resumable) runs.
 
-Definitions and run state are plain JSON under the tenant-scoped data dir, 0600.
-A run row carries everything :func:`~.runner.run_flow` needs to resume -- status,
-the threaded ``data``, the node it paused at, and a delay's ``resume_at`` -- so a
-paused flow survives a restart and a human approval days later. Best-effort I/O
-that degrades to an empty list rather than raising into a request.
+Definitions and bounded run previews live under the tenant-scoped data dir.
+Complete execution data is inline when small, otherwise in a private encrypted
+artifact referenced by the run row. Missing/corrupt execution data fails closed;
+display truncation is never used as resume input.
 """
 from __future__ import annotations
 
@@ -1054,14 +1053,18 @@ class FlowRun:
     execution_channel: str = ""
     execution_user_id: str = ""
     allowed_suites: list[str] | None = None
+    # A listing record is a projection, never a checkpoint that can be saved.
+    metadata_only: bool = field(default=False, repr=False, compare=False)
 
     def to_dict(self) -> dict:
+        from .payloads import preview
+
         return {
             "run_id": self.run_id, "flow_id": self.flow_id, "status": self.status,
-            "data": self.data, "cursor": self.cursor, "resume_at": self.resume_at,
+            "data": preview(self.data), "cursor": self.cursor, "resume_at": self.resume_at,
             "prompt": self.prompt, "error": self.error, "owner": self.owner,
             "created": self.created, "updated": self.updated, "nodes": self.nodes,
-            "input_data": self.input_data, "idem_key": self.idem_key,
+            "input_data": preview(self.input_data), "idem_key": self.idem_key,
             "origin": self.origin, "dry_run": self.dry_run,
             "cost_dollars": self.cost_dollars,
             "human": self.human,
@@ -1174,7 +1177,10 @@ def find_run_by_idem(
                      or claimed.release_id == expected_release_id)
                 and (owner is None or claimed.owner == owner)):
             return claimed
-    for r in list_runs(flow_id=flow_id, limit=within):
+    for meta in list_run_metadata(flow_id=flow_id, owner=owner, idem_key=idem_key, limit=within):
+        r = load_run(meta.run_id, owner=owner, flow_id=flow_id)
+        if r is None:
+            continue
         if (r.idem_key == idem_key
                 and (revision is None or r.definition_revision == revision)
                 and (expected_digest is None
@@ -1272,6 +1278,10 @@ def new_run_id() -> str:
 
 
 def save_run(run: FlowRun) -> None:
+    from . import payloads, run_index
+
+    if run.metadata_only:
+        raise payloads.FlowPayloadError("load complete execution data before saving a run")
     expected_release_digest = (
         release_digest_for(run.definition_digest, run.subflow_digests)
         if run.definition_digest else ""
@@ -1288,15 +1298,10 @@ def save_run(run: FlowRun) -> None:
     if not run.created:
         run.created = now
     run.updated = now
-    from .redact import cap, redact
+    values = payloads.prepare(run.data, run.input_data)
     d = run.to_dict()
-    # Bound first (so an attacker cannot make detection scan unbounded strings),
-    # then deep-redact both secret-looking keys and secret-bearing ordinary
-    # values. Persisted state is a trust boundary, not merely the API response.
-    d["data"] = redact(cap(d.get("data") or {}))
-    d["input_data"] = redact(cap(d.get("input_data") or {}))
-    run.data = dict(d["data"])
-    run.input_data = dict(d["input_data"])
+    d["data"] = payloads.preview(values["data"])
+    d["input_data"] = payloads.preview(values["input_data"])
     if d.get("error"):
         try:
             from ..safety.secret_detector import redact
@@ -1307,20 +1312,86 @@ def save_run(run: FlowRun) -> None:
             # failure without persisting the potentially secret details.
             d["error"] = "execution failed (details redacted)"
         run.error = str(d["error"])
-    _write_json(_runs_dir() / f"{_safe_id(run.run_id)}.json", d)
+    target = _runs_dir() / f"{_safe_id(run.run_id)}.json"
+    artifact_root = _runs_dir().parent / "run_payloads"
+    with _checkpoint_lock(run.run_id):
+        prior = _read_json(target)
+        if prior is None and target.exists():
+            raise payloads.FlowPayloadError("existing flow checkpoint row is unreadable; restore it before saving")
+        # Remove artifacts orphaned by a crash before publishing the row. This
+        # keeps peak storage to the old and new checkpoint, not every save ever.
+        payloads.reclaim(artifact_root, run.run_id, (prior or {}).get("data_state"))
+        previous_ref = (prior or {}).get("data_state")
+        if (previous_ref and prior.get("flow_id") == run.flow_id
+                and prior.get("owner", "") == run.owner
+                and payloads.decode(artifact_root, prior) == values):
+            # Status/lease checkpoints reuse unchanged immutable data.
+            d["data_state"] = previous_ref
+        else:
+            d["data_state"] = payloads.encode(artifact_root, d, values)
+        if d["data_state"]["kind"] == "inline":
+            d.update(values)
+        with run_index.mutation(_runs_dir(), run.run_id):
+            _write_json(target, d)
+        # A committed row is the acknowledgement; cleanup failure must not
+        # turn that successful transition into an apparent failed execution.
+        try:
+            payloads.reclaim(artifact_root, run.run_id, d["data_state"])
+        except OSError:
+            pass  # the next checkpoint retries orphan cleanup before writing
+    run.data = values["data"]
+    run.input_data = values["input_data"]
 
 
-def load_run(run_id: str) -> FlowRun | None:
-    d = _read_json(_runs_dir() / f"{_safe_id(run_id)}.json")
-    return FlowRun.from_dict(d) if d else None
+@contextmanager
+def _checkpoint_lock(run_id: str):
+    """Short publication/read lock, independent of the whole execution lock."""
+    from ..file_lock import cross_process_lock
+
+    with cross_process_lock(_runs_dir() / f".{_safe_id(run_id)}.checkpoint", strict=True):
+        yield
+
+
+def load_run(run_id: str, *, owner: str | None = None,
+             flow_id: str | None = None) -> FlowRun | None:
+    """Load complete data only after optional metadata access filters match."""
+    from .payloads import FlowPayloadError, decode
+
+    with _checkpoint_lock(run_id):
+        target = _runs_dir() / f"{_safe_id(run_id)}.json"
+        d = _read_json(target)
+        if not d:
+            if owner is not None or flow_id is not None:
+                # A malformed row cannot establish access to its private data.
+                return None
+            if target.exists():
+                raise FlowPayloadError("flow checkpoint row is unreadable; restore it before resuming")
+            return None
+        if owner is not None and d.get("owner", "") != owner:
+            return None
+        if flow_id is not None and d.get("flow_id") != flow_id:
+            return None
+        if d.get("run_id") != run_id:
+            raise FlowPayloadError("flow checkpoint belongs to a different run")
+        d.update(decode(_runs_dir().parent / "run_payloads", d))
+        return FlowRun.from_dict(d)
 
 
 def delete_run(run_id: str) -> bool:
-    try:
-        (_runs_dir() / f"{_safe_id(run_id)}.json").unlink()
+    from . import run_index
+    from .payloads import reclaim
+
+    with _checkpoint_lock(run_id):
+        try:
+            with run_index.mutation(_runs_dir(), run_id):
+                (_runs_dir() / f"{_safe_id(run_id)}.json").unlink()
+        except OSError:
+            return False
+        try:
+            reclaim(_runs_dir().parent / "run_payloads", run_id, None)
+        except OSError:
+            pass
         return True
-    except OSError:
-        return False
 
 
 @contextmanager
@@ -1340,26 +1411,49 @@ def run_lock(run_id: str):
         yield
 
 
+def list_run_metadata(*, flow_id: str | None = None, owner: str | None = None,
+                      limit: int | None = 50, statuses=None, due_before=None,
+                      cursor=None, idem_key=None) -> list[FlowRun]:
+    """Indexed bounded previews; callers must load_run before executing/saving."""
+    from . import run_index
+
+    rows = run_index.query(_runs_dir(), flow_id=flow_id, owner=owner, limit=limit,
+                           statuses=statuses, due_before=due_before, cursor=cursor,
+                           idem_key=idem_key)
+    runs = [FlowRun.from_dict(row) for row in rows]
+    for run in runs:
+        run.metadata_only = True
+    return runs
+
+
+def iter_run_metadata(*, batch_size: int = 200, **filters):
+    """Keyset paging for recovery; no newest-N cutoff hides old due runs."""
+    cursor = None
+    while True:
+        batch = list_run_metadata(limit=max(1, batch_size), cursor=cursor, **filters)
+        if not batch:
+            return
+        yield from batch
+        last = batch[-1]
+        cursor = (last.resume_at if filters.get("due_before") is not None else last.updated,
+                  last.run_id)
+
+
+def rebuild_run_index() -> None:
+    from . import run_index
+
+    run_index.rebuild(_runs_dir())
+
+
 def list_runs(*, flow_id: str | None = None, owner: str | None = None,
               limit: int | None = 50) -> list[FlowRun]:
-    d = _runs_dir()
-    if not d.exists():
-        return []
-    runs: list[FlowRun] = []
-    for p in d.glob("*.json"):
-        raw = _read_json(p)
-        if not raw:
-            continue
-        run = FlowRun.from_dict(raw)
-        if flow_id is not None and run.flow_id != flow_id:
-            continue
-        if owner is not None and run.owner != owner:
+    runs = []
+    for meta in list_run_metadata(flow_id=flow_id, owner=owner, limit=limit):
+        run = load_run(meta.run_id, owner=owner, flow_id=flow_id)
+        if run is None:
             continue
         runs.append(run)
-    runs.sort(key=lambda r: r.updated, reverse=True)
-    if limit is None:
-        return runs
-    return runs[: max(0, int(limit))]
+    return runs
 
 
 __all__: list[str] = [
@@ -1372,6 +1466,7 @@ __all__: list[str] = [
     "unpublish_flow", "load_published_bundle", "list_published_bundles",
     "published_flow_guard", "active_release_guard",
     "FlowRun", "new_run_id", "save_run", "load_run", "delete_run", "run_lock",
-    "list_runs", "find_run_by_idem", "idempotency_lock", "save_idempotency_claim",
+    "list_runs", "list_run_metadata", "iter_run_metadata", "rebuild_run_index",
+    "find_run_by_idem", "idempotency_lock", "save_idempotency_claim",
     "load_flow_schema", "record_flow_schema",
 ]

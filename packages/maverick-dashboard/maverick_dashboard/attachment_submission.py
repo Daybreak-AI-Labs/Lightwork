@@ -1,0 +1,152 @@
+"""Bounded multipart staging shared by chat and REST, before visible admission."""
+from __future__ import annotations
+
+import hashlib
+import json
+import tempfile
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import HTTPException
+from maverick import attachments
+from maverick.attachment_submissions import SubmissionConflict, SubmissionStore
+from maverick.file_lock import cross_process_lock, ensure_private_directory
+from maverick.paths import data_dir
+from starlette.concurrency import run_in_threadpool
+
+_CHUNK_BYTES = 64 * 1024
+_MAX_FILES = 128
+
+
+def _read_staged(record):
+    with record.path.open("rb") as stream:
+        data = stream.read(attachments.MAX_FILE_BYTES + 1)
+    if len(data) != record.size_bytes or hashlib.sha256(data).hexdigest() != record.sha256:
+        raise attachments.AttachmentRejected("Staged attachment changed before admission")
+    return data
+
+
+@asynccontextmanager
+async def stage_uploads(files):
+    """Read in bounded chunks; never trust multipart Content-Length."""
+    parent = ensure_private_directory(data_dir("attachment-staging"))
+    with tempfile.TemporaryDirectory(prefix="batch-", dir=parent) as directory:
+        records, total = [], 0
+        try:
+            selected = 0
+            for upload in files:
+                if upload is None or not (upload.filename or "").strip():
+                    continue
+                selected += 1
+                if selected > _MAX_FILES:
+                    raise attachments.AttachmentRejected("Too many attachments in one submission")
+                path = Path(directory) / uuid.uuid4().hex
+                size, digest = 0, hashlib.sha256()
+                with path.open("xb") as stream:
+                    while chunk := await upload.read(min(_CHUNK_BYTES, attachments.MAX_FILE_BYTES - size + 1,
+                                                          attachments.MAX_GOAL_BYTES - total + 1)):
+                        size += len(chunk)
+                        total += len(chunk)
+                        if size > attachments.MAX_FILE_BYTES or total > attachments.MAX_GOAL_BYTES:
+                            raise attachments.AttachmentRejected("Attachment size or per-goal quota exceeded")
+                        stream.write(chunk)
+                        digest.update(chunk)
+                if not size:
+                    continue
+                record = attachments.Stored(upload.filename, upload.content_type or "application/octet-stream",
+                                            size, digest.hexdigest(), path)
+                await run_in_threadpool(attachments.validate_attachment, record.filename, record.mime,
+                                        await run_in_threadpool(_read_staged, record))
+                records.append(record)
+            yield records
+        except attachments.AttachmentRejected as exc:
+            raise HTTPException(status_code=400, detail=f"Attachment: {exc}") from exc
+
+
+def manifest(records):
+    return [{"filename": r.filename, "mime": r.mime, "size_bytes": r.size_bytes, "sha256": r.sha256} for r in records]
+
+
+def publish_batch(world, goal_id, records):
+    def publish(record):
+        data = _read_staged(record)
+        directory = attachments._root_for_goal(goal_id)
+        destination = directory / f"{record.sha256[:16]}-{record.filename}"
+        attachments._publish_attachment(destination, data, record.sha256)
+        return attachments.Stored(record.filename, record.mime, record.size_bytes, record.sha256, destination)
+
+    ids = SubmissionStore(world).admit(goal_id, records, publish=publish)
+    # Mirroring is optional/best-effort and follows authoritative admission.
+    if attachments.s3_mirror_enabled():
+        for record in records:
+            destination = attachments._root_for_goal(goal_id) / f"{record.sha256[:16]}-{record.filename}"
+            attachments._s3_mirror(goal_id, destination, record.mime, _read_staged(record))
+    return ids
+
+
+async def submit(world, files, *, token, owner, title, description, parent_id=None, domain="", project_id=None):
+    async with stage_uploads(files) as records:
+        files_manifest = manifest(records)
+        fingerprint = hashlib.sha256(json.dumps([title, description, parent_id, domain, project_id, files_manifest],
+                                                sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        store = SubmissionStore(world)
+        try:
+            receipt = await run_in_threadpool(store.create, token=token, fingerprint=fingerprint, owner=owner,
+                                              title=title, description=description, manifest=files_manifest,
+                                              parent_id=parent_id, domain=domain, project_id=project_id)
+        except SubmissionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if receipt["state"] in {"dispatching", "dispatched"}:
+            return receipt
+        try:
+            await run_in_threadpool(publish_batch, world, receipt["goal_id"], records)
+            updated = await run_in_threadpool(store.update, receipt["key"], state="admitted",
+                                               message="All attachments admitted. Preparing evidence before execution.")
+            return {**updated, "created": receipt["created"]}
+        except Exception as exc:
+            await run_in_threadpool(store.update, receipt["key"], state="draft",
+                                   message="Attachment admission interrupted. This draft has not run; resubmit the original batch to recover.")
+            raise HTTPException(status_code=409, detail=f"Submission retained as draft /chat/goal/{receipt['goal_id']}; no work started.") from exc
+
+
+def prepare(world, receipt):
+    """Serialize best-effort derivation and make every missing derivative visible."""
+    from maverick.attachments import companion_coverage
+
+    goal_id = receipt["goal_id"]
+    lock = data_dir("attachment-staging") / ("prepare-" + receipt["key"])
+    with cross_process_lock(lock, strict=True):
+        store = SubmissionStore(world)
+        current = store.for_goal(goal_id)
+        if current is None or current["state"] in {"dispatching", "dispatched"}:
+            return False
+        records = world.list_attachments(goal_id)
+        admitted = {(r.filename, r.mime, r.size_bytes, r.sha256) for r in records}
+        if any((row["filename"], row["mime"], row["size_bytes"], row["sha256"]) not in admitted
+               for row in current["detail"]["manifest"]):
+            store.update(receipt["key"], state="draft", message="Attachment batch is incomplete. Resubmit the original files to recover this draft.")
+            return False
+        try:
+            for record in records:
+                attachments._verify_stored_attachment(Path(record.path), record.sha256)
+        except (OSError, attachments.AttachmentRejected):
+            store.update(receipt["key"], state="draft", message="An admitted attachment is missing or changed. Restore or resubmit the original files before running this draft.")
+            return False
+        try:
+            attachments.generate_companions(world, goal_id)
+        except Exception:
+            pass  # Coverage below makes absent derivatives explicit.
+        coverage = companion_coverage(world, goal_id)
+        missing = sum(item["status"] != "ready" for item in coverage)
+        message = (f"Attachments admitted; {missing} text companion(s) unavailable. Their source text has not been read."
+                   if missing else "Attachments and available evidence are ready.")
+        store.update(receipt["key"], state="ready", message=message, coverage=coverage)
+        return store.claim_dispatch(receipt["key"])
+
+
+async def dispatch(world, receipt, run, goal_id, **kwargs):
+    intent = {key: (sorted(value) if isinstance(value, frozenset) else value) for key, value in kwargs.items()}
+    await run_in_threadpool(SubmissionStore(world).record_dispatch_intent, receipt["key"], intent)
+    if await run_in_threadpool(prepare, world, receipt):
+        await run(goal_id, **kwargs)

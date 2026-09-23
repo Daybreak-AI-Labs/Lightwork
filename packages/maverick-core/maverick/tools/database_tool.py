@@ -28,17 +28,21 @@ ops:
 """
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import ipaddress
-import json
 import logging
+import math
 import os
 import re
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from .._envparse import coerce_bool, is_truthy
+from ..connector_attempts import CONTROL_ERRORS
 from ..db_timeouts import postgres_connect_timeout
+from ..query_execution import QueryExecution, sqlalchemy_driver
+from ..query_results import QueryResult, render_effect
 from . import Tool, as_bool
 from .sql_safety import has_unconfirmed_statement_separator
 
@@ -64,6 +68,8 @@ _SCHEMA: dict[str, Any] = {
         "sql": {"type": "string"},
         "url": {"type": "string", "description": "SQLAlchemy URL (else DATABASE_URL)."},
         "limit": {"type": "integer", "description": "max rows shown (default 50)."},
+        "response_format": {"type": "string", "enum": ["text", "json"],
+                            "description": "Readable preview (default) or structured bounded result."},
         "confirm": {"type": "boolean", "description": "required for non-read SQL."},
     },
     "required": ["op", "sql"],
@@ -286,10 +292,99 @@ def _postgres_connect_args(url: str) -> dict[str, int]:
     return {"connect_timeout": postgres_connect_timeout(values[0])}
 
 
+def _prepare_query_driver(conn, execution):
+    raw = sqlalchemy_driver(conn)
+    if execution.bind_sqlite(raw):
+        # Own the transaction even for SQLite DDL. The legacy sqlite3 driver
+        # does not automatically BEGIN for DDL or SELECT through SQLAlchemy.
+        if not raw.in_transaction:
+            conn.exec_driver_sql("BEGIN").close()
+    elif execution.bind_postgres(raw):
+        milliseconds = max(1, math.ceil(execution.remaining() * 1000))
+        local = "LOCAL " if execution.transactional else ""
+        conn.exec_driver_sql(f"SET {local}statement_timeout = {milliseconds}").close()
+
+
+def _query_connection(conn, sql, limit, needs_confirm, response_format, execution):
+    from sqlalchemy import text
+
+    result = None
+    try:
+        _prepare_query_driver(conn, execution)
+        execution.started()
+        if (not needs_confirm and _leading_keyword(sql) == "select" and execution.transactional
+                and execution.cancellation_support == "postgres_statement_timeout_and_cancel_safe"):
+            # Qualified psycopg SELECTs use a server cursor so the driver does
+            # not first buffer an unbounded result before our sentinel fetch.
+            conn = conn.execution_options(yield_per=limit + 1)
+        result = conn.execute(text(sql))
+        if result.returns_rows:
+            cols = list(result.keys())
+            rows = result.fetchmany(limit + 1)
+            result.close()
+            result = None
+            execution.check()
+            if needs_confirm:
+                execution.commit(conn)
+            else:
+                conn.rollback()
+                execution.state = "read_only"
+            data = QueryResult.from_rows(cols, rows, row_limit=limit,
+                                         transaction_status=execution.state,
+                                         cancellation_support=execution.cancellation_support)
+            execution.check()
+            return data.render(response_format=response_format)
+        affected = result.rowcount
+        result.close()
+        result = None
+        if needs_confirm:
+            execution.commit(conn)
+        else:
+            conn.rollback()
+            execution.state = "read_only"
+        execution.check()
+        return render_effect(affected, execution.state, execution.cancellation_support,
+                             response_format=response_format)
+    except BaseException as exc:
+        if result is not None:
+            with contextlib.suppress(Exception):
+                result.close()
+        execution.rollback(conn)
+        return execution.failure(exc)
+    finally:
+        execution.stop_monitor()  # Join cancellation before releasing this connection.
+        if execution.state == "unknown":
+            with contextlib.suppress(Exception):
+                conn.invalidate()
+
+
+def _execute_query(sql, url, limit, needs_confirm, response_format):
+    from sqlalchemy import create_engine
+
+    engine = None
+    with QueryExecution(mutation=needs_confirm) as execution:
+        try:
+            engine = create_engine(url, connect_args=_postgres_connect_args(url))
+            execution.check()
+            with engine.connect() as conn:
+                return _query_connection(conn, sql, limit, needs_confirm, response_format, execution)
+        except BaseException as exc:
+            return execution.failure(exc)
+        finally:
+            if engine is not None:
+                # This per-call engine is never published or reused. Dispose
+                # only after its owned driver/cancellation execution has ended.
+                execution.stop_monitor()
+                with contextlib.suppress(Exception):
+                    engine.dispose()
+
+
 def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
-              allow_hosts: tuple[str, ...] = ()) -> str:
+              allow_hosts: tuple[str, ...] = (), response_format: str = "text") -> str:
     if not sql:
         return "ERROR: query requires sql"
+    if response_format not in {"text", "json"}:
+        return "ERROR: response_format must be text or json"
     # A leading SELECT does not make a ``;``-stacked string a read: the server
     # executes every statement in one execute(), so confirm is required when a
     # statement separator could smuggle a write behind the read.
@@ -308,41 +403,12 @@ def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
     if denial:
         return denial
     try:
-        from sqlalchemy import create_engine, text
+        import sqlalchemy  # noqa: F401
     except ImportError:
         return ("ERROR: sqlalchemy not installed. Run: pip install sqlalchemy plus the "
                 "driver (psycopg / pymysql / pyodbc / ...).")
     limit = max(1, min(limit, _max_rows()))
-    engine = None
-    try:
-        engine = create_engine(url, connect_args=_postgres_connect_args(url))
-        with engine.connect() as conn:
-            result = conn.execute(text(sql))
-            if result.returns_rows:
-                cols = list(result.keys())
-                rows = result.fetchmany(limit)
-                out = [f"columns: {cols}", f"{len(rows)} row(s):"]
-                out += ["  " + json.dumps(list(r), default=str)[:300] for r in rows]
-                # A confirmed write with a RETURNING clause reports returns_rows,
-                # so commit here too -- SQLAlchemy 2.0 is commit-as-you-go and the
-                # connection would otherwise roll the write back on block exit.
-                # Do not commit unconfirmed read-classified statements: SELECT can
-                # still have transactional side effects on some databases (for
-                # example through stored/volatile functions), and those must not
-                # bypass the confirm=true safety gate.
-                if needs_confirm:
-                    conn.commit()
-                return "\n".join(out)
-            conn.commit()
-            return f"ok: {result.rowcount} row(s) affected"
-    except Exception as e:  # noqa: BLE001
-        return f"ERROR: database query failed: {type(e).__name__}: {e}"
-    finally:
-        # The Engine owns a connection pool that closing a single connection
-        # does not release; dispose it so pooled sockets/threads do not
-        # accumulate across tool calls.
-        if engine is not None:
-            engine.dispose()
+    return _execute_query(sql, url, limit, needs_confirm, response_format)
 
 
 def _run(args: dict[str, Any]) -> str:
@@ -355,9 +421,12 @@ def _run(args: dict[str, Any]) -> str:
                              (args.get("url") or "").strip(),
                              int(args.get("limit") or 50),
                              as_bool(args.get("confirm")),
-                             tuple(args.get("_capability_allow_hosts") or ()))
+                             tuple(args.get("_capability_allow_hosts") or ()),
+                             args.get("response_format", "text"))
+    except CONTROL_ERRORS:
+        raise
     except Exception as e:  # noqa: BLE001
-        return f"ERROR: database request failed: {type(e).__name__}: {e}"
+        return f"ERROR: database request failed ({type(e).__name__[:80]})"
     return f"ERROR: unknown op {op!r}"
 
 

@@ -153,7 +153,7 @@ func TestHandleUpstreamErrorIs502(t *testing.T) {
 
 func TestServeHTTPEndToEnd(t *testing.T) {
 	up := &fakeUpstream{status: 201, respHeaders: map[string]string{"Content-Type": "application/json"}, respBody: []byte(`{"id":1}`)}
-	srv := &Server{Config: authedConfig(), Upstream: up}
+	srv := &Server{Config: authedConfig(), Upstream: BufferedAdapter{Upstream: up}}
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -179,13 +179,22 @@ func TestServeHTTPEndToEnd(t *testing.T) {
 	}
 }
 
-// TestConcurrentForwards is the reason this is in Go: many in-flight requests
-// are served on separate goroutines, so a slow upstream does not serialize them
-// the way Python's GIL would. With 50 concurrent calls each delayed 20ms, total
-// wall time must stay far below the serialized 1s.
+// TestConcurrentForwards checks overlapping request ownership: 50 controlled
+// upstream calls delayed 20ms must finish well below the serialized 1s.
+func TestResponseHeadersStripClientCredentialsAndConnectionNominations(t *testing.T) {
+	got := StripResponseHeaders(map[string]string{
+		"Connection": "X-Private", "X-Private": "fixture-secret",
+		"X-Maverick-Proxy-Token": "fixture-token", "Authorization": "fixture-key",
+		"Content-Type": "text/event-stream",
+	})
+	if len(got) != 1 || got["Content-Type"] != "text/event-stream" {
+		t.Fatal("response retained a prohibited header")
+	}
+}
+
 func TestConcurrentForwards(t *testing.T) {
 	up := &fakeUpstream{status: 200, respBody: []byte("ok"), delay: 20 * time.Millisecond}
-	srv := &Server{Config: authedConfig(), Upstream: up}
+	srv := &Server{Config: authedConfig(), Upstream: BufferedAdapter{Upstream: up}}
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -246,7 +255,7 @@ func TestLastHeaderValue(t *testing.T) {
 
 func TestServeHTTPDuplicateAuthUsesLast(t *testing.T) {
 	up := &fakeUpstream{status: 200, respBody: []byte("ok")}
-	srv := &Server{Config: authedConfig(), Upstream: up}
+	srv := &Server{Config: authedConfig(), Upstream: BufferedAdapter{Upstream: up}}
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 

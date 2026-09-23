@@ -5,7 +5,8 @@ ARG DOCUMENT_BASE=debian:bookworm-slim
 FROM ${DOCUMENT_BASE}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       python3 python3-uno libreoffice-calc poppler-utils tesseract-ocr tesseract-ocr-eng \
+       python3 python3-uno libreoffice-calc libreoffice-writer libreoffice-impress libreoffice-draw \
+       texlive-latex-base poppler-utils tesseract-ocr tesseract-ocr-eng \
        fonts-dejavu-core ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 worker \

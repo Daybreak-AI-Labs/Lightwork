@@ -20,7 +20,9 @@ function splash(copyResult, invoke) {
   const downloads = [];
   const blobs = [];
   const context = {
-    window: { location: { replace() {} }, __TAURI__: invoke ? { core: { invoke } } : undefined },
+    window: { location: { replace() {} }, addEventListener() {}, __TAURI__: invoke ? { core: { invoke } } : undefined },
+    performance: { now: () => 0 },
+    AbortController,
     navigator: {},
     fetch: () => new Promise(() => {}),
     setTimeout: () => 1,

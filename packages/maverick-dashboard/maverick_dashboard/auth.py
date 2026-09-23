@@ -11,6 +11,7 @@ it only when an OIDC token is actually verified.
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 from urllib.parse import urlparse
@@ -28,6 +29,7 @@ from maverick.proxy_auth import (
     proxy_header_name,
     proxy_trusts,
 )
+from starlette.concurrency import run_in_threadpool
 
 # Arm the SCIM-group grant resolver (registered on import with
 # maverick.suite_grants) so the HTTP gates and the kernel deploy/dispatch
@@ -720,7 +722,7 @@ def _enforce_scim_active(principal: VerifiedPrincipal) -> None:
         raise HTTPException(status_code=401, detail="invalid identity")
 
 
-def _require_websocket_principal(websocket) -> VerifiedPrincipal | None:
+def _resolve_websocket_principal(websocket) -> VerifiedPrincipal | None:
     """Authenticate a WebSocket handshake with the configured mechanisms."""
     if websocket is None:
         if anonymous_local_access_allowed():
@@ -745,7 +747,6 @@ def _require_websocket_principal(websocket) -> VerifiedPrincipal | None:
         if is_revoked(ws_principal.sub, ws_principal.claims.get("iat")):
             raise HTTPException(status_code=401, detail="invalid OIDC token")
         _enforce_scim_active(ws_principal)
-        _pin_tenant_from_principal(websocket, ws_principal)
         return ws_principal
 
     # Proxy/session identities are valid WebSocket credentials too. Their
@@ -753,17 +754,14 @@ def _require_websocket_principal(websocket) -> VerifiedPrincipal | None:
     pp = _proxy_principal(websocket)
     if pp is not None:
         _enforce_scim_active(pp)
-        _pin_tenant_from_principal(websocket, pp)
         return pp
     sp = _session_principal(websocket)
     if sp is not None:
         _enforce_scim_active(sp)
-        _pin_tenant_from_principal(websocket, sp)
         return sp
     lp = _invite_session_principal(websocket)
     if lp is not None:
         _enforce_scim_active(lp)
-        _pin_tenant_from_principal(websocket, lp)
         return lp
 
     if oidc_enabled():
@@ -774,7 +772,7 @@ def _require_websocket_principal(websocket) -> VerifiedPrincipal | None:
 
 
 def _authenticate_oidc_bearer(request: Request, token: str) -> VerifiedPrincipal:
-    """Verify an explicit HTTP OIDC bearer and establish its request scope."""
+    """Verify an explicit HTTP OIDC bearer without binding request ContextVars."""
     try:
         principal = verify_oidc_token(token)
     except OIDCError as exc:
@@ -794,12 +792,10 @@ def _authenticate_oidc_bearer(request: Request, token: str) -> VerifiedPrincipal
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
     _enforce_scim_active(principal)
-    request.state.principal = principal
-    _pin_tenant_from_principal(request, principal)
     return principal
 
 
-def require_principal(
+def _resolve_principal(
     request: Request = None,  # type: ignore[assignment]
     websocket: WebSocket = None,  # type: ignore[assignment,name-defined]
 ) -> VerifiedPrincipal | None:
@@ -813,7 +809,7 @@ def require_principal(
     their own narrower credential or are intentionally public bootstrap routes.
     """
     if request is None:
-        return _require_websocket_principal(websocket)
+        return _resolve_websocket_principal(websocket)
 
     # An explicit bearer is non-ambient API authority. Resolve it before
     # proxy/browser sessions so the middleware's CSRF exemption cannot be
@@ -838,8 +834,6 @@ def require_principal(
     pp = _proxy_principal(request)
     if pp is not None:
         _enforce_scim_active(pp)
-        request.state.principal = pp
-        _pin_tenant_from_principal(request, pp)
         return pp
 
     # OIDC and SAML mint the same signed browser session. Check it before the
@@ -848,8 +842,6 @@ def require_principal(
     sp = _session_principal(request)
     if sp is not None:
         _enforce_scim_active(sp)
-        request.state.principal = sp
-        _pin_tenant_from_principal(request, sp)
         return sp
 
     # Email-invite local sessions use the same cookie name but their own issuer.
@@ -858,8 +850,6 @@ def require_principal(
     lp = _invite_session_principal(request)
     if lp is not None:
         _enforce_scim_active(lp)
-        request.state.principal = lp
-        _pin_tenant_from_principal(request, lp)
         return lp
 
     if self_authenticated:
@@ -884,33 +874,77 @@ def require_principal(
     return _authenticate_oidc_bearer(request, token)
 
 
+def _bind_principal(connection, principal):
+    """The only phase that mutates request identity or the task's tenant pin."""
+    if connection is not None and principal is not None:
+        connection.state.principal = principal
+        _pin_tenant_from_principal(connection, principal)
+    return principal
+
+
+def require_principal(
+    request: Request = None,  # type: ignore[assignment]
+    websocket: WebSocket = None,  # type: ignore[assignment]
+) -> VerifiedPrincipal | None:
+    """Synchronous compatibility API; binding stays in the caller's context."""
+    principal = _resolve_principal(request=request, websocket=websocket)
+    return _bind_principal(request if request is not None else websocket, principal)
+
+
+_OIDC_VERIFY_SLOTS = 8
+_OIDC_ADMISSION_SECONDS = 0.25
+
+
+async def _verify_off_loop(request, websocket):
+    connection = request if request is not None else websocket
+    explicit = connection is not None and connection.headers.get("authorization", "")
+    remote_bearer = (explicit and not _dashboard_token_authenticated(connection)
+                     and (request is None or not _self_authenticated_path(request.url.path)))
+    if not remote_bearer:
+        return await run_in_threadpool(_resolve_principal, request=request, websocket=websocket)
+    # Cap potentially remote verification before borrowing a worker. Probes and
+    # local/session authentication retain worker capacity during a slow IdP.
+    loop = asyncio.get_running_loop()
+    limiter = getattr(loop, "_lightwork_oidc_slots", None)
+    if limiter is None:
+        limiter = asyncio.Semaphore(_OIDC_VERIFY_SLOTS)
+        loop._lightwork_oidc_slots = limiter
+    try:
+        await asyncio.wait_for(limiter.acquire(), timeout=_OIDC_ADMISSION_SECONDS)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="identity verification is busy",
+                            headers={"Retry-After": "1"}) from exc
+    worker = asyncio.create_task(run_in_threadpool(_resolve_principal, request=request, websocket=websocket))
+
+    def finished(task):
+        limiter.release()
+        if not task.cancelled():
+            task.exception()  # retrieve failures when the client left during verification
+
+    worker.add_done_callback(finished)
+    # A disconnected request cannot release admission while its resolver thread
+    # is still running. It also cannot bind a late identity into another request.
+    return await asyncio.shield(worker)
+
+
 async def require_principal_in_request_context(
     request: Request = None,  # type: ignore[assignment]
-    websocket: WebSocket = None,  # type: ignore[assignment,name-defined]
+    websocket: WebSocket = None,  # type: ignore[assignment]
 ) -> VerifiedPrincipal | None:
-    """Run authentication in the request task so tenant ContextVars propagate.
+    """Verify off-loop, then bind identity and tenant in the original task.
 
-    FastAPI executes synchronous dependencies in a worker thread. Calling
-    :func:`set_tenant` there records a pin, but that worker's ContextVar value
-    is not visible to the async route or its child worker calls. The app-level
-    dependency therefore uses this async adapter; direct and WebSocket callers
-    can continue using the synchronous implementation above.
+    Only cryptographic public keys are cached. Session revocation and identity
+    lifecycle are checked on every verification; tenant selection/membership is
+    resolved at binding, so cached keys never become an authorization grant.
     """
-    return require_principal(request=request, websocket=websocket)
+    principal = await _verify_off_loop(request, websocket)
+    return _bind_principal(request if request is not None else websocket, principal)
 
 
-async def require_websocket_principal_in_context(
-    websocket: WebSocket,
-):
-    """Authenticate and scope a WebSocket, then always reset its tenant pin.
-
-    WebSocket routes do not pass through HTTP tenant cleanup middleware. This
-    yield dependency keeps the ContextVar in the async handler task (so world
-    selection and threadpool calls inherit it) and releases it on every normal,
-    rejected, disconnected, or exceptional exit.
-    """
+async def require_websocket_principal_in_context(websocket: WebSocket):
+    """Bind the verified handshake in its task and reset the pin on every exit."""
     try:
-        principal = _require_websocket_principal(websocket)
+        principal = await require_principal_in_request_context(websocket=websocket)
         yield principal
     finally:
         token = getattr(websocket.state, "tenant_pin_token", None)

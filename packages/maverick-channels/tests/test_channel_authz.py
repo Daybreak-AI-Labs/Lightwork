@@ -157,7 +157,7 @@ def test_sms_webhook_rejects_unauthorized_sender():
     def _post(frm):
         return client.post(
             "/webhook/sms",
-            data={"From": frm, "Body": "hi", "MessageSid": ""},
+            data={"From": frm, "Body": "hi", "MessageSid": "SM-auth-fixture"},
         )
 
     resp = _post("+19998887777")  # stranger
@@ -196,7 +196,7 @@ def test_whatsapp_webhook_rejects_unauthorized_sender():
     def _post(frm):
         return client.post(
             "/webhook/whatsapp",
-            data={"From": frm, "Body": "hi", "MessageSid": ""},
+            data={"From": frm, "Body": "hi", "MessageSid": "WA-auth-fixture"},
         )
 
     resp = _post("whatsapp:+19998887777")
@@ -286,7 +286,12 @@ def test_sms_marks_processed_before_send_and_survives_send_failure(monkeypatch):
     assert resp.status_code == 200
     assert ran == ["+12025550111"]
     wm = _FakeWorldModel.instances[-1]
-    assert ("sms", "SM123") in wm.marked
+    receipt_id = resp.headers["X-Lightwork-Receipt"]
+    assert ("delivery:sms", receipt_id) in wm.marked
+    from maverick_channels.delivery import DeliveryJournal
+    assert DeliveryJournal().get(receipt_id)["delivery"] == "delivery_unknown"
+    client.post("/webhook/sms", data={"From": "+12025550111", "Body": "hi", "MessageSid": "SM123"})
+    assert ran == ["+12025550111"]
 
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
@@ -359,7 +364,12 @@ def test_whatsapp_marks_processed_before_send_and_survives_send_failure(monkeypa
     assert resp.status_code == 200
     assert ran == ["whatsapp:+12025550111"]
     wm = _FakeWorldModel.instances[-1]
-    assert ("whatsapp", "WA123") in wm.marked
+    receipt_id = resp.headers["X-Lightwork-Receipt"]
+    assert ("delivery:whatsapp", receipt_id) in wm.marked
+    from maverick_channels.delivery import DeliveryJournal
+    assert DeliveryJournal().get(receipt_id)["delivery"] == "delivery_unknown"
+    client.post("/webhook/whatsapp", data={"From": "whatsapp:+12025550111", "Body": "hi", "MessageSid": "WA123"})
+    assert ran == ["whatsapp:+12025550111"]
 
 
 # --- telegram: chat allowlist must not authorize every group member --------
@@ -453,8 +463,8 @@ def test_voice_allowlist_blocks_unauthorized_caller(monkeypatch):
 
     def _post(number):
         return client.post("/webhook/voice", headers=hdr, json={
-            "message": {"type": "transcript", "role": "user", "transcript": "hi"},
-            "call": {"customer": {"number": number}},
+            "message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1"},
+            "call": {"id": "call1", "customer": {"number": number}},
         })
 
     # Unauthorized caller: rejected, handler never runs.
@@ -484,8 +494,8 @@ def test_voice_without_allowlist_allows_any_authenticated_caller(monkeypatch):
     chan = VoiceChannel(_handler, api_key="vapi-test-key")
     client = TestClient(chan._app)
     resp = client.post("/webhook/voice", headers={"Authorization": "Bearer voice-secret"}, json={
-        "message": {"type": "transcript", "role": "user", "transcript": "hi"},
-        "call": {"customer": {"number": "+19998887777"}},
+        "message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1"},
+        "call": {"id": "call1", "customer": {"number": "+19998887777"}},
     })
     assert resp.status_code == 200
     assert resp.json() == {"response": "ran"}

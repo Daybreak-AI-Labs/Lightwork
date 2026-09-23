@@ -233,34 +233,43 @@ class OpenAIClient:
         base_url: str | None = None,
         allow_openai_env_fallback: bool = True,
         default_headers: dict | None = None,
+        environment=None,
     ):
         try:
             import openai
             from openai import AsyncOpenAI, OpenAI
         except ImportError as e:
             raise ImportError(_openai_import_error_message(e)) from e
+        env = os.environ if environment is None else environment
         key = api_key
         if key is None and allow_openai_env_fallback:
-            key = os.environ.get("OPENAI_API_KEY")
+            key = env.get("OPENAI_API_KEY")
         # Strip whitespace: a trailing newline (`echo $KEY > file`) or stray
         # spaces otherwise 401 every call. Covers every OpenAI-compatible
         # provider (openrouter/deepseek/ollama/moonshot/xai/tgi/vllm), which
         # all pass their key through here. Matches AnthropicClient.
         if key is not None:
             key = key.strip() or None
-        if key is None and not allow_openai_env_fallback:
+        if key is None and (not allow_openai_env_fallback or environment is not None):
             raise RuntimeError(
                 "OpenAI-compatible provider requires a non-empty API key; "
                 "refusing to fall back to OPENAI_API_KEY for this base_url."
             )
         from .base import sdk_http_timeout
         kw: dict = {"api_key": key, "base_url": base_url}
+        if environment is not None:
+            # Explicit empty optional values prevent SDK-level live env fallback.
+            kw.update(
+                base_url=base_url or env.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+                organization=env.get("OPENAI_ORG_ID", ""),
+                project=env.get("OPENAI_PROJECT_ID", ""),
+            )
         # Data-residency / ZDR control: operator-set `[providers.<name>]
         # default_headers` are attached to every request so a compliance gateway
         # can enforce region pinning / no-retention headers. Empty -> none.
         if default_headers:
             kw["default_headers"] = dict(default_headers)
-        timeout = sdk_http_timeout(openai)
+        timeout = sdk_http_timeout(openai, environment=environment)
         if timeout is not None:
             kw["timeout"] = timeout
         # Lightwork's bounded retry layer is the sole retry authority. Leaving
@@ -268,6 +277,13 @@ class OpenAIClient:
         # budgets, egress denials, and audit accounting.
         self._sync = OpenAI(max_retries=0, **kw)
         self._async = AsyncOpenAI(max_retries=0, **kw)
+        if environment is not None:
+            # Empty construction sentinels block SDK env fallback, then restore
+            # absent metadata so no new empty headers are sent to any endpoint.
+            for client in (self._sync, self._async):
+                if client is not None:
+                    client.organization = env.get("OPENAI_ORG_ID") or None
+                    client.project = env.get("OPENAI_PROJECT_ID") or None
         # Expose the resolved endpoint for introspection (doctor / logs) and so
         # the OpenAI-compatible subclasses (vllm / tgi / bedrock /
         # openai_compatible) and their tests can read where they're actually

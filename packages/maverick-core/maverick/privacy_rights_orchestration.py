@@ -36,7 +36,8 @@ from typing import Any
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_CLAIM_HISTORY_CLEANUP_BATCH = 128
 AUDIT_SCHEMA = "lightwork.privacy-rights-orchestration-audit.v1"
 MANIFEST_SCHEMA = "lightwork.privacy-rights-completeness-manifest.v1"
 EXPORT_SCHEMA = "lightwork.privacy-rights-export.v1"
@@ -687,14 +688,85 @@ class PrivacyRightsOrchestrationStore:
                 COMMIT;
                 """
             )
-            version = connection.execute(
-                "SELECT value FROM metadata WHERE key='schema_version'"
-            ).fetchone()
-            if version is None or version["value"] != str(SCHEMA_VERSION):
-                raise PrivacyRightsIntegrityError(
-                    "privacy-rights database schema is unsupported"
-                )
+            self._migrate_claim_history(connection)
+            from .privacy_callback_scan import create_schema
+
+            create_schema(connection)
         ensure_private_file(self.path)
+
+    def _migrate_claim_history(self, connection: sqlite3.Connection) -> None:
+        """One transactional v1 backfill; subsequent opens do not scan history."""
+        self._begin(connection)
+        version = connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
+        if version is None or version["value"] not in {"1", str(SCHEMA_VERSION)}:
+            raise PrivacyRightsIntegrityError("privacy-rights database schema is unsupported")
+        if version["value"] == "1":
+            connection.execute("ALTER TABLE rights_claim_batches ADD COLUMN created_at REAL")
+            for row in connection.execute("SELECT * FROM rights_claim_batches"):
+                payload = self._claim_batch(row, projected=False)
+                connection.execute(
+                    "UPDATE rights_claim_batches SET created_at=? WHERE tenant_id=? AND batch_id=?",
+                    (payload["created_at"], row["tenant_id"], row["batch_id"]),
+                )
+            connection.execute(
+                "CREATE INDEX rights_claim_expiry ON rights_claim_batches(tenant_id,created_at,batch_id)"
+            )
+            connection.execute(
+                "CREATE INDEX rights_operation_result ON rights_operations(tenant_id,result_kind,result_id)"
+            )
+            connection.execute(
+                "CREATE TRIGGER rights_claim_created_required BEFORE INSERT ON rights_claim_batches "
+                "WHEN NEW.created_at IS NULL OR typeof(NEW.created_at) NOT IN ('integer','real') OR NEW.created_at<=0 "
+                "BEGIN SELECT RAISE(ABORT,'claim receipt requires a created_at projection'); END"
+            )
+            connection.execute("UPDATE metadata SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+        connection.commit()
+
+    def _claim_batch(self, row: sqlite3.Row, *, projected: bool = True) -> dict[str, Any]:
+        try:
+            payload = self._payload(row, "claim batch")
+            created = _timestamp(payload.get("created_at"), "claim batch created_at")
+            if payload.get("batch_id") != row["batch_id"]:
+                raise ValueError("batch ID binding")
+            if projected and (_timestamp(row["created_at"], "claim batch projection") != created):
+                raise ValueError("claim history projection")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise PrivacyRightsIntegrityError("persisted claim batch time/binding failed integrity verification") from exc
+        return payload
+
+    @staticmethod
+    def _delete_claim_batch(connection: sqlite3.Connection, tenant: str, batch_id: str) -> None:
+        # The caller owns the immediate transaction; both deletions roll back
+        # together if either write fails. Receipt deletion never releases a lease.
+        connection.execute(
+            "DELETE FROM rights_operations WHERE tenant_id=? AND result_kind='claim_batch' AND result_id=?",
+            (tenant, batch_id),
+        )
+        connection.execute("DELETE FROM rights_claim_batches WHERE tenant_id=? AND batch_id=?", (tenant, batch_id))
+
+    def _prune_claim_history(self, connection: sqlite3.Connection, tenant: str,
+                             now: float, idempotency_key: str) -> None:
+        cutoff = now - self._claim_history_retention_seconds
+        # Logical expiry applies to the requested key even when bounded physical
+        # cleanup has not reached it. Validate the operation before following it.
+        operation = self._operation_row(connection, tenant, idempotency_key)
+        if operation is not None and operation["result_kind"] == "claim_batch":
+            row = connection.execute(
+                "SELECT * FROM rights_claim_batches WHERE tenant_id=? AND batch_id=?",
+                (tenant, operation["result_id"]),
+            ).fetchone()
+            if row is None:
+                raise PrivacyRightsIntegrityError("claim operation has no receipt")
+            if self._claim_batch(row)["created_at"] <= cutoff:
+                self._delete_claim_batch(connection, tenant, row["batch_id"])
+        rows = connection.execute(
+            "SELECT * FROM rights_claim_batches WHERE tenant_id=? AND created_at<=? "
+            "ORDER BY created_at,batch_id LIMIT ?",
+            (tenant, cutoff, _CLAIM_HISTORY_CLEANUP_BATCH),
+        ).fetchall()
+        for row in rows:
+            self._claim_batch(row)
+            self._delete_claim_batch(connection, tenant, row["batch_id"])
 
     @staticmethod
     def _begin(connection: sqlite3.Connection) -> None:
@@ -782,15 +854,13 @@ class PrivacyRightsOrchestrationStore:
         ]
 
     @staticmethod
-    def _operation(
+    def _operation_row(
         connection: sqlite3.Connection,
         tenant_id: str,
         idempotency_key: str,
-        request: Mapping[str, object],
-    ) -> tuple[str, sqlite3.Row | None]:
+    ) -> sqlite3.Row | None:
         key = _id(idempotency_key, "idempotency_key", _OP_RE)
         operation_sha = hashlib.sha256(key.encode()).hexdigest()
-        request_sha = _sha256(dict(request))
         row = connection.execute(
             "SELECT * FROM rights_operations WHERE tenant_id=? AND operation_sha256=?",
             (tenant_id, operation_sha),
@@ -807,10 +877,17 @@ class PrivacyRightsOrchestrationStore:
                 raise PrivacyRightsIntegrityError(
                     "persisted idempotency binding failed integrity verification"
                 )
-            if row["request_sha256"] != request_sha:
-                raise PrivacyRightsConflict(
-                    "idempotency key is bound to different canonical content"
-                )
+        return row
+
+    @staticmethod
+    def _operation(
+        connection: sqlite3.Connection, tenant_id: str, idempotency_key: str,
+        request: Mapping[str, object],
+    ) -> tuple[str, sqlite3.Row | None]:
+        row = PrivacyRightsOrchestrationStore._operation_row(connection, tenant_id, idempotency_key)
+        request_sha = _sha256(dict(request))
+        if row is not None and row["request_sha256"] != request_sha:
+            raise PrivacyRightsConflict("idempotency key is bound to different canonical content")
         return request_sha, row
 
     @staticmethod
@@ -1962,31 +2039,7 @@ class PrivacyRightsOrchestrationStore:
         }
         with self._connect() as connection:
             self._begin(connection)
-            expired_batches: list[str] = []
-            for batch_row in connection.execute(
-                "SELECT * FROM rights_claim_batches WHERE tenant_id=?",
-                (tenant,),
-            ).fetchall():
-                batch = self._payload(batch_row, "claim batch")
-                created_at = batch.get("created_at")
-                if (
-                    isinstance(created_at, (int, float))
-                    and not isinstance(created_at, bool)
-                    and math.isfinite(float(created_at))
-                    and float(created_at)
-                    <= now - self._claim_history_retention_seconds
-                ):
-                    expired_batches.append(batch_row["batch_id"])
-            for batch_id in expired_batches:
-                connection.execute(
-                    "DELETE FROM rights_operations WHERE tenant_id=? "
-                    "AND result_kind='claim_batch' AND result_id=?",
-                    (tenant, batch_id),
-                )
-                connection.execute(
-                    "DELETE FROM rights_claim_batches WHERE tenant_id=? AND batch_id=?",
-                    (tenant, batch_id),
-                )
+            self._prune_claim_history(connection, tenant, now, idempotency_key)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -2050,24 +2103,21 @@ class PrivacyRightsOrchestrationStore:
                     ):
                         replayed.append(current)
                 return tuple(replayed)
-            sql = (
-                "SELECT * FROM rights_callbacks WHERE tenant_id=? AND "
-                "((state='pending' AND next_attempt_at<=?) OR "
-                "(state='leased' AND lease_until<=?)) "
-            )
-            parameters: list[object] = [tenant, now, now]
-            if owned_sources is not None:
-                sql += "AND source_id IN (" + ",".join("?" for _ in owned_sources) + ") "
-                parameters.extend(owned_sources)
-            sql += "ORDER BY next_attempt_at,callback_id LIMIT ?"
-            parameters.append(min(1_000, bounded_limit * 10))
-            rows = connection.execute(sql, tuple(parameters)).fetchall()
+            from .privacy_callback_scan import CallbackScan
+
+            scan = CallbackScan(connection, tenant, owned_sources, now, min(1_000, bounded_limit * 10))
             claimed: list[CallbackItem] = []
             snapshots: list[dict[str, object]] = []
-            for row in rows:
+            for row in scan.rows:
                 if len(claimed) >= bounded_limit:
                     break
+                scan.examined_row(row)
                 raw = self._payload(row, "callback")
+                if any(raw.get(field) != row[field] for field in (
+                    "callback_id", "case_id", "task_id", "source_id", "phase",
+                    "state", "next_attempt_at", "lease_until",
+                )):
+                    raise PrivacyRightsIntegrityError("callback queue projection failed integrity verification")
                 current = self._callback(raw, row["integrity_sha256"])
                 if not self._callback_ready(connection, tenant, current):
                     continue
@@ -2116,9 +2166,10 @@ class PrivacyRightsOrchestrationStore:
                     {"recovered": recovered, "lease_until": now + lease},
                     now,
                 )
+            scan.save()
             if not claimed:
-                # An empty poll has no side effect and must not grow durable
-                # claim/operation history forever under unique scheduler run IDs.
+                # Empty polls only advance bounded derived scan progress;
+                # they never create claim/operation history.
                 return ()
             batch_id = _id(
                 "batch:" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:32],
@@ -2133,8 +2184,8 @@ class PrivacyRightsOrchestrationStore:
             self._insert(
                 connection,
                 "rights_claim_batches",
-                ("tenant_id", "batch_id"),
-                (tenant, batch_id),
+                ("tenant_id", "batch_id", "created_at"),
+                (tenant, batch_id, now),
                 batch_payload,
             )
             self._record_operation(
@@ -4206,7 +4257,7 @@ class PrivacyRightsOrchestrationStore:
                     (tenant,),
                 ).fetchall()
                 for row in rows:
-                    payload = self._payload(row, label)
+                    payload = self._claim_batch(row) if table == "rights_claim_batches" else self._payload(row, label)
                     if payload.get("tenant_id") != tenant or row["tenant_id"] != tenant:
                         raise PrivacyRightsIntegrityError(
                             f"persisted {label} is outside the requested tenant"

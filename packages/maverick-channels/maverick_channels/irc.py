@@ -23,9 +23,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
+from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
+from .transport_worker import TransportWorker
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +142,9 @@ def format_privmsg(target: str, text: str, *, max_chars: int = _MAX_LINE_CHARS) 
     a 512-byte line cap). Each physical newline starts a new PRIVMSG; long lines
     are hard-wrapped at ``max_chars``."""
     lines: list[str] = []
+    byte_limit = 510 - len(f"PRIVMSG {target} :".encode())
+    if max_chars < 1 or byte_limit < 4:
+        raise ValueError("IRC reply target leaves no bounded text capacity")
     # Normalize ALL line terminators to \n before splitting. Splitting on \n
     # only left a bare \r embedded mid-line; IRC servers treat \r as a line
     # terminator, so reply text like "hi\rJOIN #evil" injected an arbitrary IRC
@@ -146,13 +152,17 @@ def format_privmsg(target: str, text: str, *, max_chars: int = _MAX_LINE_CHARS) 
     # (safely-prefixed) PRIVMSG instead.
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     for raw in normalized.split("\n"):
-        chunk = raw
-        if not chunk:
+        if not raw:
             continue
-        while len(chunk) > max_chars:
-            lines.append(f"PRIVMSG {target} :{chunk[:max_chars]}")
-            chunk = chunk[max_chars:]
-        lines.append(f"PRIVMSG {target} :{chunk}")
+        chunk, size = [], 0
+        for character in raw:
+            width = len(character.encode("utf-8"))
+            if chunk and (len(chunk) >= max_chars or size + width > byte_limit):
+                lines.append(f"PRIVMSG {target} :{''.join(chunk)}")
+                chunk, size = [], 0
+            chunk.append(character)
+            size += width
+        lines.append(f"PRIVMSG {target} :{''.join(chunk)}")
     return lines or [f"PRIVMSG {target} :(no content)"]
 
 
@@ -192,74 +202,181 @@ class IRCChannel(Channel):
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._running = False
+        self._write_lock = asyncio.Lock()
+        self._worker = None
+        self._reader_task = None
+        self._stop_task = None
+        self._whois = {}
+        self._session_id = uuid.uuid4().hex
+        self._sequence = 0
+
+    def _account(self):
+        return f"{self.server.casefold()}:{self.port}:{self.tls}:{self.nick.casefold()}"
 
     async def _send_line(self, line: str) -> None:
-        if self._writer is None:  # pragma: no cover -- guarded by start()
-            return
-        # Single choke-point CR/LF strip: even if some caller assembles a line
-        # from attacker-influenced text (a crafted nick/target, a future code
-        # path), it can never inject a second IRC command on the wire.
+        if self._writer is None:
+            raise DeliveryNotSent("IRC transport is not connected")
         line = line.replace("\r", "").replace("\n", "")
-        self._writer.write((line + "\r\n").encode("utf-8", errors="replace"))
-        await self._writer.drain()
+        data = (line + "\r\n").encode("utf-8", errors="replace")
+        if len(data) > 512:
+            raise DeliveryNotSent("IRC line exceeds the wire byte bound")
+        # Construction-only test callers historically bypass __init__.
+        if not hasattr(self, "_write_lock"):
+            self._write_lock = asyncio.Lock()
+        async with self._write_lock:
+            self._writer.write(data)
+            await asyncio.wait_for(self._writer.drain(), timeout=5)
 
-    async def start(self) -> None:  # pragma: no cover -- needs a live IRC server
-        self._reader, self._writer = await asyncio.open_connection(
-            self.server, self.port, ssl=self.tls,
-        )
+    async def _read_transport(self):
+        try:
+            while self._running:
+                raw = await self._reader.readline()
+                if not raw:
+                    return
+                try:
+                    await self._handle_raw(raw.decode("utf-8", errors="replace"))
+                except Exception:
+                    log.warning("IRC input was not admitted; transport intake requires review")
+        finally:
+            for pending in self._whois.values():
+                if not pending["future"].done():
+                    pending["future"].set_result(None)
+
+    async def start(self) -> None:
+        self._stop_task = None
+        self._reader, self._writer = await asyncio.open_connection(self.server, self.port, ssl=self.tls, limit=65536)
         self._running = True
-        if self.password:
-            await self._send_line(f"PASS {self.password}")
-        await self._send_line("CAP LS 302")
-        await self._send_line("CAP REQ :account-tag")
-        await self._send_line(f"NICK {self.nick}")
-        await self._send_line(f"USER {self.nick} 0 * :Lightwork agent")
-        await self._send_line("CAP END")
-        for chan in self.channels:
-            await self._send_line(f"JOIN {chan}")
-        while self._running:
-            raw = await self._reader.readline()
-            if not raw:
-                break
-            try:
-                await self._handle_raw(raw.decode("utf-8", errors="replace"))
-            except Exception:  # pragma: no cover -- one bad line never kills the loop
-                log.exception("irc: error handling line")
+        self._session_id, self._sequence = uuid.uuid4().hex, 0
+        account = self._account()
+        self._worker = TransportWorker(self, account=account, send=self._send_saved,
+            authorize=lambda message: account == self._account() and is_allowed(message.sender_id, self.allowed_user_ids)).start()
+        try:
+            if self.password:
+                await self._send_line(f"PASS {self.password}")
+            await self._send_line("CAP LS 302")
+            await self._send_line("CAP REQ :account-tag message-tags")
+            await self._send_line(f"NICK {self.nick}")
+            await self._send_line(f"USER {self.nick} 0 * :Lightwork agent")
+            await self._send_line("CAP END")
+            for channel in self.channels:
+                await self._send_line(f"JOIN {channel}")
+            self._reader_task = asyncio.create_task(self._read_transport(), name="irc-reader")
+            await self._reader_task
+        except asyncio.CancelledError:
+            if self._running:
+                raise
+        finally:
+            await self.stop()
 
-    async def _handle_raw(self, raw: str) -> None:
+    async def _handle_raw(self, raw: str):
         msg = parse_line(raw)
         if msg is None:
-            return
+            return None
         if is_ping(msg):
             await self._send_line(pong_for(msg))
-            return
+            return None
+        if msg.command in {"330", "318", "401"} and len(msg.params) >= 2:
+            pending = self._whois.get(msg.params[1].casefold())
+            if pending:
+                if msg.command == "330" and len(msg.params) >= 3:
+                    pending["account"] = msg.params[2]
+                elif not pending["future"].done():
+                    pending["future"].set_result(pending.get("account"))
+            return None
         parsed = parse_privmsg(msg, own_nick=self.nick)
-        if parsed is None:
-            return
+        if parsed is None or msg.sender_nick.casefold() == self.nick.casefold():
+            return None
         sender, reply_target, text = parsed
         if not is_allowed(sender, self.allowed_user_ids):
-            return
-        incoming = IncomingMessage(
-            user_id=reply_target, text=text, channel=self.name,
-            raw=msg, sender_id=sender,
-        )
-        reply = await self.dispatch_text(incoming)
-        if reply:
-            await self.send(reply_target, reply)
+            return None
+        direct = msg.params[0].casefold() == self.nick.casefold()
+        if not direct and reply_target.casefold() not in {channel.casefold() for channel in self.channels}:
+            return None
+        self._sequence += 1
+        identity = msg.tags.get("msgid") or f"session:{self._session_id}:{self._sequence}"
+        incoming = IncomingMessage(user_id=reply_target, text=text, channel=self.name,
+                                   sender_id=sender, message_id=identity)
+        route = {"direct": direct,
+                 "identity_scope": "provider" if msg.tags.get("msgid") else "connection"}
+        if self._worker is not None:
+            return await self._worker.submit(incoming, external_id=identity, route=route)
+        account = self._account()
+        async def send_saved(reply):
+            return await self._send_saved(incoming, reply, route)
+        return await self.process_message(incoming, external_id=identity, account=account, route=route,
+            authorize=lambda: account == self._account() and is_allowed(sender, self.allowed_user_ids), send=send_saved)
+
+    async def _resolve_account(self, nick):
+        key = nick.casefold()
+        existing = self._whois.get(key)
+        if existing:
+            return await asyncio.wait_for(asyncio.shield(existing["future"]), timeout=5)
+        future = asyncio.get_running_loop().create_future()
+        self._whois[key] = {"future": future}
+        try:
+            await self._send_line(f"WHOIS {nick}")
+            return await asyncio.wait_for(future, timeout=5)
+        except Exception as exc:
+            raise DeliveryNotSent("IRC reply target account could not be verified") from exc
+        finally:
+            self._whois.pop(key, None)
+            if not future.done():
+                future.cancel()
+
+    async def _send_saved(self, message, reply, route):
+        if reply.text:
+            if not route["direct"] and message.user_id.casefold() not in {channel.casefold() for channel in self.channels}:
+                raise DeliveryNotSent("IRC reply channel is no longer configured")
+            expected = message.sender_id if route["direct"] else None
+            return await self._send_chunks(message.user_id, reply.text, expected_account=expected)
+
+    async def _send_chunks(self, user_id, text, *, expected_account=None):
+        for index, line in enumerate(format_privmsg(user_id, text)):
+            if expected_account is not None:
+                current = await self._resolve_account(user_id)
+                if not current or current.casefold() != expected_account.casefold():
+                    raise DeliveryNotSent("IRC nickname no longer belongs to the admitted caller")
+            async def write(line=line):
+                await self._send_line(line)
+                return "local-wire-write-only"
+            await send_chunk(f"irc-{index}", line, write)
+        if delivery_active():
+            # drain() only confirms local buffering, not server acceptance or
+            # delivery. Hold the outer operation rather than replaying it.
+            raise DeliveryUnknown("IRC remote delivery has no acknowledgement")
 
     async def send(self, user_id: str, text: str) -> None:
-        for line in format_privmsg(user_id, text):
-            await self._send_line(line)
+        return await self._send_chunks(user_id, text)
 
-    async def stop(self) -> None:
+    async def _finish_stop(self):
+        if self._worker is not None:
+            await self._worker.close()
         self._running = False
         if self._writer is not None:
             try:
-                self._writer.write(b"QUIT :Lightwork shutting down\r\n")
-                await self._writer.drain()
-                self._writer.close()
-            except Exception:  # pragma: no cover
+                await self._send_line("QUIT :Lightwork shutting down")
+            except Exception:
                 pass
+            self._writer.close()
+            try:
+                await asyncio.wait_for(self._writer.wait_closed(), timeout=5)
+            except Exception:
+                log.warning("IRC socket closure remains unconfirmed")
+        if self._reader_task is not None and not self._reader_task.done():
+            self._reader_task.cancel()
+            done, _ = await asyncio.wait([self._reader_task], timeout=5)
+            if self._reader_task in done:
+                try:
+                    self._reader_task.result()
+                except (asyncio.CancelledError, Exception):
+                    pass
+            else:
+                log.warning("IRC reader shutdown remains unconfirmed")
+
+    async def stop(self) -> None:
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._finish_stop(), name="irc-stop")
+        await asyncio.shield(self._stop_task)
 
 
 __all__ = [

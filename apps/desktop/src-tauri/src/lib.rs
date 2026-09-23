@@ -6,8 +6,8 @@
 //! soon as the port answers. On the Rust side, if nothing is listening on
 //! 127.0.0.1:8765 at launch we spawn the user's installed CLI —
 //! `maverick dashboard --host 127.0.0.1 --port 8765` — as a child process and
-//! kill it again on exit. A dashboard the user already runs is left untouched
-//! (we only ever kill a child we spawned).
+//! drain it on exit, with bounded forced termination if it cannot finish.
+//! A dashboard the user already runs is left untouched.
 //!
 //! Customer builds carry the full frozen release runtime beside this binary.
 //! Engineering builds retain the installed-CLI lookup for local development.
@@ -295,8 +295,8 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 app.state::<lightwork_desktop_oauth_return::Broker>().stop();
-                // Kill only the dashboard *we* started; an externally started
-                // one was never put into the Sidecar state.
+                // Drain only our owned child, then use the finite force-stop
+                // fallback. An external dashboard is never in owned state.
                 app.state::<Dashboard>().stop_owned();
             }
         });

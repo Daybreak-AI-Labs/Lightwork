@@ -243,17 +243,24 @@ class ThirdPartyFeedScheduler:
                 "provider_errors_returned": False,
             }
 
-    def stop(self, *, timeout: float = 5.0) -> bool:
+    def stop(self, *, timeout: float = 5.0, wait: bool = True) -> bool:
         with self._lock:
             stop = self._stop
             thread = self._thread
-            self._stop = None
-            self._thread = None
+            if stop is not None:
+                stop.set()
         if stop is None or thread is None:
             return False
-        stop.set()
+        if not wait:
+            return not thread.is_alive()
         thread.join(max(0.0, min(float(timeout), 30.0)))
-        return not thread.is_alive()
+        if thread.is_alive():
+            return False
+        with self._lock:
+            if self._thread is thread:
+                self._stop = None
+                self._thread = None
+        return True
 
 
 __all__ = [

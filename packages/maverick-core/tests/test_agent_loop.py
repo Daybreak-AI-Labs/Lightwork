@@ -808,6 +808,34 @@ class TestToolOutputCap:
         assert "truncated" in out
         assert len(out) < 5000   # framed + capped, far smaller than the raw 5000
 
+    @pytest.mark.asyncio
+    async def test_full_result_reader_binds_authenticated_user_not_audit_capability(
+        self, ctx, monkeypatch,
+    ):
+        import json
+        import re
+
+        from maverick import agent as agent_mod
+
+        ctx.user_id = "alice"
+        monkeypatch.setattr(agent_mod, "_MAX_TOOL_RESULT_BYTES", 200)
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        original = agent.tools.run
+        full = "business rows\n" * 500 + "FINAL_ROW"
+
+        async def huge(name, args):
+            return full if name == "shell" else await original(name, args)
+
+        monkeypatch.setattr(agent.tools, "run", huge)
+        output = await agent._run_tool("shell", {"cmd": "query"})
+        ref = re.search(r"artifact_id=([a-f0-9]{64})", output)[1]
+        # The authenticated registry user exists even without a capability
+        # principal. The actual registered reader must use the same authority.
+        page = json.loads(await original("read_tool_result", {
+            "artifact_id": ref, "offset": len(full) - 9, "limit": 9,
+        }))
+        assert page["text"] == "FINAL_ROW" and not page["has_more"]
+
 
 class TestToolLifecycleAudit:
     @staticmethod

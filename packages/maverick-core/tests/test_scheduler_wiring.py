@@ -4,7 +4,7 @@ The scheduler engine (maverick.scheduler) and the worker existed but had no
 entry point: nothing imported the scheduler, there was no `maverick worker`
 or `maverick schedule` command, and the worker never re-armed recurring
 jobs. These tests cover the wiring: JobQueue.cancel, the worker re-arm
-(first-claim only), and the three CLI commands.
+(one successor per occurrence), and the three CLI commands.
 """
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ def test_cancel_running_or_unknown_returns_false(tmp_path):
 
 # ---------- worker re-arm ----------
 
-def test_maybe_rearm_only_on_first_attempt(tmp_path):
-    from maverick.job_queue import Job, JobQueue
+def test_maybe_rearm_once_across_real_claimed_attempts(tmp_path):
+    from maverick.job_queue import JobQueue
     from maverick.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q)
@@ -42,18 +42,21 @@ def test_maybe_rearm_only_on_first_attempt(tmp_path):
     def _armed():
         return [j for j in q.list(status="pending") if j.payload.get("__cron__")]
 
-    w._maybe_rearm(Job(id=1, kind="noop", payload={"__cron__": cron},
-                       run_at=0, status="running", attempts=1))
+    jid = q.enqueue("noop", {"__cron__": cron}, run_at=0)
+    first = q.claim(now=0)
+    w._maybe_rearm(first)
     assert len(_armed()) == 1
 
     # A retry (attempts > 1) must NOT enqueue another occurrence.
-    w._maybe_rearm(Job(id=1, kind="noop", payload={"__cron__": cron},
-                       run_at=0, status="running", attempts=2))
+    assert q.fail(jid, "retry", retry_after=0, expected_attempts=first.attempts)
+    retry = q.claim()
+    assert retry.attempts == 2
+    w._maybe_rearm(retry)
     assert len(_armed()) == 1
 
     # A non-cron job is never re-armed.
-    w._maybe_rearm(Job(id=2, kind="noop", payload={},
-                       run_at=0, status="running", attempts=1))
+    q.enqueue("noop", {}, run_at=0)
+    w._maybe_rearm(q.claim(now=0))
     assert len(_armed()) == 1
 
 
@@ -175,20 +178,16 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
     monkeypatch.setattr("maverick.runner.run_goal_in_thread", _fake_run)
 
     import maverick.worker as worker_mod
-    from maverick.job_queue import Job
     from maverick.worker import Worker
     w = Worker(db_path=tmp_path / "jobs.db")
-    w._handlers["start_goal"](Job(
-        id=1, kind="start_goal",
-        payload={
+    w.queue.enqueue("start_goal", {
             "title": "Digest",
             "text": "Summarize overnight emails",
             "owner": "user:alice",
             "channel": "api",
             "user_id": "alice",
-        },
-        run_at=0.0, status="running", attempts=1,
-    ))
+        }, run_at=0)
+    w._handlers["start_goal"](w.queue.claim(now=0))
 
     from maverick.world_model import open_world
     world = open_world(tmp_path / "world.db")
@@ -213,15 +212,11 @@ def test_start_goal_records_schedule_provenance(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "maverick.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done")
 
-    from maverick.job_queue import Job
     from maverick.worker import Worker
     w = Worker(db_path=tmp_path / "jobs.db")
-    w._handlers["start_goal"](Job(
-        id=1, kind="start_goal",
-        payload={"text": "Summarize emails", "title": "Digest",
-                 "schedule_id": "sched-xyz"},
-        run_at=0.0, status="running", attempts=1,
-    ))
+    w.queue.enqueue("start_goal", {"text": "Summarize emails", "title": "Digest",
+                                   "schedule_id": "sched-xyz"}, run_at=0)
+    w._handlers["start_goal"](w.queue.claim(now=0))
 
     from maverick.world_model import open_world
     world = open_world(tmp_path / "world.db")
@@ -237,12 +232,10 @@ def test_start_goal_without_schedule_id_records_no_origin(tmp_path, monkeypatch)
     monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(
         "maverick.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done")
-    from maverick.job_queue import Job
     from maverick.worker import Worker
-    Worker(db_path=tmp_path / "jobs.db")._handlers["start_goal"](Job(
-        id=1, kind="start_goal", payload={"text": "one-off"},
-        run_at=0.0, status="running", attempts=1,
-    ))
+    w = Worker(db_path=tmp_path / "jobs.db")
+    w.queue.enqueue("start_goal", {"text": "one-off"}, run_at=0)
+    w._handlers["start_goal"](w.queue.claim(now=0))
     from maverick.world_model import open_world
     world = open_world(tmp_path / "world.db")
     try:
@@ -410,12 +403,12 @@ def test_drain_snapshots_ready_time_for_slow_recurring_jobs(
     monkeypatch.setattr("maverick.worker.time.time", lambda: 100.0)
     rearmed = {"count": 0}
 
-    def _fake_schedule_cron(queue, expr, kind, payload):
+    def _fake_next_run(expr, *, after=None, tz=""):
         rearmed["count"] += 1
         run_at = 200.0 if rearmed["count"] == 1 else 1_000_000_000_000.0
-        return queue.enqueue(kind, payload, run_at=run_at), run_at
+        return run_at
 
-    monkeypatch.setattr("maverick.scheduler.schedule_cron", _fake_schedule_cron)
+    monkeypatch.setattr("maverick.scheduler.next_run", _fake_next_run)
     runs = []
     w = Worker(queue=q, idle_sleep=0.0)
     w.register("noop", lambda job: runs.append(job.id))

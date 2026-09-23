@@ -11,7 +11,10 @@ ops:
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from . import Tool
@@ -19,6 +22,7 @@ from . import Tool
 _DEFAULT_MAX_BYTES = 1_000_000
 _DEFAULT_MAX_DEPTH = 64
 _DEFAULT_MAX_ITEMS = 100_000
+_MAX_CSV_FIELD_CHARS = 65_536
 
 
 def _depth_of(obj: Any) -> int:
@@ -69,26 +73,70 @@ def _parse_json(text: str, max_depth: int, max_items: int) -> str:
             f"{items} container item(s)")
 
 
-def _parse_csv(text: str, max_items: int) -> str:
-    # Hand-roll a minimal, bounded CSV split rather than feed the whole blob to
-    # csv.reader at once: count rows as we go and stop the moment the cap is
-    # crossed, so a billion-row input can't be fully materialised.
+@dataclass(frozen=True)
+class CSVShape:
+    records: int
+    header_columns: int
+    physical_lines: int
+    min_columns: int
+    max_columns: int
+    error: str | None = None
+    dialect: str = "excel (comma, double quote, doubled-quote escapes)"
+
+
+def _csv_shape(text: str, max_items: int) -> CSVShape:
+    """Count logical records without materializing the table or mutating globals.
+
+    The raw byte ceiling has already bounded the reader's maximum allocation.
+    Each parsed row is discarded after checking its fields; the process-wide
+    csv.field_size_limit is never changed, including during concurrent calls.
+    Empty physical records are ignored; quoted empty fields are data records.
+    """
     rows = 0
     cols = 0
-    for line in text.splitlines():
-        if line == "":
-            continue
-        rows += 1
-        if rows == 1:
-            cols = len(line.split(","))
-        if rows > max_items:
-            return f"REJECT: row count exceeds max_items {max_items}"
-    return f"OK csv: {rows} row(s), {cols} column(s) in header"
+    minimum = 0
+    maximum = 0
+    error = None
+    with io.StringIO(text, newline="") as source:
+        reader = csv.reader(source, dialect="excel", strict=True)
+        try:
+            for row in reader:
+                if not row:
+                    continue
+                rows += 1
+                if rows > max_items:
+                    error = f"row count exceeds max_items {max_items}"
+                    break
+                if any(len(field) > _MAX_CSV_FIELD_CHARS for field in row):
+                    error = f"CSV field exceeds {_MAX_CSV_FIELD_CHARS} characters"
+                    break
+                if rows == 1:
+                    cols = minimum = len(row)
+                minimum = min(minimum, len(row))
+                maximum = max(maximum, len(row))
+        except csv.Error as exc:
+            error = ("CSV parser field limit exceeded" if "field larger than field limit" in str(exc)
+                     else "invalid CSV quoting or record syntax")
+        return CSVShape(rows, cols, reader.line_num, minimum, maximum, error)
+
+
+def _parse_csv(text: str, max_items: int) -> str:
+    shape = _csv_shape(text, max_items)
+    if shape.error:
+        return f"REJECT: {shape.error} at or before physical line {shape.physical_lines}"
+    return (f"OK csv: {shape.records} row(s), {shape.header_columns} column(s) in header; "
+            f"{shape.physical_lines} physical line(s), columns per record "
+            f"{shape.min_columns}..{shape.max_columns}; dialect={shape.dialect}")
 
 
 def _parse(text: str, fmt: str, max_bytes: int, max_depth: int, max_items: int) -> str:
     # Size gate FIRST, before any structural work touches the payload.
-    size = len(text.encode("utf-8", errors="ignore"))
+    if len(text) > max_bytes:
+        return f"REJECT: input character count exceeds max_bytes {max_bytes}"
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeError:
+        return "REJECT: input is not valid UTF-8 text"
     if size > max_bytes:
         return f"REJECT: input size {size} bytes exceeds max_bytes {max_bytes}"
     if fmt == "json":
@@ -101,9 +149,9 @@ def _parse(text: str, fmt: str, max_bytes: int, max_depth: int, max_items: int) 
 def _bounded_int(value: Any, default: int) -> int:
     try:
         n = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
-    return n if n > 0 else default
+    return min(n, default) if n > 0 else default
 
 
 def _run(args: dict[str, Any]) -> str:
@@ -125,9 +173,9 @@ _SCHEMA: dict[str, Any] = {
         "op": {"type": "string", "enum": ["parse"]},
         "text": {"type": "string", "description": "Untrusted text to parse"},
         "format": {"type": "string", "enum": ["json", "csv"]},
-        "max_bytes": {"type": "integer", "description": "Max raw UTF-8 byte size"},
-        "max_depth": {"type": "integer", "description": "Max nesting depth (JSON)"},
-        "max_items": {"type": "integer", "description": "Max container items / CSV rows"},
+        "max_bytes": {"type": "integer", "description": "Max raw UTF-8 byte size; at most 1000000"},
+        "max_depth": {"type": "integer", "description": "Max nesting depth (JSON); at most 64"},
+        "max_items": {"type": "integer", "description": "Max container items / logical CSV records; at most 100000"},
     },
     "required": ["text"],
 }

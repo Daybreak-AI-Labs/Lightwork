@@ -375,15 +375,24 @@ class AnthropicClient:
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None,
-                 default_headers: dict | None = None):
+                 default_headers: dict | None = None, *, environment=None):
         # May 26 council fix (long-tail audit #1): strip whitespace.
         # `export ANTHROPIC_API_KEY=$(cat key.txt)` is a common source of
         # trailing newline; without strip, every API call 401s and the
         # operator sees "API outage" instead of the real "key has
         # whitespace" issue.
-        key = (api_key or os.environ.get("ANTHROPIC_API_KEY") or "").strip() or None
+        env = os.environ if environment is None else environment
+        key = (api_key or env.get("ANTHROPIC_API_KEY") or "").strip() or None
         from .base import sdk_http_timeout
         kw: dict = {"api_key": key}
+        if environment is not None:
+            token = env.get("ANTHROPIC_AUTH_TOKEN", "")
+            if not key and not token:
+                raise RuntimeError("Anthropic requires a credential in the admitted provider configuration")
+            kw.update(
+                api_key=key or "", auth_token=token,
+                base_url=base_url or env.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com",
+            )
         # Thread an explicit `[providers.anthropic] base_url` into the SDK so a
         # configured endpoint (proxy / gateway) is honored. ``None`` leaves the
         # SDK's own default base_url (mirrors how OpenAIClient handles base_url).
@@ -395,7 +404,7 @@ class AnthropicClient:
         # (e.g. {"anthropic-region": "eu"}). Empty by default -> no extra headers.
         if default_headers:
             kw["default_headers"] = dict(default_headers)
-        timeout = sdk_http_timeout(anthropic)
+        timeout = sdk_http_timeout(anthropic, environment=environment)
         if timeout is not None:
             kw["timeout"] = timeout
         self.client = anthropic.Anthropic(max_retries=0, **kw)

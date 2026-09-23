@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import inspect
 import sqlite3
+import time
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -512,6 +514,272 @@ def test_legal_hold_retention_and_four_eyes_block_destructive_dispatch(
         idempotency_key="claim-unheld-delete",
     )
     assert claimed[0].phase == "delete"
+
+
+def test_callback_progress_survives_restart_and_does_not_starve_work_behind_holds(authority, monkeypatch, record_property):
+    store, actor, clock = authority
+    enroll_all(store, "tenant-a", "crm", key="fair-source")
+    held_cases = []
+    for index in range(11):
+        clock.advance(1)
+        actor["value"] = "planner"
+        case = open_verified(store, clock, "tenant-a", f"fair-{index}", ["erasure"])
+        task = store.plan_source_tasks(
+            "tenant-a", case.case_id, "crm", phases=["delete"], max_attempts=3,
+            expected_case_revision=case.revision, idempotency_key=f"plan-fair-{index}",
+        )[0]
+        actor["value"] = "approver"
+        store.approve_destructive_work("tenant-a", task.task_id, expected_revision=task.revision,
+                                       idempotency_key=f"approve-fair-{index}")
+        if index < 10:
+            case = store.get_case("tenant-a", case.case_id)
+            held_cases.append(store.set_legal_hold(
+                "tenant-a", case.case_id, active=True, evidence_sha256=digest(f"hold-{index}"),
+                evidence_ref=f"hold:{index}", expected_revision=case.revision,
+                idempotency_key=f"hold-fair-{index}",
+            ))
+    actor["value"] = "source-worker"
+    original_ready = rights.PrivacyRightsOrchestrationStore._callback_ready
+    scanned = []
+
+    def count_ready(self, connection, tenant, callback):
+        scanned.append(callback.callback_id)
+        return original_ready(self, connection, tenant, callback)
+
+    monkeypatch.setattr(rights.PrivacyRightsOrchestrationStore, "_callback_ready", count_ready)
+    # Count real SQLite statements, including connection PRAGMAs, without
+    # retaining their expanded arguments (which can contain protected data).
+    sql_counts = Counter()
+    native_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = native_connect(*args, **kwargs)
+        connection.set_trace_callback(lambda statement: sql_counts.update(
+            [statement.lstrip().split(None, 1)[0].upper()],
+        ))
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+    start = time.perf_counter()
+    assert store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, source_ids=["crm"],
+                                 idempotency_key="fair-poll-1") == ()
+    blocked_ms = (time.perf_counter() - start) * 1000
+    blocked_sql = dict(sql_counts)
+    assert len(scanned) == 10
+    # Production request handlers may construct a store per call. Progress
+    # must survive that boundary, not live only on one Python instance.
+    reopened = rights.PrivacyRightsOrchestrationStore(
+        store.path, config_gate=lambda: None, principal_resolver=lambda: actor["value"],
+        digest_key_resolver=lambda _tenant: b"k" * 32, clock=clock,
+    )
+    sql_counts.clear()
+    next_claim = reopened.claim_callbacks("tenant-a", limit=1, lease_seconds=30, source_ids=["crm"],
+                                         idempotency_key="fair-poll-2")
+    frontier_sql = dict(sql_counts)
+    assert len(next_claim) == 1 and next_claim[0].case_id == "fair-10"
+    assert len(scanned) == 11
+    for index, case in enumerate(held_cases):
+        reopened.set_legal_hold(
+            "tenant-a", case.case_id, active=False, evidence_sha256=digest(f"release-{index}"),
+            evidence_ref=f"release:{index}", expected_revision=case.revision,
+            idempotency_key=f"release-fair-{index}",
+        )
+    released = []
+    durations = []
+    runnable_sql = []
+    for index in range(10):
+        sql_counts.clear()
+        start = time.perf_counter()
+        claimed = reopened.claim_callbacks("tenant-a", limit=1, lease_seconds=30, source_ids=["crm"],
+                                           idempotency_key=f"released-poll-{index}")
+        durations.append((time.perf_counter() - start) * 1000)
+        runnable_sql.append(dict(sql_counts))
+        assert len(claimed) == 1
+        released.append(claimed[0].case_id)
+    assert set(released) == {case.case_id for case in held_cases}
+    assert len(scanned) == 21
+    assert reopened.claim_callbacks("tenant-a", limit=1, lease_seconds=30, source_ids=["crm"],
+                                    idempotency_key="all-leased") == ()
+    record_property("blocked_candidates_examined", 10)
+    record_property("eligible_candidate_found_on_poll", 2)
+    record_property("released_candidates_examined", 10)
+    record_property("held_page_ms", blocked_ms)
+    record_property("runnable_claim_ms", durations)
+    record_property("blocked_page_sql_statements", blocked_sql)
+    record_property("eligible_frontier_sql_statements", frontier_sql)
+    record_property("runnable_poll_sql_statements", runnable_sql)
+    assert blocked_sql["BEGIN"] == blocked_sql["COMMIT"] == 1
+    assert blocked_sql["SELECT"] > frontier_sql["SELECT"]
+    assert all(counts["BEGIN"] == counts["COMMIT"] == 1 for counts in runnable_sql)
+    assert all(counts["SELECT"] < blocked_sql["SELECT"] for counts in runnable_sql)
+
+
+def test_callback_progress_is_source_scoped_and_rolled_back_with_claim_failure(authority, monkeypatch):
+    from maverick.privacy_callback_scan import CallbackScan
+
+    store, _actor, clock = authority
+    for source in ("crm", "erp"):
+        enroll_all(store, "tenant-a", source, key=f"scope-{source}")
+        for index in range(12):
+            case = open_verified(store, clock, "tenant-a", f"scope-{source}-{index}", ["access"])
+            store.plan_source_tasks(
+                "tenant-a", case.case_id, source, phases=["discover"], max_attempts=3,
+                expected_case_revision=case.revision, idempotency_key=f"scope-plan-{source}-{index}",
+            )
+    save = CallbackScan.save
+
+    def fail_after_cursor(self):
+        save(self)
+        raise RuntimeError("injected transaction failure")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(CallbackScan, "save", fail_after_cursor)
+        with pytest.raises(RuntimeError, match="injected"):
+            store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, source_ids=["crm"],
+                                  idempotency_key="scope-rollback")
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM rights_callback_scan_progress").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM rights_callbacks WHERE state='leased'").fetchone()[0] == 0
+    for source in ("crm", "erp"):
+        result = store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, source_ids=[source],
+                                       idempotency_key=f"scope-claim-{source}")
+        assert len(result) == 1 and result[0].source_id == source
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM rights_callback_scan_progress").fetchone()[0] == 2
+
+
+def _seed_claim_history(store, created_at, count, prefix):
+    with store._connect() as connection:
+        store._begin(connection)
+        for index in range(count):
+            key = f"{prefix}-{index}"
+            batch_id = "batch:" + hashlib.sha256(key.encode()).hexdigest()[:32]
+            store._insert(
+                connection, "rights_claim_batches", ("tenant_id", "batch_id", "created_at"),
+                ("tenant-a", batch_id, created_at),
+                {"tenant_id": "tenant-a", "batch_id": batch_id, "created_at": created_at, "callbacks": []},
+            )
+            store._record_operation(connection, "tenant-a", key, "f" * 64, "claim_batch", batch_id)
+
+
+def test_claim_history_cleanup_visits_expired_rows_and_uses_index(authority, monkeypatch, record_property):
+    store, _actor, clock = authority
+    store._claim_history_retention_seconds = 60
+    _seed_claim_history(store, clock(), 2000, "retained")
+    _seed_claim_history(store, clock() - 61, 3, "expired")
+    validated = []
+    validate = store._claim_batch
+
+    def counted(row, **kwargs):
+        validated.append(row["batch_id"])
+        return validate(row, **kwargs)
+
+    monkeypatch.setattr(store, "_claim_batch", counted)
+    assert store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, idempotency_key="history-scan") == ()
+    assert len(validated) == 3
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM rights_claim_batches").fetchone()[0] == 2000
+        assert connection.execute("SELECT COUNT(*) FROM rights_operations WHERE result_kind='claim_batch'").fetchone()[0] == 2000
+        plan = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM rights_claim_batches WHERE tenant_id=? AND created_at<=? "
+            "ORDER BY created_at,batch_id LIMIT ?", ("tenant-a", clock() - 60, 128),
+        ).fetchall()
+    assert any("rights_claim_expiry" in row[-1] for row in plan)
+    record_property("retained_receipts", 2000)
+    record_property("expired_receipts_validated", len(validated))
+    record_property("expiry_query_plan", [row[-1] for row in plan])
+
+
+def test_claim_history_expiry_prevents_replay_before_cleanup_reaches_the_receipt(authority):
+    store, _actor, clock = authority
+    store._claim_history_retention_seconds = 60
+    enroll_all(store, "tenant-a", "crm", key="expiry-source")
+    case = open_verified(store, clock, "tenant-a", "expiry-case", ["access"])
+    store.plan_source_tasks("tenant-a", case.case_id, "crm", phases=["discover"], max_attempts=3,
+                            expected_case_revision=case.revision, idempotency_key="expiry-plan")
+    original = store.claim_callbacks("tenant-a", limit=1, lease_seconds=300, idempotency_key="expiry-target")
+    assert len(original) == 1
+    _seed_claim_history(store, clock() - 10, 200, "older-history")
+    clock.advance(61)
+    assert store.claim_callbacks("tenant-a", limit=1, lease_seconds=300, idempotency_key="expiry-target") == ()
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM rights_claim_batches").fetchone()[0] == 72
+        # The active lease survives history cleanup and is not reissued.
+        assert connection.execute("SELECT state,lease_until FROM rights_callbacks").fetchone() == (
+            "leased", clock() + 239,
+        )
+
+
+def test_claim_history_paired_cleanup_rolls_back_and_rejects_tampered_projection(authority):
+    store, _actor, clock = authority
+    store._claim_history_retention_seconds = 60
+    _seed_claim_history(store, clock() - 61, 1, "rollback-history")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("CREATE TRIGGER fail_receipt_delete BEFORE DELETE ON rights_claim_batches "
+                           "BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="injected"):
+        store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, idempotency_key="rollback-poll")
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM rights_claim_batches").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM rights_operations WHERE result_kind='claim_batch'").fetchone()[0] == 1
+        connection.execute("DROP TRIGGER fail_receipt_delete")
+        connection.execute("UPDATE rights_claim_batches SET created_at=1")
+    with pytest.raises(rights.PrivacyRightsIntegrityError, match="time/binding"):
+        store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, idempotency_key="tampered-poll")
+    with pytest.raises(rights.PrivacyRightsIntegrityError, match="time/binding"):
+        store.verify_integrity("tenant-a")
+
+
+def test_claim_history_v1_migration_is_atomic_and_validates_existing_receipts(authority):
+    store, actor, clock = authority
+    _seed_claim_history(store, clock(), 4, "legacy-history")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP INDEX rights_claim_expiry")
+        connection.execute("DROP INDEX rights_operation_result")
+        connection.execute("DROP TRIGGER rights_claim_created_required")
+        connection.execute("ALTER TABLE rights_claim_batches DROP COLUMN created_at")
+        connection.execute("UPDATE metadata SET value='1' WHERE key='schema_version'")
+        connection.execute("CREATE TRIGGER fail_migration BEFORE UPDATE ON rights_claim_batches "
+                           "BEGIN SELECT RAISE(ABORT,'injected migration failure'); END")
+
+    def reopen():
+        return rights.PrivacyRightsOrchestrationStore(
+            store.path, config_gate=lambda: None, principal_resolver=lambda: actor["value"],
+            digest_key_resolver=lambda _tenant: b"k" * 32, clock=clock,
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="injected migration"):
+        reopen()
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0] == "1"
+        assert "created_at" not in {row[1] for row in connection.execute("PRAGMA table_info(rights_claim_batches)")}
+        connection.execute("DROP TRIGGER fail_migration")
+    migrated = reopen()
+    assert migrated.verify_integrity("tenant-a").verified_records == 8
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0] == "2"
+        assert connection.execute("SELECT DISTINCT created_at FROM rights_claim_batches").fetchall() == [(clock(),)]
+    assert reopen().verify_integrity("tenant-a").verified_records == 8
+
+
+@pytest.mark.parametrize("created_at", [None, "malformed", float("inf"), -1])
+def test_claim_history_malformed_projection_is_rejected_on_lookup(authority, created_at):
+    store, _actor, clock = authority
+    _seed_claim_history(store, clock(), 1, "invalid-time")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("UPDATE rights_claim_batches SET created_at=?", (created_at,))
+    with pytest.raises(rights.PrivacyRightsIntegrityError, match="time/binding"):
+        store.claim_callbacks("tenant-a", limit=1, lease_seconds=30, idempotency_key="invalid-time-0")
+
+
+def test_claim_history_legacy_insert_cannot_silently_escape_the_expiry_index(authority):
+    store, _actor, _clock = authority
+    with sqlite3.connect(store.path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="created_at projection"):
+            connection.execute(
+                "INSERT INTO rights_claim_batches(tenant_id,batch_id,payload_json,integrity_sha256) VALUES(?,?,?,?)",
+                ("tenant-a", "old-writer", "{}", "f" * 64),
+            )
 
 
 def test_default_lease_token_accepts_urlsafe_leading_symbols(

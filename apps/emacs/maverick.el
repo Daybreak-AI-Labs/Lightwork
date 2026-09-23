@@ -24,6 +24,8 @@
 
 ;;; Code:
 
+(require 'json)
+
 (defgroup maverick nil
   "Drive the Lightwork agent runtime."
   :group 'tools
@@ -84,18 +86,41 @@
 
 ;;;###autoload
 (defun maverick-halt ()
-  "Arm the Lightwork killswitch (aborts all running goals)."
+  "Arm the local Lightwork killswitch for upcoming execution checkpoints."
   (interactive)
-  (when (yes-or-no-p "Arm the killswitch and abort ALL running goals? ")
-    (shell-command (maverick--command "halt"))
-    (message "Lightwork killswitch armed.")))
+  (when (yes-or-no-p "Arm the local killswitch? Running work stops at its next checkpoint. ")
+    (maverick--checked-halt "halt" t)))
+
+(defun maverick--checked-halt (command present)
+  "Run COMMAND and validate its local halt-file state PRESENT."
+  (condition-case err
+      (with-temp-buffer
+        ;; argv execution preserves literal arguments and does not interpret
+        ;; a signalled process or unreadable response as successful mutation.
+        (let ((status (call-process maverick-cli-path nil t nil command "--json")))
+          (unless (and (integerp status) (zerop status))
+            (error "Command not acknowledged (exit/signal %s)" status))
+          (let* ((json-object-type 'alist)
+                 (json-key-type 'symbol)
+                 (json-false :false)
+                 (result (json-read-from-string (buffer-string))))
+            (unless (and (equal (alist-get 'command result) command)
+                         (eq (alist-get 'acknowledged result) t)
+                         (equal (alist-get 'scope result) "local")
+                         (eq (alist-get 'halt_file_present result) (if present t :false))
+                         (eq (alist-get 'work_stopped result) :false))
+              (error "Local halt-file state was not confirmed"))
+            (message "%s" (if present
+                "Local kill switch armed. Running work stops at its next checkpoint."
+              "Local kill switch cleared. Prior tasks were not restarted.")))))
+    (error (message "Lightwork outcome unconfirmed: %s. Check local state before retrying."
+                    (error-message-string err)))))
 
 ;;;###autoload
 (defun maverick-unhalt ()
   "Clear the Lightwork killswitch."
   (interactive)
-  (shell-command (maverick--command "unhalt"))
-  (message "Lightwork killswitch cleared."))
+  (maverick--checked-halt "unhalt" nil))
 
 (provide 'maverick)
 

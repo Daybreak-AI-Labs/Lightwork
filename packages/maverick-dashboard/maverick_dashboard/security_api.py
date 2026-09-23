@@ -1333,19 +1333,26 @@ def start_hunter_scheduler() -> bool:
         return True
 
 
-def stop_hunter_scheduler(*, timeout: float = 5.0) -> bool:
-    """Stop and boundedly join the production hunter loop."""
+def stop_hunter_scheduler(*, timeout: float = 5.0, wait: bool = True) -> bool:
+    """Signal first; retain a stopping worker until its exit is observed."""
     global _hunter_scheduler_stop, _hunter_scheduler_thread
     with _hunter_scheduler_lock:
         stop = _hunter_scheduler_stop
         worker = _hunter_scheduler_thread
-        _hunter_scheduler_stop = None
-        _hunter_scheduler_thread = None
+        if stop is not None:
+            stop.set()
     if stop is None or worker is None:
         return False
-    stop.set()
+    if not wait:
+        return not worker.is_alive()
     worker.join(max(0.0, min(float(timeout), 30.0)))
-    return not worker.is_alive()
+    if worker.is_alive():
+        return False
+    with _hunter_scheduler_lock:
+        if _hunter_scheduler_thread is worker:
+            _hunter_scheduler_stop = None
+            _hunter_scheduler_thread = None
+    return True
 
 
 async def _hunt_call(module, fn: Callable, *args, **kwargs):

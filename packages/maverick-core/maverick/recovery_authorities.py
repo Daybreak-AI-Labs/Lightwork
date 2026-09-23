@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 # Keeping the mapping closed and exported lets an acceptance test compare it
 # with every literal GovernedRecordStore/_RecordStore declaration in source.
 GLOBAL_START_JSON_AUTHORITY_POLICIES = {
+    "a2a-task-authority-v1": "a2a_task_execution_authority",
     "ai_bank_mrm_packages": "bank_mrm_package_authority",
     "ai_benchmark_cohort_reports": "benchmark_cohort_authority",
     "ai_benchmark_contributions": "benchmark_contribution_authority",
@@ -38,6 +39,9 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "ai_roi_assumptions": "roi_assumption_authority",
     "ai_serious_incidents": "serious_incident_authority",
     "assessment_evidence_proposals": "assessment_evidence_authority",
+    "channel-deliveries": "channel_execution_delivery_authority",
+    "channel-delivery-cursors": "channel_delivery_recovery_cursor_authority",
+    "channel-poll-cursors": "channel_provider_poll_cursor_authority",
     "data_map": "privacy_data_map_record_authority",
     "dpa_reviews": "dpa_review_authority",
     "dsar_requests": "dsar_request_authority",
@@ -54,6 +58,7 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "eu_registrations": "eu_registration_authority",
     "finance_anomaly_cases": "finance_anomaly_case_authority",
     "finance_screening_cases": "finance_screening_case_authority",
+    "imessage-intake-cursors": "imessage_intake_cursor_authority",
     "model_risk_portfolio_snapshots": "model_risk_portfolio_authority",
     "outcome_value_evidence": "outcome_value_evidence_authority",
     "paper_reviews": "paper_review_authority",
@@ -120,6 +125,11 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     if not is_sqlite and name.endswith(".lock"):
         return None
 
+    if _contains(parts, "a2a", "tasks.authority.sealed"):
+        # This is a database-generation/anti-downgrade receipt, not a credential
+        # or a cache. Restoring it requires current shared authority readback;
+        # discarding it would allow an already consumed task to execute locally.
+        return "a2a_shared_authority_binding"
     if (
         _contains(parts, "connections", "connections.sealed")
         or _contains(parts, "connections", "oauth-setup.sealed")
@@ -495,6 +505,8 @@ DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES = {
 # readback protocol for them, so every restored copy must remain a visible
 # global-start blocker until an administrator records a disposition.
 GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
+    "a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
+    "tenants/tenant-a/a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
     "config.toml": "tenant_configuration_authority",
     "runtime-overrides.toml": "runtime_override_authority",
     "roles.toml": "role_instruction_authority",

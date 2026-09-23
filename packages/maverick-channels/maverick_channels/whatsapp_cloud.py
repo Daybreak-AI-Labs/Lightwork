@@ -45,10 +45,8 @@ from .base import (
     Channel,
     IncomingMessage,
     add_webhook_body_limit,
-    claim_processed_message,
     is_allowed,
     normalize_allowlist,
-    release_processed_message,
 )
 
 log = logging.getLogger(__name__)
@@ -194,80 +192,63 @@ class WhatsAppCloudChannel(Channel):
         except ValueError:
             raise HTTPException(status_code=400, detail="bad JSON") from None
 
+        from starlette.background import BackgroundTasks
+        from starlette.responses import JSONResponse
+
+        background, receipts = BackgroundTasks(), []
         for m in self._extract_messages(payload):
             sender = str(m.get("from") or "")
             text = str(((m.get("text") or {}).get("body")) or "")
             msg_id = str(m.get("id") or "")
-            if not is_allowed(sender, self.allowed_user_ids):
-                log.warning("unauthorized whatsapp-cloud access: from=%s", sender)
+            if not is_allowed(sender, self.allowed_user_ids) or not text:
                 continue
-            if not text:
-                continue
-
-            # Claim the message id atomically BEFORE processing so Meta's
-            # redelivery can't double-run a goal (same pattern as Twilio).
-            claimed = False
-            if msg_id:
-                try:
-                    claimed = claim_processed_message("whatsapp_cloud", msg_id)
-                    if not claimed:
-                        log.info("whatsapp-cloud message %s already claimed; skipping", msg_id)
-                        continue
-                except Exception as exc:  # pragma: no cover
-                    log.exception(
-                        "whatsapp-cloud dedup claim failed; asking Meta to retry"
-                    )
-                    raise HTTPException(
-                        status_code=503, detail="message claim store unavailable"
-                    ) from exc
-
-            incoming = IncomingMessage(
-                user_id=sender, text=text, channel="whatsapp_cloud", message_id=msg_id or None,
-            )
+            if not msg_id:
+                raise HTTPException(status_code=400, detail="message identity required")
+            incoming = IncomingMessage(user_id=sender, text=text, channel="whatsapp_cloud", message_id=msg_id)
+            account = self.phone_number_id
+            def authority(sender=sender, account=account):
+                return account == self.phone_number_id and is_allowed(sender, self.allowed_user_ids)
             try:
-                reply = await self.dispatch_text(incoming)
-            except Exception:  # pragma: no cover
-                log.exception("handler error")
-                if claimed:
-                    try:
-                        release_processed_message("whatsapp_cloud", msg_id)
-                    except Exception:  # pragma: no cover
-                        # The claim remains durable, so a Meta retry cannot
-                        # execute this failed delivery a second time.
-                        log.exception(
-                            "whatsapp-cloud dedup release failed; claim remains held"
-                        )
-                # Don't echo the raw exception to the external sender (it can
-                # carry internal paths/detail); the full error is logged above.
-                # Matches the generic reply sms.py / rcs.py already use.
-                reply = "⚠ An internal error occurred."
-            if reply:
-                await self.send(sender, reply)
+                receipt = await self.admit_message(incoming, external_id=msg_id,
+                            account=account, authorize=authority)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="message intake unavailable") from exc
 
-        # Meta expects a fast 200 regardless of how many messages were acted on.
-        return {"status": "ok"}
+            async def send_saved(reply, sender=sender):
+                if reply.text:
+                    return await self.send(sender, reply.text)
+                return None
+
+            async def process(incoming=incoming, msg_id=msg_id, authority=authority, send_saved=send_saved,
+                              receipt=receipt, account=account):
+                try:
+                    await self.process_message(incoming, external_id=msg_id, account=account,
+                                               authorize=authority, send=send_saved, receipt=receipt)
+                except Exception:
+                    log.warning("WhatsApp Cloud durable processing requires review: %s", receipt["id"])
+            background.add_task(process)
+            receipts.append(receipt["id"])
+        return JSONResponse({"status": "ok", "receipts": receipts}, background=background)
 
     # -- outbound ------------------------------------------------------------
 
     async def send(self, user_id: str, text: str) -> None:
         import httpx
         url = f"{GRAPH_BASE}/{self.api_version}/{self.phone_number_id}/messages"
-        # WhatsApp caps text bodies at 4096 chars.
-        for chunk in [text[i:i + 4000] for i in range(0, max(len(text), 1), 4000)]:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(
-                    url,
-                    headers={"Authorization": f"Bearer {self.access_token}"},
-                    json={
-                        "messaging_product": "whatsapp",
-                        "to": user_id,
-                        "type": "text",
-                        "text": {"body": chunk},
-                    },
-                )
-                if r.status_code >= 400:
-                    log.warning("whatsapp-cloud send failed (%s): %s",
-                                r.status_code, r.text[:200])
+        from .delivery import DeliveryNotSent, DeliveryUnknown, send_chunk
+
+        for index, chunk in enumerate([text[i:i + 4000] for i in range(0, max(len(text), 1), 4000)]):
+            async def create(chunk=chunk):
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.post(url, headers={"Authorization": f"Bearer {self.access_token}"},
+                        json={"messaging_product": "whatsapp", "to": user_id, "type": "text", "text": {"body": chunk}})
+                if 400 <= response.status_code < 500 and response.status_code != 408:
+                    raise DeliveryNotSent("Provider rejected the message")
+                if response.status_code >= 400:
+                    raise DeliveryUnknown("Provider acceptance could not be confirmed")
+                payload = response.json()
+                return str((payload.get("messages") or [{}])[0].get("id") or "")[:512]
+            await send_chunk(f"text-{index}", chunk, create)
 
     async def start(self) -> None:
         import uvicorn
@@ -276,7 +257,15 @@ class WhatsAppCloudChannel(Channel):
         )
         self._uvicorn_server = uvicorn.Server(config)
         log.info("WhatsApp Cloud webhook on %s:%d", self.bind_host, self.port)
-        await self._uvicorn_server.serve()
+        account = self.phone_number_id
+        def authorize(message):
+            return self.phone_number_id == account and is_allowed(message.principal_id, self.allowed_user_ids)
+        async def send_saved(message, reply, route):
+            if reply.text:
+                return await self.send(message.user_id, reply.text)
+            return None
+        async with self.recovery_worker(account=account, authorize=authorize, send=send_saved):
+            await self._uvicorn_server.serve()
 
     async def stop(self) -> None:
         if self._uvicorn_server is not None:

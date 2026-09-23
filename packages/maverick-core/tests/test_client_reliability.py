@@ -8,7 +8,7 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from types import SimpleNamespace
 
 import httpx
@@ -24,7 +24,12 @@ def _rest(monkeypatch, response):
 
     @contextmanager
     def client(*args, **kwargs):
-        yield SimpleNamespace(request=lambda *a, **kw: response)
+        @contextmanager
+        def stream(*a, **kw):
+            with closing(httpx.Response(response.status_code, headers=response.headers,
+                                        stream=httpx.ByteStream(response.content))) as streamed:
+                yield streamed
+        yield SimpleNamespace(stream=stream)
 
     monkeypatch.setattr(_ssrf, "safe_client", client)
     return _rest_connector.make_rest_tool(
@@ -235,7 +240,13 @@ def test_graphql_large_result_is_explicitly_incomplete(monkeypatch):
 
     @contextmanager
     def client(*a, **kw):
-        yield SimpleNamespace(post=lambda *a, **kw: httpx.Response(200, json={"data": {"orders": "x" * 5000}}))
+        response = httpx.Response(200, json={"data": {"orders": "x" * 5000}})
+        @contextmanager
+        def stream(*a, **kw):
+            with closing(httpx.Response(200, headers=response.headers,
+                                        stream=httpx.ByteStream(response.content))) as streamed:
+                yield streamed
+        yield SimpleNamespace(stream=stream)
 
     monkeypatch.setattr(_ssrf, "safe_client", client)
     tool = _rest_connector.make_graphql_tool(

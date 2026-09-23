@@ -60,10 +60,33 @@ def audit_event_paths(
     )
 
 
+def validate_export_destination(path: Path, *, tenant: str | None = None) -> None:
+    """Keep exports and read receipts outside all evidence in the audit root.
+
+    Selection is not protection: anchors, WORM receipts, locks, checkpoints and
+    unselected day files remain authoritative even when this export omits them.
+    Reject multiply-linked destinations without walking an unbounded evidence
+    tree. The private atomic writer independently checks destination custody.
+    """
+    root = reader.resolve_audit_dir(tenant).resolve(strict=False)
+    resolved = path.resolve(strict=False)
+    if resolved == root or root in resolved.parents:
+        raise ValueError("audit output must be outside the protected audit directory")
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        return
+    if info.st_nlink != 1:
+        raise ValueError("audit output must not alias another file through a hard link")
+
+
 def iter_audit_events(
     *, day: str | None = None, all_days: bool = False,
     since: str | None = None, until: str | None = None,
     tenant: str | None = None,
+    report: reader.ReadReport | None = None,
+    verify: bool = False,
+    strict: bool = False,
 ) -> Iterator[dict[str, Any]]:
     """Yield audit event dicts from the tenant-aware audit dir.
 
@@ -71,11 +94,13 @@ def iter_audit_events(
     precedence: a ``since``/``until`` window (inclusive, over day-file dates)
     wins; then ``all_days`` sweeps every day-file except the cross-file
     ``anchors.ndjson`` tip-ledger (matching ``audit verify``); otherwise a
-    single day-file is read (``day`` or today, UTC). Malformed/unreadable lines
-    and a missing dir are skipped silently (fail-soft).
+    single day-file is read (``day`` or today, UTC). Malformed/unreadable input
+    is recorded in ``report``; ``strict`` refuses it. ``verify`` checks selected
+    segment chains, separately from anchor/checkpoint assurance.
     """
     return reader.iter_events(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
+        report=report, verify=verify, strict=strict,
     )
 
 

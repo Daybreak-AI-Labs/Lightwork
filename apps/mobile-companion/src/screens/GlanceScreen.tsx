@@ -7,7 +7,7 @@
  * GET /api/v1/offline/bundle when the dashboard serves it (404 on older
  * dashboards is fine — the cache just isn't refreshed). When everything is
  * unreachable, renders the cached bundle with an offline banner. */
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -18,6 +18,7 @@ import {
   getActive,
   getOfflineBundle,
   getSpend,
+  isAccessDenied,
 } from "../api";
 import { offlineBanner, saveBundle, useCachedBundle } from "../offlineCache";
 import { ConnectionNotice } from "../components/ConnectionNotice";
@@ -28,19 +29,24 @@ type GlanceData = { active: ActiveGoal[]; spend: SpendTotal | null };
 export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
   const { settings } = props;
 
-  const fetcher = useCallback(async (): Promise<GlanceData> => {
+  const fetcher = useCallback(async (signal: AbortSignal): Promise<GlanceData> => {
     const [activeRes, spendRes] = await Promise.all([
-      getActive(settings),
-      getSpend(settings).catch(() => null),
+      getActive(settings, signal),
+      getSpend(settings, signal).catch(error => { if (isAccessDenied(error)) throw error; return null; }),
     ]);
-    // Best-effort cache refresh; endpoint may not exist on older dashboards.
-    getOfflineBundle(settings).then((b) => saveBundle(b, settings.baseUrl, settings.cacheScope)).catch(() => undefined);
     return { active: activeRes.goals, spend: spendRes ? spendRes.total : null };
   }, [settings]);
 
-  const { data, error } = usePolling<GlanceData>(fetcher, 15_000);
+  const { data, error, accessDenied, unsupported } = usePolling<GlanceData>(fetcher, 15_000);
+  // Optional cache refresh has its own lifecycle and deadline; it neither
+  // holds the glance response nor outlives the connection generation.
+  const bundleFetcher = useCallback((signal: AbortSignal) => getOfflineBundle(settings, signal), [settings]);
+  const bundle = usePolling(bundleFetcher, 60_000);
+  useEffect(() => {
+    if (bundle.data) void saveBundle(bundle.data, settings.baseUrl, settings.cacheScope).catch(() => undefined);
+  }, [bundle.data, settings]);
 
-  const cached = useCachedBundle(settings, Boolean(error && !data));
+  const cached = useCachedBundle(settings, Boolean(error && !data && !accessDenied && !unsupported && !bundle.accessDenied && !bundle.unsupported));
 
   if (!data && cached) {
     const g = cached.bundle.glance;
@@ -63,7 +69,8 @@ export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
 
   return (
     <ScrollView style={styles.fill}>
-      {error ? <ConnectionNotice message={error} /> : null}
+      {error ? <ConnectionNotice message={error} accessDenied={accessDenied} /> : null}
+      {error && data ? <Text style={styles.banner}>Retained results may be out of date.</Text> : null}
       <Stat label="active runs" value={data ? String(data.active.length) : "…"} />
       <Stat
         label="total spend"

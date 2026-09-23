@@ -249,6 +249,9 @@ class PinnedGatewayHTTPTransport:
     ) -> PilotHTTPResponse:
         import httpx
 
+        request_headers = {key: value for key, value in headers.items()
+                           if key.lower() != "accept-encoding"}
+        request_headers["Accept-Encoding"] = "identity"
         try:
             with httpx.Client(
                 follow_redirects=False,
@@ -258,9 +261,14 @@ class PinnedGatewayHTTPTransport:
                 with client.stream(
                     method,
                     url,
-                    headers=dict(headers),
+                    headers=request_headers,
                     content=body,
                 ) as response:
+                    # The protocol accepts identity bytes only. Reject a
+                    # nonconforming server before HTTPX can decompress chunks.
+                    encoding = response.headers.get("content-encoding", "")
+                    if encoding.strip().lower() not in {"", "identity"}:
+                        raise PilotProtocolError("gateway response encoding is unsupported")
                     declared = response.headers.get("content-length")
                     if declared is not None:
                         try:
@@ -496,6 +504,7 @@ class ExternalGatewayPilotClient:
         request_digest = _request_fingerprint(method, path, body)
         headers = {
             "Accept": "application/json",
+            "Accept-Encoding": "identity",
             "Authorization": f"Bearer {self._bearer}",
         }
         if body is not None:

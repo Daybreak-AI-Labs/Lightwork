@@ -590,8 +590,8 @@ class TestReconnectOnBrokenConnection:
         def __init__(self, conn):
             self._conn = conn
 
-        def execute(self, *a, **kw):
-            pass
+        def execute(self, sql, params=None):
+            self._conn.statements.append((sql, params))
 
         def close(self):
             pass
@@ -602,6 +602,7 @@ class TestReconnectOnBrokenConnection:
             self._breaks_on_cursor = breaks_on_cursor
             self.committed = False
             self.rolled_back = False
+            self.statements = []
 
         def cursor(self):
             if self._breaks_on_cursor:
@@ -626,29 +627,36 @@ class TestReconnectOnBrokenConnection:
         world._lock = threading.RLock()
         world._dsn = "postgresql://fake"
         world._connect_kwargs = {"autocommit": False}
+        world._io_timeout_seconds = 0.25
         return world
 
     def test_already_closed_connection_is_reopened_before_use(self, monkeypatch):
         world = self._world()
+        world._rls = True
+        monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
         dead = self._FakeConnection()
         dead.closed = 1  # e.g. explicitly closed by a prior broken _tx()
         world.conn = dead
         fresh = self._FakeConnection()
         connect_calls = []
 
-        def _fake_connect(dsn, autocommit=False):
-            connect_calls.append((dsn, autocommit))
+        def _fake_connect(dsn, *, io_timeout_seconds, autocommit=False):
+            connect_calls.append((dsn, autocommit, io_timeout_seconds))
             return fresh
 
-        import psycopg
-        monkeypatch.setattr(psycopg, "connect", _fake_connect)
+        from maverick.postgres_io import BoundedConnection
+        monkeypatch.setattr(BoundedConnection, "connect", _fake_connect)
 
         with world._tx() as cur:
             cur.execute("SELECT 1")
 
-        assert connect_calls == [("postgresql://fake", False)]
+        assert connect_calls == [("postgresql://fake", False, 0.25)]
         assert world.conn is fresh
         assert fresh.committed is True
+        assert fresh.statements == [
+            ("SELECT set_config('maverick.tenant', %s, true)", ("acme",)),
+            ("SELECT 1", None),
+        ]
 
     def test_connection_broken_mid_transaction_is_closed_not_left_dangling(
         self, monkeypatch,
@@ -666,6 +674,8 @@ class TestReconnectOnBrokenConnection:
 
     def test_next_tx_reconnects_after_a_broken_transaction(self, monkeypatch):
         world = self._world()
+        world._rls = True
+        monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
         dying = self._FakeConnection(breaks_on_cursor=True)
         world.conn = dying
         import psycopg
@@ -675,11 +685,22 @@ class TestReconnectOnBrokenConnection:
                 pass
 
         fresh = self._FakeConnection()
-        monkeypatch.setattr(psycopg, "connect",
-                             lambda dsn, autocommit=False: fresh)
+        connect_calls = []
+
+        def _fake_connect(dsn, *, io_timeout_seconds, autocommit=False):
+            connect_calls.append((dsn, autocommit, io_timeout_seconds))
+            return fresh
+
+        from maverick.postgres_io import BoundedConnection
+        monkeypatch.setattr(BoundedConnection, "connect", _fake_connect)
 
         with world._tx() as cur:
             cur.execute("SELECT 1")
 
         assert world.conn is fresh
         assert fresh.committed is True
+        assert connect_calls == [("postgresql://fake", False, 0.25)]
+        assert fresh.statements == [
+            ("SELECT set_config('maverick.tenant', %s, true)", ("acme",)),
+            ("SELECT 1", None),
+        ]

@@ -20,13 +20,18 @@
   var DASH = "http://127.0.0.1:" + PORT;
   var FAST_MS = 600; // poll interval while we expect a quick startup
   var SLOW_MS = 2000; // poll interval after we've shown the trouble card
-  var TROUBLE_AFTER = 9; // ~6s of fast polls before surfacing help
+  var TROUBLE_MS = 6000; // elapsed time, independent of network completion
+  var PROBE_MS = 2500;
 
   var statusText = document.getElementById("status-text");
   var trouble = document.getElementById("trouble");
-  var tries = 0;
+  var phase = "connecting";
   var connected = false;
   var probeTimer;
+  var probeDeadline;
+  var watchdogTimer;
+  var activeProbe;
+  var began = performance.now();
   var generation = 0;
   var retryPending = false;
   var diagnostics = document.getElementById("diagnostics");
@@ -77,36 +82,58 @@
   function connect() {
     if (connected) return;
     connected = true;
+    phase = "connected";
+    cancelProbes();
     setStatus("Connected — loading…");
     window.location.replace(DASH + "/");
   }
 
+  function cancelProbes() {
+    clearTimeout(probeTimer);
+    clearTimeout(probeDeadline);
+    clearTimeout(watchdogTimer);
+    if (activeProbe) activeProbe.abort();
+    activeProbe = null;
+  }
+
+  function watch(current) {
+    if (connected || current !== generation || phase === "stopped") return;
+    var remaining = TROUBLE_MS - (performance.now() - began);
+    if (remaining <= 0) showTrouble();
+    else watchdogTimer = setTimeout(function () { watch(current); }, remaining);
+  }
+
   function probe() {
-    if (connected) return;
+    if (connected || phase === "stopped") return;
     var current = generation;
-    tries += 1;
-
-    if (tries === 1) setStatus("Starting the Lightwork engine…");
-    else if (tries < TROUBLE_AFTER) setStatus("Waiting for the dashboard…");
-
-    fetch(DASH + "/healthz", { mode: "no-cors", cache: "no-store" })
+    var controller = new AbortController();
+    var finished = false;
+    activeProbe = controller;
+    if (phase !== "trouble") setStatus("Waiting for the dashboard…");
+    function finish(success) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(deadline);
+      if (current !== generation || connected || phase === "stopped") return;
+      if (activeProbe === controller) activeProbe = null;
+      if (success) connect();
+      else probeTimer = setTimeout(probe, phase === "trouble" ? SLOW_MS : FAST_MS);
+    }
+    // Schedule the retry ourselves. A fetch implementation that ignores abort
+    // cannot suppress recovery controls or let a late response navigate.
+    var deadline = setTimeout(function () { controller.abort(); finish(false); }, PROBE_MS);
+    probeDeadline = deadline;
+    fetch(DASH + "/healthz", { mode: "no-cors", cache: "no-store", signal: controller.signal })
       .then(function () {
-        if (current !== generation) return;
-        connect();
+        finish(true);
       })
       .catch(function () {
-        if (current !== generation) return;
-        if (tries >= TROUBLE_AFTER) {
-          showTrouble();
-          // Keep trying slowly so it auto-recovers if the user starts it.
-          probeTimer = setTimeout(probe, SLOW_MS);
-        } else {
-          probeTimer = setTimeout(probe, FAST_MS);
-        }
+        finish(false);
       });
   }
 
   function showTrouble() {
+    phase = "trouble";
     if (trouble) trouble.style.display = "block";
     setStatus("Still waiting for the dashboard…");
   }
@@ -119,14 +146,20 @@
       retryPending = true;
       retry.disabled = true;
       generation += 1;
-      clearTimeout(probeTimer);
+      cancelProbes();
+      phase = "retrying";
+      began = performance.now();
+      var current = generation;
+      watch(current);
       if (trouble) trouble.style.display = "none";
-      tries = 0;
       setStatus("Retrying…");
       try {
         await invoke("retry_dashboard");
+        if (current !== generation || phase === "stopped") return;
+        if (phase !== "trouble") phase = "connecting";
         probe();
       } catch (error) {
+        if (current !== generation || phase === "stopped") return;
         if (diagnostics) diagnostics.textContent = String(error);
         showTrouble();
         setStatus("Lightwork could not start. Review startup details, then try again.");
@@ -176,5 +209,12 @@
     });
   }
 
+  window.addEventListener("pagehide", function () {
+    generation += 1;
+    phase = "stopped";
+    cancelProbes();
+  });
+  setStatus("Starting the Lightwork engine…");
+  watch(generation);
   probe();
 })();

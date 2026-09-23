@@ -194,7 +194,7 @@ class _PinnedTransport:
         self.close()
 
 
-def safe_client(url: str, **client_kwargs: Any) -> httpx.Client:
+def safe_client(url: str, *, attempt_deadline=None, **client_kwargs: Any) -> httpx.Client:
     """Return an ``httpx.Client`` pinned to a validated public IP for ``url``.
 
     Raises ``BlockedHost`` if the scheme is not http/https or the host
@@ -209,7 +209,14 @@ def safe_client(url: str, **client_kwargs: Any) -> httpx.Client:
     host = parsed.hostname or ""
     ip = resolve_pinned_ip(host)
     host_header = host if not parsed.port else f"{host}:{parsed.port}"
-    transport = _PinnedTransport(host, host_header, ip, httpx.HTTPTransport())
+    if attempt_deadline is None:
+        inner = httpx.HTTPTransport()
+    else:
+        from ._bounded_http import DeadlineHTTPTransport
+        # The existing resolver remains synchronous. If DNS consumed the
+        # deadline, constructing this transport refuses before any HTTP I/O.
+        inner = DeadlineHTTPTransport(attempt_deadline)
+    transport = _PinnedTransport(host, host_header, ip, inner)
     client_kwargs.setdefault("follow_redirects", False)
     client_kwargs["transport"] = transport
     return httpx.Client(**client_kwargs)

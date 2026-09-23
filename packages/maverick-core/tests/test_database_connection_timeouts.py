@@ -70,6 +70,7 @@ def test_real_postgres_handshake_times_out_before_server_disconnect(monkeypatch,
 @pytest.mark.parametrize("entry", ["tool", "world"])
 def test_real_driver_receives_bounded_timeout_and_retains_operator_options(monkeypatch, raw, expected, entry):
     psycopg = pytest.importorskip("psycopg")
+    from maverick.postgres_io import BoundedConnection
     from maverick.world_model_backends import postgres
 
     monkeypatch.delenv("MAVERICK_PG_CONNECT_TIMEOUT_SECONDS", raising=False)
@@ -81,6 +82,7 @@ def test_real_driver_receives_bounded_timeout_and_retains_operator_options(monke
         raise psycopg.OperationalError("fixture inspected connection parameters")
 
     monkeypatch.setattr(psycopg, "connect", connect)
+    monkeypatch.setattr(BoundedConnection, "connect", connect)
     query = "options=-c%20search_path%3Dcustomer%2Cpublic&application_name=customer-work"
     if raw is not None:
         query += "&connect_timeout=" + raw
@@ -100,12 +102,14 @@ def test_real_driver_receives_bounded_timeout_and_retains_operator_options(monke
 
 
 def test_postgres_pool_and_reconnect_retain_the_bounded_timeout(monkeypatch):
-    psycopg = pytest.importorskip("psycopg")
+    pytest.importorskip("psycopg")
     pool_module = pytest.importorskip("psycopg_pool")
+    from maverick.postgres_io import BoundedConnection
     from maverick.world_model_backends import postgres
 
     monkeypatch.setenv("MAVERICK_PG_CONNECT_TIMEOUT_SECONDS", "4")
     monkeypatch.setenv("PGCONNECT_TIMEOUT", "30")
+    monkeypatch.setenv("MAVERICK_PG_IO_TIMEOUT_SECONDS", ".2")
     monkeypatch.setattr(postgres, "_rls_enabled", lambda: False)
     monkeypatch.setattr(postgres.PostgresWorldModel, "_migrate", lambda _self: None)
     pools, direct = [], []
@@ -118,14 +122,18 @@ def test_postgres_pool_and_reconnect_retain_the_bounded_timeout(monkeypatch):
         pools.append(kwargs)
         return SimpleNamespace()
 
-    monkeypatch.setattr(psycopg, "connect", connect)
+    monkeypatch.setattr(BoundedConnection, "connect", connect)
     monkeypatch.setattr(pool_module, "ConnectionPool", pool)
     monkeypatch.setattr(postgres, "_pool_size", lambda: 2)
     postgres.PostgresWorldModel("postgresql://fixture@localhost/fixture")
     assert pools[0]["kwargs"]["connect_timeout"] == 4
+    assert pools[0]["connection_class"] is BoundedConnection
+    assert pools[0]["kwargs"]["io_timeout_seconds"] == .2
     monkeypatch.setattr(postgres, "_pool_size", lambda: 0)
     world = postgres.PostgresWorldModel("postgresql://fixture@localhost/fixture")
+    monkeypatch.setenv("MAVERICK_PG_IO_TIMEOUT_SECONDS", ".4")
     world.conn.closed = True
     world._reconnect_if_broken()
     assert len(direct) == 2 and direct[0] == direct[1]
     assert direct[1]["connect_timeout"] == 4
+    assert direct[1]["io_timeout_seconds"] == .2

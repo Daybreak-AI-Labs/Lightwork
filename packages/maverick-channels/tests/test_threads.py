@@ -31,7 +31,7 @@ def _channel(**overrides):
 
 def _reply(username=OWNER, text="hello agent", reply_id=REPLY_ID, from_id="999000111"):
     return {"id": reply_id, "text": text, "username": username,
-            "from": {"id": from_id, "username": username}}
+            "from": {"id": from_id, "username": username}, "timestamp": "2026-01-01T00:00:00Z"}
 
 
 class _Resp:
@@ -91,6 +91,7 @@ def _fake_wm(monkeypatch):
     """Stateful in-memory claim store mirroring WorldModel's dedup contract:
     True on first claim, False on duplicates, release undoes the claim."""
     wm = MagicMock()
+    wm.is_processed_message.return_value = False
     claimed = set()
 
     def _mark(channel, ext_id, goal_id=None):
@@ -128,14 +129,14 @@ def test_poll_cycle_processes_allowed_reply_once(monkeypatch):
     assert msg.user_id == REPLY_ID and msg.message_id == REPLY_ID
     assert msg.sender_id == OWNER and msg.channel == "threads"
     assert msg.text == "hello agent"
-    assert wm.mark_message_processed.call_count == 2  # claimed, then duplicate
-    wm.mark_message_processed.assert_any_call("threads", REPLY_ID)
+    assert wm.mark_message_processed.call_count == 1
+    assert wm.mark_message_processed.call_args.args[0] == "delivery:threads"
     ch.send.assert_awaited_once_with(REPLY_ID, "the reply")
 
     poll = calls[0]
     assert poll["method"] == "GET"
     assert poll["url"].endswith(f"/v1.0/{SELF_ID}/replies")
-    assert poll["params"] == {"fields": "id,text,username,from"}
+    assert poll["params"] == {"fields": "id,text,username,from,timestamp", "limit": 25}
     assert poll["headers"]["Authorization"] == f"Bearer {ACCESS_TOKEN}"
 
 
@@ -167,7 +168,7 @@ def test_self_authored_reply_skipped(monkeypatch):
     assert not ch.send.await_count
 
 
-def test_claim_released_on_handler_failure(monkeypatch):
+def test_unknown_handler_outcome_retains_claim(monkeypatch):
     ch = _channel(handler=AsyncMock(side_effect=RuntimeError("boom")))
     ch.send = AsyncMock()
     wm = _fake_wm(monkeypatch)
@@ -175,9 +176,12 @@ def test_claim_released_on_handler_failure(monkeypatch):
 
     asyncio.run(_cycle(ch))
 
-    wm.mark_message_processed.assert_called_once_with("threads", REPLY_ID)
-    wm.release_processed_message.assert_called_once_with("threads", REPLY_ID)
-    assert not ch.send.await_count
+    from maverick_channels.delivery import DeliveryJournal
+    row = DeliveryJournal().store.list(limit=1)[0]
+    assert row["execution"] == "execution_unknown"
+    assert wm.mark_message_processed.call_count == 1
+    wm.release_processed_message.assert_not_called()
+    ch.send.assert_awaited_once_with(REPLY_ID, "⚠ An internal error occurred.")
 
 
 def test_claim_infra_failure_skips_fail_closed(monkeypatch):
@@ -195,7 +199,8 @@ def test_claim_infra_failure_skips_fail_closed(monkeypatch):
     )
     _install_httpx(monkeypatch, [], _responder_with([_reply()]))
 
-    asyncio.run(_cycle(ch))
+    with pytest.raises(RuntimeError, match="no db"):
+        asyncio.run(_cycle(ch))
 
     assert not ch.handler.await_count
     assert not ch.send.await_count
@@ -206,6 +211,7 @@ def test_release_failure_holds_claim_and_prevents_second_execution(monkeypatch, 
     ch.send = AsyncMock()
     claimed = set()
     wm = MagicMock()
+    wm.is_processed_message.return_value = False
 
     def _mark(channel, ext_id):
         key = (channel, ext_id)
@@ -224,8 +230,8 @@ def test_release_failure_holds_claim_and_prevents_second_execution(monkeypatch, 
         asyncio.run(_cycle(ch))
 
     assert ch.handler.await_count == 1
-    assert wm.mark_message_processed.call_count == 2
-    assert any("claim remains held" in record.message for record in caplog.records)
+    assert wm.mark_message_processed.call_count == 1
+    wm.release_processed_message.assert_not_called()
 
 
 def test_two_step_publish_payloads(monkeypatch):
@@ -295,13 +301,14 @@ def test_chunked_send_aborts_and_logs_on_midstream_failure(monkeypatch, caplog):
 
     _install_httpx(monkeypatch, calls, _responder)
 
-    with caplog.at_level("WARNING"):
+    from maverick_channels.delivery import DeliveryUnknown
+    with pytest.raises(DeliveryUnknown, match="unconfirmed"):
         asyncio.run(ch.send(REPLY_ID, "x" * 1200))  # 3 chunks of 500/500/200
 
     # chunk 1 create+publish, chunk 2 create (fails) -> stop. Chunk 3 never sent.
     assert state["creates"] == 2
     assert not any(c["url"].endswith("/threads_publish") for c in calls[2:])
-    assert any("2/3 chunk(s) undelivered" in r.message for r in caplog.records)
+    # The failure is surfaced to the caller; it is never reported as success.
 
 
 def test_missing_credentials_raise(monkeypatch):

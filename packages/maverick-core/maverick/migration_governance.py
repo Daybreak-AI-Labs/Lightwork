@@ -23,6 +23,8 @@ Alembic governs a revision graph:
   carry a destructive statement (``DROP TABLE``/``DROP COLUMN``/``RENAME``):
   those break a rolling deploy where old replicas still read the old schema.
   Released versions are grandfathered (governed by the checksum, not re-judged).
+  A reviewed v39 learning-key constraint replacement is pinned separately by
+  backend, version and full SQL digest; it does not authorize other DDL.
 
 Pure and offline (no DB). Surfaced as ``python -m maverick.migration_governance
 --ci`` (CI gate) and ``--regen`` (rewrite the lock after an intentional add).
@@ -43,6 +45,16 @@ from pathlib import Path
 # — exclude it from the cross-backend subset check (per-backend checksums still
 # pin it independently).
 _BASE_VERSION = 1
+
+# Reviewed data-preserving exception: v39 replaces only validated global
+# learning-table primary keys after tenant/null uniqueness is installed. The
+# full normalized SQL digest pins the entire locked, fail-closed migration;
+# neither arbitrary constraint drops nor a modified v39 inherit approval.
+# See docs/operations/learning-store-tenant-keys.md. Released-lock immutability
+# and explicit old-checksum repinning remain independent checks.
+_REVIEWED_CONSTRAINT_REPLACEMENTS = {
+    "postgres:39": "50f7c13c96f0f914267ccabc8dff7ba5e15be4cf5572c398fa3f570c39b0e9dc",  # pragma: allowlist secret - reviewed migration SQL digest
+}
 
 _DESTRUCTIVE = (
     # DROP of any schema object an old replica may still depend on. CONSTRAINT
@@ -155,6 +167,14 @@ def _destructive_statements(statements: list[str]) -> list[str]:
     return hits
 
 
+def _reviewed_constraint_replacement(backend: str, version: str, statements: list[str]) -> bool:
+    expected = _REVIEWED_CONSTRAINT_REPLACEMENTS.get(f"{backend}:{version}")
+    if expected is None:
+        return False
+    actual = hashlib.sha256("\n".join(_normalize(s) for s in statements).encode("utf-8")).hexdigest()
+    return actual == expected
+
+
 def lock_problems(
     lock: dict | None, lads: dict[str, dict[int, list[str]]] | None = None,
 ) -> list[str]:
@@ -186,7 +206,7 @@ def lock_problems(
             else:
                 pending_regen = True
                 destructive = _destructive_statements(lads[backend][int(version)])
-                if destructive:
+                if destructive and not _reviewed_constraint_replacement(backend, version, lads[backend][int(version)]):
                     problems.append(
                         f"{backend}: new migration v{version} has destructive "
                         f"statement(s) {destructive}; new migrations must be "
@@ -235,7 +255,7 @@ def regen_blockers(
         for version in current:
             if version not in prior:
                 dead = _destructive_statements(lads[backend][int(version)])
-                if dead:
+                if dead and not _reviewed_constraint_replacement(backend, version, lads[backend][int(version)]):
                     blockers.append(
                         f"{backend}: new migration v{version} has destructive "
                         f"statement(s) {dead}")

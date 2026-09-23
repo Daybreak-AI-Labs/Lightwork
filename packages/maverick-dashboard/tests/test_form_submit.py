@@ -1,6 +1,7 @@
 """The public POST /form/{token} endpoint that records hosted-form submissions."""
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -59,3 +60,24 @@ def test_invalid_json_is_400(monkeypatch, tmp_path):
     r = _client().post("/form/x", content=b"{not json",
                        headers={"content-type": "application/json"})
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_questionnaire_migration_is_retryable_not_missing(monkeypatch, tmp_path, method):
+    _isolate(monkeypatch, tmp_path, triggers="0")
+    from maverick import vendor_management
+    from maverick.governed_record_lookup import RecordLookupUnavailable
+
+    def unavailable(_token):
+        raise RecordLookupUnavailable("record lookup is rebuilding")
+    monkeypatch.setattr(vendor_management, "questionnaire_for_token", unavailable)
+    response = getattr(_client(), method)("/form/existing-link")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "2"
+
+
+def test_disabled_questionnaire_register_still_returns_missing(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path, triggers="0")
+    from maverick import vendor_management
+    monkeypatch.setattr(vendor_management, "enabled", lambda: False)
+    assert _client().get("/form/unknown").status_code == 404

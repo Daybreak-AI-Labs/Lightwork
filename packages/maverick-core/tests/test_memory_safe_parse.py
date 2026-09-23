@@ -1,7 +1,12 @@
 """memory_safe_parse: bounded parsing of untrusted JSON/CSV."""
 from __future__ import annotations
 
-from maverick.tools.memory_safe_parse import memory_safe_parse
+import csv
+import io
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+from maverick.tools.memory_safe_parse import _csv_shape, memory_safe_parse
 
 
 def _run(**kw):
@@ -47,3 +52,54 @@ def test_errors_and_contract():
     assert _run(text="{}", format="xml").startswith("ERROR")
     t = memory_safe_parse()
     assert t.name == "memory_safe_parse" and t.parallel_safe is True
+
+
+@pytest.mark.parametrize("text", [
+    'name,note\r\n"Smith, John","two\r\nlines"\r\n',
+    'name,note\n"Doubled ""quotes""","hello, world"\n',
+    '\n\na,b\n\n,\n"",\n',
+    'one,two\nthree\nfour,five,six\n',
+    '',
+    '""\n',
+    'a,b\r1,2\r',
+    '名字,备注\n甲,乙\n',
+])
+def test_csv_logical_shape_agrees_with_stdlib_and_reports_physical_lines(text):
+    reader = csv.reader(io.StringIO(text, newline=""), strict=True)
+    expected = [row for row in reader if row]
+    result = _csv_shape(text, 100)
+    assert result.error is None
+    assert result.records == len(expected)
+    assert result.header_columns == (len(expected[0]) if expected else 0)
+    assert result.physical_lines == reader.line_num
+    assert result.min_columns == min(map(len, expected), default=0)
+    assert result.max_columns == max(map(len, expected), default=0)
+
+
+@pytest.mark.parametrize("text", ['a,b\n"unclosed,b', 'a,b\n"closed"junk,b'])
+def test_csv_malformed_quoting_is_rejected_without_echoing_customer_text(text):
+    result = _run(text=text, format="csv")
+    assert result.startswith("REJECT: invalid CSV")
+    assert "unclosed" not in result and "junk" not in result
+
+
+def test_csv_bounds_logical_records_fields_and_bytes_without_global_parser_changes():
+    before = csv.field_size_limit()
+    multiline = 'a,b\n"first\nsecond",2\n3,4\n'
+    shape = _csv_shape(multiline, 2)
+    assert shape.error == "row count exceeds max_items 2"
+    assert shape.records == 3 and shape.physical_lines == 4
+    text = '"' + "x" * 65_537 + '"'
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(lambda _: _run(text=text, format="csv"), range(8)))
+    assert all(result.startswith("REJECT: CSV field exceeds") for result in results)
+    assert csv.field_size_limit() == before
+    assert "max_bytes" in _run(text="é" * 5, format="csv", max_bytes=6)
+    assert _run(text="\ud800", format="csv").startswith("REJECT")
+    assert "max_bytes" in _run(text="x" * 1_000_001, format="csv", max_bytes=10_000_000)
+
+
+def test_quoted_delimiters_and_newlines_do_not_inflate_summary():
+    result = _run(text='name,note\n"Smith, John","two\nlines"\n', format="csv")
+    assert "2 row(s), 2 column(s) in header" in result
+    assert "3 physical line(s)" in result

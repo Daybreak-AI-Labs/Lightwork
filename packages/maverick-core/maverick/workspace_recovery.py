@@ -165,10 +165,18 @@ def _live_state() -> dict:
 
 
 def _staged_live_state(stage: Path) -> dict:
-    """Fingerprint the exact transformed payload before it can be published."""
+    """Bind transformed bytes and deterministic restore-publication markers."""
     with backup._temporary_directory(prefix="lightwork-bootstrap-expected-") as temporary:
         copy = file_lock.ensure_private_directory(Path(temporary) / "data")
         files = backup._stage(stage, copy, include_keys=False)
+    # The restore transaction adds derived-index invalidation markers beside
+    # canonical rows. Bind those exact bytes before publication too; excluding
+    # all markers from the live digest would hide post-publication tampering.
+    # An existing staged marker is published verbatim and retains its own hash.
+    marker = backup._DERIVED_REBUILD_MARKER_BYTES
+    metadata = {"sha256": hashlib.sha256(marker).hexdigest(), "size": len(marker)}
+    for relative in backup._flow_index_restore_markers(set(files)):
+        files.setdefault(relative, dict(metadata))
     canonical = json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
     return {
         "file_count": len(files),

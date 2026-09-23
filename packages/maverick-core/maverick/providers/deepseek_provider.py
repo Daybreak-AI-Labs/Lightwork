@@ -22,13 +22,15 @@ class DeepSeekClient(OpenAIClient):
     # Inheriting 0.5x would over-charge cached input ~5x.
     CACHE_READ_MULT = 0.1
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        key = api_key or os.environ.get("DEEPSEEK_API_KEY")
-        url = base_url or os.environ.get(
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
+        env = os.environ if environment is None else environment
+        key = api_key or env.get("DEEPSEEK_API_KEY")
+        url = base_url or env.get(
             "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1",
         )
         super().__init__(
             api_key=key,
             base_url=url,
             allow_openai_env_fallback=False,
+            environment=environment,
         )

@@ -87,3 +87,5 @@ Coverage includes failed/legacy keychain writes, concurrent reads and saves,
 out-of-order responses, slow polling, unmounts, save feedback, and cached data
 isolation when the dashboard or token changes. Native iOS/Android layout and
 keychain acceptance still require a device build.
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

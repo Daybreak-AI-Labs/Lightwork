@@ -20,6 +20,7 @@ from maverick.file_lock import (
     atomic_read_bytes,
     atomic_read_text,
     atomic_write_bytes,
+    atomic_write_bytes_chunks,
     atomic_write_text,
     atomic_write_text_chunks,
     cross_process_lock,
@@ -181,6 +182,32 @@ def test_atomic_write_text_chunks_streams_privately(tmp_path):
     ]
     assert private_path_is_restricted(p)
     assert [f.name for f in tmp_path.iterdir()] == ["export.jsonl"]
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_binary_stream_stays_private_and_unpublished_until_complete(tmp_path, fail):
+    path = tmp_path / "segment.bin"
+    atomic_write_bytes(path, b"original")
+    class Interrupted(BaseException):
+        pass
+    def chunks():
+        for payload in (b"\x00\xff", b"exact signed row\n"):
+            assert path.read_bytes() == b"original"
+            temporary = list(tmp_path.glob(".segment.bin-*.tmp"))
+            assert len(temporary) == 1
+            assert private_path_is_restricted(temporary[0])
+            yield payload
+        if fail:
+            raise Interrupted
+    if fail:
+        with pytest.raises(Interrupted):
+            atomic_write_bytes_chunks(path, chunks())
+        assert path.read_bytes() == b"original"
+    else:
+        assert atomic_write_bytes_chunks(path, chunks()) == 2
+        assert path.read_bytes() == b"\x00\xffexact signed row\n"
+    assert private_path_is_restricted(path)
+    assert [entry.name for entry in tmp_path.iterdir()] == ["segment.bin"]
 
 
 def test_atomic_write_replaces_symlink_not_referent(tmp_path):

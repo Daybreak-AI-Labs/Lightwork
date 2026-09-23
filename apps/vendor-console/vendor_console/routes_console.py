@@ -222,6 +222,7 @@ def tickets_list(request: Request, status: str = "",
     return render(request, "tickets.html",
                   {"staff": staff, "tickets": store.list_tickets(conn, status=status),
                    "counts": store.ticket_status_counts(conn), "status": status,
+                   "intake_conflicts": store.intake_conflicts(conn),
                    "section": "support"})
 
 
@@ -256,7 +257,10 @@ def ticket_set_status(request: Request, ticket_id: int, status: str = Form(...),
     from .models import TICKET_STATUSES
     if status not in TICKET_STATUSES:
         raise HTTPException(status_code=400, detail="invalid status")
-    support.set_status(conn, ticket_id, status, actor=staff.email, note=note)
+    try:
+        support.set_status(conn, ticket_id, status, actor=staff.email, note=note)
+    except store.SupportIntakeConflict as exc:
+        raise HTTPException(status_code=409, detail="another active ticket owns this intake identity") from exc
     return RedirectResponse(f"/support/{ticket_id}", status_code=303)
 
 

@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
+from .mcp_catalog import CatalogLimits, ToolCatalog, check_call_guard
 from .runtime_overrides import RuntimeOverridesSecurityError
 from .safety.remote_scan import scan_remote_content
 from .safety.secret_detector import redact as _redact_secrets
@@ -398,7 +399,17 @@ class MCPClient:
         # elicitation/create). Tracked so they aren't GC'd mid-flight and can be
         # cancelled on stop().
         self._inbound_tasks: set[asyncio.Task] = set()
-        self.tools: list[dict[str, Any]] = []
+        self.catalog = ToolCatalog(
+            lambda method, params: self._request(method, params),
+            limits=CatalogLimits(seconds=min(timeout, 30.0)),
+        )
+
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        return self.catalog.tools
+
+    async def refresh_tools(self) -> None:
+        await self.catalog.refresh()
 
     def _next_id(self) -> int:
         self._req_id += 1
@@ -451,8 +462,7 @@ class MCPClient:
                   init_resp.get("serverInfo", {}))
         await self._notify("notifications/initialized", {})
 
-        tools_resp = await self._request("tools/list", {})
-        self.tools = tools_resp.get("tools", [])
+        await self.refresh_tools()
         log.info("MCP %s ready (%d tool(s))", self.spec.name, len(self.tools))
 
     async def _drain_stderr(self) -> None:
@@ -504,6 +514,8 @@ class MCPClient:
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         async with self._lock:
+            if method == "tools/call":
+                check_call_guard()
             self._check_alive()
             self._ensure_reader()
             req_id = self._next_id()
@@ -516,6 +528,11 @@ class MCPClient:
             }
             try:
                 await self._send(payload)
+            except asyncio.CancelledError:
+                self._pending.pop(req_id, None)
+                future.cancel()
+                self._schedule_cancel_notice(req_id)
+                raise
             except Exception:
                 # The request never made it onto the wire; no reply will ever
                 # arrive for it, so don't leave a dangling pending Future.
@@ -531,7 +548,7 @@ class MCPClient:
             # Future so the reader drops that late reply, then tell the server
             # to stop (#541 behavior).
             self._pending.pop(req_id, None)
-            await self._send_cancel(req_id)
+            self._schedule_cancel_notice(req_id)
             raise
         except asyncio.CancelledError:
             # The awaiting caller's task was cancelled (not our timeout). The
@@ -644,6 +661,8 @@ class MCPClient:
         if msg.get("method") is not None:
             if msg.get("id") is not None:
                 self._handle_inbound_request(msg)
+            elif msg.get("method") == "notifications/tools/list_changed":
+                self.catalog.changed()
             return  # notification: nothing to route
         # A JSON-RPC error with id:null (parse error / invalid request) can't
         # be correlated to a single request -- the server choked on our input.
@@ -894,6 +913,7 @@ class MCPClient:
         return _finalize_tool_result(self.spec.name, tool_name, resp)
 
     async def stop(self) -> None:
+        await self.catalog.close()
         if self._reader_task is not None:
             self._reader_task.cancel()
             try:
@@ -963,7 +983,17 @@ class StreamableHttpMCPClient:
         self._initialized = False
         self._req_id = 0
         self._oauth_provider: Any = None
-        self.tools: list[dict[str, Any]] = []
+        self.catalog = ToolCatalog(
+            lambda method, params: self._request(method, params),
+            limits=CatalogLimits(seconds=min(timeout, 30.0)),
+        )
+
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        return self.catalog.tools
+
+    async def refresh_tools(self) -> None:
+        await self.catalog.refresh()
 
     def _oauth_config(self):
         """Parse the OAuth config for this server, if one is configured."""
@@ -1048,8 +1078,7 @@ class StreamableHttpMCPClient:
             self._protocol_version = init["protocolVersion"]
         self._initialized = True  # gates the MCP-Protocol-Version header below
         await self._notify("notifications/initialized", {})
-        tools_resp = await self._request("tools/list", {})
-        self.tools = tools_resp.get("tools", []) if isinstance(tools_resp, dict) else []
+        await self.refresh_tools()
         log.info("MCP %s ready (%d tool(s)) over HTTP", self.spec.name, len(self.tools))
 
     def _headers(self) -> dict[str, str]:
@@ -1070,6 +1099,8 @@ class StreamableHttpMCPClient:
             raise MCPClientError(f"MCP server {self.spec.name!r} not started")
 
         async def _send() -> _HTTPMCPResponse:
+            if payload.get("method") == "tools/call":
+                check_call_guard()
             async with self._client.stream(
                 "POST", self.spec.url, json=payload, headers=self._headers()
             ) as resp:
@@ -1133,6 +1164,8 @@ class StreamableHttpMCPClient:
                     msg = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                if isinstance(msg, dict) and msg.get("method") == "notifications/tools/list_changed" and "id" not in msg:
+                    self.catalog.changed()
                 if req_id is None or (isinstance(msg, dict) and msg.get("id") == req_id):
                     return text
         return text
@@ -1194,6 +1227,7 @@ class StreamableHttpMCPClient:
         return _finalize_tool_result(self.spec.name, tool_name, resp)
 
     async def stop(self) -> None:
+        await self.catalog.close()
         if self._client is not None:
             try:
                 await self._client.aclose()

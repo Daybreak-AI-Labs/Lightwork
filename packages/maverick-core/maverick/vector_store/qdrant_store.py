@@ -16,6 +16,7 @@ so embeddings happen client-side without an extra wiring step.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import uuid as _uuid
@@ -122,6 +123,53 @@ class QdrantStore:
                 log.warning("qdrant: set_model(%s) failed: %s", embedding_model, e)
 
         self._collection = collection
+        location = url or str(store_path.resolve())
+        self.recall_identity = hashlib.sha256(f"{location}:{collection}".encode()).hexdigest()
+        self.requires_precomputed_embeddings = True
+        self.supports_atomic_recall = all(callable(getattr(self._client, name, None)) for name in (
+            "upsert", "query_points", "collection_exists", "get_collection",
+        ))
+
+    def upsert_one(self, document: str, *, id: str, metadata: dict,
+                   embedding: list[float] | None = None) -> None:
+        """Atomic single-point replacement with an explicitly prepared vector.
+
+        Unlike upload helpers this issues no automatic write retries. Transport
+        errors after commit have an unknown outcome; the recall layer records
+        that uncertainty and falls back until explicitly re-indexed.
+        """
+        from qdrant_client.models import Distance, PointStruct, VectorParams
+
+        from ..skill.embeddings import validate_vectors
+
+        vector = validate_vectors([embedding], 1)[0]
+        tenant_id = _active_tenant()
+        payload = {**metadata, _NSID_KEY: _stored_id(id, tenant_id), "document": document,
+                   "__recall_tenant__": tenant_id or ""}
+        point = PointStruct(id=_point_id(id, tenant_id), vector=vector, payload=payload)
+        exists = metered_transport_call(
+            "qdrant", lambda: self._client.collection_exists(self._collection),
+            hosted=self._remote, category="retrieval",
+        )
+        if not exists:
+            metered_transport_call(
+                "qdrant", lambda: self._client.create_collection(
+                    self._collection, vectors_config=VectorParams(size=len(vector), distance=Distance.COSINE)),
+                hosted=self._remote, category="storage",
+            )
+        else:
+            info = metered_transport_call(
+                "qdrant", lambda: self._client.get_collection(self._collection),
+                hosted=self._remote, category="retrieval",
+            )
+            params = info.config.params.vectors
+            if (not isinstance(params, VectorParams) or params.size != len(vector)
+                    or params.distance != Distance.COSINE):
+                raise ValueError("recall vector space does not match the existing collection")
+        metered_transport_call(
+            "qdrant", lambda: self._client.upsert(self._collection, points=[point], wait=True),
+            hosted=self._remote, category="storage",
+        )
 
     def add(
         self,
@@ -171,7 +219,8 @@ class QdrantStore:
             category="storage",
         )
 
-    def query(self, text: str, *, top_k: int = 5) -> list[dict]:
+    def query(self, text: str | None = None, *, top_k: int = 5,
+              embedding: list[float] | None = None) -> list[dict]:
         """Top-k similarity search. Returns list of
         {id, document, score, distance, metadata}.
 
@@ -183,6 +232,8 @@ class QdrantStore:
         by raw ``score`` (already similarity-ordered by the backend)
         rather than ``distance``.
         """
+        if embedding is not None:
+            return self._query_vector(embedding, top_k=top_k)
         if not text:
             return []
         tenant_id = _active_tenant()
@@ -230,6 +281,34 @@ class QdrantStore:
             })
             if len(out) >= want:
                 break
+        return out
+
+    def _query_vector(self, embedding: list[float], *, top_k: int) -> list[dict]:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        from ..skill.embeddings import validate_vectors
+
+        vector = validate_vectors([embedding], 1)[0]
+        tenant_id = _active_tenant()
+        # A dedicated payload field permits exact server-side tenant filtering;
+        # logical id prefix filtering cannot express an exact indexed predicate.
+        scope = tenant_id or ""
+        result = metered_transport_call(
+            "qdrant", lambda: self._client.query_points(
+                self._collection, query=vector, limit=max(1, min(top_k, 100)),
+                query_filter=Filter(must=[FieldCondition(key="__recall_tenant__", match=MatchValue(value=scope))]),
+                with_payload=True,
+            ), hosted=self._remote, category="retrieval",
+        )
+        prefix = f"tenant:{tenant_id}:" if tenant_id is not None else ""
+        out = []
+        for point in result.points:
+            payload = dict(point.payload or {})
+            nsid = str(payload.pop(_NSID_KEY, ""))
+            if payload.pop("__recall_tenant__", None) != scope or not nsid.startswith(prefix):
+                continue
+            out.append({"id": nsid[len(prefix):], "document": payload.pop("document", ""),
+                        "distance": 1.0 - float(point.score), "metadata": payload})
         return out
 
     def delete(self, ids: list[str]) -> None:

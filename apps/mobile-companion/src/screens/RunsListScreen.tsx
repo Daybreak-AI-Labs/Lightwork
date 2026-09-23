@@ -22,9 +22,9 @@ export function RunsListScreen(props: {
   onOpenRun: (id: number) => void;
 }): React.JSX.Element {
   const { settings, onOpenRun } = props;
-  const fetcher = useCallback(() => listGoals(settings, 50), [settings]);
-  const { data, error } = usePolling<Goal[]>(fetcher, 10_000);
-  const cached = useCachedBundle(settings, Boolean(error && !data));
+  const fetcher = useCallback((signal: AbortSignal) => listGoals(settings, 50, signal), [settings]);
+  const { data, error, accessDenied, unsupported } = usePolling<Goal[]>(fetcher, 10_000);
+  const cached = useCachedBundle(settings, Boolean(error && !data && !accessDenied && !unsupported));
 
   const offline = !data && cached;
   const rows: Goal[] = data
@@ -40,7 +40,8 @@ export function RunsListScreen(props: {
       {offline && cached ? (
         <Text style={styles.banner}>{offlineBanner(cached)}</Text>
       ) : null}
-      {error && !offline ? <ConnectionNotice message={error} /> : null}
+      {error && !offline ? <ConnectionNotice message={error} accessDenied={accessDenied} /> : null}
+      {error && data ? <Text style={styles.banner}>Retained results may be out of date.</Text> : null}
       <FlatList
         data={rows}
         keyExtractor={(g: Goal) => String(g.id)}

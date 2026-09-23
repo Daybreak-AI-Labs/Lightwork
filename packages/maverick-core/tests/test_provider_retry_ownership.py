@@ -382,7 +382,11 @@ def test_azure_clients_use_sdk_timeout_and_disable_sdk_retries(monkeypatch) -> N
         "AZURE_OPENAI_AUTH": "api_key",
         "AZURE_OPENAI_DEPLOYMENT": "governed-deployment",
         "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
+        "MAVERICK_LLM_CONNECT_TIMEOUT": "5",
+        "MAVERICK_LLM_READ_TIMEOUT": "29",
     }
+    monkeypatch.setenv("MAVERICK_LLM_CONNECT_TIMEOUT", "91")
+    monkeypatch.setenv("MAVERICK_LLM_READ_TIMEOUT", "92")
 
     AzureOpenAIClient(
         api_key="test-key",  # pragma: allowlist secret

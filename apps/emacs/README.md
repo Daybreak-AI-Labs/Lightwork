@@ -25,3 +25,5 @@ Add to `load-path` and require:
 | `M-x maverick-logs` | recent run logs |
 | `M-x maverick-halt` | arm the killswitch (confirms first) |
 | `M-x maverick-unhalt` | clear the killswitch |
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

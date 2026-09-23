@@ -105,6 +105,7 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
         tenant: 'browser-workspace', actor: 'user:browser-reviewer', actor_authorization_sha256: sha('6'),
         purpose: 'product_research', items: [item()], count: 1, matched: 1,
         omitted_ineligible: 1, truncated: false, authority_checks: 'Current checks passed.',
+        status: 'matched', complete: true, incomplete_reasons: [], next_cursor: null,
         training_permission_notice: 'Separate permission is required.'}});
     }
     if (url.pathname.endsWith('/detail')) return route.fulfill({json: {context, ...item()}});
@@ -159,6 +160,8 @@ test('empty and revoked states remove stale content and explain the next step', 
         purpose: 'product_research', items: searches === 1 ? [item()] : [],
         count: searches === 1 ? 1 : 0, matched: searches === 1 ? 1 : 0,
         omitted_ineligible: searches === 1 ? 0 : 1, truncated: false,
+        status: searches === 1 ? 'matched' : 'no_match', complete: true,
+        incomplete_reasons: [], next_cursor: null,
         authority_checks: 'Current checks passed.', training_permission_notice: 'Separate permission.'}});
     }
     if (url.pathname.endsWith('/detail')) return route.fulfill({status: 409,
@@ -191,6 +194,7 @@ test('export verifies the complete authority binding with browser Web Crypto', a
       actor: 'user:browser-reviewer', actor_authorization_sha256: sha('6'), query: '',
       purpose: 'product_research', items: [item()], count: 1, matched: 1,
       omitted_ineligible: 0, truncated: false, authority_checks: 'Current checks passed.',
+      status: 'matched', complete: true, incomplete_reasons: [], next_cursor: null,
       training_permission_notice: 'Separate permission is required.'}});
     if (url.pathname.endsWith('/export')) return route.fulfill({json: exportEnvelope(context)});
     return route.fulfill({status: 404, json: {detail: 'Synthetic route unavailable'}});

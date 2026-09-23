@@ -48,6 +48,7 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 from maverick import a2a
+from maverick.flow.payloads import FlowPayloadError
 from maverick.oidc import VerifiedPrincipal
 from maverick.runtime_overrides import RuntimeOverridesSecurityError
 from starlette.concurrency import run_in_threadpool
@@ -152,9 +153,11 @@ def _format_datetime(ts) -> str:
     """Jinja filter: float epoch -> 'HH:MM:SS'."""
     import datetime as _dt
 
+    if ts is None:
+        return "-"
     try:
         return _dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
 
 
@@ -590,15 +593,6 @@ async def _install_automation_scheduler() -> None:
         log.exception("automation worker not started")
 
 
-async def _stop_automation_scheduler() -> None:
-    try:
-        from maverick_dashboard import automation_queue
-
-        await run_in_threadpool(automation_queue.stop)
-    except Exception:  # pragma: no cover
-        pass
-
-
 async def _start_privacy_discovery_remediation_scheduler() -> None:
     try:
         from maverick_dashboard.privacy_data_discovery_scheduler import (
@@ -608,17 +602,6 @@ async def _start_privacy_discovery_remediation_scheduler() -> None:
         await run_in_threadpool(start_privacy_data_discovery_scheduler, app)
     except Exception:  # pragma: no cover - never block startup
         log.exception("privacy-discovery remediation scheduler not started")
-
-
-async def _stop_privacy_discovery_remediation_scheduler() -> None:
-    try:
-        from maverick_dashboard.privacy_data_discovery_scheduler import (
-            stop_privacy_data_discovery_scheduler,
-        )
-
-        await run_in_threadpool(stop_privacy_data_discovery_scheduler, app)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
 
 
 async def _start_privacy_notice_publication_scheduler() -> None:
@@ -632,17 +615,6 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
-async def _stop_privacy_notice_publication_scheduler() -> None:
-    try:
-        from maverick_dashboard.privacy_notice_publication_scheduler import (
-            stop_privacy_notice_publication_scheduler,
-        )
-
-        await run_in_threadpool(stop_privacy_notice_publication_scheduler, app)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-
-
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
@@ -652,9 +624,9 @@ async def _lifespan(app: FastAPI):
     original registration order; their bodies each guard with try/except so a
     failure never blocks startup.
 
-    On shutdown we drain in-flight goals (bounded) so a rolling upgrade / pod
-    eviction lets running goals finish instead of hard-killing them mid-LLM-call
-    (which bills for discarded work and can wedge a goal 'running').
+    All owned and composed schedulers share a shutdown supervisor: close goal
+    admission, signal every component, then join/drain against one deadline.
+    Partial startup and exceptional lifespan exit run the same cleanup.
 
     One exception to "never blocks startup": when the deployment has opted into
     a mandatory enterprise boundary (MAVERICK_REQUIRE_ENTERPRISE=1 /
@@ -679,150 +651,102 @@ async def _lifespan(app: FastAPI):
     # a replica that refuses to start is a visible outage, while a corrupted
     # audit chain is discovered months later by whoever needs it most.
     from maverick.control_plane_lease import acquire as _acquire_control_plane
+    from maverick.control_plane_lease import current
+    from maverick.postgres_transactions import open_postgres_pools
+    from maverick.runner import open_goal_admission
 
-    _acquire_control_plane(role="dashboard")
-    _assert_dashboard_auth_configured()
-    # Loud warning if reverse-proxy SSO is on but no upstream is trusted
-    # (neither trusted_proxies pinned nor trust_loopback explicitly set) --
-    # the forwarded identity header is then refused from every peer.
+    from ._lifecycle import ShutdownSupervisor, register_main_components, shutdown_seconds
+
+    previous = getattr(app.state, "lifecycle_supervisor", None)
+    if previous is not None:
+        previous.assert_restart_allowed()
+    supervisor = ShutdownSupervisor(shutdown_seconds())
+    app.state.lifecycle_supervisor = supervisor
+    register_main_components(app, supervisor)
     try:
-        from maverick.proxy_auth import warn_if_untrusted_proxy_config
+        supervisor.release_control_plane = current() is None
+        _acquire_control_plane(role="dashboard")
+        _assert_dashboard_auth_configured()
+        open_postgres_pools()
+        open_goal_admission()
+        # Loud warning if reverse-proxy SSO is on but no upstream is trusted
+        # (neither trusted_proxies pinned nor trust_loopback explicitly set) --
+        # the forwarded identity header is then refused from every peer.
+        try:
+            from maverick.proxy_auth import warn_if_untrusted_proxy_config
 
-        warn_if_untrusted_proxy_config()
-    except Exception:  # pragma: no cover -- a warning must never block startup
-        pass
-    await _reclaim_orphans()
-    await _install_queue_dispatcher()
-    await _install_automation_scheduler()
-    try:
-        from maverick_dashboard.security_api import start_hunter_scheduler
+            warn_if_untrusted_proxy_config()
+        except Exception:  # pragma: no cover -- a warning must never block startup
+            pass
+        await _reclaim_orphans()
+        await _install_queue_dispatcher()
+        await _install_automation_scheduler()
+        try:
+            from maverick_dashboard.security_api import start_hunter_scheduler
 
-        await run_in_threadpool(start_hunter_scheduler)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("security hunter scheduler not started")
-    try:
-        from maverick_dashboard.finance_scheduler import start_finance_scheduler
+            await run_in_threadpool(start_hunter_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("security hunter scheduler not started")
+        try:
+            from maverick_dashboard.finance_scheduler import start_finance_scheduler
 
-        await run_in_threadpool(start_finance_scheduler)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("finance operations scheduler not started")
-    try:
-        from maverick_dashboard.red_team_scheduler import start_red_team_scheduler
+            await run_in_threadpool(start_finance_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("finance operations scheduler not started")
+        try:
+            from maverick_dashboard.red_team_scheduler import start_red_team_scheduler
 
-        await run_in_threadpool(start_red_team_scheduler)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("red-team schedule dispatcher not started")
-    try:
-        from maverick_dashboard.ai_inventory_scheduler import (
-            start_ai_inventory_scheduler,
-        )
-
-        await run_in_threadpool(start_ai_inventory_scheduler)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("AI inventory scheduler not started")
-    try:
-        from maverick_dashboard.ai_cost_scheduler import start_ai_cost_scheduler
-
-        await run_in_threadpool(start_ai_cost_scheduler)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("AI cost scheduler not started")
-    try:
-        from maverick_dashboard.identity_governance_scheduler import (
-            start_identity_governance_scheduler,
-        )
-
-        await run_in_threadpool(start_identity_governance_scheduler)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("identity-governance scheduler not started")
-    await _start_privacy_discovery_remediation_scheduler()
-    await _start_privacy_notice_publication_scheduler()
-    # Connected-entitlement auto-refresh: a deployment with [license] api_url
-    # configured polls the vendor console so an upgrade/downgrade issued there
-    # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
-    # None) without an API URL or with refresh_interval_seconds = 0, so tests
-    # and offline/air-gapped boxes are untouched. Fail-open by construction:
-    # the loop never raises and a failed poll leaves the license file in charge.
-    try:
-        from maverick.entitlements import start_refresher
-
-        await run_in_threadpool(start_refresher)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("license auto-refresh not started")
-    # Load installed voice weights without delaying startup. Downloads require
-    # explicit persisted opt-in, or the separately reviewed Settings action.
-    try:
-        from .voice_setup_api import start_warmup
-
-        start_warmup(app)
-    except Exception:  # pragma: no cover - never block startup
-        log.exception("voice STT warm-up not started")
-    yield
-    from .voice_setup_api import stop_setup
-
-    await run_in_threadpool(stop_setup, app)
-    try:
-        from maverick.entitlements import stop_refresher
-
-        await run_in_threadpool(stop_refresher)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    try:
-        from maverick_dashboard.security_api import stop_hunter_scheduler
-
-        await run_in_threadpool(stop_hunter_scheduler)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    try:
-        from maverick_dashboard.finance_scheduler import stop_finance_scheduler
-
-        await run_in_threadpool(stop_finance_scheduler)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    try:
-        from maverick_dashboard.red_team_scheduler import stop_red_team_scheduler
-
-        await run_in_threadpool(stop_red_team_scheduler)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    try:
-        from maverick_dashboard.ai_inventory_scheduler import stop_ai_inventory_scheduler
-
-        await run_in_threadpool(stop_ai_inventory_scheduler)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    try:
-        from maverick_dashboard.ai_cost_scheduler import stop_ai_cost_scheduler
-
-        await run_in_threadpool(stop_ai_cost_scheduler)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    try:
-        from maverick_dashboard.identity_governance_scheduler import (
-            stop_identity_governance_scheduler,
-        )
-
-        await run_in_threadpool(stop_identity_governance_scheduler)
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
-    await _stop_privacy_discovery_remediation_scheduler()
-    await _stop_privacy_notice_publication_scheduler()
-    await _stop_automation_scheduler()
-    # Graceful drain: give running goals a bounded window to finish. Bounded by
-    # MAVERICK_DRAIN_TIMEOUT (default 25s, under the typical 30s
-    # terminationGracePeriod so the kubelet's SIGKILL doesn't pre-empt it). Runs
-    # off the event loop (the drain polls a threading primitive); best-effort --
-    # never raise on the way down.
-    try:
-        from maverick.runner import drain_inflight
-
-        timeout = float(os.environ.get("MAVERICK_DRAIN_TIMEOUT", "25") or 25)
-        left = await run_in_threadpool(drain_inflight, timeout)
-        if left:
-            log.warning(
-                "shutdown: %d goal(s) still in-flight after %.0fs drain timeout", left, timeout
+            await run_in_threadpool(start_red_team_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("red-team schedule dispatcher not started")
+        try:
+            from maverick_dashboard.ai_inventory_scheduler import (
+                start_ai_inventory_scheduler,
             )
-    except Exception:  # pragma: no cover - shutdown must never raise
-        pass
+
+            await run_in_threadpool(start_ai_inventory_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("AI inventory scheduler not started")
+        try:
+            from maverick_dashboard.ai_cost_scheduler import start_ai_cost_scheduler
+
+            await run_in_threadpool(start_ai_cost_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("AI cost scheduler not started")
+        try:
+            from maverick_dashboard.identity_governance_scheduler import (
+                start_identity_governance_scheduler,
+            )
+
+            await run_in_threadpool(start_identity_governance_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("identity-governance scheduler not started")
+        await _start_privacy_discovery_remediation_scheduler()
+        await _start_privacy_notice_publication_scheduler()
+        # Connected-entitlement auto-refresh: a deployment with [license] api_url
+        # configured polls the vendor console so an upgrade/downgrade issued there
+        # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
+        # None) without an API URL or with refresh_interval_seconds = 0, so tests
+        # and offline/air-gapped boxes are untouched. Fail-open by construction:
+        # the loop never raises and a failed poll leaves the license file in charge.
+        try:
+            from maverick.entitlements import start_refresher
+
+            await run_in_threadpool(start_refresher)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("license auto-refresh not started")
+        # Load installed voice weights without delaying startup. Downloads require
+        # explicit persisted opt-in, or the separately reviewed Settings action.
+        try:
+            from .voice_setup_api import start_warmup
+
+            start_warmup(app)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("voice STT warm-up not started")
+        supervisor.phase = "running"
+        yield
+    finally:
+        await supervisor.stop()
 
 
 def enforce_page_visibility(
@@ -916,6 +840,18 @@ from .ai_evidence_analysis_composition import (  # noqa: E402
 from .ai_governance_loop_composition import (  # noqa: E402
     install_ai_governance_loop_composition,
 )
+
+
+@app.middleware("http")
+async def _shutdown_admission(request: Request, call_next):
+    supervisor = getattr(request.app.state, "lifecycle_supervisor", None)
+    if (supervisor is not None and supervisor.phase in {"stopping", "degraded"}
+            and request.url.path != "/livez"):
+        return JSONResponse({"detail": "dashboard is shutting down"}, status_code=503,
+                            headers={"Retry-After": "5"})
+    return await call_next(request)
+
+
 from .ai_governance_loop_scheduler import (  # noqa: E402
     attach_ai_governance_loop_scheduler,
 )
@@ -2391,6 +2327,32 @@ async def runtime_policy_exception_handler(
     )
 
 
+@app.exception_handler(FlowPayloadError)
+async def flow_payload_exception_handler(request: Request, exc: FlowPayloadError):
+    """Expose a recovery action without leaking private payload or key details."""
+    message = (
+        "Workflow data could not be saved or loaded safely. Ask an administrator "
+        "to check storage limits and restore the complete checkpoint with its key "
+        "before retrying. If recovery is unavailable, review the original inputs "
+        "and any prior effects before creating a replacement run."
+    )
+    headers = {"Cache-Control": "no-store"}
+    if _wants_html(request):
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"path": request.url.path, "status": 409,
+             "title": "Workflow data needs recovery", "message": message},
+            status_code=409,
+            headers=headers,
+        )
+    return JSONResponse(
+        {"detail": message, "code": "flow_data_unavailable"},
+        status_code=409,
+        headers=headers,
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Catch-all so we never serve the default white "Internal Server Error"."""
@@ -2591,13 +2553,16 @@ async def extension_cors(request: Request, call_next):
     if origin is None:
         return await call_next(request)
     if request.method == "OPTIONS" and request.headers.get("access-control-request-method"):
+        allow_headers = "Authorization, Content-Type"
+        if request.url.path in {"/api/v1/goals", "/api/v1/goal-submissions/receipt"}:
+            allow_headers += ", Idempotency-Key"
         return PlainTextResponse(
             "",
             status_code=204,
             headers={
                 "Access-Control-Allow-Origin": origin,
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Allow-Headers": allow_headers,
                 "Access-Control-Max-Age": "600",
                 "Vary": "Origin",
             },
@@ -5388,7 +5353,10 @@ async def audit_page(request: Request) -> HTMLResponse:
             detail="Invalid audit day. Enter a real date in YYYY-MM-DD format.",
         )
     audit_log = default_audit_log()
-    events = audit_log.tail(n, day=day)
+    from maverick.audit.segments import ReadReport
+
+    read_report = ReadReport()
+    events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
     # Distinct kinds in this tail (for the filter dropdown), computed before
     # filtering so every available kind stays selectable; then optionally
     # narrow to one kind (e.g. shield_block, tool_call).
@@ -5406,6 +5374,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             "kind": kind,
             "kinds": kinds,
             "audit_signing_enabled": bool(audit_log.signing_enabled),
+            "audit_read_report": read_report.as_dict(),
         },
     )
 
@@ -8087,6 +8056,7 @@ def chat_page(request: Request) -> HTMLResponse:
             "threads": _chat_threads(request, w),
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
+            "submission_key": secrets.token_urlsafe(24),
             "model_route_ready": selected_model_routes_ready(),
         },
     )
@@ -8121,19 +8091,15 @@ def _turn_text(title: str, description: str) -> str:
 def _chat_threads(request: Request, w, *, active_root: int | None = None) -> list[dict]:
     """The caller's recent chats (root goals) for the sidebar, newest first."""
     try:
-        goals = w.list_goals(owner=goal_owner_filter(request), limit=80, order="desc")
+        goals = w.conversation_summaries(owner=goal_owner_filter(request), limit=_THREAD_LIST_LIMIT)
     except Exception:  # pragma: no cover -- the sidebar must never 500 a page
         return []
     threads: list[dict] = []
     for g in goals:
-        if g.parent_id:
-            continue  # follow-ups and agent subgoals live inside their thread
         threads.append({
             "id": g.id, "title": g.title, "status": g.status,
             "active": g.id == active_root, "updated_at": g.updated_at,
         })
-        if len(threads) >= _THREAD_LIST_LIMIT:
-            break
     return threads
 
 
@@ -8151,58 +8117,20 @@ def _thread_turns(w, goal, root) -> list:
     ]
 
 
-async def _store_uploads(w, goal_id: int, files: list[UploadFile], bg: BackgroundTasks) -> None:
-    """Persist uploaded files as goal attachments (size/mime caps in
-    maverick.attachments.store) and queue their text companions."""
-    real_files = [f for f in files if f and (f.filename or "").strip()]
-    if not real_files:
-        return
-    from maverick import attachments as _att
-
-    total = 0
-    for f in real_files:
-        data = await f.read()
-        if not data:
-            continue  # an unfilled file input still posts an empty part
-        try:
-            rec = _att.store(
-                goal_id,
-                f.filename,
-                f.content_type or "application/octet-stream",
-                data,
-                existing_total=total,
-            )
-        except _att.AttachmentRejected as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Attachment '{f.filename}': {exc}",
-            ) from exc
-        w.add_attachment(
-            goal_id, rec.filename, rec.mime, rec.size_bytes, rec.sha256, str(rec.path)
-        )
-        total += rec.size_bytes
-    # Text companions (audio/video transcripts, extracted Office-doc text)
-    # BEFORE the goal runs, so they embed on the agent's first message.
-    # Background tasks run sequentially in add order; generate_companions is
-    # best-effort and never raises.
-    bg.add_task(_att.generate_companions, w, goal_id)
-
-
-def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conversation_id: int | None) -> None:
+def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conversation_id: int | None, receipt: dict) -> None:
     """Hand a goal to the shared runner (same concurrency cap, budget defaults
     and error handling as the REST API and MCP server)."""
     from maverick.runner import run_goal_in_background_async
+
+    from .attachment_submission import dispatch
 
     kwargs: dict = {"allowed_suites": caller_suites(request)}
     if conversation_id is not None:
         kwargs["conversation_id"] = conversation_id
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(
-            run_goal_in_background_async, goal_id, channel="dashboard", user_id=user_id, **kwargs
-        )
-    else:
-        bg.add_task(run_goal_in_background_async, goal_id, **kwargs)
+        kwargs.update(channel="dashboard", user_id=user_id)
+    bg.add_task(dispatch, _world(), receipt, run_goal_in_background_async, goal_id, **kwargs)
 
 
 def _open_thread_turn(w, owner: str, root_id: int, goal_id: int, text: str) -> int | None:
@@ -8238,6 +8166,7 @@ async def chat_send(
     title: str = Form(...),
     description: str = Form(""),
     files: list[UploadFile] = File(default=[]),
+    submission_key: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
@@ -8262,14 +8191,15 @@ async def chat_send(
     description = description if description.strip() else title
     w = _world()
     owner = caller_principal(request) or ""
-    goal_id = w.create_goal(title, description, owner=owner)
-    # Persist any uploaded files as goal attachments. The agent reaches them
-    # via its list_attachments + read_file tools (images are also delivered as
-    # vision blocks).
-    await _store_uploads(w, goal_id, files, bg)
+    from .attachment_submission import submit
+
+    receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
+                           owner=owner, title=title, description=description)
+    goal_id = receipt["goal_id"]
     # The first message opens a chat thread: this goal is its root.
-    conversation_id = _open_thread_turn(w, owner, goal_id, goal_id, _turn_text(title, description))
-    _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id)
+    conversation_id = (_open_thread_turn(w, owner, goal_id, goal_id, _turn_text(title, description))
+                       if receipt.get("created") else _thread_conversation(w, owner, goal_id).id)
+    _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id, receipt=receipt)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
 
@@ -8280,6 +8210,7 @@ async def chat_reply(
     goal_id: int,
     message: str = Form(...),
     files: list[UploadFile] = File(default=[]),
+    submission_key: str = Form(""),
 ) -> RedirectResponse:
     """Continue a chat. The message becomes the next goal in the same thread
     (parent_id = the root goal) and runs inside the thread's conversation, so
@@ -8314,18 +8245,44 @@ async def chat_reply(
     root_id = _thread_root_id(parent)
     root = parent if root_id == parent.id else (w.get_goal(root_id) or parent)
     title = message.splitlines()[0].strip()[:GOAL_TITLE_MAX_LENGTH] or message[:GOAL_TITLE_MAX_LENGTH]
-    new_id = w.create_goal(
-        title,
-        message,
-        parent_id=root_id,
+    from .attachment_submission import submit
+
+    receipt = await submit(
+        w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
+        title=title, description=message, parent_id=root_id,
         owner=caller_principal(request) or root.owner or "",
         domain=root.domain or "",
         project_id=root.project_id,
     )
-    await _store_uploads(w, new_id, files, bg)
-    conversation_id = _open_thread_turn(w, root.owner, root_id, new_id, message)
-    _dispatch_goal(request, bg, new_id, conversation_id=conversation_id)
+    new_id = receipt["goal_id"]
+    conversation_id = (_open_thread_turn(w, root.owner, root_id, new_id, message)
+                       if receipt.get("created") else _thread_conversation(w, root.owner, root_id).id)
+    _dispatch_goal(request, bg, new_id, conversation_id=conversation_id, receipt=receipt)
     return RedirectResponse(f"/chat/goal/{new_id}", status_code=303)
+
+
+@app.post("/chat/goal/{goal_id}/recover-submission")
+async def recover_chat_submission(request: Request, bg: BackgroundTasks, goal_id: int) -> RedirectResponse:
+    _require_same_origin(request)
+    require_permission(request, "operate")
+    require_provider_or_400()
+    from maverick.attachment_submissions import SubmissionStore
+
+    w = _world()
+    goal = w.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, goal)
+    receipt = await run_in_threadpool(SubmissionStore(w).for_goal, goal_id)
+    if receipt is None or goal.status != "draft":
+        raise HTTPException(status_code=409, detail="This submission is not a recoverable draft")
+    records = {(r.filename, r.mime, r.size_bytes, r.sha256) for r in w.list_attachments(goal_id)}
+    if any((r["filename"], r["mime"], r["size_bytes"], r["sha256"]) not in records
+           for r in receipt["detail"]["manifest"]):
+        raise HTTPException(status_code=409, detail="The attachment batch is incomplete. Resubmit the original form and files to recover it.")
+    conversation_id = _thread_conversation(w, goal.owner, _thread_root_id(goal)).id
+    _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id, receipt=receipt)
+    return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
 
 @app.post("/webhook/start")
@@ -8953,13 +8910,13 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
 
 
 def _vendor_questionnaire_for(token: str) -> dict | None:
-    """The vendor questionnaire this token addresses, or None. Never raises —
-    the form endpoints must stay usable when the register is off."""
+    """Resolve one form; unavailable authority must not masquerade as a 404."""
     try:
         from maverick import vendor_management
         return vendor_management.questionnaire_for_token(token)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="questionnaire lookup is temporarily unavailable",
+                            headers={"Retry-After": "2"}) from exc
 
 
 @app.get("/form/{token}", response_class=HTMLResponse)
@@ -9394,6 +9351,8 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         share_links = []
     root_id = _thread_root_id(g)
     root = g if root_id == g.id else (w.get_goal(root_id) or g)
+    from maverick.attachment_submissions import SubmissionStore
+
     from ._event_stream import TERMINAL_RUN_STATUSES
 
     return templates.TemplateResponse(
@@ -9401,10 +9360,12 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         "chat_goal.html",
         {
             "goal": g,
+            "submission_key": secrets.token_urlsafe(24),
+            "submission": SubmissionStore(w).for_goal(goal_id),
             "thread_title": root.title,
             "thread_turns": _thread_turns(w, g, root),
             "threads": _chat_threads(request, w, active_root=root_id),
-            "run_open": g.status not in TERMINAL_RUN_STATUSES,
+            "run_open": g.status not in TERMINAL_RUN_STATUSES and g.status != "draft",
             "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
             "deliverable": contract,
             "rendered": rendered,
@@ -9885,125 +9846,33 @@ async def api_goal_events_stream(
     client knows it can stop listening (EventSource normally retries
     forever).
     """
-    import asyncio as _asyncio
-    import json as _json
+    from ._event_stream import (
+        LeasedStreamingResponse,
+        StreamLease,
+        goal_stream,
+        replay_cursor,
+        stream_state,
+    )
 
-    from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
-
-    w = _world()
-    g = await run_in_threadpool(w.get_goal, goal_id)
-    if g is None:
+    world = _world()
+    goal = await run_in_threadpool(stream_state, world, goal_id)
+    if goal is None:
         raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-
-    # Cap concurrent streams so thousands of EventSource opens can't exhaust
-    # FDs/tasks. Acquire non-blocking and return 503 when full; release in the
-    # generator's finally so a disconnect (CancelledError) frees a slot.
+    assert_goal_access(request, goal)
     sem = _get_sse_semaphore()
     if sem.locked():
-        raise HTTPException(
-            status_code=503,
-            detail="too many concurrent event streams; retry shortly",
-            headers={"Retry-After": "5"},
-        )
+        raise HTTPException(status_code=503, detail="too many concurrent event streams; retry shortly",
+                            headers={"Retry-After": "5"})
     await sem.acquire()
-
-    TERMINAL = TERMINAL_RUN_STATUSES
-    POLL_INTERVAL = 0.5  # server-side cadence
-    MAX_POLL_INTERVAL = 5.0  # cap idle backoff to reduce DB churn
-    IDLE_HEARTBEAT_EVERY = 30  # send a comment line so proxies don't time out
-    MAX_STREAM_SECONDS = 300  # lifetime cap per SSE stream
-    MAX_BATCH = _SSE_MAX_BATCH
-
-    # EventSource reconnects on its own (a network blip, a proxy timeout,
-    # or our MAX_STREAM_SECONDS cap). Without resume support it would
-    # restart from ``?since=`` and replay the whole log as duplicates;
-    # honor Last-Event-ID so a reconnect resumes exactly where it left off.
-    resume_from = replay_cursor(since, request.headers.get("last-event-id"))
-
-    async def generate():
-        started = _asyncio.get_running_loop().time()
-        sid = resume_from
-        idle_ticks = 0
-        poll_interval = POLL_INTERVAL
-        # Advertise the reconnect delay (ms) to the client.
-        yield "retry: 3000\n\n"
-        # Initial flush: anything already on the board since `since`.
-        try:
-            while True:
-                if (_asyncio.get_running_loop().time() - started) >= MAX_STREAM_SECONDS:
-                    yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
-                    return
-                # Offload the blocking, lock-held SQLite reads so this 0.5s
-                # poll loop doesn't run them on the event loop (which would
-                # stall every other request/stream while the query holds the
-                # world-DB lock).
-                events = await run_in_threadpool(
-                    w.goal_events, goal_id, since_id=sid, limit=MAX_BATCH
-                )
-                g = await run_in_threadpool(w.get_goal, goal_id)
-                if g is None:
-                    yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
-                    return
-                if events:
-                    sid = events[-1].id
-                    payload = {
-                        "status": g.status,
-                        "result": g.result or "",
-                        "next_id": sid,
-                        "terminal": False,
-                        "events": [
-                            {
-                                "id": e.id,
-                                "agent": e.agent,
-                                "kind": e.kind,
-                                "content": e.content,
-                                "ts": e.ts,
-                            }
-                            for e in events
-                        ],
-                    }
-                    yield f"id: {sid}\ndata: {_json.dumps(payload)}\n\n"
-                    idle_ticks = 0
-                    poll_interval = POLL_INTERVAL
-                else:
-                    idle_ticks += 1
-                    if idle_ticks * POLL_INTERVAL >= IDLE_HEARTBEAT_EVERY:
-                        # SSE comment line; ignored by EventSource but keeps
-                        # intermediaries from closing the connection.
-                        yield ": heartbeat\n\n"
-                        idle_ticks = 0
-                    poll_interval = min(MAX_POLL_INTERVAL, poll_interval * 1.5)
-                if g.status in TERMINAL:
-                    if len(events) < MAX_BATCH:
-                        payload = {
-                            "status": g.status,
-                            "result": g.result or "",
-                            "next_id": sid,
-                            "events": [],
-                            "terminal": True,
-                        }
-                        yield f"id: {sid}\nevent: terminal\ndata: {_json.dumps(payload)}\n\n"
-                        return
-                    # A full batch means more backlog may remain: keep draining
-                    # (without sleeping) and end only once a read comes up short.
-                    continue
-                await _asyncio.sleep(poll_interval)
-        except _asyncio.CancelledError:
-            return
-        finally:
-            # Always free the stream slot, whether we ended on a terminal
-            # status, the lifetime cap, or a client disconnect.
-            sem.release()
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # nginx/caddy: disable response buffering
-        },
+    lease = StreamLease(sem)
+    content = goal_stream(
+        request, world, goal_id,
+        since=replay_cursor(since, request.headers.get("last-event-id")),
+        lease=lease, visible=lambda state: can_access_goal(request, state),
+        legacy=True, max_batch=_SSE_MAX_BATCH,
     )
+    return LeasedStreamingResponse(content, lease=lease, media_type="text/event-stream",
+                                   headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ----- roadmap cluster: graph editor / goal builder / embed / benchmarks /
@@ -11246,7 +11115,7 @@ def main() -> None:
     except Exception:  # pragma: no cover - linting never blocks a non-strict start
         pass
 
-    import uvicorn
+    from ._server import run_dashboard_server
 
     # JSON logging consistency: uvicorn installs its OWN plaintext access/error
     # formatters by default, so even after configure_logging() switches the root
@@ -11262,10 +11131,10 @@ def main() -> None:
     except Exception:  # pragma: no cover - never block startup on a config read
         _proxy_kwargs = {}
     if _json_logs:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info",
-                    log_config=None, **_proxy_kwargs)
+        run_dashboard_server(app, host=args.host, port=args.port, log_level="info",
+                             log_config=None, **_proxy_kwargs)
     else:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info", **_proxy_kwargs)
+        run_dashboard_server(app, host=args.host, port=args.port, log_level="info", **_proxy_kwargs)
 
 
 # This must remain after every route declaration so lazy included-router

@@ -22,8 +22,12 @@ the selected executor if necessary:
 docker build -f deploy/docker/Dockerfile.documents -t lightwork-documents:local .
 ```
 
-The image contains LibreOffice Calc, Python UNO, Poppler, Tesseract and the English
-language pack. For a released deployment, build from an approved base digest,
+The image recipe includes LibreOffice Calc, Writer, Impress and Draw, Python UNO,
+Poppler, Tesseract with the English language pack, and base pdfLaTeX packages.
+The `latex` tool defaults to Tectonic; install it and its cached bundle in a
+custom worker image, or explicitly select `engine="pdflatex"`. There is no
+automatic engine substitution or package download during a document job.
+For a released deployment, build from an approved base digest,
 record the native package versions, scan the image and pin its resulting digest.
 Install additional `tesseract-ocr-*` language packs in the worker image before
 selecting them in configuration.
@@ -39,12 +43,45 @@ ocr_max_pages = 20
 timeout = 120
 ```
 
-These capabilities are opt-in. Native processing requires an existing Docker,
+These three configured capabilities are opt-in. Native PDF OCR and spreadsheet
+recalculation require an existing Docker,
 Podman or Kubernetes backend. Each job receives its own private workspace and
 has network access disabled; it receives no other client files or application
 configuration. Missing engines, image access, language packs or sandbox setup
 produce an error and preserve the original document. The tools do not install
-system packages or silently execute native parsers on the application host.
+system packages or silently execute those opt-in parsers on the application host.
+
+## Office, image OCR, and LaTeX jobs
+
+The existing `office_convert`, image `ocr`, and LaTeX `render` tools also use
+the shared private worker. They retain their existing explicit Local backend
+route; Local runs on the host and does not provide container network isolation.
+On Docker, Podman and Kubernetes, the selected document worker image receives
+only job files, with network disabled. A missing host binary does not veto a
+capable container. Capability/version checks run inside the selected worker.
+Office export uses Python UNO with macros disabled, updates disabled and the
+input loaded read-only. LaTeX disables shell execution; Tectonic uses only its
+cached bundle. Missing fonts, packages or filters produce an error.
+
+Each `lightwork.document-job.v1` manifest declares a unique job identity,
+immutable input size/hash, operation, deadline and expected output name/type.
+The worker returns its engine version and output size/hash. The harness checks
+the job identity, original input, regular output file, media signature where
+applicable, size and digest before reporting success or publishing the result.
+Exit zero alone is insufficient. Missing/stale files, nonzero exit, timeouts,
+changed inputs or digest mismatches retain previous outputs. A destination
+changed while the job runs is not overwritten. Job workspaces are removed on
+both success and failure. Output and input are bounded at 64 MiB, individual
+command stdout/stderr at 2 MiB each, and OCR text at one million characters.
+
+These checks establish a verified artifact transfer, not the correctness of
+its business content or visual fidelity. The September 22 local refactor
+validation used backend interface fakes and tiny local Python child processes;
+native LibreOffice/Tesseract/TeX and container execution were unavailable on
+that host. The updated image recipe and customer document fidelity still need
+the consolidated platform acceptance run before being claimed as qualified.
+
+For ingestion and attachment text coverage, see [Document extraction](document-extraction.md).
 
 ## Excel workbooks
 

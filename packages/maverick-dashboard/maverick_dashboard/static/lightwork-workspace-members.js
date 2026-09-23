@@ -7,14 +7,19 @@
   // the stale-tab header stays the workspace the page was RENDERED under.
   const tenant=()=>picker&&picker.value?picker.value:root.dataset.tenant,base=()=>"/api/v1/admin/tenants/"+encodeURIComponent(tenant())+"/roles";
   const expected=()=>root.dataset.expected!==undefined?root.dataset.expected:tenant(),label=principal=>labels[principal]?labels[principal]+" ("+principal+")":principal;
+  const access=window.LightworkAccessState.create(()=>tenant()+":"+expected(),lock);
   function node(tag,text){const item=document.createElement(tag);item.textContent=text;return item;}
   function lock(){denied=true;el("list").replaceChildren();el("principal").value="";el("role").selectedIndex=0;root.querySelectorAll("button,input,select").forEach(control=>control.disabled=true);}
   async function api(path,options={}){
+    const token=access.capture();
     const headers={"Content-Type":"application/json"},exp=expected();if(exp)headers["X-Lightwork-Expected-Tenant"]=exp;
     const response=await fetch(base()+path,{...options,credentials:"same-origin",headers});
-    if([401,403].includes(response.status)){lock();throw new Error("Your sign-in or administrator access changed. Sign in again and reload Users.");}
+    access.assertCurrent(token);
+    if(["session","scope"].includes(access.observe(response,null,{forbiddenScope:true}).kind)){throw new Error("Your sign-in or administrator access changed. Sign in again and reload Users.");}
     if(response.status===204)return null;
     let data;try{data=await response.json();}catch(_){throw new Error("The workspace member service returned an unreadable response.");}
+    access.assertCurrent(token);
+    if(access.observe(response,data,{forbiddenScope:true,contextMessage:/active workspace changed/i}).kind==="context")throw new Error("The workspace changed. Reload Users before continuing.");
     if(!response.ok)throw new Error(typeof data.detail==="string"?data.detail:"Workspace membership could not be changed.");return data;
   }
   async function load(){
@@ -30,7 +35,7 @@
   }
   async function action(work){if(busy||denied)return;busy=true;const controls=Array.from(root.querySelectorAll("button,input,select"));controls.forEach(value=>value.disabled=true);try{await work();}catch(error){el("status").textContent=error.message;}finally{busy=false;if(!denied)controls.forEach(value=>value.disabled=false);}}
   el("refresh").addEventListener("click",()=>action(load));
-  if(picker)picker.addEventListener("change",()=>{root.dataset.tenant=picker.value;el("list").replaceChildren();el("status").textContent="Workspace "+picker.value+" chosen. Select Refresh members to load its roster.";});
+  if(picker)picker.addEventListener("change",()=>{access.advance();root.dataset.tenant=picker.value;el("list").replaceChildren();el("status").textContent="Workspace "+picker.value+" chosen. Select Refresh members to load its roster.";});
   el("form").addEventListener("submit",event=>{event.preventDefault();action(async()=>{
     const principal=el("principal").value.trim(),role=el("role").value;
     if(!principal.startsWith("user:")||principal.length<=5)throw new Error("Choose a named colleague's exact user: sign-in identity.");

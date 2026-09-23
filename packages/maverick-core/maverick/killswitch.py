@@ -23,11 +23,28 @@ import stat
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
+_local_checks: ContextVar[tuple[Callable[[], None], ...]] = ContextVar("execution_local_stop_checks", default=())
+
+
+@contextmanager
+def bind_local_check(checker: Callable[[], None]):
+    """Add an owned execution stop without arming the process-wide halt.
+
+    Async children and explicit context copies inherit the check; unrelated
+    threads/requests do not. Nested scopes retain their parent's stop checks.
+    """
+    token = _local_checks.set((*_local_checks.get(), checker))
+    try:
+        yield
+    finally:
+        _local_checks.reset(token)
 
 
 def _default_halt_file() -> Path:
@@ -63,6 +80,10 @@ _in_process_generation: str | None = None
 _clear_transition_holds: dict[str, tuple[str, str]] = {}
 _last_file_check_ts: float = 0.0
 _last_file_present: bool = False
+_last_file_authority: tuple[str, bool, bool] | None = None
+# Independent of the in-process/control-plane lock: filesystem observation
+# never acquires a control barrier or changes an in-process halt generation.
+_file_check_lock = threading.Lock()
 # Cluster-wide halt (v22): consulted from the shared world store so an emergency
 # stop armed on one replica halts the whole fleet. Throttled like the file check;
 # only engaged on a shared backend (Postgres).
@@ -289,36 +310,59 @@ def _file_halt_active(
     Avoids stat-ing the filesystem on every tool call. The 1s cache is
     invisible to humans triggering halts but cheap enough to not matter.
     """
-    global _last_file_check_ts, _last_file_present
-    now = time.monotonic()
-    elapsed = now - _last_file_check_ts
-    # ``0.0`` is the explicit cache-reset sentinel used by tests and process
-    # startup.  Also refuse to reuse a cache entry if a patched/platform clock
-    # ever moves backwards.  ``monotonic`` avoids ordinary wall-clock jumps.
-    if _last_file_check_ts > 0.0 and 0.0 <= elapsed < min_interval:
-        return _last_file_present
-    _last_file_check_ts = now
-    path = _halt_file_path()
-    try:
-        path.stat()
-        _last_file_present = True
-    except FileNotFoundError:
-        # An explicitly configured authority whose parent/mount is absent is
-        # not equivalent to an absent HALT file. Privileged learning callers
-        # must refuse because the configured stop channel cannot be observed.
-        if fail_closed and os.environ.get("MAVERICK_HALT_FILE"):
-            try:
-                path.parent.stat()
-            except OSError as parent_exc:
-                raise Halted(
-                    "HALT file authority unavailable", "file-error",
-                ) from parent_exc
-        _last_file_present = False
-    except (OSError, ValueError) as exc:
-        if fail_closed:
-            raise Halted("HALT file authority unavailable", "file-error") from exc
-        _last_file_present = False
-    return _last_file_present
+    global _last_file_check_ts, _last_file_present, _last_file_authority
+    with _file_check_lock:
+        try:
+            path = _halt_file_path().absolute()
+            explicit = bool(os.environ.get("MAVERICK_HALT_FILE"))
+            # Path.absolute captures CWD without resolving symlinks or collapsing
+            # '..': observe exactly this spelling, even if another thread chdirs.
+            authority = (
+                os.fspath(path), explicit, fail_closed,
+            )
+        except (OSError, ValueError) as exc:
+            _last_file_check_ts = 0.0
+            _last_file_authority = None
+            if fail_closed:
+                raise Halted("HALT file authority unavailable", "file-error") from exc
+            return False
+        now = time.monotonic()
+        elapsed = now - _last_file_check_ts
+        # Re-homing or a stricter observation cannot reuse another authority's
+        # positive OR negative result. Zero remains the explicit reset sentinel;
+        # a backwards clock and force_refresh also bypass the cache.
+        if (
+            authority == _last_file_authority
+            and _last_file_check_ts > 0.0
+            and 0.0 <= elapsed < min_interval
+        ):
+            return _last_file_present
+        # A failed refresh must not leave a formerly healthy cached negative
+        # available to the next fail-closed call with this same metadata.
+        _last_file_check_ts = 0.0
+        _last_file_authority = None
+        try:
+            path.stat()
+            present = True
+        except FileNotFoundError:
+            # An explicitly configured authority whose parent/mount is absent
+            # is not equivalent to an absent HALT file for privileged callers.
+            if fail_closed and explicit:
+                try:
+                    path.parent.stat()
+                except OSError as parent_exc:
+                    raise Halted(
+                        "HALT file authority unavailable", "file-error",
+                    ) from parent_exc
+            present = False
+        except (OSError, ValueError) as exc:
+            if fail_closed:
+                raise Halted("HALT file authority unavailable", "file-error") from exc
+            present = False
+        _last_file_present = present
+        _last_file_authority = authority
+        _last_file_check_ts = now
+        return present
 
 
 def _shared_halt_active(
@@ -405,6 +449,8 @@ def check(*, force_refresh: bool = False, fail_closed: bool = False) -> None:
     )
     if shared is not None:
         raise Halted(shared[0], shared[1])
+    for checker in _local_checks.get():
+        checker()
 
 
 def is_active() -> bool:

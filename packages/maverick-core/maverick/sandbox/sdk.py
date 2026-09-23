@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)
@@ -34,6 +36,73 @@ SDK_VERSION = 2
 # Optional capability methods a backend MAY provide; capabilities() reports
 # which are present so callers feature-detect instead of try/except-ing.
 _OPTIONAL = ("put_file", "close", "stop", "exec_authenticated_tests")
+
+
+@dataclass(frozen=True)
+class LegacyExecutionPolicy:
+    """Backend-author declaration of a physically enforced fixed execution cap.
+
+    Only an exec(cmd) implementation that owns and enforces this finite cap may
+    advertise ``legacy_execution_policy``. This is a trusted backend contract,
+    not a claim that inspecting Python signatures proves cancellation support.
+    """
+
+    max_seconds: float
+
+    def __post_init__(self):
+        if isinstance(self.max_seconds, bool) or not isinstance(self.max_seconds, (int, float)) or not math.isfinite(self.max_seconds) or self.max_seconds <= 0:
+            raise ValueError("legacy execution cap must be finite and positive")
+
+
+class LegacySandboxAdapter:
+    """Adapt only an explicitly bounded legacy owner, never a timeout thread."""
+
+    def __init__(self, backend):
+        policy = getattr(backend, "legacy_execution_policy", None)
+        if not isinstance(policy, LegacyExecutionPolicy):
+            raise TypeError("legacy sandbox requires an explicit finite legacy_execution_policy")
+        execute = getattr(backend, "exec", None)
+        if not callable(execute):
+            raise TypeError("legacy sandbox must implement exec(cmd)")
+        try:
+            inspect.signature(execute).bind("command")
+        except (TypeError, ValueError) as error:
+            raise TypeError("legacy sandbox must bind exec(cmd) before dispatch") from error
+        self._backend = backend
+        self._policy = policy
+        self._execute = execute
+
+    def __getattr__(self, name):
+        return getattr(self._backend, name)
+
+    def exec(self, cmd: str, timeout: float | None = None):
+        # A new policy or method needs fresh admission. Do not change a shared
+        # backend timeout or infer support from an exception after invocation.
+        current = getattr(self._backend, "exec", None)
+        if (getattr(self._backend, "legacy_execution_policy", None) is not self._policy
+                or getattr(current, "__self__", None) is not getattr(self._execute, "__self__", None)
+                or getattr(current, "__func__", current) is not getattr(self._execute, "__func__", self._execute)):
+            raise RuntimeError("legacy sandbox execution policy changed; readmit the backend")
+        if timeout is not None:
+            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError("sandbox timeout must be finite and positive")
+            if self._policy.max_seconds > timeout:
+                raise ValueError("legacy sandbox cannot enforce the shorter requested timeout")
+        return self._execute(cmd)
+
+
+def execution_callable(backend):
+    """Choose the declared call shape before any sandbox command is invoked."""
+    execute = getattr(backend, "exec", None)
+    if not callable(execute):
+        raise TypeError("configured sandbox must implement exec(cmd, timeout=None)")
+    try:
+        inspect.signature(execute).bind("command", timeout=1.0)
+    except (TypeError, ValueError):
+        if not isinstance(getattr(backend, "legacy_execution_policy", None), LegacyExecutionPolicy):
+            raise TypeError("configured sandbox must support a timeout or declare a finite legacy execution policy") from None
+        return LegacySandboxAdapter(backend).exec
+    return execute
 
 
 @runtime_checkable
@@ -79,6 +148,11 @@ def conformance(backend: Any) -> list[str]:
                 problems.append(
                     "exec() must accept a per-call timeout kwarg "
                     "(timeout=None) — tools plumb longer caps for test runs")
+            elif names:
+                try:
+                    sig.replace(parameters=params).bind("command", timeout=1.0)
+                except TypeError:
+                    problems.append("exec() must bind a command and per-call timeout keyword")
         except (TypeError, ValueError):  # builtins/C callables
             problems.append("exec() signature is not introspectable")
     if not _declares_workdir(backend):
@@ -139,6 +213,13 @@ def load_entry_point_backend(name: str, *, workdir, timeout: float,
             "or fix [sandbox] backend.")
     factory = matches[0].load()
     backend = factory(workdir=workdir, timeout=timeout, **(options or {}))
+    if isinstance(getattr(backend, "legacy_execution_policy", None), LegacyExecutionPolicy):
+        # The fixed cap must satisfy this run's requested policy before the
+        # entry point is admitted, even if no command is ever dispatched.
+        adapter = LegacySandboxAdapter(backend)
+        if adapter._policy.max_seconds > timeout:
+            raise ValueError("legacy sandbox cannot enforce the shorter requested timeout")
+        backend = adapter
     problems = conformance(backend)
     if problems:
         raise RuntimeError(
@@ -152,6 +233,9 @@ def load_entry_point_backend(name: str, *, workdir, timeout: float,
 __all__ = [
     "SDK_VERSION",
     "SandboxV2",
+    "LegacyExecutionPolicy",
+    "LegacySandboxAdapter",
+    "execution_callable",
     "capabilities",
     "conformance",
     "installed_entry_point_names",

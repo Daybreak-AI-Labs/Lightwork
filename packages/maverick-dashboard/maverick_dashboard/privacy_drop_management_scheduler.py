@@ -496,7 +496,7 @@ class DROPManagedMaintenanceScheduler:
             self._thread.start()
         return True
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 5.0, *, wait: bool = True) -> None:
         if (
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
@@ -507,8 +507,12 @@ class DROPManagedMaintenanceScheduler:
         self._stop.set()
         with self._lock:
             thread = self._thread
+        if not wait:
+            return False
         if thread is not None:
             thread.join(float(timeout))
+            if thread.is_alive():
+                return
         with self._lock:
             if self._thread is thread and (thread is None or not thread.is_alive()):
                 self._thread = None
@@ -574,14 +578,11 @@ def attach_drop_managed_scheduler(app: Any, runtime: DROPManagedMaintenanceSched
 
     @asynccontextmanager
     async def lifespan(target: Any):
-        from starlette.concurrency import run_in_threadpool
+        from ._lifecycle import supervised_runtime
 
         async with previous(target):
-            await run_in_threadpool(runtime.start)
-            try:
+            async with supervised_runtime(target, "drop_management", runtime):
                 yield
-            finally:
-                await run_in_threadpool(runtime.stop)
 
     app.router.lifespan_context = lifespan
     app.state.privacy_drop_management_scheduler = runtime

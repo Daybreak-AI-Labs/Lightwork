@@ -227,11 +227,6 @@ def _deliverable_edit_similarity(original: str, revised: str) -> float:
     return difflib.SequenceMatcher(None, original, revised).ratio()
 
 
-# Shared-store channel for Idempotency-Key dedup on goal creation (see
-# create_goal). Distinct from the channel/webhook idempotency namespaces.
-_IDEMPOTENCY_CHANNEL = "idempotency:api:goals"
-
-
 def _shared_halt_backend() -> bool:
     """Resolve whether the shared-store halt is authoritative.
 
@@ -1309,12 +1304,7 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
                 "Idempotency-Replayed": {"schema": {"type": "boolean"}},
             },
         },
-        503: {
-            "description": "Idempotency state is temporarily indeterminate",
-            "headers": {
-                "Retry-After": {"schema": {"type": "integer"}},
-            },
-        },
+        409: {"description": "Request identity conflicts or needs reconciliation; no repeat dispatch"},
     },
 )
 def create_goal(
@@ -1365,81 +1355,45 @@ def create_goal(
             raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
         require_suite(request, suite_for(domain))
     w = _world()
-    # Idempotency-Key (optional, RFC-style): a client whose POST times out at the
-    # LB and retries must not double-create / double-bill a paid run -- and on a
-    # multi-replica deployment the retry can land on a different replica, so the
-    # dedup must be in the shared store (reusing the backend-agnostic
-    # mark/lookup_processed_message primitive). The key is scoped to the caller so
-    # it can't collide across principals. A replay returns the ORIGINAL goal and
-    # dispatches no second run.
+    # Keyed admission uses the same atomic goal/receipt transaction as chat
+    # attachments, binding the complete reviewed payload and effective limits.
+    # Replays and read reconciliation never dispatch work a second time.
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
-    idem_ext = ""
-    if idem_key:
-        if len(idem_key) > 255:
-            raise HTTPException(status_code=400, detail="Idempotency-Key too long (max 255)")
-        idem_ext = f"{caller_principal(request) or ''}:{idem_key}"
-        prior = w.lookup_processed_message(_IDEMPOTENCY_CHANNEL, idem_ext)
-        if prior is not None:
-            g0 = w.get_goal(prior)
-            if g0 is not None:
-                response.headers["Location"] = f"/api/v1/goals/{g0.id}"
-                response.headers["Idempotency-Replayed"] = "true"
-                return _to_goal_out(g0)  # replay: original goal, no new run
-    goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
-    if domain:
-        w.set_goal_domain(goal_id, domain)
-    if idem_key and not w.mark_message_processed(_IDEMPOTENCY_CHANNEL, idem_ext, goal_id=goal_id):
-        # Lost a concurrent race on the same key: return the winner's goal and do
-        # NOT dispatch a run for this never-run goal row. Mark the loser
-        # terminal so it cannot remain a permanently-pending ghost in the
-        # operator worklist.
-        prior = w.lookup_processed_message(_IDEMPOTENCY_CHANNEL, idem_ext)
-        g0 = w.get_goal(prior) if prior is not None else None
-        if g0 is not None:
-            try:
-                w.set_goal_status(
-                    goal_id,
-                    "cancelled",
-                    result="superseded by a concurrent idempotent request",
-                )
-            except Exception:
-                log.warning(
-                    "could not mark idempotency-race loser goal #%s cancelled",
-                    goal_id,
-                    exc_info=True,
-                )
-            response.headers["Location"] = f"/api/v1/goals/{g0.id}"
-            response.headers["Idempotency-Replayed"] = "true"
-            return _to_goal_out(g0)
-        # A claim without its referenced goal is indeterminate shared-store
-        # state. Never return the newly-created goal as accepted: it was not
-        # dispatched, and doing so leaves the client polling forever.
-        try:
-            w.set_goal_status(
-                goal_id,
-                "blocked",
-                result="idempotency claim is temporarily indeterminate",
-            )
-        except Exception:
-            log.warning(
-                "could not mark indeterminate idempotency goal #%s blocked",
-                goal_id,
-                exc_info=True,
-            )
-        raise HTTPException(
-            status_code=503,
-            detail="idempotency claim is temporarily indeterminate; retry shortly",
-            headers={"Retry-After": "1"},
-        )
-    from maverick.runner import run_goal_in_background_async
-
-    # Enforce server-side execution caps even when callers request larger values.
     max_dollars = min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
     max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
+    receipt = None
+    if idem_key:
+        from .goal_submission import reserve_api
+
+        receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
+            payload=payload, title=title, description=description, domain=domain,
+            caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth})
+        goal_id = receipt["goal_id"]
+        if not receipt["created"]:
+            g0 = w.get_goal(goal_id)
+            if g0 is None:
+                raise HTTPException(status_code=409, detail="Submission goal unavailable; reconcile before retrying")
+            if (g0.owner or "") != (caller_principal(request) or ""):
+                raise HTTPException(status_code=404, detail="No matching submission receipt")
+            assert_goal_access(request, g0)
+            response.headers["Location"] = f"/api/v1/goals/{g0.id}"
+            response.headers["Idempotency-Replayed"] = "true"
+            return _to_goal_out(g0)
+    else:
+        goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
+        if domain:
+            w.set_goal_domain(goal_id, domain)
+    from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
+    if receipt is not None:
+        from .goal_submission import claim_api_dispatch
+
+        claim_api_dispatch(w, receipt, {"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds,
+            "max_depth": max_depth, "channel": "api", "user_id": user_id,
+            "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None})
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -1466,6 +1420,28 @@ def create_goal(
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
     response.headers["Idempotency-Replayed"] = "false"
     return _to_goal_out(g)
+
+
+@router.get("/goal-submissions/receipt")
+def reconcile_goal_submission(request: Request, response: Response, kind: str = "api") -> dict:
+    """Recover an acknowledgement by its original key, without submitting work."""
+    from .goal_submission import lookup_receipt
+
+    try:
+        require_permission(request, "operate")
+        receipt, goal = lookup_receipt(_world(), key=request.headers.get("Idempotency-Key") or "",
+                                      owner=caller_principal(request) or "", kind=kind)
+        assert_goal_access(request, goal)
+        if goal.domain:
+            from maverick.domain import suite_for
+            require_suite(request, suite_for(goal.domain))
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
+        raise
+    response.headers["Cache-Control"] = "no-store"
+    return {"state": "accepted", "submission_state": receipt["state"],
+            "goal": {"id": goal.id, "status": goal.status},
+            "replayed": True, "execution_confirmed": False}
 
 
 @router.get(
@@ -1573,11 +1549,9 @@ def goal_events(
 
 def _sse_event(e) -> str:
     """Format one goal event as a Server-Sent Event frame."""
-    data = json.dumps(
-        {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
-    )
-    kind = str(e.kind or "message").replace("\n", " ").replace("\r", " ")
-    return f"id: {e.id}\nevent: {kind}\ndata: {data}\n\n"
+    from ._event_stream import sse_event
+
+    return sse_event(e)
 
 
 _TERMINAL_STATUSES = TERMINAL_RUN_STATUSES
@@ -1616,71 +1590,30 @@ async def goal_events_stream(
     server controls polling cadence and idle backoff.
     """
     del poll
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
+    from ._event_stream import LeasedStreamingResponse, StreamLease, goal_stream, stream_state
+    from .auth import can_access_goal
 
-    since = replay_cursor(since, request.headers.get("last-event-id"))
+    world = _world()
+    goal = await run_in_threadpool(stream_state, world, goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, goal)
     sem = _get_sse_semaphore()
     if sem.locked():
-        raise HTTPException(
-            status_code=503,
-            detail="too many concurrent event streams; retry shortly",
-            headers={"Retry-After": "5"},
-        )
+        raise HTTPException(status_code=503, detail="too many concurrent event streams; retry shortly",
+                            headers={"Retry-After": "5"})
     await sem.acquire()
-
-    async def _gen():
-        started = asyncio.get_running_loop().time()
-        last = since
-        sent = 0
-        idle_for = 0.0
-        poll_interval = _SSE_POLL_INTERVAL
-        try:
-            yield ": connected\n\n"  # open the stream immediately
-            while True:
-                if await request.is_disconnected():
-                    break
-                if (asyncio.get_running_loop().time() - started) >= _SSE_MAX_STREAM_SECONDS:
-                    yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
-                    return
-                events = await run_in_threadpool(w.goal_events, goal_id, last, _SSE_MAX_BATCH)
-                for e in events:
-                    yield _sse_event(e)
-                    last = e.id
-                    sent += 1
-                    if limit and sent >= limit:
-                        return
-                cur = await run_in_threadpool(w.get_goal, goal_id)
-                if cur is None:
-                    yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
-                    return
-                if events:
-                    idle_for = 0.0
-                    poll_interval = _SSE_POLL_INTERVAL
-                else:
-                    idle_for += poll_interval
-                    if idle_for >= _SSE_IDLE_HEARTBEAT_EVERY:
-                        yield ": heartbeat\n\n"
-                        idle_for = 0.0
-                    poll_interval = min(_SSE_MAX_POLL_INTERVAL, poll_interval * 1.5)
-                if cur is not None and cur.status in _TERMINAL_STATUSES:
-                    if len(events) < _SSE_MAX_BATCH:
-                        yield f"event: end\ndata: {json.dumps({'status': cur.status, 'next_id': last, 'terminal': True})}\n\n"
-                        return
-                    # A full batch means more backlog may remain: keep draining
-                    # (without sleeping) and end only once a read comes up short.
-                    continue
-                await asyncio.sleep(poll_interval)
-        except asyncio.CancelledError:
-            return
-        finally:
-            sem.release()
-
-    return StreamingResponse(_gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    lease = StreamLease(sem)
+    content = goal_stream(
+        request, world, goal_id,
+        since=replay_cursor(since, request.headers.get("last-event-id")),
+        lease=lease, visible=lambda state: can_access_goal(request, state),
+        limit=limit, max_batch=_SSE_MAX_BATCH, poll=_SSE_POLL_INTERVAL,
+        max_poll=_SSE_MAX_POLL_INTERVAL, heartbeat=_SSE_IDLE_HEARTBEAT_EVERY,
+        lifetime=_SSE_MAX_STREAM_SECONDS,
+    )
+    return LeasedStreamingResponse(content, lease=lease, media_type="text/event-stream",
+                                   headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/goals/{goal_id}/answer", status_code=204)
@@ -1736,54 +1669,22 @@ async def upload_attachment(
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
 
-    from maverick.attachments import (
-        MAX_FILE_BYTES,
-        AttachmentRejected,
-        store,
-    )
+    from maverick.attachments import AttachmentRejected, generate_companions
 
-    data = await file.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"file too large: {len(data)} bytes (limit {MAX_FILE_BYTES})"),
-        )
+    from .attachment_submission import publish_batch, stage_uploads
 
-    mime = file.content_type or "application/octet-stream"
-    filename = file.filename or "upload"
-
-    existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
-    try:
-        stored = store(
-            goal_id,
-            filename=filename,
-            mime=mime,
-            data=data,
-            existing_total=existing,
-        )
-    except AttachmentRejected as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    aid = w.add_attachment(
-        goal_id=goal_id,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-        path=str(stored.path),
-    )
-    # Companion generation (transcripts / extracted text) off the request
-    # path; best-effort, never raises.
-    from maverick.attachments import generate_companions
-
+    async with stage_uploads([file]) as records:
+        if not records:
+            raise HTTPException(status_code=400, detail="empty attachment")
+        try:
+            ids = await run_in_threadpool(publish_batch, w, goal_id, records)
+        except AttachmentRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        stored = records[0]
     bg.add_task(generate_companions, w, goal_id)
-    return AttachmentOut(
-        id=aid,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-    )
+    return AttachmentOut(id=ids[0], filename=stored.filename, mime=stored.mime,
+                         size_bytes=stored.size_bytes, sha256=stored.sha256)
+
 
 
 def _privacy_auth_genuinely_off() -> bool:
@@ -1962,7 +1863,7 @@ async def attach_from_source(
     assert_goal_access(request, g)
 
     from maverick import doc_discovery
-    from maverick.attachments import AttachmentRejected, store
+    from maverick.attachments import AttachmentRejected, generate_companions
 
     principal = _document_source_principal(request)
     try:
@@ -1981,29 +1882,28 @@ async def attach_from_source(
 
     filename = body.name.strip() or f"{body.source}-{body.doc_id[:24]}"
     mime = doc_discovery.resolve_mime(filename, mime)
-    existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
-    try:
-        stored = store(goal_id, filename=filename, mime=mime, data=data, existing_total=existing)
-    except AttachmentRejected as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    aid = w.add_attachment(
-        goal_id=goal_id,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-        path=str(stored.path),
-    )
-    from maverick.attachments import generate_companions
+    import io
 
+    from starlette.datastructures import Headers
+
+    from .attachment_submission import publish_batch, stage_uploads
+
+    upload = UploadFile(file=io.BytesIO(data), filename=filename, headers=Headers({"content-type": mime}))
+    try:
+        async with stage_uploads([upload]) as records:
+            if not records:
+                raise HTTPException(status_code=400, detail="empty attachment")
+            try:
+                ids = await run_in_threadpool(publish_batch, w, goal_id, records)
+            except AttachmentRejected as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            stored = records[0]
+    finally:
+        await upload.close()
     bg.add_task(generate_companions, w, goal_id)
-    return AttachmentOut(
-        id=aid,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-    )
+    return AttachmentOut(id=ids[0], filename=stored.filename, mime=stored.mime,
+                         size_bytes=stored.size_bytes, sha256=stored.sha256)
+
 
 
 # --------------------------------------------------------------------------- #
@@ -6369,7 +6269,7 @@ def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50
     from maverick.flow import store
 
     owner = goal_owner_filter(request)
-    runs = store.list_runs(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
+    runs = store.list_run_metadata(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
     return {"runs": [_run_out(r) for r in runs]}
 
 
@@ -6406,6 +6306,16 @@ def _run_out(run) -> dict:
     d.pop("release_id", None)
     d.pop("definition_version", None)
     d.pop("subflow_digests", None)
+    if run.metadata_only:
+        d["execution_data_status"] = "not_loaded"
+        if run.status == "paused_approval":
+            # A listing cannot attest current full-data/connector authority.
+            # Detail/preview/resume endpoints still hydrate and verify it.
+            d["human"] = {key: value for key, value in (d.get("human") or {}).items()
+                          if key != "approval_card"}
+            d["approval_binding_sha256"] = ""
+            d["approval_card_status"] = "detail_required"
+        return d
     if run.status == "paused_approval":
         from maverick.approval_cards import (
             ApprovalCardError,
@@ -6446,11 +6356,9 @@ def _load_owned_run(request: Request, run_id: str):
     so a run's existence isn't leaked across owners)."""
     from maverick.flow import store
 
-    run = store.load_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="no such run")
     owner = goal_owner_filter(request)
-    if owner is not None and run.owner != owner:
+    run = store.load_run(run_id, owner=owner)
+    if run is None:
         raise HTTPException(status_code=404, detail="no such run")
     return run
 
@@ -6477,8 +6385,10 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     _require_flows()
     _load_owned_run(request, run_id)  # 404 before holding a stream slot
     from maverick.flow import store as flow_store
+    from maverick.flow.payloads import FlowPayloadError
 
-    from maverick_dashboard._shared import _get_sse_semaphore
+    from ._event_stream import LeasedStreamingResponse, StreamCadence, StreamLease
+    from ._shared import _get_sse_semaphore
 
     sem = _get_sse_semaphore()
     if sem.locked():
@@ -6489,6 +6399,8 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
         )
     await sem.acquire()
 
+    lease = StreamLease(sem)
+    owner = goal_owner_filter(request)
     # completed/failed/rejected are final; a run parked on a human or an
     # external event won't change until someone acts -- close the stream and
     # let the page's actions (approve / resume) drive the next one.
@@ -6500,16 +6412,15 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
         "paused_approval",
         "paused_event",
     )
-    poll, max_poll, max_seconds, heartbeat_every = 0.5, 5.0, 300.0, 30.0
-
     async def generate():
-        started = _asyncio.get_running_loop().time()
+        clock = _asyncio.get_running_loop().time
+        cadence = StreamCadence(clock(), clock())
         last_stamp = None
-        interval, idle = poll, 0.0
-        yield "retry: 3000\n\n"
         try:
+            yield "retry: 3000\n\n"
+            cadence.sent(clock())
             while True:
-                if (_asyncio.get_running_loop().time() - started) >= max_seconds:
+                if cadence.expired(clock()):
                     yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
                     return
                 # Stop re-reading the run file the moment the client goes away
@@ -6517,32 +6428,37 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                 # timing -- matches the goal-events stream.
                 if await request.is_disconnected():
                     return
-                run = await run_in_threadpool(flow_store.load_run, run_id)
+                run = await run_in_threadpool(flow_store.load_run, run_id, owner=owner)
                 if run is None:
                     yield 'event: error\ndata: {"detail": "run vanished"}\n\n'
                     return
-                if run.updated != last_stamp:
+                changed = run.updated != last_stamp
+                if changed:
                     last_stamp = run.updated
                     payload = _run_out(run)
                     kind = "terminal" if run.status in end_states else "snapshot"
                     yield f"event: {kind}\ndata: {_json.dumps(payload, default=str)}\n\n"
+                    cadence.sent(clock())
                     if kind == "terminal":
                         return
-                    interval, idle = poll, 0.0
-                else:
-                    idle += interval
-                    if idle >= heartbeat_every:
-                        yield ": heartbeat\n\n"
-                        idle = 0.0
-                    interval = min(max_poll, interval * 1.5)
-                await _asyncio.sleep(interval)
+                elif cadence.heartbeat_due(clock()):
+                    yield ": heartbeat\n\n"
+                    cadence.sent(clock())
+                cadence.backoff(changed)
+                await _asyncio.sleep(cadence.delay(clock()))
+        except FlowPayloadError:
+            yield (
+                'event: error\ndata: {"detail": "complete workflow data is unavailable; '
+                'restore the checkpoint before resuming", "code": "flow_data_unavailable"}\n\n'
+            )
         except _asyncio.CancelledError:
             return
         finally:
-            sem.release()
+            lease.release()
 
-    return StreamingResponse(
+    return LeasedStreamingResponse(
         generate(),
+        lease=lease,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -12073,6 +11989,67 @@ async def list_channels(request: Request) -> dict:
     return {"channels": channels}
 
 
+@router.get("/channels/delivery-receipts")
+async def channel_delivery_receipts(request: Request, cursor: str = "", limit: int = 50,
+                                    receipt_id: str = "") -> dict:
+    """Tenant-scoped delivery status without inbound text, replies or credentials."""
+    import re
+
+    require_global_permission(request, "admin")
+    if not 1 <= limit <= 100 or len(cursor) > 256:
+        raise HTTPException(status_code=400, detail="invalid receipt window")
+    from maverick_channels.delivery import DeliveryJournal
+
+    def read():
+        journal = DeliveryJournal()
+        if receipt_id:
+            if not re.fullmatch(r"chd-[a-f0-9]{56}", receipt_id):
+                raise HTTPException(status_code=400, detail="invalid receipt identity")
+            row = journal.get(receipt_id)
+            rows, next_cursor = ([row] if row else []), cursor
+        else:
+            window = list(journal.store.iter_record_ids(start_after=cursor, limit=limit))
+            rows = [row for _, record_id in window if (row := journal.get(record_id))]
+            next_cursor = window[-1][0] if window else cursor
+        results = []
+        for row in rows:
+            item = {key: row.get(key) for key in ("id", "channel", "account_sha256", "execution_id", "execution",
+                                                 "delivery", "created_at", "updated_at", "compacted")}
+            chunks = row.get("chunks", {})
+            item["chunk_states"] = {state: sum(chunk["state"] == state for chunk in chunks.values())
+                                    for state in {chunk["state"] for chunk in chunks.values()}}
+            if receipt_id:
+                item["chunks"] = [{"key": key, "state": chunk["state"], "provider_id": chunk.get("provider_id", ""),
+                                   "idempotency_key": chunk.get("idempotency_key", "")}
+                                  for key, chunk in chunks.items()]
+            results.append(item)
+        return {"receipts": results, "next_cursor": next_cursor, "bounded_window": not bool(receipt_id)}
+
+    return await run_in_threadpool(read)
+
+
+@router.get("/channels/poll-checkpoints")
+async def channel_poll_checkpoints(request: Request, cursor: str = "", limit: int = 50) -> dict:
+    """Bounded tenant status; provider tokens and opaque cursors stay private."""
+    require_global_permission(request, "admin")
+    if not 1 <= limit <= 100 or len(cursor) > 256:
+        raise HTTPException(status_code=400, detail="invalid checkpoint window")
+    from maverick.governed_records import GovernedRecordStore
+
+    def read():
+        store = GovernedRecordStore("channel-poll-cursors", "chp", "channel_poll_cursor")
+        window = list(store.iter_record_ids(start_after=cursor, limit=limit))
+        rows = []
+        for _, record_id in window:
+            row = store.get(record_id)
+            if row:
+                rows.append({**{key: row.get(key) for key in ("id", "channel", "status", "updated_at")},
+                             "has_continuation": bool(row.get("cursor"))})
+        return {"checkpoints": rows, "next_cursor": window[-1][0] if window else cursor, "bounded_window": True}
+
+    return await run_in_threadpool(read)
+
+
 @router.get("/audit/tail")
 async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> dict:
     """Tail the audit log (NDJSON at ~/.maverick/audit/YYYY-MM-DD.ndjson).
@@ -12094,7 +12071,14 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
             status_code=400,
             detail="invalid audit day; expected a real date in YYYY-MM-DD format",
         )
-    return {"events": default_audit_log().tail(n, day=safe_day)}
+    from maverick.audit.segments import ReadReport
+
+    def read():
+        report = ReadReport()
+        events = default_audit_log().tail(n, day=safe_day, report=report)
+        return {"events": events, "read_report": report.as_dict()}
+
+    return await run_in_threadpool(read)
 
 
 @router.get("/audit/grep")

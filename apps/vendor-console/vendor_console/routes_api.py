@@ -10,6 +10,7 @@ import json
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from . import audit, licensing, releases, store, support
@@ -96,7 +97,7 @@ def serve_release(request: Request):
 
 @router.post("/api/v1/support")
 async def intake_support(request: Request):
-    """File a redacted support bundle as a ticket (deduped by correlation_id)."""
+    """File a bundle scoped to the serve-token customer and correlation id."""
     conn = request.app.state.conn
     cust = _customer_from_token(request)
     raw = await _read_limited_body(request)
@@ -106,7 +107,11 @@ async def intake_support(request: Request):
         raise HTTPException(status_code=400, detail="body must be a JSON bundle") from e
     if not isinstance(bundle, dict):
         raise HTTPException(status_code=400, detail="bundle must be a JSON object")
-    tkt = support.intake_bundle(conn, customer_id=cust.id, bundle=bundle,
-                                actor=f"deployment:{cust.name}")
+    try:
+        tkt = await run_in_threadpool(
+            support.intake_bundle, conn, customer_id=cust.id, bundle=bundle,
+            actor=f"deployment:{cust.name}")
+    except store.SupportIntakeConflict as exc:
+        raise HTTPException(status_code=409, detail="support intake requires staff reconciliation") from exc
     return JSONResponse({"ticket_id": tkt.id, "correlation_id": tkt.correlation_id,
                          "status": tkt.status}, status_code=201)

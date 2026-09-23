@@ -163,7 +163,7 @@ class AzureOpenAIClient(OpenAIClient):
             or ""
         ).rstrip("/")
         deployment = env.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
-        version = env.get("AZURE_OPENAI_API_VERSION", "2024-10-21").strip()
+        version = env.get("AZURE_OPENAI_API_VERSION", "").strip() or "2024-10-21"
         if not endpoint or not deployment:
             raise RuntimeError(
                 "Azure OpenAI requires AZURE_OPENAI_ENDPOINT + "
@@ -187,8 +187,10 @@ class AzureOpenAIClient(OpenAIClient):
         # Apply the configured HTTP timeout (the base OpenAIClient does this;
         # we bypass it here, so wire it in manually or Azure calls can hang).
         from .base import sdk_http_timeout
-        _timeout = sdk_http_timeout(openai)
+        _timeout = sdk_http_timeout(openai, environment=environment)
         _extra = {"timeout": _timeout} if _timeout is not None else {}
+        if environment is not None:
+            _extra.update(organization=env.get("OPENAI_ORG_ID", ""), project=env.get("OPENAI_PROJECT_ID", ""))
         if default_headers:
             _extra["default_headers"] = dict(default_headers)
         # ``complete`` / ``complete_async`` are inherited from OpenAIClient,
@@ -209,6 +211,11 @@ class AzureOpenAIClient(OpenAIClient):
             **auth,
             **_extra,
         )
+        if environment is not None:
+            for client in (self._sync, self._async):
+                if client is not None:
+                    client.organization = env.get("OPENAI_ORG_ID") or None
+                    client.project = env.get("OPENAI_PROJECT_ID") or None
         # The deployment name is what Azure routes on; expose it as the
         # default model so the LLM facade's model id is harmless.
         self.DEFAULT_MODEL = deployment

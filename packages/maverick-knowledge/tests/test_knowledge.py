@@ -239,6 +239,18 @@ class TestPgVectorLive:
             pytest.skip("no MAVERICK_PG_DSN / MAVERICK_KNOWLEDGE_DSN")
         if importlib.util.find_spec("psycopg") is None:
             pytest.skip("psycopg not installed")
+        # A general PostgreSQL fixture also serves non-vector authorities.
+        # Require its optional server extension as well as the Python driver;
+        # an explicitly selected knowledge DSN still must satisfy its contract.
+        if not os.environ.get("MAVERICK_KNOWLEDGE_DSN"):
+            import psycopg
+
+            with psycopg.connect(dsn, autocommit=True) as connection:
+                available = connection.execute(
+                    "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'",
+                ).fetchone()
+            if available is None:
+                pytest.skip("native pgvector server extension is not available in the general PostgreSQL fixture")
         from maverick_knowledge.store import PgVectorStore
         # Unique table per run so concurrent CI jobs don't collide.
         return PgVectorStore(dsn=dsn, dim=3, table=f"kn_test_{uuid.uuid4().hex[:8]}")

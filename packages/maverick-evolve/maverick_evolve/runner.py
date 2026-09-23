@@ -34,7 +34,7 @@ from statistics import NormalDist
 
 from . import config_space
 from .archive import Archive, Candidate
-from .eval_harness import EvalCase, evaluate, evaluate_case
+from .eval_harness import EXECUTION_STOPS, EvalCase, EvalObservation, evaluate, observe_case
 from .metaproductive import MetaproductiveArchive, evolve_metaproductive
 from .search import evolve
 
@@ -463,6 +463,7 @@ async def confirm_candidate(
         log.error("strict calibration receipt unavailable; keeping seed")
         return seed
 
+    comparison_id = secrets.token_hex(16)
     if authorize is not None:
         try:
             if require_authorization:
@@ -475,6 +476,7 @@ async def confirm_candidate(
                     evaluator_id=evaluator_id,
                     case_count=len(sealed_cases),
                 )
+                comparison_id = request.request_sha256
                 permit_z = _confirmation_permit_z(
                     authorize(request), request, require_structured=True)
             else:
@@ -504,21 +506,43 @@ async def confirm_candidate(
         champion_agent = agent_factory(dict(champion.config))
         seed_outcomes: list[float] = []
         champion_outcomes: list[float] = []
+        execution_failed = False
+
+        async def expose(agent, candidate, case, index) -> EvalObservation:
+            exposure_id = f"{comparison_id}:{candidate.id}:{index}"
+            # This joins cancellation/error observations to the already spent
+            # permit without logging sealed content or grades to development.
+            log.info(
+                "sealed_exposure comparison=%s candidate=%s case_index=%d exposure=%s",
+                comparison_id, candidate.id, index,
+                sha256(exposure_id.encode("utf-8")).hexdigest())
+            return await observe_case(
+                agent, case, scorer=scorer, evaluator_id=evaluator_id,
+                exposure_id=exposure_id)
+
         # Counterbalance arm order across the immutable case order. Both arms
-        # still receive one and only one evaluation of every sealed case.
+        # receive one exposure per case even after an ordinary execution error.
+        # Cancellation or a budget/halt stop instead ends exposure immediately.
         for index, case in enumerate(sealed_cases):
             if index % 2 == 0:
-                seed_score = await evaluate_case(seed_agent, case, scorer=scorer)
-                champion_score = await evaluate_case(
-                    champion_agent, case, scorer=scorer)
+                seed_observation = await expose(seed_agent, seed, case, index)
+                champion_observation = await expose(champion_agent, champion, case, index)
             else:
-                champion_score = await evaluate_case(
-                    champion_agent, case, scorer=scorer)
-                seed_score = await evaluate_case(seed_agent, case, scorer=scorer)
-            seed_outcomes.append(seed_score)
-            champion_outcomes.append(champion_score)
-    except Exception as exc:
-        log.error("sealed confirmation failed; rejecting champion: %s", exc)
+                champion_observation = await expose(champion_agent, champion, case, index)
+                seed_observation = await expose(seed_agent, seed, case, index)
+            execution_failed |= any(
+                observation.execution_status != "succeeded" or observation.grade is None
+                for observation in (seed_observation, champion_observation))
+            seed_outcomes.append(seed_observation.score)
+            champion_outcomes.append(champion_observation.score)
+    except EXECUTION_STOPS:
+        raise
+    except Exception:
+        log.error("sealed confirmation failed; rejecting champion")
+        return seed
+
+    if execution_failed:
+        log.error("sealed confirmation had an execution failure; keeping seed")
         return seed
 
     # Evaluation can outlive the receipt that was fresh before exposure.  A

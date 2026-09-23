@@ -44,13 +44,43 @@ def test_canonical_authority_registry_covers_every_declared_store() -> None:
     assert authority_policy("future-authority.lock", is_sqlite=True) == "unknown_sqlite"
 
 
+def test_shared_a2a_binding_is_retained_and_blocks_restored_admission(tmp_path: Path) -> None:
+    """An opaque anti-downgrade receipt cannot be discarded as an ordinary cache."""
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    relative = "tenants/tenant-a/a2a/tasks.authority.sealed"
+    marker = stage.joinpath(*relative.split("/"))
+    file_lock.ensure_private_directory(marker.parent)
+    file_lock.atomic_create_bytes(marker, b"opaque authenticated binding retained verbatim")
+    original = marker.read_bytes()
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert marker.read_bytes() == original
+    item, = [item for item in report["items"] if item["source"] == relative]
+    assert item["safe_state"] == "global_start_blocked"
+    assert item["prior_state"] == "unclassified:a2a_shared_authority_binding"
+    assert item["requires_external_readback"] is True
+    assert authority_policy(relative.swapcase(), is_sqlite=False) == "a2a_shared_authority_binding"
+    assert authority_policy(relative + ".lock", is_sqlite=False) is None
+
+
 def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     """Make adding a default governed store without recovery policy fail CI."""
-    source_root = Path(__file__).parents[1] / "maverick"
+    packages = Path(__file__).parents[2]
+    source_roots = (packages / "maverick-core" / "maverick",
+                    packages / "maverick-channels" / "maverick_channels")
     declarations: dict[str, str] = {}
     dynamic_declarations: set[str] = set()
-    for source in source_root.rglob("*.py"):
+    for source in (path for root in source_roots for path in root.rglob("*.py")):
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        constants = {
+            target.id: node.value
+            for node in tree.body if isinstance(node, ast.Assign)
+            for target in node.targets if isinstance(target, ast.Name)
+            and target.id.isupper() and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        }
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -65,6 +95,8 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
             if name not in {"GovernedRecordStore", "_RecordStore"} or not node.args:
                 continue
             namespace = node.args[0]
+            if isinstance(namespace, ast.Name) and namespace.id in constants:
+                namespace = constants[namespace.id]
             if not (
                 isinstance(namespace, ast.Constant)
                 and isinstance(namespace.value, str)
@@ -77,7 +109,7 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
                     dynamic_declarations.add(ast.unparse(namespace))
                 continue
             relative = f"{namespace.value}/recovered.json"
-            declarations[relative] = f"{source.relative_to(source_root)}:{node.lineno}"
+            declarations[relative] = f"{source.relative_to(packages)}:{node.lineno}"
 
     missing = {
         relative: location

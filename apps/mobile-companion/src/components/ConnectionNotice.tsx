@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-export function ConnectionNotice({ message }: { message: string }): React.JSX.Element {
+export function ConnectionNotice({ message, accessDenied = false }: { message: string; accessDenied?: boolean }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   return (
     <View style={styles.notice}>
       <Text style={styles.error} accessibilityRole="alert">
-        Could not load the latest information. Check your connection and dashboard settings.
+        {message.startsWith("Unsupported mobile transport:") ? message :
+          accessDenied ? "Access denied. Check your sign-in and permissions. Cached information is hidden." :
+          "Could not load the latest information. Check your connection and dashboard settings."}
       </Text>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
         onPress={() => setExpanded(!expanded)}>

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 from maverick.world_model_backends import pg_rls
-from maverick.world_model_backends.postgres import _TENANT_TABLES
+from maverick.world_model_backends.pg_rls import _PREFLIGHT_TABLES
 
 
 class _FakeCursor:
@@ -62,7 +62,7 @@ class _FakeConn:
 def _tables(role="app", *, nulls=0, exists=True, owner=None):
     owner = owner if owner is not None else role
     return {t: {"exists": exists, "owner": owner, "nulls": nulls}
-            for t in _TENANT_TABLES}
+            for t in _PREFLIGHT_TABLES}
 
 
 # --- resolve_dsn precedence -------------------------------------------------
@@ -120,15 +120,15 @@ def test_preflight_flags_missing_table_without_raising():
 def test_backfill_assigns_null_rows_and_commits():
     conn = _FakeConn("app", _tables("app", nulls=3))
     report = pg_rls.backfill(conn, "acme")
-    assert report == dict.fromkeys(_TENANT_TABLES, 3)
+    assert report == dict.fromkeys(_PREFLIGHT_TABLES, 3)
     assert conn.committed is True
-    assert conn.updated == dict.fromkeys(_TENANT_TABLES, "acme")
+    assert conn.updated == dict.fromkeys(_PREFLIGHT_TABLES, "acme")
 
 
 def test_backfill_dry_run_counts_without_writing():
     conn = _FakeConn("app", _tables("app", nulls=4))
     report = pg_rls.backfill(conn, "acme", dry_run=True)
-    assert report == dict.fromkeys(_TENANT_TABLES, 4)
+    assert report == dict.fromkeys(_PREFLIGHT_TABLES, 4)
     assert conn.committed is False
     assert conn.updated == {}
 
@@ -136,7 +136,7 @@ def test_backfill_dry_run_counts_without_writing():
 def test_backfill_skips_missing_table():
     conn = _FakeConn("app", _tables("app", nulls=2, exists=False))
     report = pg_rls.backfill(conn, "acme")
-    assert report == dict.fromkeys(_TENANT_TABLES, 0)
+    assert report == dict.fromkeys(_PREFLIGHT_TABLES, 0)
     assert conn.updated == {}
 
 

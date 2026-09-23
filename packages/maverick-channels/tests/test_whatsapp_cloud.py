@@ -46,6 +46,7 @@ def _event(sender=SENDER, text="hello agent", msg_id="wamid.X1"):
 def _claim_ok(monkeypatch):
     """Most tests are not about dedup; provide an available claim store."""
     wm = MagicMock()
+    wm.is_processed_message.return_value = False
     wm.mark_message_processed.return_value = True
     monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
     return wm
@@ -140,6 +141,7 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
     wm = MagicMock()
+    wm.is_processed_message.return_value = True
     wm.mark_message_processed.return_value = False  # already claimed
     monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
     client = TestClient(ch._app)
@@ -147,7 +149,8 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     r = client.post("/webhook/whatsapp-cloud", content=body,
                     headers={"X-Hub-Signature-256": _sign(body)})
     assert r.status_code == 200
-    wm.mark_message_processed.assert_called_once_with("whatsapp_cloud", "wamid.X1")
+    wm.is_processed_message.assert_called_with("whatsapp_cloud", "wamid.X1")
+    wm.mark_message_processed.assert_not_called()
     assert not ch.handler.await_count
 
 
@@ -179,6 +182,9 @@ def test_send_posts_to_graph(monkeypatch):
     class _Resp:
         status_code = 200
         text = ""
+
+        def json(self):
+            return {"messages": [{"id": "fixture-response-id"}]}
 
     class _Client:
         def __init__(self, timeout=None):
@@ -213,6 +219,9 @@ def test_long_replies_chunked(monkeypatch):
     class _Resp:
         status_code = 200
         text = ""
+
+        def json(self):
+            return {"messages": [{"id": "fixture-response-id"}]}
 
     class _Client:
         def __init__(self, timeout=None):

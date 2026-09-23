@@ -335,6 +335,21 @@ def test_analysis_memo_is_shared_and_states_its_limits():
     assert "a model cannot create or clear a finding" in memo
 
 
+def test_analysis_memo_explains_refused_redline_scope():
+    from maverick import docx_redline as dr
+
+    anchor = "Processor may engage subcontractors without prior approval."
+    wrapped = "8.2. " + anchor + " All other duties survive."
+    result = dr.build_redlined_docx([wrapped], [
+        dr.ClauseEdit(find=anchor, replace="Prior approval is required.")],
+        date="2026-09-22T12:00:00Z")
+    review = pr.review_paper(DPA_TEXT, vendor="Acme", use_model=False)
+    memo = pr.analysis_memo(review, redline_result=result)
+    assert "manual review" in memo
+    assert "Edit 1: The anchor covers only part of a paragraph" in memo
+    assert "Supply the complete paragraph and replacement" in memo
+
+
 # --- drafting OUR paper (the vendor signs our template) --------------------
 
 def _draft_doc_xml(content: bytes) -> str:

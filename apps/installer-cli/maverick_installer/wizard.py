@@ -4747,6 +4747,14 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; leave off for SQLite or single-tenant installs.",
             default=False,
         ),
+        "governed_pg_pool": _q_confirm(
+            "Reuse one bounded Postgres connection for governed records? "
+            "Only affects a configured Postgres governed-record backend. "
+            "Each operation still validates tenant, schema and key authority; "
+            "waiting is capped at five seconds. Start with one connection and "
+            "measure your workload before increasing pool_size. Off by default.",
+            default=False,
+        ),
         "audit_sign": _q_confirm(
             "Sign the audit log for tamper-evidence? Ed25519 hash-chains every "
             "audit row (plus a signed cross-file ledger) so `maverick audit verify` "
@@ -6583,9 +6591,18 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     return lines
 
 
-def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
+def _cfg_governed_records(enable_pool: bool = False) -> list[str]:
+    return [
+        "", "[governed_records]", 'backend = "auto"',
+        f"pool_size = {1 if enable_pool else 0}", "pool_timeout_seconds = 5",
+    ]
+
+
+def _cfg_security_suite(
+    security_suite: dict[str, Any] | None, *, governed_pg_pool: bool = False,
+) -> list[str]:
     if security_suite is None:
-        return []
+        return _cfg_governed_records(True) if governed_pg_pool else []
     allowed_inventory_connectors = {
         "agentforce",
         "azure_ai_foundry",
@@ -6713,9 +6730,7 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "attachment_ttl_seconds = 604800",
         "max_attachments = 100000",
         'allowed_media_types = ["application/json", "application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png", "image/webp", "text/csv", "text/plain"]',
-        "",
-        "[governed_records]",
-        'backend = "auto"',
+        *_cfg_governed_records(governed_pg_pool or bool(security_suite.get("governed_pg_pool"))),
         "",
         "[evidence_graph]",
         f"enable = {'true' if security_suite.get('evidence_graph', False) or security_suite.get('vendor_onboarding', False) else 'false'}",
@@ -8510,7 +8525,9 @@ def write_config(
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
     lines += _cfg_assessments(assessments)
-    lines += _cfg_security_suite(security_suite)
+    lines += _cfg_security_suite(
+        security_suite, governed_pg_pool=bool(advanced.get("governed_pg_pool")),
+    )
     if security_suite is not None:
         lines += [
             "", "[vendor_onboarding]",

@@ -37,6 +37,7 @@ from .pricing import (
     VersionedPricingProvider,
     load_pricing_evidence_pack,
 )
+from .providers.configuration import ProviderConfig as _ProviderClientConfig
 from .runtime_overrides import RuntimeOverridesSecurityError
 
 # Latest Claude family as of 2026-05.
@@ -1296,32 +1297,11 @@ _BEDROCK_CLIENT_ENV_NAMES = (
     "BEDROCK_AUTH_MODE",
     "BEDROCK_ENDPOINT",
     "BEDROCK_MODEL_ID",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
 )
 _PROVIDER_SNAPSHOT_RETRIES = 3
 _CLIENT_CACHE_MAX = 32
-
-
-@dataclass(frozen=True, repr=False)
-class _ProviderClientConfig:
-    """One immutable provider-client admission snapshot.
-
-    The secret-bearing values intentionally do not appear in ``repr``.  Cache
-    identity uses only ``fingerprint`` so credentials and auth headers never
-    become dict keys that diagnostics might print.
-    """
-
-    api_key: str | None
-    base_url: str | None
-    default_headers: tuple[tuple[str, str], ...]
-    auth_mode: str | None
-    provider_environment: tuple[tuple[str, str], ...]
-    fingerprint: str
-
-    def headers_dict(self) -> dict[str, str] | None:
-        return dict(self.default_headers) if self.default_headers else None
-
-    def environment_dict(self) -> dict[str, str]:
-        return dict(self.provider_environment)
 
 
 def _provider_config_snapshot(
@@ -1340,7 +1320,7 @@ def _provider_config_snapshot(
         before = dict(os.environ)
         try:
             raw = get_provider_config(provider) or {}
-            provider_config = dict(raw) if isinstance(raw, dict) else {}
+            provider_config = dict(raw) if isinstance(raw, dict) else raw
         except Exception:  # pragma: no cover -- provider config remains fail-soft
             provider_config = {}
         after = dict(os.environ)
@@ -1354,16 +1334,8 @@ def _provider_config_snapshot(
 
 
 def _canonical_headers(value: object) -> tuple[tuple[str, str], ...]:
-    if not isinstance(value, dict):
-        return ()
-    headers: dict[str, str] = {}
-    for raw_name, raw_value in value.items():
-        if not isinstance(raw_name, str):
-            continue
-        name = raw_name.strip()
-        if name:
-            headers[name] = str(raw_value)
-    return tuple(sorted(headers.items(), key=lambda item: (item[0].casefold(), item[0])))
+    from .providers.configuration import canonical_headers
+    return canonical_headers(value)
 
 
 def _provider_config_fingerprint(
@@ -1373,6 +1345,7 @@ def _provider_config_fingerprint(
     default_headers: tuple[tuple[str, str], ...],
     auth_mode: str | None,
     provider_environment: tuple[tuple[str, str], ...],
+    adapter_options: tuple[tuple[str, str | float], ...] = (),
 ) -> str:
     canonical = json.dumps(
         {
@@ -1385,6 +1358,7 @@ def _provider_config_fingerprint(
             ),
             "auth_mode": auth_mode,
             "provider_environment": provider_environment,
+            "adapter_options": adapter_options,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -1678,6 +1652,9 @@ class LLM:
         # separate get_provider_config() reads, so a rotation between them could
         # pair old credentials with a new gateway.
         pcfg, environment = _provider_config_snapshot(provider)
+        from .providers.configuration import adapter_options, validate_fields
+        validate_fields(provider, pcfg)
+        options = adapter_options(provider, pcfg)
         key = _provider_api_key(
             provider,
             self._anthropic_api_key,
@@ -1705,7 +1682,20 @@ class LLM:
                 environment.get("AZURE_OPENAI_AUTH", "").strip().lower() or None
             )
 
+        # Pass an explicit environment to every adapter, including an empty
+        # snapshot. A missing value must not fall back to a newer generation.
         provider_environment: tuple[tuple[str, str], ...] = ()
+        common_environment = {
+            name: environment[name] for name in (
+                "MAVERICK_LLM_READ_TIMEOUT", "MAVERICK_LLM_CONNECT_TIMEOUT",
+            ) if name in environment
+        }
+        if provider == "anthropic" and "ANTHROPIC_AUTH_TOKEN" in environment:
+            common_environment["ANTHROPIC_AUTH_TOKEN"] = environment["ANTHROPIC_AUTH_TOKEN"]
+        if provider not in ("anthropic", "bedrock", "codex_cli"):
+            common_environment.update({
+                name: environment[name] for name in ("OPENAI_ORG_ID", "OPENAI_PROJECT_ID") if name in environment
+            })
         if provider == "azure":
             azure_environment = {
                 name: environment.get(name, "")
@@ -1713,7 +1703,7 @@ class LLM:
             }
             if auth_mode is not None:
                 azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
-            provider_environment = tuple(sorted(azure_environment.items()))
+            common_environment.update(azure_environment)
         elif provider == "bedrock":
             # The native client derives its endpoint from the region and picks
             # IAM vs bearer auth; ``[providers.bedrock] auth_mode`` / ``endpoint``
@@ -1727,7 +1717,14 @@ class LLM:
             raw_endpoint = pcfg.get("endpoint")
             if isinstance(raw_endpoint, str) and raw_endpoint.strip():
                 bedrock_environment["BEDROCK_ENDPOINT"] = raw_endpoint.strip().lower()
-            provider_environment = tuple(sorted(bedrock_environment.items()))
+            common_environment.update(bedrock_environment)
+        elif provider == "codex_cli":
+            from .providers.codex_cli_provider import _ENV_ALLOWLIST
+            common_environment = {
+                name: environment[name] for name in (*_ENV_ALLOWLIST, "COMSPEC", "PATHEXT", "USERPROFILE")
+                if name in environment
+            }
+        provider_environment = tuple(sorted(common_environment.items()))
 
         fingerprint = _provider_config_fingerprint(
             api_key=key,
@@ -1735,6 +1732,7 @@ class LLM:
             default_headers=default_headers,
             auth_mode=auth_mode,
             provider_environment=provider_environment,
+            adapter_options=options,
         )
         return _ProviderClientConfig(
             api_key=key,
@@ -1743,6 +1741,7 @@ class LLM:
             auth_mode=auth_mode,
             provider_environment=provider_environment,
             fingerprint=fingerprint,
+            adapter_options=options,
         )
 
     def _get_client(self, provider: str):
@@ -1764,12 +1763,10 @@ class LLM:
                 "api_key": config.api_key,
                 "base_url": config.base_url,
                 "default_headers": config.headers_dict(),
+                "environment": config.environment_dict(),
             }
-            if provider in ("azure", "bedrock"):
-                # Azure's key-vs-Entra selection, static token, deployment, and
-                # API version -- and Bedrock's region, auth mode and endpoint --
-                # must consume the same environment snapshot too.
-                factory_kwargs["environment"] = config.environment_dict()
+            if provider == "codex_cli":
+                factory_kwargs["provider_options"] = config.options_dict()
             client = get_provider_client(provider, **factory_kwargs)
 
             # A provider/tenant has exactly one current client in this LLM.

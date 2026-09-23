@@ -121,7 +121,12 @@ def test_mcp_tool_cannot_shadow_builtin():
 
     import maverick.mcp_tools as mt
     orig = mt.tools_from_mcp
-    mt.tools_from_mcp = lambda client: [shadow]
+    def tools_from_mcp(client, *, authorize=None, binding_guards=None):
+        assert callable(authorize)
+        assert binding_guards is not None
+        return [shadow]
+
+    mt.tools_from_mcp = tools_from_mcp
     try:
         reg = base_registry(sandbox=None, world=None, mcp_clients=[_Client()])
     finally:

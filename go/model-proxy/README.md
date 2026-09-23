@@ -9,18 +9,19 @@ space.
 
 ## Why a second language here
 
-This is the one carve where the win is **concurrency, not CPU**. The proxy sits
-in the inference data path — every model call funnels through it. Python's
-`ThreadingHTTPServer` serializes the actual forwarding work behind the GIL; Go
-serves each request on its own goroutine, so concurrent calls forward in
-parallel. That's throughput/density for hosted/multi-tenant deployments, not
-lower single-call latency.
+Go provides a standalone deployment binary. Both the Go and Python listeners
+now stream responses with bounded admission, backpressure and cancellation.
+Neither implementation has been qualified against live provider traffic by the
+local transport tests; these changes do not establish a comparative speedup.
 
-The **behaviour is identical**. The security-critical decision logic —
+The security-critical decision logic —
 `BuildRequest` (drop the client's auth + hop-by-hop headers, inject the proxy's
 key, refuse a host outside the allow-set), `Authenticate` (constant-time client
 token check), `RouteAllowed` (allow-list only model-inference routes) — is a
-byte-for-byte port and is parity-tested against the real Python (see below).
+covered by generated parity fixtures against the real Python (see below).
+
+The shared lifecycle, limits and compatibility restrictions are documented in
+[model proxy streams](../../docs/operations/model-proxy-streams.md).
 
 ## Run
 

@@ -127,6 +127,84 @@ def test_two_data_roots_do_not_contend(tmp_path, monkeypatch) -> None:
     assert _result(_child(other))["result"] == "acquired"
 
 
+def test_same_process_cannot_reuse_one_roots_lease_for_another(tmp_path):
+    first = lease.acquire()
+    with pytest.raises(lease.LeaseUnavailable, match="different control-plane"):
+        lease.acquire(tmp_path / "another")
+    assert lease.current() is first
+    assert lease.posture(tmp_path / "another")["state"] == "unavailable"
+
+
+def test_direct_release_cannot_leave_cached_ownership_success(tmp_path):
+    first = lease.acquire()
+    first.release()
+    assert lease.current() is None
+    assert lease.posture()["single_writer_enforced"] is False
+    replacement = lease.acquire()
+    assert replacement is not first
+    assert replacement.fencing_token == first.fencing_token + 1
+
+
+@pytest.mark.parametrize("count", ["2", "0", "-1", "true", "garbage", "01", ""])
+def test_declared_multi_replica_or_invalid_count_refused_before_override(tmp_path, monkeypatch, count):
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", count)
+    monkeypatch.setenv(lease.OVERRIDE_ENV, "1")
+    with pytest.raises(lease.LeaseUnavailable, match="must remain 1"):
+        lease.acquire()
+    assert lease.posture()["state"] == "unavailable"
+    assert not lease.lock_path().exists()
+
+
+def test_declared_replica_change_cannot_reuse_cached_lease(tmp_path, monkeypatch):
+    lease.acquire()
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "2")
+    with pytest.raises(lease.LeaseUnavailable, match="must remain 1"):
+        lease.acquire()
+    assert lease.posture()["single_writer_enforced"] is False
+
+
+def test_concurrent_same_process_admission_shares_one_owner(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        owners = list(executor.map(lambda _: lease.acquire(tmp_path), range(8)))
+    assert all(owner is owners[0] for owner in owners)
+    assert owners[0].fencing_token == 1
+
+
+def test_a_different_process_identity_cannot_use_cached_ownership(tmp_path, monkeypatch):
+    held = lease.acquire()
+    original_pid = os.getpid()
+    monkeypatch.setattr(lease.os, "getpid", lambda: original_pid + 1)
+    with pytest.raises(lease.LeaseUnavailable, match="another process"):
+        held.assert_owned()
+    with pytest.raises(lease.LeaseUnavailable, match="another process"):
+        lease.acquire()
+    assert lease.posture()["single_writer_enforced"] is False
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="native fork unavailable on this platform")
+def test_native_fork_cannot_inherit_control_plane_admission(tmp_path):
+    code = textwrap.dedent(f"""
+        import os
+        from maverick import control_plane_lease as lease
+        lease.acquire({str(tmp_path)!r})
+        child = os.fork()
+        if child == 0:
+            try:
+                lease.acquire({str(tmp_path)!r})
+            except lease.LeaseUnavailable:
+                os._exit(0)
+            os._exit(5)
+        _, status = os.waitpid(child, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+        lease.current().assert_owned()
+        lease.release()
+    """)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
 # -- the fencing token -----------------------------------------------------
 
 def test_the_fencing_token_advances_across_restarts(tmp_path) -> None:

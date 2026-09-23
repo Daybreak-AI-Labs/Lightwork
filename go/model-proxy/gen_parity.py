@@ -51,6 +51,8 @@ def _cfg_json(c: mp.ProxyConfig) -> dict:
 _OPENAI = "https://api.openai.com"
 
 _BUILD_CASES = [
+    (_cfg(), "/v1/messages", {"x-maverick-proxy-token": "<client-token>",
+                              "Connection": "x-private", "x-private": "drop-me"}),
     (_cfg(), "/v1/messages", {"Authorization": "Bearer <client-token>", "X-Custom": "v"}),
     (_cfg(), "v1/messages", {"x-api-key": "client-sent", "Content-Type": "application/json"}),
     (_cfg(auth_style="x-api-key"), "/v1/messages",

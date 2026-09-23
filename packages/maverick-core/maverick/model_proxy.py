@@ -16,21 +16,23 @@ add per-call rate/audit policy later.
 The security-critical part is :func:`build_request` (drop the client's auth +
 hop-by-hop headers, inject the proxy's key in the upstream's scheme, refuse a
 host outside the allow-set) — pure and exhaustively tested. The HTTP listener
-(:func:`serve`, ``python -m maverick.model_proxy``) is a thin stdlib shell.
+(:func:`serve`, ``python -m maverick.model_proxy``) owns an asyncio HTTP/1.1
+listener and an HTTPX upstream connection pool.
 
 Config: ``[model_proxy]`` (``upstream`` / ``listen`` / ``auth_style`` /
 ``client_token`` / ``allowed_routes``) with the key from the proxy's **own**
 environment (``MAVERICK_PROXY_KEY``) so it is never in the agent's config. The
 listener requires a client bearer token (``MAVERICK_PROXY_CLIENT_TOKEN``) and
 only forwards model-inference routes by default, so a reachable local service is
-not a general provider-key oracle. Responses are buffered (an SSE stream is
-forwarded whole), which keeps the proxy simple and correct; token-by-token relay
-is a later refinement.
+not a general provider-key oracle. The listener streams bounded upstream bytes
+with backpressure and owns cancellation/cleanup on disconnect. Synchronous
+forward/handle helpers remain bounded buffered compatibility adapters.
 """
 from __future__ import annotations
 
 import hmac
 import logging
+import math
 import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -45,7 +47,7 @@ _HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length",
 })
-_AUTH_HEADERS = frozenset({"authorization", "x-api-key", "api-key"})
+_AUTH_HEADERS = frozenset({"authorization", "x-api-key", "api-key", "x-maverick-proxy-token"})
 
 DEFAULT_PORT = 8765
 DEFAULT_ALLOWED_ROUTES = frozenset({
@@ -74,6 +76,20 @@ class ProxyConfig:
     client_token: str = ""
     # "METHOD /path" specs. Empty means the safe model-inference defaults above.
     allowed_routes: frozenset[str] = frozenset()
+    max_request_bytes: int = 8 * 1024 * 1024
+    max_response_bytes: int = 64 * 1024 * 1024
+    total_seconds: float = 600.0
+    max_connections: int = 64
+
+    def __post_init__(self):
+        object.__setattr__(self, "allow_hosts", frozenset(self.allow_hosts))
+        object.__setattr__(self, "allowed_routes", frozenset(self.allowed_routes))
+        for field in ("max_request_bytes", "max_response_bytes", "max_connections"):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"model_proxy.{field} must be a positive integer")
+        if isinstance(self.total_seconds, bool) or not math.isfinite(self.total_seconds) or self.total_seconds <= 0:
+            raise ValueError("model_proxy.total_seconds must be finite and positive")
 
     def allowed(self) -> frozenset[str]:
         if self.allow_hosts:
@@ -96,17 +112,20 @@ def config_from_env() -> ProxyConfig | None:
     allowed_routes = _parse_allowed_routes(
         os.environ.get("MAVERICK_PROXY_ALLOWED_ROUTES", "")
     )
-    if not upstream or not auth_style or not client_token or not allowed_routes:
-        try:
-            cfg = (load_config() or {}).get("model_proxy") or {}
+    cfg = {}
+    try:
+        cfg = (load_config() or {}).get("model_proxy") or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        if not upstream or not auth_style or not client_token or not allowed_routes:
             upstream = upstream or str(cfg.get("upstream") or "").strip()
             listen = listen or str(cfg.get("listen") or "").strip()
             auth_style = auth_style or str(cfg.get("auth_style") or "").strip().lower()
             client_token = client_token or str(cfg.get("client_token") or "").strip()
             if not allowed_routes:
                 allowed_routes = _parse_allowed_routes(cfg.get("allowed_routes") or ())
-        except Exception:  # pragma: no cover -- config never blocks startup
-            pass
+    except Exception:  # pragma: no cover -- absent config never blocks startup
+        pass
     if not upstream:
         return None
     host, port = _split_listen(listen)
@@ -118,6 +137,15 @@ def config_from_env() -> ProxyConfig | None:
         auth_style=auth_style if auth_style in ("bearer", "x-api-key") else "bearer",
         client_token=client_token,
         allowed_routes=allowed_routes,
+        **{
+            name: cast(os.environ.get(f"MAVERICK_PROXY_{name.upper()}", cfg.get(name, default)))
+            for name, cast, default in (
+                ("max_request_bytes", int, 8 * 1024 * 1024),
+                ("max_response_bytes", int, 64 * 1024 * 1024),
+                ("total_seconds", float, 600.0),
+                ("max_connections", int, 64),
+            )
+        },
     )
 
 
@@ -196,13 +224,22 @@ def build_request(config: ProxyConfig, path: str,
     allowed = config.allowed()
     if host not in allowed:
         raise ValueError(f"upstream host {host!r} not in allow-set {sorted(allowed)}")
-    out = {k: v for k, v in headers.items()
-           if k.lower() not in _HOP_BY_HOP and k.lower() not in _AUTH_HEADERS}
+    out = strip_response_headers(headers)
     if config.auth_style == "x-api-key":
         out["x-api-key"] = config.api_key
     else:
         out["Authorization"] = f"Bearer {config.api_key}"
     return url, out
+
+
+def strip_response_headers(headers: dict[str, str]) -> dict[str, str]:
+    nominated = {
+        token.strip().lower()
+        for key, value in headers.items() if key.lower() == "connection"
+        for token in value.split(",")
+    }
+    blocked = _HOP_BY_HOP | _AUTH_HEADERS | nominated
+    return {key: value for key, value in headers.items() if key.lower() not in blocked}
 
 
 def forward(config: ProxyConfig, method: str, path: str,
@@ -211,14 +248,37 @@ def forward(config: ProxyConfig, method: str, path: str,
     """Forward a request upstream with the proxy's key. Returns
     ``(status, headers, body)``. Response is buffered."""
     url, fwd_headers = build_request(config, path, headers)
-    if client is None:
-        import httpx
-        client = httpx
-    resp = client.request(method, url, headers=fwd_headers, content=body or b"",
-                          timeout=timeout)
-    resp_headers = {k: v for k, v in dict(resp.headers).items()
-                    if k.lower() not in _HOP_BY_HOP}
-    return resp.status_code, resp_headers, resp.content
+    if len(body) > config.max_request_bytes:
+        raise ValueError("proxy request body limit exceeded")
+    if client is not None:
+        # Explicit legacy buffered adapter for existing embedders/test clients.
+        resp = client.request(method, url, headers=fwd_headers, content=body or b"",
+                              timeout=min(timeout, config.total_seconds))
+        if len(resp.content) > config.max_response_bytes:
+            raise RuntimeError("proxy upstream body limit exceeded")
+        return resp.status_code, strip_response_headers(dict(resp.headers)), resp.content
+    import asyncio
+
+    import httpx
+
+    from .model_proxy_stream import forward_stream
+    from .owned_process import run_sync
+
+    async def buffered():
+        async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as owned:
+            async with forward_stream(config, owned, method, path, headers, body) as response:
+                status, response_headers, chunks = response
+                output = bytearray()
+                async for chunk in chunks:
+                    if len(output) + len(chunk) > config.max_response_bytes:
+                        raise RuntimeError("proxy upstream body limit exceeded")
+                    output.extend(chunk)
+                return status, response_headers, bytes(output)
+
+    async def bounded():
+        return await asyncio.wait_for(buffered(), min(timeout, config.total_seconds))
+
+    return run_sync(bounded)
 
 
 def handle(config: ProxyConfig, method: str, path: str,
@@ -230,6 +290,8 @@ def handle(config: ProxyConfig, method: str, path: str,
         return 401, {"Content-Type": "text/plain"}, b"proxy authentication required"
     if not route_allowed(config, method, path):
         return 403, {"Content-Type": "text/plain"}, b"model proxy route not allowed"
+    if len(body) > config.max_request_bytes:
+        return 413, {"Content-Type": "text/plain"}, b"proxy request body limit exceeded"
     from .secrets import scrub
     try:
         return forward(config, method, path, headers, body, client=client)
@@ -244,37 +306,17 @@ def handle(config: ProxyConfig, method: str, path: str,
         return 502, {"Content-Type": "text/plain"}, f"proxy error: {safe}".encode()
 
 
-def serve(config: ProxyConfig) -> None:  # pragma: no cover -- socket server
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+def serve(config: ProxyConfig) -> None:  # pragma: no cover -- CLI lifecycle
+    import asyncio
 
-    class _Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+    from .model_proxy_stream import ProxyServer
 
-        def _do(self, method: str) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = self.rfile.read(length) if length else b""
-            status, headers, out = handle(
-                config, method, self.path, dict(self.headers), body)
-            self.send_response(status)
-            for k, v in headers.items():
-                self.send_header(k, v)
-            self.send_header("Content-Length", str(len(out)))
-            self.end_headers()
-            self.wfile.write(out)
+    async def run():
+        server = await ProxyServer(config).start()
+        log.info("model proxy listening on %s:%d", config.listen_host, config.listen_port)
+        await server.serve_forever()
 
-        def do_GET(self):
-            self._do("GET")
-
-        def do_POST(self):
-            self._do("POST")
-
-        def log_message(self, *a):  # quiet by default
-            log.debug("proxy: %s", a[0] % a[1:] if len(a) > 1 else a[0])
-
-    srv = ThreadingHTTPServer((config.listen_host, config.listen_port), _Handler)
-    log.info("model proxy on %s:%d -> %s", config.listen_host,
-             config.listen_port, config.upstream)
-    srv.serve_forever()
+    asyncio.run(run())
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell

@@ -16,7 +16,7 @@ test('request guard uses the same secure addresses accepted by connection setup'
   const calls = [];
   const api = source('src/api.ts', { fetch: async (...args) => {
     calls.push(args);
-    return { ok: true, json: async () => [] };
+    return new Response('[]');
   } });
   for (const baseUrl of ['https://dashboard.example.test', 'http://127.0.0.1:8765', 'http://[::1]:8765']) {
     assert.equal(api.isTokenTransportSafe(baseUrl), true);

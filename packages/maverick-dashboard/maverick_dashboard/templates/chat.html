@@ -30,6 +30,7 @@
 
 {% block dock %}
 <form method="post" action="/chat/send" class="composer cs-anim" enctype="multipart/form-data">
+  <input type="hidden" name="submission_key" value="{{ submission_key }}" />
   <fieldset class="composer__controls"{% if not model_route_ready %} disabled{% endif %}>
   <legend class="sr-only">Start governed AI work</legend>
   <input

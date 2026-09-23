@@ -17,9 +17,9 @@ import time
 import pytest
 
 _DSN = os.environ.get("MAVERICK_PG_DSN")
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.usefixtures("postgres_test_dsn"), pytest.mark.skipif(
     not _DSN, reason="MAVERICK_PG_DSN not set (no Postgres service)"
-)
+)]
 
 
 @pytest.fixture

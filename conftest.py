@@ -120,6 +120,16 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_runner_shutdown_admission(monkeypatch):
+    """A prior TestClient shutdown must not close admission in another test."""
+    import sys
+
+    runner = sys.modules.get("maverick.runner")
+    if runner is not None:
+        monkeypatch.setattr(runner, "_accepting_goals", True)
+
+
+@pytest.fixture(autouse=True)
 def _restore_environ():
     """Put ``os.environ`` back the way the test found it.
 
@@ -249,6 +259,22 @@ def _isolate_default_audit_writers():
         yield
     finally:
         _reset()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_channel_execution_authority(request, monkeypatch, tmp_path):
+    """Channels import the default world path once; each test owns a new DB.
+
+    Keep this in the root conftest: both core and channels have a ``tests``
+    package, which otherwise collides during combined importlib collection.
+    """
+    if "maverick-channels" not in request.node.path.parts:
+        return
+    try:
+        from maverick import world_model
+    except ImportError:
+        return  # Channels-only environments may intentionally omit the core.
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "channel-world.db")
 
 
 @pytest.fixture

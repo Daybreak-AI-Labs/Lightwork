@@ -160,14 +160,14 @@ class VoiceSetup:
                 self.job["state"] = "cancelling"
                 self.cancel.set()
 
-    def stop(self) -> None:
+    def stop(self, *, timeout: float = 3.0, wait: bool = True) -> None:
         with self.lock:
             if self.job and self.job["state"] in _ACTIVE:
                 self.job["state"] = "cancelling"
             self.cancel.set()
             thread = self.thread
-        if thread:
-            thread.join(timeout=3.0)
+        if thread and wait:
+            thread.join(timeout=max(0.0, float(timeout)))
 
 
 def _manager(request: Request) -> VoiceSetup:
@@ -244,27 +244,42 @@ def cancel(request: Request, body: CancelIn):
     return _response(request, target, key, context)
 
 
+_warmup_lock = threading.Lock()
+
+
 def start_warmup(app) -> None:
     from maverick.tools.voice import warm_up_local_stt
 
     from .api import _voice_commands_enabled
 
-    app.state.voice_warmup_cancel = threading.Event()
-    app.state.voice_warmup_thread = None
-    if _voice_commands_enabled():
-        thread = threading.Thread(target=contextvars.copy_context().run, args=(warm_up_local_stt,),
-            kwargs={"cancel": app.state.voice_warmup_cancel}, name="voice-stt-warmup", daemon=True)
-        app.state.voice_warmup_thread = thread
-        thread.start()
+    with _warmup_lock:
+        existing = getattr(app.state, "voice_warmup_thread", None)
+        if existing is not None and existing.is_alive():
+            return
+        app.state.voice_warmup_cancel = threading.Event()
+        app.state.voice_warmup_thread = None
+        if _voice_commands_enabled():
+            thread = threading.Thread(target=contextvars.copy_context().run, args=(warm_up_local_stt,),
+                kwargs={"cancel": app.state.voice_warmup_cancel}, name="voice-stt-warmup", daemon=True)
+            app.state.voice_warmup_thread = thread
+            thread.start()
 
 
-def stop_setup(app) -> None:
-    cancel = getattr(app.state, "voice_warmup_cancel", None)
-    if cancel:
-        cancel.set()
+def stop_setup(app, *, timeout: float = 3.0, wait: bool = True) -> None:
+    import time
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    with _warmup_lock:
+        cancel = getattr(app.state, "voice_warmup_cancel", None)
+        thread = getattr(app.state, "voice_warmup_thread", None)
+        if cancel:
+            cancel.set()
     manager = getattr(app.state, "voice_setup", None)
     if manager:
-        manager.stop()
-    thread = getattr(app.state, "voice_warmup_thread", None)
+        manager.stop(wait=False)
+    if not wait:
+        return
+    if manager:
+        manager.stop(timeout=max(0.0, deadline - time.monotonic()))
     if thread:
-        thread.join(timeout=3.0)
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))

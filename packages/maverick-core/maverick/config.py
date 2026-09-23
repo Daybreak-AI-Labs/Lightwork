@@ -30,6 +30,7 @@ Schema overview::
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import math
 import os
@@ -41,6 +42,7 @@ from typing import Any
 
 # Initialize encryption before a worker resolves sealed dashboard settings.
 from . import crypto_at_rest
+from .file_lock import atomic_read_bytes
 
 try:
     import tomllib  # Python 3.11+
@@ -224,7 +226,9 @@ def _read_toml_raw(path: Path) -> dict:
     if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
         return cached[2]
     try:
-        with open(path, "rb") as f:
+        # Private Windows publication retains the verified write handle until
+        # rename completes. A reader can see the name before that handle closes.
+        with io.BytesIO(atomic_read_bytes(path)) as f:
             raw = tomllib.load(f)
     except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as e:
         # The kernel must tolerate a missing config (returns {} above); a
@@ -236,6 +240,12 @@ def _read_toml_raw(path: Path) -> dict:
             path, type(e).__name__, e,
         )
         _toml_errors[key] = f"{type(e).__name__}: {e}"
+        if isinstance(e, OSError):
+            # A sharing/permission failure is not parsed file content. Keep
+            # health fail-closed now, but retry the next read even when this
+            # complete file's mtime and size have not changed.
+            _toml_cache.pop(key, None)
+            return {}
         raw = {}
     else:
         _toml_errors.pop(key, None)

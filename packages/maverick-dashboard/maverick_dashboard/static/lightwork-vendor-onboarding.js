@@ -8,11 +8,27 @@
   let selected = null;
   let approvalCardCurrent = false;
   let reviewedAt = null;
+  let reviewRefreshRequired = false;
   let busy = false;
   let queueCursor = "", queueNext = null, queueHistory = [], queueView = "all";
   let pendingIntake = null;
   let uploadReview = null, uploadGeneration = 0, uploadDenied = false;
   let exportReview = null, exportDenied = false;
+  const deniedActions = new Set();
+  const access = window.LightworkAccessState.create(() => root.dataset.workspaceContext, clearPrivate);
+  function clearPrivate() {
+    selected = null; approvalCardCurrent = false; reviewedAt = null;
+    uploadDenied = true; exportDenied = true; pendingIntake = null;
+    clearUploadReview(true); clearExportReview();
+    for (const id of ["case-title", "case-reference", "status", "scope", "evidence", "assessment", "corrections",
+      "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status",
+      "attention-summary", "acceptance-evidence-check", "document-results", "new-documents", "selected-documents"])
+      byId(id)?.replaceChildren();
+    root.querySelectorAll("input,textarea").forEach(input => { input.value = ""; input.checked = false; });
+    root.dataset.accessDenied = "true";
+    try { intakeStorage?.removeItem(intakeTaskKey); window.sessionStorage.removeItem(connectionTaskKey); } catch (_) {}
+    buttons();
+  }
   const connectionTaskKey = "lightwork:connection-task:v1";
   const intakeTaskKey = `lightwork:vendor-intake:v1:${root.dataset.workspaceContext || "local"}`;
   let intakeStorage = null;
@@ -80,6 +96,10 @@
     const node = document.createElement(tag); node.textContent = text; parent.append(node); return node;
   }
   function buttons() {
+    if (access.blocked) {
+      root.querySelectorAll("button,input,textarea,select").forEach(control => { control.disabled = true; });
+      return;
+    }
     const row = selected || {};
     const op = row.operation || {};
     const cancelled = Boolean(row.cancellation) || row.stage === "cancelled";
@@ -100,7 +120,7 @@
       "save-draft": editable,
       accept: !cancelled && op.state === "verified" && !row.outcome && row.stage !== "acceptance_reevaluation_required",
       reject: !cancelled && op.state === "verified" && !row.outcome};
-    for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || !enabled;
+    for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || reviewRefreshRequired || !enabled;
     byId("intake").querySelectorAll("input,textarea,select,button").forEach(control => { control.disabled = busy; });
     byId("refresh").disabled = busy;
     if (byId("case-filter")) byId("case-filter").disabled = busy;
@@ -127,6 +147,16 @@
     if (byId("export-confirm")) byId("export-confirm").disabled = busy || exportDenied || !exportReview;
     if (byId("export-download")) byId("export-download").disabled = busy || exportDenied || !exportReview ||
       !byId("export-confirm").checked;
+    for (const name of deniedActions) {
+      const [caseId, operation] = name.split("/");
+      if (caseId === (selected?.id || "")) {
+        const controls = {review:["review-approve", "review-reject"], draft:["save-draft"], accept:["accept", "reject"],
+          "collect-evidence":["collect"], "prepare-action":["prepare"], "approve-action":["approve"],
+          documents:["save-documents"], "evidence-export-preview":["export-preview", "export-download"],
+          "evidence-export":["export-preview", "export-download"]}[operation] || [operation];
+        for (const id of controls) if (byId(id)) byId(id).disabled = true;
+      }
+    }
   }
   const evidenceDocuments = record => record.evidence?.documents || (record.evidence ? [record.evidence] : []);
   const exportReference = value => typeof value === "string" && /^EVR-[0-9a-f]{32}$/.test(value);
@@ -434,13 +464,33 @@
     }
   }
   async function api(path, body) {
+    const token = access.capture();
+    const parts = path.split("/");
+    if (body !== undefined && reviewRefreshRequired && parts[2] === selected?.id)
+      throw new Error("Refresh and review the current request before making another change.");
+    const actionKey = parts[1] === "cases" && parts.length > 3 ? `${parts[2]}/${parts[3]}` : "";
+    if (body !== undefined && actionKey && deniedActions.has(actionKey))
+      throw new Error("This action is unavailable. Check its permissions and reload before trying again.");
     const response = await fetch(base + path, {
       method: body === undefined ? "GET" : "POST", credentials: "same-origin",
       headers: {"Content-Type": "application/json", ...(root.dataset.workspaceContext ? {"X-Lightwork-Vendor-Context": root.dataset.workspaceContext} : {})},
       ...(body === undefined ? {} : {body: JSON.stringify(body)})
     });
+    access.assertCurrent(token);
+    const policy = {forbiddenScope: body === undefined, contextMessage: /active workspace changed/i};
+    const early = access.observe(response, null, policy);
+    if (early.kind === "conflict") { reviewRefreshRequired = true; approvalCardCurrent = false; reviewedAt = null; }
+    if (["session", "scope"].includes(early.kind))
+      throw new Error("Your sign-in or workspace access changed. Sign in again and reload this page.");
+    if (early.kind === "capability" && actionKey) deniedActions.add(actionKey);
     let data;
-    try { data = await response.json(); } catch (_) { throw new Error("Server response unavailable; reload the case before retrying."); }
+    try { data = await response.json(); } catch (_) {
+      if (early.kind === "capability") throw new Error("This action is unavailable. Check its permissions and reload before trying again.");
+      throw new Error("Server response unavailable; reload the case before retrying.");
+    }
+    access.assertCurrent(token);
+    if (access.observe(response, data, policy).kind === "context")
+      throw new Error("The account or workspace changed. Reload this page before continuing.");
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Server response unavailable; reload the case before retrying.");
     if (!response.ok) {
       const detail = data.detail;
@@ -637,6 +687,7 @@
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item)),
     ];
     show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet.");
+    reviewRefreshRequired = false;
     buttons();
     if (sameCase && !sameReview)
       return "The request or assessment changed. Draft answers, notes, and decision reasons were reset. Review the current version before deciding.";
@@ -684,7 +735,7 @@
     buttons();
   }
   async function run(operation, success = "Saved. Review the current case before the next action.", focusId) {
-    if (busy) return;
+    if (busy || access.blocked) return;
     busy = true;
     root.setAttribute("aria-busy", "true");
     buttons();
@@ -831,15 +882,21 @@
     });
   }
   async function uploadRequest(path, body) {
+    const token = access.capture();
     if (uploadDenied) throw new Error("Sign in and reload this page before uploading evidence.");
     const response = await fetch(base + path, {method:"POST", credentials:"same-origin", cache:"no-store",
       headers:{"Content-Type":"application/json",...(root.dataset.workspaceContext?{"X-Lightwork-Vendor-Context":root.dataset.workspaceContext}:{})},body:JSON.stringify(body)});
+    access.assertCurrent(token);
+    access.observe(response);
     if ([401,403].includes(response.status)) {
       clearUploadReview(true); uploadDenied = true;
       throw new Error("Access to evidence upload is unavailable. Sign in or check permissions, then reload this page.");
     }
     let result;
     try { result = await response.json(); } catch (_) { throw new Error("Upload response unavailable. Refresh the request before retrying."); }
+    access.assertCurrent(token);
+    if (access.observe(response, result, {contextMessage: /active workspace changed/i}).kind === "context")
+      throw new Error("The account or workspace changed. Reload this page before continuing.");
     if (!response.ok) {
       const detail = result?.detail;
       const error = new Error(typeof detail === "string" ? detail :

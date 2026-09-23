@@ -23,6 +23,7 @@ AppleScript treats argv items as literal strings -- no interpolation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import platform
 import sqlite3
@@ -30,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
+from .delivery import DeliveryNotSent, DeliveryUnknown, send_chunk
 
 log = logging.getLogger(__name__)
 
@@ -72,39 +74,76 @@ class iMessageChannel(Channel):  # noqa: N801 - product spelling
         self._last_rowid: int | None = None
         self._stop = False
 
+    @staticmethod
+    def _account():
+        return str(CHAT_DB.resolve())
+
+    def _authorized(self, msg, account):
+        return account == self._account() and is_allowed(msg.principal_id, self.allowed_user_ids)
+
+    def _checkpoint(self, rowid=None):
+        from maverick.governed_records import GovernedRecordStore
+        from maverick.privacy_ops import RecordConflict
+
+        store = GovernedRecordStore("imessage-intake-cursors", "imc", "imessage_intake_cursor")
+        record_id = "imc-" + hashlib.sha256(self._account().encode()).hexdigest()[:56]
+        for _ in range(4):
+            current = store.get(record_id)
+            try:
+                if current is None:
+                    # First adoption skips historical Messages; subsequent
+                    # restarts resume the durable checkpoint, never MAX(ROWID).
+                    value = self._latest_rowid() if rowid is None else rowid
+                    current = store.create({"id": record_id, "last_rowid": value},
+                        action="initialize", actor="imessage", max_records=100)
+                elif rowid is not None and rowid > current["last_rowid"]:
+                    current = store.update(record_id, lambda row: row.update(last_rowid=rowid),
+                        expected_revision=current["revision"], action="checkpoint", actor="imessage")
+                return current["last_rowid"]
+            except RecordConflict:
+                continue
+        raise RuntimeError("iMessage intake checkpoint is busy")
+
+    async def _send_saved(self, msg, reply, route):
+        if reply.text:
+            return await self.send(msg.user_id, reply.text)
+
+    async def _receive(self, handle, text, rowid, guid):
+        account = self._account()
+        if not is_allowed(handle, self.allowed_user_ids):
+            self._last_rowid = await asyncio.to_thread(self._checkpoint, rowid)
+            return
+        msg = IncomingMessage(user_id=handle, text=text, channel=self.name, message_id=guid)
+        receipt = await self.admit_message(msg, external_id=guid, account=account,
+            authorize=lambda: self._authorized(msg, account))
+        # Only admitted work can advance polling. A crash after this point is
+        # recovered from the inbox, independent of the Messages DB cursor.
+        self._last_rowid = await asyncio.to_thread(self._checkpoint, rowid)
+        return await self.process_message(msg, external_id=guid, account=account,
+            authorize=lambda: self._authorized(msg, account), receipt=receipt,
+            send=lambda reply: self._send_saved(msg, reply, {}))
+
     async def start(self) -> None:
         log.info("iMessage channel polling chat.db every %ds", self.poll_interval)
-        self._last_rowid = await asyncio.to_thread(self._latest_rowid)
+        self._last_rowid = await asyncio.to_thread(self._checkpoint)
+        account = self._account()
         while not self._stop:
+            try:
+                await self.recover_messages(account=account,
+                    authorize=lambda msg: self._authorized(msg, account), send=self._send_saved)
+            except Exception:
+                log.warning("iMessage durable recovery requires review")
             try:
                 messages = await asyncio.to_thread(self._fetch_new)
             except Exception:  # pragma: no cover
                 log.exception("iMessage poll failed")
                 messages = []
-            for handle, text, rowid in messages:
-                self._last_rowid = max(self._last_rowid or 0, rowid)
-                if not is_allowed(handle, self.allowed_user_ids):
-                    log.warning("unauthorized imessage access: handle=%s", handle)
-                    continue
-                msg = IncomingMessage(
-                    user_id=handle, text=text, channel="imessage",
-                )
+            for handle, text, rowid, guid in messages:
                 try:
-                    reply = await self.dispatch_text(msg)
-                except Exception:  # pragma: no cover
-                    log.exception("handler error")
-                    reply = "⚠ An internal error occurred."
-                if not reply:  # action-only goal -> nothing to send
-                    continue
-                try:
-                    await self.send(handle, reply)
-                except Exception:  # pragma: no cover
-                    # osascript can hang (Messages.app wedged -> TimeoutExpired)
-                    # or be missing (OSError); subprocess.run's check=False does
-                    # not suppress those. An unguarded send here propagated out
-                    # of start() and killed the whole poll loop. Other channels
-                    # (signal/email/sms/whatsapp) already guard their send.
-                    log.exception("imessage reply send failed")
+                    await self._receive(handle, text, rowid, guid)
+                except Exception:
+                    log.warning("iMessage intake requires retry or review")
+                    break  # no checkpoint may skip a failed admission
             await asyncio.sleep(self.poll_interval)
 
     def _latest_rowid(self) -> int:
@@ -112,24 +151,27 @@ class iMessageChannel(Channel):  # noqa: N801 - product spelling
             row = conn.execute("SELECT COALESCE(MAX(ROWID), 0) FROM message").fetchone()
             return row[0] if row else 0
 
-    def _fetch_new(self) -> list[tuple[str, str, int]]:
-        out: list[tuple[str, str, int]] = []
+    def _fetch_new(self) -> list[tuple[str, str, int, str]]:
+        out: list[tuple[str, str, int, str]] = []
         with sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True) as conn:
             cur = conn.execute(
                 """
-                SELECT m.ROWID, h.id, m.text
+                SELECT m.ROWID, h.id, m.text, m.guid
                 FROM message m
                 JOIN handle h ON m.handle_id = h.ROWID
                 WHERE m.ROWID > ?
                   AND m.is_from_me = 0
                   AND m.text IS NOT NULL
                 ORDER BY m.ROWID ASC
+                LIMIT 256
                 """,
                 (self._last_rowid or 0,),
             )
-            for rowid, handle, text in cur.fetchall():
+            for rowid, handle, text, guid in cur.fetchall():
                 if text:
-                    out.append((handle, text, rowid))
+                    if not guid:
+                        raise ValueError("iMessage message has no stable GUID")
+                    out.append((handle, text, rowid, guid))
         return out
 
     async def send(self, user_id: str, text: str) -> None:
@@ -139,14 +181,19 @@ class iMessageChannel(Channel):  # noqa: N801 - product spelling
         adversarial LLM output (quotes, semicolons, newlines, `$`) cannot
         escape into command execution.
         """
-        await asyncio.to_thread(
-            subprocess.run,
-            ["osascript", "-", text, user_id],
-            input=_SEND_SCRIPT,
-            text=True,
-            check=False,
-            timeout=10,
-        )
+        async def post():
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run, ["osascript", "-", text, user_id],
+                    input=_SEND_SCRIPT, text=True, check=False, timeout=10, capture_output=True,
+                )
+            except FileNotFoundError as exc:
+                raise DeliveryNotSent("iMessage sender is unavailable") from exc
+            if result.returncode != 0:
+                raise DeliveryUnknown("iMessage local send was not confirmed")
+            # This confirms local Messages acceptance, not recipient delivery.
+            return "osascript-accepted"
+        return await send_chunk("text-0", {"recipient": user_id, "text": text}, post)
 
     async def stop(self) -> None:
         self._stop = True

@@ -31,6 +31,14 @@
   var currentItems = [];
   var selectedReference = null;
   var pending = false;
+  var searchGeneration = 0;
+  var activeSearch = null;
+  var nextCursor = null;
+  var deniedPaths = new Set();
+  var unconfirmedPaths = new Set();
+  var access = window.LightworkAccessState.create(function () {
+    return [root.dataset.context, root.dataset.tenant, root.dataset.actor].join(":");
+  }, clearPrivate);
   var SHA = /^[a-f0-9]{64}$/;
   var ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
   var PURPOSE = /^[a-z][a-z0-9_.-]{0,63}$/;
@@ -39,6 +47,12 @@
       !searchForm || !searchButton || !exportButton || !status ||
       !searchNote || !results || !detailPanel || !detailHeading || !detail || !requests ||
       !refreshRequests) { return; }
+
+  var nextButton = node("button", "btn", "Next results");
+  nextButton.id = "ka-next-results";
+  nextButton.type = "button";
+  nextButton.hidden = true;
+  searchNote.after(nextButton);
 
   function failure(message, code) {
     var error = new Error(message);
@@ -296,7 +310,7 @@
 
   function ensureContext(payload) {
     if (!payload || typeof payload !== "object" || payload.context !== context) {
-      clearPrivate();
+      access.invalidate("context");
       throw failure("Your account or workspace changed. Private knowledge was cleared; reload the page.", "context_changed");
     }
     return payload;
@@ -306,40 +320,57 @@
     return payload && typeof payload.detail === "string" ? payload.detail : "Knowledge access failed.";
   }
 
-  async function readJson(response) {
+  async function readJson(response, token, path, readScope) {
+    access.assertCurrent(token);
+    var policy = {forbiddenScope: readScope, contextMessage: /account or workspace changed|active workspace changed/i};
+    var meaning = access.observe(response, null, policy);
+    if (meaning.kind === "transient" && path.startsWith("/requests/")) unconfirmedPaths.add(path);
+    if (["session", "scope", "capability"].includes(meaning.kind)) {
+      if (meaning.kind === "capability") deniedPaths.add(path);
+      var denial = failure(meaning.kind === "capability" ?
+        "This action is unavailable. Check its permissions and reload knowledge access." :
+        "Your sign-in or knowledge access changed. Sign in again and reload this page.");
+      denial.accessKind = meaning.kind;
+      throw denial;
+    }
     var declared = Number(response.headers.get("content-length") || 0);
     if (declared > maxResponseBytes) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
       throw failure("The knowledge response exceeded its size boundary.");
     }
     var body = await response.text();
+    access.assertCurrent(token);
     if (new TextEncoder().encode(body).length > maxResponseBytes) {
       throw failure("The knowledge response exceeded its size boundary.");
     }
     var payload;
     try { payload = body ? JSON.parse(body) : {}; }
     catch (_error) {
-      if (response.status === 401 || response.status === 403) { clearPrivate(); }
-      throw failure("The knowledge response could not be verified.");
+      var unreadable = failure("The knowledge response could not be verified.");
+      unreadable.accessKind = meaning.kind;
+      throw unreadable;
     }
     if (!response.ok) {
       var message = errorDetail(payload);
-      if (response.status === 401 || response.status === 403 || /account or workspace changed/i.test(message)) {
-        clearPrivate();
-      }
-      throw failure(message, response.status === 409 ? "conflict" : "request_failed");
+      meaning = access.observe(response, payload, policy);
+      var rejected = failure(message, response.status === 409 ? "conflict" : "request_failed");
+      rejected.accessKind = meaning.kind;
+      throw rejected;
     }
     return ensureContext(payload);
   }
 
   async function api(path, body, method) {
+    var token = access.capture();
+    if (deniedPaths.has(path)) throw failure("This action is unavailable. Check its permissions and reload knowledge access.");
+    if (unconfirmedPaths.has(path)) throw failure("The previous result is not confirmed. Refresh request status before deciding whether to retry.");
     var response = await fetch(apiBase + path, {
       method: method || "POST",
       credentials: "same-origin",
       headers: {Accept: "application/json", "Content-Type": "application/json"},
       body: body === undefined ? undefined : JSON.stringify(body)
     });
-    return readJson(response);
+    return readJson(response, token, path, path === "/search" || method === "GET");
   }
 
   function node(tag, className, value) {
@@ -368,10 +399,16 @@
   function setBusy(value) {
     pending = value;
     root.setAttribute("aria-busy", value ? "true" : "false");
+    value = value || access.blocked;
     searchButton.disabled = value;
+    nextButton.disabled = value || !nextCursor;
     refreshRequests.disabled = value;
-    exportButton.disabled = value || !currentItems.length;
-    if (submitRequest) { submitRequest.disabled = value || !selectedReference; }
+    exportButton.disabled = value || !currentItems.length || deniedPaths.has("/export");
+    if (submitRequest) { submitRequest.disabled = value || !selectedReference || deniedPaths.has("/requests"); }
+    root.querySelectorAll("[data-access-path]").forEach(function (button) {
+      button.disabled = value || deniedPaths.has(button.dataset.accessPath) || unconfirmedPaths.has(button.dataset.accessPath);
+    });
+    if (access.blocked) root.querySelectorAll("button,input,textarea,select").forEach(function (control) { control.disabled = true; });
   }
 
   function announce(message, focus) {
@@ -390,7 +427,17 @@
     updateCorrectionField();
   }
 
+  function resetSearch() {
+    searchGeneration += 1;
+    activeSearch = null;
+    nextCursor = null;
+    nextButton.hidden = true;
+    nextButton.disabled = true;
+  }
+
   function clearPrivate() {
+    resetSearch();
+    announce("Private knowledge was cleared. Reload to recheck the current account and workspace.", true);
     currentItems = [];
     results.textContent = "";
     detail.textContent = "";
@@ -400,9 +447,11 @@
     clearRequestInputs();
     var query = document.getElementById("ka-query");
     if (query) { query.value = ""; }
+    setBusy(false);
   }
 
   function clearEligibleResults() {
+    resetSearch();
     currentItems = [];
     results.textContent = "";
     detail.textContent = "";
@@ -451,7 +500,17 @@
         payload.purpose !== requestedPurpose || !PURPOSE.test(payload.purpose) ||
         typeof payload.omitted_ineligible !== "number" ||
         !Number.isInteger(payload.omitted_ineligible) || payload.omitted_ineligible < 0 ||
-        typeof payload.truncated !== "boolean") {
+        typeof payload.truncated !== "boolean" ||
+        typeof payload.complete !== "boolean" || payload.truncated === payload.complete ||
+        !["matched", "no_match", "incomplete", "unavailable"].includes(payload.status) ||
+        !Array.isArray(payload.incomplete_reasons) ||
+        payload.incomplete_reasons.some(function (value) {
+          return !["more_matches", "more_candidates", "content_unavailable"].includes(value);
+        }) ||
+        (payload.next_cursor !== null &&
+          (typeof payload.next_cursor !== "string" || !payload.next_cursor.length || payload.next_cursor.length > 2048)) ||
+        (payload.complete && (payload.next_cursor !== null || payload.incomplete_reasons.length)) ||
+        (!payload.complete && !payload.incomplete_reasons.length)) {
       throw failure("The knowledge search response failed validation.");
     }
     var boundary = {purpose: requestedPurpose, action: "read", actor: actor,
@@ -462,8 +521,12 @@
     }
     results.textContent = "";
     currentItems = clean;
+    nextCursor = payload.next_cursor;
+    nextButton.hidden = !nextCursor;
     if (!clean.length) {
-      results.appendChild(node("p", "muted", "No currently eligible sources matched this search."));
+      results.appendChild(node("p", "muted", payload.complete ?
+        "No currently eligible sources matched this search page." :
+        "No matches are available on this partial search page. This does not establish that evidence is absent."));
     } else {
       clean.forEach(function (value) { results.appendChild(renderResult(value)); });
     }
@@ -472,7 +535,11 @@
         " withheld because current access could not be revalidated." :
       "Every displayed source passed current eligibility checks.";
     if (payload.truncated) {
-      searchNote.textContent += " More eligible matches exist; narrow the search or increase the result count.";
+      searchNote.textContent += " This search is incomplete.";
+      if (nextCursor) { searchNote.textContent += " Continue to the next results; each page rechecks current access."; }
+      if (payload.incomplete_reasons.includes("content_unavailable")) {
+        searchNote.textContent += " Some source content could not be checked; retry after it becomes available.";
+      }
     }
     exportButton.disabled = !clean.length;
     announce(clean.length + (clean.length === 1 ? " eligible source" : " eligible sources") + " found.", false);
@@ -676,6 +743,7 @@
     ]).forEach(function (choice) {
       var button = node("button", choice[2], choice[0]);
       button.type = "button";
+      button.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/decision";
       button.addEventListener("click", async function () {
         var note = input.value.trim();
         if (!note || !confirm.checked) {
@@ -708,7 +776,9 @@
             "The exact source version is retired from new use. Derivative follow-up is recorded." :
             "The request was denied; source use remains unchanged.", true);
         } catch (error) {
-          try { await loadRequests(); } catch (_refreshError) { /* retain the decision error */ }
+          if (!["capability", "transient"].includes(error.accessKind)) {
+            try { await loadRequests(); } catch (_refreshError) { /* retain the decision error */ }
+          }
           announce(error.message || "The rights decision could not be completed.", true);
         } finally {
           setBusy(false);
@@ -755,6 +825,7 @@
       box.appendChild(confirmLabel);
       var place = node("button", "btn", "Place retention hold");
       place.type = "button";
+      place.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/retention-hold";
       place.addEventListener("click", async function () {
         var holdId = identity.value.trim();
         var holdBasis = basis.value.trim();
@@ -785,7 +856,9 @@
           await loadRequests();
           announce("The retention hold is active and bound to this deletion request.", true);
         } catch (error) {
-          try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
+          if (!["capability", "transient"].includes(error.accessKind)) {
+            try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
+          }
           announce(error.message || "The retention hold could not be placed.", true);
         } finally {
           setBusy(false);
@@ -811,6 +884,7 @@
     box.appendChild(releaseConfirmLabel);
     var release = node("button", "btn btn--danger", "Release retention hold");
     release.type = "button";
+    release.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/retention-hold/release";
     release.addEventListener("click", async function () {
       var releaseReason = reason.value.trim();
       if (!releaseReason || !releaseConfirm.checked) {
@@ -835,7 +909,9 @@
         await loadRequests();
         announce("The retention hold was released with evidence.", true);
       } catch (error) {
-        try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
+        if (!["capability", "transient"].includes(error.accessKind)) {
+          try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
+        }
         announce(error.message || "The retention hold could not be released.", true);
       } finally {
         setBusy(false);
@@ -916,13 +992,15 @@
   }
 
   async function loadRequests() {
+    var token = access.capture();
     var response = await fetch(apiBase + "/requests?limit=100", {
       method: "GET",
       credentials: "same-origin",
       headers: {Accept: "application/json"}
     });
-    var payload = await readJson(response);
+    var payload = await readJson(response, token, "/requests", true);
     renderRequests(validateRequests(payload));
+    unconfirmedPaths.clear();
   }
 
   function updateCorrectionField() {
@@ -931,6 +1009,43 @@
     correctionField.hidden = !shown;
     correction.required = shown;
     if (!shown) { correction.value = ""; }
+  }
+
+  async function runSearch(requested) {
+    if (pending) { return; }
+    var generation = ++searchGeneration;
+    activeSearch = {query: requested.query, purpose: requested.purpose, limit: requested.limit};
+    nextCursor = null;
+    nextButton.hidden = true;
+    currentItems = [];
+    setBusy(true);
+    detail.textContent = "";
+    detailPanel.hidden = true;
+    clearRequestInputs();
+    results.textContent = "";
+    results.appendChild(node("p", "muted", "Rechecking current source access…"));
+    announce("Searching currently eligible sources…", false);
+    try {
+      var payload = await api("/search", {
+        context: context,
+        query: requested.query,
+        purpose: requested.purpose,
+        limit: requested.limit,
+        cursor: requested.cursor || null
+      });
+      if (generation !== searchGeneration) { return; }
+      renderResults(payload, requested.purpose);
+    } catch (error) {
+      if (generation !== searchGeneration) { return; }
+      currentItems = [];
+      results.textContent = "";
+      exportButton.disabled = true;
+      nextCursor = null;
+      nextButton.hidden = true;
+      announce(error.message || "Knowledge search failed.", true);
+    } finally {
+      if (generation === searchGeneration || activeSearch === null) { setBusy(false); }
+    }
   }
 
   searchForm.addEventListener("submit", async function (event) {
@@ -942,29 +1057,17 @@
       announce("Choose a valid intended use and result count.", true);
       return;
     }
-    setBusy(true);
-    detail.textContent = "";
-    detailPanel.hidden = true;
-    clearRequestInputs();
-    results.textContent = "";
-    results.appendChild(node("p", "muted", "Rechecking current source access…"));
-    announce("Searching currently eligible sources…", false);
-    try {
-      var payload = await api("/search", {
-        context: context,
-        query: document.getElementById("ka-query").value.trim(),
-        purpose: purpose,
-        limit: limit
-      });
-      renderResults(payload, purpose);
-    } catch (error) {
-      currentItems = [];
-      results.textContent = "";
-      exportButton.disabled = true;
-      announce(error.message || "Knowledge search failed.", true);
-    } finally {
-      setBusy(false);
-    }
+    await runSearch({query: document.getElementById("ka-query").value.trim(), purpose: purpose, limit: limit});
+  });
+
+  nextButton.addEventListener("click", async function () {
+    if (pending || !activeSearch || !nextCursor) { return; }
+    await runSearch({query: activeSearch.query, purpose: activeSearch.purpose,
+      limit: activeSearch.limit, cursor: nextCursor});
+  });
+
+  ["ka-query", "ka-purpose", "ka-limit"].forEach(function (id) {
+    document.getElementById(id).addEventListener("input", clearEligibleResults);
   });
 
   exportButton.addEventListener("click", async function () {
@@ -1056,7 +1159,7 @@
       setTimeout(function () { URL.revokeObjectURL(url); }, 0);
       announce("Exported " + clean.length + " currently eligible source" + (clean.length === 1 ? "." : "s."), false);
     } catch (error) {
-      clearEligibleResults();
+      if (!["capability", "transient"].includes(error.accessKind)) clearEligibleResults();
       announce(error.message || "Knowledge export failed closed.", true);
     } finally {
       setBusy(false);

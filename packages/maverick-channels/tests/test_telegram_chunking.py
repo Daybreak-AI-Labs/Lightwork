@@ -35,7 +35,8 @@ def make_channel(monkeypatch):
 
 def _update():
     return SimpleNamespace(
-        message=SimpleNamespace(text="hi", message_id=7, reply_text=AsyncMock()),
+        message=SimpleNamespace(text="hi", message_id=7,
+            reply_text=AsyncMock(return_value=SimpleNamespace(message_id=8))),
         effective_user=SimpleNamespace(id=111),
         effective_chat=SimpleNamespace(id=111, type="private"),
     )

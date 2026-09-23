@@ -118,7 +118,7 @@ def test_header_rotation_rekeys_and_evicts_stale_client(monkeypatch):
         def __init__(self, headers):
             self.headers = headers
 
-    def factory(_provider, *, api_key=None, base_url=None, default_headers=None):
+    def factory(_provider, *, api_key=None, base_url=None, default_headers=None, environment=None):
         del api_key, base_url
         client = Client(default_headers)
         created.append(client)

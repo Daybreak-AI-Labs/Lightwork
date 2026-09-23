@@ -105,7 +105,7 @@ async function setup(queue) {
     if (typeof next === 'function') { return next(url, options); }
     return response(next);
   };
-  window.eval(script);
+  window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8'));window.eval(script);
   await tick();
   return {dom, window, document: window.document, calls, downloads: () => downloads};
 }
@@ -115,13 +115,116 @@ function searchPayload(records = [item()]) {
     tenant: TENANT, actor: ACTOR, actor_authorization_sha256: '6'.repeat(64),
     purpose: 'product_research', items: records, count: records.length, matched: records.length,
     omitted_ineligible: 0, truncated: false, authority_checks: 'Current checks passed.',
+    status: records.length ? 'matched' : 'no_match', complete: true,
+    incomplete_reasons: [], next_cursor: null,
     training_permission_notice: 'Access does not grant training permission.'};
 }
+
+for(const format of ['json','html'])test(`${format} knowledge 401 clears private data and stays locked after final cleanup`,async()=>{
+  const ui=await setup([{context:CONTEXT,requests:[],count:0},searchPayload(),()=>response(format==='html'?'<h1>Login</h1>':{detail:'Sign in'},401)]);
+  const form=ui.document.getElementById('ka-search-form');form.dispatchEvent(new ui.window.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  assert.notEqual(ui.document.getElementById('ka-results').textContent,'');
+  ui.document.getElementById('ka-export').click();await tick();
+  assert.equal(ui.document.getElementById('ka-results').textContent,'');
+  assert.equal(ui.document.getElementById('ka-search').disabled,true);
+  assert.equal(ui.document.getElementById('ka-export').disabled,true);ui.dom.window.close();
+});
+
+test('knowledge export-only denial preserves authorized search and locks only export',async()=>{
+  const ui=await setup([{context:CONTEXT,requests:[],count:0},searchPayload(),()=>response('<h1>Denied</h1>',403)]);
+  ui.document.getElementById('ka-search-form').dispatchEvent(new ui.window.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  const visible=ui.document.getElementById('ka-results').textContent;
+  ui.document.getElementById('ka-export').click();await tick();
+  assert.equal(ui.document.getElementById('ka-results').textContent,visible);
+  assert.equal(ui.document.getElementById('ka-search').disabled,false);
+  assert.equal(ui.document.getElementById('ka-export').disabled,true);ui.dom.window.close();
+});
 
 function requestList(records = []) {
   return {context: CONTEXT, schema: 'lightwork.knowledge-rights-requests.v1',
     items: records, count: records.length, can_review: true};
 }
+
+test('partial empty search exposes continuation and keeps its original query and context', async () => {
+  const partial = {...searchPayload([]), status: 'incomplete', complete: false,
+    truncated: true, incomplete_reasons: ['more_candidates'], next_cursor: 'page-two'};
+  const ui = await setup([requestList(), partial, searchPayload()]);
+  ui.document.getElementById('ka-query').value = 'rush orders';
+  ui.document.getElementById('ka-search-form').dispatchEvent(
+    new ui.window.Event('submit', {bubbles: true, cancelable: true})
+  );
+  await tick();
+  const next = ui.document.getElementById('ka-next-results');
+  assert.equal(next.hidden, false);
+  assert.equal(next.disabled, false);
+  assert.match(ui.document.getElementById('ka-results').textContent, /does not establish that evidence is absent/);
+  assert.match(ui.document.getElementById('ka-search-note').textContent, /incomplete/);
+  next.click();
+  await tick();
+  const sent = JSON.parse(ui.calls[2].options.body);
+  assert.equal(sent.cursor, 'page-two');
+  assert.equal(sent.query, 'rush orders');
+  assert.equal(sent.context, CONTEXT);
+  assert.equal(sent.purpose, 'product_research');
+  assert.equal(next.hidden, true);
+  assert.equal(ui.document.querySelectorAll('#ka-results article').length, 1);
+  ui.dom.window.close();
+});
+
+test('changing search fields clears continuation and ignores a delayed prior response', async () => {
+  let resolve;
+  const delayed = new Promise(done => { resolve = done; });
+  const ui = await setup([requestList(), () => delayed, searchPayload([])]);
+  const form = ui.document.getElementById('ka-search-form');
+  form.dispatchEvent(new ui.window.Event('submit', {bubbles: true, cancelable: true}));
+  await tick();
+  const query = ui.document.getElementById('ka-query');
+  query.value = 'new intended search';
+  query.dispatchEvent(new ui.window.Event('input', {bubbles: true}));
+  resolve(response({...searchPayload(), status: 'incomplete', complete: false,
+    truncated: true, incomplete_reasons: ['more_matches'], next_cursor: 'old-page'}));
+  await tick();
+  assert.equal(ui.document.getElementById('ka-results').textContent, '');
+  assert.equal(ui.document.getElementById('ka-next-results').hidden, true);
+  assert.equal(ui.document.getElementById('ka-export').disabled, true);
+  assert.equal(ui.document.getElementById('ka-search').disabled, false);
+  form.dispatchEvent(new ui.window.Event('submit', {bubbles: true, cancelable: true}));
+  await tick();
+  assert.equal(JSON.parse(ui.calls[2].options.body).cursor, null);
+  assert.equal(JSON.parse(ui.calls[2].options.body).query, 'new intended search');
+  ui.dom.window.close();
+});
+
+test('continuation cannot retain private results after a workspace context changes', async () => {
+  const partial = {...searchPayload(), status: 'incomplete', complete: false,
+    truncated: true, incomplete_reasons: ['more_matches'], next_cursor: 'page-two'};
+  const ui = await setup([requestList(), partial, {...searchPayload(), context: OTHER_CONTEXT}]);
+  ui.document.getElementById('ka-search-form').dispatchEvent(
+    new ui.window.Event('submit', {bubbles: true, cancelable: true})
+  );
+  await tick();
+  ui.document.getElementById('ka-next-results').click();
+  await tick();
+  assert.equal(ui.document.getElementById('ka-results').textContent, '');
+  assert.equal(ui.document.getElementById('ka-next-results').hidden, true);
+  assert.equal(ui.document.getElementById('ka-export').disabled, true);
+  assert.equal(ui.document.getElementById('ka-submit-request').disabled, true);
+  ui.dom.window.close();
+});
+
+test('unavailable evidence is distinct from an empty complete search', async () => {
+  const unavailable = {...searchPayload([]), status: 'unavailable', complete: false,
+    truncated: true, incomplete_reasons: ['content_unavailable']};
+  const ui = await setup([requestList(), unavailable]);
+  ui.document.getElementById('ka-search-form').dispatchEvent(
+    new ui.window.Event('submit', {bubbles: true, cancelable: true})
+  );
+  await tick();
+  assert.match(ui.document.getElementById('ka-search-note').textContent, /content could not be checked/);
+  assert.doesNotMatch(ui.document.getElementById('ka-results').textContent, /No currently eligible sources matched/);
+  assert.equal(ui.document.getElementById('ka-next-results').hidden, true);
+  ui.dom.window.close();
+});
 
 function exportPayload(record = item()) {
   const exported = item({...record, eligibility: {...record.eligibility,
@@ -340,6 +443,19 @@ test('review shows derivative retirement, hashes plain-language rationale, and k
   assert.equal(body.confirm, true);
   assert.match(ui.document.getElementById('ka-requests').textContent, /external source deletion unverified/);
   assert.match(ui.document.getElementById('ka-requests').textContent, /retire or retrain model required/);
+  ui.dom.window.close();
+});
+
+test('temporary rights decision failure preserves its rationale and requires readback before retry',async()=>{
+  const ui=await setup([requestList([rights()]),()=>response({detail:'Temporary failure; refresh status.'},503),requestList([rights()])]);
+  const card=ui.document.querySelector('.ka-request'), input=card.querySelector('textarea');
+  input.value='Reviewed exact source and derivatives';card.querySelector('input[type="checkbox"]').checked=true;
+  const approve=[...card.querySelectorAll('button')].find(button=>/Approve/.test(button.textContent));
+  approve.click();await tick();await tick();
+  assert.equal(input.value,'Reviewed exact source and derivatives');assert.equal(ui.calls.length,2);
+  assert.equal(approve.disabled,true);assert.equal(ui.document.getElementById('ka-refresh-requests').disabled,false);
+  ui.document.getElementById('ka-refresh-requests').click();await tick();
+  assert.equal(ui.calls.length,3);assert.equal(ui.document.querySelector('.ka-request button').disabled,false);
   ui.dom.window.close();
 });
 

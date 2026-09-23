@@ -536,22 +536,15 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
     return dest
 
 
-def store(
-    goal_id: int,
+def validate_attachment(
     filename: str,
     mime: str,
     data: bytes,
     *,
     existing_total: int = 0,
-    root: Path | None = None,
     generated_companion: bool = False,
-) -> Stored:
-    """Validate + persist a single attachment. Returns the on-disk record.
-
-    ``existing_total`` is the sum of ``size_bytes`` for prior attachments
-    on this goal; the caller passes it in so the per-goal cap is enforced
-    even when uploads arrive across requests.
-    """
+) -> str:
+    """Validate one bounded payload without publishing files or mirrored data."""
     if not filename:
         raise AttachmentRejected("filename is required")
     _validate_portable_name(
@@ -590,7 +583,23 @@ def store(
             f"{existing_total + size} > {MAX_GOAL_BYTES}"
         )
 
-    sha256 = hashlib.sha256(data).hexdigest()
+    return hashlib.sha256(data).hexdigest()
+
+
+def store(
+    goal_id: int,
+    filename: str,
+    mime: str,
+    data: bytes,
+    *,
+    existing_total: int = 0,
+    root: Path | None = None,
+    generated_companion: bool = False,
+) -> Stored:
+    """Validate and publish one file; metadata admission serializes goal quotas."""
+    sha256 = validate_attachment(filename, mime, data, existing_total=existing_total,
+                                 generated_companion=generated_companion)
+    size = len(data)
     dest_dir = _root_for_goal(goal_id, root)
     # SHA-prefix the on-disk name so two attachments with the same
     # filename don't collide and so a re-upload of the same bytes is a
@@ -758,6 +767,12 @@ def content_blocks_for_goal(
                     f"instructions:\n{body}"
                 ),
             })
+    missing = [item for item in companion_coverage(world, goal_id) if item["status"] != "ready"]
+    if missing:
+        text_blocks.append({"type": "text", "text": "[untrusted attachment availability metadata]\n"
+                            "The following source text has not been extracted or transcribed for this run. "
+                            "Do not imply that its contents were read:\n" + "\n".join(
+                                f"{item['filename']}: {item['status']}" for item in missing[:32])})
     return blocks + doc_blocks + text_blocks
 
 
@@ -808,17 +823,35 @@ def _transcribe_media(path: Path) -> str | None:
     return out.strip() or None
 
 
-def _extract_document(path: Path) -> str | None:
-    """Text extraction via maverick-knowledge's parsers (optional install)."""
+def _extract_document(path: Path):
+    """Loss-aware extraction via the optional knowledge parser package."""
     try:
-        from maverick_knowledge.parse import extract_text
+        from maverick_knowledge.parse import extract_document
     except ImportError:
         return None
     try:
-        out = extract_text(path)
+        return extract_document(path)
     except Exception:  # noqa: BLE001 -- unparseable file: no companion
         return None
-    return (out or "").strip() or None
+
+
+def companion_coverage(world, goal_id: int) -> list[dict]:
+    """Availability is distinct from a companion's own source-coverage status."""
+    existing = list(world.list_attachments(goal_id))
+    have = {a.filename for a in existing if Path(a.path).is_file()}
+    result = []
+    for source in existing:
+        if _is_companion(source.filename):
+            continue
+        if source.mime.startswith(_TRANSCRIBE_MIME_PREFIXES):
+            suffix, enabled = ".transcript.txt", _companion_feature("transcribe_media", "MAVERICK_ATTACH_TRANSCRIBE")
+        elif source.mime.startswith(_EXTRACT_MIMES_PREFIXES):
+            suffix, enabled = ".extracted.txt", _companion_feature("extract_text", "MAVERICK_ATTACH_EXTRACT")
+        else:
+            continue
+        status = "ready" if source.filename + suffix in have else ("unavailable" if enabled else "disabled")
+        result.append({"filename": source.filename, "sha256": source.sha256, "status": status})
+    return result
 
 
 def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int:
@@ -862,11 +895,24 @@ def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int
         name = a.filename + suffix
         if name in have:
             continue
-        text = produce(Path(a.path))
-        if not text:
+        result = produce(Path(a.path))
+        if result is None:
             continue
-        data = text[:_COMPANION_MAX_CHARS].encode("utf-8")
         try:
+            if hasattr(result, "companion"):
+                if result.source_sha256 and result.source_sha256 != a.sha256:
+                    log.warning("attachment changed before document extraction: %s", a.filename)
+                    continue
+                text = result.companion(_COMPANION_MAX_CHARS)
+            else:
+                text = str(result or "")
+                if not text:
+                    continue
+                if len(text) > _COMPANION_MAX_CHARS:
+                    stop = max(0, _COMPANION_MAX_CHARS - 300)
+                    text = (f"[PARTIAL companion: source_sha256={a.sha256}; normalized text range "
+                            f"0:{stop} of {len(text)} characters; remaining text omitted]\n" + text[:stop])
+            data = text.encode("utf-8")
             rec = store(goal_id, name, "text/plain", data,
                         existing_total=total, root=root,
                         generated_companion=True)

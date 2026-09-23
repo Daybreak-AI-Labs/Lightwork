@@ -39,6 +39,7 @@ RISK_LEVELS = ("low", "medium", "high")
 # the host, run arbitrary code, or drive a real machine/browser; low-risk
 # tools are read-only or pure lookups.
 _DEFAULT_RISK: dict[str, str] = {
+    "read_tool_result": "low",  # same-goal, same-principal screened artifact
     # high: arbitrary code / host mutation / full control
     "shell": "high",
     # The session kernel executes model-written Python. It is exactly as

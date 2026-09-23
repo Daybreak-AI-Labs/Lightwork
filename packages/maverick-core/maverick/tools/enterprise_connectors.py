@@ -8,9 +8,11 @@ spec here — no new module per connector. Systems that need a bespoke shape
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from . import Tool
 from ._connector_specs import _GRAPHQL_SPECS, _SPECS
-from ._rest_connector import _build_auth_headers, make_graphql_tool, make_rest_tool
+from ._rest_connector import _build_auth_headers
 
 
 def _fill_env(spec: dict) -> dict:
@@ -530,11 +532,29 @@ def auth_headers_for(
     )
 
 
+@lru_cache(maxsize=1)
+def enterprise_connector_descriptors():
+    """Process-shared immutable catalog; no factory or credential resolution."""
+    from ._lazy import ToolDescriptor, freeze
+    from ._rest_connector import _GQL_SCHEMA, _READ_SCHEMA, _SCHEMA
+
+    schemas = [freeze(schema) for schema in (_SCHEMA, _GQL_SCHEMA, _READ_SCHEMA)]
+    groups = ((_SPECS, "make_rest_tool", schemas[0], {}),
+              (_GRAPHQL_SPECS, "make_graphql_tool", schemas[1], {}),
+              (_READ_SPECS, "make_rest_tool", schemas[2], {"read_only": True}))
+    return tuple(
+        ToolDescriptor(name=spec["name"], description=spec["description"],
+                       input_schema=schema, factory_module="maverick.tools._rest_connector",
+                       factory_name=factory, factory_kwargs={**spec, **extra})
+        for specs, factory, schema, extra in groups for spec in specs
+    )
+
+
 def enterprise_connectors() -> list[Tool]:
-    """Instantiate every spec'd connector (registered in base_registry)."""
-    return ([make_rest_tool(**spec) for spec in _SPECS]
-            + [make_graphql_tool(**spec) for spec in _GRAPHQL_SPECS]
-            + [make_rest_tool(read_only=True, **spec) for spec in _READ_SPECS])
+    """Bind cheap tool views; instantiate each connector only on first use."""
+    from ._lazy import LazyTool
+
+    return [LazyTool(descriptor) for descriptor in enterprise_connector_descriptors()]
 
 
 # Bespoke (hand-written) strategic connectors live in their own modules, not in

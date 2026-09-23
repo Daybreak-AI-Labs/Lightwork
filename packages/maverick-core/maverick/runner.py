@@ -49,6 +49,7 @@ MAX_CONCURRENT_GOALS_PER_PRINCIPAL = max(
 _run_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_GOALS)
 _inflight_lock = threading.Lock()
 _inflight_count = 0
+_accepting_goals = True
 
 # W1-72: run_goal_in_background_async used to hand the ENTIRE goal run (up to
 # DEFAULT_MAX_WALL_SECONDS, plus up to 2x _ACQUIRE_TIMEOUT of semaphore
@@ -104,10 +105,29 @@ def inflight_goals() -> int:
         return _inflight_count
 
 
-def _mark_inflight_started() -> None:
+def close_goal_admission() -> None:
+    """Atomically refuse new accepted runs before beginning process drain."""
+    global _accepting_goals
+    with _inflight_lock:
+        _accepting_goals = False
+
+
+def open_goal_admission() -> None:
+    """Reopen only after the dashboard has verified its prior workers exited."""
+    global _accepting_goals
+    with _inflight_lock:
+        if _inflight_count:
+            raise RuntimeError("cannot reopen goal admission while prior runs remain")
+        _accepting_goals = True
+
+
+def _mark_inflight_started(*, require_admission: bool = False) -> bool:
     global _inflight_count
     with _inflight_lock:
+        if require_admission and not _accepting_goals:
+            return False
         _inflight_count += 1
+        return True
 
 
 def _mark_inflight_finished() -> None:
@@ -131,8 +151,11 @@ def drain_inflight(timeout: float = 25.0, poll: float = 0.5) -> int:
     Returns the count still in-flight at return (0 = fully drained). Synchronous
     (polls the semaphore) -- call it off the event loop. Never raises."""
     deadline = time.monotonic() + max(0.0, timeout)
-    while inflight_goals() > 0 and time.monotonic() < deadline:
-        time.sleep(max(0.05, poll))
+    while inflight_goals() > 0:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(remaining, max(0.05, poll)))
     return inflight_goals()
 
 
@@ -203,7 +226,11 @@ def run_goal_in_thread(
             "(goal_id=%s); refusing run", timeout, goal_id,
         )
         return None
-    _mark_inflight_started()
+    if not _mark_inflight_started(require_admission=True):
+        _run_semaphore.release()
+        principal_sem.release()
+        log.info("run_goal_in_thread: shutdown admission is closed (goal_id=%s)", goal_id)
+        return None
     world = None
     sandbox = None
     try:

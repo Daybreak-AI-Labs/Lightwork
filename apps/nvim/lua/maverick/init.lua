@@ -60,20 +60,36 @@ function M.logs()
   term_run({ "logs" })
 end
 
+local function checked_halt(command, present)
+  local ok, output = pcall(vim.fn.system, { M.config.cli, command, "--json" })
+  local status = vim.v.shell_error
+  if not ok or status ~= 0 then
+    vim.notify("Lightwork outcome unconfirmed (exit " .. tostring(status) .. "). Check local state before retrying.", vim.log.levels.ERROR)
+    return
+  end
+  local parsed, result = pcall(vim.fn.json_decode, output)
+  if not parsed or type(result) ~= "table" or result.command ~= command
+    or result.acknowledged ~= true or result.scope ~= "local"
+    or result.halt_file_present ~= present or result.work_stopped ~= false then
+    vim.notify("Local halt-file state was not confirmed. Check the CLI before retrying.", vim.log.levels.ERROR)
+    return
+  end
+  vim.notify(present and "Local kill switch armed. Running work stops at its next checkpoint."
+    or "Local kill switch cleared. Prior tasks were not restarted.", vim.log.levels.INFO)
+end
+
 function M.halt()
-  vim.ui.select({ "No", "Yes — abort ALL running goals" },
+  vim.ui.select({ "No", "Yes — arm the local kill switch" },
     { prompt = "Arm the Lightwork killswitch?" },
     function(choice)
       if choice and choice:sub(1, 3) == "Yes" then
-        vim.fn.system({ M.config.cli, "halt" })
-        vim.notify("Lightwork killswitch armed.", vim.log.levels.WARN)
+        checked_halt("halt", true)
       end
     end)
 end
 
 function M.unhalt()
-  vim.fn.system({ M.config.cli, "unhalt" })
-  vim.notify("Lightwork killswitch cleared.", vim.log.levels.INFO)
+  checked_halt("unhalt", false)
 end
 
 return M

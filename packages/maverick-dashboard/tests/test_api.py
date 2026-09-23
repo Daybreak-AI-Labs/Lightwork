@@ -16,8 +16,12 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
+    import maverick.runner as runner_mod
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    # Route-shape changes must never turn a stale admission mock into paid work.
+    # Individual dispatch contract tests replace this safe default explicitly.
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **kw: None)
     yield
 
 
@@ -160,23 +164,13 @@ class TestGoals:
         r2 = client.post("/api/v1/goals", json={"title": "g"}, headers={"Idempotency-Key": "k2"})
         assert r1.json()["id"] != r2.json()["id"]
 
-    def test_idempotency_race_loser_is_terminal_not_pending(self, monkeypatch):
+    def test_legacy_idempotency_is_readable_but_cannot_authorize_new_dispatch(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
         from maverick_dashboard import api as api_mod
 
         world = api_mod._world()
         winner_id = world.create_goal("winner", "")
-        lookups = iter((None, winner_id))
-        monkeypatch.setattr(
-            world,
-            "lookup_processed_message",
-            lambda *_args, **_kwargs: next(lookups),
-        )
-        monkeypatch.setattr(
-            world,
-            "mark_message_processed",
-            lambda *_args, **_kwargs: False,
-        )
+        world.mark_message_processed("idempotency:api:goals", ":same-key", goal_id=winner_id)
         monkeypatch.setattr(api_mod, "_world", lambda: world)
 
         response = client.post(
@@ -185,11 +179,12 @@ class TestGoals:
             headers={"Idempotency-Key": "same-key"},
         )
 
-        assert response.status_code == 201
-        assert response.json()["id"] == winner_id
-        assert response.headers["idempotency-replayed"] == "true"
-        loser = next(g for g in world.list_goals() if g.id != winner_id)
-        assert loser.status == "cancelled"
+        assert response.status_code == 409
+        recovered = client.get("/api/v1/goal-submissions/receipt", headers={"Idempotency-Key": "same-key"})
+        assert recovered.status_code == 200
+        assert recovered.json()["goal"]["id"] == winner_id
+        assert recovered.json()["submission_state"] == "legacy_unverified"
+        assert len(world.list_goals()) == 1
 
     def test_create_rejects_invalid_template_name(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -388,27 +383,11 @@ class TestAttachments:
         assert "mime type not allowed" in resp.json()["detail"]
 
 
-    def test_upload_reads_with_size_cap(self, monkeypatch):
+    def test_upload_reads_with_size_cap(self, monkeypatch, tmp_path):
         import asyncio
 
+        from maverick.world_model import WorldModel
         from maverick_dashboard import api as api_mod
-
-        class _World:
-            def get_goal(self, goal_id):
-                return object()
-
-            def list_attachments(self, goal_id):
-                return []
-
-            def add_attachment(self, **kwargs):
-                return 1
-
-        class _Stored:
-            filename = "x.txt"
-            mime = "text/plain"
-            size_bytes = 1
-            sha256 = "abc"
-            path = "/tmp/x"
 
         class _File:
             filename = "x.txt"
@@ -419,18 +398,10 @@ class TestAttachments:
 
             async def read(self, size=-1):
                 self.read_sizes.append(size)
-                return b"x"
+                return b"x" if len(self.read_sizes) == 1 else b""
 
-        monkeypatch.setattr(api_mod, "_world", lambda: _World())
-
-        called = {}
-
-        def _store(goal_id, filename, mime, data, existing_total):
-            called["data"] = data
-            return _Stored()
-
-        monkeypatch.setattr("maverick.attachments.store", _store)
         monkeypatch.setattr("maverick.attachments.MAX_FILE_BYTES", 7)
+        monkeypatch.setattr("maverick.attachments.DEFAULT_ROOT", tmp_path / "attachments")
 
         f = _File()
         # upload_attachment now takes the Request first (for owner scoping); a
@@ -438,10 +409,13 @@ class TestAttachments:
         # BackgroundTasks (third) receives the companion-generation task; not
         # executing it here keeps the test focused on the size-cap read.
         from fastapi import BackgroundTasks
-        out = asyncio.run(api_mod.upload_attachment(object(), 1, BackgroundTasks(), f))
+        with WorldModel(tmp_path / "world.db") as world:
+            monkeypatch.setattr(api_mod, "_world", lambda: world)
+            goal_id = world.create_goal("Upload")
+            out = asyncio.run(api_mod.upload_attachment(object(), goal_id, BackgroundTasks(), f))
+            assert world.list_attachments(goal_id)[0].size_bytes == 1
 
-        assert f.read_sizes == [8]
-        assert called["data"] == b"x"
+        assert f.read_sizes == [8, 7]
         assert out.size_bytes == 1
 
     def test_upload_to_unknown_goal_404(self):
