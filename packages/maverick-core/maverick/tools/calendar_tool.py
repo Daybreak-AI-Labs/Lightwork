@@ -242,7 +242,9 @@ def _find_slot(args: dict[str, Any]) -> str:
     cursor = now
     for _ in range(search_days * 24):  # safety cap on the inner walk
         day_start = cursor.replace(hour=earliest, minute=0, second=0, microsecond=0)
-        day_end = cursor.replace(hour=latest, minute=0, second=0, microsecond=0)
+        if day_start >= window_end:
+            break
+        day_end = min(cursor.replace(hour=latest, minute=0, second=0, microsecond=0), window_end)
         if day_start < now:
             day_start = max(day_start, now)
         if day_start >= day_end:
@@ -266,7 +268,7 @@ def _find_slot(args: dict[str, Any]) -> str:
             end = cur + duration
             return (
                 f"free slot: {cur.isoformat()} -> {end.isoformat()} "
-                f"({duration_min} min)"
+                f"({duration_min} min)" + note
             )
         # Move to next day's earliest hour.
         cursor = (cursor + timedelta(days=1)).replace(hour=0, minute=0)

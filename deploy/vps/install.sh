@@ -152,13 +152,18 @@ run_wizard() {
 
 install_service() {
   log "Installing systemd unit (User=${TARGET_USER}, home=${TARGET_HOME})..."
-  # The unit ships with %i / /home/%i placeholders; render them to the
-  # concrete install user + home so the service runs as the same user that
-  # owns the pipx venv (and so /root vs /home/<user> is handled). Installing
-  # the raw unit left %i empty -> User= empty + /home//... -> never started.
-  sed -e "s#%i#${TARGET_USER}#g" -e "s#/home/${TARGET_USER}#${TARGET_HOME}#g" \
-      /opt/maverick/deploy/vps/maverick.service \
-    > /etc/systemd/system/maverick.service
+  # Read and provision the selected workspace as the service account. Publish
+  # only a completely rendered unit, retaining the previous unit on failure.
+  local rendered_unit
+  rendered_unit="$(mktemp /etc/systemd/system/.maverick.service.XXXXXX)"
+  if ! run_as_user python3 /opt/maverick/deploy/vps/render_service.py \
+      --user "$TARGET_USER" --home "$TARGET_HOME" > "$rendered_unit"; then
+    rm -f -- "$rendered_unit"
+    echo "Workspace validation failed; the service was not enabled." >&2
+    return 1
+  fi
+  chmod 0644 "$rendered_unit"
+  mv -f -- "$rendered_unit" /etc/systemd/system/maverick.service
   systemctl daemon-reload
   systemctl enable maverick.service
   log "Service installed. Start with:  systemctl start maverick"

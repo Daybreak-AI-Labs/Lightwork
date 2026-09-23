@@ -4,6 +4,8 @@
 #     --config deploy/reference-architectures/fly/fly.toml
 #   fly volumes create maverick_state --size 10
 #   fly secrets set ANTHROPIC_API_KEY=sk-ant-...
+#   fly secrets set MAVERICK_DASHBOARD_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+#   fly secrets list  # verify both names before deployment; keep their values private
 #   fly deploy
 #
 # One machine + one volume; the dashboard listens on 8765 and Fly's proxy

@@ -347,6 +347,67 @@ def test_worker_clamps_signed_producer_limits_to_local_policy(monkeypatch):
     assert seen["max_depth"] == 2
 
 
+@pytest.mark.parametrize("requested", [None, 0.0, 100_000.0])
+def test_worker_preserves_absent_or_explicit_task_limits(monkeypatch, requested):
+    seen = {}
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda **kw: seen.update(kw) or "done")
+    assert qd.run_queued_goal(_local_envelope(
+        max_dollars=requested, max_wall_seconds=requested,
+    )) == "done"
+    assert seen["max_dollars"] == requested
+    assert seen["max_wall_seconds"] == requested
+
+
+@pytest.mark.parametrize("requested", [None, 0.0, 100_000.0])
+@pytest.mark.parametrize("source", ["budget", "queue", "environment"])
+def test_worker_enforces_explicit_caps_before_dispatch(monkeypatch, source, requested):
+    from maverick import config
+
+    if source == "environment":
+        monkeypatch.setenv("MAVERICK_QUEUE_WORKER_MAX_DOLLARS", "2")
+        monkeypatch.setenv("MAVERICK_QUEUE_WORKER_MAX_WALL_SECONDS", "20")
+    else:
+        prefix = "worker_" if source == "queue" else ""
+        monkeypatch.setattr(config, "load_config", lambda: {source: {
+            f"{prefix}max_dollars": 2.0, f"{prefix}max_wall_seconds": 20.0,
+        }})
+    seen = {}
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda **kw: seen.update(kw) or "done")
+    assert qd.run_queued_goal(_local_envelope(
+        max_dollars=requested, max_wall_seconds=requested,
+    )) == "done"
+    assert seen["max_dollars"] == (0.0 if requested == 0 else 2.0)
+    assert seen["max_wall_seconds"] == (0.0 if requested == 0 else 20.0)
+
+
+@pytest.mark.parametrize("raw", [True, -1, float("nan"), float("inf"), "invalid"])
+@pytest.mark.parametrize("field", ["worker_max_dollars", "worker_max_wall_seconds"])
+def test_worker_invalid_limits_are_rejected_before_consuming_envelope(monkeypatch, raw, field):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda: {"queue": {field: raw}})
+    monkeypatch.setattr(
+        "maverick.job_queue.JobQueue.claim_dispatch_envelope",
+        lambda *_a, **_kw: pytest.fail("invalid worker policy consumed the envelope"),
+    )
+    with pytest.raises(qd.QueueSecurityError, match=f"{field} is invalid"):
+        qd.run_queued_goal(_local_envelope())
+
+
+def test_explicit_zero_worker_limits_survive_disabled_task_defaults(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "budget": {"task_limits_enabled": False, "max_dollars": 100},
+        "queue": {"worker_max_dollars": 0, "worker_max_wall_seconds": 0},
+    })
+    seen = {}
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda **kw: seen.update(kw) or "done")
+    assert qd.run_queued_goal(_local_envelope(max_dollars=100, max_wall_seconds=100)) == "done"
+    assert seen["max_dollars"] == 0
+    assert seen["max_wall_seconds"] == 0
+
+
 def test_malformed_signed_capability_is_rejected_before_claim(monkeypatch):
     cap = Capability(principal="user:limited", allow_tools=frozenset({"read_file"}))
     payload = _local_envelope(capability=cap)

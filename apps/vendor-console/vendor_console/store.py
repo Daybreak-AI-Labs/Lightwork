@@ -132,10 +132,17 @@ def customer_by_serve_token_hash(conn: sqlite3.Connection, token_hash: str) -> C
 
 # ---- licenses --------------------------------------------------------------
 
-def add_license(conn: sqlite3.Connection, *, customer_id: int, license_id: str,
+def add_license(conn: sqlite3.Connection, **values) -> int:
+    with db.transaction(conn) as owned:
+        return add_license_in_transaction(owned, **values)
+
+
+def add_license_in_transaction(conn: sqlite3.Connection, *, customer_id: int, license_id: str,
                 tier: str, suites: list[str], features: list[str], seats: int | None,
                 issued_at: str, expires_at: str | None, grace_days: int, key_id: str,
-                doc: dict, note: str, created_by: str, at: float | None = None) -> int:
+                 doc: dict, note: str, created_by: str, at: float | None = None) -> int:
+    if not conn.in_transaction:
+        raise ValueError("license creation requires an owned transaction")
     cur = conn.execute(
         "INSERT INTO licenses(customer_id, license_id, tier, suites_json, features_json, "
         "seats, issued_at, expires_at, grace_days, key_id, doc_json, note, created_by, "
@@ -143,7 +150,6 @@ def add_license(conn: sqlite3.Connection, *, customer_id: int, license_id: str,
         (customer_id, license_id, tier, json.dumps(suites), json.dumps(features),
          seats, issued_at, expires_at, grace_days, key_id, json.dumps(doc), note,
          created_by, at if at is not None else time.time()))
-    conn.commit()
     return cur.lastrowid
 
 
@@ -162,11 +168,18 @@ def list_licenses(conn: sqlite3.Connection, customer_id: int) -> list[License]:
 
 def revoke_license(conn: sqlite3.Connection, license_id: str, *, note: str = "",
                    at: float | None = None) -> bool:
+    with db.transaction(conn) as owned:
+        return revoke_license_in_transaction(owned, license_id, note=note, at=at)
+
+
+def revoke_license_in_transaction(conn: sqlite3.Connection, license_id: str, *, note: str = "",
+                                  at: float | None = None) -> bool:
+    if not conn.in_transaction:
+        raise ValueError("license revocation requires an owned transaction")
     cur = conn.execute(
         "UPDATE licenses SET revoked_at = ?, note = ? WHERE license_id = ? "
         "AND revoked_at IS NULL",
         (at if at is not None else time.time(), note, license_id))
-    conn.commit()
     return cur.rowcount > 0
 
 

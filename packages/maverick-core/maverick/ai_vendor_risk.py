@@ -726,6 +726,36 @@ def _citation(
     }
 
 
+_CLAUSE_RE = re.compile(r"[^.!?;\n]+")
+_HEDGE_RE = re.compile(r"\b(?:might|could|should|would|planned|planning|plans?|intend\w*|proposed|pending|unless|aim\w*|expect\w*)\b|\bmay\s+be\b", re.IGNORECASE)
+_NEGATION_RE = re.compile(r"\b(?:not|never|no|without|cannot|can't|isn't|aren't|doesn't|don't|won't)\b", re.IGNORECASE)
+
+
+def _uncertain_signal(clause: str, *, qid: str, rule: _Rule, pattern: re.Pattern[str]) -> bool:
+    """Keep explicit negative rules; abstain on surrounding negation/hedges.
+
+    This is a conservative lexical screen, not a semantic assertion. Only a
+    negation explicitly required by the matched static rule is consumed. An
+    additional negation (including a double negative) needs human resolution.
+    """
+    if _HEDGE_RE.search(clause):
+        return True
+    remainder = clause
+    if qid == "aiv_training_data" and rule.answer == "yes" and "(?:not|never)" in pattern.pattern:
+        remainder = re.sub(r"\b(?:not|never)\s+(?:used|use)\b", "used", remainder, count=1, flags=re.IGNORECASE)
+    elif rule.answer == "no":
+        # Match only expressions present in this particular negative rule;
+        # e.g. 'incident history is not clear' must not turn 'clear' into no.
+        spelling = pattern.pattern.replace(r"\s+", " ")
+        for expression in ("does not", "will not", "not disclosed", "not provided",
+                           "not determined", "not assessed", "not documented",
+                           "cannot", "without", "no"):
+            if expression in spelling:
+                remainder = re.sub(r"\b" + re.escape(expression).replace(r"\ ", r"\s+") + r"\b",
+                                   " ", remainder, count=1, flags=re.IGNORECASE)
+    return _NEGATION_RE.search(remainder) is not None
+
+
 def _extract_document_answers(
     text: str,
     evidence: Mapping[str, Any],
@@ -735,19 +765,24 @@ def _extract_document_answers(
     answers: dict[str, dict[str, Any]] = {}
     for qid, rules in _DOCUMENT_RULES.items():
         matches: dict[str, list[re.Match[str]]] = {"yes": [], "no": []}
+        uncertain: list[re.Match[str]] = []
         for rule in rules:
             for pattern in rule.patterns:
-                hit = pattern.search(text)
-                if hit is not None:
-                    matches[rule.answer].append(hit)
+                for clause in _CLAUSE_RE.finditer(text):
+                    hit = pattern.search(text, clause.start(), clause.end())
+                    if hit is not None:
+                        destination = (uncertain if _uncertain_signal(clause.group(), qid=qid,
+                                       rule=rule, pattern=pattern) else matches[rule.answer])
+                        if len(destination) < _MAX_CITATIONS_PER_ANSWER:
+                            destination.append(hit)
         present = [answer for answer, hits in matches.items() if hits]
-        if not present:
+        if not present and not uncertain:
             continue
-        if len(present) > 1:
+        if len(present) > 1 or uncertain:
             answer = "unknown"
             confidence = 0.0
-            selected = (matches["yes"] + matches["no"])[:_MAX_CITATIONS_PER_ANSWER]
-            note = "Conflicting deterministic document signals require human resolution."
+            selected = (uncertain + matches["yes"] + matches["no"])[:_MAX_CITATIONS_PER_ANSWER]
+            note = "Conflicting, negated or uncertain document signals require human resolution."
         else:
             answer = present[0]
             selected = matches[answer][:_MAX_CITATIONS_PER_ANSWER]

@@ -56,7 +56,8 @@ WORKFLOW_SYSTEM = (
     '"title": "<short title; may contain {{param}} placeholders>", '
     '"params": ["<identifier>", ...], '
     '"steps": ["<imperative step>", ...], '
-    '"budget_dollars": <number between 0.5 and 20>}\n'
+    '"budget_dollars": null}\n'
+    "Leave budget_dollars null unless the user's brief explicitly requests a spending cap. "
     "Rules: 5-9 concrete, ordered steps an autonomous agent can execute. Use "
     "{{snake_case}} placeholders for the few values that change per run and "
     "list each placeholder name (without the braces) in params. Output the "
@@ -316,10 +317,14 @@ def parse_workflow(raw: str) -> dict[str, Any]:
             break
 
     try:
-        budget = float(data.get("budget_dollars") or 5.0)
+        raw_budget = data.get("budget_dollars")
+        budget = float(raw_budget) if raw_budget is not None else None
     except (TypeError, ValueError):
-        budget = 5.0
-    budget = max(0.5, min(budget, 20.0))
+        raise ValueError("workflow spending cap must be a number or null") from None
+    if budget is not None:
+        import math
+        if not math.isfinite(budget) or budget < 0:
+            raise ValueError("workflow spending cap must be finite and non-negative")
 
     body = "## Steps\n" + "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
     return {
@@ -328,7 +333,7 @@ def parse_workflow(raw: str) -> dict[str, Any]:
         "params": params,
         "steps": steps,
         "body": body,
-        "budget_dollars": round(budget, 2),
+        "budget_dollars": round(budget, 2) if budget is not None else None,
     }
 
 

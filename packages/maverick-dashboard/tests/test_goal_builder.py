@@ -77,14 +77,19 @@ def test_compose_assembles_brief_and_runs_with_budget(client, world, runner_stub
     assert runner_stub == [(body["id"], 1.5)]
 
 
-def test_compose_budget_clamped_to_server_cap(client, world, runner_stub):
-    from maverick.runner import DEFAULT_MAX_DOLLARS
+@pytest.mark.parametrize("ceiling,expected", [(None, 10_000.0), (25.0, 25.0), (0.0, 0.0)])
+def test_compose_budget_clamped_to_configured_server_cap(
+    client, world, runner_stub, monkeypatch, ceiling, expected,
+):
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "configured_max_dollars", lambda: ceiling)
     r = client.post("/api/v1/goals/compose", json={
-        "title": "big spender", "budget_dollars": 99.0,
+        "title": "big spender", "budget_dollars": 10_000.0,
     })
     assert r.status_code == 201
     # the brief records the requested cap; the runner gets the clamped one
-    assert runner_stub[0][1] == DEFAULT_MAX_DOLLARS
+    assert runner_stub[0][1] == expected
 
 
 def test_compose_without_blocks_uses_title_as_brief(client, world, runner_stub):
@@ -92,9 +97,8 @@ def test_compose_without_blocks_uses_title_as_brief(client, world, runner_stub):
     assert r.status_code == 201
     g = world.get_goal(r.json()["id"])
     assert g.description == "just do it"
-    # no budget block -> the server default cap applies
-    from maverick.runner import DEFAULT_MAX_DOLLARS
-    assert runner_stub[0][1] == DEFAULT_MAX_DOLLARS
+    # No budget block and no configured ceiling must not invent a task cap.
+    assert runner_stub[0][1] is None
 
 
 def test_compose_drops_blank_steps(client, world, runner_stub):
@@ -117,9 +121,9 @@ def test_compose_validation(client, runner_stub):
                     json={"title": "t", "steps": ["s"] * 51})
     assert r.status_code == 400
     assert "steps" in r.json()["detail"]
-    # pydantic bounds on the budget
+    # Invalid caps are rejected rather than silently reinterpreted.
     assert client.post("/api/v1/goals/compose",
-                       json={"title": "t", "budget_dollars": 10_000}).status_code == 422
+                       json={"title": "t", "budget_dollars": -1}).status_code == 422
     assert runner_stub == []  # nothing invalid ever reached the runner
 
 

@@ -37,8 +37,13 @@ def test_no_grant_no_enforce_omitted(tmp_path, monkeypatch):
     # the kernel's "nothing granted, enforce off" default.
     cfg = _write(tmp_path, monkeypatch, plugins=["weather"])
     assert 'enabled = ["weather"]' in cfg
-    assert "grant" not in cfg
-    assert "enforce_permissions" not in cfg
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
+    plugins = tomllib.loads(cfg)["plugins"]
+    assert "grant" not in plugins
+    assert "enforce_permissions" not in plugins
 
 
 def test_keys_match_what_kernel_reads(tmp_path, monkeypatch):

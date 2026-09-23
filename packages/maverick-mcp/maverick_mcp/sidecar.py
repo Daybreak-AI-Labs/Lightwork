@@ -607,13 +607,14 @@ class HttpMCPUpstream:
             if self._client is None:
                 import httpx
 
-                response = httpx.post(
-                    self._config.upstream_url,
+                with httpx.stream(
+                    "POST", self._config.upstream_url,
                     json=payload,
                     headers=headers,
                     timeout=30.0,
                     follow_redirects=False,
-                )
+                ) as response:
+                    return self._read_response(response, request_id)
             else:
                 response = self._client.post(
                     self._config.upstream_url,
@@ -622,25 +623,81 @@ class HttpMCPUpstream:
                     timeout=30.0,
                     follow_redirects=False,
                 )
+        except SidecarUpstreamError:
+            raise
         except Exception as exc:
             raise SidecarUpstreamError("upstream MCP request failed") from exc
-        raw = getattr(response, "content", b"") or b""
-        if not isinstance(raw, (bytes, bytearray)) or len(raw) > _MAX_RESPONSE_BYTES:
-            raise SidecarUpstreamError("upstream MCP response exceeds the byte cap")
-        if int(getattr(response, "status_code", 502)) >= 400:
+        return self._read_response(response, request_id)
+
+    @staticmethod
+    def _read_response(response: Any, request_id: Any) -> dict[str, Any]:
+        """Read one bounded response; never retry a possibly completed call."""
+        if not 200 <= int(getattr(response, "status_code", 502)) < 300:
             raise SidecarUpstreamError("upstream MCP returned an HTTP error")
+        headers = getattr(response, "headers", {})
+        is_sse = headers.get("content-type", "").split(";", 1)[0].strip().lower() == "text/event-stream"
+        chunks = (response.iter_bytes(chunk_size=65536) if hasattr(response, "iter_bytes")
+                  else [getattr(response, "content", b"") or b""])
+        raw = bytearray()
+        if is_sse:
+            return _read_sse_response(chunks, request_id)
+        for chunk in chunks:
+            if not isinstance(chunk, (bytes, bytearray)) or len(raw) + len(chunk) > _MAX_RESPONSE_BYTES:
+                raise SidecarUpstreamError("upstream MCP response exceeds the byte cap")
+            raw.extend(chunk)
         try:
             message = json.loads(bytes(raw).decode("utf-8"))
         except (UnicodeError, ValueError) as exc:
             raise SidecarUpstreamError("upstream MCP returned invalid JSON") from exc
-        if (
-            not isinstance(message, dict)
-            or message.get("jsonrpc") != "2.0"
-            or message.get("id") != request_id
-            or ("result" not in message and "error" not in message)
-        ):
-            raise SidecarUpstreamError("upstream MCP response envelope is invalid")
-        return message
+        return _validated_upstream_response(message, request_id)
+
+
+def _validated_upstream_response(message: Any, request_id: Any) -> dict[str, Any]:
+    if (not isinstance(message, dict) or message.get("jsonrpc") != "2.0"
+            or type(message.get("id")) is not type(request_id) or message.get("id") != request_id
+            or ("result" in message) == ("error" in message)):
+        raise SidecarUpstreamError("upstream MCP response envelope is invalid")
+    return message
+
+
+def _read_sse_response(chunks, request_id: Any) -> dict[str, Any]:
+    """Decode SSE incrementally through the matching final JSON-RPC frame."""
+    import codecs
+    from itertools import chain
+
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    pending, data, total = "", [], 0
+    try:
+        for chunk in chain(chunks, [None]):
+            finished = chunk is None
+            if finished:
+                pending += decoder.decode(b"", final=True)
+            else:
+                if not isinstance(chunk, (bytes, bytearray)) or total + len(chunk) > _MAX_RESPONSE_BYTES:
+                    raise SidecarUpstreamError("upstream MCP response exceeds the byte cap")
+                total += len(chunk)
+                pending += decoder.decode(chunk)
+            while True:
+                boundary = re.search(r"\r\n|\r|\n", pending)
+                if boundary is None or (not finished and boundary.group() == "\r" and boundary.end() == len(pending)):
+                    break  # A split CRLF must remain one line ending.
+                line, pending = pending[:boundary.start()], pending[boundary.end():]
+                if line:
+                    if line.startswith("data:"):
+                        value = line[5:]
+                        data.append(value.removeprefix(" "))
+                    continue
+                if not data:
+                    continue
+                message = json.loads("\n".join(data))
+                data = []
+                if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"
+                        and "id" not in message and isinstance(message.get("method"), str)):
+                    continue  # Progress notifications are not the call result.
+                return _validated_upstream_response(message, request_id)
+    except (UnicodeError, ValueError) as exc:
+        raise SidecarUpstreamError("upstream MCP returned invalid SSE") from exc
+    raise SidecarUpstreamError("upstream MCP stream ended without a complete matching response")
 
 
 class GovernedMCPGateway:

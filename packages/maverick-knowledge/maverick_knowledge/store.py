@@ -104,6 +104,19 @@ class SqliteVectorStore:
             )
             self._db.commit()
 
+    def add_with_identity(self, collection, items, fingerprint: str) -> None:
+        """Fence identity validation and publication against migration writers."""
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute("SELECT meta FROM chunks WHERE collection = ?", (collection,))
+            if any(json.loads(row[0]).get("embedding_fingerprint") != fingerprint for row in rows):
+                raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+            self._db.executemany(
+                "INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?)",
+                [(collection, cid, text, json.dumps(vec), json.dumps(meta))
+                 for cid, text, vec, meta in items],
+            )
+
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
             return []
@@ -201,6 +214,31 @@ class SqliteVectorStore:
                 if len(result) > maximum:
                     break
         return result
+
+    def read_collection(self, collection: str, *, limit: int) -> list[StoredChunk]:
+        if not 1 <= limit <= 100_000:
+            raise ValueError("knowledge collection-read limit is invalid")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id LIMIT ?",
+                (collection, limit + 1),
+            ).fetchall()
+        return [StoredChunk(cid, text, json.loads(meta)) for cid, text, meta in rows]
+
+    def replace_embeddings(self, collection: str, snapshot: list[StoredChunk], items: list) -> None:
+        """Compare the entire source snapshot and replace vectors in one transaction."""
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id", (collection,),
+            ).fetchall()
+            current = [StoredChunk(cid, text, json.loads(meta)) for cid, text, meta in rows]
+            if current != snapshot:
+                raise RuntimeError("knowledge collection changed during reindex; retry")
+            self._db.executemany(
+                "UPDATE chunks SET vec = ?, meta = ? WHERE collection = ? AND id = ?",
+                [(json.dumps(vec), json.dumps(meta), collection, cid) for cid, _text, vec, meta in items],
+            )
 
     def close(self) -> None:
         """Close the underlying SQLite connection (idempotent)."""
@@ -413,6 +451,33 @@ class PgVectorStore:
         ) as provider_call:
             provider_call(dispatch)
 
+    def _collection_fence(self, cur, collection: str) -> None:
+        cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (json.dumps([self._namespace, collection]),))
+
+    def add_with_identity(self, collection, items, fingerprint: str) -> None:
+        def dispatch():
+            with self._lock, self._db.transaction(), self._db.cursor() as cur:
+                self._collection_fence(cur, collection)
+                found = cur.execute(
+                    f"SELECT 1 FROM {self._table} WHERE namespace = %s AND collection = %s "
+                    "AND (meta ->> 'embedding_fingerprint') IS DISTINCT FROM %s LIMIT 1",
+                    (self._namespace, collection, fingerprint),
+                ).fetchone()
+                if found is not None:
+                    raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+                cur.executemany(
+                    f"INSERT INTO {self._table} (namespace, collection, id, text, embedding, meta) "
+                    "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb) "
+                    "ON CONFLICT (namespace, collection, id) DO UPDATE SET "
+                    "text = EXCLUDED.text, embedding = EXCLUDED.embedding, meta = EXCLUDED.meta",
+                    [(self._namespace, collection, cid, text, _to_pgvector(vec), json.dumps(meta))
+                     for cid, text, vec, meta in items],
+                )
+        with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
+                               operation="knowledge-identity-fenced-add") as call:
+            call(dispatch)
+
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
             return []
@@ -587,6 +652,45 @@ class PgVectorStore:
             )
             for chunk_id, text, meta in rows
         ]
+
+    def read_collection(self, collection: str, *, limit: int) -> list[StoredChunk]:
+        if not 1 <= limit <= 100_000:
+            raise ValueError("knowledge collection-read limit is invalid")
+        with metered_operation("pgvector", category="retrieval", service="vector-store:pgvector",
+                               operation="knowledge-reindex-read") as call:
+            def dispatch():
+                with self._lock, self._db.cursor() as cur:
+                    return cur.execute(
+                        f"SELECT id, text, meta FROM {self._table} "
+                        "WHERE namespace = %s AND collection = %s ORDER BY id LIMIT %s",
+                        (self._namespace, collection, limit + 1),
+                    ).fetchall()
+            rows = call(dispatch)
+        return [StoredChunk(cid, text, meta if isinstance(meta, dict) else json.loads(meta))
+                for cid, text, meta in rows]
+
+    def replace_embeddings(self, collection: str, snapshot: list[StoredChunk], items: list) -> None:
+        with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
+                               operation="knowledge-reindex-replace") as call:
+            def dispatch():
+                with self._lock, self._db.transaction(), self._db.cursor() as cur:
+                    self._collection_fence(cur, collection)
+                    rows = cur.execute(
+                        f"SELECT id, text, meta FROM {self._table} "
+                        "WHERE namespace = %s AND collection = %s ORDER BY id FOR UPDATE",
+                        (self._namespace, collection),
+                    ).fetchall()
+                    current = [StoredChunk(cid, text, meta if isinstance(meta, dict) else json.loads(meta))
+                               for cid, text, meta in rows]
+                    if current != snapshot:
+                        raise RuntimeError("knowledge collection changed during reindex; retry")
+                    cur.executemany(
+                        f"UPDATE {self._table} SET embedding = %s::vector, meta = %s::jsonb "
+                        "WHERE namespace = %s AND collection = %s AND id = %s",
+                        [(_to_pgvector(vec), json.dumps(meta), self._namespace, collection, cid)
+                         for cid, _text, vec, meta in items],
+                    )
+            call(dispatch)
 
     def close(self) -> None:
         """Close the underlying connection (idempotent)."""

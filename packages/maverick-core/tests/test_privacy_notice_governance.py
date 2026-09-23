@@ -139,6 +139,37 @@ def approve_release(
     return approved
 
 
+@pytest.mark.parametrize(("ttl", "elapsed"), [(300, 301), (60, 61)])
+def test_expired_publication_prefix_does_not_starve_ready_work_after_restart(authority, ttl, elapsed):
+    store, actor, clock = authority
+    create_policy(store, ttl=ttl)
+
+    def schedule(name):
+        release = create_release(store, clock, notice_id=name, key=name)
+        approved = approve_release(store, actor, release, suffix=name)
+        actor["value"] = "release-scheduler"
+        store.schedule_release(
+            "tenant-a", name, release.version, activate_at=clock(),
+            expected_release_sha256=release.definition_sha256, max_attempts=3,
+            expected_revision=approved.state_revision, idempotency_key=f"schedule-{name}",
+        )
+
+    for index in range(10):
+        schedule(f"expired-{index}")
+    clock.advance(elapsed)
+    schedule("ready-eleventh")
+    # The public bridge uses limit=1; its bounded first scan retires the old
+    # prefix. That progress must survive constructing a fresh store instance.
+    assert store.claim_publication_intents("tenant-a", limit=1, lease_seconds=30) == ()
+    restarted = notice.PrivacyNoticeGovernanceStore(
+        store.path, config_gate=lambda: None, principal_resolver=lambda: "worker",
+        signing_key_resolver=lambda *_: b"n" * 32, clock=clock,
+    )
+    claimed = restarted.claim_publication_intents("tenant-a", limit=1, lease_seconds=30)
+    assert [item.notice_id for item in claimed] == ["ready-eleventh"]
+    assert restarted.claim_publication_intents("tenant-a", limit=1, lease_seconds=30) == ()
+
+
 def publish_release(
     store: notice.PrivacyNoticeGovernanceStore,
     actor: dict[str, str],

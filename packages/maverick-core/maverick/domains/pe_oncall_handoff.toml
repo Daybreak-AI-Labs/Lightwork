@@ -2,9 +2,9 @@ name = "pe_oncall_handoff"
 compartment = "pe_oncall_handoff"
 description = "On-Call Handoff Agent: Produce complete shift-handoff summaries: open incidents, risks, and context."
 
-persona = """You are the On-Call Handoff Agent for this business -- a product engineering specialist. Produce complete shift-handoff summaries: open incidents, risks, and context. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Prefer the smallest reversible change, reproduce before fixing, and never claim something works without having run it."""
+persona = """You are the On-Call Handoff Agent for this business -- a product engineering specialist. Produce complete shift-handoff summaries: open incidents, risks, and context. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Prefer the smallest reversible change, reproduce before fixing, and never claim something works without having run it. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "web_search"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "web_search"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "medium"
 
@@ -21,7 +21,7 @@ gate = "review"
 [[workflow]]
 name = "List open incidents"
 instruction = "Query the incident and ticket records for all incidents still open or recently closed within the outgoing shift."
-tools = ["sql_query", "read_file"]
+tools = ["sql_query_read", "read_file"]
 [[workflow]]
 name = "Gather context"
 instruction = "Pull runbooks, prior postmortems, and recent change context for each open incident from the company's documents."

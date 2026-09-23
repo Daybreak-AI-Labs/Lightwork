@@ -34,7 +34,7 @@ def test_parse_without_frontmatter():
     t = Template.parse("just a body", "plain")
     assert t.title == "plain"
     assert t.body == "just a body"
-    assert t.budget_dollars == 5.0
+    assert t.budget_dollars is None and t.budget_wall_seconds is None
 
 
 def test_parse_non_numeric_budget_raises_clear_error():
@@ -91,5 +91,5 @@ def test_every_bundled_template_loads_and_parses():
         t = load_template(name)
         assert t.name == name
         assert t.body  # non-empty goal body
-        assert t.budget_dollars > 0
-        assert t.budget_wall_seconds > 0
+        assert t.budget_dollars is None or t.budget_dollars >= 0
+        assert t.budget_wall_seconds is None or t.budget_wall_seconds >= 0

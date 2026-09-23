@@ -1026,6 +1026,9 @@ class FlowRun:
     dry_run: bool = False
     # Agent spend reserved for this run (dollars), so a viewer can see run cost.
     cost_dollars: float = 0.0
+    # Explicit operator increase applies to this run, without rewriting its
+    # immutable graph or discarding already metered work.
+    budget_limit_dollars: float | None = None
     # Snapshot of the paused human task (choices/form/assignee) taken AT PAUSE
     # time, like `prompt` -- so the run viewer renders what the paused node
     # actually declared, even if the flow is edited while the run waits.
@@ -1055,6 +1058,8 @@ class FlowRun:
     allowed_suites: list[str] | None = None
     # A listing record is a projection, never a checkpoint that can be saved.
     metadata_only: bool = field(default=False, repr=False, compare=False)
+    # Private execution frames, excluded from public to_dict projections.
+    continuation: dict = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict:
         from .payloads import preview
@@ -1067,6 +1072,7 @@ class FlowRun:
             "input_data": preview(self.input_data), "idem_key": self.idem_key,
             "origin": self.origin, "dry_run": self.dry_run,
             "cost_dollars": self.cost_dollars,
+            "budget_limit_dollars": self.budget_limit_dollars,
             "human": self.human,
             "decided_by": self.decided_by,
             "definition_digest": self.definition_digest,
@@ -1082,6 +1088,12 @@ class FlowRun:
 
     @staticmethod
     def from_dict(d: dict) -> FlowRun:
+        import math
+
+        limit = d.get("budget_limit_dollars")
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
+                raise FlowSnapshotError("flow run spending allowance is invalid")
         definition_digest = str(d.get("definition_digest") or "")
         subflow_digests = {
             str(k): (str(v) if v is not None else None)
@@ -1102,6 +1114,7 @@ class FlowRun:
             run_id=str(d.get("run_id", "")), flow_id=str(d.get("flow_id", "")),
             status=str(d.get("status", "")), data=dict(d.get("data") or {}),
             cursor=d.get("cursor"), resume_at=d.get("resume_at"),
+            continuation=dict(d.get("continuation") or {}),
             prompt=str(d.get("prompt", "")), error=str(d.get("error", "")),
             owner=str(d.get("owner", "")),
             created=float(d.get("created", 0.0)), updated=float(d.get("updated", 0.0)),
@@ -1110,6 +1123,7 @@ class FlowRun:
             origin=str(d.get("origin", "manual") or "manual"),
             dry_run=bool(d.get("dry_run", False)),
             cost_dollars=float(d.get("cost_dollars", 0.0) or 0.0),
+            budget_limit_dollars=float(limit) if limit is not None else None,
             human=dict(d.get("human") or {}),
             decided_by=str(d.get("decided_by") or "")[:500],
             definition_digest=definition_digest,
@@ -1298,7 +1312,7 @@ def save_run(run: FlowRun) -> None:
     if not run.created:
         run.created = now
     run.updated = now
-    values = payloads.prepare(run.data, run.input_data)
+    values = payloads.prepare(run.data, run.input_data, continuation=run.continuation)
     d = run.to_dict()
     d["data"] = payloads.preview(values["data"])
     d["input_data"] = payloads.preview(values["input_data"])
@@ -1341,6 +1355,7 @@ def save_run(run: FlowRun) -> None:
             pass  # the next checkpoint retries orphan cleanup before writing
     run.data = values["data"]
     run.input_data = values["input_data"]
+    run.continuation = values["continuation"]
 
 
 @contextmanager

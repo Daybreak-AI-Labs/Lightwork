@@ -1167,15 +1167,9 @@ class PrivacyRightsSourceWorker:
             raise PrivacyRightsSourceWorkerConfigError(
                 "privacy-rights orchestration store is unavailable"
             )
-        callbacks = tuple(
-            item
-            for item in store.list_callbacks(
-                tenant,
-                state="ambiguous",
-                limit=min(1_000, bounded_limit * 10),
-            )
-            if item.source_id in self._owned_source_ids
-        )[:bounded_limit]
+        callbacks = store.due_reconciliation_callbacks(
+            tenant, source_ids=tuple(self._owned_source_ids), limit=bounded_limit,
+        )
         counts = {
             "resolved": 0,
             "requeued": 0,
@@ -1314,6 +1308,15 @@ class PrivacyRightsSourceWorker:
                 raise
             except Exception:
                 counts["errors"] += 1
+                try:
+                    store.defer_reconciliation_read(
+                        tenant, callback.callback_id, expected_revision=callback.revision,
+                        retry_delay_seconds=max(1, retry_delay),
+                    )
+                except Exception:
+                    # A concurrent reconciliation may have advanced this CAS.
+                    # Never change its disposition or replay the mutation.
+                    pass
         return ReconciliationBatchResult(
             tenant_id=tenant,
             inspected=len(callbacks),

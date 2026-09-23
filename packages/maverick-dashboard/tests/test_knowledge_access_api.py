@@ -217,6 +217,35 @@ def test_search_continuation_uses_current_context_and_exact_query(customer):
     assert "Private knowledge-a" not in stale.text
 
 
+def test_search_api_preserves_full_chunk_excerpt_and_partial_coverage_flags(customer):
+    """Transport contract; exact source reconstruction is covered in core tests."""
+    from dataclasses import replace
+
+    client, service, registry, rights = customer
+    _dataset(registry, rights, "knowledge-a", "long-policy")
+    original = service.content_resolver
+
+    def content(tenant, reference, admission):
+        return replace(original(tenant, reference, admission), summary="ordinary " * 800,
+                       retrieval_chunks=("ordinary " * 800, "quasardeadline: seventeen days"),
+                       summary_truncated=True)
+
+    service.content_resolver = content
+    request = {"context": _context(client), "query": "quasardeadline", "purpose": PURPOSE}
+    response = client.post(BASE + "/search", json=request)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["complete"] is True
+    assert "quasardeadline" in result["items"][0]["summary"]
+    assert result["items"][0]["summary_truncated"] is True
+    assert "_retrieval_chunks" not in result["items"][0]
+    service.content_resolver = lambda *args: replace(content(*args), search_coverage_complete=False)
+    partial = client.post(BASE + "/search", json=request | {"query": "absent-clause"})
+    assert partial.status_code == 200, partial.text
+    assert partial.json()["complete"] is False
+    assert "partial_source_coverage" in partial.json()["incomplete_reasons"]
+
+
 def test_page_assets_navigation_and_customer_language(customer):
     client, _service, _registry, _rights = customer
     page = client.get("/knowledge-access")

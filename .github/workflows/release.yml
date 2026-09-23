@@ -258,7 +258,7 @@ jobs:
           # requirements/ci.txt so rebuilding a tag cannot silently consume a
           # new packager or hook set.
           python -m pip install --constraint requirements/ci.txt \
-            'pyinstaller==6.22.2'
+            'pyinstaller==6.22.3'
           python -m pip check
           python scripts/verify_constraint_closure.py
           python -c "from maverick.providers import verify_release_runtime; verify_release_runtime()"
@@ -371,7 +371,7 @@ jobs:
           set -euo pipefail
           python -I -m pip install --upgrade \
             'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
-            'packaging==26.3' 'cyclonedx-bom==7.3.1'
+            'packaging==26.3' 'cyclonedx-bom==7.4.0'
           python -I scripts/verify_constraint_closure.py
           SBOM_ENV="$RUNNER_TEMP/lightwork-release-sbom"
           python -m venv "$SBOM_ENV"

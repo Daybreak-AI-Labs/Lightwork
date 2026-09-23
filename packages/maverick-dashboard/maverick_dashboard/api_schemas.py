@@ -161,8 +161,8 @@ class GoalIn(BaseModel):
     # REST caller is a cost / DB-bloat amplification vector. 16k chars is ample
     # for a goal brief; oversized payloads get a 422 rather than silent bloat.
     description: str = Field("", max_length=GOAL_DESCRIPTION_MAX_LENGTH)
-    max_dollars: float = Field(5.0, ge=0.0, le=100.0)
-    max_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
+    max_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
+    max_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     max_depth: int = Field(3, ge=1, le=5)
     template: str | None = None
     params: dict[str, str] | None = None
@@ -625,7 +625,7 @@ class HaltIn(BaseModel):
 class FleetRunIn(BaseModel):
     agent: str = Field(..., max_length=64)
     prompt: str = Field(..., max_length=8000)
-    max_dollars: float | None = Field(None, ge=0.0, le=100.0)
+    max_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
 
 
 class FleetAgentIn(BaseModel):
@@ -664,7 +664,7 @@ class ChildIn(BaseModel):
 class ComposeIn(BaseModel):
     title: str = Field(..., max_length=200)
     steps: list[str] = Field(default_factory=list)
-    budget_dollars: float | None = Field(None, ge=0.0, le=100.0)
+    budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     channel: str | None = Field(None, max_length=64)
     priority: str | None = Field(None, max_length=16)
 
@@ -694,8 +694,8 @@ class WorkflowSaveIn(BaseModel):
     title: str = Field(..., max_length=200)
     body: str = Field(..., max_length=20000)
     params: list[str] = Field(default_factory=list)
-    budget_dollars: float = Field(5.0, ge=0.0, le=100.0)
-    budget_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
+    budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
+    budget_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     overwrite: bool = False
     expected_generation: int | None = Field(None, ge=0)
 

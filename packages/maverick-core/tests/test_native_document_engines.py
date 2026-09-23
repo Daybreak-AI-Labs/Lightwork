@@ -81,7 +81,7 @@ def test_real_scanned_pdf_ocr_reads_invoice_numbers(worker):
     from PIL import Image, ImageDraw, ImageFont
     path = worker.workdir / "invoice.pdf"
     raster = Image.new("RGB", (1400, 800), "white")
-    font = ImageFont.truetype("DejaVuSans.ttf", 44)
+    font = ImageFont.load_default(size=44)
     ImageDraw.Draw(raster).multiline_text((70, 80), "INVOICE 1042\nQuantity 10\nUnit price 25.00\nTotal 250.00",
                                          font=font, fill="black", spacing=35)
     raster.save(path, "PDF", resolution=150)
@@ -151,7 +151,7 @@ def test_real_image_ocr_uses_verified_text_job(worker):
 
     path = worker.workdir / "revenue.png"
     raster = Image.new("RGB", (1200, 300), "white")
-    font = ImageFont.truetype("DejaVuSans.ttf", 44)
+    font = ImageFont.load_default(size=44)
     ImageDraw.Draw(raster).text((40, 80), "Revenue 120000", font=font, fill="black")
     raster.save(path)
     original = path.read_bytes()

@@ -8,7 +8,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from maverick.budget import budget_from_config
 from maverick.quotas import UsageLedger, record_usage
 from maverick.tenant import registry
 
@@ -25,9 +24,8 @@ def test_punctuation_tenant_uses_raw_registry_id_and_releases_hold(
     tenant_id = "channel:user"
     _provision_capped_tenant(monkeypatch, tenant_id)
 
-    budget = budget_from_config(max_dollars=6.0)
-
-    assert budget.max_dollars == pytest.approx(6.0)
+    reservation_id = 'explicit-legacy-fixture'
+    assert registry.reserve_tenant_budget(tenant_id, 6.0, 3600, reservation_id) == 6.0
     assert registry.tenant_remaining_today(tenant_id) == pytest.approx(4.0)
     reservation_path = registry._reservations_path(tenant_id)
     assert "channel%3Auser" in reservation_path.parts
@@ -36,24 +34,24 @@ def test_punctuation_tenant_uses_raw_registry_id_and_releases_hold(
     record_usage(
         "user:local",
         1.0,
-        reservation_id=budget._tenant_reservation_id,
+        reservation_id=reservation_id,
     )
 
     assert registry.tenant_remaining_today(tenant_id) == pytest.approx(9.0)
     assert registry._load_reservations(tenant_id) == {}
 
 
-def test_simultaneous_budget_starts_cannot_overgrant(monkeypatch) -> None:
+def test_simultaneous_legacy_reservations_cannot_overgrant(monkeypatch) -> None:
     _provision_capped_tenant(monkeypatch)
     workers = 12
     start = threading.Barrier(workers)
 
-    def allocate() -> float:
+    def allocate(index) -> float:
         start.wait(timeout=10)
-        return budget_from_config(max_dollars=6.0).max_dollars
+        return registry.reserve_tenant_budget('acme', 6.0, 3600, f'legacy-{index}')
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        grants = list(pool.map(lambda _index: allocate(), range(workers)))
+        grants = list(pool.map(allocate, range(workers)))
 
     assert sum(grants) <= 10.0 + 1e-9
     assert sorted(grant for grant in grants if grant > 0) == [4.0, 6.0]
@@ -185,7 +183,8 @@ print(registry.reserve_tenant_budget("acme", 6.0, 3600.0, sys.argv[2]))
 
 def test_failed_usage_write_retains_reservation(monkeypatch) -> None:
     _provision_capped_tenant(monkeypatch)
-    budget = budget_from_config(max_dollars=6.0)
+    reservation_id = 'failed-legacy-fixture'
+    registry.reserve_tenant_budget('acme', 6.0, 3600, reservation_id)
 
     def fail_record(*_args, **_kwargs):
         raise OSError("ledger unavailable")
@@ -194,10 +193,10 @@ def test_failed_usage_write_retains_reservation(monkeypatch) -> None:
     record_usage(
         "user:local",
         1.0,
-        reservation_id=budget._tenant_reservation_id,
+        reservation_id=reservation_id,
     )
 
     # No durable charge was written, so fail closed by keeping the hold until
     # its TTL rather than making the unmetered allowance available again.
     assert registry.tenant_remaining_today("acme") == pytest.approx(4.0)
-    assert budget._tenant_reservation_id in registry._load_reservations("acme")
+    assert reservation_id in registry._load_reservations("acme")

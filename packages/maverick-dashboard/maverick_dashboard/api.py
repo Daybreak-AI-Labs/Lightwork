@@ -33,8 +33,9 @@ from fastapi import (
 from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
-    DEFAULT_MAX_WALL_SECONDS,
+    clamp_task_limit,
     configured_max_dollars,
+    configured_max_wall_seconds,
 )
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import (
@@ -1359,8 +1360,8 @@ def create_goal(
     # attachments, binding the complete reviewed payload and effective limits.
     # Replays and read reconciliation never dispatch work a second time.
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
-    max_dollars = min(payload.max_dollars, configured_max_dollars())
-    max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
+    max_dollars = clamp_task_limit(payload.max_dollars, configured_max_dollars())
+    max_wall_seconds = clamp_task_limit(payload.max_wall_seconds, configured_max_wall_seconds())
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
     receipt = None
     if idem_key:
@@ -6407,6 +6408,7 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     end_states = (
         "completed",
         "failed",
+        "budget_limited",
         "rejected",
         "indeterminate",
         "paused_approval",
@@ -6576,7 +6578,8 @@ async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowR
 
 @router.post("/flows/runs/{run_id}/retry")
 def retry_flow_run_endpoint(
-    request: Request, run_id: str, from_failure: bool = False
+    request: Request, run_id: str, from_failure: bool = False,
+    budget_limit_dollars: float | None = Query(None, gt=0, allow_inf_nan=False),
 ) -> dict:
     """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
     (a fresh run, so any partial side effects aren't re-driven mid-flow). This is
@@ -6617,18 +6620,29 @@ def retry_flow_run_endpoint(
     from maverick_dashboard import automation_queue as aq
 
     if from_failure:
-        if run.status != "failed" or not run.cursor:
+        if run.status not in {"failed", "budget_limited"} or not run.cursor:
             raise HTTPException(
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
                 "resumed from its failure; use a plain retry instead",
             )
+        if run.status == "budget_limited":
+            if budget_limit_dollars is None or budget_limit_dollars <= max(
+                run.cost_dollars, run.budget_limit_dollars or 0.0,
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Set a larger total run allowance to continue saved work. Organization limits still apply.",
+                )
+        elif budget_limit_dollars is not None:
+            raise HTTPException(status_code=409, detail="Only a budget-held run can change its allowance.")
         try:
             aq.enqueue_flow_resume(
                 run.flow_id,
                 run_id,
                 owner=run.owner,
                 from_failure=True,
+                budget_limit_dollars=budget_limit_dollars,
             )
         except store.FlowSnapshotError as exc:
             raise HTTPException(
@@ -10344,6 +10358,21 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
     # partial import doesn't read as a clean success.
     skipped = len(raws) - len(automations)
 
+    # Validate the complete requested batch before publishing a template,
+    # arming a schedule or writing a trigger. A graph requiring manual repair
+    # must not leave a runnable approximation behind after an HTTP error.
+    prepared_graphs = []
+    for automation in automations:
+        _, body = automation.render()
+        _ensure_import_body_size(body)
+        if payload.as_flows:
+            from maverick.automation_import.to_flow import to_flow_with_report
+
+            try:
+                prepared_graphs.append(to_flow_with_report(automation))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     # Resolve schedule activation: an explicit request field wins; when the UI
     # omits it (None), fall back to the [automation_import] create_schedules
     # config knob (previously a dead setting -- nothing read it). Off by default.
@@ -10374,9 +10403,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
     channel = "api" if user_id else None
 
     results: list[dict] = []
-    for a in automations:
-        _, body = a.render()
-        _ensure_import_body_size(body)
+    for automation_index, a in enumerate(automations):
         res = materialize(
             a,
             save=not payload.dry_run,
@@ -10438,10 +10465,9 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             # Lower to a real graph too: structure preserved where the source
             # exposes it, each step's disposition logged -- the migration is
             # never silently lossy.
-            from maverick.automation_import.to_flow import to_flow_with_report
             from maverick.flow import store as flow_store
 
-            flow_graph, fidelity = to_flow_with_report(a)
+            flow_graph, fidelity = prepared_graphs[automation_index]
             if owner:
                 flow_graph.owner = owner
             flow_id = flow_graph.id
@@ -13265,11 +13291,7 @@ def run_fleet_agent(
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
     spend_ceiling = configured_max_dollars()
-    max_dollars = (
-        min(payload.max_dollars, spend_ceiling)
-        if payload.max_dollars is not None
-        else spend_ceiling
-    )
+    max_dollars = clamp_task_limit(payload.max_dollars, spend_ceiling)
 
     w = _world()
     goal_id = w.create_goal(
@@ -13855,11 +13877,7 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
     from maverick.runner import run_goal_in_background_async
 
     spend_ceiling = configured_max_dollars()
-    max_dollars = (
-        min(payload.budget_dollars, spend_ceiling)
-        if payload.budget_dollars is not None
-        else spend_ceiling
-    )
+    max_dollars = clamp_task_limit(payload.budget_dollars, spend_ceiling)
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
@@ -14341,7 +14359,7 @@ def resume_goal(
         )
     max_dollars = payload.max_dollars if payload is not None else None
     spend_ceiling = configured_max_dollars()
-    if max_dollars is not None and max_dollars > spend_ceiling:
+    if max_dollars is not None and spend_ceiling is not None and max_dollars > spend_ceiling:
         raise HTTPException(
             status_code=400,
             detail=(

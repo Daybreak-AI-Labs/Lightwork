@@ -40,7 +40,11 @@ def test_resume_passes_sandbox_override_to_build_sandbox(tmp_path, monkeypatch):
             return object()
 
         ns.build_sandbox = build_sandbox
-        ns.run_goal_sync = lambda *a, **k: "FINAL: resumed."
+        def run_goal_sync(_llm, world, _budget, goal_id, **kwargs):
+            world.set_goal_status(goal_id, "done", "FINAL: resumed.")
+            return "FINAL: resumed."
+
+        ns.run_goal_sync = run_goal_sync
         return ns
 
     monkeypatch.setattr(cli_mod, "_kernel", fake_kernel)
@@ -79,7 +83,11 @@ def test_resume_without_sandbox_flag_uses_config_default(tmp_path, monkeypatch):
             return object()
 
         ns.build_sandbox = build_sandbox
-        ns.run_goal_sync = lambda *a, **k: "FINAL: resumed."
+        def run_goal_sync(_llm, world, _budget, goal_id, **kwargs):
+            world.set_goal_status(goal_id, "done", "FINAL: resumed.")
+            return "FINAL: resumed."
+
+        ns.run_goal_sync = run_goal_sync
         return ns
 
     monkeypatch.setattr(cli_mod, "_kernel", fake_kernel)

@@ -527,7 +527,7 @@ def build_sandbox(
         return SSHBackend(
             host=host,
             workdir=PurePosixPath(
-                str(full_cfg.get("workdir", "~/maverick-workspace"))
+                str(workdir if workdir is not None else full_cfg.get("workdir", "~/maverick-workspace"))
             ),
             timeout=timeout,
             ssh_args=full_cfg.get("ssh_args", []),

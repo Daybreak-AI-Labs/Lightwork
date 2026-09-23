@@ -9,6 +9,7 @@ from pathlib import Path
 
 from maverick import file_lock
 from maverick import workspace_recovery as recovery
+from maverick.channel_recovery import NAMESPACES as CHANNEL_NAMESPACES
 from maverick.recovery_authorities import (
     APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES,
     AUTHORITY_SAMPLES,
@@ -316,12 +317,23 @@ def test_rollback_sensitive_replay_and_consent_authorities_block_startup(
     assert report["protected_authority"]["classification_complete"] is True
 
 
-def test_every_unmodeled_authority_blocks_global_start_until_disposed(
+def test_every_unreconciled_authority_blocks_global_start_until_disposed(
     tmp_path: Path,
 ) -> None:
     stage = file_lock.ensure_private_directory(tmp_path / "stage")
     for relative in GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES:
-        _write(stage, relative, {"restored": True})
+        if relative.endswith(".sqlite3"):
+            path = stage / relative
+            file_lock.ensure_private_directory(path.parent)
+            file_lock.atomic_create_bytes(path, b"")
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute("CREATE TABLE restored(id TEXT)")
+                connection.commit()
+            finally:
+                connection.close()
+        else:
+            _write(stage, relative, {"restored": True})
 
     removed, report = recovery._reconcile_bootstrap_stage(stage)
 
@@ -334,7 +346,10 @@ def test_every_unmodeled_authority_blocks_global_start_until_disposed(
     assert set(blockers) == set(GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES)
     for relative, expected_policy in GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES.items():
         item = blockers[relative]
-        assert item["prior_state"] == f"unclassified:{expected_policy}"
+        namespace = relative.split("/", 1)[0]
+        expected_prior = (f"unreadable_{namespace}" if namespace in CHANNEL_NAMESPACES
+                          else f"unclassified:{expected_policy}")
+        assert item["prior_state"] == expected_prior
         assert item["requires_external_readback"] is True
         assert item["state"] == "unresolved"
         assert (stage / relative).exists()
@@ -345,6 +360,52 @@ def test_every_unmodeled_authority_blocks_global_start_until_disposed(
         "state_sha256": report["protected_authority"]["state_sha256"],
         "disposition": "current_authority_and_external_readback_required",
     }
+
+
+def test_restored_collection_and_organization_receipts_remain_held_and_unchanged(
+    tmp_path: Path,
+) -> None:
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    expected = {}
+    for prefix in ("", "tenants/tenant-a/"):
+        collection = prefix + "billing/stripe-collections/period.json"
+        holds = prefix + "usage/provider_holds.json"
+        _write(stage, collection, {"schema": 1, "items": {"item-a": {"state": "unknown"}}})
+        _write(stage, holds, {"version": 1, "calls": {"call-a": {"state": "unknown"}}})
+        expected[collection] = "stripe_collection_authority"
+        expected[holds] = "organization_provider_holds"
+        for stem in ("provider_holds", "provider_history"):
+            marker = prefix + f"usage/{stem}.required"
+            file_lock.atomic_create_text(stage / marker, "organization provider authority v1\n")
+            expected[marker] = f"organization_{stem}_required"
+        history = prefix + "usage/provider_history.sqlite3"
+        database = stage / history
+        file_lock.atomic_create_bytes(database, b"")
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute("CREATE TABLE calls(id TEXT PRIMARY KEY, data TEXT)")
+            connection.execute("INSERT INTO calls VALUES(?, ?)",
+                               ("call-a", '{"released":true,"state":"settled"}'))
+            connection.commit()
+        finally:
+            connection.close()
+        expected[history] = "organization_provider_history"
+    original = {relative: (stage / relative).read_bytes() for relative in expected}
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert {item["source"] for item in report["items"]} == set(expected)
+    for item in report["items"]:
+        relative = item["source"]
+        assert item["prior_state"] == f"unclassified:{expected[relative]}"
+        assert item["safe_state"] == "global_start_blocked"
+        assert item["state"] == "unresolved"
+        assert item["requires_external_readback"] is True
+        assert (stage / relative).read_bytes() == original[relative]
+        assert authority_policy(relative.swapcase(), is_sqlite=relative.endswith(".sqlite3")) == expected[relative]
+        assert authority_policy(relative + ".lock", is_sqlite=False) is None
+    assert report["protected_authority"]["classification_complete"] is True
 
 
 def test_world_approvals_are_invalidated_but_attempt_receipts_remain(tmp_path: Path) -> None:

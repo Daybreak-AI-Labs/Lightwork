@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import time
+from dataclasses import asdict
 from unittest.mock import AsyncMock
 
 import pytest
@@ -111,3 +114,112 @@ def test_restored_channel_authorities_remain_blocked_without_no_replay_reconcili
         handler.assert_not_awaited()
         provider.assert_not_awaited()
     asyncio.run(cannot_replay())
+
+
+@pytest.mark.parametrize("encrypted", [False, True])
+def test_supported_channel_readback_completes_restore_without_replaying_old_receipts(monkeypatch, tmp_path, encrypted):
+    from maverick.governed_records import GovernedRecordStore
+    from maverick_channels import delivery
+
+    source = _select_home(monkeypatch, tmp_path / "source")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1" if encrypted else "0")
+    recovery_key = recovery.configure_key()["key"]
+    original, messages = {}, {}
+    for index, (execution, state) in enumerate((
+        ("received", "not_ready"), ("completed", "ready"), ("completed", "retryable"),
+        ("execution_started_unconfirmed", "not_ready"), ("execution_unknown", "delivery_unknown"),
+        ("completed", "delivered"),
+    )):
+        message = IncomingMessage(user_id="owner", text=f"request {index}", channel="fixture", message_id=str(index))
+        identity = delivery._record_id("fixture", "account", str(index))
+        payload, _ = delivery._payload(message, identity)
+        value = {"id": identity, "revision": 1, "created_at": time.time(), "updated_at": time.time(),
+                 "channel": "fixture", "account_sha256": delivery._digest("account"), "external_id": str(index),
+                 "execution_id": f"execution-{index}", "fingerprint": delivery._digest([payload, {}]),
+                 "message": payload, "route": {}, "execution": execution, "delivery": state,
+                 "reply": asdict(delivery.Reply("previous answer")), "chunks": {}}
+        if state == "delivered":
+            value["chunks"] = {"reply": {"state": "delivered", "provider_id": "remote-receipt", "payload_sha256": "a" * 64}}
+        _record(source, "channel-deliveries", value, encrypted=encrypted)
+        original[identity] = value
+        messages[identity] = message
+    for namespace, prefix, fields in (
+        ("channel-delivery-cursors", "chc", {"cursor": "archived-position"}),
+        ("channel-poll-cursors", "chp", {"channel": "mastodon", "cursor": "10", "seen_cursors": [], "status": "idle", "watermark": "5"}),
+        ("imessage-intake-cursors", "imc", {"last_rowid": 50}),
+    ):
+        _record(source, namespace, {"id": prefix + "-" + "b" * 56, "revision": 1, **fields}, encrypted=encrypted)
+    snapshot = recovery.create()
+    exported = tmp_path / "valid-channel-source.tgz"
+    file_lock.atomic_create_bytes(exported, recovery.download_path(snapshot["id"]).read_bytes())
+    custody = recovery.export_encryption_keys() if encrypted else None
+    target = _select_home(monkeypatch, tmp_path / "target")
+    recovery.configure_key(imported=recovery_key)
+    imported = recovery.import_archive(exported)
+    recovery.prepare_bootstrap(isolated=True, actor="admin", source_offline=True)
+    if encrypted:
+        report = recovery.test_key_custody(imported["id"], custody, expected_sha256=imported["sha256"], actor="admin")
+        recovery.install_retained_keys(imported["id"], custody, expected_sha256=imported["sha256"],
+                                       report_id=report["report_id"], isolated=True, actor="admin")
+    review = recovery.prepare_restore(imported["id"], isolated=True, actor="admin")
+    recovery.apply_restore(review["review"], review["target"], isolated=True, actor="admin")
+    status = recovery.reconciliation_status(actor="admin")
+    items = [row for row in status["items"] if row["category"] == "channel_authority"]
+    assert len(items) == 9 and status["unresolved"] == 9
+    with pytest.raises(recovery.RecoveryError):
+        recovery.assert_bootstrap_start_allowed()
+    first = items[0]
+    first_record = original[first["record_id"]]
+    valid_first = copy.deepcopy(first["readback_template"])
+    valid_first.update(observed_at=time.time(), evidence_reference="provider-log-123", outcome="confirmed",
+        execution="recorded" if first_record["execution"] != "received" else "absent",
+        delivery="recorded" if first_record["delivery"] == "delivered" else "absent")
+    for chunk in valid_first["chunks"].values():
+        chunk.update(outcome="recorded", provider_id="remote-receipt")
+    for changes in ({"record_id": "other"}, {"namespace": "other"}, {"source_sha256": "0" * 64},
+                    {"binding_sha256": "0" * 64}, {"observed_at": time.time() - 3600}, {"outcome": "unknown"}):
+        invalid = {**valid_first, **changes}
+        with pytest.raises(recovery.RecoveryError):
+            recovery.resolve_reconciliation(first["id"], "channel_readback_confirmed", evidence_reference=None,
+                channel_readback=invalid, isolated=True, actor="admin")
+    with pytest.raises(recovery.RecoveryError):
+        recovery.resolve_reconciliation(first["id"], "external_effect_absent", evidence_reference="generic-ref-123", isolated=True, actor="admin")
+    for item in items:
+        readback = copy.deepcopy(item["readback_template"])
+        readback.update(observed_at=time.time(), evidence_reference="provider-log-123", outcome="confirmed")
+        namespace = readback["namespace"]
+        if namespace == "channel-deliveries":
+            before = original[item["record_id"]]
+            readback.update(execution="recorded" if before["execution"] != "received" else "absent",
+                            delivery="recorded" if before["delivery"] == "delivered" else "absent")
+            for chunk in readback["chunks"].values():
+                chunk.update(outcome="recorded", provider_id="remote-receipt")
+        elif namespace == "channel-poll-cursors":
+            readback["checkpoint"] = {"watermark": "100"}
+        elif namespace == "imessage-intake-cursors":
+            readback["checkpoint"] = {"last_rowid": 100}
+        kwargs = dict(evidence_reference=None, channel_readback=readback, isolated=True, actor="admin")
+        recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **kwargs)
+        # Fresh reads, including the marker, prove an exact retry is idempotent.
+        assert recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **kwargs)["state"] == "resolved"
+        modified = {**readback, "evidence_reference": "different-readback"}
+        with pytest.raises(recovery.RecoveryError):
+            recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **{**kwargs, "channel_readback": modified})
+    assert recovery.complete_reconciliation(isolated=True, actor="admin")["state"] == "completed"
+    recovery.assert_bootstrap_start_allowed()
+    journal = DeliveryJournal()
+    for identity, before in original.items():
+        row = journal.get(identity)
+        assert {key: row[key] for key in ("execution", "delivery", "chunks")} == {key: before[key] for key in ("execution", "delivery", "chunks")}
+        assert row["restore_hold"]["state"] == "resolved"
+        handler, provider = AsyncMock(), AsyncMock()
+        channel = type("FixtureChannel", (), {"handler": handler})()
+        asyncio.run(process_message(channel, messages[identity], external_id=before["external_id"],
+            account="account", authorize=lambda: True, send=provider, journal=DeliveryJournal()))
+        handler.assert_not_awaited()
+        provider.assert_not_awaited()
+        if encrypted:
+            assert crypto_at_rest.is_sealed((target / "channel-deliveries" / (identity + ".json")).read_bytes())
+    poll = GovernedRecordStore("channel-poll-cursors", "chp", "channel_poll_cursor").get("chp-" + "b" * 56)
+    assert poll["watermark"] == "100" and poll["cursor"] is None
+    assert poll["restore_hold"]["prior_checkpoint"]["watermark"] == "5"

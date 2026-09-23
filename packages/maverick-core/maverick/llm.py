@@ -952,11 +952,13 @@ def _reserve_provider_call(
     *,
     sequence: _ProviderAttemptSequence,
     service: str,
+    budget=None,
 ):
     from .provider_cost_cap import reserve
     return reserve(
         provider,
         projected_dollars,
+        organization_budget=budget,
         **sequence.next(default_service=service),
     )
 
@@ -1086,6 +1088,7 @@ class _ProviderAttemptTracker:
                 self.projected,
                 sequence=self.sequence,
                 service=self.service,
+                budget=self.budget,
             ),
             baseline=self.budget.dollars if self.budget is not None else 0.0,
         )

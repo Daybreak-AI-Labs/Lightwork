@@ -354,3 +354,26 @@ def spreadsheet(sandbox=None) -> Tool:
         input_schema=_SPREADSHEET_SCHEMA,
         fn=lambda args: _run(args, sandbox),
     )
+
+
+def spreadsheet_read(sandbox=None) -> Tool:
+    """Read an existing workbook without permitting any file/engine mutation."""
+    properties = {key: value for key, value in _SPREADSHEET_SCHEMA["properties"].items()
+                  if key in {"op", "path", "sheet", "limit"}}
+    properties["op"] = {"type": "string", "enum": ["info", "read"]}
+
+    def run(args):
+        if args.get("op") not in ("info", "read"):
+            return "ERROR: spreadsheet_read supports only info/read; draft changes in your response"
+        return _run(args, sandbox)
+
+    return Tool(
+        name="spreadsheet_read",
+        description=("Read existing workspace CSV/XLSX/XLSM metadata or rows. "
+                     "Only info/read; cannot write, edit or recalculate. Formula cells "
+                     "include cached values and freshness status. Draft proposed analysis "
+                     "and changes in the response for a human to apply."),
+        input_schema={"type": "object", "properties": properties,
+                      "required": ["op", "path"], "additionalProperties": False},
+        fn=run,
+    )

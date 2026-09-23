@@ -44,6 +44,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # --- fixed-key sections (unknown keys are flagged) ---
     "deployment": {"type", "allow_multiple_control_planes"},
     "budget": {
+        "task_limits_enabled",
+        "strict_pricing",
         "max_dollars",
         "max_wall_seconds",
         "max_tool_calls",

@@ -38,6 +38,54 @@ def _isolate_raw_agent_loop_from_rehearsal(monkeypatch):
 
 class TestAgentLoop:
     @pytest.mark.asyncio
+    async def test_ordinary_agent_can_finish_after_old_twenty_five_step_default(
+        self, ctx, fake_llm, make_llm_response, monkeypatch,
+    ):
+        monkeypatch.delenv("MAVERICK_MAX_STEPS", raising=False)
+        fake_llm.scripted = [make_llm_response(tool_calls=[
+            ToolCall(id=f"read-{i}", name="read_file", input={"path": f"record-{i}.txt"}),
+        ]) for i in range(27)] + [make_llm_response(text="FINAL: finished all records")]
+        agent = Agent(ctx=ctx, role="researcher", brief="read all records")
+
+        async def read(_name, args):
+            return "contents of " + args["path"]
+
+        monkeypatch.setattr(agent.tools, "run", read)
+        result = await agent.run()
+        assert agent.max_steps is None and result.final == "finished all records"
+        assert result.error is None and len(fake_llm.calls) == 28
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reason", ["max_tokens", "length"])
+    @pytest.mark.parametrize("marker", ["FINAL: ", ""])
+    async def test_truncated_answer_continues_without_accepting_partial_final(
+        self, ctx, fake_llm, make_llm_response, reason, marker,
+    ):
+        fake_llm.scripted = [
+            make_llm_response(text=marker + "incomplete first item", stop_reason=reason),
+            make_llm_response(text="FINAL: complete answer"),
+        ]
+        result = await Agent(ctx=ctx, role="researcher", brief="answer").run()
+        assert result.error is None and result.final == "complete answer"
+        assert len(fake_llm.calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_repeated_provider_cutoff_is_incomplete_and_never_dispatches_tools(
+        self, ctx, fake_llm, make_llm_response, monkeypatch,
+    ):
+        fake_llm.scripted = [make_llm_response(
+            text="FINAL: unfinished", stop_reason="max_tokens",
+            tool_calls=[ToolCall(id="partial", name="ask_user", input={})],
+        ) for _ in range(3)]
+        agent = Agent(ctx=ctx, role="researcher", brief="answer")
+        calls = []
+        monkeypatch.setattr(agent, "_run_dispatched_tool", lambda *a, **k: calls.append(a))
+        result = await agent.run()
+        assert result.stop_kind == "incomplete" and result.error
+        assert result.final is None and result.verifier_confidence == 0
+        assert calls == [] and len(fake_llm.calls) == 3
+
+    @pytest.mark.asyncio
     async def test_final_parsing_returns_answer(self, ctx, fake_llm, make_llm_response):
         fake_llm.scripted = [make_llm_response(text="FINAL: the answer is 42")]
         agent = Agent(ctx=ctx, role="researcher", brief="compute the answer")
@@ -135,6 +183,7 @@ class TestAgentLoop:
 
     @pytest.mark.asyncio
     async def test_budget_exceeded_returns_error(self, ctx, fake_llm, make_llm_response):
+        ctx.budget.max_input_tokens = 1_000_000
         ctx.budget.input_tokens = ctx.budget.max_input_tokens - 1
         class _BoomLLM:
             async def complete_async(self, **kwargs):

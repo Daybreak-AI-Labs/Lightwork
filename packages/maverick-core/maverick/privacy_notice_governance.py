@@ -1777,6 +1777,24 @@ class PrivacyNoticeGovernanceStore:
                         or not self._ready(release, approvals)
                         or not release.effective_from <= now < release.effective_until
                     ):
+                        # Persist progress through rejected candidates. Otherwise
+                        # the same bounded prefix can hide due work forever.
+                        expired = now >= release.effective_until
+                        deferred = dict(raw)
+                        state = "dead_letter" if expired else "pending"
+                        next_attempt = max(now + 60, release.effective_from)
+                        error_code = "release_expired" if expired else "release_not_ready"
+                        deferred.update(state=state, next_attempt_at=next_attempt,
+                                        lease_owner=None, lease_token=None, lease_until=None,
+                                        last_error_code=error_code, revision=current.revision + 1,
+                                        updated_at=now)
+                        self._write(connection, "notice_publication_intents", tenant,
+                                    "intent_id", current.intent_id, deferred,
+                                    index_updates={"state": state, "next_attempt_at": next_attempt,
+                                                   "lease_until": None})
+                        self._audit(connection, tenant, "publication_intent_failed",
+                                    current.intent_id, actor,
+                                    {"state": state, "error_code": error_code, "attempts": current.attempts}, now)
                         continue
                 token = _id(self._token_factory(), "lease_token", _OP_RE)
                 payload = dict(raw)

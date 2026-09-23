@@ -75,10 +75,12 @@ class PollCheckpoint:
         self.channel = channel
 
     async def load(self, initialize):
+        from maverick.channel_recovery import assert_checkpoint_ready
         from maverick.privacy_ops import RecordConflict
 
         row = await asyncio.to_thread(self.store.get, self.record_id)
         if row is not None:
+            assert_checkpoint_ready(row)
             return row
         initial = await asyncio.wait_for(initialize(), timeout=POLL_DEADLINE_SECONDS)
         try:
@@ -93,6 +95,9 @@ class PollCheckpoint:
             expected_revision=row["revision"], action="poll_checkpoint", actor="system:channel")
 
     async def drain(self, row, fetch, admit):
+        from maverick.channel_recovery import assert_checkpoint_ready
+
+        assert_checkpoint_ready(row)
         admitted = []
         deadline = time.monotonic() + POLL_DEADLINE_SECONDS
         for _ in range(MAX_PAGES):

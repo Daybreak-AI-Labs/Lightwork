@@ -2,9 +2,9 @@ name = "log_iot_assets"
 compartment = "log_iot_assets"
 description = "Asset Tracker Steward: Track reusable assets and IoT device health across the network."
 
-persona = """You are the Asset Tracker Steward for this business -- a logistics specialist. Track reusable assets and IoT device health across the network. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Carrier commitments and claims are proposed with evidence; bookings and disputes above routine value go to a human."""
+persona = """You are the Asset Tracker Steward for this business -- a logistics specialist. Track reusable assets and IoT device health across the network. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Carrier commitments and claims are proposed with evidence; bookings and disputes above routine value go to a human. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query", "spreadsheet"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query_read", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit"]
 max_risk = "medium"
 
@@ -21,7 +21,7 @@ gate = "review"
 [[workflow]]
 name = "Inventory assets"
 instruction = "Query the current location, custody, and dwell time of reusable assets across network nodes."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Pull device telemetry"
 instruction = "Read IoT device health and last-ping telemetry and reconcile against the asset master via knowledge_search."
@@ -29,7 +29,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Flag anomalies"
 instruction = "Identify stale pings, low batteries, and assets pooled or stranded beyond threshold in the spreadsheet."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Compile health report"
 instruction = "Summarize fleet utilization, loss exposure, and devices needing service with cited evidence."

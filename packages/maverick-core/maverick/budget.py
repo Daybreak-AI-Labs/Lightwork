@@ -19,7 +19,6 @@ import os
 import re
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 
 from .pricing import (
@@ -608,11 +607,11 @@ def _lookup_price(
 
 @dataclass
 class Budget:
-    max_input_tokens: int = 1_000_000
-    max_output_tokens: int = 200_000
-    max_dollars: float = 5.0
-    max_wall_seconds: float = 3600.0
-    max_tool_calls: int = 500
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    max_dollars: float | None = None
+    max_wall_seconds: float | None = None
+    max_tool_calls: int | None = None
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -820,6 +819,8 @@ class Budget:
         other._validate_integrity()
         with self._lock:
             self._validate_integrity()
+            from .tenant.provider_admission import merge_budget
+            merge_budget(self, other)
             self.input_tokens += other.input_tokens
             self.output_tokens += other.output_tokens
             self.cache_read_tokens += other.cache_read_tokens
@@ -845,7 +846,8 @@ class Budget:
         Lets a caller bound an in-flight async await (e.g. an LLM generation)
         so the wall cap is HARD — interrupting a long generation — rather than
         only checked at turn boundaries."""
-        return self.max_wall_seconds - self.elapsed()
+        return (self.max_wall_seconds - self.elapsed()
+                if self.max_wall_seconds is not None else math.inf)
 
     def __post_init__(self) -> None:
         self._started_monotonic = time.monotonic()
@@ -872,6 +874,8 @@ class Budget:
             ("max_output_tokens", 200_000),
         ):
             _v = getattr(self, _field)
+            if _v is None:
+                continue
             try:
                 if not math.isfinite(float(_v)):
                     setattr(self, _field, _default)
@@ -914,28 +918,31 @@ class Budget:
             "cache_read_tokens",
             "cache_write_tokens",
             "tool_calls",
-            "max_input_tokens",
-            "max_output_tokens",
-            "max_tool_calls",
         ):
             _nonnegative_integer(getattr(self, field_name), field_name.replace("_", " "))
-        for field_name in ("dollars", "max_dollars", "max_wall_seconds"):
+        for field_name in ("max_input_tokens", "max_output_tokens", "max_tool_calls"):
+            if getattr(self, field_name) is not None:
+                _nonnegative_integer(getattr(self, field_name), field_name.replace("_", " "))
+        for field_name in ("dollars",):
             _nonnegative_finite(getattr(self, field_name), field_name.replace("_", " "))
+        for field_name in ("max_dollars", "max_wall_seconds"):
+            if getattr(self, field_name) is not None:
+                _nonnegative_finite(getattr(self, field_name), field_name.replace("_", " "))
         _nonnegative_finite(getattr(self, "_reserved", 0.0), "reserved dollars")
         _validate_token_operations(getattr(self, "_token_operations", {}))
 
     def check(self) -> None:
         self._validate_integrity()
-        if self.input_tokens > self.max_input_tokens:
+        if self.max_input_tokens is not None and self.input_tokens > self.max_input_tokens:
             raise BudgetExceeded(f"input tokens {self.input_tokens} > {self.max_input_tokens}")
-        if self.output_tokens > self.max_output_tokens:
+        if self.max_output_tokens is not None and self.output_tokens > self.max_output_tokens:
             raise BudgetExceeded(f"output tokens {self.output_tokens} > {self.max_output_tokens}")
-        if self.dollars > self.max_dollars:
+        if self.max_dollars is not None and self.dollars > self.max_dollars:
             raise BudgetExceeded(f"${self.dollars:.2f} > ${self.max_dollars:.2f}")
-        if self.tool_calls > self.max_tool_calls:
+        if self.max_tool_calls is not None and self.tool_calls > self.max_tool_calls:
             raise BudgetExceeded(f"tool calls {self.tool_calls} > {self.max_tool_calls}")
         elapsed = _nonnegative_finite(self.elapsed(), "elapsed wall time")
-        if elapsed >= self.max_wall_seconds:
+        if self.max_wall_seconds is not None and elapsed >= self.max_wall_seconds:
             raise BudgetExceeded(
                 f"wall time {elapsed:.0f}s >= {self.max_wall_seconds:.0f}s"
             )
@@ -957,7 +964,7 @@ class Budget:
         with self._lock:
             self._validate_integrity()
             projected = self.dollars + getattr(self, "_reserved", 0.0) + est
-            if projected > self.max_dollars:
+            if self.max_dollars is not None and projected > self.max_dollars:
                 raise BudgetExceeded(
                     f"projected ${projected:.2f} > ${self.max_dollars:.2f} "
                     f"(spent ${self.dollars:.2f} + est ${est:.2f} for this call)"
@@ -979,7 +986,7 @@ class Budget:
             self._validate_integrity()
             held = getattr(self, "_reserved", 0.0)
             projected = self.dollars + held + est
-            if projected > self.max_dollars:
+            if self.max_dollars is not None and projected > self.max_dollars:
                 raise BudgetExceeded(
                     f"projected ${projected:.2f} > ${self.max_dollars:.2f} "
                     f"(spent ${self.dollars:.2f} + in-flight ${held:.2f} "
@@ -1042,12 +1049,29 @@ _BUDGET_KEY_TYPES = {
 }
 
 
+def _configured_task_limits(cfg: dict) -> dict:
+    limits = {}
+    for key, caster in _BUDGET_KEY_TYPES.items():
+        if cfg.get(key) is None:
+            continue
+        try:
+            if isinstance(cfg[key], bool):
+                raise ValueError("boolean limit")
+            cast = caster(cfg[key])
+            if not math.isfinite(cast) or cast < 0:
+                raise ValueError("invalid limit")
+            limits[key] = cast
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"budget.{key} must be a finite non-negative limit") from exc
+    return limits
+
+
 def resolve_budget_caps(*, defaults: dict | None = None,
                         task_class: str | None = None, **overrides) -> dict:
     """Resolve the configured caps without reserving anything.
 
     The precedence :func:`budget_from_config` documents, stopped before the
-    tenant-remainder clamp and reservation, so a caller can learn the
+    organization preflight and physical-call admission, so a caller can learn the
     deployment's ceiling (for example the largest per-attempt limit the
     dashboard may accept) without holding tenant allowance for a run that has
     not started.
@@ -1068,26 +1092,28 @@ def resolve_budget_caps(*, defaults: dict | None = None,
             if key in _BUDGET_KEY_TYPES and val is not None:
                 kwargs[key] = val
     try:
-        from .config import get_budget_overrides
+        from .config import config_source_errors, get_budget_overrides
         cfg = get_budget_overrides() or {}
-    except Exception:
-        cfg = {}
-    for key, caster in _BUDGET_KEY_TYPES.items():
-        if cfg.get(key) is not None:
-            try:
-                cast = caster(cfg[key])
-                # Reject non-finite caps from config (TOML nan/inf) -- they
-                # would disable the cap rather than set it. Skip -> prior layer.
-                if isinstance(cast, float) and not math.isfinite(cast):
-                    continue
-                kwargs[key] = cast
-            except (TypeError, ValueError):
-                pass  # malformed config value -> fall back to prior layer
+        if config_source_errors():
+            raise ValueError("task budget configuration is unavailable")
+    except Exception as exc:
+        raise ValueError("task budget configuration is unavailable") from exc
+    from .runtime_overrides import task_limits_override
+
+    enabled = task_limits_override()
+    if enabled is None:
+        enabled = cfg.get("task_limits_enabled", True)
+    if type(enabled) is not bool:
+        raise ValueError("budget.task_limits_enabled must be true or false")
+    if not enabled:
+        kwargs.clear()
+    if enabled:
+        kwargs.update(_configured_task_limits(cfg))
     # Dashboard-set spend cap (settings page; lives in runtime-overrides.toml,
     # never config.toml). A live UI choice sits above [budget] config, below an
     # explicit per-call override / env flag.
     dash_cap = budget_override()
-    if dash_cap is not None:
+    if enabled and dash_cap is not None:
         kwargs["max_dollars"] = dash_cap
     # Env override for the documented MAVERICK_BUDGET_DOLLARS. The cookbooks
     # use `MAVERICK_BUDGET_DOLLARS=0.5 maverick start ...` to cap a single
@@ -1098,10 +1124,11 @@ def resolve_budget_caps(*, defaults: dict | None = None,
     if env_dollars:
         try:
             cast = float(env_dollars)
-            if math.isfinite(cast):
-                kwargs["max_dollars"] = cast
-        except (TypeError, ValueError):
-            pass
+            if not math.isfinite(cast) or cast < 0:
+                raise ValueError("invalid limit")
+            kwargs["max_dollars"] = cast
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MAVERICK_BUDGET_DOLLARS must be a finite non-negative limit") from exc
     for key, val in overrides.items():
         if val is not None and key in _BUDGET_KEY_TYPES:
             kwargs[key] = val
@@ -1126,21 +1153,23 @@ def budget_from_config(*, defaults: dict | None = None,
 
     ``config.get_budget_overrides()`` already existed but was never wired,
     so the ``[budget]`` section had no effect on any run. This is the single
-    funnel that fixes that; malformed values are skipped (keep prior layer)
-    rather than crashing the run.
+    funnel that fixes that; malformed explicit values fail before the run.
     """
     kwargs = resolve_budget_caps(
         defaults=defaults, task_class=task_class, **overrides
     )
     reservation_id, refusal = _clamp_to_tenant_remainder(kwargs)
     budget = Budget(**kwargs)
+    if not refusal:
+        from .tenant.provider_admission import initialize_budget
+        initialize_budget(budget)
     if reservation_id:
         # Handle so the run can release the tenant hold when it records its
         # actual spend: ``quotas.record_usage(..., reservation_id=b._tenant_reservation_id)``.
         budget._tenant_reservation_id = reservation_id
     if refusal:
-        # W2-83: the tenant allowance is exhausted (or unreadable), so this
-        # budget was clamped to $0. Carry the reason so the run gate refuses
+        # The tenant allowance is exhausted (or unreadable). Carry the reason
+        # without changing the task's own limits, so the run gate refuses
         # cleanly BEFORE the goal starts instead of admitting a run that dies
         # on its first model call with "budget exceeded".
         budget._tenant_refusal = refusal
@@ -1148,86 +1177,18 @@ def budget_from_config(*, defaults: dict | None = None,
 
 
 def _clamp_to_tenant_remainder(kwargs: dict) -> tuple[str | None, str | None]:
-    """Clamp ``kwargs['max_dollars']`` to the active tenant's remaining daily
-    allowance (#78) in place, and RESERVE that clamped cap against the tenant so
-    concurrent runs coordinate (finding #2). Returns ``(reservation_id,
-    refusal_reason)``: the reservation id is ``None`` when no reservation was
-    made (no active tenant / no cap / clamp 0); the refusal reason is set
-    exactly when the run was clamped to $0 by tenant policy (allowance
-    exhausted, policy unreadable, reservation failed) so callers can refuse
-    the start with a human-readable reason instead of running it into a wall.
+    """Preflight organization policy without allocating an arbitrary task cap.
 
-    Highest precedence: the tenant's aggregate daily ceiling is a billing
-    guarantee, so it overrides even an explicit ``--max-dollars``. Without it the
-    over-quota gate only fires *between* runs, letting one run blow past the
-    tenant cap. No active tenant / no cap -> untouched (the default single-tenant
-    install is unchanged). Never *raises* a cap, only lowers it.
-
-    Concurrency (finding #2, fixed): the remaining-allowance calculation and
-    reservation write are one strict cross-process-locked operation. So N runs
-    that START for one tenant before any records spend receive caps whose sum is
-    no greater than the tenant's remaining daily allowance. The reservation
-    carries a TTL backstop derived from the wall cap, so a crashed run that never
-    records spend only dents the cap until the hold expires; the hold is released
-    after the run's actual spend is durably recorded.
+    Per-physical-call durable admission enforces the aggregate ceiling. Merely
+    constructing an uncapped or capped Budget consumes no organization funds.
+    Explicit task limits remain independent, including an uncapped None value.
     """
+    del kwargs  # compatibility signature; organization policy never rewrites task limits
     try:
-        from .paths import current_tenant_id
-        tenant = current_tenant_id()
+        from .paths import current_tenant_id_strict
+        from .tenant.registry import tenant_over_quota
+        tenant = current_tenant_id_strict()
+        return None, tenant_over_quota(tenant) if tenant else None
     except Exception as exc:
-        # An unreadable tenant identity may hide a cap. Zero the run allowance
-        # rather than treating that policy outage as "unlimited".
-        log.error("tenant budget policy unavailable; clamping run to zero: %s", exc)
-        kwargs["max_dollars"] = 0.0
+        log.error("tenant budget policy unavailable: %s", exc)
         return None, f"tenant budget policy unavailable: {exc}"
-    if not tenant:
-        return None, None
-
-    # When no max_dollars was set, the requested amount is Budget's own default
-    # (not "unbounded"). The atomic allocator can therefore only lower it.
-    current = kwargs.get("max_dollars")
-    if current is None:
-        current = Budget.__dataclass_fields__["max_dollars"].default
-    try:
-        requested = float(current)
-    except (TypeError, ValueError, OverflowError) as exc:
-        log.error("tenant budget request is invalid; clamping run to zero: %s", exc)
-        kwargs["max_dollars"] = 0.0
-        return None, f"tenant budget request is invalid: {exc}"
-    if not math.isfinite(requested) or requested <= 0:
-        # The caller asked for nothing (or nonsense); that is its own choice,
-        # not a tenant refusal.
-        kwargs["max_dollars"] = 0.0
-        return None, None
-
-    try:
-        from .tenant.registry import reserve_tenant_budget
-        # A run cannot spend past its wall cap, so the wall cap is a tight, safe
-        # TTL backstop; bound it so a crashed run can't dent the cap for long.
-        wall = kwargs.get("max_wall_seconds")
-        try:
-            wall = float(wall)
-            if not math.isfinite(wall) or wall <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            wall = float(Budget.__dataclass_fields__["max_wall_seconds"].default)
-        ttl = min(max(wall, 300.0), 6 * 3600.0)
-        reservation_id = uuid.uuid4().hex
-        granted = reserve_tenant_budget(tenant, requested, ttl, reservation_id)
-        if granted is None:
-            return None, None
-        kwargs["max_dollars"] = granted
-        if granted <= 0:
-            return None, (
-                f"workspace {tenant!r} has no daily spend allowance left for "
-                "this run: today's spend plus the amounts held by runs in "
-                "flight reach its cap; retry when those runs finish or after "
-                "midnight UTC"
-            )
-        return reservation_id, None
-    except Exception as exc:
-        # Running after a failed reservation reopens the concurrent overspend
-        # window. Deny this start; a later retry can reserve after state heals.
-        log.error("tenant budget reservation failed; clamping run to zero: %s", exc)
-        kwargs["max_dollars"] = 0.0
-        return None, f"tenant budget reservation failed: {exc}"

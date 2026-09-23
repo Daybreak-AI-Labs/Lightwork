@@ -32,8 +32,8 @@ def materialize(
     automation: ImportedAutomation,
     *,
     save: bool = True,
-    budget_dollars: float = 5.0,
-    budget_wall_seconds: float = 3600.0,
+    budget_dollars: float | None = None,
+    budget_wall_seconds: float | None = None,
     queue: Any | None = None,
     overwrite: bool = True,
     owner: str | None = None,
@@ -76,8 +76,8 @@ def materialize(
             title=title,
             body=body,
             params=fields,
-            budget_dollars=float(budget_dollars),
-            budget_wall_seconds=float(budget_wall_seconds),
+            budget_dollars=budget_dollars,
+            budget_wall_seconds=budget_wall_seconds,
             overwrite=overwrite,
         )
         created = True

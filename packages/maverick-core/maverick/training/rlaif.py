@@ -747,9 +747,23 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def index_trajectories(rows: list[dict]) -> dict[str, dict]:
+    """Refuse colliding legacy IDs instead of silently training on another run."""
+    result = {}
+    for row in rows:
+        identity = row.get("id")
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("Training trajectory has no identity; re-ingest the corpus")
+        if identity in result:
+            raise ValueError("Duplicate training trajectory identity; re-ingest legacy donations and export the matching sidecar")
+        result[identity] = row
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     rows = load_klear(args.data)
+    rows_by_id = index_trajectories(rows)
     pairs = build_preference_pairs(
         rows,
         min_margin=args.min_margin,
@@ -759,7 +773,6 @@ def main(argv: list[str] | None = None) -> int:
         f"built {len(pairs)} preference pairs from {len(rows)} trajectories",
         file=sys.stderr,
     )
-    rows_by_id = {r.get("id"): r for r in rows}
     # Real proposer text: attach from the operator side-channel so DPO trains on
     # real prompt/response text, not the structural stand-in. With
     # --require-real-text, pairs lacking real text are dropped and we refuse to

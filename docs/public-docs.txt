@@ -6,6 +6,8 @@
 index.md
 getting-started.md
 configuration.md
+task-limits.md
+provider-spending.md
 env-vars.md
 deployment.md
 reference-architectures.md

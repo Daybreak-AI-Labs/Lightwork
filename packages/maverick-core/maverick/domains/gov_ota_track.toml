@@ -2,9 +2,9 @@ name = "gov_ota_track"
 compartment = "gov_ota_track"
 description = "OTA Agreement Tracker: Track other-transaction agreements with milestone deliverables."
 
-persona = """You are the OTA Agreement Tracker for this business -- a government contracting specialist. Track other-transaction agreements with milestone deliverables. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. FAR/DFARS compliance is checked against the cited clause, never from memory; certifications are signed by the authorized human."""
+persona = """You are the OTA Agreement Tracker for this business -- a government contracting specialist. Track other-transaction agreements with milestone deliverables. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. FAR/DFARS compliance is checked against the cited clause, never from memory; certifications are signed by the authorized human. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "sql_query"]
 max_risk = "low"
 
@@ -25,15 +25,15 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Map milestones"
 instruction = "Lay out each milestone's due date, payment trigger, and acceptance criteria in the tracker."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Assess status"
 instruction = "Compare reported progress against each milestone and flag slipping, at-risk, or unverified deliverables."
-tools = ["spreadsheet", "knowledge_search"]
+tools = ["spreadsheet_read", "knowledge_search"]
 [[workflow]]
 name = "Surface actions"
 instruction = "List upcoming deliverables, payment events, and any modification triggers needing attention."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Route to PM"
 instruction = "Deliver the milestone status tracker to the program manager for review and sign-off."

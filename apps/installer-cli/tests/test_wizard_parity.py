@@ -187,12 +187,13 @@ def test_write_config_emits_knowledge(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(
         tmp_path, monkeypatch,
         knowledge={"enable": True, "embedder": "hosted", "store": "pgvector",
-                   "dsn": "postgresql://x"},
+                   "dsn": "postgresql://x", "revision": "operator-recorded-202609"},
     )
     assert parsed["knowledge"]["enable"] is True
     assert parsed["knowledge"]["embedder"] == "hosted"
     assert parsed["knowledge"]["store"] == "pgvector"
     assert parsed["knowledge"]["dsn"] == "postgresql://x"
+    assert parsed["knowledge"]["revision"] == "operator-recorded-202609"
 
 
 def test_write_config_omits_knowledge_by_default(tmp_path: Path, monkeypatch):
@@ -453,6 +454,10 @@ def test_write_config_roundtrips_backslash_paths_and_allowlist(tmp_path: Path, m
     and a channel allowed_user_ids must emit as an ARRAY. Regression: the raw
     f'{k} = "{v}"' emit turned C:\\Users... into an invalid \\U escape (config
     unreadable on Windows) and rendered a list as a quoted string."""
+    # This test isolates TOML escaping from the separately tested workspace
+    # provisioning, and must never create the synthetic user's home directory.
+    import maverick_installer.wizard as wizard
+    monkeypatch.setattr(wizard, '_prepare_wizard_workspace', dict)
     parsed = _write_full_config(
         tmp_path, monkeypatch,
         sandbox={"backend": "local", "workdir": r"C:\Users\me\maverick ws", "timeout": 60},

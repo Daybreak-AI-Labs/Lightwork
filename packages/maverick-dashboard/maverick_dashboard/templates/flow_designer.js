@@ -1449,6 +1449,10 @@
     render(); if (selected) renderProps();
     if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return true; }
     if (run.status === 'paused_event') { sayWithRunLink('📥 waiting for an external event —', runId); return true; }
+    if (run.status === 'budget_limited') {
+      sayWithRunLink('Saved work is waiting for a larger spending allowance. Review and continue this run —', runId);
+      return true;
+    }
     if (run.status === 'indeterminate') {
       sayWithRunLink('⚠️ effect state is indeterminate; reconcile the external system before retrying —', runId);
       return true;

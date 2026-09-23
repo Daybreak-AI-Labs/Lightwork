@@ -28,6 +28,29 @@ async function harness(handler, overrides = {}) {
   return { dom, calls, get, state, select };
 }
 
+test('channel recovery sends exact structured readback with current administrator context', async () => {
+  const template = { schema: 1, namespace: 'channel-deliveries', record_id: 'chd-' + 'a'.repeat(56),
+    source_sha256: 'b'.repeat(64), binding_sha256: 'c'.repeat(64), observed_at: null,
+    evidence_reference: '', outcome: 'unknown', execution: 'unknown', delivery: 'unknown', chunks: {} };
+  const item = reconciliationItem({ category: 'channel_authority', safe_state: 'channel_restore_held',
+    requires_external_readback: true, readback_template: template });
+  const h = await harness(async url => url.endsWith('/reconciliation') ? reconciliationReport([item]) : {}, {
+    recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+  });
+  const textarea = h.get('reconciliation-items').querySelector('textarea');
+  assert.deepEqual(JSON.parse(textarea.value), template);
+  assert.equal(h.get('reconciliation-items').querySelector('input[type="text"]'), null);
+  const readback = { ...template, observed_at: Date.now() / 1000, evidence_reference: 'provider-audit-123',
+    outcome: 'confirmed', execution: 'recorded', delivery: 'absent' };
+  textarea.value = JSON.stringify(readback);
+  h.get('reconciliation-items').querySelector('button').click(); await tick(); await tick();
+  const call = h.calls.find(row => row.url.includes('/reconciliation/items/'));
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'channel_readback_confirmed', channel_readback: readback });
+  assert.equal(call.init.headers['X-Lightwork-Recovery-Context'], 'account-context');
+  assert.equal(h.get('reconciliation-complete').disabled, true);
+  h.dom.window.close();
+});
+
 test('restore needs prepared target-bound review and explicit checkbox; changing selection invalidates it', async () => {
   const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3, restore_mode: 'ordinary' } : {});
   h.select();

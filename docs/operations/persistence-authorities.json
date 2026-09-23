@@ -4,7 +4,7 @@
   "source_state": "local implementation; line references regenerated from current files",
   "singleton_required": true,
   "high_availability_qualified": false,
-  "scope": "521 initial Python source-seam candidates from parent AST scan of 1535 files plus a fresh production-seam scan and explicit A2A/batch/schema modules; includes explicitly excluded test/tooling false positives. Semantics classified from module purpose, write sites and selected owning contracts. Not every branch or native deployment tested.",
+  "scope": "521 initial Python source-seam candidates from parent AST scan of 1535 files plus a fresh production-seam scan and explicit A2A/batch/schema modules; includes explicitly excluded test/tooling false positives. Semantics classified from module purpose, write sites and selected owning contracts. Not every branch or native deployment tested. Consolidation follow-up explicitly classifies channel recovery, frozen Stripe collections and organization provider hold/history stores, including required markers and retained restore blockers.",
   "contracts": {
     "governed": {
       "owner": "Domain module owns namespace; GovernedRecordStore owns persistence",
@@ -181,15 +181,15 @@
     "a2a": 4,
     "preferences": 3,
     "learning": 53,
-    "sqlite_domain": 77,
+    "sqlite_domain": 78,
     "configuration": 56,
     "read_projection": 15,
     "coordinator": 1,
     "audit": 20,
     "transient": 16,
     "business_records": 11,
-    "execution": 19,
-    "recovery": 8,
+    "execution": 21,
+    "recovery": 9,
     "derived": 14,
     "composition": 54,
     "external": 18,
@@ -23199,6 +23199,228 @@
           "function": "publish",
           "kind": "atomic_create_bytes",
           "expression": "atomic_create_bytes(root / f'{artifact_id}.bin', blob)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/channel_recovery.py",
+      "contract": "recovery",
+      "owner": "packages/maverick-core/maverick/channel_recovery.py",
+      "purpose": "Exact restored channel receipt and cursor reconciliation; authenticates bounded local records and preserves prior external-effect outcomes.",
+      "referenced_store_owners": [
+        "maverick.workspace_recovery",
+        "maverick.governed_records",
+        "maverick.crypto_at_rest"
+      ],
+      "review": "Reviewed stage_authorities/reconcile_item and encrypted publication: private atomic replacement preserves retained envelope; workspace recovery owns admission and signed completion. Current administrator attestation is required, not an automatic provider query. No PG channel restore or HA qualification.",
+      "governed_namespaces": [],
+      "persisted_authorities": [
+        {
+          "sample_path": "channel-deliveries/record.json",
+          "recovery_policy": "channel_execution_delivery_authority",
+          "disposition": "Valid records enter a restore hold and require exact current readback; malformed records block startup. Never re-execute or resend restored receipts."
+        },
+        {
+          "sample_path": "channel-delivery-cursors/record.json",
+          "recovery_policy": "channel_delivery_recovery_cursor_authority",
+          "disposition": "Valid records enter a restore hold and require exact current readback; malformed records block startup. Never re-execute or resend restored receipts."
+        },
+        {
+          "sample_path": "channel-poll-cursors/record.json",
+          "recovery_policy": "channel_provider_poll_cursor_authority",
+          "disposition": "Valid records enter a restore hold and require exact current readback; malformed records block startup. Never re-execute or resend restored receipts."
+        },
+        {
+          "sample_path": "imessage-intake-cursors/record.json",
+          "recovery_policy": "imessage_intake_cursor_authority",
+          "disposition": "Valid records enter a restore hold and require exact current readback; malformed records block startup. Never re-execute or resend restored receipts."
+        }
+      ],
+      "literal_path_hints": [
+        "channel-deliveries/record.json",
+        "channel-delivery-cursors/record.json",
+        "channel-poll-cursors/record.json",
+        "imessage-intake-cursors/record.json"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 59,
+          "function": "_write",
+          "kind": "atomic_write_bytes",
+          "expression": "file_lock.atomic_write_bytes(path, rendered, mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/stripe_collection.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/stripe_collection.py",
+      "purpose": "Frozen tenant invoice bindings and per-item external collection receipts; prevent duplicate and overlapping-period collection.",
+      "referenced_store_owners": [
+        "maverick.billing_stripe",
+        "maverick.file_lock"
+      ],
+      "review": "Reviewed tenant-wide collection fence and per-receipt lock, atomic freeze before dispatch, item receipt updates and unknown-state refusal. Restore retains every receipt and blocks startup pending external reconciliation; no auto-clear of ambiguous collections or distributed deployment qualification.",
+      "governed_namespaces": [],
+      "persisted_authorities": [
+        {
+          "sample_path": "billing/stripe-collections/period.json",
+          "recovery_policy": "stripe_collection_authority",
+          "disposition": "Retain exact binding and item outcomes; global startup hold until authoritative provider/accounting reconciliation."
+        }
+      ],
+      "literal_path_hints": [
+        "billing/stripe-collections/period.json"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 61,
+          "function": "collect_invoice",
+          "kind": "data_dir",
+          "expression": "data_dir('billing', 'stripe-collections', hashlib.sha256(identity.encode()).hexdigest() + '.json', tenant=tenant_id)"
+        },
+        {
+          "line": 63,
+          "function": "collect_invoice",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path.parent / '.collection-fence', strict=True)"
+        },
+        {
+          "line": 63,
+          "function": "collect_invoice",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 81,
+          "function": "save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(state, sort_keys=True, allow_nan=False))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/tenant/_provider_archive.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-core/maverick/tenant/_provider_archive.py",
+      "purpose": "Indexed retained provider receipt history for released scopes and checkpoint/replay identity; not an expiring cache.",
+      "referenced_store_owners": [
+        "maverick.tenant.provider_admission",
+        "maverick.file_lock"
+      ],
+      "review": "Reviewed SQLite runs/calls/plans commit under provider_admission owner lock before hot JSON removal; hot rows win after interrupted compaction. Required marker detects absent history. Restored database and marker retain bytes and block startup pending accounting reconciliation; no cross-host SQLite qualification.",
+      "governed_namespaces": [],
+      "persisted_authorities": [
+        {
+          "sample_path": "usage/provider_history.sqlite3",
+          "recovery_policy": "organization_provider_history",
+          "disposition": "Retain archived receipt/checkpoint identity; global startup hold until authoritative reconciliation."
+        },
+        {
+          "sample_path": "usage/provider_history.required",
+          "recovery_policy": "organization_provider_history_required",
+          "disposition": "Retain history-required guard and block startup; never silently initialize empty history."
+        }
+      ],
+      "literal_path_hints": [
+        "usage/provider_history.sqlite3",
+        "usage/provider_history.required"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 19,
+          "function": "_database",
+          "kind": "data_dir",
+          "expression": "data_dir('usage', 'provider_history.sqlite3', tenant=tenant)"
+        },
+        {
+          "line": 28,
+          "function": "_database",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(path, '')"
+        },
+        {
+          "line": 32,
+          "function": "_database",
+          "kind": "connect",
+          "expression": "sqlite3.connect(path, timeout=30)"
+        },
+        {
+          "line": 43,
+          "function": "_database",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(marker, 'organization provider history v1\\n')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/tenant/provider_admission.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/tenant/provider_admission.py",
+      "purpose": "Organization provider call admission holds, run/principal bindings and cumulative-usage acknowledgement; uncertain calls retain spend reservations.",
+      "referenced_store_owners": [
+        "maverick.quotas",
+        "maverick.tenant._provider_archive",
+        "maverick.file_lock"
+      ],
+      "review": "Reviewed strict cross-process lock plus local RLock, bounded hot JSON and required marker, uncertain receipt retention and cumulative ledger acknowledgement before release. Provider history archives only released scopes. These files and markers cannot be rolled back independently of ledger/provider state; restore blocks globally.",
+      "governed_namespaces": [],
+      "persisted_authorities": [
+        {
+          "sample_path": "usage/provider_holds.json",
+          "recovery_policy": "organization_provider_holds",
+          "disposition": "Retain unresolved holds and settlement plans; global startup hold until exact current accounting reconciliation."
+        },
+        {
+          "sample_path": "usage/provider_holds.required",
+          "recovery_policy": "organization_provider_holds_required",
+          "disposition": "Retain missing-authority guard; global startup hold, never discard as a cache."
+        }
+      ],
+      "literal_path_hints": [
+        "usage/provider_holds.json",
+        "usage/provider_holds.required"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 48,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('usage', 'provider_holds.json', tenant=tenant)"
+        },
+        {
+          "line": 106,
+          "function": "_save",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(marker, 'organization provider accounting v1\\n')"
+        },
+        {
+          "line": 112,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, encoded, mode=384)"
+        },
+        {
+          "line": 119,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 275,
+          "function": "_acknowledge_scope",
+          "kind": "data_dir",
+          "expression": "data_dir('usage', 'ledger.json', tenant=tenant)"
+        },
+        {
+          "line": 392,
+          "function": "foreign_settled_totals",
+          "kind": "data_dir",
+          "expression": "data_dir('usage', 'ledger.json', tenant=tenant)"
         }
       ]
     }

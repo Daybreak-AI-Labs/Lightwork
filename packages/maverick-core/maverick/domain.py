@@ -801,7 +801,38 @@ def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
                 f"workflow step's gate {final_gate!r}: runtime enforces "
                 f"{final_gate!r}, but raise output.gate so the deliverable "
                 "contract matches its playbook")
+    errors.extend(tool_compatibility_errors(profile))
     return errors, warnings
+
+
+def tool_compatibility_errors(
+    profile: DomainProfile, available_tools: set[str] | None = None,
+    *, risk_overrides: dict[str, str] | None = None,
+) -> list[str]:
+    """Check declared operations before deployment without expanding authority.
+
+    Registry-aware callers can also check names. Parent grants and runtime
+    policies may narrow access further; this checks the pack's own contract.
+    """
+    from fnmatch import fnmatchcase
+
+    errors: list[str] = []
+    declared = set(profile.allow_tools) | {t for step in profile.workflow for t in step.tools}
+    for name in sorted(declared):
+        if available_tools is not None and name not in available_tools:
+            errors.append(f"declared tool {name!r} is not available in the installed registry")
+        if any(fnmatchcase(name, deny) for deny in profile.deny_tools):
+            errors.append(f"declared tool {name!r} is denied by this pack")
+        if profile.max_risk in _VALID_RISKS:
+            risk = tool_risk(name, overrides=risk_overrides)
+            if risk_rank(risk) > risk_rank(profile.max_risk):
+                errors.append(f"declared tool {name!r} ({risk}) exceeds max_risk={profile.max_risk!r}; "
+                              "use a scoped read tool or provide an approved export")
+    for step in profile.workflow:
+        for name in step.tools:
+            if profile.allow_tools and name not in profile.allow_tools:
+                errors.append(f"workflow tool {name!r} is not in allow_tools")
+    return errors
 
 
 def _department_memory(profile: DomainProfile, task: str, *,
@@ -870,6 +901,10 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     from .agent_autonomy import default_profile_for, render_autonomy_prompt
     from .domain_discipline import augment_persona
     from .domain_refusals import render_refusals
+    compatibility = tool_compatibility_errors(profile)
+    if compatibility:
+        raise ValueError(f"Domain {profile.name!r} has incompatible tool requirements: "
+                         + "; ".join(compatibility))
     principal = principal or f"agent:{profile.name}-{depth}"
     if parent is not None and hasattr(parent, "_effective_capability"):
         parent_cap = parent._effective_capability("spawn_specialist")
@@ -882,7 +917,7 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         user_id=getattr(ctx, "user_id", None),
         shield=getattr(ctx, "shield", None),
     )
-    return Agent(
+    agent = Agent(
         ctx=ctx, role=profile.name, brief=task + ("\n" + memory if memory else ""),
         depth=depth, parent=parent,
         domain=profile.compartment,
@@ -901,3 +936,17 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         # kernel mechanics keyed on "am I this goal's root", not the persona.
         is_goal_root=(depth == 0 and parent is None),
     )
+    # Validate the *assembled* instance, including operator plugins and MCP
+    # bindings. The plain base catalog cannot establish deployment readiness.
+    names = {tool.name for tool in agent.tools.all()}
+    missing = sorted({name for step in profile.workflow for name in step.tools} - names)
+    if missing:
+        raise ValueError(
+            f"Domain {profile.name!r} cannot deploy: required workflow tools unavailable: "
+            + ", ".join(missing)
+            + ". Configure/enable the named adapter or MCP connection, or revise the "
+            "workflow to read an operator-approved workspace export with read_file. "
+            "No model work has started."
+        )
+    agent.deployment_prerequisites = sorted(set(profile.allow_tools) - names)
+    return agent

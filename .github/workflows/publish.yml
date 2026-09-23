@@ -46,7 +46,7 @@ jobs:
         run: |
           python -I -m pip install --upgrade \
             'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
-            'packaging==26.3' 'build==1.5.0'
+            'packaging==26.3' 'build==1.6.1'
           python -I scripts/verify_constraint_closure.py
 
       - name: Validate the tag and build the complete release cohort

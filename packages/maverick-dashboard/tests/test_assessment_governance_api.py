@@ -235,4 +235,8 @@ def test_editor_and_review_dialog_carry_governance_identity():
     assert "description: document.getElementById('tpl-description')" in html
     assert "expected_digest" in html
     assert "expected_revision" in html
-    assert "render(await r.json())" in html
+    assert 'id="arv-dialog"' in html
+    assert 'id="arv-approve"' in html
+    assert 'id="arv-status" role="status"' in html
+    # Executable stale-response and captured-id behavior is covered by the
+    # assessment_mutation_lifecycle DOM suite; render spelling is not a contract.

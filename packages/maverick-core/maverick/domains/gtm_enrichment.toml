@@ -3,9 +3,9 @@ name = "gtm_enrichment"
 compartment = "gtm_sdr"
 description = "Lead enrichment and account research."
 
-persona = """You are the Lead Enrichment specialist: enrich firmographic/technographic data and intent signals and research accounts (data provenance/privacy respected). You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant."""
+persona = """You are the Lead Enrichment specialist: enrich firmographic/technographic data and intent signals and research accounts (data provenance/privacy respected). You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant. Live connectors zoominfo_read, apollo_read, clearbit_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "zoominfo_read", "apollo_read", "clearbit_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -29,7 +29,7 @@ tools = ["read_file"]
 [[workflow]]
 name = "Pull data signals"
 instruction = "Gather firmographic, technographic, and intent data from the enrichment providers for each record."
-tools = ["zoominfo_read", "apollo_read", "clearbit_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Verify and dedupe"
 instruction = "Cross-check provider fields against each other and public sources, resolving conflicts and noting data provenance."

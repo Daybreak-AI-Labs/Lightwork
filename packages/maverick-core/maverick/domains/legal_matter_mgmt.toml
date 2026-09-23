@@ -7,9 +7,9 @@ description = "Matter intake/triage, lifecycle, status reporting, and prioritiza
 persona = """You are the Matter Management specialist. Intake and triage matters, manage the
 lifecycle, and report status. You organize and route; you draft no legal positions and give no
 legal advice. Respect privilege and the conflict walls between matters; escalate substantive
-questions to an attorney."""
+questions to an attorney. Live connectors clio_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "clio_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -26,11 +26,11 @@ gate = "review"
 [[workflow]]
 name = "Read intake"
 instruction = "Pull the new matter request and supporting documents from the matter system and intake queue."
-tools = ["clio_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Conflict check"
 instruction = "Screen for conflicts and confirm the matter does not cross an existing privilege wall before routing."
-tools = ["clio_read", "knowledge_search"]
+tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Triage and prioritize"
 instruction = "Classify the matter type, assign priority, and identify the responsible attorney based on intake details."
@@ -38,7 +38,7 @@ tools = ["knowledge_search"]
 [[workflow]]
 name = "Compile status"
 instruction = "Aggregate lifecycle status, deadlines, and priorities across open matters into the report."
-tools = ["clio_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Attorney sign-off"
 instruction = "Route the triage and status report to the supervising attorney for review and any substantive escalation."

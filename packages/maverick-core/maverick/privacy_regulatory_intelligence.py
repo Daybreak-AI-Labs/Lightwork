@@ -1528,15 +1528,22 @@ class PrivacyRegulatoryIntelligenceStore:
                 "s.integrity_sha256 AS source_integrity_sha256 "
                 "FROM documents d JOIN sources s ON "
                 "s.tenant_id=d.tenant_id AND s.source_id=d.source_id "
-                "JOIN (SELECT tenant_id,document_id,MAX(version) AS version "
-                "FROM documents WHERE tenant_id=? GROUP BY tenant_id,document_id) latest "
-                "ON latest.tenant_id=d.tenant_id AND latest.document_id=d.document_id "
-                "AND latest.version=d.version WHERE d.tenant_id=?",
-                (tenant, tenant),
+                "WHERE d.tenant_id=? ORDER BY d.document_id, d.version DESC",
+                (tenant,),
             ).fetchall()
         hits: list[SearchHit] = []
+        selected_documents: set[str] = set()
         for row in rows:
             document_payload = self._row_payload(row, "document")
+            # Choose the newest publication known at the historical boundary,
+            # after authenticating its metadata. A later publication must not
+            # erase the previously available version from historical research.
+            document_id = document_payload["document_id"]
+            if document_id in selected_documents:
+                continue
+            if document_payload["publication_date"] > as_of_value:
+                continue
+            selected_documents.add(document_id)
             try:
                 source_payload = json.loads(row["source_payload_json"])
             except (TypeError, json.JSONDecodeError) as exc:

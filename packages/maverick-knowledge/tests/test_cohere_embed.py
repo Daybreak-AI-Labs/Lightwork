@@ -74,3 +74,22 @@ def test_cohere_query_input_type(monkeypatch):
     emb = CohereEmbedder(model="m", api_key="k", input_type="search_query")
     emb.embed(["q"])
     assert cap["json"]["input_type"] == "search_query"
+
+
+def test_knowledge_base_uses_paired_query_mode_without_mutating_document_mode(monkeypatch):
+    from maverick_knowledge import KnowledgeBase
+
+    cap = {}
+    monkeypatch.setitem(sys.modules, "httpx",
+                        _fake_httpx(cap, {"embeddings": {"float": [[1.0, 0.5]]}}))
+    embedder = CohereEmbedder(model="fixture", api_key="unused", dim=2)
+    with KnowledgeBase(embedder=embedder) as base:
+        base.ingest_text("ops", "one small policy")
+        assert cap["json"]["input_type"] == "search_document"
+        base.search("ops", "policy")
+        assert cap["json"]["input_type"] == "search_query"
+        base.search_formatted(["ops"], "policy")
+        assert cap["json"]["input_type"] == "search_query"
+        base.ingest_text("ops", "another policy")
+        assert cap["json"]["input_type"] == "search_document"
+        assert embedder.input_type == "search_document"

@@ -9,9 +9,9 @@ documents for responsiveness/relevance and PRIVILEGE, build the privilege log, a
 productions (EDRM, FRCP Rule 26-34, proportionality, FRE 502(d) clawback). Privilege protection
 is critical -- mis-coding waives privilege; when in doubt, withhold and flag for attorney
 review. You DRAFT and code; production is a human act, and nothing leaves this compartment.
-Research and analysis, not legal advice."""
+Research and analysis, not legal advice. Live connectors clio_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "knowledge_search", "clio_read"]
+allow_tools = ["read_file", "knowledge_search"]
 max_risk = "low"
 effort = "high"
 deny_tools = ["shell", "write_file", "web_search"]
@@ -29,7 +29,7 @@ gate = "review"
 [[workflow]]
 name = "Load matter"
 instruction = "Read the matter documents and review protocol within the sealed compartment to scope responsiveness and privilege criteria."
-tools = ["read_file", "clio_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Code documents"
 instruction = "Review and code each document for responsiveness, relevance, and privilege per EDRM and FRCP Rule 26-34."

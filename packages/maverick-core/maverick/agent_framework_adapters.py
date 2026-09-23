@@ -56,7 +56,7 @@ _DEFAULT_SCHEMA = {
 
 # ---- Lightwork as an AutoGen tool -------------------------------------------
 
-def maverick_autogen_callable(*, max_dollars: float = 2.0, **binds: Any):
+def maverick_autogen_callable(*, max_dollars: float | None = None, **binds: Any):
     """The plain typed callable AutoGen registers as a tool.
 
     AutoGen (0.4's ``FunctionTool``, and 0.2's ``register_function``) wraps
@@ -70,7 +70,7 @@ def maverick_autogen_callable(*, max_dollars: float = 2.0, **binds: Any):
     return run_maverick
 
 
-def maverick_autogen_tool(*, max_dollars: float = 2.0, **binds: Any):
+def maverick_autogen_tool(*, max_dollars: float | None = None, **binds: Any):
     """Lightwork as an AutoGen ``FunctionTool`` (needs ``autogen-core``)."""
     try:
         from autogen_core.tools import FunctionTool
@@ -88,7 +88,7 @@ def maverick_autogen_tool(*, max_dollars: float = 2.0, **binds: Any):
 
 # ---- Lightwork as a CrewAI tool ----------------------------------------------
 
-def maverick_crewai_tool(*, max_dollars: float = 2.0, **binds: Any):
+def maverick_crewai_tool(*, max_dollars: float | None = None, **binds: Any):
     """Lightwork as a CrewAI tool (needs ``crewai``).
 
     Returns an instance of a ``crewai.tools.BaseTool`` subclass whose ``_run``
@@ -113,7 +113,7 @@ def maverick_crewai_tool(*, max_dollars: float = 2.0, **binds: Any):
 
 # ---- Lightwork as an OpenAI function tool ------------------------------------
 
-def maverick_openai_tool(*, max_dollars: float = 2.0, **binds: Any):
+def maverick_openai_tool(*, max_dollars: float | None = None, **binds: Any):
     """Lightwork as an OpenAI function tool (dependency-free).
 
     OpenAI's function calling is a plain JSON wire format, so this returns the
@@ -126,7 +126,9 @@ def maverick_openai_tool(*, max_dollars: float = 2.0, **binds: Any):
 
     def run_maverick(prompt: str, max_dollars: float | None = None) -> str:
         """Delegate a goal to the Lightwork agent swarm and return its result."""
-        dollars = ceiling if max_dollars is None else min(float(max_dollars), ceiling)
+        from .runner import clamp_task_limit
+
+        dollars = clamp_task_limit(max_dollars, ceiling)
         return run_maverick_goal(prompt, "", max_dollars=dollars, **binds)
 
     tool_def = {

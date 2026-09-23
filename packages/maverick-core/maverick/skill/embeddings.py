@@ -14,7 +14,9 @@ import logging
 import math
 import threading
 import uuid
+from collections import OrderedDict
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -33,6 +35,8 @@ _MAX_DIM = 4096
 _MAX_CACHE_BYTES = 16 * 1024 * 1024
 _BATCH_SIZE = 64
 _PROCESS_REVISION = uuid.uuid4().hex
+_PROCESS_CACHES: OrderedDict[str, dict] = OrderedDict()
+_MAX_PROCESS_CACHES = 4
 
 
 def _cache_path():
@@ -56,6 +60,8 @@ def _cache_path():
 _model = None  # lazy singleton
 _model_name = None
 _model_lock = threading.RLock()  # also fences identity against concurrent embedding
+_identity_model = None
+_identity_revision = uuid.uuid4().hex
 
 
 def _have_fastembed() -> bool:
@@ -110,8 +116,12 @@ def embedding_identity() -> dict[str, str]:
     A restart/reload then rebuilds safely instead of claiming unchanged weights.
     No hosted embedder is silently substituted on this optional local path.
     """
+    global _identity_model, _identity_revision
     with _model_lock:
         model = _get_model()
+        if model is not _identity_model:
+            _identity_model = model
+            _identity_revision = uuid.uuid4().hex
         try:
             provider_version = version("fastembed")
         except PackageNotFoundError:
@@ -120,7 +130,7 @@ def embedding_identity() -> dict[str, str]:
         return {
             "provider": "fastembed", "provider_version": provider_version,
             "model": MODEL_NAME,
-            "revision": str(revision) if revision else f"process:{_PROCESS_REVISION}:instance:{id(model)}",
+            "revision": str(revision) if revision else f"process:{_PROCESS_REVISION}:instance:{_identity_revision}",
             "preprocessing": _PREPROCESSING,
         }
 
@@ -201,6 +211,11 @@ def _save_cache(cache: dict[str, CachedEmbedding], *, path: Path | None = None,
                 identity: Mapping | None = None) -> None:
     path = path or _cache_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    from ..file_lock import atomic_write_text
+    atomic_write_text(path, _cache_payload(cache, identity))
+
+
+def _cache_payload(cache: dict[str, CachedEmbedding], identity: Mapping | None) -> str:
     entries = {
         name: {"text": e.text, "mtime": e.mtime, "vector": e.vector,
                "content_sha256": _text_digest(e.text), "dimension": len(e.vector)}
@@ -209,13 +224,12 @@ def _save_cache(cache: dict[str, CachedEmbedding], *, path: Path | None = None,
     # Atomic write (temp + os.replace) so a crash mid-write or a concurrent
     # writer can't leave a truncated/corrupt cache -- the same pattern the
     # sibling skill.stats module uses.
-    from ..file_lock import atomic_write_text
     payload = json.dumps({"schema": _CACHE_SCHEMA,
                           "identity": dict(identity or embedding_identity()), "entries": entries},
                          sort_keys=True, separators=(",", ":"), allow_nan=False)
     if len(entries) > _MAX_ENTRIES or len(payload.encode()) > _MAX_CACHE_BYTES:
         raise ValueError("embedding cache exceeds its storage boundary")
-    atomic_write_text(path, payload)
+    return payload
 
 
 def _text_digest(text: str) -> str:
@@ -241,8 +255,14 @@ def cached_corpus_vectors(texts: Mapping[str, str], *, namespace: str = "skills"
                       "projection": (_PREPROCESSING if namespace == "skills"
                                      else "catalog-name-summary.v1")}
     path = _cache_path() if namespace == "skills" else data_dir("capability_embeddings.json")
-    with cross_process_lock(path, strict=True):
-        previous = _load_cache(path=path, identity=cache_identity, dimension=dimension)
+    # Unattested weights are deliberately process scoped. They must not evict
+    # another worker's warm corpus from a shared on-disk cache on every request.
+    process_local = str(selected_identity.get("revision", "")).startswith("process:")
+    cache_key = json.dumps([str(path.resolve()), cache_identity, dimension], sort_keys=True)
+    lock = _model_lock if process_local else cross_process_lock(path, strict=True)
+    with lock:
+        previous = (deepcopy(_PROCESS_CACHES.get(cache_key, {})) if process_local
+                    else _load_cache(path=path, identity=cache_identity, dimension=dimension))
         cache = {
             name: entry for name, entry in previous.items()
             if name in texts and entry.content_sha256 == _text_digest(texts[name])
@@ -264,7 +284,14 @@ def cached_corpus_vectors(texts: Mapping[str, str], *, namespace: str = "skills"
         if embedding_identity() != selected_identity:
             return None
         # This path also persists deletions when there were no embedding misses.
-        if cache != previous or set(previous) != set(texts):
+        if process_local:
+            if cache != previous or set(previous) != set(texts):
+                _cache_payload(cache, cache_identity)  # enforce the same byte boundary in memory
+            _PROCESS_CACHES[cache_key] = deepcopy(cache)
+            _PROCESS_CACHES.move_to_end(cache_key)
+            while len(_PROCESS_CACHES) > _MAX_PROCESS_CACHES:
+                _PROCESS_CACHES.popitem(last=False)
+        elif cache != previous or set(previous) != set(texts):
             _save_cache(cache, path=path, identity=cache_identity)
         return cache
 

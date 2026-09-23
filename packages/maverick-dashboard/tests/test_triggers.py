@@ -530,10 +530,8 @@ def test_webhook_run_honors_template_budget(monkeypatch, tmp_path):
     assert seen["dollars"] == 0.75 and seen["wall"] == 120.0
 
 
-def test_webhook_run_clamps_oversized_template_budget(monkeypatch, tmp_path):
-    # A template on disk (catalog install / hand-edited) is not clamped at save
-    # time; the fire path must still cap it at the save-layer ceiling so a signed
-    # burst can't amplify per-fire spend past what the builder could set.
+def test_webhook_run_clamps_template_to_configured_operator_budget(monkeypatch, tmp_path):
+    # A larger explicitly saved template cannot raise current operator limits.
     _isolate(monkeypatch, tmp_path)
     _configured(monkeypatch)
     import maverick.templates as tpl
@@ -541,6 +539,8 @@ def test_webhook_run_clamps_oversized_template_budget(monkeypatch, tmp_path):
         "---\ntitle: Huge\nbudget_dollars: 1000\nbudget_wall_seconds: 999999\n---\n"
         "Do a big thing.\n", encoding="utf-8")
     import maverick.runner as runner_mod
+    monkeypatch.setattr(runner_mod, "configured_max_dollars", lambda: 100.0)
+    monkeypatch.setattr(runner_mod, "configured_max_wall_seconds", lambda: 86400.0)
     seen = {}
 
     def fake_run(

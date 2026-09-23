@@ -66,7 +66,10 @@ def test_idle_heartbeat_keeps_monotonic_deadlines_through_backoff(legacy):
                 ticks.append(clock.now)
         assert ticks == [30.0, 60.0]
         assert clock.now == 65 and not sem.locked()
-        assert not any(kind == "state" and result for kind, result in world.reads)
+        # Legacy frames include live answer previews even without event rows;
+        # the modern event-only stream keeps its result-free projection.
+        state_reads = [result for kind, result in world.reads if kind == "state"]
+        assert state_reads and all(result is legacy for result in state_reads)
     asyncio.run(run())
 
 

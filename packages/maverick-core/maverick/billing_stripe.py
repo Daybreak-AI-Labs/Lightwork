@@ -46,9 +46,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import time
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 
 from .config import env_flag, get_billing_stripe
 
@@ -230,9 +233,66 @@ def _to_minor_units(amount: float, currency: str) -> int:
     """Convert a dollar (major-unit) amount to Stripe's integer minor units,
     honoring zero-decimal currencies. Rounds half-up on the cent."""
     cur = (currency or "usd").lower()
-    if cur in _ZERO_DECIMAL:
-        return int(round(float(amount)))
-    return int(round(float(amount) * 100))
+    value = _money(amount)
+    # ISK/UGX charges are whole units represented with two API decimal places.
+    if cur in {"isk", "ugx"}:
+        return int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP)) * 100
+    factor = 1 if cur in _ZERO_DECIMAL else 100
+    return int((value * factor).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+def _money(amount) -> Decimal:
+    try:
+        if isinstance(amount, bool):
+            raise ValueError
+        value = Decimal(str(amount))
+        if not value.is_finite() or value < 0:
+            raise ValueError
+        return value
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise StripeError("Invoice amounts must be finite and non-negative") from exc
+
+
+def _rated_usage_items(invoice, currency: str) -> list[dict]:
+    """Reconcile line rounding to the invoice total using largest remainders."""
+    lines = list(invoice.line_items)
+    charges = [_money(line.charge) for line in lines]
+    total = _money(invoice.total)
+    if abs(sum(charges, Decimal(0)) - total) > Decimal("0.000001"):
+        raise StripeError("Invoice total does not reconcile to its rated line items")
+    factor = 1 if currency in _ZERO_DECIMAL or currency == "isk" else 100
+    api_factor = 100 if currency in {"isk", "ugx"} else 1
+    raw = [charge * factor for charge in charges]
+    rounded = [int(value.to_integral_value(rounding=ROUND_FLOOR)) for value in raw]
+    target = _to_minor_units(total, currency) // api_factor
+    residual = target - sum(rounded)
+    if not 0 <= residual <= len(lines):
+        raise StripeError("Invoice rounding does not reconcile")
+    order = sorted(range(len(lines)), key=lambda index: (-(raw[index] - rounded[index]), index))
+    for index in order[:residual]:
+        rounded[index] += 1
+    rows, identities = [], set()
+    for line, amount in zip(lines, rounded, strict=True):
+        kind = getattr(line, "kind", "usage")
+        identity = (kind, line.day, line.principal)
+        if identity in identities:
+            raise StripeError("Invoice contains duplicate line identities")
+        identities.add(identity)
+        rows.append({"day": line.day, "principal": line.principal, "kind": kind,
+                     "in_tokens": line.in_tokens, "out_tokens": line.out_tokens,
+                     "charge": str(_money(line.charge)), "amount_minor": amount * api_factor})
+    return rows
+
+
+def _validate_collection_period(tenant_id, invoice) -> None:
+    try:
+        start = date.fromisoformat(invoice.period_start)
+        end = date.fromisoformat(invoice.period_end)
+        if (invoice.tenant != tenant_id or not invoice.invoice_id or start > end
+                or end >= datetime.now(timezone.utc).date()):
+            raise ValueError
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise StripeError("Metered collection requires an identified, closed past UTC period for this tenant; set --since and --until") from exc
 
 
 # ---- client protocol + real implementation ---------------------------------
@@ -282,7 +342,7 @@ class _RealStripeClient:
     def list_subscriptions(self, customer_id):
         res = self._stripe.Subscription.list(
             api_key=self._key, customer=customer_id, status="all", limit=100)
-        return list(res.get("data") or [])
+        return list(res.auto_paging_iter())
 
     def create_subscription(self, *, customer_id, price_id, metadata, idempotency_key):
         return self._stripe.Subscription.create(
@@ -392,19 +452,31 @@ def ensure_subscription(tenant_id: str, *,
     cid = ensure_customer(tenant_id, client=client)
     cli = _client(client)
     metadata = {_TENANT_META_KEY: tenant_id, _PLAN_META_KEY: plan}
-    existing = next(
-        (s for s in cli.list_subscriptions(cid) if _sub_is_ours(s, tenant_id)),
-        None,
-    )
+    owned = [s for s in cli.list_subscriptions(cid) if _sub_is_ours(s, tenant_id)]
+    terminal = {"canceled", "incomplete_expired"}
+    live = [s for s in owned if s.get("status") not in terminal]
+    if len(live) > 1:
+        raise StripeError("Multiple current platform subscriptions require reconciliation before sync")
+    existing = live[0] if live else None
     if existing is None:
+        # A new lifecycle must not reuse a key whose earlier response names a
+        # now-canceled subscription. Identical readback still yields one key.
+        lifecycle = ("-" + hashlib.sha256(json.dumps(sorted(str(s["id"]) for s in owned)).encode()).hexdigest()[:24]) if owned else ""
         sub = cli.create_subscription(
             customer_id=cid, price_id=price_id, metadata=metadata,
-            idempotency_key=f"maverick-sub-{tenant_id}-{plan}",
+            idempotency_key=f"maverick-sub-{tenant_id}-{plan}{lifecycle}",
         )
         return {"status": "created", "tenant": tenant_id, "plan": plan,
                 "price": price_id, "subscription": str(sub["id"]),
                 "customer": cid}
+    if existing.get("status") not in {"active", "trialing"}:
+        raise StripeError(f"Platform subscription {existing['id']} is {existing.get('status', 'unknown')}; resolve its billing state before sync")
+    if existing.get("cancel_at_period_end") or existing.get("cancel_at"):
+        return {"status": "pending_cancellation", "tenant": tenant_id, "plan": plan,
+                "subscription": str(existing["id"]), "customer": cid}
     cur_price, item_id = _sub_price_and_item(existing)
+    if not item_id or len((existing.get("items") or {}).get("data") or []) != 1:
+        raise StripeError("Platform subscription items require reconciliation before sync")
     if cur_price == price_id:
         return {"status": "unchanged", "tenant": tenant_id, "plan": plan,
                 "price": price_id, "subscription": str(existing["id"]),
@@ -434,30 +506,68 @@ def push_usage_items(tenant_id: str, invoice, *,
                  "pending); billing platform fee only for tenant %r", tenant_id)
         return []
     currency = (getattr(invoice, "currency", None) or "usd").lower()
+    _validate_collection_period(tenant_id, invoice)
+    rated = _rated_usage_items(invoice, currency)
+    from .stripe_collection import collect_invoice
+
+    return collect_invoice(tenant_id, invoice, currency, rated, client=client)
+
+
+def _collect_invoice_items(tenant_id, invoice, currency, rated, *, client, state, save):
     cid = ensure_customer(tenant_id, client=client)
     cli = _client(client)
+    if state.get("customer") not in {None, cid}:
+        raise StripeError("Frozen invoice is bound to a different customer")
+    state["customer"] = cid
+    save()
     out: list[dict] = []
-    period = getattr(invoice, "invoice_id", "") or "open"
-    for li in getattr(invoice, "line_items", []):
-        amount = _to_minor_units(li.charge, currency)
+    period = invoice.invoice_id
+    for li in rated:
+        amount = li["amount_minor"]
         if amount <= 0:
             continue
+        identity = (f"{li['day']}:{li['principal']}" if li["kind"] == "usage"
+                    else json.dumps([li["kind"], li["day"], li["principal"]], separators=(",", ":")))
+        key = "maverick-usage-" + hashlib.sha256(f"{tenant_id}:{period}:{identity}".encode()).hexdigest()[:32]
+        receipt = state["items"].get(key)
+        if receipt is not None and (
+            not isinstance(receipt, dict) or receipt.get("status") not in {"pending", "complete"}
+            or type(receipt.get("attempted_at")) not in (int, float)
+            or not _money(receipt["attempted_at"]).is_finite()
+            or receipt["attempted_at"] > time.time()
+        ):
+            raise StripeError("Collection receipt is invalid; reconcile before billing")
+        if receipt and receipt.get("status") == "complete":
+            result = receipt.get("result")
+            if (not isinstance(result, dict) or not result.get("id")
+                    or result.get("customer") != cid or result.get("amount") != amount
+                    or result.get("currency") != currency or result.get("idempotency_key") != key):
+                raise StripeError("Completed collection receipt does not match this invoice item")
+            out.append(receipt["result"])
+            continue
+        if receipt and time.time() - receipt["attempted_at"] >= 23 * 3600:
+            raise StripeError("Invoice item outcome is uncertain beyond the safe retry window; reconcile in Stripe before further collection")
+        if receipt is None:
+            receipt = {"status": "pending", "attempted_at": time.time()}
+            state["items"][key] = receipt
+            save()  # record intent before the external call; preserve on failure
         item = cli.create_invoice_item(
             customer_id=cid, amount=amount, currency=currency,
-            description=f"Model usage {li.day} · {li.principal}",
+            description=("Minimum invoice adjustment" if li["kind"] == "minimum_adjustment" else f"Model usage {li['day']} · {li['principal']}"),
             metadata={
-                _TENANT_META_KEY: tenant_id, "day": li.day,
-                "principal": li.principal, "in_tokens": str(li.in_tokens),
-                "out_tokens": str(li.out_tokens),
+                _TENANT_META_KEY: tenant_id, "day": li["day"],
+                "principal": li["principal"], "in_tokens": str(li["in_tokens"]),
+                "out_tokens": str(li["out_tokens"]),
             },
-            idempotency_key=(
-                "maverick-usage-"
-                + hashlib.sha256(
-                    f"{tenant_id}:{period}:{li.day}:{li.principal}".encode()
-                ).hexdigest()[:32]
-            ),
+            idempotency_key=key,
         )
-        out.append(dict(item) if not isinstance(item, dict) else item)
+        if not isinstance(item.get("id"), str) or not item["id"]:
+            raise StripeError("Invoice item response lacks its durable identity; reconcile before retry")
+        result = {"id": item["id"], "customer": cid, "amount": amount,
+                  "currency": currency, "idempotency_key": key}
+        receipt.update(status="complete", result=result)
+        save()
+        out.append(result)
     return out
 
 
@@ -469,6 +579,9 @@ def sync_tenant(tenant_id: str, *, client: StripeClient | None = None,
 
     The operator surface behind ``maverick billing stripe-sync``."""
     require_enabled()
+    if invoice is not None and bill_metered_usage():
+        _validate_collection_period(tenant_id, invoice)
+        _rated_usage_items(invoice, (invoice.currency or "usd").lower())
     cid = ensure_customer(tenant_id, client=client)
     sub = ensure_subscription(tenant_id, client=client)
     result = {"tenant": tenant_id, "customer": cid, "subscription": sub}
@@ -495,13 +608,7 @@ def preview_charges(tenant_id: str, card, *, since: str | None = None,
     invoice = generate_invoice(tenant_id, card, since=since, until=until)
     currency = (invoice.currency or cfg.get("currency", "usd")).lower()
     metered_on = bill_metered_usage()
-    usage_minor = [
-        {"day": li.day, "principal": li.principal,
-         "amount_minor": _to_minor_units(li.charge, currency),
-         "charge": li.charge}
-        for li in invoice.line_items
-        if _to_minor_units(li.charge, currency) > 0
-    ]
+    usage_minor = [row for row in _rated_usage_items(invoice, currency) if row["amount_minor"] > 0]
     return {
         "tenant": tenant_id,
         "plan": plan,

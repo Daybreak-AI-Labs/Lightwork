@@ -94,11 +94,13 @@ summarizer      = "anthropic:claude-haiku-4-5"
 skill_distiller = "anthropic:claude-sonnet-4-6"
 
 [budget]
-max_dollars         = 5.0
-max_wall_seconds    = 3600
-max_tool_calls      = 500
-max_input_tokens    = 1000000
-max_output_tokens   = 200000
+# Omitted task limits stay unset. These examples are explicit opt-in limits.
+task_limits_enabled = true
+# max_dollars       = 25.0
+# max_wall_seconds  = 3600
+# max_tool_calls    = 500
+# max_input_tokens  = 1000000
+# max_output_tokens = 200000
 strict_pricing      = true
 
 [safety]

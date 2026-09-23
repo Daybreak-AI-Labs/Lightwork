@@ -14,14 +14,14 @@ store    = "sqlite"    # sqlite | pgvector | qdrant
 
 ## Storage: pick a backend per deployment
 
-One `VectorStore` protocol, three interchangeable backends. Choice is a config
-line, not a fork — the agent-facing behaviour is identical.
+One `VectorStore` protocol supports three backends. Operational limits and
+reindex support differ; qualify the selected backend with your corpus.
 
 | Backend    | When                                            | Notes |
 |------------|-------------------------------------------------|-------|
-| **sqlite** (default) | Single box, SMB, air-gapped                | Dependency-free brute-force cosine, sealed by the platform's encryption-at-rest. Comfortable to a few million chunks per tenant. |
-| **pgvector** | Enterprise self-hosted — **the recommended default for regulated clients** | Rides the Postgres you already run and the platform already supports (world model + knowledge in one database to encrypt, back up, audit, and isolate with RLS). Hybrid keyword+vector in one engine. Adequate to ~5M vectors/tenant. Needs `maverick-knowledge[pgvector]` + the Postgres `vector` extension. |
-| **qdrant** | Very large corpora / dedicated retrieval infra  | Apache-2.0, self-hosted single binary, fast filtered search. The certified escape hatch when a client outgrows pgvector. Needs `maverick-knowledge[qdrant]`. |
+| **sqlite** (default) | Single box, SMB, air-gapped | Brute-force cosine over local records; measure latency at the intended corpus size. |
+| **pgvector** | Deployments already operating Postgres | Needs `maverick-knowledge[pgvector]`, the `vector` extension, and verified database isolation, backup and permissions. |
+| **qdrant** | Dedicated retrieval infrastructure | Needs `maverick-knowledge[qdrant]`. Existing collections migrate by re-ingesting into a new collection; in-place reindex is refused. |
 
 We do **not** ship a managed-only vector service as the default: the platform
 sells "your data never leaves your boundary," so the knowledge store — the
@@ -57,9 +57,30 @@ dim     = 1024
 `hosted` (Voyage, needs `VOYAGE_API_KEY`), `local` (on-box
 sentence-transformers, no key), or `deterministic` (a hashing stub — offline and
 keyless, but low recall quality; for tests and smoke runs only). **Meaningful
-semantic recall needs `local` or `hosted`.** If you change embedder or model,
-the vector dimension changes — re-embed the corpus (the store raises rather than
-silently returning garbage on a dim mismatch).
+semantic recall needs `local` or `hosted`.** Changing an embedder or model can
+change the vector space even when its dimension stays the same. Chunks record
+an embedding identity; retrieval and ingestion refuse a mixed or incompatible
+collection instead of silently comparing unrelated vectors.
+
+Existing untagged collections require an explicit migration. With the intended
+embedding configuration active, run
+`maverick knowledge reindex <collection> --tenant <tenant>` for a supported
+SQLite or pgvector store. Reindex uses the existing complete chunk text and
+preserves chunk IDs, provenance and content commitments. Vector replacement is
+atomic against the captured collection state; a concurrent corpus change
+requires a retry. This in-place operation is bounded to 100,000 chunks. A
+pgvector store also requires the replacement vectors to match the existing
+table dimension; changing dimensions requires a new store and an explicit
+corpus migration. For Qdrant, ingest into a new collection and switch the
+configured knowledge sources after verifying it; in-place reindex is refused
+before embedding work begins.
+
+Hosted identities bind the configured provider, model, endpoint, dimensions
+and optional `[knowledge] revision`. That revision is an operator-supplied
+identity, not independent proof of which remote weights served a request.
+Changing provider weights without changing a published or configured revision
+cannot be inferred from equal-sized vectors. Opaque custom embedder instances
+do not share a persistent cache identity.
 
 ## Governance
 

@@ -61,8 +61,11 @@ opt-in controls build on:
   decode bombs; escape hatch `MAVERICK_SHIELD_NO_DECODE=1`.
 - **Sandbox-mediated shell** — all tool shell execution goes through
   `sandbox.exec()` (local/Firecracker backends), never raw `subprocess`.
-- **Hard `Budget` caps** — every long-running path respects a per-run budget
-  (`budget.check()`); a single run cannot spend without bound.
+- **Explicit task limits and organization allowances** — configured task caps
+  are enforced at execution and metering boundaries. Ordinary tasks have no
+  generated dollar, time, token, tool or step cap. Organization spend controls,
+  provider accounting, cancellation and HALT remain separate authorities. See
+  [task limits](task-limits.md) before choosing an allowance policy.
 - **Append-only audit log** — every notable action is written to an
   append-only NDJSON audit log; when [signing](#audit-log-signing-tamper-evidence)
   is enabled it becomes an Ed25519 Merkle-chained, tamper-evident log.

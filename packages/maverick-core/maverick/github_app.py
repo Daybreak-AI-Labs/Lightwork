@@ -342,8 +342,8 @@ async def process_issue(
     payload: WebhookPayload,
     *,
     token: str | None = None,
-    max_dollars: float = 5.0,
-    max_wall_seconds: float = 1800.0,
+    max_dollars: float | None = None,
+    max_wall_seconds: float | None = None,
     draft: bool = True,
 ) -> PRResult:
     """End-to-end: clone, run swarm, push branch, open PR.

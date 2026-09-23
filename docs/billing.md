@@ -1,12 +1,10 @@
 # Billing & collection model
 
-Lightwork is sold as **annual enterprise contracts** (see
-[`product-portfolio.md`](./product-portfolio.md)), not self-serve checkout. The
-billing surface in the product reflects that: it **meters usage and produces
-invoices**, and collection happens through your normal contract/AR process or a
-payment processor you wire in. There is intentionally **no built-in card-checkout
-flow** — a $18K–$500K/yr governed-platform sale closes on a signed order form and
-an invoice, not a Stripe "Buy now" button.
+Lightwork meters provider usage and produces rated invoices. Your commercial
+agreement determines platform fees, support fees and whether metered usage is
+charged separately. Collection uses your accounts-receivable process or an
+operator-configured processor. These billing primitives do not enforce a
+particular license price or contract term.
 
 ## What the product does
 
@@ -18,8 +16,9 @@ an invoice, not a Stripe "Buy now" button.
 - **Idempotency.** An invoice for a **closed** period (both `--since` and
   `--until` given) carries a deterministic `invoice_id` (`inv_…`, keyed on
   tenant + period + currency, **not** the amount), so re-running billing for that
-  period yields the same id and a downstream charge step can dedup and **never
-  double-bill**. An **open-ended** invoice (a missing bound — including the CLI
+  period yields the same id for downstream reconciliation. The collector also
+  needs a durable receipt and immutable rated contents; the identifier alone
+  cannot establish whether an external charge succeeded. An **open-ended** invoice (a missing bound — including the CLI
   default with no `--since/--until`) has an **empty `invoice_id`**: its total
   grows as usage accrues, so it is deliberately *not* a safe dedup key. Always
   bill closed periods.
@@ -54,11 +53,30 @@ Pick one:
    an agent create charges. Charge-creation is an operator/finance action, not an
    agent capability.
 
-## Why no self-serve checkout
+## Operator Stripe collection
 
-For this product's ACV and buyer (regulated enterprise, security-reviewed,
-contract-signed), a self-serve card flow is the wrong primitive: procurement
-requires an order form, a DPA, and net terms — not a checkout page. Metering +
-idempotent invoicing + AR export covers the real motion. If a lower-tier,
-self-serve **Community/Team** SKU later needs card checkout, wire a processor at
-that point keyed on `invoice_id`; nothing in the core blocks it.
+The collection adapter accepts only an explicitly bounded period ending before
+the current UTC day. Rating a current/open period is useful for a statement;
+it is not a collectible final invoice. Repeated collection of a closed period
+uses a private tenant receipt, freezes the rated content, and returns already
+acknowledged item results without creating them again. Changed contents for
+the same period require reconciliation rather than a second automatic charge.
+A tenant-wide collection fence also rejects overlapping periods and changing
+the currency to collect the same usage again. Concurrent collectors cannot
+reserve conflicting periods independently.
+
+Minimum charges appear as an explicit adjustment line, so itemized charges
+reconcile with the invoice total. Currency-specific integer units and rounded
+line allocations preserve that total instead of rounding every line in
+isolation. Review the invoice currency and rate card before collection.
+
+A timeout after dispatch is uncertain. The collector retains that state and
+uses the same provider idempotency key only within its conservative 23-hour
+retry window. Beyond that window it stops for operator reconciliation with
+Stripe. Do not delete the receipt or use a new invoice identity to force a
+retry. Historical collections made before these receipts existed also require
+reconciliation; this change does not retroactively discover old charges.
+
+Subscription lookup excludes terminal subscriptions, refuses ambiguous or
+unresolved current subscriptions, and preserves a pending cancellation. It
+does not reactivate a subscription simply because its old price matches.

@@ -63,3 +63,22 @@ def test_budget_blocks_cross_origin(monkeypatch, tmp_path):
                        headers={"origin": "http://evil.example"},
                        follow_redirects=False)
     assert r.status_code == 403
+
+
+def test_remove_configured_task_limits_is_explicit_and_reversible(monkeypatch, tmp_path):
+    _prep(monkeypatch, tmp_path)
+    from maverick.budget import resolve_budget_caps
+    from maverick.runtime_overrides import task_limits_override
+
+    monkeypatch.setattr("maverick.config.get_budget_overrides", lambda: {
+        "max_dollars": 5, "max_wall_seconds": 3600, "max_tool_calls": 500,
+    })
+    c = _client()
+    assert resolve_budget_caps()["max_dollars"] == 5
+    r = c.post("/settings/budget", data={"mode": "disabled"}, headers=_ORIGIN)
+    assert r.status_code == 200
+    assert task_limits_override() is False and resolve_budget_caps() == {}
+    assert "Remove configured task limits" in r.text
+    r = c.post("/settings/budget", data={"mode": "configured", "max_dollars": ""}, headers=_ORIGIN)
+    assert r.status_code == 200
+    assert task_limits_override() is True and resolve_budget_caps()["max_tool_calls"] == 500

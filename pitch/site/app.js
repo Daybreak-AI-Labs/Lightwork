@@ -64,16 +64,28 @@
     var form = modal.querySelector("#demo-form");
     var done = modal.querySelector(".modal-done");
     var lastFocus = null;
+    var generation = 0, sending = false;
+    var submitButton = form.querySelector(".df-submit");
+
+    function resetSubmit() {
+      sending = false;
+      submitButton.disabled = false;
+      submitButton.textContent = "Request a demo";
+    }
 
     function open(e) {
       if (e) e.preventDefault();
       lastFocus = document.activeElement;
+      generation++;
+      resetSubmit();
       form.hidden = false; done.hidden = true;
       modal.classList.add("show");
       document.documentElement.classList.add("modal-open");
       setTimeout(function () { var i = form.querySelector("input"); if (i) i.focus(); }, 40);
     }
     function close() {
+      generation++;
+      resetSubmit();
       modal.classList.remove("show");
       document.documentElement.classList.remove("modal-open");
       if (lastFocus && lastFocus.focus) lastFocus.focus();
@@ -99,6 +111,7 @@
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      if (sending) return;
       var d = {
         name: form.name.value.trim(),
         email: form.email.value.trim(),
@@ -110,6 +123,8 @@
       if (!d.name || !d.email) { (d.name ? form.email : form.name).focus(); return; }
 
       if (ACCESS_KEY) {
+        var submissionGeneration = generation;
+        sending = true;
         var btn = form.querySelector(".df-submit");
         btn.disabled = true; btn.textContent = "Sending…";
         fetch("https://api.web3forms.com/submit", {
@@ -124,10 +139,12 @@
         })
           .then(function (r) { return r.json(); })
           .then(function (j) {
+            if (submissionGeneration !== generation) return;
             if (j && j.success) { form.hidden = true; done.hidden = false; }
-            else { btn.disabled = false; btn.textContent = "Request a demo"; window.location.href = mailtoFallback(d); }
+            else { window.location.href = mailtoFallback(d); }
           })
-          .catch(function () { btn.disabled = false; btn.textContent = "Request a demo"; window.location.href = mailtoFallback(d); });
+          .catch(function () { if (submissionGeneration === generation) window.location.href = mailtoFallback(d); })
+          .finally(function () { if (submissionGeneration === generation) resetSubmit(); });
       } else {
         window.location.href = mailtoFallback(d);
       }

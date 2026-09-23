@@ -125,7 +125,7 @@ def test_differential_fuzz():
     rng = random.Random(20260615)
     toks = [  # pragma: allowlist secret  (fake token fragments for fuzzing)
         "sk-ant-", "sk-proj-", "AKIA" + "1234567890ABCDEF", "ghp_", "gho_", "AIza",  # pragma: allowlist secret
-        '"type":"service_account"', "xoxb-1-2-", "sk_live_", "eyJa.eyJb.cccc",
+        '"type":"service_account"', "xoxb-1-2-", "sk_live_", "eyJa.eyJb.cccc",  # pragma: allowlist secret -- deliberately truncated synthetic detector fixture
         "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----",  # pragma: allowlist secret
         "glpat-", "postgres://u:p@h/d", "Authorization: Bearer ", "SECRET_KEY=",
         "\nAPI_TOKEN=", "@example.com", "123-45-6789", "192.168.1.1",

@@ -16,6 +16,7 @@ is where human-in-the-loop lives.
 """
 from __future__ import annotations
 
+import copy
 import re
 import threading
 import time
@@ -58,6 +59,7 @@ STATUS_PAUSED_EVENT = "paused_event"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
 STATUS_INDETERMINATE = "indeterminate"
+STATUS_BUDGET_LIMITED = "budget_limited"
 
 # The single source of truth for "which statuses mean a run is parked and
 # resumable" and "which statuses mean a run is still in flight". Every gate that
@@ -504,6 +506,11 @@ class FlowRunResult:
     resume_at: float | None = None  # epoch for a delay pause
     prompt: str = ""                # approval prompt for the UI
     error: str = ""
+    continuation: dict = field(default_factory=dict)
+
+
+class FlowBudgetExceeded(BudgetExceeded):
+    """A flow allowance refused an invocation before it dispatched any work."""
 
 
 class FlowApprovalStale(ApprovalCardError):
@@ -572,24 +579,30 @@ class _Ctx:
     flow_stack: set = field(default_factory=set)   # subflow ids on the call stack
     deadline: float | None = None                  # whole-flow wall-clock deadline
     parallel_slots: Any = None                     # shared worker budget for fan-out
+    frame: dict = field(default_factory=dict)
+    control_stop: list = field(default_factory=list)
 
-    def nested(self) -> _Ctx:
+    def nested(self, slot: str = "body") -> _Ctx:
         # A copy that cannot pause (foreach body / subflow run straight). Shares
         # flow_stack + deadline so cycle detection and the whole-flow deadline
         # span the linear nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
                     flow_stack=self.flow_stack, deadline=self.deadline,
-                    parallel_slots=self.parallel_slots)
+                    parallel_slots=self.parallel_slots,
+                    frame=self.frame.setdefault("children", {}).setdefault(slot, {}),
+                    control_stop=self.control_stop)
 
-    def branched(self) -> _Ctx:
+    def branched(self, slot: str = "body") -> _Ctx:
         # For a CONCURRENT parallel branch: its own flow_stack copy (independent
         # cycle detection -- a sibling branch's subflow isn't a cycle here), but a
         # shared clock/deadline and the shared on_node sink.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
                     flow_stack=set(self.flow_stack), deadline=self.deadline,
-                    parallel_slots=self.parallel_slots)
+                    parallel_slots=self.parallel_slots,
+                    frame=self.frame.setdefault("children", {}).setdefault(slot, {}),
+                    control_stop=self.control_stop)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -768,7 +781,7 @@ def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         if node.output:
             data[node.output] = {k: child[k] for k in child if k not in seeded}
     else:
-        before = set(data)
+        before = set(ctx.frame.setdefault("return_seed", list(data)))
         try:
             _run_chain(sub, data, ctx.nested(), sub.start)
         finally:
@@ -813,10 +826,14 @@ def _run_while(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     (so the body can change what the condition sees). Iterations are capped by
     ``limit`` (default 100) as the runaway guard; the body may set ``_break``."""
     cap = node.limit if node.limit and node.limit > 0 else _WHILE_DEFAULT_CAP
-    passes = 0
-    while passes < cap and eval_condition(node.condition, data):
+    passes = int(ctx.frame.get("passes", 0))
+    while passes < cap and (
+        "body" in ctx.frame.get("children", {}) or eval_condition(node.condition, data)
+    ):
         _run_chain(node.body, data, ctx.nested(), node.body.start)
         passes += 1
+        ctx.frame["passes"] = passes
+        ctx.frame.pop("children", None)
         if data.get("_break"):
             data.pop("_break", None)
             break
@@ -857,7 +874,7 @@ def _run_scope(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
 
 
 def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    items = list(_dig(data, node.items) or [])
+    items = copy.deepcopy(ctx.frame.get("items", list(_dig(data, node.items) or [])))
     if node.limit and node.limit > 0:
         items = items[:node.limit]          # cap iterations (a runaway-list guard)
     elif len(items) > _FOREACH_DEFAULT_CAP:
@@ -866,7 +883,8 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         # SURFACE the truncation rather than silently firing 10k+ connector calls.
         items = items[:_FOREACH_DEFAULT_CAP]
         data["_foreach_truncated"] = True
-    results = []
+    ctx.frame["items"] = items
+    results = copy.deepcopy(ctx.frame.get("results", []))
     if node.concurrent and len(items) > 1:
         # Concurrent iteration: each item gets an isolated data copy and its own
         # branch context (independent cycle detection), on the same bounded pool
@@ -880,20 +898,20 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             subs.append(sub)
         threaded = []
         inline = []
-        for sub in subs:
+        for index, sub in enumerate(subs):
             if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
-                threaded.append(sub)
+                threaded.append((index, sub))
             else:
-                inline.append(sub)
+                inline.append((index, sub))
         first_error = None
         if threaded:
             with _cf.ThreadPoolExecutor(max_workers=len(threaded)) as ex:
                 futs = [ex.submit(_run_chain_with_parallel_slot, node.body, sub,
-                                  ctx.branched(), node.body.start)
-                        for sub in threaded]
-                for sub in inline:
+                                  ctx.branched(str(index)), node.body.start)
+                        for index, sub in threaded]
+                for index, sub in inline:
                     try:
-                        _run_chain(node.body, sub, ctx.branched(), node.body.start)
+                        _run_chain(node.body, sub, ctx.branched(str(index)), node.body.start)
                     except Exception as e:
                         first_error = first_error or e
                 for f in futs:
@@ -902,17 +920,21 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
                     except Exception as e:
                         first_error = first_error or e
         else:
-            for sub in inline:
-                _run_chain(node.body, sub, ctx.branched(), node.body.start)
+            for index, sub in inline:
+                _run_chain(node.body, sub, ctx.branched(str(index)), node.body.start)
+        if ctx.control_stop:
+            raise ctx.control_stop[0]
         if first_error is not None:
             raise first_error
         results = subs
     else:
-        for item in items:
+        for item in items[len(results):]:
             sub = dict(data)
             sub[node.var] = item
             _run_chain(node.body, sub, ctx.nested(), node.body.start)
             results.append(sub)      # per-iteration data snapshot (body outputs included)
+            ctx.frame["results"] = copy.deepcopy(results)
+            ctx.frame.pop("children", None)
             if node.output:
                 # Publish partial results after EACH iteration, so a whole-flow
                 # deadline or a failure mid-loop keeps the batch's completed work
@@ -937,19 +959,20 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         import concurrent.futures as _cf
         futs = []
         inline = []
-        for br, sub in zip(node.branches, branch_outputs, strict=True):
+        for index, (br, sub) in enumerate(zip(node.branches, branch_outputs, strict=True)):
             if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
-                futs.append((br, sub))
+                futs.append((index, br, sub))
             else:
-                inline.append((br, sub))
+                inline.append((index, br, sub))
         first_error = None
         if futs:
             with _cf.ThreadPoolExecutor(max_workers=len(futs)) as ex:
-                futs = [ex.submit(_run_chain_with_parallel_slot, br, sub, ctx.branched(), br.start)
-                        for br, sub in futs]
-                for br, sub in inline:
+                futs = [ex.submit(_run_chain_with_parallel_slot, br, sub,
+                                  ctx.branched(str(index)), br.start)
+                        for index, br, sub in futs]
+                for index, br, sub in inline:
                     try:
-                        _run_chain(br, sub, ctx.branched(), br.start)
+                        _run_chain(br, sub, ctx.branched(str(index)), br.start)
                     except Exception as e:
                         first_error = first_error or e
                 for f in futs:
@@ -958,8 +981,10 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
                     except Exception as e:
                         first_error = first_error or e
         else:
-            for br, sub in inline:
-                _run_chain(br, sub, ctx.branched(), br.start)
+            for index, br, sub in inline:
+                _run_chain(br, sub, ctx.branched(str(index)), br.start)
+        if ctx.control_stop:
+            raise ctx.control_stop[0]
         if first_error is not None:
             raise first_error
     else:
@@ -1046,22 +1071,39 @@ def _run_node(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
 
 
 def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
-    cursor = start
-    seen = 0
+    frame = ctx.frame
+    if frame:
+        if frame.get("flow_id") != flow.id or not isinstance(frame.get("data"), dict):
+            raise ValueError("flow continuation does not match its graph")
+        data.clear()
+        data.update(copy.deepcopy(frame["data"]))
+    else:
+        frame.update(flow_id=flow.id, cursor=start, data=copy.deepcopy(data), seen=0)
+    cursor = frame["cursor"]
+    seen = int(frame.get("seen", 0))
     limit = max(1000, len(flow.nodes) * 100)   # cycle backstop
     while cursor is not None:
+        if ctx.control_stop:
+            raise ctx.control_stop[0]
         if ctx.deadline is not None and ctx.now() > ctx.deadline:
             raise RuntimeError(f"flow {flow.id!r} exceeded its wall-clock deadline")
         node = flow.node(cursor)
         if node is None:
-            return
+            raise ValueError("flow continuation node no longer exists")
         try:
             cursor = _run_node(node, data, ctx)
-        except (_Pause, _Reject, _NodeError, _Indeterminate, FlowApprovalStale):
+        except (BudgetExceeded, Halted, FlowApprovalStale) as exc:
+            ctx.control_stop.append(exc)
+            raise
+        except (_Pause, _Reject, _NodeError, _Indeterminate):
             raise
         except Exception as e:
             raise _NodeError(node.id, e) from e
+        finally:
+            frame["data"] = copy.deepcopy(data)
         seen += 1
+        frame.clear()
+        frame.update(flow_id=flow.id, cursor=cursor, data=copy.deepcopy(data), seen=seen)
         if seen > limit:
             raise RuntimeError(f"flow {flow.id!r} exceeded {limit} steps (cycle?)")
 
@@ -1072,6 +1114,38 @@ def _run_chain_with_parallel_slot(flow: Flow, data: dict, ctx: _Ctx, start: str 
     finally:
         if ctx.parallel_slots is not None:
             ctx.parallel_slots.release()
+
+
+def _legacy_cursor_ambiguous(flow: Flow, node: FlowNode, resolve_flow) -> bool:
+    """A legacy leaf ID must identify exactly one non-container invocation."""
+    pending = [flow]
+    visited = set()
+    ambiguous = node.kind in {"scope", "foreach", "parallel", "while", "subflow"}
+    while pending and not ambiguous:
+        candidate = pending.pop()
+        if id(candidate) in visited:
+            continue
+        visited.add(id(candidate))
+        for child_node in candidate.nodes.values():
+            children = list(child_node.branches or [])
+            if child_node.body is not None:
+                children.append(child_node.body)
+            if child_node.kind == "subflow":
+                sub = resolve_flow(child_node.flow_ref) if resolve_flow else None
+                if sub is None:
+                    ambiguous = True
+                    break
+                children.append(sub)
+            for child in children:
+                if child.node(node.id) is not None:
+                    ambiguous = True
+                pending.append(child)
+    return ambiguous
+
+
+def _valid_continuation(resume: dict, continuation: object) -> bool:
+    return (isinstance(continuation, dict) and resume.get("rerun") is True and continuation.get("version") == 1
+            and isinstance(continuation.get("frame"), dict))
 
 
 def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
@@ -1095,7 +1169,14 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
                flow_stack={flow.id},   # so the top flow can't recurse into itself
                deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None),
                parallel_slots=threading.BoundedSemaphore(_PARALLEL_MAX_WORKERS))
-    if resume:
+    if resume and resume.get("continuation"):
+        continuation = copy.deepcopy(resume["continuation"])
+        if not _valid_continuation(resume, continuation):
+            return FlowRunResult(status=STATUS_FAILED, error="unsupported flow continuation")
+        ctx.frame = continuation["frame"]
+        data = dict(data or {})
+        start = flow.start
+    elif resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))
         decision = resume.get("decision")
@@ -1113,6 +1194,16 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
                 status=STATUS_FAILED, data=data, cursor=resume.get("node_id"),
                 error=(f"cannot resume: node {resume.get('node_id')!r} no longer "
                        "exists in this flow version"))
+        if resume.get("rerun"):
+            # Older checkpoints named only a leaf. A duplicate nested ID or a
+            # container cursor cannot identify which invocation already acted.
+            # Refuse reconstruction rather than repeating a completed prefix.
+            ambiguous = _legacy_cursor_ambiguous(flow, node, resolve_flow)
+            if ambiguous:
+                return FlowRunResult(
+                    status=STATUS_INDETERMINATE, data=data, cursor=node.id,
+                    error="legacy failure lacks invocation history; reconcile completed work before creating a replacement",
+                )
         if decision == "rejected":
             return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
         # Default continuation: a pause resumes AFTER its node (the approval/
@@ -1142,6 +1233,10 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     else:
         data = dict(data or {})
         start = flow.start
+    return _execute_chain_result(flow, data, ctx, start)
+
+
+def _execute_chain_result(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> FlowRunResult:
     try:
         _run_chain(flow, data, ctx, start)
         return FlowRunResult(status=STATUS_COMPLETED, data=data)
@@ -1156,11 +1251,18 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         # node id as the cursor so the run can be retried from right there.
         return FlowRunResult(status=STATUS_FAILED, data=data,
                               error=_safe_error_text(e, limit=2000),
-                              cursor=e.node_id)
+                              cursor=ctx.frame.get("cursor") or e.node_id,
+                              continuation={"version": 1, "frame": ctx.frame})
     except _Indeterminate as e:
         return FlowRunResult(status=STATUS_INDETERMINATE, data=data,
                               error=_safe_error_text(e, limit=2000),
                               cursor=e.node_id)
+    except FlowBudgetExceeded as e:
+        return FlowRunResult(
+            status=STATUS_BUDGET_LIMITED, data=data, cursor=ctx.frame.get("cursor"),
+            error=_safe_error_text(e, limit=2000),
+            continuation={"version": 1, "frame": ctx.frame},
+        )
     except (BudgetExceeded, Halted, FlowApprovalStale):
         raise
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller
@@ -1175,5 +1277,6 @@ __all__ = [
     "STATUS_QUEUED", "STATUS_CLAIMED", "STATUS_RUNNING", "STATUS_RESUMING",
     "STATUS_COMPLETED", "STATUS_PAUSED_APPROVAL", "STATUS_PAUSED_DELAY",
     "STATUS_PAUSED_EVENT", "STATUS_REJECTED", "STATUS_FAILED", "STATUS_INDETERMINATE",
+    "STATUS_BUDGET_LIMITED", "FlowBudgetExceeded",
     "PAUSED_STATUSES", "ACTIVE_STATUSES", "QUARANTINED_STATUSES",
 ]

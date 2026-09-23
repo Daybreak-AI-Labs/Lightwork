@@ -100,8 +100,8 @@ class TestGoals:
             (
                 resp.json()["id"],
                 {
-                    "max_dollars": 2.0,
-                    "max_wall_seconds": 1800.0,
+                    "max_dollars": None,
+                    "max_wall_seconds": None,
                     "max_depth": 3,
                     "channel": None,
                     "user_id": None,
@@ -208,14 +208,22 @@ class TestGoals:
         assert "/" not in detail                  # no filesystem path leaked
         assert ".maverick" not in detail
 
-    def test_create_clamps_max_dollars(self, monkeypatch):
-        """Pydantic Field bounds reject values outside [0, 100]."""
+    @pytest.mark.parametrize("ceiling,expected", [(None, 10_000.0), (25.0, 25.0), (0.0, 0.0)])
+    def test_create_applies_only_configured_max_dollars(self, monkeypatch, ceiling, expected):
+        """An explicit deployment ceiling constrains a caller's requested cap."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        import maverick.runner as runner_mod
+        from maverick_dashboard import api as api_mod
+
+        called = []
+        monkeypatch.setattr(api_mod, "configured_max_dollars", lambda: ceiling)
+        monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **kw: called.append((a, kw)))
         resp = client.post("/api/v1/goals", json={
             "title": "big spend", "max_dollars": 10_000.0,
         })
-        # 422 = Pydantic validation error
-        assert resp.status_code == 422
+        assert resp.status_code == 201
+        assert len(called) == 1
+        assert called[0][1]["max_dollars"] == expected
 
     def test_create_rejects_oversized_description(self, monkeypatch):
         """An unbounded description is a cost/DB-bloat amplification vector;

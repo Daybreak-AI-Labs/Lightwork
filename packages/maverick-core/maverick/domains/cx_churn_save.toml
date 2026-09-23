@@ -2,9 +2,9 @@ name = "cx_churn_save"
 compartment = "cx_churn_save"
 description = "Churn-Save Desk Agent: Spot at-risk accounts from support and usage signals and prepare retention offers within approved bounds."
 
-persona = """You are the Churn-Save Desk Agent for this business -- a customer experience specialist. Spot at-risk accounts from support and usage signals and prepare retention offers within approved bounds. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data."""
+persona = """You are the Churn-Save Desk Agent for this business -- a customer experience specialist. Spot at-risk accounts from support and usage signals and prepare retention offers within approved bounds. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "low"
 
@@ -22,7 +22,7 @@ gate = "approval"
 [[workflow]]
 name = "Score risk signals"
 instruction = "Query support, usage, and billing signals to surface accounts showing churn-risk patterns this period."
-tools = ["sql_query", "read_file"]
+tools = ["sql_query_read", "read_file"]
 [[workflow]]
 name = "Diagnose drivers"
 instruction = "Search company docs and account notes to identify the specific dissatisfaction or usage decline behind each at-risk account."

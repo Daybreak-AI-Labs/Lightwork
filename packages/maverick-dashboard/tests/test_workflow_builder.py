@@ -52,7 +52,7 @@ def test_parse_workflow_normalizes():
     assert d["title"] == "Weekly {{topic}} report"
     assert d["params"] == ["topic"]                # non-identifier + dup dropped
     assert d["steps"] == ["a", "b"]                # blank dropped
-    assert d["budget_dollars"] == 20.0             # clamped to the max
+    assert d["budget_dollars"] == 99.0             # explicit allowance retained
     assert "1. a" in d["body"] and "2. b" in d["body"]
 
 
@@ -60,6 +60,19 @@ def test_parse_workflow_strips_code_fence():
     from maverick_dashboard.workflow_ai import parse_workflow
     d = parse_workflow('```json\n{"name":"x","title":"X","steps":["do it"]}\n```')
     assert d["name"] == "x" and d["steps"] == ["do it"]
+    assert d["budget_dollars"] is None
+
+
+def test_save_workflow_without_caps_round_trips_none(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import load_template
+
+    response = _client().post("/api/v1/workflows", json={
+        "name": "no-generated-cap", "title": "Workflow", "body": "Do the agreed work.",
+    })
+    assert response.status_code in {200, 201}, response.text
+    saved = load_template("no-generated-cap")
+    assert saved.budget_dollars is None and saved.budget_wall_seconds is None
 
 
 def test_parse_workflow_rejects_unusable():
@@ -507,8 +520,8 @@ def test_save_endpoint_conflicts_without_overwrite(monkeypatch, tmp_path):
     assert load_template("dup").title == "Second"
 
 
-def test_save_user_template_clamps_budget_and_folds_placeholders(monkeypatch, tmp_path):
-    # Budgets clamp into the schema range; every {{placeholder}} used in the
+def test_save_user_template_preserves_explicit_budget_and_folds_placeholders(monkeypatch, tmp_path):
+    # Explicit budgets are retained; every {{placeholder}} used in the
     # title/body becomes a fillable param so none renders as a literal.
     _isolate(monkeypatch, tmp_path)
     from maverick.templates import load_template, save_user_template
@@ -518,8 +531,8 @@ def test_save_user_template_clamps_budget_and_folds_placeholders(monkeypatch, tm
         params=["topic"], budget_dollars=999.0, budget_wall_seconds=0.0,
     )
     t = load_template("clamp")
-    assert t.budget_dollars == 100.0        # clamped down from 999
-    assert t.budget_wall_seconds == 1.0     # clamped up from 0
+    assert t.budget_dollars == 999.0
+    assert t.budget_wall_seconds == 0.0     # explicit zero remains a refusal
     assert set(t.params) == {"topic", "recipient"}
 
 
@@ -621,7 +634,7 @@ def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
     r = _client().post("/api/v1/agents/ap-bot/override", json={
         "description": "AP clerk", "persona": "You are a careful AP clerk.",
         "allow_tools": ["ocr_read", "send_payment"], "deny_tools": ["shell"],
-        "max_risk": "medium",
+        "max_risk": "high",
         "workflow": [
             {"name": "Read", "instruction": "ocr", "tools": ["ocr_read"], "gate": None},
             {"name": "Pay", "instruction": "pay", "tools": ["send_payment"], "gate": "approval"},

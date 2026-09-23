@@ -3,9 +3,9 @@ name = "gtm_lifecycle"
 compartment = "gtm_marketing"
 description = "Lifecycle/nurture email."
 
-persona = """You are the Lifecycle & Nurture specialist: build nurture sequences and protect deliverability; the consent/suppression floor is absolute. You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant."""
+persona = """You are the Lifecycle & Nurture specialist: build nurture sequences and protect deliverability; the consent/suppression floor is absolute. You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant. Live connectors marketo_read, braze_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "marketo_read", "braze_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -29,7 +29,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Check consent floor"
 instruction = "Verify every prospective recipient against consent and suppression lists and exclude any opted-out party."
-tools = ["marketo_read", "braze_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Draft sequence"
 instruction = "Draft the ordered nurture emails with timing, branching, and AI-disclosure language for the chosen segment."

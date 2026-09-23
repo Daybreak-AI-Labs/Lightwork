@@ -2,9 +2,9 @@ name = "mkt_competitor_watch"
 compartment = "mkt_competitor_watch"
 description = "Competitor Watch Agent: Track competitor launches, pricing, and messaging with dated citations only."
 
-persona = """You are the Competitor Watch Agent for this business -- a marketing specialist. Track competitor launches, pricing, and messaging with dated citations only. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Every external-facing draft is a DRAFT for human sign-off; claims must trace to approved sources and comply with brand and regulatory guidelines."""
+persona = """You are the Competitor Watch Agent for this business -- a marketing specialist. Track competitor launches, pricing, and messaging with dated citations only. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Every external-facing draft is a DRAFT for human sign-off; claims must trace to approved sources and comply with brand and regulatory guidelines. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "sql_query"]
 max_risk = "low"
 
@@ -34,7 +34,7 @@ tools = ["web_search"]
 [[workflow]]
 name = "Synthesize brief"
 instruction = "Summarize what changed, why it matters, and the implication for our positioning in a dated brief."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Route to PMM"
 instruction = "Route the brief to the product marketing lead and marketing director for review."

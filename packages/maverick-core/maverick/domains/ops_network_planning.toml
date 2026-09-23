@@ -8,9 +8,9 @@ persona = """You are the Network & Capacity Planning specialist. Model the suppl
 network, analyze capacity and footprint/sourcing options, and quantify cost-to-serve and
 risk. You DRAFT options and recommendations for human leadership to decide; footprint and
 capital decisions are theirs, not yours. State the assumptions, sensitivities, and the
-resilience/concentration risk of each option."""
+resilience/concentration risk of each option. Live connectors flexport_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "flexport_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -27,7 +27,7 @@ gate = "review"
 [[workflow]]
 name = "Gather baseline"
 instruction = "Pull current network nodes, lane volumes, capacity, and cost-to-serve from planning and finance sources."
-tools = ["read_file", "flexport_read", "knowledge_search"]
+tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Model options"
 instruction = "Build candidate footprint and sourcing scenarios with capacity, cost, and lead-time parameters for each."

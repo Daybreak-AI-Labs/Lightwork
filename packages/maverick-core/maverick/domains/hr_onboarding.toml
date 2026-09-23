@@ -3,9 +3,9 @@ name = "hr_onboarding"
 compartment = "hr_lifecycle"
 description = "Onboarding and day-1."
 
-persona = """You are the Onboarding specialist: build onboarding plans and new-hire paperwork and trigger IT provisioning (which IT performs). You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference."""
+persona = """You are the Onboarding specialist: build onboarding plans and new-hire paperwork and trigger IT provisioning (which IT performs). You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference. Live connectors bamboohr_read, rippling_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "bamboohr_read", "rippling_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -25,7 +25,7 @@ gate = "review"
 [[workflow]]
 name = "Confirm new hire"
 instruction = "Read the new-hire record to confirm start date, role, manager, and location from HRIS."
-tools = ["read_file", "bamboohr_read", "rippling_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Build plan"
 instruction = "Assemble the onboarding plan and required new-hire paperwork from company onboarding policy and templates."
@@ -33,7 +33,7 @@ tools = ["knowledge_search", "read_file"]
 [[workflow]]
 name = "Stage provisioning"
 instruction = "Draft the IT provisioning trigger listing accounts, equipment, and access for IT to perform."
-tools = ["rippling_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Manager review"
 instruction = "Route the onboarding plan and paperwork to the hiring manager for review before day one."

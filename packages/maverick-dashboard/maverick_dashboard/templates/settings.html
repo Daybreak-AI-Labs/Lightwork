@@ -265,24 +265,30 @@
   <div class="panel" data-settings-group="general">
     <p class="muted" style="margin-top: 0;">
       The most a single goal may spend before Lightwork stops it. Changes
-      apply on the next run. Default is ${{ '%.2f'|format(default_budget) }}
-      per goal.
+      apply on the next run. There is no automatic task limit on a new installation.
+      Existing configured limits remain in force until you change them.
     </p>
+    <p>Configured task limits are <strong>{{ 'enabled' if task_limits_enabled else 'disabled' }}</strong>.</p>
     <form method="post" action="/settings/budget"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       <label style="display: flex; flex-direction: column; gap: var(--space-1); min-width: 14rem;">
         <span>Max spend per goal (USD)</span>
         <input class="ctl" type="number" name="max_dollars" min="0.01" step="0.5"
                value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
-               placeholder="{{ '%.2f'|format(default_budget) }}" />
+               placeholder="Optional task limit" />
       </label>
       <button type="submit" class="btn btn--primary">Save cap</button>
     </form>
     {% if budget is not none %}
     <p class="muted" style="margin-bottom: 0;">
-      Current cap: <code>${{ '%.2f'|format(budget) }}</code> per goal. Clear the field and save to use the default.
+      Saved dashboard cap: <code>${{ '%.2f'|format(budget) }}</code> per goal. Saving a cap enables configured task limits. Clear the field and save to use configuration values.
     </p>
     {% endif %}
+    <form method="post" action="/settings/budget">
+      <input type="hidden" name="mode" value="disabled" />
+      <button type="submit" class="btn">Remove configured task limits</button>
+    </form>
+    <p class="muted">This intentionally disables saved task spending, time, token and tool-count limits, including limits created by an older installer. It preserves their settings for later use. Explicit limits on a new request, organization spending controls, cancellation and tool safety checks still apply.</p>
   </div>
 
   <div class="section-head" data-settings-group="integrations"><h2>Provider keys</h2></div>

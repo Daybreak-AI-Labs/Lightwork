@@ -99,7 +99,21 @@ def test_high_risk_authorities_and_non_authority_counterexamples_stay_distinct()
         "tools/database_tool.py": "external", "tools/sql_query.py": "external",
         "duckdb_analytics.py": "external", "tools/document_processing.py": "transient",
         "support_bundle.py": "artifact", "crypto_at_rest.py": "key_custody",
+        "channel_recovery.py": "recovery", "stripe_collection.py": "execution",
+        "tenant/provider_admission.py": "execution", "tenant/_provider_archive.py": "sqlite_domain",
     }
     assert {path: entries[core + path]["contract"] for path in expected} == expected
     assert entries["packages/maverick-channels/maverick_channels/slack.py"]["contract"] == "governed"
     assert entries["packages/maverick-channels/maverick_channels/rich_render.py"]["contract"] == "artifact"
+
+
+def test_reconciliation_and_provider_receipt_owners_have_explicit_path_dispositions():
+    entries = {entry["path"]: entry for entry in _inventory()["entries"]}
+    for owner in ("channel_recovery.py", "stripe_collection.py", "tenant/provider_admission.py",
+                  "tenant/_provider_archive.py"):
+        authorities = entries["packages/maverick-core/maverick/" + owner]["persisted_authorities"]
+        assert authorities
+        for authority in authorities:
+            path = authority["sample_path"]
+            assert authority_policy(path, is_sqlite=path.endswith(".sqlite3")) == authority["recovery_policy"]
+            assert authority["disposition"]

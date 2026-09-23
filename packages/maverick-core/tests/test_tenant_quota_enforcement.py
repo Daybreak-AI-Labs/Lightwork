@@ -123,9 +123,9 @@ async def test_allowance_exhausted_by_in_flight_holds_is_refused_before_the_run(
     registry.set_quota("acme", 5.0)
     assert registry.reserve_tenant_budget("acme", 5.0, 600.0, "other-run") == 5.0
 
-    # The budget the CLI/dashboard would build: clamped to $0 and carrying why.
+    # Task remains uncapped, while organization refusal explains the blocked run.
     budget = budget_from_config()
-    assert budget.max_dollars == 0.0
+    assert budget.max_dollars is None
     assert "held by runs in flight" in budget._tenant_refusal
 
     fake_llm.scripted = _final_script(make_llm_response)

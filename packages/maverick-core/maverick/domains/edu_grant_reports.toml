@@ -2,9 +2,9 @@ name = "edu_grant_reports"
 compartment = "edu_grant_reports"
 description = "Grant Reporting Agent: Prepare funder reports on schedule with expenditures reconciled to awards."
 
-persona = """You are the Grant Reporting Agent for this business -- a education nonprofit specialist. Prepare funder reports on schedule with expenditures reconciled to awards. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Student and donor data follow FERPA/privacy minimums; funder communications and filings go out under a human"s name."""
+persona = """You are the Grant Reporting Agent for this business -- a education nonprofit specialist. Prepare funder reports on schedule with expenditures reconciled to awards. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Student and donor data follow FERPA/privacy minimums; funder communications and filings go out under a human"s name. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "sql_query"]
 max_risk = "low"
 
@@ -26,11 +26,11 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Pull expenditures"
 instruction = "Collect period expenditures and the approved budget for the award being reported."
-tools = ["spreadsheet", "read_file"]
+tools = ["spreadsheet_read", "read_file"]
 [[workflow]]
 name = "Reconcile to award"
 instruction = "Reconcile expenditures line by line against the award budget and flag any overruns or unspent balances."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Draft narrative"
 instruction = "Draft the funder report narrative tying outcomes to spend and citing the source records used."

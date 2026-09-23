@@ -42,6 +42,10 @@ spec:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
           env:
+            {{- if not (hasKey .Values.env "MAVERICK_WORKDIR") }}
+            - name: MAVERICK_WORKDIR
+              value: {{ printf "%s/workspace" (.Values.persistence.mountPath | trimSuffix "/") | quote }}
+            {{- end }}
             {{- if eq .Values.worldModel.backend "postgres" }}
             - name: MAVERICK_WORLD_BACKEND
               value: "postgres"

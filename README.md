@@ -10,9 +10,9 @@
 [![License: Proprietary](https://img.shields.io/badge/license-Proprietary-red.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 
-**The governed, auditable AI agent runtime for regulated enterprises — a long-horizon multi-agent swarm that runs on your data, in your environment, under a hard budget.**
+**The governed, auditable AI agent runtime for regulated enterprises — a long-horizon multi-agent swarm that runs on your data, in your environment, with explicit operating and spending controls.**
 
-Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-agents — researcher, coder, writer, verifier — that work in parallel, checks their output, and returns a result. Every step runs under a hard spending cap and through a safety layer, on the models *you* choose.
+Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-agents — researcher, coder, writer, verifier — that work in parallel, checks their output, and returns a result. Work passes through a safety layer on the models *you* choose. Ordinary tasks have no generated task cap; you can set explicit limits and separate organization allowances. [Task limits and spend accounting](docs/task-limits.md) explains how existing settings and interrupted work behave.
 
 - 🛡️ **Governed & contained by default.** RBAC, capability tokens, per-tool ACLs, consent gates, and a kill switch bound every agent action — and in Enterprise mode an **egress lock** blocks the agent's outbound network paths (LLM calls and the built-in HTTP tools/connectors), so a prompt-injected agent can't exfiltrate through them (pair it with a network-level egress firewall to also cover raw-shell egress). Agent Shield also screens every prompt, tool call, and output; detector strength depends on the configured backend (see [`docs/safety.md`](./docs/safety.md)).
 - 🧾 **Tamper-evident & audit-ready.** A signed, hash-chained, append-only audit log (`lightwork audit verify`) with SIEM export, encryption-at-rest, DSAR, and SOC2-aligned evidence — built to survive a security review.

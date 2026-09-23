@@ -1207,7 +1207,7 @@ def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_pat
     off = _write(tmp_path, monkeypatch, {"dashboard_compress": False})
     assert tomllib.loads(off)["dashboard"]["compress"] is False
     on = _write(tmp_path, monkeypatch, {"dashboard_compress": True})
-    assert "compress" not in on
+    assert "compress" not in tomllib.loads(on).get("dashboard", {})
 
 
 def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
@@ -1216,7 +1216,7 @@ def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, 
     off = _write(tmp_path, monkeypatch, {"model_discovery": False})
     assert tomllib.loads(off)["models"]["discovery"] is False
     on = _write(tmp_path, monkeypatch, {"model_discovery": True})
-    assert "discovery" not in on
+    assert "discovery" not in tomllib.loads(on).get("models", {})
     from maverick_installer.wizard import _cfg_role_models
     both = "\n".join(_cfg_role_models({"coder": "openai:gpt-5.4"}, discovery=False))
     parsed = tomllib.loads(both)["models"]

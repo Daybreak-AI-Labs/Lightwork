@@ -231,6 +231,8 @@ _DEFAULT_RISK: dict[str, str] = {
     "zoom": "high",
     # low: read-only / pure lookups
     "read_file": "low",
+    "sql_query_read": "low",  # forced SQLite read-only connection and authorizer
+    "spreadsheet_read": "low",  # info/read only; no edits or recalculation
     "list_dir": "low",
     "list_specialists": "low",
     "repo_map": "low",

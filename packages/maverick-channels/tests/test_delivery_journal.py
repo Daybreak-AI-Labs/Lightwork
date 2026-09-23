@@ -302,3 +302,68 @@ def test_retention_clears_only_confirmed_terminal_payloads_and_preserves_claim(i
     assert isolated.get(first["id"])["compacted"]
     assert isolated.get(second["id"])["message"]["text"] == "Question"
     assert isolated.admit(_message(), external_id="event1", account="account1")["compacted"]
+
+
+def test_retention_visits_all_rows_across_restart_and_keeps_tombstones(isolated, monkeypatch):
+    from types import SimpleNamespace
+
+    eligible = []
+    for index in range(3):
+        row = isolated.admit(_message(), external_id=f"old-{index}", account="account1")
+        eligible.append(isolated.change(row, execution="completed", delivery="delivered", reply={"text": "private"}))
+    held = isolated.admit(_message(), external_id="held", account="account1")
+    held = isolated.change(held, execution="execution_unknown")
+    recent = isolated.admit(_message(), external_id="recent", account="account1")
+    future = max(row["updated_at"] for row in eligible) + delivery.RETENTION_SECONDS + 1
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: future))
+    assert sum(delivery.DeliveryJournal().compact_delivered(limit=2) for _ in range(8)) == 3
+    assert all(isolated.get(row["id"])["message"] == {} for row in eligible)
+    assert isolated.get(held["id"])["message"]["text"] == "Question"
+    assert isolated.get(recent["id"])["execution"] == "received"
+    assert isolated.store.count() == 5
+
+
+def test_recovered_telegram_download_retries_before_execution_claim(isolated):
+    from types import SimpleNamespace
+
+    from maverick_channels.telegram import TelegramChannel
+
+    attempts, handled, sent = [], [], []
+    message = IncomingMessage(user_id="7", sender_id="7", text="Read report", channel="telegram", message_id="5")
+    route = {"files": [{"file_id": "report", "filename": "report.txt", "mime": "text/plain", "size": 6}]}
+    receipt = isolated.admit(message, external_id="5", account="account", route=route)
+
+    async def download():
+        return bytearray(b"report")
+
+    async def get_file(file_id):
+        attempts.append(file_id)
+        if len(attempts) == 1:
+            raise TimeoutError("temporary download interruption")
+        return SimpleNamespace(download_as_bytearray=download)
+
+    async def handler(incoming):
+        handled.append(incoming.attachments)
+        return "done"
+
+    async def send(incoming, reply, route):
+        sent.append(reply.text)
+        return "receipt"
+
+    async def run():
+        adapter = TelegramChannel.__new__(TelegramChannel)
+        adapter.handler = handler
+        adapter._app = SimpleNamespace(bot=SimpleNamespace(get_file=get_file))
+        kwargs = dict(account="account", authorize=lambda _: True, send=send,
+                      prepare=adapter._prepare_saved, journal=delivery.DeliveryJournal())
+        with pytest.raises(TimeoutError):
+            await delivery.recover_messages(adapter, **kwargs)
+        row = isolated.get(receipt["id"])
+        assert row["execution"] == "received" and row["delivery"] == "not_ready"
+        assert handled == [] and sent == []
+        await delivery.recover_messages(adapter, **kwargs)
+        await delivery.recover_messages(adapter, **kwargs)
+
+    asyncio.run(run())
+    assert len(attempts) == 2 and len(handled) == 1 and sent == ["done"]
+    assert handled[0] == [{"filename": "report.txt", "mime": "text/plain", "data": b"report"}]

@@ -18,7 +18,7 @@ for false unless noted otherwise.
 | `MAVERICK_CONFIG` | `~/.maverick/config.toml` | Path to an alternate config file. |
 | `MAVERICK_CODING_MODE` | unset | When `1`/`true`/`yes`, switches the agent into coding mode (set by `maverick start --coding-mode`); affects prompts, fs/shell tool defaults, and cache TTL. |
 | `MAVERICK_LANGUAGE` | unset | Primary project language hint (e.g. `python`, `go`). Feeds sandbox/toolchain selection and coding mode. |
-| `MAVERICK_MAX_STEPS` | `25` | Global cap on agent loop steps per goal. |
+| `MAVERICK_MAX_STEPS` | unset | Optional explicit cap on agent loop steps per goal. Ordinary goals have no generated step cap. |
 | `MAVERICK_STEP_BUDGET_WARNING` | `3` | When this many tool-using turns remain before `MAVERICK_MAX_STEPS`, the loop nudges the agent to give its FINAL answer (so a long run isn't cut off mid-work). `0` disables. |
 | `MAVERICK_MAX_SWARM_FANOUT` | `8` | Max child agents a single spawn call may branch into. |
 | `MAVERICK_MAX_TOTAL_SPAWNS` | `64` | Process-wide cap on total spawned agents across a run. |
@@ -40,9 +40,13 @@ for false unless noted otherwise.
 | --- | --- | --- |
 | `MAVERICK_BUDGET_DOLLARS` | config `[budget]` | Override the dollar budget cap for a run. |
 | `MAVERICK_BILLING_STRICT` | `true` | Require verified pricing for live accounting. `false` explicitly enables warning-labelled estimate-only accounting for legacy/custom gateways. |
-| `MAVERICK_DEFAULT_MAX_DOLLARS` | `2.0` | Fallback per-goal dollar cap for a deployment that configured none; the Settings spend cap and `[budget] max_dollars` outrank it and set the ceiling the dashboard accepts. |
-| `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | `1800` | Default per-goal wall-clock ceiling (seconds). |
+| `MAVERICK_DEFAULT_MAX_DOLLARS` | unset | Optional deployment task default; Settings and `[budget] max_dollars` take precedence. The task-limits switch can disable these defaults. No dollar limit is generated when omitted. |
+| `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | unset | Optional deployment task wall-clock default, in seconds. No elapsed-time cap is generated when omitted. |
 | `MAVERICK_DEFAULT_MAX_DEPTH` | `3` | Default max recursion depth for spawned sub-goals. |
+
+Task limits and organization allowances are separate. See
+[task limits and spend accounting](task-limits.md) for existing-install migration,
+explicit limits, retry behavior and unknown provider charges.
 
 ## Models & routing
 

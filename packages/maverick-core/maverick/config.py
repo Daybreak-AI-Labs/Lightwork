@@ -1145,7 +1145,7 @@ def get_sandbox() -> dict:
     cfg = load_config().get("sandbox", {})
     return {
         "backend": "kubernetes" if os.environ.get("MAVERICK_DEPLOYMENT_ISOLATION") == "kubernetes" else cfg.get("backend", "local"),
-        "workdir": cfg.get("workdir", "~/maverick-workspace"),
+        "workdir": cfg.get("workdir", os.environ.get("MAVERICK_WORKDIR") or "~/maverick-workspace"),
         "timeout": cfg.get("timeout", 60),
     }
 
@@ -1164,6 +1164,7 @@ def get_knowledge() -> dict:
         "embedder": cfg.get("embedder", "hosted"),
         "store": cfg.get("store", "sqlite"),
         "model": cfg.get("model", "voyage-3"),
+        "revision": cfg.get("revision"),
         "base_url": cfg.get("base_url", "https://api.voyageai.com/v1"),
         "dim": int(cfg.get("dim", 1024)),
         "path": cfg.get("path", ""),

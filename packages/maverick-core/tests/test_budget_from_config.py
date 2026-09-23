@@ -19,8 +19,42 @@ def set_budget_cfg(monkeypatch):
 def test_no_config_uses_budget_defaults(set_budget_cfg):
     set_budget_cfg({})
     b = budget_from_config()
-    assert b.max_dollars == Budget().max_dollars  # 5.0
+    assert b.max_dollars == Budget().max_dollars is None
     assert b.max_wall_seconds == Budget().max_wall_seconds
+
+
+def test_ordinary_task_has_no_generated_caps_and_tracks_usage(set_budget_cfg):
+    set_budget_cfg({})
+    b = budget_from_config()
+    assert all(getattr(b, key) is None for key in (
+        "max_dollars", "max_wall_seconds", "max_input_tokens", "max_output_tokens", "max_tool_calls",
+    ))
+    b.dollars, b.input_tokens, b.output_tokens, b.tool_calls = 123, 2_000_000, 900_000, 5001
+    b.check()
+    assert b.reserve(50) == 50
+    b.release(50)
+    assert b.dollars == 123
+    from maverick.tools.budget_status import budget_status
+    text = budget_status(budget=b).fn({})
+    assert text.count("no task limit") == 5 and "123.0000" in text
+
+
+def test_legacy_limits_are_preserved_until_deliberate_disable(set_budget_cfg):
+    from maverick.runtime_overrides import set_task_limits
+
+    set_budget_cfg({"max_dollars": 5.0, "max_wall_seconds": 3600.0, "max_tool_calls": 500})
+    assert resolve_budget_caps() == {"max_dollars": 5, "max_wall_seconds": 3600, "max_tool_calls": 500}
+    set_task_limits(False)
+    assert resolve_budget_caps() == {}
+    assert resolve_budget_caps(max_dollars=7) == {"max_dollars": 7}
+    set_task_limits(True)
+    assert resolve_budget_caps()["max_dollars"] == 5
+
+
+def test_disabled_configured_caps_preserve_explicit_invocation_env(set_budget_cfg, monkeypatch):
+    set_budget_cfg({"task_limits_enabled": False, "max_dollars": 5})
+    monkeypatch.setenv("MAVERICK_BUDGET_DOLLARS", "0.75")
+    assert resolve_budget_caps() == {"max_dollars": 0.75}
 
 
 def test_config_applies(set_budget_cfg):
@@ -54,10 +88,10 @@ def test_defaults_used_when_no_config(set_budget_cfg):
     assert b.max_dollars == pytest.approx(2.0)
 
 
-def test_malformed_config_value_is_skipped(set_budget_cfg):
+def test_malformed_config_value_is_refused(set_budget_cfg):
     set_budget_cfg({"max_dollars": "not-a-number"})
-    b = budget_from_config(defaults={"max_dollars": 2.0})
-    assert b.max_dollars == pytest.approx(2.0)  # fell back, did not crash
+    with pytest.raises(ValueError, match="finite non-negative"):
+        budget_from_config(defaults={"max_dollars": 2.0})
 
 
 # ---- MAVERICK_BUDGET_DOLLARS env override (the cookbooks' documented knob) ----
@@ -75,17 +109,18 @@ def test_explicit_override_beats_env(set_budget_cfg, monkeypatch):
     assert budget_from_config(max_dollars=3.0).max_dollars == pytest.approx(3.0)
 
 
-def test_malformed_env_budget_dollars_is_skipped(set_budget_cfg, monkeypatch):
+def test_malformed_env_budget_dollars_is_refused(set_budget_cfg, monkeypatch):
     set_budget_cfg({"max_dollars": 1.5})
     monkeypatch.setenv("MAVERICK_BUDGET_DOLLARS", "not-a-number")
-    assert budget_from_config().max_dollars == pytest.approx(1.5)  # kept config
+    with pytest.raises(ValueError, match="MAVERICK_BUDGET_DOLLARS"):
+        budget_from_config()
 
 
-def test_nonfinite_env_budget_dollars_is_skipped(set_budget_cfg, monkeypatch):
+def test_nonfinite_env_budget_dollars_is_refused(set_budget_cfg, monkeypatch):
     set_budget_cfg({"max_dollars": 1.5})
     monkeypatch.setenv("MAVERICK_BUDGET_DOLLARS", "inf")
-    # A non-finite cap would disable the cap; keep the prior layer instead.
-    assert budget_from_config().max_dollars == pytest.approx(1.5)
+    with pytest.raises(ValueError, match="MAVERICK_BUDGET_DOLLARS"):
+        budget_from_config()
 
 
 def test_empty_env_budget_dollars_ignored(set_budget_cfg, monkeypatch):

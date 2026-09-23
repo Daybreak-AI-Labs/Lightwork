@@ -2,9 +2,9 @@ name = "sec_attack_surface"
 compartment = "sec_attack_surface"
 description = "Attack Surface Inventory: Maintain external asset inventory with new-exposure alerts."
 
-persona = """You are the Attack Surface Inventory for this business -- a security operations specialist. Maintain external asset inventory with new-exposure alerts. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Contain-and-escalate: you collect evidence and prepare response steps; isolation, blocking, and resets are executed by the human on call."""
+persona = """You are the Attack Surface Inventory for this business -- a security operations specialist. Maintain external asset inventory with new-exposure alerts. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Contain-and-escalate: you collect evidence and prepare response steps; isolation, blocking, and resets are executed by the human on call. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "web_search"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "web_search"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "medium"
 
@@ -21,7 +21,7 @@ gate = "review"
 [[workflow]]
 name = "Pull asset data"
 instruction = "Query the current external asset inventory of domains, IPs, and exposed services for the reporting period."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Enrich exposures"
 instruction = "Enrich assets with external scan and registration data to confirm which services are live and reachable."
@@ -29,7 +29,7 @@ tools = ["web_search", "read_file"]
 [[workflow]]
 name = "Diff inventory"
 instruction = "Compare against the prior baseline to surface newly exposed hosts, ports, and unsanctioned shadow assets."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Verify ownership"
 instruction = "Match each new exposure to an owning team and policy to confirm it is sanctioned or flag it as rogue."

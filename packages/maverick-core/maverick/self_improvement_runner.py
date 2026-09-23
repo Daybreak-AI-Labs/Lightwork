@@ -815,7 +815,7 @@ def _eval_budget(settings: dict):
         from .budget import Budget
         big = 10**9
         return Budget(max_dollars=float(dollars), max_input_tokens=big,
-                      max_output_tokens=big, max_tool_calls=big)
+                      max_output_tokens=big, max_tool_calls=big, max_wall_seconds=3600.0)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(
             "self-harness evaluation budget policy is invalid") from exc

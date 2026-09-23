@@ -14,11 +14,16 @@ EFS (so redeploys keep `~/.maverick`), secrets from SSM Parameter Store.
    docker push ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/maverick:latest
    ```
 
-2. **Store the provider key**
+2. **Store both required credentials**
 
    ```bash
    aws ssm put-parameter --name /maverick/anthropic-api-key \
      --type SecureString --value "sk-ant-..."
+   aws ssm put-parameter --name /maverick/dashboard-token \
+     --type SecureString \
+     --value "$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+   aws ssm get-parameters --names /maverick/anthropic-api-key /maverick/dashboard-token \
+     --query 'Parameters[].Name' --output text
    ```
 
 3. **Create an EFS file system** (and an access point if you prefer), note the
@@ -47,5 +52,5 @@ EFS (so redeploys keep `~/.maverick`), secrets from SSM Parameter Store.
   (RDS) for database HA/isolation and scale separate remote workers.
 - One-shot goals: `aws ecs run-task` with command
   `["start", "your goal text"]` reuses the same task definition.
-- The execution role needs `ssm:GetParameters` on the parameter and ECR pull;
+- The execution role needs `ssm:GetParameters` on both credential parameters and ECR pull;
   the task role needs nothing AWS-side unless your goals use AWS tools.

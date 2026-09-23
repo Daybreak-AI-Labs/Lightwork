@@ -124,6 +124,7 @@ def open_fulfillment(request_id: str, *, actor: str) -> dict[str, Any]:
         "schema": SCHEMA,
         "request_id": request,
         "subject_id": str(dsar.get("subject_id") or ""),
+        "subject_channel": str(dsar.get("channel") or ""),
         "identity": {"status": "unverified"},
         "sources": [],
         "response": None,
@@ -338,6 +339,20 @@ def response_for_token(token: str) -> dict[str, Any] | None:
         if max_reads is not None and reads_used >= int(max_reads):
             return None
 
+        from . import dsar as dsar_export
+
+        subject = str(row.get("subject_id") or "")
+        request = _dsar_record_or_raise(str(row["request_id"]))
+        if subject != str(request.get("subject_id") or ""):
+            raise DsarFulfillmentError("Fulfillment subject no longer matches the verified request")
+        channel = row.get("subject_channel", str(request.get("channel") or ""))
+        if channel != str(request.get("channel") or ""):
+            raise DsarFulfillmentError("Fulfillment channel no longer matches the verified request")
+        # A failed/ambiguous export must not consume a read or claim delivery.
+        # The subsequent CAS still prevents concurrent or revoked link use.
+        bundle = dsar_export.export_subject_data(subject, channel=channel or None, strict=True)
+        scrubbed = _redact_bundle(bundle, subject)
+
         def mark(value: dict[str, Any]) -> None:
             inner = dict(value.get("response") or {})
             if inner.get("delivered_at") is None:
@@ -359,11 +374,6 @@ def response_for_token(token: str) -> dict[str, Any] | None:
             return None
         if saved is None:
             return None
-        from . import dsar as dsar_export
-
-        subject = str(row.get("subject_id") or "")
-        bundle = dsar_export.export_subject_data(subject)
-        scrubbed = _redact_bundle(bundle, subject)
         return {
             "request_id": row.get("request_id"),
             "subject_id": subject,

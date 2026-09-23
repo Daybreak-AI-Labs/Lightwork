@@ -378,6 +378,8 @@ def _resolve_subject_channel(
     if len(channels) == 1:
         return next(iter(channels))
     if len(channels) > 1:
+        if strict:
+            raise RuntimeError("subject identity is ambiguous across channels")
         log.warning(
             "dsar: refusing ambiguous export for user_id %r across channels %s",
             user_id,

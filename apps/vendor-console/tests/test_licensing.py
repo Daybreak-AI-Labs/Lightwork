@@ -69,3 +69,37 @@ def test_issue_rejects_unknown_customer_and_tier(conn):
     cid = _customer(conn)
     with pytest.raises(ValueError):
         licensing.issue_license(conn, customer_id=cid, tier="diamond", actor="a")
+
+
+def test_issue_and_revoke_rollback_if_audit_fails(conn):
+    import sqlite3
+
+    import pytest
+    from vendor_console import audit, db
+
+    cid = _customer(conn)
+    conn.execute("CREATE TRIGGER reject_license_audit BEFORE INSERT ON audit "
+                 "WHEN NEW.action LIKE 'license.%' BEGIN SELECT RAISE(ABORT, 'fixture audit fault'); END")
+    conn.commit()
+    with pytest.raises(sqlite3.DatabaseError):
+        licensing.issue_license(conn, customer_id=cid, tier="gold")
+    with db.transaction(conn) as reader:
+        assert store.list_licenses(reader, cid) == []
+        assert licensing.active_license_doc(reader, cid) is None
+    conn.execute("DROP TRIGGER reject_license_audit")
+    conn.commit()
+    license = licensing.issue_license(conn, customer_id=cid, tier="gold")
+    conn.execute("CREATE TRIGGER reject_license_audit BEFORE INSERT ON audit "
+                 "WHEN NEW.action='license.revoke' BEGIN SELECT RAISE(ABORT, 'fixture audit fault'); END")
+    conn.commit()
+    with pytest.raises(sqlite3.DatabaseError):
+        licensing.revoke_license(conn, license.license_id)
+    with db.transaction(conn) as reader:
+        assert not store.get_license(reader, license.license_id).revoked
+        assert licensing.active_license_doc(reader, cid)["license_id"] == license.license_id
+    conn.execute("DROP TRIGGER reject_license_audit")
+    conn.commit()
+    assert licensing.revoke_license(conn, license.license_id)
+    assert not licensing.revoke_license(conn, license.license_id)
+    assert [row.action for row in audit.recent(conn) if row.action.startswith("license.")] == ["license.revoke", "license.issue"]
+    assert audit.verify_chain(conn) == (True, 0)

@@ -1668,6 +1668,29 @@ def test_ai_cost_roi_http_batch_reports_and_assumptions(monkeypatch):
     assert response.status_code == 422
 
 
+def test_ai_cost_report_requires_one_scenario_and_never_adds_alternatives(monkeypatch):
+    from maverick import ai_cost_roi as cost
+
+    monkeypatch.setenv("MAVERICK_TENANT", "roi-scenarios")
+    monkeypatch.setattr(cost, "enabled", lambda: True)
+    base = "/api/v1/security/assurance/ai-cost-roi"
+    period = {"period_start": "2026-08-01T00:00:00Z", "period_end": "2026-09-01T00:00:00Z"}
+    for scenario, amount in (("optimistic", "100"), ("pessimistic", "10")):
+        _ok(client.put(f"{base}/roi-assumptions/{scenario}", json={
+            **period, "scope_kind": "portfolio", "scope_id": "", "currency": "USD",
+            "assumed_benefit": amount, "methodology": "Operator planning estimate.",
+            "rationale": "Alternative scenarios, not additive measured results.",
+            "citations": [{"uri": "urn:lightwork:assumption:" + scenario, "sha256": "d" * 64}],
+            "idempotency_key": scenario, "expected_revision": 0,
+        }))
+    ambiguous = client.get(f"{base}/portfolio", params=period)
+    assert ambiguous.status_code == 422, ambiguous.text
+    assert "select a scenario" in ambiguous.json()["detail"]
+    selected = _ok(client.get(f"{base}/portfolio", params={**period, "scenario": "pessimistic"}))
+    assert selected["currencies"][0]["assumed_benefit"] == "10"
+    assert selected["currencies"][0]["assumption_bindings"][0]["scenario"] == "pessimistic"
+
+
 def test_ai_cost_collector_status_and_manual_collection_are_human_bound(monkeypatch):
     from maverick import ai_cost_roi as cost
     from maverick.ai_cost_collectors import CollectorLimits, CollectorSchedule

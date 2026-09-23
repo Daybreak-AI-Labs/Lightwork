@@ -137,7 +137,7 @@
       el("last").appendChild(b);
       el("last").appendChild(document.createElement("br"));
       el("last").appendChild(document.createTextNode(result));
-    }
+    } else { el("last").textContent = "No finished runs yet."; }
     el("meta").textContent = "updated " + new Date().toLocaleTimeString();
   }
 
@@ -147,21 +147,47 @@
     el("meta").textContent = msg;
   }
 
+  var alive = true, polling = false, pollTimer = null, pollController = null;
   function poll() {
+    if (!alive || polling) return;
+    polling = true;
     var headers = {};
     if (token) { headers["Authorization"] = "Bearer " + token; }
-    fetch(endpoint + GOALS_PATH, { headers: headers, cache: "no-store" })
+    var controller = new AbortController(), deadline, active = true;
+    pollController = controller;
+    var timeout = new Promise(function (_, reject) {
+      deadline = setTimeout(function () {
+        controller.abort();
+        reject(new Error("Refresh timed out. Displayed results may be stale; retrying."));
+      }, 15000);
+    });
+    var request = Promise.resolve().then(function () {
+      return fetch(endpoint + GOALS_PATH, { headers: headers, cache: "no-store", signal: controller.signal });
+    })
       .then(function (res) {
         if (res.status === 401 || res.status === 403) {
           throw new Error("unauthorized (" + res.status + ") — check token / origin");
         }
         if (!res.ok) { throw new Error("HTTP " + res.status); }
         return res.json();
-      })
-      .then(function (goals) { render(classify(goals)); })
-      .catch(function (e) { renderError(e && e.message ? e.message : "unreachable"); })
-      .then(function () { setTimeout(poll, interval); });
+      });
+    Promise.race([timeout, request])
+      .then(function (goals) { if (alive && active) render(classify(goals)); })
+      .catch(function (e) { if (alive && active) renderError(e && e.message ? e.message : "unreachable"); })
+      .finally(function () {
+        active = false;
+        clearTimeout(deadline);
+        polling = false;
+        if (pollController === controller) pollController = null;
+        if (alive) pollTimer = setTimeout(poll, interval);
+      });
   }
+
+  window.addEventListener("pagehide", function () {
+    alive = false;
+    clearTimeout(pollTimer);
+    if (pollController) pollController.abort();
+  });
 
   function mount() {
     document.body.appendChild(host);

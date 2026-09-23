@@ -21,6 +21,7 @@ Run it for real by passing a solver that drives ``maverick start`` (see
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,9 @@ class EvalResult:
     passed: bool
     expected: str
     got: str
+    execution_status: str = "completed"
+    scoring_status: str = "scored"
+    error: str = ""
 
 
 @runtime_checkable
@@ -85,11 +89,28 @@ def run_benchmark(
     tasks = bench.load_tasks(dataset, limit=limit)
     results: list[EvalResult] = []
     for t in tasks:
+        execution_status, scoring_status, error = "completed", "not_scored", ""
+        sc = 0.0
         try:
             out = solver(t)
+            if not isinstance(out, str):
+                raise TypeError("solver must return answer text")
         except Exception as e:  # one bad task != a dead benchmark
+            execution_status = "failed"
+            error = f"{type(e).__name__}: {e}"
             out = f"ERROR: {type(e).__name__}: {e}"
-        sc = max(0.0, min(1.0, float(bench.score(t, out))))
+        else:
+            try:
+                raw_score = bench.score(t, out)
+                if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+                    raise ValueError("score must be a finite number in [0, 1]")
+                if not math.isfinite(raw_score) or not 0 <= raw_score <= 1:
+                    raise ValueError("score must be a finite number in [0, 1]")
+                sc = float(raw_score)
+                scoring_status = "scored"
+            except Exception as e:
+                scoring_status = "failed"
+                error = f"{type(e).__name__}: {e}"
         results.append(
             EvalResult(
                 task_id=t.task_id,
@@ -97,6 +118,9 @@ def run_benchmark(
                 passed=sc >= 1.0,
                 expected=str(t.answer),
                 got=out,
+                execution_status=execution_status,
+                scoring_status=scoring_status,
+                error=error,
             )
         )
     n = len(results)
@@ -106,6 +130,8 @@ def run_benchmark(
         "benchmark": bench.name,
         "n": n,
         "passed": passed,
+        "execution_failures": sum(r.execution_status == "failed" for r in results),
+        "scoring_failures": sum(r.scoring_status == "failed" for r in results),
         "pass_at_1": round(passed / n, 4) if n else 0.0,
         "mean_score": round(mean, 4),
         "results": results,

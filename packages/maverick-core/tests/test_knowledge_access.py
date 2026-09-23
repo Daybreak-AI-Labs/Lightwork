@@ -640,6 +640,87 @@ def test_exact_vector_projector_keeps_identical_labels_tenant_isolated(access):
         )
 
 
+@pytest.mark.parametrize("prefix", ["ordinary policy. " * 650, "取扱規程。" * 1000], ids=["ascii", "utf8"])
+def test_long_admitted_document_tail_is_searchable_with_truthful_excerpts(access, prefix):
+    from maverick.knowledge_content_projection import (
+        ExistingKnowledgeContentProjector,
+        inspect_existing_source,
+        vector_knowledge_source_ref,
+    )
+    from maverick.knowledge_retrieval import render_evidence
+    from maverick.tools.knowledge import knowledge_search_tool
+    from maverick_knowledge import KnowledgeBase
+    from maverick_knowledge.embed import DeterministicEmbedder
+
+    service, registry, rights, _calls = access
+    with KnowledgeBase() as base:
+        body = prefix + " The unique quasardeadline requires payment within seventeen days."
+        base.ingest_text("ops", body, source="policy.txt")
+        source = vector_knowledge_source_ref("ops", _sha(body))
+        inspected = inspect_existing_source("tenant-a", source, knowledge_base=base)
+        assert "quasardeadline" not in inspected["summary"]
+        assert inspected["summary_truncated"]
+        rights[("tenant-a", "long-policy")] = {
+            "allowed": True, "action": "analyze", "expires_at": FUTURE, "epoch": "v1",
+        }
+        draft = registry.register_dataset(
+            "tenant-a", "user:source-owner", dataset_id="long-policy", version="v1",
+            source_ref=source, content_sha256=inspected["content_sha256"],
+            license_id="customer-authorized", license_evidence_sha256=_sha("license"),
+            allowed_purposes=(PURPOSE,), usage_constraints=("tenant_only",),
+            data_use_action="analyze", data_use_decision_id="decision-long-policy",
+            data_use_decision_sha256=_sha("tenant-a:decision-long-policy"),
+        )
+        reference = registry.approve("tenant-a", "user:reviewer", draft, expected_revision=1)
+        service.content_resolver = ExistingKnowledgeContentProjector(knowledge_base=base)
+        result = service.search("tenant-a", "user:reader", query="quasardeadline", purpose=PURPOSE)
+        job = service.search_at_job_start("tenant-a", "worker:reader", query="quasardeadline",
+                                         purpose=PURPOSE, source_selectors=("catalog:vector-knowledge/ops",),
+                                         job_id="long-search", limit=5)
+        for response in (result, job):
+            assert response["complete"] is True
+            assert response["status"] == "matched", response
+            assert "quasardeadline" in response["items"][0]["summary"]
+            assert response["items"][0]["summary_truncated"] is True
+            assert "_retrieval_chunks" not in response["items"][0]
+            evidence = json.loads(render_evidence(response))
+            assert "quasardeadline" in evidence["evidence"][0]["summary"]
+            assert evidence["evidence"][0]["summary_truncated"] is True
+        tool = knowledge_search_tool(service, ("catalog:vector-knowledge/ops",),
+                                     tenant_resolver=lambda: "tenant-a")
+        tool_evidence = json.loads(asyncio.run(tool.fn({"query": "quasardeadline", "k": 5})))
+        assert "quasardeadline" in tool_evidence["evidence"][0]["summary"]
+        assert tool_evidence["evidence"][0]["summary_truncated"] is True
+        detail = service.detail("tenant-a", "user:reader", reference, purpose=PURPOSE)
+        assert "_retrieval_chunks" not in detail
+        # A vector-only migration cannot invalidate the registered content digest.
+        base.embedder = DeterministicEmbedder(32)
+        base.reindex("ops")
+        assert inspect_existing_source("tenant-a", source, knowledge_base=base)["content_sha256"] == inspected["content_sha256"]
+        rights[("tenant-a", "long-policy")]["allowed"] = False
+        denied = service.search("tenant-a", "user:reader", query="quasardeadline", purpose=PURPOSE)
+        assert denied["items"] == []
+
+
+def test_preview_only_projection_cannot_claim_complete_no_match(access):
+    service, registry, rights, _calls = access
+    _dataset(registry, rights, "tenant-a", "preview")
+    resolver = service.content_resolver
+
+    def preview(tenant, reference, admission):
+        from dataclasses import replace
+
+        return replace(resolver(tenant, reference, admission), search_coverage_complete=False,
+                       summary_truncated=True)
+
+    service.content_resolver = preview
+    result = service.search("tenant-a", "user:reader", query="missingclause", purpose=PURPOSE)
+    assert result["items"] == []
+    assert result["complete"] is False
+    assert result["status"] == "incomplete"
+    assert "partial_source_coverage" in result["incomplete_reasons"]
+
+
 def test_malformed_or_cross_tenant_content_adapter_fails_closed(access):
     service, registry, rights, _calls = access
     source = _dataset(registry, rights, "tenant-a", "adapter-boundary")

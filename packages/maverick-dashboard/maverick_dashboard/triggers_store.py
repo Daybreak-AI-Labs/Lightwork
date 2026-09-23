@@ -89,11 +89,11 @@ def _normalise_template_snapshot(snapshot: dict) -> dict:
             raise ValueError("template snapshot params are invalid")
         params.append(param)
     try:
-        budget_dollars = float(snapshot.get("budget_dollars"))
-        budget_wall_seconds = float(snapshot.get("budget_wall_seconds"))
+        budget_dollars = float(snapshot["budget_dollars"]) if snapshot.get("budget_dollars") is not None else None
+        budget_wall_seconds = float(snapshot["budget_wall_seconds"]) if snapshot.get("budget_wall_seconds") is not None else None
     except (TypeError, ValueError):
         raise ValueError("template snapshot budgets are invalid") from None
-    if not math.isfinite(budget_dollars) or not math.isfinite(budget_wall_seconds):
+    if any(v is not None and (not math.isfinite(v) or v < 0) for v in (budget_dollars, budget_wall_seconds)):
         raise ValueError("template snapshot budgets are invalid")
     return {
         "name": name,
@@ -101,8 +101,8 @@ def _normalise_template_snapshot(snapshot: dict) -> dict:
         "body": body,
         "params": params,
         # Bind the same governed execution ceilings used by workflow saves.
-        "budget_dollars": min(max(budget_dollars, 0.5), 100.0),
-        "budget_wall_seconds": min(max(budget_wall_seconds, 1.0), 86400.0),
+        "budget_dollars": budget_dollars,
+        "budget_wall_seconds": budget_wall_seconds,
     }
 
 

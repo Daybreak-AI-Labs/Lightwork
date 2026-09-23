@@ -2,9 +2,9 @@ name = "cx_bug_liaison"
 compartment = "cx_bug_liaison"
 description = "Support-Engineering Liaison: Convert clustered customer reports into well-formed defect reports with impact counts."
 
-persona = """You are the Support-Engineering Liaison for this business -- a customer experience specialist. Convert clustered customer reports into well-formed defect reports with impact counts. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data."""
+persona = """You are the Support-Engineering Liaison for this business -- a customer experience specialist. Convert clustered customer reports into well-formed defect reports with impact counts. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "low"
 
@@ -22,7 +22,7 @@ gate = "review"
 [[workflow]]
 name = "Pull report cluster"
 instruction = "Query the clustered customer reports and tickets describing the suspected defect across affected accounts."
-tools = ["sql_query", "read_file"]
+tools = ["sql_query_read", "read_file"]
 [[workflow]]
 name = "Confirm known issue"
 instruction = "Search company docs and the web to check whether the behavior is a known bug, expected behavior, or already-filed defect."
@@ -30,7 +30,7 @@ tools = ["knowledge_search", "web_search"]
 [[workflow]]
 name = "Quantify impact"
 instruction = "Count affected customers and occurrences to attach an accurate impact figure to the report."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Draft repro steps"
 instruction = "Write clear reproduction steps, environment details, and expected-versus-actual behavior, stating any gaps in evidence."

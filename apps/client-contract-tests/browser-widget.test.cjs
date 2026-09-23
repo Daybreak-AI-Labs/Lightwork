@@ -174,6 +174,28 @@ async function widget(fetch, retained) {
   return {dom,timers,form,input,send,submit,check:[...dom.window.document.querySelectorAll('button')].find(b=>b.textContent==='Check start status'),close(){dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}};
 }
 
+test('chat widget preserves a long instruction in details within the title contract',async()=>{
+  let body;
+  const fixture=await widget(async(_url,options)=>{body=options.body;return {ok:true,status:200,redirected:true,url:'http://127.0.0.1:8765/chat/goal/42'};});
+  try {
+    const instruction='🙂'.repeat(201);
+    fixture.input.value=instruction;fixture.submit();await flush();
+    assert.equal(Array.from(body.get('title')).length,200);
+    assert.equal(body.get('description'),instruction);
+    assert.match(fixture.dom.window.document.body.textContent,/Goal accepted/);
+  }finally{fixture.close();}
+});
+
+test('direct validation refusal displays its correction and keeps the draft editable',async()=>{
+  const fixture=await widget(async()=>({ok:false,status:422,redirected:false,json:async()=>({detail:'Shorten the details before starting the goal.'})}));
+  try {
+    fixture.input.value='draft';fixture.submit();await flush();
+    assert.match(fixture.dom.window.document.body.textContent,/Shorten the details/);
+    assert.equal(fixture.input.value,'draft');assert.equal(fixture.send.disabled,false);
+    assert.equal(fixture.dom.window.localStorage.length,0);
+  }finally{fixture.close();}
+});
+
 test('widget requires exact same-origin goal redirect, retaining drafts on login or alternate 200 pages',async()=>{
   for(const url of ['http://127.0.0.1:8765/login','http://other.invalid/chat/goal/42','http://127.0.0.1:8765/chat/goal/42/other']) {
     const fixture=await widget(async()=>({ok:true,status:200,redirected:true,url}));

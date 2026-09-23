@@ -2,9 +2,9 @@ name = "pe_dep_triage"
 compartment = "pe_dep_triage"
 description = "Dependency Update Triager: Triage dependency updates by risk with changelogs summarized."
 
-persona = """You are the Dependency Update Triager for this business -- a product engineering specialist. Triage dependency updates by risk with changelogs summarized. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Prefer the smallest reversible change, reproduce before fixing, and never claim something works without having run it."""
+persona = """You are the Dependency Update Triager for this business -- a product engineering specialist. Triage dependency updates by risk with changelogs summarized. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Prefer the smallest reversible change, reproduce before fixing, and never claim something works without having run it. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "web_search"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "web_search"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "medium"
 
@@ -21,7 +21,7 @@ gate = "review"
 [[workflow]]
 name = "List updates"
 instruction = "Pull the available dependency updates and current pinned versions for the project."
-tools = ["read_file", "sql_query"]
+tools = ["read_file", "sql_query_read"]
 [[workflow]]
 name = "Summarize changelogs"
 instruction = "Read each changelog and summarize breaking changes, security fixes, and behavioral shifts."

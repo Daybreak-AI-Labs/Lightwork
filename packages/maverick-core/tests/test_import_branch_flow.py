@@ -46,7 +46,7 @@ def test_if_node_becomes_a_branch_with_wired_arms():
     unclassified = _assert_preview_valid(f)
     assert unclassified == []
     branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
-    assert branch.condition == "{{amount}} gt 100".replace("gt", ">")   # operator mapped
+    assert branch.condition == "amount > '100'"  # reference normalized, operator mapped
     # The supported Slack post contract binds to the classified Lightwork tool
     # behind a human gate; the false arm remains the no-op agent approximation.
     true_gate = f.nodes[branch.if_true]
@@ -131,7 +131,7 @@ def test_power_automate_if_becomes_branch_with_rejoining_arms():
     assert _assert_preview_valid(f) == []
     assert not any("risk-classify" in entry["note"] for entry in report)
     branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
-    assert branch.condition == "status == blocked"       # WDL equals -> ==
+    assert branch.condition == "status == 'blocked'"  # literal type is preserved
     assert f.start == branch.id
     then_gate = f.nodes[branch.if_true]
     then_node = f.nodes[then_gate.next]
@@ -242,7 +242,7 @@ def test_power_automate_until_becomes_while_with_negated_exit():
             "triggers": {"Manual": {"type": "Request"}},
             "actions": {"Keep_checking": {
                 "type": "Until", "runAfter": {},
-                "expression": {"equals": ["@outputs('Check')?['status']", "done"]},
+                "expression": {"equals": ["@triggerBody()?['status']", "done"]},
                 "limit": {"count": 12},
                 "actions": {"Check": {"type": "Compose", "runAfter": {},
                                       "inputs": "@body('poll')"}},
@@ -253,9 +253,9 @@ def test_power_automate_until_becomes_while_with_negated_exit():
     f, report = to_flow_with_report(power_automate.translate(wf))
     _assert_preview_valid(f)
     loop = next(n for n in f.nodes.values() if n.kind == NODE_WHILE)
-    assert loop.condition == "status != done"       # exit condition negated
+    assert loop.condition == "status != 'done'"       # exit condition negated
     assert loop.limit == 12 and loop.body is not None
-    assert next(r for r in report if r["step"] == "Keep_checking")["fidelity"] == "preserved"
+    assert next(r for r in report if r["step"] == "Keep_checking")["fidelity"] == "approximated"
 
 
 def test_power_automate_scope_becomes_scope_node():

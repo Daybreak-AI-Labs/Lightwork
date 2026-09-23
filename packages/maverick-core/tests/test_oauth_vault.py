@@ -87,6 +87,55 @@ class TestAtRestSealing:
 
 
 class TestExpiryAndRefresh:
+    @pytest.mark.parametrize("body", [{}, {"error": "temporarily_unavailable"},
+        {"access_token": 42}, {"access_token": ""},
+        {"access_token": "fresh", "expires_in": "bad"},
+        {"access_token": "fresh", "expires_in": float("inf")},
+        {"access_token": "fresh", "expires_at": float("nan")},
+        {"access_token": "fresh", "refresh_token": []}])
+    def test_invalid_production_refresh_preserves_authorization_and_requires_reconnect(self, monkeypatch, body):
+        from maverick import automation_events
+        from maverick.oauth_vault import OAuthRefreshError
+        from maverick.tools import oauth_helper
+
+        calls = []
+        monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
+
+        def respond(url, data):
+            calls.append(data)
+            return body
+
+        monkeypatch.setattr(oauth_helper, "_post_form", respond)
+        v = _vault()
+        v.put("p", {"access_token": "stale", "refresh_token": "old-refresh", "expires_at": time.time() - 10})
+        config = {"provider": "p", "token_url": "https://fixture.invalid/token", "client_id": "fixture"}
+        with pytest.raises(OAuthRefreshError, match="reconnect"):
+            automation_events._oauth_bearer(config)
+        assert v.get("p")["access_token"] == "stale"
+        assert v.get("p")["refresh_token"] == "old-refresh"
+        assert v.status("p")["reconnect_required"] is True
+        with pytest.raises(OAuthRefreshError, match="reconnect"):
+            automation_events._oauth_bearer(config)
+        assert len(calls) == 1
+        v.put("p", {"access_token": "reauthorized", "expires_in": 3600})
+        assert automation_events._oauth_bearer(config) == "reauthorized"
+        assert v.status("p")["reconnect_required"] is False
+
+    def test_refresh_interruption_leaves_a_durable_hold(self):
+        from maverick.oauth_vault import OAuthRefreshError
+
+        v = _vault()
+        v.put("p", {"access_token": "stale", "refresh_token": "old", "expires_at": time.time() - 10})
+
+        def interrupted(record):
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            v.access_token("p", refresher=interrupted)
+        assert _vault().status("p")["refresh_state"] == "refresh_in_progress"
+        with pytest.raises(OAuthRefreshError):
+            _vault().access_token("p", refresher=lambda record: pytest.fail("uncertain rotation replayed"))
+
     def test_is_expired_semantics(self):
         from maverick.oauth_vault import is_expired
         now = 1_000_000.0

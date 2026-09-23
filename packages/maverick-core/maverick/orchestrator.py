@@ -266,12 +266,30 @@ def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
 
 def _budget_exceeded_message(budget: Any, goal_id: Any) -> str:
     """Sentence-style cap message a non-engineer can read, with resume advice."""
+    limits = []
+    if budget.max_dollars is not None:
+        limits.append(f"${budget.dollars:.2f} of ${budget.max_dollars:.2f} cap")
+    if budget.max_wall_seconds is not None:
+        limits.append(f"{budget.elapsed():.0f}s of {budget.max_wall_seconds:.0f}s")
+    for used, cap, label in (
+        (budget.input_tokens, budget.max_input_tokens, "input tokens"),
+        (budget.output_tokens, budget.max_output_tokens, "output tokens"),
+        (budget.tool_calls, budget.max_tool_calls, "tool calls"),
+    ):
+        if cap is not None:
+            limits.append(f"{used} of {cap} {label}")
+    command = f"maverick resume {goal_id}"
+    if budget.max_dollars is not None:
+        command += " --max-dollars <higher>"
+    elif budget.max_wall_seconds is not None:
+        command += " --max-wall-seconds <higher>"
     return (
         f"Stopped: this goal hit your spending or time limit "
-        f"(${budget.dollars:.2f} of ${budget.max_dollars:.2f} cap, "
-        f"{budget.elapsed():.0f}s of {budget.max_wall_seconds:.0f}s).\n"
-        f"Resume with a higher cap: "
-        f"maverick resume {goal_id} --max-dollars <higher>"
+        f"({', '.join(limits) or 'a configured usage limit'}).\n"
+        "Your recorded work and usage are retained. Raise the applicable limit "
+        "or remove configured task limits in Settings, then resume saved work. "
+        "Organization spending controls still apply.\n"
+        f"Resume with a higher cap: {command}"
     )
 
 
@@ -286,6 +304,29 @@ def _usage_accounting_message(detail: str, goal_id: Any) -> str:
         "the cap will not fix it. Fix or route around the gateway, then: "
         f"maverick resume {goal_id}"
     )
+
+
+def _organization_budget_message(detail: str, goal_id: Any) -> str:
+    return (
+        "Paused: the organization spending allowance cannot admit the next call.\n"
+        f"Detail: {detail}\n"
+        "Your recorded work is retained. An organization administrator must review "
+        "the allowance and any unresolved provider charges before continuing. "
+        "Removing a task limit does not change organization spending controls.\n"
+        f"After that review, resume saved work: maverick resume {goal_id}"
+    )
+
+
+def _budget_stop_message(budget: Any, goal_id: Any, error: BudgetExceeded) -> str:
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    if isinstance(error, OrganizationBudgetExceeded):
+        return _organization_budget_message(
+            _safe_exception_text(error, fallback="organization allowance unavailable"), goal_id,
+        )
+    if isinstance(error, UnpricedModelError):
+        return _unpriced_model_message(error, goal_id)
+    return _budget_exceeded_message(budget, goal_id)
 
 
 def _review_checkpoint_message(detail: str, goal_id: Any) -> str:
@@ -1122,7 +1163,8 @@ class _QuotaUsageSettlement:
         self.recorded = False
         self.world: WorldModel | None = None
         self.episode_id: int | None = None
-        self.scope: str | None = None
+        from .tenant.provider_admission import bind_budget
+        self.scope: str | None = bind_budget(budget, principal)
 
     def bind_checkpoint(self) -> None:
         from . import checkpoint
@@ -1131,6 +1173,8 @@ class _QuotaUsageSettlement:
             self.scope = checkpoint.Checkpointer(self.world).settlement_scope(
                 self.goal.id, self.episode_id, self.principal,
             )
+            from .tenant.provider_admission import bind_budget
+            bind_budget(self.budget, self.principal, self.scope)
 
     def reconcile_snapshot(self, snapshot: dict) -> dict:
         """Restore accounted usage even when the checkpoint ack was lost."""
@@ -1174,22 +1218,37 @@ class _QuotaUsageSettlement:
         self.recorded = True
         try:
             from . import quotas
+            from .tenant.provider_admission import (
+                acknowledge_budget,
+                foreign_settled_totals,
+                known_total,
+                prepare_budget,
+            )
             prior = getattr(self.budget, "_checkpoint_settled", {})
+            dollars = max(self.budget.dollars, known_total(self.budget))
+            foreign = foreign_settled_totals(self.budget, self.scope)
+            dollars = max(0.0, dollars - foreign['dollars'])
+            if self.scope:
+                dollars = prepare_budget(self.budget, self.principal, self.scope, dollars)
+            in_tokens = max(0, self.budget.input_tokens - foreign['in_tokens'])
+            out_tokens = max(0, self.budget.output_tokens - foreign['out_tokens'])
             options = {}
             if self.scope:
                 options = {"settlement_id": self.scope, "already_settled": {
-                    "dollars": prior.get("dollars", 0),
-                    "in_tokens": prior.get("input_tokens", 0),
-                    "out_tokens": prior.get("output_tokens", 0),
+                    "dollars": max(0.0, prior.get("dollars", 0) - foreign['dollars']),
+                    "in_tokens": max(0, prior.get("input_tokens", 0) - foreign['in_tokens']),
+                    "out_tokens": max(0, prior.get("output_tokens", 0) - foreign['out_tokens']),
                 }}
             acknowledged = quotas.record_usage(
                 self.principal,
-                max(0.0, self.budget.dollars - (0 if self.scope else prior.get("dollars", 0))),
-                max(0, self.budget.input_tokens - (0 if self.scope else prior.get("input_tokens", 0))),
-                max(0, self.budget.output_tokens - (0 if self.scope else prior.get("output_tokens", 0))),
+                max(0.0, dollars - (0 if self.scope else prior.get("dollars", 0))),
+                max(0, in_tokens - (0 if self.scope else prior.get("input_tokens", 0))),
+                max(0, out_tokens - (0 if self.scope else prior.get("output_tokens", 0))),
                 reservation_id=getattr(self.budget, "_tenant_reservation_id", None),
                 **options,
             )
+            if acknowledged and self.scope:
+                acknowledge_budget(self.budget, self.principal, self.scope)
             if self.world is not None and self.episode_id is not None:
                 from . import checkpoint
                 if checkpoint.enabled():
@@ -1238,8 +1297,12 @@ class _RunLifecycle:
             return
         if error is not None:
             cancelled = isinstance(error, asyncio.CancelledError)
-            self.summary = "cancelled" if cancelled else f"internal error: {error}"
-            self.outcome = "interrupted" if cancelled else "failure"
+            allowance_stop = isinstance(error, BudgetExceeded)
+            self.summary = (
+                _budget_stop_message(self.budget, self.goal_id, error) if allowance_stop
+                else "cancelled" if cancelled else f"internal error: {error}"
+            )
+            self.outcome = "interrupted" if cancelled or allowance_stop else "failure"
             self.world.set_goal_status(
                 self.goal_id, "cancelled" if cancelled else "blocked", result=self.summary,
             )
@@ -1749,26 +1812,20 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             return _usage_accounting_message(str(e), goal_id)
         except BudgetExceeded as e:
             safe_error = _safe_exception_text(e, fallback="budget limit reached")
-            _lifecycle.end_episode(f"budget: {safe_error}", "failure")
+            _lifecycle.end_episode(f"budget: {safe_error}", "interrupted")
             try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
                 _ft.record_failure("budget", goal_id=goal_id, detail=safe_error)
             except Exception:  # pragma: no cover -- telemetry never blocks a run
                 pass
-            _maybe_record_reflexion(
-                goal, failure_class="budget", failure_msg=safe_error,
-                blackboard=blackboard, shield=shield, channel=channel,
-                user_id=user_id, domain=domain,
-            )
-            world.set_goal_status(
-                goal_id, "blocked", result=f"budget exceeded: {safe_error}",
-            )
+            message = _budget_stop_message(budget, goal_id, e)
+            world.set_goal_status(goal_id, "blocked", result=message)
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked",
-                "result": f"budget exceeded: {safe_error}",
+                "result": message,
             })
             # Sentence-style error so a non-engineer can read it.
-            return _budget_exceeded_message(budget, goal_id)
+            return message
         except Exception as e:
             # Anything else escaping the swarm (LLM auth/network errors, a
             # sandbox exec failure) used to leave the goal row stuck 'active'
@@ -1881,18 +1938,14 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             try:
                 budget.check()
             except BudgetExceeded as be:
-                _lifecycle.end_episode(f"budget: {be}", "failure")
-                _maybe_record_reflexion(
-                    goal, failure_class="budget", failure_msg=str(be),
-                    blackboard=blackboard, shield=shield, channel=channel,
-                    user_id=user_id, domain=domain,
-                )
-                world.set_goal_status(goal_id, "blocked", result=f"budget exceeded: {be}")
+                _lifecycle.end_episode(f"budget: {be}", "interrupted")
+                message = _budget_stop_message(budget, goal_id, be)
+                world.set_goal_status(goal_id, "blocked", result=message)
                 _fire_webhook("goal_finished", {
                     "goal_id": goal_id, "status": "blocked",
-                    "result": f"budget exceeded: {be}",
+                    "result": message,
                 })
-                return _budget_exceeded_message(budget, goal_id)
+                return message
             # W1-30: an unpriced model inside a spawned child is swallowed by
             # the agent into `result.error` (same reason a budget cap trip
             # is), not raised -- `budget.check()` above never sees it (it's
@@ -1951,6 +2004,18 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "Stopped: Lightwork was halted mid-run (a HALT file is present).\n"
                     f"Run `maverick unhalt` to clear it, then `maverick resume {goal_id}`."
                 )
+            if result.stop_kind in {"budget", "organization_budget"}:
+                message = (
+                    _organization_budget_message(result.stop_detail, goal_id)
+                    if result.stop_kind == "organization_budget"
+                    else _budget_exceeded_message(budget, goal_id)
+                )
+                _lifecycle.end_episode(result.stop_kind, "interrupted")
+                world.set_goal_status(goal_id, "blocked", result=message)
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": message,
+                })
+                return message
             _lifecycle.end_episode(result.error, "failure")
             _maybe_record_reflexion(
                 goal,
@@ -2362,7 +2427,7 @@ async def _run_goal_accounted(
         )
     except BudgetExceeded as exc:
         error = exc
-        return _budget_exceeded_message(budget, goal_id)
+        return _budget_stop_message(budget, goal_id, exc)
     except BaseException as exc:
         error = exc
         raise
@@ -2426,8 +2491,11 @@ async def run_goal(
                     log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
             return f"BLOCKED: {reason}"
     from .task_file_recovery import run_scope
+    from .tenant.provider_admission import run_scope as organization_run_scope
     sandbox = sandbox or LocalBackend()
-    with run_scope(world, goal_id, sandbox):
+    with run_scope(world, goal_id, sandbox), organization_run_scope(
+        budget, _execution_principal(user_id=user_id, capability=capability),
+    ):
         return await _run_goal_accounted(
             llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
             channel, user_id, capability, orchestrator_model_override, resume,
@@ -2738,7 +2806,7 @@ async def run_goal_best_of_n(
         # sandbox.workdir). No-op when the workdir isn't a local git repo.
         _reset_workdir_to_head(getattr(sandbox, "workdir", None))
         # Wave 9 fix (council M12): respect parent dollar cap.
-        if budget.dollars >= budget.max_dollars * 0.95:
+        if budget.max_dollars is not None and budget.dollars >= budget.max_dollars * 0.95:
             log.info("best-of-N early break: parent budget 95%% spent")
             break
 
@@ -2746,18 +2814,23 @@ async def run_goal_best_of_n(
         # attempts. After crashes / early-cheap completions, the surviving
         # attempts get bigger caps instead of leaving budget on the table.
         remaining_attempts = len(ladder) - i
-        remaining_dollars = max(0.0, budget.max_dollars - budget.dollars)
-        remaining_wall = max(0.0, budget.max_wall_seconds - budget.elapsed())
-        if remaining_dollars <= 0 or remaining_wall <= 0:
+        remaining_dollars = (max(0.0, budget.max_dollars - budget.dollars)
+                             if budget.max_dollars is not None else None)
+        remaining_wall = (max(0.0, budget.remaining_wall())
+                          if budget.max_wall_seconds is not None else None)
+        if ((remaining_dollars is not None and remaining_dollars <= 0)
+                or (remaining_wall is not None and remaining_wall <= 0)):
             log.info("best-of-N early break: no budget left for attempt %d", i)
             break
-        per_attempt_dollars = remaining_dollars / remaining_attempts
-        per_attempt_wall = remaining_wall / remaining_attempts
+        per_attempt_dollars = (remaining_dollars / remaining_attempts
+                               if remaining_dollars is not None else None)
+        per_attempt_wall = (remaining_wall / remaining_attempts
+                            if remaining_wall is not None else None)
 
         # Minimum-viable floor: launching an attempt with a sub-cent dollar
         # cap just trips BudgetExceeded immediately after paying for MCP
         # startup. Stop instead of burning that overhead for a doomed attempt.
-        if per_attempt_dollars < 0.01:
+        if per_attempt_dollars is not None and per_attempt_dollars < 0.01:
             log.info(
                 "best-of-N early break: per-attempt budget $%.4f below floor",
                 per_attempt_dollars,

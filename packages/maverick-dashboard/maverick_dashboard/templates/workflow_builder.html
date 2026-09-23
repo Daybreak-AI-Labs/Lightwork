@@ -204,9 +204,9 @@
                  aria-label="Information to ask for each time" />
         </div>
         <div class="wf__field wf__field--sm">
-          <label for="wf-budget">Budget ($)</label>
-          <input type="number" id="wf-budget" class="input" min="0.5" max="100" step="0.5"
-                 aria-label="Per-run budget in dollars" />
+          <label for="wf-budget">Optional spending limit ($)</label>
+          <input type="number" id="wf-budget" class="input" min="0" step="0.01"
+                 aria-label="Optional per-run budget in dollars" placeholder="No task limit" />
         </div>
       </div>
       <div class="wf__field">
@@ -700,7 +700,7 @@
       elTitle.value = d.title || '';
       elSteps.value = d.body || '';
       elParams.value = (d.params || []).join(', ');
-      elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : 5;
+      elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : '';
       if (recovery) recovery.changed();
       if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
       preview.hidden = false; pbPreview.hidden = true; savedBox.hidden = true;
@@ -722,7 +722,7 @@
     function collectTemplate() {
       var t = {
         name: elName.value.trim(), title: elTitle.value.trim(), body: elSteps.value,
-        params: splitList(elParams.value), budget_dollars: parseFloat(elBudget.value) || 5.0,
+        params: splitList(elParams.value), budget_dollars: elBudget.value.trim() === '' ? null : Number(elBudget.value),
       };
       // Preserve the wall-time cap of an edited template (the form has no field
       // for it) so a save round-trip can't reset it to the server default.

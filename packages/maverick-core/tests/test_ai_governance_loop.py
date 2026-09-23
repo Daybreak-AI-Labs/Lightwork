@@ -410,6 +410,17 @@ def test_stale_or_incomplete_authorities_remain_explicit(
     assert limitation in result["limitations"]
 
 
+def test_double_read_allows_fresh_observation_of_identical_authority(store, clock):
+    class RestampingReader(Reader):
+        def read_snapshot(self, **kwargs):
+            clock.advance(0.1)
+            return replace(super().read_snapshot(**kwargs), captured_at=clock())
+    reader = RestampingReader(snapshot(clock))
+    enqueue(store, clock)
+    assert coordinator(store, reader).run_once(worker_id="worker-fresh")["state"] == "monitoring"
+    assert len(reader.reads) == 2
+
+
 def test_double_read_authority_drift_fails_and_retries(
     store: loop.AIGovernanceLoopStore,
     clock: Clock,

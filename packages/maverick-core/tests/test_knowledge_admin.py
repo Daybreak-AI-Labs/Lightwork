@@ -9,6 +9,39 @@ from maverick import knowledge_admin
 from maverick.knowledge_seed import available_corpora, seed_corpora
 
 
+def test_reindex_cli_reports_only_committed_migration(monkeypatch):
+    from click.testing import CliRunner
+    from maverick.cli import main
+    from maverick_knowledge import KnowledgeBase
+    from maverick_knowledge.embed import DeterministicEmbedder
+
+    kb = KnowledgeBase()
+    kb.ingest_text("ops", "some policy", source="policy.txt")
+    kb.embedder = DeterministicEmbedder(32)
+    calls = []
+
+    def opened(**kwargs):
+        calls.append(kwargs)
+        return kb
+
+    monkeypatch.setattr(knowledge_admin, "open_knowledge_base", opened)
+    monkeypatch.setattr(kb, "close", lambda: None)
+    result = CliRunner().invoke(main, ["knowledge", "reindex", "ops", "--tenant", "tenant-a"])
+    assert result.exit_code == 0, result.output
+    assert "reindexed 1 chunk(s) in ops" in result.output
+    assert calls == [{"tenant": "tenant-a", "require_existing": True}]
+    assert kb.search("ops", "policy")
+
+    def failed(_collection):
+        raise RuntimeError("source changed during reindex")
+
+    monkeypatch.setattr(kb, "reindex", failed)
+    failed_result = CliRunner().invoke(main, ["knowledge", "reindex", "ops"])
+    assert failed_result.exit_code != 0
+    assert "reindexed" not in failed_result.output
+    kb.store.close()
+
+
 def test_subject_key_matches_dsar_convention():
     # Must equal maverick.dsar._fact_subject_token so knowledge erasure and
     # world-model erasure agree on subject identity.

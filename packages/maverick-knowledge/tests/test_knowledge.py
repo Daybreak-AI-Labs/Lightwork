@@ -37,11 +37,13 @@ class TestBuildStore:
         from maverick_knowledge.store import build_store
         assert isinstance(build_store({}), S)
 
-    def test_pgvector_no_longer_not_implemented(self):
+    def test_pgvector_no_longer_not_implemented(self, monkeypatch):
         # Regression: build_store used to raise NotImplementedError for pgvector.
         # It now constructs PgVectorStore, which fails on a real precondition
         # (psycopg missing, or no DSN) -- never NotImplementedError.
         from maverick_knowledge.store import build_store
+        monkeypatch.delenv("MAVERICK_KNOWLEDGE_DSN", raising=False)
+        monkeypatch.delenv("MAVERICK_PG_DSN", raising=False)
         with pytest.raises((ImportError, RuntimeError)) as ei:
             build_store({"store": "pgvector", "dsn": ""})
         assert not isinstance(ei.value, NotImplementedError)

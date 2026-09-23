@@ -12,6 +12,25 @@ Current bounds are 10,000 receipts per tenant namespace, 1,000 account recovery 
 
 Administrators can inspect a tenant-scoped, bounded status window at `GET /api/v1/channels/delivery-receipts?limit=50&cursor=...`. Pass `receipt_id=chd-...` for one receipt's chunk states and provider identifiers. These responses contain status metadata, not message/reply text or credentials. There is deliberately no endpoint that automatically resends an uncertain reply or reexecutes an uncertain run.
 
+Run `maverick channel-maintenance compact --limit 100` under the intended
+tenant to compact eligible completed records. Repeated invocations advance a
+persisted cursor, so an ineligible prefix does not hide older eligible work.
+The limit must be 1–100; zero does not request an unbounded scan. Compaction
+clears eligible content, not deduplication identities, so it does not remove
+the 10,000-receipt admission bound. Monitor capacity and plan namespace
+migration before exhaustion; never erase uncertain receipts to create space.
+
+Bootstrap restores apply a hold to each restored delivery and polling record.
+The recovery UI supplies the exact readback template for an authenticated
+administrator to complete using provider/source evidence. The record,
+namespace, source digest, execution/account identity and chunk identifiers
+must match; stale, unknown or contradictory outcomes remain blocked. This is
+an operator attestation, not an automatic provider query or a guarantee of
+external delivery. Original execution and chunk results remain preserved,
+and restoring or resolving a record never authorizes replay of its old work.
+Polling records require a current source watermark to avoid consuming old
+messages as new after restore.
+
 Validation is local. Actual local filesystem/SQLite and least-privilege PostgreSQL authorities are exercised with synthetic provider/agent transports. Successful SDK import and local adapter tests do not qualify live provider delivery.
 
 Adapter specifics are in [Gateway recovery](channel-gateway-recovery.md) for

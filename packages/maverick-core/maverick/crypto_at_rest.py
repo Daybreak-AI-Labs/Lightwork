@@ -949,6 +949,31 @@ def unseal(blob: bytes) -> bytes:
     return _unseal_with_key_cache(blob, {})
 
 
+def reseal(original: bytes, plaintext: bytes) -> bytes:
+    """Authenticate a record and replace its content under the same envelope.
+
+    This supports updating retained encrypted records after an encryption-mode
+    toggle. It does not turn plaintext into ciphertext or migrate key identity.
+    Authentication and deployment-key scope restrictions are the same as reads.
+    """
+    if not original.startswith((_MAGIC, _MAGIC_V2, _TENANT_MAGIC)):
+        raise EncryptionUnavailable("record uses an unsupported encryption envelope")
+    key_cache: dict[tuple[str, bytes], object] = {}
+    _unseal_with_key_cache(original, key_cache)
+    if original.startswith(_TENANT_MAGIC):
+        from .paths import current_tenant_id
+        from .tenant.kms import seal_for_tenant
+
+        return seal_for_tenant(current_tenant_id(), plaintext)
+    if original.startswith(_MAGIC_V2):
+        keyid = original[len(_MAGIC_V2):len(_MAGIC_V2) + _KEYID_BYTES]
+        header, cipher = _MAGIC_V2 + keyid, key_cache[("v2", keyid)]
+    else:
+        header, cipher = _MAGIC, key_cache[("v1", b"")]
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    return header + nonce + cipher.encrypt(nonce, plaintext, None)
+
+
 def seal_text(text: str) -> bytes:
     return seal(text.encode("utf-8"))
 

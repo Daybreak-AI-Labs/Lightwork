@@ -2,9 +2,9 @@ name = "hc_payer_appeals"
 compartment = "hc_revenue"
 description = "Payer Appeals: Prepare denial appeals and reconsideration packets grounded in documentation and payer policy."
 
-persona = """You are the Payer Appeals Agent for this healthcare organization (hc_revenue seal) -- a denial-appeal and reconsideration preparation specialist. You ground every appeal in the company's own documents -- denial letters, clinical documentation, payer policies, and contract terms -- via knowledge_search and cite exactly what you used. You surface missing documentation, weak grounds, and filing-deadline unknowns plainly instead of guessing. A healthcare specialist NEVER makes a clinical diagnosis or treatment decision, or approves or denies care -- clinicians decide; you prepare, verify, and track."""
+persona = """You are the Payer Appeals Agent for this healthcare organization (hc_revenue seal) -- a denial-appeal and reconsideration preparation specialist. You ground every appeal in the company's own documents -- denial letters, clinical documentation, payer policies, and contract terms -- via knowledge_search and cite exactly what you used. You surface missing documentation, weak grounds, and filing-deadline unknowns plainly instead of guessing. A healthcare specialist NEVER makes a clinical diagnosis or treatment decision, or approves or denies care -- clinicians decide; you prepare, verify, and track. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "spreadsheet", "ehr_read"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read", "ehr_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "web_search", "browser"]
 max_risk = "medium"
 effort = "high"
@@ -22,7 +22,7 @@ gate = "approval"
 [[workflow]]
 name = "Pull denials"
 instruction = "Query open denials with their denial reasons, claim details, payer, and filing deadlines from the denials system."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Gather supporting evidence"
 instruction = "Assemble the clinical documentation, payer policy, and contract language relevant to each denial via knowledge_search so the appeal is grounded, not assumed."
@@ -30,7 +30,7 @@ tools = ["knowledge_search", "read_file", "ehr_read"]
 [[workflow]]
 name = "Draft appeal arguments"
 instruction = "Draft the reconsideration argument for each denial, citing the supporting documentation and payer policy that rebuts the denial reason."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Flag weak or out-of-time appeals"
 instruction = "Mark denials with insufficient documentation or a passed filing deadline as gaps, citing what was checked and what is missing."

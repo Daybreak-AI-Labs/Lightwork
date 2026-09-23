@@ -373,20 +373,26 @@ def _worker_capability(
     return local.intersect(capability, principal=local.principal)
 
 
-def _configured_worker_ceilings() -> tuple[float, float, int]:
+def _configured_worker_ceilings() -> tuple[float | None, float | None, int]:
     """Return worker-local budget/depth ceilings independent of producers."""
     from .runner import (
         DEFAULT_MAX_DEPTH,
-        DEFAULT_MAX_DOLLARS,
-        DEFAULT_MAX_WALL_SECONDS,
+        configured_max_dollars,
+        configured_max_wall_seconds,
     )
 
     cfg = _queue_redis_config()
 
-    def _float_limit(env_name: str, config_name: str, default: float) -> float:
+    def _float_limit(
+        env_name: str, config_name: str, default: float | None,
+    ) -> float | None:
         raw: Any = os.environ.get(env_name)
         if raw is None or not raw.strip():
             raw = cfg.get(config_name, default)
+        if raw is None:
+            return None
+        if isinstance(raw, bool):
+            raise QueueSecurityError(f"queue worker {config_name} is invalid")
         try:
             value = float(raw)
         except (TypeError, ValueError, OverflowError) as exc:
@@ -398,12 +404,12 @@ def _configured_worker_ceilings() -> tuple[float, float, int]:
     dollars = _float_limit(
         "MAVERICK_QUEUE_WORKER_MAX_DOLLARS",
         "worker_max_dollars",
-        DEFAULT_MAX_DOLLARS,
+        configured_max_dollars(),
     )
     wall = _float_limit(
         "MAVERICK_QUEUE_WORKER_MAX_WALL_SECONDS",
         "worker_max_wall_seconds",
-        DEFAULT_MAX_WALL_SECONDS,
+        configured_max_wall_seconds(),
     )
     depth_raw: Any = os.environ.get("MAVERICK_QUEUE_WORKER_MAX_DEPTH")
     if depth_raw is None or not depth_raw.strip():
@@ -419,17 +425,15 @@ def _configured_worker_ceilings() -> tuple[float, float, int]:
 
 def _worker_execution_limits(
     envelope: dict[str, Any],
-) -> tuple[float, float, int]:
+) -> tuple[float | None, float | None, int]:
+    from .runner import clamp_task_limit
+
     dollars_ceiling, wall_ceiling, depth_ceiling = _configured_worker_ceilings()
     requested_dollars = envelope["max_dollars"]
     requested_wall = envelope["max_wall_seconds"]
     return (
-        min(dollars_ceiling, requested_dollars)
-        if requested_dollars is not None
-        else dollars_ceiling,
-        min(wall_ceiling, requested_wall)
-        if requested_wall is not None
-        else wall_ceiling,
+        clamp_task_limit(requested_dollars, dollars_ceiling),
+        clamp_task_limit(requested_wall, wall_ceiling),
         min(depth_ceiling, envelope["max_depth"]),
     )
 

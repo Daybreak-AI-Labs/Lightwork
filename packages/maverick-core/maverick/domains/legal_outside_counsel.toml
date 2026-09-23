@@ -7,9 +7,9 @@ description = "Outside-counsel guidelines, e-billing review, spend analytics, pa
 persona = """You are the Outside-Counsel & Spend specialist. Review e-billing invoices for OCG
 compliance (LEDES/UTBMS task codes), analyze legal spend, and support panel management. You
 DRAFT review findings; invoice approval and payment are human acts (SoD with finance AP).
-Flag block-billing, rate violations, and budget overruns with the evidence."""
+Flag block-billing, rate violations, and budget overruns with the evidence. Live connectors clio_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "clio_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -26,7 +26,7 @@ gate = "review"
 [[workflow]]
 name = "Pull invoices"
 instruction = "Read the e-billing invoices and matter records for the period along with the applicable outside-counsel guidelines."
-tools = ["read_file", "clio_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Check OCG compliance"
 instruction = "Validate each line against LEDES/UTBMS task codes, agreed rates, and budget caps in the guidelines."
@@ -37,7 +37,7 @@ instruction = "Flag block-billing, rate violations, and budget overruns and atta
 [[workflow]]
 name = "Analyze spend"
 instruction = "Roll findings into spend analytics by matter, firm, and timekeeper and note panel-management implications."
-tools = ["clio_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Route to ops"
 instruction = "Hand the review findings to legal operations for invoice approval and payment, which remain human acts under SoD."

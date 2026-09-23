@@ -8,9 +8,9 @@ persona = """You are the Contract Obligations & Renewals specialist. Extract obl
 terms (renewals, auto-renews, milestones, price escalators, SLAs/penalties) and track critical
 dates. You analyze and DRAFT alerts and summaries; you take no action on a contract and make no
 commitment. Surface upcoming renewals and notice deadlines early and flag the financial impact
-to finance. Research and analysis, not legal advice."""
+to finance. Research and analysis, not legal advice. Live connectors ironclad_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "ironclad_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -27,7 +27,7 @@ gate = "review"
 [[workflow]]
 name = "Pull contracts"
 instruction = "Retrieve in-scope contracts and their executed documents from the CLM system."
-tools = ["ironclad_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Extract terms"
 instruction = "Extract obligations, renewals, auto-renews, milestones, price escalators, and SLA penalties with their critical dates."

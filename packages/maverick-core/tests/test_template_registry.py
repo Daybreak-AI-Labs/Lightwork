@@ -45,8 +45,8 @@ def test_budget_strip_handles_crlf_frontmatter():
     # Parse the stripped content: remote budgets fall back to defaults, but
     # other frontmatter (title) is still honored now that CRLF is normalized.
     t = templates.Template.parse(stripped, "x")
-    assert t.budget_dollars == 5.0
-    assert t.budget_wall_seconds == 3600.0
+    assert t.budget_dollars is None
+    assert t.budget_wall_seconds is None
     assert t.title == "T"
 
 
@@ -113,8 +113,8 @@ def test_catalog_install_drops_remote_budget_overrides(tmp_path, monkeypatch):
     t = templates.install_template_from_catalog(
         "weekly-cleanup", indexes=["https://templates.test"], dest=tmp_path)
 
-    assert t.budget_dollars == 5.0
-    assert t.budget_wall_seconds == 3600.0
+    assert t.budget_dollars is None
+    assert t.budget_wall_seconds is None
     written = (tmp_path / "weekly-cleanup.md").read_text(encoding="utf-8")
     assert "budget_dollars" not in written
     assert "budget_wall_seconds" not in written

@@ -1422,30 +1422,55 @@
       form.appendChild(label);
     });
     var actions = element("div", null, "lightwork-consent__actions");
+    var saveStatus = element("p", "", "lightwork-consent__status");
+    saveStatus.setAttribute("role", "status");
+    var saveButtons = [], saving = false;
     function button(label, action) {
       var node = element("button", label);
       node.type = "button";
       applyBrandingAction(node, branding);
       node.addEventListener("click", action);
       actions.appendChild(node);
+      saveButtons.push(node);
     }
     async function save(mode) {
+      if (saving) return;
+      saving = true;
       var choices = consentPurposes.map(function (purpose) {
-        var checked = form.elements[purpose.id].checked;
+        var input = form.elements[purpose.id], checked = input.checked;
         if (mode === "grant") checked = true;
         if (mode === "deny") checked = false;
+        input.checked = checked;
+        input.disabled = true;
         return {purpose_id: purpose.id, action: checked ? "grant" : "deny", expires_at: null};
       });
-      await self.updatePreferences(choices);
-      await self.getPreferences();
-      await self.reportExperimentOutcome(true);
-      container.dispatchEvent(new CustomEvent("lightwork-consent-saved", {detail: self.preferences}));
-      if (surface === "banner") container.replaceChildren();
+      saveButtons.forEach(function (node) { node.disabled = true; });
+      saveStatus.textContent = "Saving choices…";
+      try {
+        await self.updatePreferences(choices);
+        await self.getPreferences();
+        consentPurposes.forEach(function (purpose) {
+          var current = self.preferences.preferences.find(function (item) { return item.purpose_id === purpose.id; });
+          form.elements[purpose.id].checked = Boolean(current && current.granted);
+        });
+        saveStatus.textContent = "Your choices are saved.";
+        container.dispatchEvent(new CustomEvent("lightwork-consent-saved", {detail: self.preferences}));
+        if (surface === "banner") container.replaceChildren();
+        // Reporting an experiment must not turn a confirmed preference save into a failure.
+        self.reportExperimentOutcome(true).catch(function () { /* Preferences remain saved. */ });
+      } catch (error) {
+        saveStatus.textContent = "Your choices could not be confirmed. " + error.message + " Review them and retry Save choices.";
+      } finally {
+        saving = false;
+        consentPurposes.forEach(function (purpose) { form.elements[purpose.id].disabled = false; });
+        saveButtons.forEach(function (node) { node.disabled = false; });
+      }
     }
     button(template.actions.accept_all || "Accept all", function () { save("grant"); });
     button(template.actions.reject_all || "Reject all", function () { save("deny"); });
     button(template.actions.save_preferences || "Save choices", function () { save("current"); });
     form.appendChild(actions);
+    form.appendChild(saveStatus);
     panel.appendChild(form);
     container.appendChild(panel);
     await this._reportExperimentExposure();

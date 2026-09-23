@@ -66,15 +66,37 @@ class LexicalProjection:
             "content_sha256": item["source"]["content_sha256"],
             "title": item["title"],
             "summary": item["summary"],
+            "retrieval_chunks": item.get("_retrieval_chunks", ()),
+            "search_coverage_complete": item.get("search_coverage_complete", True),
         })
 
     @classmethod
     def from_item(cls, identity: str, item: Mapping) -> LexicalProjection:
         title = str(item["title"])
-        summary = str(item["summary"])
+        summary = "\n".join(item.get("_retrieval_chunks", ())) or str(item["summary"])
         reference = item["reference"]
         words = terms("\n".join((title, summary, reference["asset_id"])))
         return cls(identity, Counter(words), frozenset(terms(title)), len(words))
+
+
+def retrieval_passage(item: Mapping, query: str) -> dict:
+    """Select an actual admitted chunk; keep all searchable text internal."""
+    result = dict(item)
+    chunks = result.pop("_retrieval_chunks", ())
+    if chunks and query.strip():
+        query_terms = set(terms(query))
+        index = max(range(len(chunks)), key=lambda idx: len(query_terms & set(terms(chunks[idx]))))
+        text = chunks[index]
+        # A configured chunk may itself be large. Center its bounded excerpt
+        # around a matching term rather than silently returning only its prefix.
+        match = next((m for m in _WORDS.finditer(text) if query_terms & set(terms(m.group()))), None)
+        start = max(0, (match.start() if match else 0) - 256)
+        excerpt = text[start:].encode("utf-8")[:8192].decode("utf-8", errors="ignore")
+        result["summary"] = excerpt
+        result["summary_truncated"] = bool(item.get("summary_truncated")) or len(chunks) > 1 or excerpt != text
+        result["retrieval_passage"] = {"chunk_index": index, "chunk_count": len(chunks),
+                                       "excerpt_start": start}
+    return result
 
 
 def rank(query: str, projections: Sequence[LexicalProjection]) -> list[tuple[int, float]]:
@@ -116,9 +138,10 @@ class SearchCursor:
     offset: int = 0
     ranking: str | None = None
     unavailable_before: bool = False
+    partial_before: bool = False
 
     def encode(self) -> str:
-        payload = {"v": 1, **self.__dict__}
+        payload = {"v": 2, **self.__dict__}
         return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
     @classmethod
@@ -129,11 +152,13 @@ class SearchCursor:
             if not isinstance(value, str) or not 1 <= len(value) <= 2048:
                 raise ValueError
             raw = json.loads(base64.b64decode(value, altchars=b"-_", validate=True))
+            if isinstance(raw, dict) and type(raw.get("v")) is int and raw["v"] == 1:
+                raw = {**raw, "v": 2, "partial_before": False}
             if not isinstance(raw, dict) or set(raw) != {
-                "v", "binding", "after", "snapshot", "offset", "ranking", "unavailable_before",
+                "v", "binding", "after", "snapshot", "offset", "ranking", "unavailable_before", "partial_before",
             }:
                 raise ValueError
-            if type(raw["v"]) is not int or raw["v"] != 1 or raw["binding"] != binding:
+            if type(raw["v"]) is not int or raw["v"] != 2 or raw["binding"] != binding:
                 raise ValueError
             positions = []
             for name in ("after", "snapshot"):
@@ -154,9 +179,9 @@ class SearchCursor:
                 raise ValueError
             if offset and ranking is None:
                 raise ValueError
-            if type(raw["unavailable_before"]) is not bool:
+            if type(raw["unavailable_before"]) is not bool or type(raw["partial_before"]) is not bool:
                 raise ValueError
-            return cls(binding, *positions, offset, ranking, raw["unavailable_before"])
+            return cls(binding, *positions, offset, ranking, raw["unavailable_before"], raw["partial_before"])
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError) as exc:
             raise ValueError("knowledge cursor is invalid for this search; restart the search") from exc
 
@@ -207,7 +232,7 @@ class EvidencePassage:
             str(item["source"]["content_sha256"])[:64],
             str(item["source"]["provenance_kind"])[:64],
             state, _date(item.get("observed_at")), _date(item.get("verified_at")),
-            summary[:summary_limit], len(summary) > summary_limit, corrections,
+            summary[:summary_limit], len(summary) > summary_limit or bool(item.get("summary_truncated")), corrections,
         )
 
 

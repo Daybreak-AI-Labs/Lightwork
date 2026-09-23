@@ -11,6 +11,7 @@ stub so no real goal runs.
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 
@@ -217,6 +218,22 @@ def test_dispatch_preserves_explicit_zero_budget(monkeypatch, tmp_path):
     assert r.status_code == 201, r.text
     assert calls, "expected the local dispatcher to be scheduled"
     assert calls[0]["kwargs"]["max_dollars"] == 0.0
+
+
+@pytest.mark.parametrize("ceiling,expected", [(None, 10_000.0), (25.0, 25.0), (0.0, 0.0)])
+def test_dispatch_uses_only_configured_budget_ceiling(monkeypatch, tmp_path, ceiling, expected):
+    _isolate(monkeypatch, tmp_path)
+    _save_fleet()
+    calls = _stub_runner(monkeypatch)
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "configured_max_dollars", lambda: ceiling)
+    response = _client().post("/api/v1/fleets/acme/run", json={
+        "agent": "coder", "prompt": "run the authorized work", "max_dollars": 10_000.0,
+    })
+    assert response.status_code == 201, response.text
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["max_dollars"] == expected
 
 
 def test_dispatch_unknown_agent_404(monkeypatch, tmp_path):

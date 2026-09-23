@@ -371,17 +371,18 @@
         if (id !== currentId || revision !== currentRevision || generation !== viewGeneration || answerBusy || answerDirty) return;
         statusEl.textContent = decision === 'approved' ? 'Approving…' : 'Rejecting…';
         const days = parseInt(cadenceSel.value, 10) || 0;
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/decide', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/decide', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             decision: decision,
             cadence_days: days,
-            expected_revision: currentRevision
+            expected_revision: revision
           })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const rec = await r.json();
+        if (id !== currentId || generation !== viewGeneration) return;
         decidedInDialog = true;
         statusEl.textContent = decision === 'approved'
           ? (days ? 'Approved — next review in ' + days + ' days.' : 'Approved.')
@@ -391,20 +392,23 @@
         // row decides itself from this (the reviewer shouldn't have to click
         // twice for one decision).
         document.dispatchEvent(new CustomEvent('mv-assessment-decided', {
-          detail: { id: currentId, decision: decision }
+          detail: { id: id, decision: decision }
         }));
       } catch (e) {
-        statusEl.textContent = 'Could not record decision: ' + e.message;
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = 'Could not record decision: ' + e.message;
       } finally {
-        approveBtn.disabled = rejectBtn.disabled = false;
+        if (id === currentId && generation === viewGeneration) approveBtn.disabled = rejectBtn.disabled = false;
       }
     }
     approveBtn.addEventListener('click', function () { decide('approved'); });
     rejectBtn.addEventListener('click', function () { decide('rejected'); });
 
-    async function reload() {
-      const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId));
-      if (r.ok) render(await r.json());
+    async function reload(id = currentId, generation = viewGeneration) {
+      const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
+      if (r.ok) {
+        const record = await r.json();
+        if (id === currentId && generation === viewGeneration) render(record);
+      }
     }
 
     // Accept the residual risk (B11): named owner, rationale, expiry.
@@ -415,19 +419,21 @@
       if (rationale == null || !rationale.trim()) return;
       const days = parseInt(window.prompt('Acceptance expires in how many days?', '365'), 10);
       if (!days || days < 1) { statusEl.textContent = 'A positive expiry is required.'; return; }
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       acceptBtn.disabled = true;
       statusEl.textContent = 'Recording risk acceptance…';
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/accept-risk', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/accept-risk', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rationale: rationale.trim(), expires_days: days, expected_revision: currentRevision })
+          body: JSON.stringify({ rationale: rationale.trim(), expires_days: days, expected_revision: revision })
         });
         if (!r.ok) { const j = await r.json().catch(function () { return {}; }); throw new Error(j.detail || ('HTTP ' + r.status)); }
+        if (id !== currentId || generation !== viewGeneration) return;
         statusEl.textContent = 'Risk accepted — comes due again in ' + days + ' days.';
-        await reload();
+        await reload(id, generation);
       } catch (e) {
-        statusEl.textContent = 'Could not accept risk: ' + e.message;
-      } finally { acceptBtn.disabled = false; }
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = 'Could not accept risk: ' + e.message;
+      } finally { if (id === currentId && generation === viewGeneration) acceptBtn.disabled = false; }
     });
 
     // Force a re-review now (B14): an external event trigger.
@@ -435,20 +441,23 @@
       if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before reopening review.'; return; }
       const reason = window.prompt('Why re-review now? (contract renewal, new sub-processor, material change)');
       if (reason == null) return;
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       triggerBtn.disabled = true;
       statusEl.textContent = 'Flagging for re-review…';
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/trigger-review', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/trigger-review', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: reason.trim(), expected_revision: currentRevision })
+          body: JSON.stringify({ reason: reason.trim(), expected_revision: revision })
         });
         if (!r.ok) { const j = await r.json().catch(function () { return {}; }); throw new Error(j.detail || ('HTTP ' + r.status)); }
+        if (id !== currentId || generation !== viewGeneration) return;
         statusEl.textContent = 'Flagged for re-review.';
-        await reload();
-        document.dispatchEvent(new CustomEvent('mv-assessment-decided', { detail: { id: currentId, decision: 'retriggered' } }));
+        await reload(id, generation);
+        if (id !== currentId || generation !== viewGeneration) return;
+        document.dispatchEvent(new CustomEvent('mv-assessment-decided', { detail: { id: id, decision: 'retriggered' } }));
       } catch (e) {
-        statusEl.textContent = 'Could not flag for re-review: ' + e.message;
-      } finally { triggerBtn.disabled = false; }
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = 'Could not flag for re-review: ' + e.message;
+      } finally { if (id === currentId && generation === viewGeneration) triggerBtn.disabled = false; }
     });
 
     async function open(id) {
@@ -457,6 +466,8 @@
       const generation = ++viewGeneration; answerDirty = false; selectedQuestion = ''; currentQuestions = {};
       currentId = id;
       currentRevision = null;
+      decidedInDialog = false;
+      approveBtn.disabled = rejectBtn.disabled = acceptBtn.disabled = triggerBtn.disabled = sendBtn.disabled = false;
       statusEl.textContent = '';
       body.innerHTML = '<p class="muted">Loading…</p>';
       sendBtn.style.display = 'none';
@@ -477,24 +488,27 @@
       const ta = document.getElementById('arv-questions');
       const questions = (ta && ta.value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
       if (!questions.length) { statusEl.textContent = 'Write at least one question first.'; return; }
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       sendBtn.disabled = true;
       statusEl.textContent = 'Sending…';
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/followups', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/followups', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             questions: questions,
-            expected_revision: currentRevision
+            expected_revision: revision
           })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
+        const record = await r.json();
+        if (id !== currentId || generation !== viewGeneration) return;
         statusEl.textContent = 'Sent — the requester will be asked these ' + questions.length + ' question(s).';
-        render(await r.json());
+        render(record);
       } catch (e) {
-        statusEl.textContent = 'Could not send: ' + e.message;
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = 'Could not send: ' + e.message;
       } finally {
-        sendBtn.disabled = false;
+        if (id === currentId && generation === viewGeneration) sendBtn.disabled = false;
       }
     });
     async function closeReview() {

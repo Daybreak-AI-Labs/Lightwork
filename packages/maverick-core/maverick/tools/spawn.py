@@ -72,7 +72,7 @@ def _synthesis_reserve_block(parent: Agent) -> str | None:
     if SYNTHESIS_RESERVE <= 0:
         return None
     b = parent.ctx.budget
-    if b.dollars < b.max_dollars * (1.0 - SYNTHESIS_RESERVE):
+    if b.max_dollars is None or b.dollars < b.max_dollars * (1.0 - SYNTHESIS_RESERVE):
         return None
     parent.ctx.blackboard.post(
         parent.name, "plan",
@@ -387,7 +387,8 @@ async def _swarm_credit_assignment(parent: Agent, children: list, results: list)
         }
         _cs = _credit._settings()
         b = parent.ctx.budget
-        headroom_ok = b.dollars < b.max_dollars * (1.0 - _cs["min_budget_headroom"])
+        headroom_ok = (b.max_dollars is None
+                       or b.dollars < b.max_dollars * (1.0 - _cs["min_budget_headroom"]))
         try:
             from ..calibration import learning_frozen as _frozen
             frozen = _frozen()

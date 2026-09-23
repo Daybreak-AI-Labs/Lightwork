@@ -265,6 +265,20 @@
     if (run.status === 'failed' && run.cursor) {
       btn('🔁 Retry from failed step (' + run.cursor + ')', true, function () { retry(true); });
     }
+    if (run.status === 'budget_limited' && run.cursor) {
+      var allowance = document.createElement('input');
+      allowance.type = 'number'; allowance.min = String(Math.max(run.cost_dollars || 0, run.budget_limit_dollars || 0));
+      allowance.step = '0.01'; allowance.placeholder = 'New total run allowance (USD)';
+      allowance.setAttribute('aria-label', 'New total run allowance in US dollars');
+      box.appendChild(allowance);
+      btn('Continue saved work with this allowance', true, function () {
+        var amount = Number(allowance.value);
+        if (!Number.isFinite(amount) || amount <= Number(allowance.min)) {
+          say('Enter a total allowance above the current limit. Organization limits still apply.'); return;
+        }
+        retry(true, amount);
+      });
+    }
     if (['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
       btn('↻ Re-run from scratch', false, function () { retry(false); });
     }
@@ -281,8 +295,10 @@
       }); })
       .catch(function () { say('Could not resume.'); });
   }
-  function retry(fromFailure) {
-    api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry' + (fromFailure ? '?from_failure=1' : ''),
+  function retry(fromFailure, allowance) {
+    var query = fromFailure ? '?from_failure=1' : '';
+    if (allowance !== undefined) query += '&budget_limit_dollars=' + encodeURIComponent(allowance);
+    api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry' + query,
         { method: 'POST' })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {

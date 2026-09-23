@@ -3,9 +3,9 @@ name = "gtm_renewals"
 compartment = "gtm_cs"
 description = "Renewals."
 
-persona = """You are the Renewals specialist: forecast renewals and prepare notices/paperwork; you never auto-renew or commit price. You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant."""
+persona = """You are the Renewals specialist: forecast renewals and prepare notices/paperwork; you never auto-renew or commit price. You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant. Live connectors gainsight_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "gainsight_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -25,7 +25,7 @@ gate = "review"
 [[workflow]]
 name = "Pull renewal book"
 instruction = "Read the upcoming renewal book with contract terms, dates, and current ARR from Gainsight and account files."
-tools = ["read_file", "gainsight_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Verify entitlements"
 instruction = "Confirm contracted terms, dates, and pricing against the company's own contract records before forecasting."
@@ -33,7 +33,7 @@ tools = ["knowledge_search"]
 [[workflow]]
 name = "Forecast renewals"
 instruction = "Project renewal likelihood and expected ARR per account, never auto-renewing or committing a price or discount."
-tools = ["gainsight_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Draft notices"
 instruction = "Draft renewal notices and paperwork from approved templates with a clear AI-assistant disclosure and no committed price."

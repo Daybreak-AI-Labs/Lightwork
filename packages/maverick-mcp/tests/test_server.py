@@ -8,7 +8,6 @@ and carries the right code. The `isError` envelope is only for tool
 """
 from __future__ import annotations
 
-import math
 from types import SimpleNamespace
 
 import pytest
@@ -38,6 +37,20 @@ def test_tool_reads_use_canonical_world_and_ownership_close(monkeypatch):
 
     assert MCPServer()._tool_facts_get() == "no facts known"
     assert closed == [world]
+
+
+def test_mcp_task_limits_are_optional_but_operator_authority_still_binds(monkeypatch):
+    from maverick_mcp.server import _task_budget
+
+    monkeypatch.delenv("MAVERICK_MCP_MAX_DOLLARS", raising=False)
+    monkeypatch.delenv("MAVERICK_MCP_MAX_WALL_SECONDS", raising=False)
+    monkeypatch.setattr("maverick.config.get_budget_overrides", dict)
+    uncapped = _task_budget({})
+    assert uncapped.max_dollars is None and uncapped.max_wall_seconds is None
+    monkeypatch.setenv("MAVERICK_MCP_MAX_DOLLARS", "12")
+    monkeypatch.setattr("maverick.config.get_budget_overrides", lambda: {"max_dollars": 10})
+    assert _task_budget({"max_dollars": 20}).max_dollars == 10
+    assert _task_budget({"max_dollars": 3}).max_dollars == 3
 
 
 class TestTools:
@@ -261,7 +274,7 @@ class TestProtocol:
             "shield": shield,
         }
 
-    def test_maverick_start_sanitizes_non_finite_budget_limits(self, monkeypatch):
+    def test_maverick_start_refuses_non_finite_budget_limits(self, monkeypatch):
         """Regression: string NaN limits must not bypass Budget checks."""
         from maverick import llm as llm_mod
         from maverick import orchestrator as orchestrator_mod
@@ -298,13 +311,8 @@ class TestProtocol:
             },
         })
 
-        assert out["isError"] is False
-        budget = captured["budget"]
-        assert math.isfinite(budget.max_dollars)
-        assert math.isfinite(budget.max_wall_seconds)
-        assert budget.max_dollars == 0.01
-        assert budget.max_wall_seconds == 1.0
-        assert captured["max_depth"] == 2
+        assert out["isError"] is True
+        assert captured == {}
 
     def test_tools_call_blocks_disallowed_output(self, monkeypatch):
         s = MCPServer()

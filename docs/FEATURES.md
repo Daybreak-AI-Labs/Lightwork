@@ -94,8 +94,13 @@ here.
   `GET /api/v1/run-tree/{goal_id}` (both ends access-checked).
 - **Kernel lifecycle hooks** — `PreToolUse` / `PostToolUse` / `UserPromptSubmit`
   (`hooks.py`), registrable from plugins.
-- **Budget caps** — hard dollar + wall-clock + tool-call ceilings the kernel
-  refuses to exceed (`budget.py`).
+- **Optional task limits and metered usage** — explicit dollar, elapsed-time,
+  token, tool-call and step limits are enforced; ordinary tasks receive no
+  generated limits. Settings can suppress saved task defaults reversibly.
+  Organization allowance checks remain independent and admit each physical
+  provider attempt against current recorded spend plus durable holds. Reported
+  provider cost can exceed its projection and is still recorded. See
+  [task limits and spend accounting](task-limits.md).
 - **Killswitch** — `~/.maverick/HALT` aborts all running goals (`killswitch.py`).
 - **Long-horizon review checkpoint** — opt-in `[safety] review_checkpoint`
   (`review_checkpoint.py`): the root agent fires a human-review heartbeat every
@@ -487,6 +492,15 @@ here.
   `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
+- **Pack deployment prerequisites** — tool-risk checks preserve the declared
+  risk ceilings and denylists. Read-only workflows use `sql_query_read` and
+  `spreadsheet_read`; these tools do not expose their mutable siblings' write
+  operations. Deployment validates required workflow tools against the assembled
+  registry, including custom adapters, and refuses missing requirements with
+  adapter, enablement or approved-export guidance. Optional missing allowlist
+  tools are reported separately. The September 23 catalog review identified
+  255 packs with remaining adapter-name prerequisites; linted content is not
+  proof that all 2,031 packs are operational in a fresh installation.
 - **Governance-posture audit** — `maverick domains-audit [--json <path>
   --suite <name>]` (`domain_audit.py`): the auditable inventory of "what can
   these agents do, and what stops them?" — per pack the compartment seal, risk
@@ -511,7 +525,9 @@ here.
   its parent's grant (no privilege escalation); (4) **compartment isolation** —
   a quarantine seal never bleeds across compartments/suites; (5) **hard
   refusals** — the universal refusal floor is unstrippable; (6) **budget caps**
-  — no cap is ever silently exceeded. Plus hostile-argument fuzzing of every
+  — configured limits retain their refusal behavior. This test scope does not
+  guarantee that a provider's actual invoice stays within a projected charge.
+  Plus hostile-argument fuzzing of every
   connector and tool.
 - **Robustness hardening** (bugs found by the stress sweep and fixed) —
   connectors no longer raise on a non-string op/path/query (they return an
@@ -2163,6 +2179,15 @@ here.
   graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
   summary rendered per automation — an import never silently pretends to be
   lossless.
+  Supported n8n `$json` references normalize to flow-data paths and every
+  AND/OR clause is retained. WDL `If` preserves nested AND/OR/NOT as a branch
+  graph, including literal types and nested trigger fields. Unsupported
+  operators, unbound action-output references and dynamic right operands
+  require manual repair; graph imports preflight the entire batch before
+  creating templates, schedules or triggers. Agent fallback steps retain
+  bounded, secret-redacted operational inputs without silent truncation.
+  WDL `Until` remains an approximation because the generated loop checks its
+  exit condition before each pass; compound exit expressions require repair.
 
 - **Rich human tasks** — an `approval` node carries `choices` (verdicts beyond
   approve/reject, recorded to `output` for a downstream switch), an `assignee`,
@@ -2809,18 +2834,19 @@ installed and falls back to stdlib `json` otherwise — `dumps` returns `str`,
 honors `sort_keys`, and degrades on any value orjson rejects, so it's a safe
 drop-in for round-trip/transport paths (wired into the tool-output cache
 snapshot). Deliberately NOT used for cache keys/signatures, where exact bytes
-must stay backend-stable. **Self-tuning budgets — online auto-apply**
-(`self_tuning_budget.py`, default-on `[budget] self_tuning`; the auto-applying
-companion to the advisory `maverick budget tune` / `budget_tuner.py`, which
-only *recommends* a cap for a human to set): learns a default spend cap *per
-coarse task class*
+must stay backend-stable. **Self-tuning budget suggestions**
+(`self_tuning_budget.py`, governed `[budget] self_tuning`): retains observed
+spending and can suggest a cap for a caller that explicitly requests a *coarse
+task class*
 (e.g. the goal's leading verb) from how much past runs of that class actually
 cost — a bounded reservoir per class, a high-quantile × margin suggestion
 clamped to [floor, ceiling]. Wired as the **lowest-precedence** layer of
-`budget_from_config` (an operator's configured `max_dollars` always wins) and
-fed by the orchestrator's per-run cost recording; returns nothing until a
-class has enough samples, so it never lowers safety on a guess. Off by
-default.
+`budget_from_config` for such callers (an operator's configured `max_dollars`
+wins) and fed by the orchestrator's per-run cost recording. It returns nothing
+until a class has enough samples. Ordinary production tasks do not request a
+learned class cap, and **Task limits Off** suppresses learned defaults as well
+as configured ones. The advisory `maverick budget tune` command remains a
+recommendation for an operator to review.
 
 **Local-runtime launcher + autoscaler** (`local_runtime.py`, opt-in
 `[local_runtime]`, `maverick local-runtime plan`): composes the correct
@@ -4259,10 +4285,11 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
 - **Multi-tenant `maverick serve`** — the channel server enforces the tenant
   roster at the door: with per-user tenancy on and tenants provisioned, a
   suspended/unknown tenant's message is refused before any goal exists, and a
-  tenant over its provisioned `max_daily_dollars` (`maverick tenant quota`;
-  `tenant_over_quota` sums today's tenant-scoped usage ledger across
-  principals) is refused until the UTC day rolls. No roster = no-op; registry
-  read errors fail soft.
+  tenant over its provisioned `max_daily_dollars` (`maverick tenant quota`) is
+  refused. Admission includes today's tenant-scoped usage across principals
+  and outstanding provider holds. Unknown charges survive UTC-day rollover;
+  a configured tenant's unreadable policy refuses execution. Calls without an
+  active tenant do not acquire an organization allowance.
 - **Out-of-process execution** — a swappable goal **Dispatcher** (`runner.py`)
   with a **QueueDispatcher** (`queue_dispatcher.py`) that enqueues goals for a
   worker pool (arq adapter behind `[queue]`; `install_from_config` wires it).

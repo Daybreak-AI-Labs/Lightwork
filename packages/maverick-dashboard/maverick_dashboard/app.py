@@ -14,6 +14,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -8346,7 +8347,11 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
         owner=caller_principal(request) or "",
     )
 
-    from maverick.runner import configured_max_dollars, run_goal_in_background_async
+    from maverick.runner import (
+        clamp_task_limit,
+        configured_max_dollars,
+        run_goal_in_background_async,
+    )
 
     budget = payload.get("budget")
     max_dollars = None
@@ -8360,7 +8365,9 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
         # its own, so an unclamped webhook value (negative, or arbitrarily
         # large) would defeat the budget ceiling -- budget caps are not
         # optional, even on an externally reachable signed endpoint.
-        max_dollars = min(max(max_dollars, 0.0), configured_max_dollars())
+        if not math.isfinite(max_dollars) or max_dollars < 0:
+            raise HTTPException(status_code=400, detail="budget must be a finite non-negative number")
+        max_dollars = clamp_task_limit(max_dollars, configured_max_dollars())
     bg.add_task(run_goal_in_background_async, goal_id, max_dollars)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
@@ -8531,8 +8538,14 @@ def _fire_stored_trigger(
         world = _world()
         goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
         world.record_goal_origin(goal_id, "trigger", name)
-        max_dollars = min(float(tpl.budget_dollars), 100.0)
-        max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
+        from maverick.runner import (
+            clamp_task_limit,
+            configured_max_dollars,
+            configured_max_wall_seconds,
+        )
+
+        max_dollars = clamp_task_limit(tpl.budget_dollars, configured_max_dollars())
+        max_wall = clamp_task_limit(tpl.budget_wall_seconds, configured_max_wall_seconds())
         bg.add_task(
             _run_trigger_goal_in_tenant,
             goal_id,
@@ -9979,6 +9992,7 @@ async def shell_copilot_js() -> FileResponse:
 
 
 @app.get("/static/lightwork-facts.js")
+@app.get("/static/lightwork-access-state.js")
 @app.get("/static/lightwork-consent-policy-editor.js")
 @app.get("/static/lightwork-setup.js")
 @app.get("/static/lightwork-voice-setup.js")

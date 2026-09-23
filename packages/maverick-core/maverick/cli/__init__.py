@@ -3946,8 +3946,8 @@ def start(
         except ValueError as e:
             click.echo(f"ERROR: {e}", err=True)
             sys.exit(2)
-        max_dollars = max_dollars or tpl.budget_dollars
-        max_wall_seconds = max_wall_seconds or tpl.budget_wall_seconds
+        max_dollars = tpl.budget_dollars if max_dollars is None else max_dollars
+        max_wall_seconds = tpl.budget_wall_seconds if max_wall_seconds is None else max_wall_seconds
         click.echo(f"[template {tpl.name}] {title}")
     elif not title:
         click.echo("ERROR: pass TITLE or --template <name>", err=True)
@@ -4025,7 +4025,6 @@ def start(
         # so config caps were silently ignored). Precedence: built-in defaults
         # < config < explicit CLI flags. A None flag passes through as "unset".
         bud = budget_from_config(
-            defaults={"max_dollars": 5.0, "max_wall_seconds": 3600.0},
             # Learned per-class default cap (default-on, lowest precedence; via
             # [budget] self_tuning). Department runs use their own class so
             # finance runs are sized by finance history.
@@ -4175,7 +4174,7 @@ def _stream_progress(db_path, goal_id: int, stop) -> None:
 
 @main.command()
 @click.option("--max-depth", default=3, type=int)
-@click.option("--max-dollars", default=2.0, type=float)
+@click.option("--max-dollars", default=None, type=float)
 @click.option("--workdir", default=None)
 @click.pass_context
 @_humane_errors
@@ -4223,7 +4222,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
                     )
                 except (EOFError, click.exceptions.Abort):
                     click.echo("")
-                    break
+                    return  # canceled input is never a submitted task
                 if nxt.rstrip().endswith('"""'):
                     tail = nxt.rstrip()[:-3].rstrip()
                     if tail:
@@ -4241,7 +4240,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
                     ).rstrip()
                 except (EOFError, click.exceptions.Abort):
                     click.echo("")
-                    break
+                    return  # discard the partial buffer on cancellation
                 if nxt.endswith("\\"):
                     buf.append(nxt[:-1].rstrip())
                 else:
@@ -5006,7 +5005,7 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
         click.echo(f"cannot resume goal #{goal_id}: {len(open_qs)} open question(s).")
         for q in open_qs:
             click.echo(f"  #{q.id}: {q.question}")
-        return
+        sys.exit(2)
     # Validate the local resume target before provider readiness. Looking up a
     # goal (including the graceful "nothing to resume" path) needs no LLM and
     # should remain useful while an operator is repairing provider credentials.
@@ -5030,6 +5029,8 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
                              sandbox=sandbox, max_depth=max_depth,
                              resume=True)
     click.echo(result)
+    if _run_outcome_blocked(world, goal_id):
+        sys.exit(2)
 
 
 @main.command()
@@ -7427,6 +7428,14 @@ from . import (  # noqa: E402,F401
     _trust_groups,
     _voice_groups,
 )
+
+try:
+    from maverick_channels.maintenance_cli import channel_maintenance
+except ImportError:  # optional channels package
+    pass
+else:
+    main.add_command(channel_maintenance)
+
 
 if __name__ == "__main__":
     main()

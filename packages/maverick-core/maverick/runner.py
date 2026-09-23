@@ -26,6 +26,7 @@ import contextvars
 import functools
 import logging
 import math
+import os
 import threading
 import time
 from typing import Any, Protocol
@@ -160,12 +161,22 @@ def drain_inflight(timeout: float = 25.0, poll: float = 0.5) -> int:
     return inflight_goals()
 
 
-DEFAULT_MAX_DOLLARS = env_float("MAVERICK_DEFAULT_MAX_DOLLARS", 2.0)
-DEFAULT_MAX_WALL_SECONDS = env_float("MAVERICK_DEFAULT_MAX_WALL_SECONDS", 1800.0)
+def _optional_limit(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    value = float(raw)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be a finite non-negative limit")
+    return value
+
+
+DEFAULT_MAX_DOLLARS = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
+DEFAULT_MAX_WALL_SECONDS = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
 DEFAULT_MAX_DEPTH = env_int("MAVERICK_DEFAULT_MAX_DEPTH", 3)
 
 
-def configured_max_dollars() -> float:
+def configured_max_dollars() -> float | None:
     """The deployment's per-goal spend ceiling, in USD.
 
     The same precedence a run's budget is built with -- the Settings page's
@@ -179,14 +190,22 @@ def configured_max_dollars() -> float:
     from .budget import resolve_budget_caps
 
     caps = resolve_budget_caps(defaults={"max_dollars": DEFAULT_MAX_DOLLARS})
-    value = caps.get("max_dollars", DEFAULT_MAX_DOLLARS)
-    try:
-        ceiling = float(value)
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_DOLLARS
-    if not math.isfinite(ceiling) or ceiling <= 0:
-        return DEFAULT_MAX_DOLLARS
-    return ceiling
+    return caps.get("max_dollars")
+
+
+def configured_max_wall_seconds() -> float | None:
+    from .budget import resolve_budget_caps
+
+    return resolve_budget_caps(defaults={
+        "max_wall_seconds": DEFAULT_MAX_WALL_SECONDS,
+    }).get("max_wall_seconds")
+
+
+def clamp_task_limit(requested: float | None, configured: float | None) -> float | None:
+    """An absent task ceiling is not an invented deployment allowance."""
+    if requested is None:
+        return configured
+    return min(requested, configured) if configured is not None else requested
 
 
 def run_goal_in_thread(
@@ -202,6 +221,7 @@ def run_goal_in_thread(
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
     acquire_timeout: float | None = None,
+    usage_observer=None,
 ) -> str | None:
     """Synchronously run a goal under the global concurrency semaphore.
 
@@ -258,6 +278,7 @@ def run_goal_in_thread(
         return None
     world = None
     sandbox = None
+    budget = None
     try:
         from .budget import budget_from_config
         from .llm import LLM
@@ -365,6 +386,13 @@ def run_goal_in_thread(
         log.exception("background goal run failed (goal_id=%s)", goal_id)
         return None
     finally:
+        if usage_observer is not None and budget is not None:
+            # Internal flow accounting observes the completed meter. It cannot
+            # replace the runner's configured spending authority.
+            try:
+                usage_observer(budget.dollars)
+            except Exception:
+                log.exception("goal usage observer failed (goal_id=%s)", goal_id)
         if sandbox is not None:
             close = getattr(sandbox, "close", None)
             if close is not None:

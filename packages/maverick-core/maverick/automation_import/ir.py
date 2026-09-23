@@ -16,6 +16,8 @@ the orchestrator runs the work.
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -99,6 +101,51 @@ def safe_params(params: dict[str, Any]) -> dict[str, Any]:
             else _safe_param_value(value)
         )
     return safe
+
+
+def operational_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Redact imported execution inputs without silently dropping their meaning.
+
+    Display previews may be shortened; an execution brief must retain values,
+    whitespace and nesting. Oversized/unsupported input requires manual repair.
+    """
+    remaining = 512
+
+    def clean(value: Any, depth: int = 0) -> Any:
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or depth > 12:
+            raise ValueError("Imported step inputs require repair: structure exceeds supported size")
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if not isinstance(key, str) or len(key) > 128:
+                    raise ValueError("Imported step inputs require repair: unsupported parameter name")
+                result[key] = ("[REDACTED:automation_import_secret]"
+                               if _SENSITIVE_PARAM_RE.search(key) else clean(item, depth + 1))
+            return result
+        if isinstance(value, list):
+            return [clean(item, depth + 1) for item in value]
+        if isinstance(value, str):
+            if len(value) > 16384:
+                raise ValueError("Imported step inputs require repair: value exceeds supported size")
+            return _SECRET_QUERY_RE.sub(r"\1[REDACTED:automation_import_secret]", _redact_text(value))
+        if value is None or isinstance(value, (bool, int)):
+            return value
+        if isinstance(value, float) and math.isfinite(value):
+            return value
+        raise ValueError("Imported step inputs require repair: unsupported parameter type")
+
+    cleaned = clean(params)
+    rendered = json.dumps(cleaned, ensure_ascii=False, sort_keys=True)
+    if len(rendered) > 32768:
+        raise ValueError("Imported step inputs require repair: total exceeds supported size")
+    return cleaned
+
+
+def operational_inputs(params: dict[str, Any]) -> str:
+    """Render the same complete, bounded inputs used by deterministic actions."""
+    return json.dumps(operational_params(params), ensure_ascii=False, sort_keys=True)
 
 
 def slugify(text: str) -> str:

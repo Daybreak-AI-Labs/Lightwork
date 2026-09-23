@@ -96,6 +96,58 @@ def _call(name: str = "search", arguments: dict | None = None, request_id: int =
     }
 
 
+@pytest.mark.parametrize("kind", ["json", "sse", "progress", "split", "cr", "multiline"])
+def test_http_upstream_decodes_advertised_formats(monkeypatch, kind):
+    from types import SimpleNamespace
+
+    from maverick_mcp.sidecar import HttpMCPUpstream
+
+    monkeypatch.setattr("maverick.enterprise.enterprise_egress_denial", lambda *a, **kw: None)
+    result = {"jsonrpc": "2.0", "id": 7, "result": {"content": [{"type": "text", "text": "résult"}]}}
+    data = json.dumps(result, ensure_ascii=False).encode()
+    if kind != "json":
+        data = b"data: " + data + b"\r\n\r\n"
+    if kind == "progress":
+        data = b'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{}}\n\n' + data
+    if kind == "cr":
+        data = data.replace(b"\r\n", b"\r")
+    if kind == "multiline":
+        data = data.replace(b'"id": 7,', b'"id": 7,\r\ndata:')
+    chunks = [data[i:i+1] for i in range(len(data))] if kind == "split" else [data]
+    response = SimpleNamespace(status_code=200, headers={"content-type": "application/json" if kind == "json" else "text/event-stream"},
+                               iter_bytes=lambda **kw: iter(chunks))
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(kwargs)
+        return response
+
+    config = _config()
+    assert HttpMCPUpstream(config, client=SimpleNamespace(post=post)).call(config.tools[0], {}, 7) == result
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("data", [b'data: {"jsonrpc":"2.0","id":8,"result":{}}\n\n',
+    b'data: {"jsonrpc":"2.0","id":7,"result":{}}\n', b'data: \xff\n\n', b"x" * 129])
+def test_http_upstream_never_replays_invalid_or_incomplete_sse(monkeypatch, data):
+    from types import SimpleNamespace
+
+    from maverick_mcp.sidecar import HttpMCPUpstream, SidecarUpstreamError
+
+    monkeypatch.setattr("maverick.enterprise.enterprise_egress_denial", lambda *a, **kw: None)
+    monkeypatch.setattr("maverick_mcp.sidecar._MAX_RESPONSE_BYTES", 128)
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(1)
+        return SimpleNamespace(status_code=200, headers={"content-type": "text/event-stream"}, content=data)
+
+    config = _config()
+    with pytest.raises(SidecarUpstreamError):
+        HttpMCPUpstream(config, client=SimpleNamespace(post=post)).call(config.tools[0], {}, 7)
+    assert calls == [1]
+
+
 def test_sidecar_admits_only_manifested_tool_and_audits_closed_metadata():
     gateway, upstream, audits = _gateway()
 

@@ -550,7 +550,7 @@ def test_ci_constraints_cover_every_release_base_dependency():
     }
     assert not incompatible, f"CI pins outside release manifest ranges: {incompatible}"
     assert constraints["pywhispercpp"] == "1.5.1"
-    assert constraints["tqdm"] == "4.70.0"
+    assert Version(constraints["tqdm"]) >= Version("4.70.0")
 
     core = tomllib.loads(
         (
@@ -679,7 +679,7 @@ def test_standalone_skus_are_github_source_assets_not_pypi_packages():
     assert "python scripts/build_standalone_skus.py" in release_workflow
     assert "dist/lightwork-*" in release_workflow
     assert "git checkout --detach" in release_workflow
-    assert "cyclonedx-bom==7.3.1" in release_workflow
+    assert f"cyclonedx-bom=={_ci_constraints()['cyclonedx-bom']}" in release_workflow
     assert "SBOM generation failed (non-fatal)" not in release_workflow
     assert 'target_tags=("$CONTAINER_IMAGE:$version")' in release_workflow
     assert "$CONTAINER_IMAGE:latest" not in release_workflow
@@ -886,7 +886,7 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
         "setuptools==84.0.0",
         "wheel==0.48.0",
         "packaging==26.3",
-        "build==1.5.0",
+        f"build=={_ci_constraints()['build']}",
     ):
         assert build_tool in bootstrap_step
 
@@ -1244,13 +1244,13 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
     constraints = _ci_constraints()
     expected = {
         "bandit": "1.9.4",
-        "cyclonedx-bom": "7.3.1",
+        "cyclonedx-bom": "7.4.0",
         "detect-secrets": "1.5.0",
         "pip-audit": "2.10.1",
         "psycopg": "3.3.5",
         "psycopg-binary": "3.3.5",
         "psycopg-pool": "3.3.1",
-        "ruff": "0.16.4",
+        "ruff": "0.16.7",
         "vulture": "2.16",
     }
     assert {name: constraints.get(name) for name in expected} == expected
@@ -1679,9 +1679,11 @@ def test_ci_constraints_satisfy_shipped_network_security_floors():
         REPO_ROOT / "packages" / "maverick-channels" / "pyproject.toml"
     ).read_text(encoding="utf-8")
 
-    for pinned in ("requests==2.34.2", "urllib3==2.7.0"):
-        assert pinned in constraints
-        assert pinned in docs_constraints
+    for name, floor in (("requests", "2.34.2"), ("urllib3", "2.7.0")):
+        for reviewed in (constraints, docs_constraints):
+            match = re.search(rf"(?m)^{re.escape(name)}==([^\s;]+)", reviewed)
+            assert match, f"{name} must retain an exact reviewed pin"
+            assert Version(match[1]) >= Version(floor)
     for manifest in (core_manifest, channels_manifest):
         assert "requests>=2.33.0" in manifest
         assert "urllib3>=2.7.0" in manifest
@@ -1807,7 +1809,7 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
         assert "runs-on: ubuntu-latest" not in workflow
         assert "runs-on: windows-latest" not in workflow
 
-    assert "pyinstaller==6.22.2" in release
+    assert f"pyinstaller=={_ci_constraints()['pyinstaller']}" in release
     assert "pyinstaller>=" not in release
     constraints = (
         REPO_ROOT / "requirements" / "ci.txt"
@@ -1975,6 +1977,9 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     dockerignore = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
     assert dockerignore.splitlines()[0] == "**"
     assert "!requirements/ci.txt" in dockerignore
+    for runtime_input in ("!deploy/", "!deploy/docker/", "!deploy/docker/entrypoint.sh"):
+        assert runtime_input in dockerignore
+    assert "!deploy/**" not in dockerignore
     for protected_pattern in (
         "**/.git/**",
         "**/.env.*",

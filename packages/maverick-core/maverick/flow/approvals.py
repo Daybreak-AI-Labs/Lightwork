@@ -187,6 +187,7 @@ def paused_operation_binding(
             None if run.allowed_suites is None else list(run.allowed_suites)
         ),
         "cost_dollars": float(run.cost_dollars or 0.0),
+        "budget_limit_dollars": getattr(run, "budget_limit_dollars", None),
         "submitted_inputs": dict(inputs or {}),
         "authority": dict(authority or {}),
     })
@@ -548,7 +549,7 @@ def require_current_paused_operation(
             budget={
                 "currency": "USD",
                 "run_limit_dollars": (
-                    flow.max_dollars or "configured runtime limit"
+                    run.budget_limit_dollars or flow.max_dollars or "configured runtime limit"
                 ),
                 "reserved_so_far_dollars": round(float(run.cost_dollars or 0.0), 4),
                 "authority_sha256": runtime_authority["budget_authority_sha256"],

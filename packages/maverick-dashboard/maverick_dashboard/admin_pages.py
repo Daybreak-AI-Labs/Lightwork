@@ -48,6 +48,7 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         budget_override,
         default_model_override,
         role_model_override,
+        task_limits_override,
     )
     roles = [
         ("Orchestrator", "orchestrator"), ("Coder", "coder"),
@@ -154,6 +155,8 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "features": cfg_state["features"],
         "budget": budget_override(),
         "default_budget": DEFAULT_MAX_DOLLARS,
+        "task_limits_enabled": (task_limits_override() if task_limits_override() is not None
+                                else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
         "webhook_configured": _webhook_secret_configured(),
         "saved": saved_msg,
         "saved_section": saved_section,
@@ -192,19 +195,25 @@ async def settings_set_model(request: Request) -> RedirectResponse:
 
 
 @router.post("/settings/budget")
-def settings_set_budget(request: Request, max_dollars: str = Form("")) -> RedirectResponse:
+def settings_set_budget(request: Request, max_dollars: str = Form(""),
+                        mode: str = Form("configured")) -> RedirectResponse:
     """Set (or clear) the dashboard's per-goal spend cap via the runtime
     overlay. An empty value clears it, reverting to config.toml / defaults.
     config.toml is never written."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import clear_budget, set_budget
+    from maverick.runtime_overrides import clear_budget, set_budget, set_task_limits
     val = (max_dollars or "").strip()
     try:
-        if val:
+        if mode == "disabled":
+            set_task_limits(False)
+        elif mode == "configured" and val:
             set_budget(float(val))
-        else:
+        elif mode == "configured":
             clear_budget()
+            set_task_limits(True)
+        else:
+            raise ValueError("unknown task limit policy")
     except ValueError as exc:
         raise HTTPException(
             status_code=400, detail="spend cap must be a positive number",

@@ -877,13 +877,21 @@ def _live_reservations(data: dict, now: float) -> dict:
     return out
 
 
-def _outstanding_reservations(tenant_id: str | None, *, now: float | None = None) -> float:
+def _legacy_outstanding_reservations(tenant_id: str | None, *, now: float | None = None) -> float:
     """Sum of a tenant's outstanding (non-expired) in-flight dollar holds."""
     tid = _lookup_id(tenant_id)
     if not tid:
         return 0.0
     at = time.time() if now is None else now
     return sum(v["dollars"] for v in _live_reservations(_load_reservations(tid), at).values())
+
+
+def _outstanding_reservations(tenant_id: str | None, *, now: float | None = None) -> float:
+    tid = _lookup_id(tenant_id)
+    if not tid:
+        return 0.0
+    from .provider_admission import outstanding
+    return _legacy_outstanding_reservations(tid, now=now) + outstanding(tid)
 
 
 def reserve_tenant_dollars(tenant_id: str | None, amount: float,
@@ -981,6 +989,8 @@ def reserve_tenant_budget(
                     f"tenant reservation already exists: {reservation_id!r}"
                 )
             outstanding = sum(value["dollars"] for value in data.values())
+            from .provider_admission import outstanding as provider_outstanding
+            outstanding += provider_outstanding(tid)
             remaining = max(0.0, cap - tenant_spend_today(tid) - outstanding)
             granted = min(requested, remaining)
             if granted > 0:

@@ -1434,6 +1434,57 @@ class PrivacyRightsOrchestrationStore:
                 for row in rows
             )
 
+    def due_reconciliation_callbacks(
+        self, tenant_id: str, *, source_ids: Sequence[str], limit: int = 100,
+    ) -> tuple[CallbackItem, ...]:
+        """Select due, worker-owned ambiguous reads before applying the bound."""
+        tenant = _tenant(tenant_id)
+        self._actor()
+        if isinstance(source_ids, (str, bytes)):
+            raise PrivacyRightsValidationError("source_ids must be an explicit sequence")
+        sources = sorted({_id(value, "source_id") for value in source_ids})
+        if not sources:
+            return ()
+        if len(sources) > _MAX_SOURCES:
+            raise PrivacyRightsValidationError("source_ids exceeds its bound")
+        bounded_limit = _integer(limit, "limit", 1, 1_000)
+        now = _timestamp(self._clock(), "current time")
+        placeholders = ",".join("?" for _ in sources)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM rights_callbacks WHERE tenant_id=? AND state='ambiguous' "
+                f"AND source_id IN ({placeholders}) AND next_attempt_at<=? "
+                "ORDER BY next_attempt_at,callback_id LIMIT ?",
+                (tenant, *sources, now, bounded_limit),
+            ).fetchall()
+            return tuple(self._callback(self._payload(row, "callback"), row["integrity_sha256"])
+                         for row in rows)
+
+    def defer_reconciliation_read(
+        self, tenant_id: str, callback_id: str, *, expected_revision: int,
+        retry_delay_seconds: int,
+    ) -> None:
+        """Back off a failed read while retaining every ambiguous mutation pin."""
+        tenant, callback_key = _tenant(tenant_id), _id(callback_id, "callback_id")
+        actor = self._actor()
+        now = _timestamp(self._clock(), "current time")
+        delay = _integer(retry_delay_seconds, "retry_delay_seconds", 1, _MAX_BACKOFF_SECONDS)
+        with self._connect() as connection:
+            self._begin(connection)
+            raw, digest = self._get(connection, "rights_callbacks", tenant,
+                                    "callback_id", callback_key, "callback")
+            current = self._callback(raw, digest)
+            if current.state != "ambiguous" or current.revision != expected_revision:
+                raise PrivacyRightsConflict("reconciliation callback changed")
+            payload = dict(raw)
+            payload.update(next_attempt_at=now + delay, updated_at=now,
+                           revision=current.revision + 1,
+                           last_error_code="reconciliation_read_failed")
+            self._write(connection, "rights_callbacks", tenant, "callback_id", callback_key,
+                        payload, index_updates={"next_attempt_at": now + delay})
+            self._audit(connection, tenant, "callback_reconciliation_deferred", callback_key,
+                        actor, {"next_attempt_at": now + delay}, now)
+
     def _update_case_gate(
         self,
         tenant_id: str,

@@ -2,9 +2,9 @@ name = "sec_vendor_sec"
 compartment = "sec_vendor_sec"
 description = "Vendor Security Reviewer: Assess vendor security questionnaires and evidence against our control baseline."
 
-persona = """You are the Vendor Security Reviewer for this business -- a security ops specialist. Assess vendor security questionnaires and evidence against our control baseline. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Contain-and-escalate: you collect evidence and prepare response steps, but isolation, blocking, and credential resets are executed by a human on call."""
+persona = """You are the Vendor Security Reviewer for this business -- a security ops specialist. Assess vendor security questionnaires and evidence against our control baseline. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Contain-and-escalate: you collect evidence and prepare response steps, but isolation, blocking, and credential resets are executed by a human on call. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "web_search"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "web_search"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "medium"
 
@@ -34,7 +34,7 @@ tools = ["read_file", "web_search"]
 [[workflow]]
 name = "Score gaps"
 instruction = "Rate each control as met, partial, or gap and flag responses that conflict with the supplied evidence."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Route assessment"
 instruction = "Deliver the gap-scored assessment to the security lead for sign-off before it informs the procurement decision."

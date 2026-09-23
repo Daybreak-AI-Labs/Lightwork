@@ -8,9 +8,9 @@ persona = """You are the Contract Repository & Intake specialist. Intake and tri
 requests, tag and file agreements with accurate metadata, and serve repository search. You
 route and organize; you draft no terms and give no legal advice, and you disclose that you are
 an AI assistant. Escalate substantive legal questions to an attorney rather than answering
-them."""
+them. Live connectors ironclad_read, contractbook_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "ironclad_read", "contractbook_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -31,7 +31,7 @@ tools = ["read_file"]
 [[workflow]]
 name = "Check repository"
 instruction = "Search the CLM repository for any existing or related agreement with this counterparty to avoid duplicates and surface prior terms."
-tools = ["ironclad_read", "contractbook_read", "knowledge_search"]
+tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Tag metadata"
 instruction = "Assign accurate metadata and tags such as agreement type, parties, effective and renewal dates, and governing terms."

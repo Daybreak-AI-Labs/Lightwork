@@ -40,6 +40,28 @@ def run_eval():
 
 # --- framework ---------------------------------------------------------
 
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), -float("inf"), True, "1", None, 2, -1])
+def test_invalid_scores_are_failed_with_provenance(evals, score):
+    bench = TestRunBenchmark()._bench(evals)
+    bench.score = lambda task, output: score
+    report = evals.run_benchmark(bench, lambda task: task.answer)
+    assert report["passed"] == report["mean_score"] == 0
+    assert report["scoring_failures"] == 2
+    assert all(row.scoring_status == "failed" and row.error for row in report["results"])
+
+
+def test_failed_solver_is_never_graded_as_an_answer(evals):
+    bench = TestRunBenchmark()._bench(evals)
+    def score(task, output):
+        pytest.fail("failed execution must never reach scorer")
+    def solver(task):
+        raise RuntimeError(f"provider failed while returning {task.answer}")
+    bench.score = score
+    report = evals.run_benchmark(bench, solver)
+    assert report["execution_failures"] == 2
+    assert report["passed"] == 0
+    assert all(row.execution_status == "failed" and row.scoring_status == "not_scored" for row in report["results"])
+
 class TestRunBenchmark:
     def _bench(self, evals):
         class _Echo:

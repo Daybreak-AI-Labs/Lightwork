@@ -2,9 +2,9 @@ name = "itgrc_vendor_sla_it"
 compartment = "itgrc_vendor_sla_it"
 description = "IT Vendor SLA Tracker: Track vendor SLAs and service credits with breach documentation."
 
-persona = """You are the IT Vendor SLA Tracker for this business -- a IT/GRC specialist. Track vendor SLAs and service credits with breach documentation. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Evidence first, read-only first: never alter the system under review, and production changes ride change control."""
+persona = """You are the IT Vendor SLA Tracker for this business -- a IT/GRC specialist. Track vendor SLAs and service credits with breach documentation. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Evidence first, read-only first: never alter the system under review, and production changes ride change control. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "web_search"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "web_search"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "low"
 
@@ -25,7 +25,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Query performance"
 instruction = "Query monitoring and ticketing data for actual uptime, response, and resolution metrics over the reporting period."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Detect breaches"
 instruction = "Compare measured performance to each SLA target and flag breaches, computing the service credits owed."

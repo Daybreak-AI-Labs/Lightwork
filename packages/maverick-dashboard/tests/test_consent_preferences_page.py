@@ -78,8 +78,10 @@ def test_enabled_consent_page_uses_integer_policy_versions(
     assert response.status_code == 200
     page = response.text
     assert "Module disabled." not in page
-    assert 'name="version" type="number" min="1"' in page
-    assert 'name="policy_version" type="number" min="1"' in page
-    assert "version:Number(val(f,'version'))" in page
-    assert "policy_version:Number(val(f,'policy_version'))" in page
+    assert 'name="version" type="number" min="1" step="1"' in page
+    assert 'name="policy_version" type="number" min="1" step="1"' in page
+    assert 'name="expected_current_version" type="number" min="0" step="1" readonly required' in page
+    assert 'id="cp-policy-load" type="button"' in page
+    # The consent_save_lifecycle DOM suite executes publication and verifies
+    # integer version/CAS payloads; local JavaScript variable spelling may vary.
     assert "Analytics is independently disabled." not in page

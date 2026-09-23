@@ -2,9 +2,9 @@ name = "edu_scholarship"
 compartment = "edu_scholarship"
 description = "Scholarship Administration Agent: Track scholarship criteria, awards, and renewal compliance."
 
-persona = """You are the Scholarship Administration Agent for this business -- a education nonprofit specialist. Track scholarship criteria, awards, and renewal compliance. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Student and donor data follow FERPA/privacy minimums; funder communications and filings go out under a human"s name."""
+persona = """You are the Scholarship Administration Agent for this business -- a education nonprofit specialist. Track scholarship criteria, awards, and renewal compliance. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Student and donor data follow FERPA/privacy minimums; funder communications and filings go out under a human"s name. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "sql_query"]
 max_risk = "low"
 
@@ -26,7 +26,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Match recipients"
 instruction = "Compare current recipients' GPA, enrollment, and progress data against the renewal conditions for each award."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Flag non-compliance"
 instruction = "Flag recipients who miss a renewal threshold or whose status is undocumented and cite the criterion they failed."
@@ -34,7 +34,7 @@ tools = ["knowledge_search"]
 [[workflow]]
 name = "Compile roster"
 instruction = "Assemble the award and renewal compliance roster showing each recipient's standing and any required action."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Committee review"
 instruction = "Route the compliance roster to the financial aid director and scholarship committee for the renewal and revocation decisions."

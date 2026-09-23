@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 
 from .embed import DeterministicEmbedder
+from .embedding_identity import FINGERPRINT_KEY, IDENTITY_KEY, identity, validate_batch
 from .parse import extract_document
 from .provider_accounting import operation_scope
 from .store import SqliteVectorStore
@@ -190,6 +191,8 @@ class KnowledgeBase:
         document_text = str(text or "")
         if not document_text.strip():
             return 0
+        descriptor, fingerprint = identity(self.embedder)
+        self._require_embedding_identity(collection, fingerprint)
         size = max(1, int(self.chunk_size))
         overlap = max(0, min(int(self.chunk_overlap), size - 1))
         step = size - overlap
@@ -231,6 +234,8 @@ class KnowledgeBase:
             document_length=len(document_text),
             doc_sha256=document_sha256,
             chunk_count=len(chunks),
+            embedding_identity=descriptor,
+            embedding_fingerprint=fingerprint,
         )
         exact_reader = getattr(self.store, "read_where", None)
         try:
@@ -284,6 +289,10 @@ class KnowledgeBase:
             operation="knowledge-document-embedding",
         ):
             vectors = self.embedder.embed(chunks)
+        validate_batch(vectors, len(chunks), descriptor["dimension"])
+        if identity(self.embedder)[1] != fingerprint:
+            raise RuntimeError("knowledge embedder changed during ingestion; retry")
+        self._require_embedding_identity(collection, fingerprint)
         base_meta["ingested_at"] = time.time()
         items = [
             (
@@ -311,7 +320,12 @@ class KnowledgeBase:
             service=f"vector-store:{type(self.store).__name__}",
             operation="knowledge-document-storage",
         ):
-            self.store.add(collection, items)
+            guarded_add = getattr(self.store, "add_with_identity", None)
+            if callable(guarded_add):
+                guarded_add(collection, items, fingerprint)
+            else:
+                self.store.add(collection, items)
+        self._require_embedding_identity(collection, fingerprint)
         if callable(exact_reader):
             stored = self.exact_document(collection, document_sha256)
             if stored["text"] != document_text or stored["metadata"] != base_meta:
@@ -574,24 +588,74 @@ class KnowledgeBase:
         ):
             self.store.delete_collection(collection)
 
-    def _search_vec(self, collection: str, vector, k: int) -> list[Hit]:
+    def _require_embedding_identity(self, collection: str, fingerprint: str) -> None:
+        total = self.store.count(collection)
+        matching = self.store.count_where(collection, FINGERPRINT_KEY, fingerprint)
+        if total != matching:
+            raise RuntimeError(
+                f"knowledge collection {collection!r} requires explicit reindex: "
+                "stored embedding identity differs or is unknown"
+            )
+
+    def reindex(self, collection: str, *, max_chunks: int = 100_000) -> int:
+        """Replace vectors atomically without changing content, provenance or IDs.
+
+        Only stores providing compare-and-replace support can migrate in place.
+        Other backends must ingest originals into a new collection and then
+        explicitly switch the configured source after validating it.
+        """
+        reader = getattr(self.store, "read_collection", None)
+        replace = getattr(self.store, "replace_embeddings", None)
+        if not callable(reader) or not callable(replace):
+            raise RuntimeError("in-place reindex is unsupported for this backend; "
+                               "ingest originals into a new collection and switch sources")
+        rows = reader(collection, limit=max_chunks)
+        if len(rows) > max_chunks:
+            raise RuntimeError("knowledge reindex exceeds its chunk limit")
+        descriptor, fingerprint = identity(self.embedder)
+        items = []
+        for start in range(0, len(rows), 64):
+            batch = rows[start:start + 64]
+            with operation_scope(category="storage", service=f"embedder:{type(self.embedder).__name__}",
+                                 operation="knowledge-reindex-embedding"):
+                vectors = self.embedder.embed([row.text for row in batch])
+            validate_batch(vectors, len(batch), descriptor["dimension"])
+            items.extend((row.chunk_id, row.text, vector,
+                          {**row.meta, IDENTITY_KEY: descriptor, FINGERPRINT_KEY: fingerprint})
+                         for row, vector in zip(batch, vectors, strict=True))
+        if identity(self.embedder)[1] != fingerprint:
+            raise RuntimeError("knowledge embedder changed during reindex; retry")
+        replace(collection, rows, items)
+        self._require_embedding_identity(collection, fingerprint)
+        return len(items)
+
+    def _search_vec(self, collection: str, vector, k: int, fingerprint: str) -> list[Hit]:
         """Store lookup for an already-embedded query; one Hit-wrap site."""
+        self._require_embedding_identity(collection, fingerprint)
         with operation_scope(
             category="retrieval",
             service=f"vector-store:{type(self.store).__name__}",
             operation="knowledge-vector-search",
         ):
             matches = self.store.search(collection, vector, k)
+        self._require_embedding_identity(collection, fingerprint)
+        if any(m.meta.get(FINGERPRINT_KEY) != fingerprint for m in matches):
+            raise RuntimeError("knowledge embedding identity changed during search; retry")
         return [Hit(m.score, m.text, m.meta.get("source", "")) for m in matches]
 
     def search(self, collection: str, query: str, k: int = 5) -> list[Hit]:
+        descriptor, fingerprint = identity(self.embedder)
+        self._require_embedding_identity(collection, fingerprint)
         with operation_scope(
             category="retrieval",
             service=f"embedder:{type(self.embedder).__name__}",
             operation="knowledge-query-embedding",
         ):
-            vector = self.embedder.embed([query])[0]
-        return self._search_vec(collection, vector, k)
+            vector = getattr(self.embedder, "embed_query", self.embedder.embed)([query])[0]
+        validate_batch([vector], 1, descriptor["dimension"])
+        if identity(self.embedder)[1] != fingerprint:
+            raise RuntimeError("knowledge embedder changed during search; retry")
+        return self._search_vec(collection, vector, k, fingerprint)
 
     def search_formatted(self, collections, query: str, k: int = 5) -> str:
         """Search one or more domain collections and render the top-k chunks with
@@ -603,15 +667,22 @@ class KnowledgeBase:
         is collapsed before the k-slice -- absorbed duplicates make room for
         the next-best distinct chunk rather than shrinking the result, and the
         model never pays tokens for the same span twice."""
+        descriptor, fingerprint = identity(self.embedder)
+        collections = tuple(collections)
+        for collection in collections:
+            self._require_embedding_identity(collection, fingerprint)
         with operation_scope(
             category="retrieval",
             service=f"embedder:{type(self.embedder).__name__}",
             operation="knowledge-query-embedding",
         ):
-            vector = self.embedder.embed([query])[0]
+            vector = getattr(self.embedder, "embed_query", self.embedder.embed)([query])[0]
+        validate_batch([vector], 1, descriptor["dimension"])
+        if identity(self.embedder)[1] != fingerprint:
+            raise RuntimeError("knowledge embedder changed during search; retry")
         hits: list[Hit] = []
         for c in collections:
-            hits.extend(self._search_vec(c, vector, k))
+            hits.extend(self._search_vec(c, vector, k, fingerprint))
         hits.sort(key=lambda h: h.score, reverse=True)
         hits = _dedup_hits(hits, max_overlap=self.chunk_overlap)[: max(1, k)]
         if not hits:

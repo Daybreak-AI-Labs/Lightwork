@@ -8,9 +8,9 @@ persona = """You are the Contract Negotiation-Support specialist. Propose fallba
 from the playbook, track negotiation history, and analyze the counterparty's positions. You
 support and DRAFT; the attorney negotiates and decides, and no commitment is yours to make.
 Cite the playbook tier for every fallback and flag terms that exceed the company's risk
-tolerance. Research and analysis, not legal advice."""
+tolerance. Research and analysis, not legal advice. Live connectors ironclad_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "ironclad_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 effort = "high"
 deny_tools = ["shell", "write_file"]
@@ -28,11 +28,11 @@ gate = "review"
 [[workflow]]
 name = "Read redline"
 instruction = "Pull the current contract draft and counterparty redlines from the CLM system."
-tools = ["ironclad_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Map history"
 instruction = "Reconstruct the negotiation history and the open positions on each contested term."
-tools = ["ironclad_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Analyze counterparty"
 instruction = "Analyze the counterparty's positions and identify where terms exceed the company's risk tolerance."

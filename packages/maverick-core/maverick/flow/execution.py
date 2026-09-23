@@ -25,6 +25,7 @@ from . import node_outcomes, store
 from .ir import Flow, FlowNode
 from .runner import (
     PAUSED_STATUSES,
+    STATUS_BUDGET_LIMITED,
     STATUS_CLAIMED,
     STATUS_COMPLETED,
     STATUS_FAILED,
@@ -33,6 +34,7 @@ from .runner import (
     STATUS_RESUMING,
     STATUS_RUNNING,
     FlowApprovalStale,
+    FlowBudgetExceeded,
     run_flow,
 )
 
@@ -72,29 +74,46 @@ AgentRunner = Callable[[str, dict], "tuple[Any, float | None]"]
 ActionRunner = Callable[[str, dict, dict], "tuple[Any, float | None]"]
 
 
-DEFAULT_AGENT_BUDGET = 5.0   # matches default_agent_runner's per-node cap
+DEFAULT_AGENT_BUDGET = 5.0   # legacy injected-runner reservation; production meters actual usage
+
+
+class _MeteredAgentResult(tuple):
+    """Keep the two-value executor contract with response-local spend."""
+
+    def __new__(cls, result, outcome, dollars):
+        value = super().__new__(cls, (result, outcome))
+        value.dollars = float(dollars)
+        return value
 
 
 def _budget_gated(agent_runner: AgentRunner, cap: float, per_call: float, spent: list) -> AgentRunner:
     """Wrap an agent runner with a per-RUN aggregate spend ceiling. Each agent
     node is reserved at its worst-case per-node budget (``per_call``) against a
     shared, lock-guarded total; once the next reservation would exceed ``cap`` the
-    node is skipped instead of spawning another goal. This bounds fan-out spend --
+    node is held instead of spawning another goal. This bounds fan-out spend --
     a wide ``parallel`` or a long ``foreach`` can't multiply cost without a
     ceiling. Conservative: it counts each node at its cap, so it never
     under-counts real spend. Thread-safe for concurrent branches.
 
-    A skipped node grounds a ``None`` outcome, NOT ``0.0``: it never ran, so it is
-    not a failure -- grounding 0.0 would make a healthy node look flaky (skewing
-    self-rewrite proposals), burn its retries against the still-exhausted gate,
-    and fire its on_error branch. ``None`` means "no signal," which is correct."""
+    Production runners meter actual usage and accept the remaining allowance.
+    With an explicit aggregate cap they serialize agent admission, so parallel
+    children cannot each consume the same remainder. Injected legacy runners
+    retain their declared conservative reservation contract. A pre-dispatch
+    refusal is a control stop, with no business result or learning outcome."""
     import threading
     lock = threading.Lock()
 
     def run(brief: str, data: dict, **kw) -> tuple:
         with lock:
+            if getattr(agent_runner, "_meters_usage", False):
+                remaining = cap - spent[0]
+                if remaining <= 0:
+                    raise FlowBudgetExceeded(f"flow spending allowance reached (${cap:g}) before dispatch")
+                result = agent_runner(brief, data, allowance=remaining, **kw)
+                spent[0] += result.dollars
+                return result
             if spent[0] + per_call > cap:
-                return (f"skipped: flow budget exhausted (${cap:g} cap)", None)
+                raise FlowBudgetExceeded(f"flow spending allowance reached (${cap:g}) before dispatch")
             spent[0] += per_call
         return agent_runner(brief, data, **kw)
     return run
@@ -108,6 +127,11 @@ def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> A
     lock = threading.Lock()
 
     def run(brief: str, data: dict, **kw) -> tuple:
+        if getattr(agent_runner, "_meters_usage", False):
+            result = agent_runner(brief, data, **kw)
+            with lock:
+                spent[0] += result.dollars
+            return result
         with lock:
             spent[0] += per_call
         return agent_runner(brief, data, **kw)
@@ -227,6 +251,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
              approval_authority_binding_sha256: str = "",
              approval_decision_attestation: object | None = None,
              from_failure: bool = False,
+            budget_limit_dollars: float | None = None,
             inputs: dict | None = None, record_outcomes: bool = True,
             agent_budget_dollars: float = DEFAULT_AGENT_BUDGET, origin: str = "manual",
             now: Callable[[], float] | None = None) -> store.FlowRun:
@@ -255,6 +280,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     approval_check_binding = ""
     approval_check_expired = False
     approval_snapshot = None
+    if budget_limit_dollars is not None and not resume_run_id:
+        raise FlowNotResumable("a run allowance change requires a saved budget-held run")
     if resume_run_id:
         prior = store.load_run(resume_run_id)
         if prior is None:
@@ -265,7 +292,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         # this guard, resuming a completed run re-executes the whole flow
         # (duplicate side effects) and resuming a rejected run runs the very node
         # a human rejected -- defeating the approval gate.
-        retryable_failure = (from_failure and prior.status == STATUS_FAILED
+        retryable_failure = (from_failure and prior.status in {STATUS_FAILED, STATUS_BUDGET_LIMITED}
                              and bool(prior.cursor))
         approval_resume = prior.status == STATUS_PAUSED_APPROVAL
         if prior.status not in _RESUMABLE and not retryable_failure:
@@ -273,6 +300,17 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 f"run {resume_run_id!r} is not paused (status {prior.status!r})"
                 + ("; it has no failure cursor to retry from"
                    if from_failure and prior.status == STATUS_FAILED else ""))
+        if budget_limit_dollars is not None:
+            import math
+            if (
+                prior.status != STATUS_BUDGET_LIMITED or not from_failure
+                or isinstance(budget_limit_dollars, bool)
+                or not math.isfinite(budget_limit_dollars)
+                or budget_limit_dollars <= max(
+                    prior.cost_dollars, prior.budget_limit_dollars or 0.0,
+                )
+            ):
+                raise FlowNotResumable("a budget-held run requires a larger finite total allowance")
         # Resume the immutable graph captured at run start.  This makes an
         # approval meaningful: an edit made while the run is paused cannot swap
         # the reviewed downstream action (or a referenced child flow) for a new
@@ -313,6 +351,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         resume = {"node_id": prior.cursor, "data": resume_data}
         if retryable_failure:
             resume["rerun"] = True
+            if prior.continuation:
+                resume["continuation"] = prior.continuation
         elif prior.status == STATUS_PAUSED_APPROVAL:
             # `expired` rides outside the human-verdict string. The dashboard
             # worker validates its bound scheduler reservation and due time
@@ -463,11 +503,16 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # max_dollars gate updates this list too; without a gate, wrap a plain spend
     # tracker so cost is still recorded.
     spent = [float(prior.cost_dollars) if (resume_run_id and prior) else 0.0]
+    run_budget_limit = (
+        budget_limit_dollars if budget_limit_dollars is not None
+        else prior.budget_limit_dollars if prior is not None and prior.budget_limit_dollars is not None
+        else flow.max_dollars
+    )
     if record_outcomes:
-        if flow.max_dollars and flow.max_dollars > 0:
+        if run_budget_limit and run_budget_limit > 0:
             # Aggregate per-run spend ceiling: a wide parallel / long foreach can't
             # fan out unbounded cost (per-node budget alone doesn't bound the COUNT).
-            agent_runner = _budget_gated(agent_runner, flow.max_dollars, agent_budget_dollars, spent)
+            agent_runner = _budget_gated(agent_runner, run_budget_limit, agent_budget_dollars, spent)
         else:
             agent_runner = _spend_tracked(agent_runner, agent_budget_dollars, spent)
 
@@ -662,7 +707,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 },
                 budget={
                     "currency": "USD",
-                    "run_limit_dollars": flow.max_dollars or "configured runtime limit",
+                    "run_limit_dollars": run_budget_limit or "configured runtime limit",
                     "reserved_so_far_dollars": round(spent[0], 4),
                     "authority_sha256": runtime_authority[
                         "budget_authority_sha256"
@@ -688,7 +733,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     run = store.FlowRun(
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
-        error=res.error, owner=owner, origin=run_origin, cost_dollars=round(spent[0], 4),
+        continuation=res.continuation,
+        error=res.error, owner=owner, origin=run_origin, cost_dollars=spent[0],
+        budget_limit_dollars=run_budget_limit or None,
         human=human,
         decided_by=(
             approval_actor
@@ -736,8 +783,8 @@ def default_agent_runner(
     world,
     *,
     owner: str = "",
-    budget_dollars: float = 5.0,
-    budget_wall_seconds: float = 3600.0,
+    budget_dollars: float | None = None,
+    budget_wall_seconds: float | None = None,
     channel: str | None = None,
     user_id: str | None = None,
     allowed_suites: frozenset[str] | None = None,
@@ -749,25 +796,36 @@ def default_agent_runner(
     and grounds a terminal outcome (done=1.0 / not=0.0) as the node's signal.
     Best-effort: a runner failure yields a failure result + a 0.0 outcome rather
     than raising into the flow."""
-    def run(brief: str, data: dict, wall: float | None = None) -> tuple[Any, float | None]:
+    def run(brief: str, data: dict, wall: float | None = None,
+            *, allowance: float | None = None) -> tuple[Any, float | None]:
+        from ..runner import clamp_task_limit, configured_max_dollars, configured_max_wall_seconds
+
         gid = world.create_goal(str(brief)[:200], str(brief)[:8000], owner=owner)
         # A per-node timeout bounds this goal's wall so a timed-out node's goal
         # self-terminates instead of running to the default cap after the flow
         # gave up on it (kernel rule 3 still holds -- this only ever lowers it).
-        ws = min(budget_wall_seconds, wall) if (wall and wall > 0) else budget_wall_seconds
+        ws = clamp_task_limit(budget_wall_seconds, configured_max_wall_seconds())
+        ws = clamp_task_limit(wall if wall and wall > 0 else None, ws)
+        dollars = clamp_task_limit(budget_dollars, configured_max_dollars())
+        dollars = clamp_task_limit(allowance, dollars)
+        usage = []
         try:
             from ..runner import run_goal_in_thread
             result = run_goal_in_thread(
                 gid,
-                max_dollars=budget_dollars,
+                max_dollars=dollars,
                 max_wall_seconds=ws,
                 channel=channel,
                 user_id=user_id,
                 allowed_suites=allowed_suites,
                 concurrency_principal=(concurrency_principal or owner or user_id),
+                usage_observer=usage.append,
             )
         except Exception as e:  # pragma: no cover -- runner wiring varies by env
-            return (f"agent step failed: {type(e).__name__}: {_safe_failure(e)}", 0.0)
+            return _MeteredAgentResult(
+                f"agent step failed: {type(e).__name__}: {_safe_failure(e)}", 0.0,
+                usage[-1] if usage else 0.0,
+            )
         g = world.get_goal(gid)
         outcome = 1.0 if (g and g.status == "done") else 0.0
         # Attribute this goal's tool usage back to the node (from the ContextVar
@@ -783,7 +841,11 @@ def default_agent_runner(
             _capture_node_tools(
                 fid, nid, gid, revision=revision, cohort=cohort,
             )
-        return (result if result is not None else (g.result if g else ""), outcome)
+        return _MeteredAgentResult(
+            g.result if g is not None else (result or ""), outcome,
+            usage[-1] if usage else 0.0,
+        )
+    run._meters_usage = True
     return run
 
 

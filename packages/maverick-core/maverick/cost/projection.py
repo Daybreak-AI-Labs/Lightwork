@@ -94,7 +94,7 @@ class BudgetVerdict:
     verdict: str            # "OK" | "TIGHT" | "OVER"
     recommendation: str     # one line, human-ready
     projected_dollars: float
-    budget_dollars: float
+    budget_dollars: float | None
 
 
 def _price_for(model: str) -> tuple[float, float]:
@@ -175,7 +175,7 @@ def project_plan(steps: list[dict], *, iterations: int = 1) -> PlanProjection:
     )
 
 
-def compare_against_budget(projection: PlanProjection, budget_dollars: float) -> BudgetVerdict:
+def compare_against_budget(projection: PlanProjection, budget_dollars: float | None) -> BudgetVerdict:
     """Verdict for a projection against a dollar cap, plus one recommendation.
 
     OVER when the projection exceeds the budget (a non-positive budget is OVER
@@ -183,6 +183,13 @@ def compare_against_budget(projection: PlanProjection, budget_dollars: float) ->
     headroom matters because these estimates skew low; OK otherwise.
     """
     total = projection.total_dollars
+    if budget_dollars is None:
+        return BudgetVerdict(
+            verdict="OK", recommendation=(
+                f"Projected ${total:.4f}; no task-specific spending limit is configured. "
+                "Organization allowances and provider controls still apply."
+            ), projected_dollars=total, budget_dollars=None,
+        )
     budget = float(budget_dollars)
     if total > budget:
         verdict = "OVER"

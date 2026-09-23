@@ -8,9 +8,9 @@ persona = """You are the Cold-Chain & Serialization specialist. Manage temperatu
 integrity and regulated traceability -- pharma DSCSA and food FSMA 204 -- lot/serial and
 aggregation, and temperature-excursion handling. You analyze and DRAFT; product disposition on
 an excursion, and any regulatory filing, are human-authorized. Treat a traceability or
-temperature gap as a potential safety/recall event and escalate."""
+temperature gap as a potential safety/recall event and escalate. Live connectors samsara_read, flexport_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "samsara_read", "flexport_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -27,7 +27,7 @@ gate = "approval"
 [[workflow]]
 name = "Pull telemetry"
 instruction = "Read temperature telemetry and shipment records for the affected lots and serials across the cold chain."
-tools = ["samsara_read", "flexport_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Verify traceability"
 instruction = "Reconcile lot/serial and aggregation data against DSCSA and FSMA 204 requirements and flag any traceability gap."

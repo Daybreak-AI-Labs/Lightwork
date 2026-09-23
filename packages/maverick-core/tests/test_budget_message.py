@@ -40,6 +40,38 @@ async def test_budget_exhaustion_gives_helpful_message(tmp_path: Path, fake_llm)
     # the user can see how far over they went and what the limit was (#598).
     assert "$5.00 of $0.01 cap" in out
     assert world.get_goal(gid).status == "blocked"
+    assert world.get_goal(gid).result == out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["provider", "setup"])
+async def test_organization_allowance_message_survives_agent_and_lifecycle(
+    tmp_path, fake_llm, monkeypatch, stage,
+):
+    from maverick.tenant.provider_admission import OrganizationBudgetExceeded
+
+    world = WorldModel(tmp_path / "world.db")
+    gid = world.create_goal("organization controlled task", "")
+
+    async def refuse(*args, **kwargs):
+        raise OrganizationBudgetExceeded("Daily allowance has unresolved charges")
+
+    if stage == "provider":
+        monkeypatch.setattr(fake_llm, "complete_async", refuse)
+    else:
+        monkeypatch.setattr("maverick.orchestrator._build_orchestrator_brief", refuse)
+    out = await run_goal(
+        fake_llm, world, Budget(), gid,
+        sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
+    )
+    assert "organization spending allowance" in out
+    assert "Daily allowance has unresolved charges" in out
+    assert "organization administrator" in out
+    assert "--max-dollars" not in out and "internal error" not in out
+    assert world.get_goal(gid).status == "blocked"
+    assert world.get_goal(gid).result == out
+    episode, = world.list_episodes(goal_id=gid)
+    assert episode.outcome == "interrupted" and episode.ended_at is not None
 
 
 class _StrictInvoiceClient:

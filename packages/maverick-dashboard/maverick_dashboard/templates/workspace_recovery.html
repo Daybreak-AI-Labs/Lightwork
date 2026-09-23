@@ -89,6 +89,7 @@
     <p id="wrec-reconciliation-status" role="status" aria-live="polite"></p>
     <p>Nothing listed here runs automatically. Pending requests must be retired and recreated under current authority. Work that may have reached an external system requires an authoritative readback reference.</p>
     <ul id="wrec-reconciliation-items"></ul>
+    <p>For channel records, review the exact readback template below against the provider or source system. Enter the observation time as Unix seconds and retain its evidence reference. Readback must be no older than 15 minutes. Confirmed old receipts remain retired from automatic replay. Polling checkpoints must name the current provider watermark, timestamp floor, or iMessage row position; do not reuse an archived continuation. Unknown or unavailable outcomes must remain unresolved.</p>
     <p id="wrec-reconciliation-blocked" hidden>This build cannot safely classify or rewrite at least one restored authority. Keep recovery mode active and <a href="/help">create a redacted support report in the app</a>.</p>
     <label class="wrec-confirm"><input id="wrec-reconciliation-confirm" type="checkbox">I reviewed every restored item and authorize returning this workspace to normal use after restart.</label>
     <button id="wrec-reconciliation-complete" type="button" disabled>Complete restored-work review</button>

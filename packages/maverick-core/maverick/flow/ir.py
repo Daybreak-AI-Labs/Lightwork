@@ -115,8 +115,10 @@ UNSAFE_ACTION_TOOLS = frozenset({
     "transcribe_audio",
     "speak",
     "spreadsheet",
+    "spreadsheet_read",
     "pandas_query",
     "sql_query",
+    "sql_query_read",
     "self_edit",
 })
 

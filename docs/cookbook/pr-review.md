@@ -32,8 +32,9 @@ Don't change any code. End with a "verdict" line: "looks good",
 
 - Use `maverick monitor` in a second terminal to watch the agent
   navigate the diff.
-- Cap the budget tighter than the default $5: `MAVERICK_BUDGET_DOLLARS=1`
-  (or set in config.toml).
+- Choose an explicit $1 task cap with `MAVERICK_BUDGET_DOLLARS=1`
+  (or set it in config.toml). Ordinary tasks have no generated dollar cap;
+  existing configured limits are preserved. See [task limits](../task-limits.md).
 - If you want the agent to apply suggested fixes, add to the goal:
   *"After reviewing, apply only the fixes you're highly confident
   in. Open a separate commit for them."*

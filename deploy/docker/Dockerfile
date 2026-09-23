@@ -107,7 +107,9 @@ RUN groupadd --gid 1000 maverick \
     && mkdir -p /workspace /home/maverick/.maverick \
     && chown -R maverick:maverick /workspace /home/maverick
 
+COPY --chmod=0755 deploy/docker/entrypoint.sh /usr/local/bin/lightwork-entrypoint
 ENV HOME=/home/maverick
+ENV MAVERICK_WORKDIR=/home/maverick/.maverick/workspace
 USER maverick
 WORKDIR /workspace
 
@@ -117,5 +119,5 @@ WORKDIR /workspace
 
 # Default entrypoint is the maverick CLI. First run — if config is missing —
 # helpfully points the user at `maverick init`.
-ENTRYPOINT ["maverick"]
+ENTRYPOINT ["/usr/local/bin/lightwork-entrypoint"]
 CMD ["--help"]

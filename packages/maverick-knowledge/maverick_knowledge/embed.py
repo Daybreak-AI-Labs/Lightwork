@@ -44,6 +44,10 @@ class DeterministicEmbedder:
     def __init__(self, dim: int = 256):
         self.dim = dim
 
+    def embedding_identity(self) -> dict:
+        return {"provider": "deterministic", "model": "sha256-token-bins",
+                "revision": "1", "preprocessing": "lowercase-whitespace-l2.v1"}
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for t in texts:
@@ -63,11 +67,13 @@ class HostedEmbedder:
     is imported lazily so the package imports clean without the ``hosted`` extra.
     """
 
-    def __init__(self, model: str, base_url: str, api_key: str, dim: int = 1024):
+    def __init__(self, model: str, base_url: str, api_key: str, dim: int = 1024,
+                 revision: str = "provider-model-contract"):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.dim = dim
+        self.revision = revision
         hostname = (urlsplit(self.base_url).hostname or "hosted-embeddings").lower()
         if "voyageai" in hostname:
             self.provider = "voyage"
@@ -75,6 +81,10 @@ class HostedEmbedder:
             self.provider = "openai"
         else:
             self.provider = hostname[:192]
+
+    def embedding_identity(self) -> dict:
+        return {"provider": self.provider, "model": self.model, "endpoint": self.base_url,
+                "revision": self.revision, "preprocessing": "text-verbatim.v1"}
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx
@@ -121,14 +131,27 @@ class CohereEmbedder:
 
     def __init__(self, model: str, api_key: str, dim: int = 1024,
                  base_url: str = "https://api.cohere.com/v2",
-                 input_type: str = "search_document"):
+                 input_type: str = "search_document", revision: str = "provider-model-contract"):
         self.model = model
         self.api_key = api_key
         self.dim = dim
         self.base_url = base_url.rstrip("/")
         self.input_type = input_type
+        self.revision = revision
+
+    def embedding_identity(self) -> dict:
+        return {"provider": "cohere", "model": self.model, "endpoint": self.base_url,
+                "revision": self.revision, "document_input_type": self.input_type,
+                "query_input_type": "search_query", "preprocessing": "text-verbatim.v1"}
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts, input_type=self.input_type)
+
+    def embed_query(self, texts: list[str]) -> list[list[float]]:
+        """Encode queries in the paired retrieval space without mutating mode."""
+        return self._embed(texts, input_type="search_query")
+
+    def _embed(self, texts: list[str], *, input_type: str) -> list[list[float]]:
         import httpx
 
         def dispatch():
@@ -138,7 +161,7 @@ class CohereEmbedder:
                 json={
                     "model": self.model,
                     "texts": texts,
-                    "input_type": self.input_type,
+                    "input_type": input_type,
                     "embedding_types": ["float"],
                 },
                 timeout=60,
@@ -196,6 +219,7 @@ def build_embedder(cfg: dict | None = None) -> Embedder:
             base_url=cfg.get("base_url", "https://api.voyageai.com/v1"),
             api_key=key,
             dim=int(cfg.get("dim", 1024)),
+            revision=str(cfg.get("revision") or "provider-model-contract"),
         )
 
     if provider == "cohere":
@@ -212,6 +236,7 @@ def build_embedder(cfg: dict | None = None) -> Embedder:
             api_key=key,
             dim=int(cfg.get("dim", 1024)),
             input_type=cfg.get("input_type", "search_document"),
+            revision=str(cfg.get("revision") or "provider-model-contract"),
         )
 
     if provider == "local":
@@ -223,7 +248,7 @@ def build_embedder(cfg: dict | None = None) -> Embedder:
                 "embedder = 'deterministic' for offline/dev retrieval."
             )
         from .local_embed import LocalEmbedder  # optional 'local' extra
-        return LocalEmbedder(cfg.get("model", "all-MiniLM-L6-v2"))
+        return LocalEmbedder(cfg.get("model", "all-MiniLM-L6-v2"), revision=cfg.get("revision"))
 
     raise ValueError(
         f"knowledge: unknown embedder provider {provider!r} "

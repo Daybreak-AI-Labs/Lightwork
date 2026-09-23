@@ -63,7 +63,7 @@ class DirectorRun:
     profile: str
     consent_mode: str
     checkpoint: dict          # CheckpointPolicy kwargs
-    max_dollars: float
+    max_dollars: float | None
     planning_mode: str = "plan_execute_reflect"
     env_overrides: dict = field(default_factory=dict)
 
@@ -114,8 +114,8 @@ def direct(outcome: str, *, profile: str = "supervised",
         raise ValueError("an outcome statement is required")
     p = _profile(profile)
     if base_max_dollars is None:
-        from .budget import budget_from_config
-        base_max_dollars = float(budget_from_config().max_dollars)
+        from .budget import resolve_budget_caps
+        base_max_dollars = resolve_budget_caps().get("max_dollars")
     title = outcome if len(outcome) <= 80 else outcome[:77] + "..."
     description = (
         f"Outcome: {outcome}\n\n"
@@ -129,7 +129,8 @@ def direct(outcome: str, *, profile: str = "supervised",
         profile=profile,
         consent_mode=str(p["consent_mode"]),
         checkpoint=dict(p["checkpoint"]),
-        max_dollars=round(base_max_dollars * float(p["budget_multiplier"]), 2),
+        max_dollars=(round(base_max_dollars * float(p["budget_multiplier"]), 2)
+                     if base_max_dollars is not None else None),
         env_overrides={
             "MAVERICK_CONSENT_MODE": str(p["consent_mode"]),
             "MAVERICK_REVIEW_CHECKPOINT_DOLLARS": str(p["checkpoint"].get("dollars", "")),

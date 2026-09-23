@@ -33,7 +33,7 @@ def _json(value: Any) -> bytes:
                       ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
-def prepare(data: dict, input_data: dict) -> dict:
+def prepare(data: dict, input_data: dict, continuation: dict | None = None) -> dict:
     """Validate resource limits before detection; keep every legitimate value.
 
     Unlike preview truncation, quota/type failures are explicit. Tuples are
@@ -74,7 +74,12 @@ def prepare(data: dict, input_data: dict) -> dict:
 
     if not isinstance(data, dict) or not isinstance(input_data, dict):
         raise FlowPayloadError("flow checkpoint data must be objects")
-    normalized = visit({"data": data, "input_data": input_data})
+    values = {"data": data, "input_data": input_data}
+    if continuation is not None:
+        if not isinstance(continuation, dict):
+            raise FlowPayloadError("flow continuation must be an object")
+        values["continuation"] = continuation
+    normalized = visit(values)
     try:
         # Measure escaping/large integers too, before scanning the text.
         if len(_json(normalized)) > MAX_BYTES:
@@ -167,6 +172,8 @@ def _legacy_incomplete(value: Any) -> bool:
 def decode(root: Path, row: dict) -> dict:
     ref = row.get("data_state")
     values = {"data": row.get("data") or {}, "input_data": row.get("input_data") or {}}
+    if "continuation" in row:
+        values["continuation"] = row["continuation"]
     if ref is None:
         if _legacy_incomplete(values):
             raise FlowPayloadError("legacy flow checkpoint is incomplete; restore complete inputs before retrying")
@@ -192,7 +199,9 @@ def decode(root: Path, row: dict) -> dict:
                     or any(opened[key] != value for key, value in scope.items())):
                 raise FlowPayloadError("flow checkpoint artifact belongs to a different scope")
             values = opened["values"]
-            if not isinstance(values, dict) or set(values) != {"data", "input_data"}:
+            if not isinstance(values, dict) or set(values) not in (
+                {"data", "input_data"}, {"data", "input_data", "continuation"},
+            ):
                 raise FlowPayloadError("flow checkpoint artifact values are invalid")
         else:
             raise FlowPayloadError("flow checkpoint reference kind is invalid")

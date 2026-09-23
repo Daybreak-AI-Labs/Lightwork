@@ -322,6 +322,13 @@ def test_bootstrap_key_install_resume_and_reconciliation_routes_are_strict_and_b
         "evidence_reference": "ticket-123", "isolated": True,
         "actor": headers["X-Lightwork-Recovery-Context"],
     })
+    channel_body = {"confirm": True, "disposition": "channel_readback_confirmed", "channel_readback": {"schema": 1}}
+    assert client.post(f"/api/v1/recovery/reconciliation/items/{item}", json=channel_body).status_code == 409
+    assert client.post(f"/api/v1/recovery/reconciliation/items/{item}", headers=headers, json=channel_body).status_code == 200
+    assert calls[-1] == ("resolve", item, "channel_readback_confirmed", {
+        "evidence_reference": None, "channel_readback": {"schema": 1}, "isolated": True,
+        "actor": headers["X-Lightwork-Recovery-Context"],
+    })
     assert client.post("/api/v1/recovery/reconciliation/complete", headers=headers, json={"confirm": True}).status_code == 200
     assert calls[-1] == ("complete", {
         "isolated": True, "actor": headers["X-Lightwork-Recovery-Context"],

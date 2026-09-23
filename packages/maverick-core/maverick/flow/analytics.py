@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 from ..budget_tuner import percentile
 from .runner import (
     PAUSED_STATUSES,
+    STATUS_BUDGET_LIMITED,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_REJECTED,
@@ -51,7 +52,7 @@ def aggregate(*, owner: str | None = None, limit: int = 500) -> dict:
                 agg["errors"][str(r.error)[:160]] += 1
         elif r.status == STATUS_REJECTED:
             agg["rejected"] += 1
-        elif r.status in PAUSED_STATUSES:
+        elif r.status in PAUSED_STATUSES or r.status == STATUS_BUDGET_LIMITED:
             agg["paused"] += 1
     out = []
     for flow_id, agg in by_flow.items():

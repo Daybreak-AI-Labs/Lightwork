@@ -144,7 +144,7 @@ class DeliveryJournal:
         for position, record_id in self.store.iter_record_ids(start_after=next_cursor, limit=limit):
             row = self.get(record_id)
             next_cursor = position
-            if (row and row["channel"] == channel and row["account_sha256"] == _digest(account)
+            if (row and not row.get("restore_hold") and row["channel"] == channel and row["account_sha256"] == _digest(account)
                     and (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
                 rows.append(row)
         return rows, (cursors, cursor, next_cursor)
@@ -201,6 +201,8 @@ class DeliveryJournal:
                 row = self.get(record_id)
         if not row or row["fingerprint"] != fingerprint:
             raise ValueError("Channel message identity already belongs to different content or routing")
+        if row.get("restore_hold"):
+            return row
         if row["execution"] == "staging":
             for path, data, sha in publications:
                 ensure_private_directory(path.parent)
@@ -216,7 +218,7 @@ class DeliveryJournal:
         from maverick.world_model import close_world_if_owned, open_world
 
         _assert_work_allowed()
-        if row["execution"] != "received":
+        if row.get("restore_hold") or row["execution"] != "received":
             return None
         # Open/check the legacy authority before claiming execution so a store
         # outage remains safely retryable. Legacy claims are never reopened.
@@ -241,11 +243,27 @@ class DeliveryJournal:
         or deduplication identities. Operators can archive the tenant authority
         under their retention policy before provisioning further capacity.
         """
-        if not isinstance(limit, int) or not 1 <= limit <= 100:
+        from maverick.governed_records import GovernedRecordStore
+        from maverick.privacy_ops import RecordConflict
+
+        _assert_work_allowed()
+        if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("Invalid channel retention batch")
+        cursors = GovernedRecordStore("channel-delivery-cursors", "chc", "channel_delivery_cursor")
+        cursor_id = "chc-" + _digest(["maintenance", "retention", 1])[:56]
+        cursor = cursors.get(cursor_id)
+        if cursor is None:
+            try:
+                cursor = cursors.create({"id": cursor_id, "cursor": "", "purpose": "retention"},
+                                        action="retention_cursor_created", actor="system:channel", max_records=1000)
+            except RecordConflict:
+                cursor = cursors.get(cursor_id)
         now, compacted = time.time(), 0
-        for row in self.store.list(limit=limit):
-            if (row["execution"] != "completed" or row["delivery"] != "delivered"
+        next_cursor = cursor["cursor"]
+        for position, record_id in self.store.iter_record_ids(start_after=cursor["cursor"], limit=limit):
+            next_cursor = position
+            row = self.get(record_id)
+            if (not row or row.get("restore_hold") or row["execution"] != "completed" or row["delivery"] != "delivered"
                     or row.get("compacted") or row["updated_at"] > now - RETENTION_SECONDS):
                 continue
             paths = [_blob_path(row["id"], item["sha256"]) for item in row["message"].get("attachments", [])]
@@ -255,6 +273,7 @@ class DeliveryJournal:
                 # and bounded receipt/digest values, never external paths.
                 path.unlink(missing_ok=True)
             compacted += 1
+        self.finish_recovery_window((cursors, cursor, next_cursor))
         return compacted
 
 
@@ -281,23 +300,38 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
                                   authorize=authorize, route=route, journal=journal)
     if not authorize():
         raise PermissionError("Channel sender authorization changed")
+    # Materialization/downloads do not dispatch the agent. Leave the receipt
+    # received if preparation fails so a later recovery can safely try again.
+    # CAS publication plus the execution claim still gives one handler owner.
+    if row.get("restore_hold"):
+        return row  # A recovery disposition never authorizes old work to replay.
+    inbound = None
+    if row["execution"] == "received":
+        inbound = await asyncio.to_thread(_materialize, row)
+        if prepare is not None and not row.get("preparation_complete"):
+            from maverick.attachments import _publish_attachment
+            from maverick.file_lock import ensure_private_directory
+            from maverick.privacy_ops import RecordConflict
+
+            inbound = await prepare(inbound)
+            payload, publications = await asyncio.to_thread(_payload, inbound, row["id"])
+            if any(payload[key] != row["message"][key]
+                    for key in ("user_id", "sender_id", "channel", "message_id", "text")):
+                raise PermissionError("Prepared channel input changed its admitted identity or text")
+            for path, data, sha in publications:
+                await asyncio.to_thread(ensure_private_directory, path.parent)
+                await asyncio.to_thread(_publish_attachment, path, data, sha)
+            try:
+                row = await asyncio.to_thread(journal.change, row, message=payload, preparation_complete=True)
+            except RecordConflict:
+                # Another preparer owns the current revision. It alone may
+                # claim execution; an observer must not use stale input.
+                return await asyncio.to_thread(journal.get, row["id"])
+        if not authorize():
+            raise PermissionError("Channel sender authorization changed")
     claimed = await asyncio.to_thread(journal.claim_execution, row)
     if claimed:
         try:
-            inbound = await asyncio.to_thread(_materialize, claimed)
-            if prepare is not None:
-                from maverick.attachments import _publish_attachment
-                from maverick.file_lock import ensure_private_directory
-
-                inbound = await prepare(inbound)
-                payload, publications = await asyncio.to_thread(_payload, inbound, claimed["id"])
-                if any(payload[key] != claimed["message"][key]
-                       for key in ("user_id", "sender_id", "channel", "message_id", "text")):
-                    raise PermissionError("Prepared channel input changed its admitted identity or text")
-                for path, data, sha in publications:
-                    await asyncio.to_thread(ensure_private_directory, path.parent)
-                    await asyncio.to_thread(_publish_attachment, path, data, sha)
-                claimed = await asyncio.to_thread(journal.change, claimed, message=payload)
             if not authorize():
                 raise PermissionError("Channel sender authorization changed")
             _assert_work_allowed()
@@ -388,6 +422,8 @@ class _DeliveryAttempt:
             raise PermissionError("Channel reply authorization changed")
         key = _bounded(key, 128, "chunk key")
         row = await asyncio.to_thread(self.journal.get, self.record_id)
+        if row.get("restore_hold"):
+            raise DeliveryUnknown("Restored channel delivery remains retired from automatic replay")
         chunks = dict(row["chunks"])
         old = chunks.get(key)
         digest = _digest(payload)

@@ -71,8 +71,10 @@ class ReconciliationIn(ConfirmIn):
         "retire_and_create_new_request",
         "external_effect_absent",
         "external_effect_recorded",
+        "channel_readback_confirmed",
     ]
     evidence_reference: str | None = Field(default=None, max_length=512)
+    channel_readback: dict | None = None
 
 
 class RestoreIn(ConfirmIn):
@@ -420,6 +422,7 @@ async def resolve_reconciliation(
         evidence_reference=body.evidence_reference,
         isolated=isolated(request.app),
         actor=actor,
+        **({"channel_readback": body.channel_readback} if body.channel_readback is not None else {}),
     )
     return Response(
         json.dumps(result),

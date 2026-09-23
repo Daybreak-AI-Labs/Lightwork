@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import itertools
 import json
 import logging
 import os
@@ -346,6 +347,8 @@ def _rule(
 
 _FILE_TOOL_POLICIES: dict[str, _FileToolPolicy] = {
     "read_file": _FileToolPolicy((_rule("path"),)),
+    "spreadsheet_read": _FileToolPolicy((_rule("path"),)),
+    "sql_query_read": _FileToolPolicy((_rule("database"),)),
     "write_file": _FileToolPolicy((_rule("path", mutates=True),)),
     "list_dir": _FileToolPolicy((_rule("path", default="."),)),
     "str_replace_editor": _FileToolPolicy(
@@ -1024,11 +1027,19 @@ def _budget_error_label(e: BudgetExceeded) -> str:
     class -- poisoning the self-tuning budget learner with a failure that
     had nothing to do with spend.
     """
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    if isinstance(e, OrganizationBudgetExceeded):
+        return "organization spending limit"
     return "unpriced model" if isinstance(e, UnpricedModelError) else "budget exceeded"
 
 
 def _budget_stop_kind(e: BudgetExceeded) -> str:
     """The :attr:`AgentResult.stop_kind` for a cap trip / unpriced model."""
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    if isinstance(e, OrganizationBudgetExceeded):
+        return "organization_budget"
     return "unpriced_model" if isinstance(e, UnpricedModelError) else "budget"
 
 
@@ -1512,7 +1523,7 @@ class Agent:
         model_override: str | None = None,
         depth: int = 0,
         parent: Agent | None = None,
-        max_steps: int = 25,
+        max_steps: int | None = None,
         capability=None,
         domain: str | None = None,
         persona: str | None = None,
@@ -1593,7 +1604,10 @@ class Agent:
         # shows "most successful solutions resolve in ~25 rounds; long-
         # tail iteration past that has diminishing returns." Allow ops
         # to override globally via MAVERICK_MAX_STEPS, default 25.
-        self.max_steps = env_int("MAVERICK_MAX_STEPS", max_steps)
+        raw_steps = os.environ.get("MAVERICK_MAX_STEPS")
+        self.max_steps = int(raw_steps) if raw_steps and raw_steps.strip() else max_steps
+        if self.max_steps is not None and (type(self.max_steps) is not int or self.max_steps < 1):
+            raise ValueError("MAVERICK_MAX_STEPS / max_steps must be a positive integer")
         self.name = f"{role}-{depth}-{uuid.uuid4().hex[:6]}"
         # Register before tool construction: bus tool closures enforce the
         # SwarmContext roster on every send/receive/delegation. If an unusual
@@ -3907,7 +3921,10 @@ class Agent:
         ep_id = getattr(self.ctx, "episode_id", 0) or 0
         ckpt, start_step, messages = self._resume_from_checkpoint(messages, bb, ep_id)
 
-        for step in range(start_step, self.max_steps):
+        truncated_responses = 0
+        steps = (range(start_step, self.max_steps) if self.max_steps is not None
+                 else itertools.count(start_step))
+        for step in steps:
             # Durable checkpoint at the turn boundary: commit the resumable loop
             # state BEFORE the next LLM call, so a crash mid-step loses at most
             # one step's work. Extracted to _save_checkpoint; fail-open.
@@ -3971,7 +3988,8 @@ class Agent:
             # paying in full for nothing.
             if self.depth > 0 and _SYNTHESIS_RESERVE > 0:
                 _b = self.ctx.budget
-                if _b.dollars >= _b.max_dollars * (1.0 - _SYNTHESIS_RESERVE):
+                if (_b.max_dollars is not None
+                        and _b.dollars >= _b.max_dollars * (1.0 - _SYNTHESIS_RESERVE)):
                     bb.post(
                         self.name, "note",
                         f"stopping at ${_b.dollars:.2f}/${_b.max_dollars:.2f} to "
@@ -4070,6 +4088,32 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
                                    stop_kind="killswitch", stop_detail=str(e))
+
+            # A provider token cutoff is not a completed answer, even if its
+            # partial text already contains FINAL. Incomplete tool arguments
+            # cannot be dispatched or installed as orphan tool-use history.
+            if resp.stop_reason in {"max_tokens", "length"}:
+                truncated_responses += 1
+                if truncated_responses >= 3:
+                    return AgentResult(
+                        error="model response remained incomplete after token cutoffs",
+                        role=self.role, name=self.name, stop_kind="incomplete",
+                        stop_detail="provider output token limit",
+                        verifier_confidence=0.0,
+                    )
+                if resp.text:
+                    messages.append({"role": "assistant", "content": resp.text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response was cut off by the provider's output limit. "
+                        "No tool calls from that response ran. Produce a complete, concise "
+                        "answer using FINAL: <answer>, or issue complete tool calls."
+                    ),
+                })
+                continue
+
+            truncated_responses = 0
 
             # May 26 smoke fix: when the response contains BOTH a FINAL:
             # marker AND tool_use blocks, the model is confused. If
@@ -5035,7 +5079,7 @@ class Agent:
                             + _bb_delta
                         ),
                     })
-            remaining = self.max_steps - 1 - step
+            remaining = self.max_steps - 1 - step if self.max_steps is not None else 0
             if tool_results and _STEP_BUDGET_WARNING and 0 < remaining <= _STEP_BUDGET_WARNING:
                 tool_results.append({
                     "type": "text",

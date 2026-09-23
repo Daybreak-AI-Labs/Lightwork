@@ -1013,8 +1013,8 @@ def base_registry(
     from .sns_tool import sns_tool
     from .spend_report import spend_report
     from .spotify_tool import spotify_tool
-    from .spreadsheet import spreadsheet
-    from .sql_query import sql_query
+    from .spreadsheet import spreadsheet, spreadsheet_read
+    from .sql_query import sql_query, sql_query_read
     from .streaming_reasoning_trace import streaming_reasoning_trace
     from .stripe_tool import stripe_tool
     from .supply_chain_pin import supply_chain_pin
@@ -1072,6 +1072,7 @@ def base_registry(
     reg.register(apply_patch(sandbox))
     reg.register(compute())
     reg.register(sql_query(sandbox))
+    reg.register(sql_query_read(sandbox))
     reg.register(email_tool())
     reg.register(pandas_query(sandbox))
     reg.register(git_advanced(sandbox))
@@ -1105,6 +1106,7 @@ def base_registry(
     reg.register(notion())
     reg.register(obsidian())
     reg.register(spreadsheet(sandbox))
+    reg.register(spreadsheet_read(sandbox))
     reg.register(translate())
     reg.register(slack_bot())
     reg.register(stripe_tool())

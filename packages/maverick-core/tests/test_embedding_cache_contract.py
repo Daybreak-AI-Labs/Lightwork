@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,52 @@ from maverick import self_learning as sl
 from maverick.paths import reset_tenant, set_tenant
 from maverick.skill import embeddings as se
 from maverick.skills import Skill
+
+
+def test_two_processes_keep_unverified_corpora_warm_without_shared_cache_churn(tmp_path):
+    script = """
+import json, sys
+from pathlib import Path
+from maverick.skill import embeddings as se
+class LocalModel:
+    calls = 0
+    def embed(self, texts):
+        self.calls += len(texts)
+        return [[1.0, 0.5] for text in texts]
+se._model = LocalModel()
+se._model_name = se.MODEL_NAME
+se.CACHE_PATH = Path(sys.argv[1])
+for line in sys.stdin:
+    result = se.cached_corpus_vectors({'a': 'sales', 'b': 'weather'}, dimension=2)
+    print(json.dumps({'count': len(result), 'calls': se._model.calls,
+                      'revision': se.embedding_identity()['revision']}), flush=True)
+"""
+    path = tmp_path / "skill_embeddings.json"
+    workers = [subprocess.Popen([sys.executable, "-u", "-c", script, str(path)],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True) for _ in range(2)]
+    try:
+        results = []
+        for index in (0, 1, 0, 1):
+            worker = workers[index]
+            worker.stdin.write("query\n")
+            worker.stdin.flush()
+            results.append(json.loads(worker.stdout.readline()))
+        assert [item["calls"] for item in results] == [2, 2, 2, 2]
+        assert results[0]["revision"] != results[1]["revision"]
+        assert all(item["count"] == 2 for item in results)
+        assert not path.exists()
+    finally:
+        for worker in workers:
+            worker.stdin.close()
+        for worker in workers:
+            try:
+                worker.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+                worker.wait(timeout=10)
+            worker.stdout.close()
+            worker.stderr.close()
 
 
 @pytest.fixture

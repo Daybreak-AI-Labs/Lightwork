@@ -54,14 +54,24 @@ docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 # header, so there is no clickable link; open a REST client instead.
 URL="http://localhost:${PORT}/"
 printf 'Waiting for the dashboard to come up'
+ready=false
+deadline=$((SECONDS + 60))
 for _ in $(seq 1 60); do
-  if curl -fsS "http://localhost:${PORT}/livez" >/dev/null 2>&1; then
+  remaining=$((deadline - SECONDS))
+  if ((remaining <= 0)); then break; fi
+  request_timeout=$((remaining < 3 ? remaining : 3))
+  if curl -fsS --connect-timeout 1 --max-time "$request_timeout" "http://localhost:${PORT}/livez" >/dev/null 2>&1; then
+    ready=true
     break
   fi
   printf '.'
   sleep 1
 done
 echo
+if [ "$ready" != true ]; then
+  echo "Lightwork demo did not become ready within 60 seconds. Inspect docker compose logs before retrying." >&2
+  exit 1
+fi
 
 echo
 echo "Lightwork demo is live:  $URL"

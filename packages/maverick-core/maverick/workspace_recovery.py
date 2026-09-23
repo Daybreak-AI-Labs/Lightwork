@@ -1284,6 +1284,21 @@ def _record_decryptor_from_keys(
             ) from exc
         raise RecoveryError("The recovery record uses an unsupported encryption envelope.")
 
+    def reseal(original: bytes, plaintext: bytes, tenant: str | None, workspace: Path) -> bytes:
+        # Authenticate the original before using its retained envelope/key.
+        decrypt(original, tenant, workspace)
+        nonce = secrets.token_bytes(12)
+        if original.startswith(crypto_at_rest._MAGIC):
+            return crypto_at_rest._MAGIC + nonce + AESGCM(keys["at_rest.key"]).encrypt(nonce, plaintext, None)
+        if original.startswith(crypto_at_rest._MAGIC_V2):
+            key_id = original[len(crypto_at_rest._MAGIC_V2):][:8]
+            key = keys.get(key_id.hex() + ".key") or keys["at_rest.key"]
+            return crypto_at_rest._MAGIC_V2 + key_id + nonce + AESGCM(key).encrypt(nonce, plaintext, None)
+        tenant_key = tenant_keys[(tenant, str(workspace))][0]
+        return kms._gcm_seal(tenant_key, crypto_at_rest._TENANT_MAGIC, plaintext,
+                             kms._tenant_context(tenant, b"tenant-data"))
+
+    decrypt.reseal = reseal
     decrypt._authenticated_wrapped_deks = authenticated_wrapped_deks
     return decrypt
 
@@ -2591,6 +2606,16 @@ def _reconcile_bootstrap_stage(  # noqa: C901 - one fail-closed staged transacti
 
     job_counts: Counter[str] = Counter()
     items = []
+    from .channel_recovery import stage_authorities
+
+    channel_items, channel_classified = stage_authorities(
+        stage, decryptor=decryptor, tenant=tenant, now=time.time(), make_item=_reconciliation_item,
+        blocked_item=lambda relative, namespace, digest: _reconciliation_item(
+            "unclassified_protected_authority", relative, Path(relative).stem,
+            prior_state=f"unreadable_{namespace}", content_sha256=digest,
+            safe_state="global_start_blocked", requires_external_readback=True),
+    )
+    items.extend(channel_items)
     for credential in preserved_credentials:
         items.append(_reconciliation_item(
             "credential_custody",
@@ -2669,7 +2694,7 @@ def _reconcile_bootstrap_stage(  # noqa: C901 - one fail-closed staged transacti
     classified_sources = {
         str(item["source"]) for item in items
         if isinstance(item.get("source"), str)
-    } | additional_classified
+    } | additional_classified | channel_classified
     spend_path = stage / "provider_spend.json"
     if spend_path.exists():
         classified_sources.add("provider_spend.json")
@@ -2810,7 +2835,8 @@ def _reconcile_bootstrap_stage(  # noqa: C901 - one fail-closed staged transacti
                     "unclassified_protected_authority",
                     relative,
                     relative,
-                    prior_state="unknown_sqlite",
+                    prior_state=("unknown_sqlite" if policy == "unknown_sqlite"
+                                 else f"unclassified:{policy}"),
                     content_sha256=backup._sha256(db),
                     safe_state="global_start_blocked",
                     requires_external_readback=True,
@@ -3229,6 +3255,7 @@ def resolve_reconciliation(
     evidence_reference: str | None,
     isolated: bool,
     actor: str,
+    channel_readback: dict | None = None,
 ) -> dict:
     """Record one signed, explicit no-replay disposition from recovery mode."""
     if not isolated:
@@ -3241,21 +3268,28 @@ def resolve_reconciliation(
             raise RecoveryError("No restored work is awaiting reconciliation.")
         items, _ = _classified_bootstrap_reconciliation(marker)
         item = next((row for row in items if hmac.compare_digest(row["id"], item_id)), None)
-        if item is None or item.get("state") != "unresolved":
+        if item is None or (item.get("state") != "unresolved" and item.get("category") != "channel_authority"):
             raise RecoveryError("The reconciliation item changed. Reload recovery.")
         if item.get("safe_state") == "global_start_blocked":
             raise RecoveryError(
                 "This encrypted authority cannot be safely rewritten in this build. Keep recovery mode active and export support evidence."
             )
+        is_channel = item.get("category") == "channel_authority"
         needs_readback = item.get("requires_external_readback") is True
-        allowed = ({"external_effect_absent", "external_effect_recorded"}
+        allowed = ({"channel_readback_confirmed"} if is_channel else
+                   {"external_effect_absent", "external_effect_recorded"}
                    if needs_readback else {"retire_and_create_new_request"})
         if disposition not in allowed:
             raise RecoveryError(
                 "Choose a disposition that matches the required external readback."
             )
         reference = str(evidence_reference or "").strip()
-        if needs_readback:
+        if is_channel:
+            if channel_readback is None or reference:
+                raise RecoveryError("Import the exact channel readback; a generic reference cannot release channel authority.")
+        elif channel_readback is not None:
+            raise RecoveryError("Channel readback does not belong to this reconciliation item.")
+        elif needs_readback:
             if not 8 <= len(reference) <= 512 or any(ord(char) < 32 for char in reference):
                 raise RecoveryError(
                     "Enter a short reference to the authoritative external readback."
@@ -3263,7 +3297,20 @@ def resolve_reconciliation(
         elif reference:
             raise RecoveryError("Queued work retirement does not accept external evidence.")
         now = time.time()
-        if item["category"] == "queued_work":
+        if is_channel:
+            from . import channel_recovery
+
+            relative = backup._safe_relative_path(item["source"], label="channel recovery source")
+            decryptor = (_bootstrap_record_decryptor(marker) if marker.get("retained_keys") is not None else None)
+            try:
+                digest, readback_digest = channel_recovery.resolve(
+                    _root().joinpath(*relative.parts), item, channel_readback, actor=actor,
+                    decryptor=decryptor, tenant=current_tenant_id_strict(), workspace=_root())
+            except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                raise RecoveryError("Channel readback is unavailable, stale, ambiguous or does not match this exact restored authority.") from exc
+            item["safe_source"] = {"kind": "file_sha256", "sha256": digest}
+            item["evidence_sha256"] = readback_digest
+        elif item["category"] == "queued_work":
             _resolve_job_item(item, disposition=disposition, now=now)
         else:
             _verify_reconciliation_source(item)

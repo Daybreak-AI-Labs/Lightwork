@@ -7,19 +7,20 @@ triggers:
   - get the fields from this document
 tools_needed:
   - read_file
-  - extract_document
+  - read_pdf
+  - ocr
 ---
 # What this skill does
 
-Performs deterministic field and table extraction from a document (PDF, scan, image, form) with a per-field confidence score and an explicit could-not-read flag for anything illegible. The goal class is "turn a document into structured data you can trust": every extracted value carries provenance (page/region) and a confidence, and low-confidence or missing fields are surfaced rather than hallucinated.
+Extracts available document text and tables, then prepares a structured field draft with source references and an explicit could-not-read flag. The shipped tools do not promise schema extraction, bounding boxes, or calibrated per-field confidence. Distinguish tool-returned evidence from the agent's interpretation.
 
 # Steps
 
-1. Read the document with read_file to understand its structure (native text vs scanned image, single table vs multi-page), then call extract_document with the target schema (the named fields and table columns you need).
-2. For each field, return value plus source location (page and bounding region) plus confidence. For tables, preserve row/column structure and flag merged or split cells.
+1. For a PDF call `read_pdf` with `source` and `include_tables=true`; choose `pages` when known. For a scanned PDF, `ocr=true` requires the enabled offline document engine. For an image call `ocr` with `op="extract"`, `path`, and `backend="tesseract"`; this also requires the configured local engine. For plain text use `read_file` with `path`. If an optional engine/dependency is unavailable, report that prerequisite and request extracted text; do not imply extraction succeeded.
+2. Map the returned text/tables to the requested fields. Cite only page/region information actually returned. Mark confidence as uncalibrated unless the tool supplied a score; never invent coordinates or scores. For tables preserve the available row/column structure and flag uncertain alignment.
 3. Mark any field that is illegible, absent, or ambiguous as could_not_read rather than inventing a plausible value. Do not infer a number that is not on the page.
 4. Reconcile internal consistency where the document allows it (totals equal the sum of line items, dates are ordered) and flag any failed check for human review instead of silently correcting.
 
 # Notes
 
-The cardinal sin is filling a blank or smudged field with a confident guess; a missing value flagged as such is recoverable, a fabricated one is a landmine. OCR confidence is not document confidence — a crisp scan of a contradictory form is still wrong. Watch for scanned tables where row alignment drifts; verify against a total. This skill extracts and reports; it does not write the values into any system of record. Keep extraction deterministic: re-running on the same document should give the same fields and confidences.
+Do not fill a blank or smudged field with a guess. OCR confidence is not document confidence. Verify table totals and preserve the source excerpt. This skill drafts and reports; it does not write values into a system of record or certify deterministic field extraction.

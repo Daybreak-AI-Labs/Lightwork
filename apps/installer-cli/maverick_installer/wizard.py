@@ -28,6 +28,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -1058,7 +1059,8 @@ def pick_signed_skills() -> dict[str, Any]:
 
 def pick_budget() -> dict[str, Any]:
     console.print()
-    console.print("[dim]Per-run caps. Edit later in ~/.maverick/config.toml.[/dim]")
+    console.print("[dim]Task limits are optional. Organization spending controls still apply.[/dim]")
+    enabled = _q_confirm("  Add spending, time or tool-count limits to each task?", default=False)
     budget: dict[str, Any] = {
         "max_dollars": _safe_float(
             _q_text("  Max $ per run", default="5.0"),
@@ -1072,7 +1074,7 @@ def pick_budget() -> dict[str, Any]:
             _q_text("  Max tool calls per run", default="500"),
             default=500,
         ),
-    }
+    } if enabled else {}
     # Billing-grade accounting is the safe default. Preserve an explicit false
     # for legacy/custom gateways, where estimates remain provenance-labelled.
     budget["strict_pricing"] = _q_confirm(
@@ -1472,6 +1474,15 @@ def pick_knowledge() -> dict[str, Any]:
         default="hosted        - Voyage AI (needs VOYAGE_API_KEY)",
     ).split()[0]
     out["embedder"] = embedder
+    if embedder != "deterministic":
+        console.print(
+            "[dim]Optional embedding revision: local models use a resolved commit hash; "
+            "a hosted revision is your recorded provider version, not provider verification. "
+            "Changing the model or revision requires knowledge reindex.[/dim]"
+        )
+        revision = _q_text("  Embedding revision (blank = automatic/default identity)", default="").strip()
+        if revision:
+            out["revision"] = revision
     store = _q_select(
         "  Vector store:",
         [
@@ -5335,7 +5346,7 @@ def pick_sandbox() -> dict[str, Any]:
         default=docker_default,
     )
     backend = pick.split()[0]
-    workdir = _q_text("  Workspace directory", default=str(Path.home() / "maverick-workspace"))
+    workdir = _q_text("  Workspace directory", default=os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "maverick-workspace"))
     cfg: dict[str, Any] = {"backend": backend, "workdir": workdir, "timeout": 60}
     # Non-Python coders get a toolchain image that can actually run their tests
     # (cargo/go test, the JS runner, ...). Python is the default image, so we
@@ -8340,23 +8351,56 @@ def _tighten_wizard_file(path: Path) -> None:
 
 def _write_wizard_file(path: Path, body: str) -> None:
     """Write one private wizard file, preserving a logically equivalent retry."""
+    from maverick.file_lock import atomic_write_text
 
     if _wizard_file_unchanged(path, body.encode("utf-8")):
         _tighten_wizard_file(path)
         console.print(f"[green]ok[/green] unchanged {path} (chmod 600)")
         return
     _backup_wizard_file(path)
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as destination:
-            destination.write(body)
-    finally:
-        # If the file already existed at a wider mode, tighten it.
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+    atomic_write_text(path, body, mode=0o600)
     console.print(f"[green]ok[/green] wrote {path} (chmod 600)")
+
+
+def _publish_wizard_configuration(config_body: str, env_body: str | None) -> None:
+    """Publish complete files, rolling environment changes back on config failure.
+
+    Each file is atomic. This does not claim crash-atomic replacement of two
+    directory entries; ordinary save failures restore the previous pair.
+    """
+    from maverick.file_lock import atomic_write_text, cross_process_lock
+
+    tomllib.loads(config_body)  # Never replace .env for an invalid configuration.
+    with cross_process_lock(CONFIG_FILE, strict=True):
+        old_env = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else None
+        env_changed = env_body is not None and not _wizard_file_unchanged(ENV_FILE, env_body.encode("utf-8"))
+        try:
+            if env_body is not None:
+                _write_wizard_file(ENV_FILE, env_body)
+            _write_wizard_file(CONFIG_FILE, config_body)
+        except BaseException:
+            if env_changed:
+                if old_env is None:
+                    ENV_FILE.unlink(missing_ok=True)
+                else:
+                    atomic_write_text(ENV_FILE, old_env, mode=0o600)
+            raise
+
+
+def _prepare_wizard_workspace(sandbox: dict[str, Any]) -> dict[str, Any]:
+    """Prepare host workspaces before a configuration is advertised as usable."""
+    result = dict(sandbox)
+    if str(result.get("backend", "local")).strip().lower() == "ssh":
+        return result  # Remote POSIX paths must never be provisioned on this host.
+    workdir = Path(result.get("workdir") or os.environ.get("MAVERICK_WORKDIR") or "~/maverick-workspace").expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    # Permission bits alone are insufficient for ACLs and mounted volumes.
+    with tempfile.TemporaryFile(dir=workdir, prefix=".lightwork-setup-") as probe:
+        probe.write(b"workspace-ready\n")
+        probe.flush()
+        os.fsync(probe.fileno())
+    result["workdir"] = str(workdir)
+    return result
 
 
 def write_config(
@@ -8414,6 +8458,7 @@ def write_config(
     per_tenant_keys: bool = False,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    sandbox = _prepare_wizard_workspace(sandbox)
 
     keys = dict(keys)
     if security_suite and security_suite.get("red_team_assurance"):
@@ -8433,17 +8478,9 @@ def write_config(
             prior or secrets.token_urlsafe(48),
         )
 
-    # Re-running the wizard truncates config.toml / .env. The loader explicitly
-    # supports hand-editing, so back up any existing file first (0o600) instead
-    # of silently destroying a user's manual edits.
-    if keys:
-        # Atomic + perm-from-creation: previous version was
-        # ``write_text(...)`` followed by ``chmod(0o600)``, which left
-        # the file world-readable (0o644) for one syscall. Open with
-        # ``O_CREAT | O_WRONLY | O_TRUNC`` and mode 0o600 so the file
-        # never exists at any other permission.
-        body = "\n".join(f"{k}={v}" for k, v in keys.items()) + "\n"
-        _write_wizard_file(ENV_FILE, body)
+    # Preserve private backups of hand-edited files. Compose both new files
+    # before replacing either active file, and publish through private temps.
+    env_body = "\n".join(f"{k}={v}" for k, v in keys.items()) + "\n" if keys else None
 
     # [flows] can be requested by two independent wizard steps: the dedicated
     # flow-engine step (the `flows` arg) and the advanced-reasoning "Flow
@@ -8592,7 +8629,7 @@ def write_config(
     # secret-bearing in backups/log redaction. chmod 600 so multi-user hosts
     # don't leak it to other accounts.
     config_body = "\n".join(lines) + "\n"
-    _write_wizard_file(CONFIG_FILE, config_body)
+    _publish_wizard_configuration(config_body, env_body)
 
 
 def smoke_test() -> bool:
@@ -8689,11 +8726,7 @@ def run_fast() -> int:
         "scan_output": True,
         "compartments": False,
     }
-    budget = {
-        "max_dollars": 5.0,
-        "max_wall_seconds": 3600.0,
-        "max_tool_calls": 500,
-    }
+    budget = {"strict_pricing": True}
     # Prefer the isolated Docker sandbox, but fall back to local when the
     # daemon isn't up -- otherwise fast-setup writes a docker config that the
     # very next `maverick start` can't run (the user never chose docker, yet
@@ -8796,19 +8829,17 @@ def pick_mode() -> str:
 def _consumer_budget() -> dict[str, float]:
     """Single-question budget chip picker for consumer mode."""
     pick = _q_select(
-        "Stop after spending how much per task?",
-        ["$1", "$5", "$20", "custom"],
-        default="$5",
+        "Add an optional spending limit to each task?",
+        ["No task limit", "$1", "$5", "$20", "custom"],
+        default="No task limit",
     )
+    if pick == "No task limit":
+        return {}
     if pick == "custom":
         dollars = _safe_float(_q_text("  Custom cap ($)", default="5.0"), default=5.0)
     else:
         dollars = float(pick.lstrip("$"))
-    return {
-        "max_dollars": dollars,
-        "max_wall_seconds": 600.0,
-        "max_tool_calls": 100,
-    }
+    return {"max_dollars": dollars}
 
 
 def _consumer_api_key() -> dict[str, str]:
@@ -8950,8 +8981,8 @@ def run_consumer() -> int:
 
     workdir = _q_text(
         "Where can Lightwork work?",
-        default=str(Path.home() / "Documents" / "Maverick"),
-    ).strip() or str(Path.home() / "Documents" / "Maverick")
+        default=os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick"),
+    ).strip() or os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick")
 
     budget = _consumer_budget()
 
@@ -9228,8 +9259,8 @@ def run_express() -> int:
     keys = _consumer_api_key()
     workdir = _q_text(
         "Where can Lightwork work?",
-        default=str(Path.home() / "Documents" / "Maverick"),
-    ).strip() or str(Path.home() / "Documents" / "Maverick")
+        default=os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick"),
+    ).strip() or os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick")
     budget = _consumer_budget()
 
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)

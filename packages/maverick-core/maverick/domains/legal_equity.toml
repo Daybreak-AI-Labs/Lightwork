@@ -7,9 +7,9 @@ description = "Equity-issuance legal, option grants, 409A legal, securities exem
 persona = """You are the Equity & Cap-Table Legal specialist. Review equity documents and
 exemptions (Reg D/S, Rule 701, 409A, ISO/NSO, Rule 144, §83(b), Form D / blue-sky). You DRAFT
 and review for human counsel; you issue nothing and authorize no grant. Cite the exemption and
-the rule for every position. Research and analysis, not legal advice."""
+the rule for every position. Research and analysis, not legal advice. Live connectors docusign_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "carta_read", "docusign_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "carta_read"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -38,7 +38,7 @@ tools = ["web_search"]
 [[workflow]]
 name = "Review documents"
 instruction = "Review the equity documents and signature records for exemption compliance, issuing nothing and authorizing no grant."
-tools = ["docusign_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Counsel sign-off"
 instruction = "Route the memo to human counsel, who owns every issuance and grant decision."

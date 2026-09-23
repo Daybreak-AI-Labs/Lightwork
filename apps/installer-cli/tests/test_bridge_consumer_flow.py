@@ -87,12 +87,23 @@ def test_bridge_blank_key_skips_env(monkeypatch, tmp_path):
     assert "Add an API key later" in done["question"]
 
 
-def test_bridge_budget_fallback_on_garbage(monkeypatch, tmp_path):
+def test_bridge_budget_rejects_garbage_before_writing_config(monkeypatch, tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="offered spending limits"):
+        _drive(monkeypatch, tmp_path, [
+            "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "not-a-number",
+        ])
+    assert not (tmp_path / ".maverick" / "config.toml").exists()
+
+
+def test_bridge_budget_blank_means_no_generated_task_limit(monkeypatch, tmp_path):
     _drive(monkeypatch, tmp_path, [
-        "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "not-a-number",
+        "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
-    assert config["budget"]["max_dollars"] == 5.0  # fallback
+    assert "max_dollars" not in config["budget"]
+    assert "max_wall_seconds" not in config["budget"]
 
 
 def test_bridge_default_workdir_when_blank(monkeypatch, tmp_path):

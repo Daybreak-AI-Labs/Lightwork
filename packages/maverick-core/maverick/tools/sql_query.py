@@ -236,3 +236,24 @@ def sql_query(sandbox=None) -> Tool:
         input_schema=_SQL_QUERY_SCHEMA,
         fn=lambda args: _run_sql_query(args, sandbox),
     )
+
+
+def sql_query_read(sandbox=None) -> Tool:
+    """A separate read seat; caller arguments can never enable writes."""
+    schema = {**_SQL_QUERY_SCHEMA, "properties": {
+        key: value for key, value in _SQL_QUERY_SCHEMA["properties"].items()
+        if key != "read_only"
+    }, "additionalProperties": False}
+
+    def run(args):
+        if "read_only" in args and args["read_only"] is not True:
+            return "ERROR: sql_query_read cannot enable writes"
+        return _run_sql_query({**args, "read_only": True}, sandbox)
+
+    return Tool(
+        name="sql_query_read",
+        description=("Read/query/aggregate a workspace SQLite database. Always read-only; "
+                     "no writes, schema changes or attached databases. Use params for "
+                     "bindings and max_rows for bounded results."),
+        input_schema=schema, fn=run,
+    )

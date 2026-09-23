@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
-# Tenant-local governed record stores whose restored rows do not yet have a
-# store-specific, authenticated reconciliation protocol.  These rows can feed
+# Tenant-local governed record stores whose restored rows require a hold or
+# store-specific authenticated reconciliation.  These rows can feed
 # approvals, external delivery, regulated status, trust, or execution gates.
 # Keeping the mapping closed and exported lets an acceptance test compare it
 # with every literal GovernedRecordStore/_RecordStore declaration in source.
@@ -261,6 +261,19 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "llm_team_budget"
     if _contains(parts, "mcp_sidecar", "call_budget.json"):
         return "mcp_call_budget"
+    # Frozen external billing receipts and provider admission history cannot
+    # roll back independently of the provider or cumulative usage ledger.
+    if _contains(parts, "billing", "stripe-collections"):
+        return "stripe_collection_authority"
+    if "usage" in parts[:-1]:
+        provider_policies = {
+            "provider_holds.json": "organization_provider_holds",
+            "provider_holds.required": "organization_provider_holds_required",
+            "provider_history.sqlite3": "organization_provider_history",
+            "provider_history.required": "organization_provider_history_required",
+        }
+        if name in provider_policies:
+            return provider_policies[name]
     if _contains(parts, "browser", "state.json"):
         return "browser_session"
     if _contains(parts, "keys", "plugin_ca", "revocations.json"):
@@ -501,9 +514,10 @@ DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES = {
 
 
 # These stores carry replay, revocation, identity, trust, scheduler, delivery,
-# or executable-instruction state.  Bootstrap currently has no store-specific
-# readback protocol for them, so every restored copy must remain a visible
-# global-start blocker until an administrator records a disposition.
+# or executable-instruction state.  Copies without a supported and authenticated
+# store-specific reconciliation must remain visible global-start blockers.
+# Malformed channel records also block globally; valid records instead enter
+# the channel reconciliation protocol while retaining their exact receipts.
 GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
     "tenants/tenant-a/a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
@@ -516,6 +530,16 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "dashboard-config.toml": "dashboard_configuration_authority",
     "dashboard-event-triggers.toml": "event_trigger_scheduler_authority",
     "dashboard-triggers.toml": "webhook_trigger_authority",
+    "billing/stripe-collections/period.json": "stripe_collection_authority",
+    "usage/provider_holds.json": "organization_provider_holds",
+    "usage/provider_holds.required": "organization_provider_holds_required",
+    "usage/provider_history.sqlite3": "organization_provider_history",
+    "usage/provider_history.required": "organization_provider_history_required",
+    "tenants/tenant-a/billing/stripe-collections/period.json": "stripe_collection_authority",
+    "tenants/tenant-a/usage/provider_holds.json": "organization_provider_holds",
+    "tenants/tenant-a/usage/provider_holds.required": "organization_provider_holds_required",
+    "tenants/tenant-a/usage/provider_history.sqlite3": "organization_provider_history",
+    "tenants/tenant-a/usage/provider_history.required": "organization_provider_history_required",
     "model_improvement/training_receipts.ndjson": "training_approval_authority",
     "keys/consent-experiments.key": "consent_experiment_key_authority",
     "generated_tools/recovered.py": "generated_tool_authority",

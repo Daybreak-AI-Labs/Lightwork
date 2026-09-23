@@ -190,12 +190,16 @@
     // so a landed response whose URL contains /chat/goal/ IS the success
     // signal; link the user straight to the live goal.
     var fd = new FormData();
-    fd.append("title", msg);
+    var characters = Array.from(msg);
+    fd.append("title", characters.length > 200 ? characters.slice(0, 199).join("") + "…" : msg);
+    if (characters.length > 200) fd.append("description", msg);
     fd.append("submission_key", pendingId);
-    boundedFetch("/chat/send", { method: "POST", body: fd }, function (r) {
+    boundedFetch("/chat/send", { method: "POST", body: fd }, async function (r) {
         if (!alive) return;
         if (!r.ok) {
-          var failure = new Error("Dashboard replied HTTP " + r.status + ".");
+          var detail = null;
+          try { detail = await r.json(); } catch (_) { /* Fall back to the status if no JSON detail is available. */ }
+          var failure = new Error(detail && typeof detail.detail === "string" ? detail.detail : "Dashboard replied HTTP " + r.status + ".");
           // A followed redirect can fail AFTER goal creation. Only a direct
           // client-error response proves the start was refused.
           failure.refused = !r.redirected && r.status >= 400 && r.status < 500 && r.status !== 409;

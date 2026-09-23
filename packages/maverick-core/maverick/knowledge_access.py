@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 
 from .governed_records import GovernedRecordStore
-from .knowledge_retrieval import LexicalProjection, SearchCursor, digest, rank
+from .knowledge_retrieval import LexicalProjection, SearchCursor, digest, rank, retrieval_passage
 from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
 from .research_registry import (
@@ -242,8 +242,8 @@ def _reference_key(reference: ResearchAssetRef) -> tuple[str, str, str, str]:
 class KnowledgeDocument:
     """A bounded projection from an existing content authority.
 
-    ``summary`` is the only content retained in the small process cache.  The
-    full source remains in its owning store.  The exact tenant, registry ref,
+    Searchable chunks are bounded to the source projector's 256 KiB boundary.
+    The owning store is reread on every access. The exact tenant, registry ref,
     and content digest stop a buggy adapter from crossing a tenant or version
     boundary.
     """
@@ -257,6 +257,9 @@ class KnowledgeDocument:
     observed_at: float | None = None
     verified_at: float | None = None
     schema: str = KNOWLEDGE_DOCUMENT_SCHEMA
+    retrieval_chunks: tuple[str, ...] = ()
+    search_coverage_complete: bool = True
+    summary_truncated: bool = False
 
     def __post_init__(self) -> None:
         canonical_tenant_id(self.tenant)
@@ -267,6 +270,12 @@ class KnowledgeDocument:
             raise ValueError("knowledge content_sha256 must be a lowercase SHA-256 digest")
         _text(self.title, "knowledge title", 240)
         _text(self.summary, "knowledge summary", 8_192, required=False)
+        if (not isinstance(self.retrieval_chunks, tuple) or len(self.retrieval_chunks) > 2048
+            or any(not isinstance(chunk, str) for chunk in self.retrieval_chunks)
+            or sum(len(chunk.encode("utf-8")) for chunk in self.retrieval_chunks) > 256 * 1024
+            or type(self.search_coverage_complete) is not bool
+            or type(self.summary_truncated) is not bool):
+            raise ValueError("knowledge retrieval chunks or coverage are malformed")
         if self.claim_state not in _CLAIM_STATES:
             raise ValueError("knowledge claim_state must be inferred or verified")
         _positive_time(self.observed_at, "knowledge observed_at", optional=True)
@@ -695,6 +704,7 @@ class KnowledgeAccessService:
         action: str,
         actor_authority: KnowledgeActorAuthority,
         use_cache: bool,
+        include_retrieval_chunks: bool = False,
     ) -> dict:
         admission = self._admission(
             tenant,
@@ -739,6 +749,8 @@ class KnowledgeAccessService:
             "reference": asdict(reference),
             "title": document.title,
             "summary": document.summary,
+            "summary_truncated": document.summary_truncated,
+            "search_coverage_complete": document.search_coverage_complete,
             "content_available": bool(document.summary),
             "claim_state": document.claim_state,
             "observed_at": document.observed_at,
@@ -772,6 +784,8 @@ class KnowledgeAccessService:
             "correction_history": history,
             "training_permission_notice": TRAINING_PERMISSION_NOTICE,
         }
+        if include_retrieval_chunks:
+            item["_retrieval_chunks"] = document.retrieval_chunks
         # Request-history projection performs additional registry/store I/O.
         # Revalidate after it so a revocation during that work cannot release
         # the content assembled above.
@@ -842,12 +856,13 @@ class KnowledgeAccessService:
         )
         items: list[dict] = []
         projections: list[LexicalProjection] = []
-        omitted = unavailable = 0
+        omitted = unavailable = partial = 0
         for row in page["items"]:
             try:
                 item = self._item(
                     tenant, ResearchAssetRef(**row["reference"]), purpose=purpose,
                     action=action, actor_authority=authority, use_cache=True,
+                    include_retrieval_chunks=True,
                 )
             except KnowledgeContentUnavailable:
                 unavailable += 1
@@ -857,6 +872,7 @@ class KnowledgeAccessService:
                 continue
             # This projection contains no cached authority. _item has already
             # reread the owning content store and current source/actor rights.
+            partial += not item["search_coverage_complete"]
             identity = LexicalProjection.key(tenant, item)
             with self._cache_lock:
                 projection = self._lexical.get(identity)
@@ -877,18 +893,21 @@ class KnowledgeAccessService:
         if continuation.offset > len(ranked):
             raise ValueError("knowledge cursor exceeds the candidate page; restart the search")
         end = min(len(ranked), continuation.offset + limit)
-        selected = [items[index] for index, _score in ranked[continuation.offset:end]]
+        selected = [retrieval_passage(items[index], query)
+                    for index, _score in ranked[continuation.offset:end]]
         more_matches = end < len(ranked)
         next_cursor = None
         if more_matches:
             next_cursor = SearchCursor(
                 binding, continuation.after, page["snapshot"], end, ranking_digest,
                 continuation.unavailable_before,
+                continuation.partial_before or bool(partial),
             ).encode()
         elif page["has_more"]:
             next_cursor = SearchCursor(
                 binding, page["last"], page["snapshot"],
                 unavailable_before=continuation.unavailable_before or bool(unavailable),
+                partial_before=continuation.partial_before or bool(partial),
             ).encode()
         reasons = []
         if more_matches:
@@ -897,6 +916,8 @@ class KnowledgeAccessService:
             reasons.append("more_candidates")
         if unavailable or continuation.unavailable_before:
             reasons.append("content_unavailable")
+        if partial or continuation.partial_before:
+            reasons.append("partial_source_coverage")
         complete = not reasons
         status = (
             "unavailable" if "content_unavailable" in reasons and not selected and next_cursor is None
@@ -1077,6 +1098,7 @@ class KnowledgeAccessService:
         purpose: str,
         action: str,
         job_id: str,
+        retrieval_query: str | None = None,
     ) -> dict:
         """Revalidate and materialize an exact catalogue inside a queued worker.
 
@@ -1088,6 +1110,8 @@ class KnowledgeAccessService:
         canonical = canonical_tenant_id(tenant)
         exact = self._exact_references(references, _MAX_EXPORT)
         exact_job = _identifier(job_id, "job_id")
+        if retrieval_query is not None:
+            retrieval_query = _text(retrieval_query, "knowledge query", 512, required=False)
         if action not in _ACTIONS:
             raise ValueError("knowledge job action is unsupported")
         with tenant_scope(tenant=canonical), self.registry.effect_fence():
@@ -1106,6 +1130,7 @@ class KnowledgeAccessService:
                     action=action,
                     actor_authority=authority,
                     use_cache=True,
+                    include_retrieval_chunks=retrieval_query is not None,
                 )
                 for reference in exact
             ]
@@ -1118,6 +1143,8 @@ class KnowledgeAccessService:
                     purpose=purpose,
                     action=action,
                 )
+                if retrieval_query is not None:
+                    items = [retrieval_passage(item, retrieval_query) for item in items]
                 binding = {
                     "schema": KNOWLEDGE_JOB_MATERIALIZATION_SCHEMA,
                     "tenant": canonical,
@@ -1213,6 +1240,7 @@ class KnowledgeAccessService:
                     purpose=exact_purpose,
                     action="analyze",
                     job_id=exact_job,
+                    retrieval_query=needle,
                 )
                 if (
                     materialization.get("actor") != authority.principal

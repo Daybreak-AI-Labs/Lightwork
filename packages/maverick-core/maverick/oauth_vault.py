@@ -21,6 +21,7 @@ than silently degrading to plaintext.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -34,6 +35,43 @@ from .tenant.kms import seal_text_for_tenant, unseal_text_for_tenant
 _DEFAULT_SKEW = 60
 
 _lock = threading.Lock()
+
+
+class OAuthRefreshError(RuntimeError):
+    """Authorization must be replaced after an unconfirmed token rotation."""
+
+
+def _validated_token(record: dict) -> dict:
+    if not isinstance(record, dict) or "error" in record:
+        raise ValueError("invalid OAuth token response")
+    result = dict(record)
+    for name in ("access_token", "refresh_token", "token_type"):
+        value = result.get(name)
+        if name == "access_token" or name in result:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("invalid OAuth token metadata")
+    if "scope" in result and not isinstance(result["scope"], str):
+        raise ValueError("invalid OAuth scope")
+    for name in ("expires_at", "expires_in", "obtained_at"):
+        if name not in result:
+            continue
+        value = result[name]
+        if isinstance(value, bool):
+            raise ValueError("invalid OAuth expiry")
+        try:
+            number = float(value)
+        except (ValueError, TypeError, OverflowError):
+            raise ValueError("invalid OAuth expiry") from None
+        if not math.isfinite(number) or number <= 0:
+            raise ValueError("invalid OAuth expiry")
+        result[name] = number
+    result.setdefault("obtained_at", time.time())
+    if ("expires_in" in result
+            and not math.isfinite(result["obtained_at"] + result["expires_in"])):
+        raise ValueError("invalid OAuth expiry")
+    result.pop("refresh_state", None)
+    result.pop("refresh_attempted_at", None)
+    return result
 
 
 def _expires_at_from(record: dict) -> float | None:
@@ -122,8 +160,7 @@ class OAuthVault:
         ``obtained_at`` if absent so relative ``expires_in`` stays meaningful."""
         if not provider:
             raise ValueError("provider is required")
-        rec = dict(record or {})
-        rec.setdefault("obtained_at", time.time())
+        rec = _validated_token(record)
         with _lock:
             data = self._load()
             data[provider] = rec
@@ -166,6 +203,8 @@ class OAuthVault:
             "scope": record.get("scope"),
             "has_refresh_token": bool(record.get("refresh_token")),
             "obtained_at": record.get("obtained_at"),
+            "reconnect_required": bool(record.get("refresh_state")),
+            "refresh_state": record.get("refresh_state", "ready"),
         }
 
     def access_token(
@@ -187,13 +226,32 @@ class OAuthVault:
             record = data.get(provider)
             if record is None:
                 return None
+            if record.get("refresh_state"):
+                raise OAuthRefreshError("OAuth refresh outcome is unconfirmed; reconnect this provider.")
+            try:
+                _validated_token(record)
+            except ValueError:
+                data[provider] = {**record, "refresh_state": "reconnect_required"}
+                self._save(data)
+                raise OAuthRefreshError("Stored OAuth authorization is invalid; reconnect this provider.") from None
             if not is_expired(record, skew=skew):
                 return record.get("access_token")
             if refresher is None:
                 return None
-            fresh = dict(refresher(record) or {})
+            # A refresh may rotate its credential even if the response is lost
+            # or malformed. Persist the hold before dispatch; a process crash
+            # cannot turn an uncertain rotation into an automatic second call.
+            data[provider] = {**record, "refresh_state": "refresh_in_progress",
+                              "refresh_attempted_at": time.time()}
+            self._save(data)
+            try:
+                fresh = _validated_token(refresher(dict(record)))
+            except Exception:
+                data[provider]["refresh_state"] = "reconnect_required"
+                self._save(data)
+                raise OAuthRefreshError("OAuth refresh did not confirm usable authorization; reconnect this provider.") from None
             # Providers may omit the refresh token on refresh — keep the old one.
-            if not fresh.get("refresh_token") and record.get("refresh_token"):
+            if "refresh_token" not in fresh and record.get("refresh_token"):
                 fresh["refresh_token"] = record["refresh_token"]
             fresh.setdefault("obtained_at", time.time())
             data[provider] = fresh

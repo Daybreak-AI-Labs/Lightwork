@@ -82,6 +82,7 @@ class iMessageChannel(Channel):  # noqa: N801 - product spelling
         return account == self._account() and is_allowed(msg.principal_id, self.allowed_user_ids)
 
     def _checkpoint(self, rowid=None):
+        from maverick.channel_recovery import assert_checkpoint_ready
         from maverick.governed_records import GovernedRecordStore
         from maverick.privacy_ops import RecordConflict
 
@@ -89,6 +90,8 @@ class iMessageChannel(Channel):  # noqa: N801 - product spelling
         record_id = "imc-" + hashlib.sha256(self._account().encode()).hexdigest()[:56]
         for _ in range(4):
             current = store.get(record_id)
+            if current is not None:
+                assert_checkpoint_ready(current)
             try:
                 if current is None:
                     # First adoption skips historical Messages; subsequent

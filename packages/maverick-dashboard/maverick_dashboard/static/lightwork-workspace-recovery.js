@@ -63,7 +63,7 @@
       && reconciliation.unresolved === 0 && reconciliation.global_start_blocked !== true;
     get("reconciliation-confirm").disabled = !canComplete;
     get("reconciliation-complete").disabled = !canComplete || !get("reconciliation-confirm").checked;
-    get("reconciliation").querySelectorAll('input[type="text"]').forEach(function (input) { input.disabled = !ready; });
+    get("reconciliation").querySelectorAll('input[type="text"], textarea').forEach(function (input) { input.disabled = !ready; });
   }
   function clearReview() { review = null; get("review").hidden = true; get("review-text").textContent = ""; get("confirm").checked = false; }
   function clearConfirmations() {
@@ -218,6 +218,25 @@
       } else if (item.safe_state === "global_start_blocked") {
         globalBlocked = true;
         var blocked = document.createElement("p"); blocked.textContent = "This authority cannot be safely changed by this build. Normal startup remains blocked."; entry.append(blocked);
+      } else if (item.category === "channel_authority") {
+        var instructions = document.createElement("p"), readback = document.createElement("textarea");
+        instructions.textContent = "Administrator attestation from authoritative readback: replace unknown outcomes with absent or recorded, set outcome to confirmed, and supply the observation time and evidence reference. This action never replays the old request.";
+        readback.rows = 14; readback.maxLength = 262144;
+        readback.setAttribute("aria-label", "Exact channel readback for " + item.record_id);
+        readback.value = JSON.stringify(item.readback_template, null, 2);
+        var confirmReadback = document.createElement("button"); confirmReadback.type = "button";
+        confirmReadback.textContent = "Confirm exact channel readback and retire old work";
+        confirmReadback.addEventListener("click", function () { return action(async function () {
+          var value;
+          try { value = JSON.parse(readback.value); }
+          catch (_error) { throw new Error("Enter a valid channel readback JSON object."); }
+          await request("reconciliation/items/" + encodeURIComponent(item.id), {
+            confirm: true, disposition: "channel_readback_confirmed", channel_readback: value,
+          });
+          await load(get("snapshot").value);
+          say("Exact channel readback recorded. Old receipts remain retired from automatic replay.");
+        }); });
+        entry.append(instructions, readback, confirmReadback);
       } else if (item.requires_external_readback) {
         var label = document.createElement("label"), evidence = document.createElement("input");
         evidence.type = "text"; evidence.maxLength = 512; evidence.autocomplete = "off"; evidence.placeholder = "Ticket, receipt, log, or external record reference";

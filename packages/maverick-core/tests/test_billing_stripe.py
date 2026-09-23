@@ -48,6 +48,7 @@ class FakeStripe:
         self.subs: dict[str, list[dict]] = {}
         self.invoice_items: list[dict] = []
         self.customer_idem: dict[str, str] = {}
+        self.subscription_keys: list[str] = []
         self._n = 0
 
     def _id(self, prefix: str) -> str:
@@ -70,6 +71,7 @@ class FakeStripe:
         return list(self.subs.get(customer_id, []))
 
     def create_subscription(self, *, customer_id, price_id, metadata, idempotency_key):
+        self.subscription_keys.append(idempotency_key)
         sub = {
             "id": self._id("sub"), "status": "active", "metadata": dict(metadata),
             "items": {"data": [{"id": self._id("si"), "price": {"id": price_id}}]},
@@ -226,6 +228,228 @@ def test_push_usage_items_match_invoice_when_metered_on(monkeypatch):
 
 
 # ---- webhook: signature verification ---------------------------------------
+
+def test_canceled_subscription_starts_a_distinct_idempotent_lifecycle(monkeypatch):
+    _enable(monkeypatch, prices={"pro": "price_pro"})
+    tr.create_tenant("acme", plan="pro")
+    fake = FakeStripe()
+    first = billing_stripe.sync_tenant("acme", client=fake)
+    old = fake.subs[first["customer"]][0]
+    old["status"] = "canceled"
+    second = billing_stripe.sync_tenant("acme", client=fake)
+    assert second["subscription"]["status"] == "created"
+    assert fake.subscription_keys[0] != fake.subscription_keys[1]
+    assert billing_stripe.sync_tenant("acme", client=fake)["subscription"]["status"] == "unchanged"
+    assert len(fake.subscription_keys) == 2
+
+
+@pytest.mark.parametrize("status", ["incomplete", "past_due", "unpaid", "paused", "unknown"])
+def test_pending_subscription_requires_resolution_without_duplicate_create(monkeypatch, status):
+    _enable(monkeypatch, prices={"pro": "price_pro"})
+    tr.create_tenant("acme", plan="pro")
+    fake = FakeStripe()
+    first = billing_stripe.sync_tenant("acme", client=fake)
+    fake.subs[first["customer"]][0]["status"] = status
+    with pytest.raises(billing_stripe.StripeError, match="resolve its billing state"):
+        billing_stripe.sync_tenant("acme", client=fake)
+    assert len(fake.subscription_keys) == 1
+
+
+def test_multiple_active_or_pending_cancellation_are_not_silently_modified(monkeypatch):
+    import copy
+
+    _enable(monkeypatch, prices={"pro": "price_pro"})
+    tr.create_tenant("acme", plan="pro")
+    fake = FakeStripe()
+    first = billing_stripe.sync_tenant("acme", client=fake)
+    sub = fake.subs[first["customer"]][0]
+    sub["cancel_at_period_end"] = True
+    assert billing_stripe.sync_tenant("acme", client=fake)["subscription"]["status"] == "pending_cancellation"
+    fake.subs[first["customer"]].append({**copy.deepcopy(sub), "id": "sub_duplicate"})
+    with pytest.raises(billing_stripe.StripeError, match="Multiple current"):
+        billing_stripe.sync_tenant("acme", client=fake)
+    assert len(fake.subscription_keys) == 1
+
+
+def test_open_or_current_period_refused_before_any_stripe_mutation(monkeypatch):
+    from dataclasses import replace
+    from datetime import datetime, timezone
+
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    fake = FakeStripe()
+    for inv in [replace(_invoice(), invoice_id="", period_end=""),
+                replace(_invoice(), period_end=datetime.now(timezone.utc).date().isoformat())]:
+        with pytest.raises(billing_stripe.StripeError, match="closed past UTC period"):
+            billing_stripe.sync_tenant("acme", invoice=inv, client=fake)
+    assert not fake.customers and not fake.invoice_items
+
+
+def test_frozen_invoice_replays_after_restart_but_rejects_rerating(monkeypatch):
+    import importlib
+    from dataclasses import replace
+
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    fake = FakeStripe()
+    first = billing_stripe.push_usage_items("acme", _invoice(), client=fake)
+    from maverick import stripe_collection
+    importlib.reload(stripe_collection)
+    assert billing_stripe.push_usage_items("acme", _invoice(), client=fake) == first
+    changed = replace(_invoice(), line_items=[replace(_invoice().line_items[0], charge=2.20), _invoice().line_items[1]], total=4.60, subtotal=4.60)
+    with pytest.raises(billing_stripe.StripeError, match="Closed invoice changed"):
+        billing_stripe.push_usage_items("acme", changed, client=fake)
+    assert len(fake.invoice_items) == 2
+
+
+@pytest.mark.parametrize("since,until,currency", [
+    ("2026-06-01", "2026-06-15", "USD"),
+    ("2026-06-15", "2026-07-15", "USD"),
+    ("2026-06-01", "2026-06-30", "EUR"),
+])
+def test_closed_usage_cannot_be_collected_again_through_overlapping_period(monkeypatch, since, until, currency):
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    ledger = billing.ledger_for_tenant("acme")
+    for day in ("2026-06-01", "2026-06-15", "2026-06-30", "2026-07-01"):
+        ledger.record("user:alice", 1.0, 10, 1, day=day)
+    original = billing.generate_invoice("acme", billing.RateCard(), since="2026-06-01", until="2026-06-30")
+    alternate = billing.generate_invoice("acme", billing.RateCard(currency=currency), since=since, until=until)
+    fake = FakeStripe()
+    billing_stripe.push_usage_items("acme", original, client=fake)
+    assert len(fake.invoice_items) == 3
+    with pytest.raises(billing_stripe.StripeError, match="overlap"):
+        billing_stripe.push_usage_items("acme", alternate, client=fake)
+    assert len(fake.invoice_items) == 3
+    following = billing.generate_invoice("acme", billing.RateCard(), since="2026-07-01", until="2026-07-31")
+    assert len(billing_stripe.push_usage_items("acme", following, client=fake)) == 1
+
+
+def test_concurrent_processes_cannot_collect_overlapping_usage(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    billing_stripe.ensure_customer("acme", client=FakeStripe())
+    attempts = tmp_path / "provider-attempts.txt"
+    script = """
+import json, sys
+from pathlib import Path
+from maverick.billing import Invoice, LineItem
+from maverick.billing_stripe import push_usage_items, StripeError
+class Client:
+    def create_invoice_item(self, **kwargs):
+        with Path(sys.argv[1]).open('a') as output:
+            output.write('attempt\\n')
+        return {'id': 'ii_fixture'}
+invoice = Invoice('acme', '2026-06-01', sys.argv[2],
+                  [LineItem('user:alice', '2026-06-15', 1., 1, 0, 1.)],
+                  subtotal=1., total=1., invoice_id=sys.argv[2])
+sys.stdin.readline()
+try:
+    push_usage_items('acme', invoice, client=Client())
+    print(json.dumps({'status': 'collected'}), flush=True)
+except StripeError as exc:
+    print(json.dumps({'status': 'blocked', 'error': str(exc)}), flush=True)
+"""
+    workers = [subprocess.Popen([sys.executable, "-u", "-c", script, str(attempts), end],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+               for end in ("2026-06-20", "2026-06-30")]
+    try:
+        for worker in workers:
+            worker.stdin.write("go\n")
+            worker.stdin.flush()
+        results = []
+        for worker in workers:
+            output, errors = worker.communicate(timeout=30)
+            assert worker.returncode == 0, errors
+            results.append(json.loads(output))
+        assert sorted(result["status"] for result in results) == ["blocked", "collected"]
+        assert "overlap" in next(result["error"] for result in results if result["status"] == "blocked")
+        assert attempts.read_text().splitlines() == ["attempt"]
+    finally:
+        for worker in workers:
+            if worker.poll() is None:
+                worker.kill()
+                worker.wait(timeout=10)
+
+
+def test_prior_receipt_with_unknown_period_requires_reconciliation(monkeypatch):
+    from dataclasses import replace
+
+    from maverick.file_lock import atomic_read_text, atomic_write_text
+    from maverick.paths import data_dir
+
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    fake = FakeStripe()
+    first = billing_stripe.push_usage_items("acme", _invoice(), client=fake)
+    receipt_path = next(data_dir("billing", "stripe-collections", tenant="acme").glob("*.json"))
+    state = json.loads(atomic_read_text(receipt_path))
+    state.pop("binding")
+    atomic_write_text(receipt_path, json.dumps(state))
+    following = replace(_invoice(), period_start="2026-07-01", period_end="2026-07-31", invoice_id="july")
+    with pytest.raises(billing_stripe.StripeError, match="period is unknown"):
+        billing_stripe.push_usage_items("acme", following, client=fake)
+    assert len(fake.invoice_items) == 2
+    # Exact original replay can retain the same completed receipts and recover
+    # the explicit binding authenticated by their existing frozen digest.
+    assert billing_stripe.push_usage_items("acme", _invoice(), client=fake) == first
+    assert len(fake.invoice_items) == 2
+
+
+@pytest.mark.parametrize("usage,minimum", [(1.0, 10.0), (10.0, 10.0), (20.0, 10.0), (0.0, 10.0), (0.0, 0.0)])
+def test_minimum_adjustment_matches_preview_and_collection(monkeypatch, usage, minimum):
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    ledger = billing.ledger_for_tenant("acme")
+    if usage:
+        ledger.record("user:alice", usage, 0, 0, day="2026-06-01")
+    card = billing.RateCard(minimum_charge=minimum)
+    invoice = billing.generate_invoice("acme", card, since="2026-06-01", until="2026-06-01")
+    assert sum(li.charge for li in invoice.line_items) == invoice.total
+    preview = billing_stripe.preview_charges("acme", card, since="2026-06-01", until="2026-06-01")
+    fake = FakeStripe()
+    result = billing_stripe.push_usage_items("acme", invoice, client=fake)
+    expected = int(max(usage, minimum) * 100)
+    assert sum(row["amount"] for row in result) == expected
+    assert sum(row["amount_minor"] for row in preview["usage_items_that_would_bill"]) == expected
+    assert billing_stripe.push_usage_items("acme", invoice, client=fake) == result
+    assert len(fake.invoice_items) == len(result)
+
+
+@pytest.mark.parametrize("value,currency,expected", [("0.005", "usd", 1), ("1.005", "usd", 101), ("2.675", "usd", 268), ("2.5", "jpy", 3), ("2.5", "isk", 300), ("2.5", "ugx", 300)])
+def test_minor_units_follow_explicit_decimal_half_up(value, currency, expected):
+    assert billing_stripe._to_minor_units(value, currency) == expected
+
+
+def test_line_rounding_preserves_rounded_invoice_total(monkeypatch):
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    invoice = Invoice(tenant="acme", period_start="2026-06-01", period_end="2026-06-01",
+                      line_items=[LineItem(name, "2026-06-01", 0.005, 0, 0, 0.005) for name in ("a", "b")],
+                      total=0.01, subtotal=0.01, invoice_id="rounding")
+    fake = FakeStripe()
+    assert sum(row["amount"] for row in billing_stripe.push_usage_items("acme", invoice, client=fake)) == 1
+
+
+def test_ambiguous_item_does_not_replay_after_idempotency_window(monkeypatch):
+    _enable(monkeypatch, metered=True)
+    tr.create_tenant("acme", plan="pro")
+    class TimeoutStripe(FakeStripe):
+        def create_invoice_item(self, **kwargs):
+            super().create_invoice_item(**kwargs)
+            raise TimeoutError("response lost")
+    fake = TimeoutStripe()
+    with pytest.raises(TimeoutError):
+        billing_stripe.push_usage_items("acme", _invoice(), client=fake)
+    future = time.time() + 24 * 3600
+    monkeypatch.setattr(billing_stripe.time, "time", lambda: future)
+    with pytest.raises(billing_stripe.StripeError, match="uncertain beyond"):
+        billing_stripe.push_usage_items("acme", _invoice(), client=fake)
+    assert len(fake.invoice_items) == 1
 
 def _sign(payload: str, secret: str, ts: int) -> str:
     mac = hmac.new(secret.encode(), f"{ts}.{payload}".encode(), hashlib.sha256)

@@ -149,6 +149,31 @@ def _bounded_int(value: Any, *, default: int, ceiling: float) -> int:
     return int(_bounded_float(value, default=float(default), ceiling=ceiling))
 
 
+def _task_budget(args: dict):
+    """Optional caller limits, constrained by current operator authority."""
+    from maverick.budget import budget_from_config, resolve_budget_caps
+    from maverick.runner import clamp_task_limit
+
+    configured = resolve_budget_caps()
+    overrides = {}
+    for key, env in (("max_dollars", "MAVERICK_MCP_MAX_DOLLARS"),
+                     ("max_wall_seconds", "MAVERICK_MCP_MAX_WALL_SECONDS")):
+        limits = []
+        for raw in (args.get(key), os.environ.get(env), configured.get(key)):
+            if raw is None:
+                limits.append(None)
+                continue
+            try:
+                value = float(raw)
+                if isinstance(raw, bool) or not math.isfinite(value) or value < 0:
+                    raise ValueError
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"{key} must be a finite non-negative limit") from None
+            limits.append(value)
+        overrides[key] = clamp_task_limit(limits[0], clamp_task_limit(limits[1], limits[2]))
+    return budget_from_config(**overrides)
+
+
 class _ProtocolError(Exception):
     """Raised for JSON-RPC protocol-level errors (unknown method/tool, bad params).
 
@@ -188,8 +213,8 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "title": {"type": "string"},
                 "description": {"type": "string"},
-                "max_dollars": {"type": "number", "default": 5.0},
-                "max_wall_seconds": {"type": "number", "default": 3600},
+                "max_dollars": {"type": "number", "minimum": 0},
+                "max_wall_seconds": {"type": "number", "minimum": 0},
                 "max_depth": {"type": "integer", "default": 3},
             },
             "required": ["title"],
@@ -1538,7 +1563,6 @@ class MCPServer:
     def _tool_start(self, args: dict, *, capability=None) -> str:
         from maverick.deployment import require_enterprise_or_die
         require_enterprise_or_die()
-        from maverick.budget import Budget
         from maverick.llm import LLM
         from maverick.orchestrator import run_goal_sync
         from maverick.sandbox import build_sandbox
@@ -1553,22 +1577,12 @@ class MCPServer:
         # operator's provider spend. Ceilings come from env and default to
         # the schema defaults (so the common case is unchanged); raise them
         # with MAVERICK_MCP_MAX_DOLLARS / _MAX_WALL_SECONDS / _MAX_DEPTH.
-        max_dollars = _bounded_float(
-            args.get("max_dollars", 5.0),
-            default=5.0,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_DOLLARS", 5.0),
-        )
-        max_wall = _bounded_float(
-            args.get("max_wall_seconds", 3600),
-            default=3600.0,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_WALL_SECONDS", 3600.0),
-        )
+        budget = _task_budget(args)
         max_depth = _bounded_int(
             args.get("max_depth", 3),
             default=3,
             ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
         )
-        budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
         with _canonical_world() as world:
             goal_id = world.create_goal(
                 title,
@@ -1606,7 +1620,6 @@ class MCPServer:
             return "\n".join(lines)
 
     def _tool_resume(self, args: dict, *, capability=None) -> str:
-        from maverick.budget import Budget
         from maverick.llm import LLM
         from maverick.orchestrator import run_goal_sync
         from maverick.sandbox import build_sandbox
@@ -1636,22 +1649,12 @@ class MCPServer:
             # Clamp to the same operator ceilings as _tool_start. Over HTTP the
             # budget is client-controlled; a bare Budget() let a resume bypass
             # the MAVERICK_MCP_MAX_* caps that _tool_start enforces.
-            max_dollars = _bounded_float(
-                args.get("max_dollars", 5.0),
-                default=5.0,
-                ceiling=os.environ.get("MAVERICK_MCP_MAX_DOLLARS", 5.0),
-            )
-            max_wall = _bounded_float(
-                args.get("max_wall_seconds", 3600),
-                default=3600.0,
-                ceiling=os.environ.get("MAVERICK_MCP_MAX_WALL_SECONDS", 3600.0),
-            )
+            budget = _task_budget(args)
             max_depth = _bounded_int(
                 args.get("max_depth", 3),
                 default=3,
                 ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
             )
-            budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
             run_kwargs = {"sandbox": build_sandbox(), "max_depth": max_depth}
             if capability is not None:
                 run_kwargs["capability"] = capability

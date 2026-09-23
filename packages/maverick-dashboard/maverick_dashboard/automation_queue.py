@@ -971,6 +971,9 @@ def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
             versions.get("definition_digest") == run.definition_digest,
             versions.get("release_digest") == run.release_digest,
             versions.get("release_id") == run.release_id,
+            (run.budget_limit_dollars is None or
+             card["budget"].get("run_limit_dollars") == run.budget_limit_dollars
+            ),
             (
                 run.resume_at is None
                 or float(card["expires_at"]) == float(run.resume_at)
@@ -1038,6 +1041,7 @@ def enqueue_flow_resume(
     inputs: dict | None = None,
     expired: bool = False,
     from_failure: bool = False,
+    budget_limit_dollars: float | None = None,
     run_at: float | None = None,
     approval_binding_sha256: str = "",
     decision_authority: object | None = None,
@@ -1059,6 +1063,8 @@ def enqueue_flow_resume(
         payload["expired"] = True
     if from_failure:
         payload["from_failure"] = True
+    if budget_limit_dollars is not None:
+        payload["budget_limit_dollars"] = budget_limit_dollars
     payload.update({"tenant": tenant} if tenant else _job_tenant_payload())
 
     def _reserve() -> None:
@@ -1240,6 +1246,7 @@ def _notify_flow(flow, run) -> None:
     if flow is None or not getattr(flow, "notify", False):
         return
     from maverick.flow.runner import (
+        STATUS_BUDGET_LIMITED,
         STATUS_COMPLETED,
         STATUS_FAILED,
         STATUS_INDETERMINATE,
@@ -1252,6 +1259,8 @@ def _notify_flow(flow, run) -> None:
         body, prio = f"“{name}” finished.", "default"
     elif run.status == STATUS_FAILED:
         body, prio = f"“{name}” failed: {run.error or 'see the run'}", "high"
+    elif run.status == STATUS_BUDGET_LIMITED:
+        body, prio = f"“{name}” is saved and waiting for a larger spending allowance. Review the run to continue.", "high"
     elif run.status == STATUS_INDETERMINATE:
         body = (
             f"“{name}” stopped with an indeterminate external effect. "
@@ -1559,6 +1568,7 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
                 return
             from maverick.flow.runner import (
                 PAUSED_STATUSES,
+                STATUS_BUDGET_LIMITED,
                 STATUS_FAILED,
                 STATUS_RESUMING,
             )
@@ -1571,7 +1581,7 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
                 return
             retryable_failure = (
                 bool(payload.get("from_failure"))
-                and prior.status == STATUS_FAILED
+                and prior.status in {STATUS_FAILED, STATUS_BUDGET_LIMITED}
                 and bool(prior.cursor)
             )
             if prior.status not in PAUSED_STATUSES and not retryable_failure:
@@ -1679,6 +1689,7 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
                         "approval_decision_attestation"
                     ),
                     from_failure=bool(payload.get("from_failure")),
+                    budget_limit_dollars=payload.get("budget_limit_dollars"),
                     inputs=dict(payload.get("inputs") or {}),
                     record_outcomes=not dry_run,
                 )

@@ -72,21 +72,19 @@ def test_none_override_passes_through_to_config(monkeypatch):
     assert b.max_dollars == 2.0
 
 
-def test_nonfinite_config_value_is_skipped(monkeypatch):
+def test_nonfinite_config_value_is_refused(monkeypatch):
     monkeypatch.setattr(
         "maverick.config.get_budget_overrides",
         lambda: {"max_dollars": float("inf")},
     )
-    b = budget_from_config(defaults={"max_dollars": 5.0})
-    # inf from config must NOT become the cap; falls back to the default.
-    assert b.max_dollars == 5.0
-    assert math.isfinite(b.max_dollars)
+    with pytest.raises(ValueError, match="finite non-negative"):
+        budget_from_config(defaults={"max_dollars": 5.0})
 
 
-def test_malformed_config_value_is_skipped(monkeypatch):
+def test_malformed_config_value_is_refused(monkeypatch):
     monkeypatch.setattr(
         "maverick.config.get_budget_overrides",
         lambda: {"max_dollars": "not-a-number"},
     )
-    b = budget_from_config(defaults={"max_dollars": 4.0})
-    assert b.max_dollars == 4.0
+    with pytest.raises(ValueError, match="finite non-negative"):
+        budget_from_config(defaults={"max_dollars": 4.0})

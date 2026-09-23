@@ -17,7 +17,7 @@ from pathlib import Path
 
 from maverick import entitlements
 
-from . import audit, store
+from . import audit, db, store
 from .models import License
 
 log = logging.getLogger(__name__)
@@ -111,32 +111,37 @@ def issue_license(conn: sqlite3.Connection, *, customer_id: int, tier: str,
     if features_denied:
         payload["features_denied"] = list(features_denied)
     doc = entitlements.sign_license(payload, signing_key or signing_key_hex())
-    store.add_license(conn, customer_id=customer_id, license_id=lic_id, tier=tier,
-                      suites=list(suites or []), features=list(features or []),
-                      seats=seats, issued_at=issued, expires_at=exp,
-                      grace_days=int(grace_days), key_id=doc["key_id"], doc=doc,
-                      note="", created_by=actor)
-    audit.record(conn, actor=actor, action="license.issue", target=cust.name,
-                 detail={"license_id": lic_id, "tier": tier,
-                         "suites": list(suites or []),
-                         "features_denied": list(features_denied or []),
-                         "expires_at": exp})
-    lic = store.get_license(conn, lic_id)
-    assert lic is not None
+    with db.transaction(conn) as owned:
+        current = store.get_customer(owned, customer_id)
+        if current is None or current.name != cust.name:
+            raise ValueError("customer changed during license preparation")
+        store.add_license_in_transaction(owned, customer_id=customer_id, license_id=lic_id, tier=tier,
+                          suites=list(suites or []), features=list(features or []),
+                          seats=seats, issued_at=issued, expires_at=exp,
+                          grace_days=int(grace_days), key_id=doc["key_id"], doc=doc,
+                          note="", created_by=actor)
+        audit.record_in_transaction(owned, actor=actor, action="license.issue", target=cust.name,
+                     detail={"license_id": lic_id, "tier": tier,
+                             "suites": list(suites or []),
+                             "features_denied": list(features_denied or []),
+                             "expires_at": exp})
+        lic = store.get_license(owned, lic_id)
+        assert lic is not None
     return lic
 
 
 def revoke_license(conn: sqlite3.Connection, license_id: str, *, actor: str = "system",
                    note: str = "") -> bool:
-    lic = store.get_license(conn, license_id)
-    if lic is None:
-        return False
-    ok = store.revoke_license(conn, license_id, note=note)
-    if ok:
-        cust = store.get_customer(conn, lic.customer_id)
-        audit.record(conn, actor=actor, action="license.revoke",
-                     target=cust.name if cust else str(lic.customer_id),
-                     detail={"license_id": license_id, "note": note})
+    with db.transaction(conn) as owned:
+        lic = store.get_license(owned, license_id)
+        if lic is None:
+            return False
+        ok = store.revoke_license_in_transaction(owned, license_id, note=note)
+        if ok:
+            cust = store.get_customer(owned, lic.customer_id)
+            audit.record_in_transaction(owned, actor=actor, action="license.revoke",
+                         target=cust.name if cust else str(lic.customer_id),
+                         detail={"license_id": license_id, "note": note})
     return ok
 
 
