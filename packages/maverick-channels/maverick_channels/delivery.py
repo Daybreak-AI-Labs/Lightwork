@@ -16,6 +16,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from itertools import islice
 from pathlib import Path
 
 from .base import IncomingMessage, Reply, as_reply
@@ -75,6 +76,28 @@ def _record_id(channel, account, external_id):
     _bounded(account, 4096, "configured account identity")
     _bounded(channel, 128, "adapter name")
     return "chd-" + _digest([current_tenant_id_strict(), channel, account, external_id])[:56]
+
+
+def _cleanup_paths(record_id, digests):
+    if (not isinstance(digests, list) or len(digests) > MAX_ATTACHMENTS
+            or any(not isinstance(digest, str) for digest in digests)):
+        raise ValueError("Invalid channel attachment cleanup manifest")
+    return [_blob_path(record_id, digest) for digest in digests]
+
+
+def _legacy_cleanup_digests(record_id):
+    """Recover only bounded blob names owned by an already compacted receipt."""
+    directory = _blob_path(record_id, "0" * 64).parent
+    try:
+        with os.scandir(directory) as entries:
+            retained = list(islice(entries, MAX_ATTACHMENTS + 1))
+    except FileNotFoundError:
+        return []
+    digests = [entry.name for entry in retained]
+    _cleanup_paths(record_id, digests)
+    if any(not entry.is_file(follow_symlinks=False) for entry in retained):
+        raise ValueError("Invalid channel attachment cleanup entry")
+    return digests
 
 
 def _payload(msg, record_id):
@@ -260,21 +283,43 @@ class DeliveryJournal:
                 cursor = cursors.get(cursor_id)
         now, compacted = time.time(), 0
         next_cursor = cursor["cursor"]
-        for position, record_id in self.store.iter_record_ids(start_after=cursor["cursor"], limit=limit):
-            next_cursor = position
-            row = self.get(record_id)
-            if (not row or row.get("restore_hold") or row["execution"] != "completed" or row["delivery"] != "delivered"
-                    or row.get("compacted") or row["updated_at"] > now - RETENTION_SECONDS):
-                continue
-            paths = [_blob_path(row["id"], item["sha256"]) for item in row["message"].get("attachments", [])]
-            self.change(row, message={}, reply=None, chunks={}, route={}, compacted=True)
-            for path in paths:
-                # Paths are constructed solely from the verified tenant store
-                # and bounded receipt/digest values, never external paths.
-                path.unlink(missing_ok=True)
-            compacted += 1
-        self.finish_recovery_window((cursors, cursor, next_cursor))
+        try:
+            for position, record_id in self.store.iter_record_ids(start_after=cursor["cursor"], limit=limit):
+                next_cursor = position
+                compacted += self._compact_receipt(self.get(record_id), now)
+        finally:
+            # Surface cleanup failures, but do not let one locked or malformed
+            # receipt starve every later record. The rotating scan retries it.
+            self.finish_recovery_window((cursors, cursor, next_cursor))
         return compacted
+
+    def _compact_receipt(self, row, now):
+        from maverick.privacy_ops import RecordConflict
+
+        if (not row or row.get("restore_hold") or row["execution"] != "completed"
+                or row["delivery"] != "delivered"):
+            return False
+        if row.get("compacted") and row.get("cleanup_pending") == []:
+            return False
+        if ("cleanup_pending" not in row and not row.get("compacted")
+                and row["updated_at"] > now - RETENTION_SECONDS):
+            return False
+        try:
+            if "cleanup_pending" not in row:
+                digests = (_legacy_cleanup_digests(row["id"]) if row.get("compacted") else
+                           [item["sha256"] for item in row["message"].get("attachments", [])])
+                _cleanup_paths(row["id"], digests)
+                # CAS establishes durable cleanup intent before any deletion.
+                # Retrying this state bypasses the updated_at retention cutoff.
+                row = self.change(row, message={}, reply=None, chunks={}, route={},
+                                  cleanup_pending=digests, compacted=False)
+            for path in _cleanup_paths(row["id"], row["cleanup_pending"]):
+                _assert_work_allowed()
+                path.unlink(missing_ok=True)
+            self.change(row, cleanup_pending=[], compacted=True)
+        except RecordConflict:
+            return False  # Another worker owns/completed the transition.
+        return True
 
 
 async def admit_message(msg, *, external_id, account, authorize, route=None, journal=None):

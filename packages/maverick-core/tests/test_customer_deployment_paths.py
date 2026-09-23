@@ -87,6 +87,36 @@ def test_vps_workspace_failure_precedes_any_completed_unit(tmp_path, monkeypatch
         renderer.render_service("WorkingDirectory=@WORKDIR@", user="fixture", home=tmp_path)
 
 
+@pytest.mark.parametrize("remote", ["~/remote-only", "/remote/customer/workspace"])
+def test_vps_ssh_workspace_stays_remote_despite_local_collision(tmp_path, monkeypatch, remote):
+    renderer = load("deploy/vps/render_service.py")
+    home = tmp_path / "service-home"
+    state = home / ".maverick"
+    state.mkdir(parents=True)
+    collision = home / "remote-only"
+    collision.write_text("unrelated local file", encoding="utf-8")
+    config_path = state / "config.toml"
+    config_path.write_text('[sandbox]\nbackend="ssh"\nhost="customer@remote"\nworkdir=' + json.dumps(remote) + '\n', encoding="utf-8")
+    before = config_path.read_bytes()
+    template = (ROOT / "deploy/vps/maverick.service").read_text(encoding="utf-8")
+    original_mkdir = Path.mkdir
+
+    def local_mkdir(path, *args, **kwargs):
+        assert path.resolve().is_relative_to(tmp_path.resolve()), "remote path must not be provisioned locally"
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", local_mkdir)
+    rendered = renderer.render_service(template, user="fixture", home=home)
+    local_workspace = state / "service-workspace"
+    assert local_workspace.is_dir()
+    assert not list(local_workspace.iterdir())
+    assert f"WorkingDirectory={renderer._unit_value(local_workspace)}" in rendered
+    assert f"ReadWritePaths={renderer._unit_value(state)} {renderer._unit_value(local_workspace)}" in rendered
+    assert remote not in rendered
+    assert collision.read_text(encoding="utf-8") == "unrelated local file"
+    assert config_path.read_bytes() == before
+
+
 def test_container_default_matches_state_mount_and_explicit_config_wins(monkeypatch):
     dockerfile = (ROOT / "deploy/docker/Dockerfile").read_text(encoding="utf-8")
     assert "ENV MAVERICK_WORKDIR=/home/maverick/.maverick/workspace" in dockerfile

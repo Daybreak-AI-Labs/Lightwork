@@ -16,7 +16,7 @@ def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
         def get_goal(self, goal_id):
             return SimpleNamespace(
                 id=goal_id,
-                status="done",
+                status="done" if captured else "pending",
                 execution_principal="user:alice",
             )
 
@@ -30,7 +30,7 @@ def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
     monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: object())
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     assert runner.run_goal_in_thread(
@@ -58,7 +58,7 @@ def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
         def get_goal(self, goal_id):
             return SimpleNamespace(
                 id=goal_id,
-                status="done",
+                status="done" if captured else "pending",
                 execution_principal="user:agent:acme.coder",
             )
 
@@ -84,7 +84,7 @@ def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
     monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: object())
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     assert runner.run_goal_in_thread(

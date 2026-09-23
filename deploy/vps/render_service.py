@@ -30,13 +30,18 @@ def render_service(template: str, *, user: str, home: Path) -> str:
     configured = config.get("sandbox", {}).get("workdir")
     if not isinstance(configured, str) or not configured.strip():
         raise ValueError("setup must save sandbox.workdir before installing the service")
-    if configured == "~":
-        configured = str(home)
-    elif configured.startswith("~/"):
-        configured = str(home / configured[2:])
-    workspace = Path(configured)
-    if not workspace.is_absolute():
-        raise ValueError("sandbox.workdir must be an absolute path for the VPS service")
+    if str(config.get("sandbox", {}).get("backend", "local")).strip().lower() == "ssh":
+        # SSH workdir belongs to the remote host. A local collision or ACL at
+        # the same spelling says nothing about its availability there.
+        workspace = state / "service-workspace"
+    else:
+        if configured == "~":
+            configured = str(home)
+        elif configured.startswith("~/"):
+            configured = str(home / configured[2:])
+        workspace = Path(configured)
+        if not workspace.is_absolute():
+            raise ValueError("sandbox.workdir must be an absolute path for the VPS service")
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     # This program is invoked as the service account, after the wizard. Test

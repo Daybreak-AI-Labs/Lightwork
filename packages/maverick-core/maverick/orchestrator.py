@@ -23,6 +23,7 @@ from .git_safety import (
 )
 from .llm import LLM, model_for_role
 from .mcp_client import load_mcp_specs_from_config, start_mcp_clients, stop_mcp_clients
+from .run_outcome import GoalCancelled, cancellation_message
 from .sandbox import LocalBackend
 from .skills import distill
 from .swarm import SwarmContext
@@ -1300,7 +1301,7 @@ class _RunLifecycle:
             allowance_stop = isinstance(error, BudgetExceeded)
             self.summary = (
                 _budget_stop_message(self.budget, self.goal_id, error) if allowance_stop
-                else "cancelled" if cancelled else f"internal error: {error}"
+                else cancellation_message(error) if cancelled else f"internal error: {error}"
             )
             self.outcome = "interrupted" if cancelled or allowance_stop else "failure"
             self.world.set_goal_status(
@@ -1852,6 +1853,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
 
         # A dashboard cancellation can race the final model response. It must
         # win before a returned result is persisted as successful or blocked.
+        if result.stop_kind == "cancelled":
+            cancelled = GoalCancelled(result.stop_detail)
+            cancelled.tool_execution_unknown = result.tool_execution_unknown
+            raise cancelled
         if world.get_goal(goal_id).status == "cancelled":
             _lifecycle.end_episode("cancelled", "interrupted")
             return "Stopped: this goal was cancelled."
@@ -2428,6 +2433,9 @@ async def _run_goal_accounted(
     except BudgetExceeded as exc:
         error = exc
         return _budget_stop_message(budget, goal_id, exc)
+    except GoalCancelled as exc:
+        error = exc
+        return cancellation_message(exc)
     except BaseException as exc:
         error = exc
         raise

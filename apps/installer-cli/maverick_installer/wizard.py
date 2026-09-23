@@ -1452,7 +1452,8 @@ def pick_knowledge() -> dict[str, Any]:
 
     Off by default; the kernel never requires maverick-knowledge. When on,
     ``embedder`` selects the embedding provider (hosted Voyage / local /
-    deterministic) and ``store`` selects the vector backend (sqlite / pgvector).
+    deterministic) and ``store`` selects SQLite/pgvector for ingestion or
+    Qdrant for existing-corpus reads and erasure.
     Returns a dict written under ``[knowledge]``.
     """
     console.print()
@@ -1488,7 +1489,7 @@ def pick_knowledge() -> dict[str, Any]:
         [
             "sqlite   - single-file, local (default; fine to a few million chunks)",
             "pgvector - Postgres + pgvector (enterprise: one DB to encrypt/back up/audit)",
-            "qdrant   - Qdrant (scale / dedicated retrieval infra)",
+            "qdrant   - existing corpus reads/erasure (new ingestion unavailable)",
         ],
         default="sqlite   - single-file, local (default; fine to a few million chunks)",
     ).split()[0]
@@ -1498,6 +1499,10 @@ def pick_knowledge() -> dict[str, Any]:
         if dsn:
             out["dsn"] = dsn
     elif store == "qdrant":
+        console.print(
+            "[yellow]Qdrant can read and erase existing documents. Adding or repairing "
+            "documents is unavailable. Choose SQLite or pgvector to ingest new documents.[/yellow]"
+        )
         url = _q_text("  Qdrant URL (blank = QDRANT_URL env)", default="").strip()
         if url:
             out["url"] = url
@@ -5327,6 +5332,16 @@ def _docker_available() -> bool:
 _LANGUAGE_BACKENDS = {"docker", "gvisor", "podman", "kubernetes"}
 
 
+def _ssh_destination(value: Any) -> str:
+    """Validate a destination's structure without invoking SSH or resolving DNS."""
+    destination = value.strip() if isinstance(value, str) else ""
+    if any(ord(character) < 32 or ord(character) == 127 for character in destination) or not re.fullmatch(r"(?:[^\s@/:\\]+@)?[^\s@/\\]+", destination):
+        raise ValueError("SSH destination must be a host, user@host, or SSH config alias")
+    if destination.rsplit("@", 1)[-1].startswith("-") or destination.startswith("-"):
+        raise ValueError("SSH destination cannot start with an option prefix")
+    return destination
+
+
 def pick_sandbox() -> dict[str, Any]:
     # Security-first default: keep Docker selected by default regardless
     # of current daemon reachability to avoid silently falling back to
@@ -5346,8 +5361,20 @@ def pick_sandbox() -> dict[str, Any]:
         default=docker_default,
     )
     backend = pick.split()[0]
-    workdir = _q_text("  Workspace directory", default=os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "maverick-workspace"))
+    remote = backend == "ssh"
+    workdir = _q_text(
+        "  Remote workspace directory" if remote else "  Workspace directory",
+        default="~/maverick-workspace" if remote else os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "maverick-workspace"),
+    )
     cfg: dict[str, Any] = {"backend": backend, "workdir": workdir, "timeout": 60}
+    if remote:
+        while True:
+            try:
+                cfg["host"] = _ssh_destination(_q_text("  SSH destination (user@host or SSH config alias)", default=""))
+                break
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+        console.print("[dim]SSH connectivity is checked when the sandbox starts; setup does not contact the remote host.[/dim]")
     # Non-Python coders get a toolchain image that can actually run their tests
     # (cargo/go test, the JS runner, ...). Python is the default image, so we
     # only write [sandbox] language when it's something else -- existing and
@@ -8391,6 +8418,7 @@ def _prepare_wizard_workspace(sandbox: dict[str, Any]) -> dict[str, Any]:
     """Prepare host workspaces before a configuration is advertised as usable."""
     result = dict(sandbox)
     if str(result.get("backend", "local")).strip().lower() == "ssh":
+        result["host"] = _ssh_destination(result.get("host"))
         return result  # Remote POSIX paths must never be provisioned on this host.
     workdir = Path(result.get("workdir") or os.environ.get("MAVERICK_WORKDIR") or "~/maverick-workspace").expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
@@ -8640,6 +8668,8 @@ def smoke_test() -> bool:
 
         cfg = load_config()
         assert cfg.get("sandbox", {}).get("backend"), "sandbox backend missing"
+        if str(cfg["sandbox"]["backend"]).strip().lower() == "ssh":
+            _ssh_destination(cfg["sandbox"].get("host"))
         console.print("[green]✓[/green] Config readable")
     except Exception as e:
         console.print(f"[red]✗[/red] Config read failed: {e}")

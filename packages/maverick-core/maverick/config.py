@@ -1155,7 +1155,8 @@ def get_knowledge() -> dict:
 
     Off by default; the agent kernel never requires the maverick-knowledge
     package. ``embedder`` selects hosted/local/deterministic; ``store`` selects
-    sqlite/pgvector. Provider details (model/base_url/dim/path) are read by
+    sqlite/pgvector for ingestion, or qdrant for existing-corpus reads/erasure.
+    Provider details (model/base_url/dim/path/url) are read by
     maverick_knowledge.build_embedder / build_store.
     """
     cfg = load_config().get("knowledge", {}) or {}
@@ -1168,6 +1169,7 @@ def get_knowledge() -> dict:
         "base_url": cfg.get("base_url", "https://api.voyageai.com/v1"),
         "dim": int(cfg.get("dim", 1024)),
         "path": cfg.get("path", ""),
+        "url": cfg.get("url", ""),
         # DSN for the pgvector scale backend (falls back to env in build_store).
         "dsn": cfg.get("dsn", ""),
     }

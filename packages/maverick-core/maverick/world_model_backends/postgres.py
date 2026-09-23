@@ -1559,6 +1559,21 @@ class PostgresWorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
 
+    def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
+        """Refuse only an exact-tenant, non-terminal goal before dispatch."""
+        frag, fparams = _mutation_tenant_scope()
+        sql = (
+            "UPDATE goals SET status='blocked', completed_at=NULL, "
+            "updated_at=GREATEST(updated_at + 0.000001, %s), result=%s "
+            "WHERE id=%s AND status IN ('pending','active','running','blocked') AND " + frag
+        )
+        with self._tx() as cur:
+            cur.execute(sql, tuple([time.time(), _seal(result), int(goal_id), *fparams]))
+            changed = cur.rowcount == 1
+            if changed:
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+            return changed
+
     def set_goal_partial_result(self, goal_id: int, text: str) -> bool:
         """Replace a running goal's result with the answer written so far;
         matches the SQLite backend (non-terminal rows only, no sign-off effect)."""

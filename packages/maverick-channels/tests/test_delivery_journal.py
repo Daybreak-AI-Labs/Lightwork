@@ -323,6 +323,175 @@ def test_retention_visits_all_rows_across_restart_and_keeps_tombstones(isolated,
     assert isolated.store.count() == 5
 
 
+def _delivered_with_blobs(journal, monkeypatch):
+    from types import SimpleNamespace
+
+    message = _message()
+    message.attachments = [{"filename": f"source-{index}.txt", "mime": "text/plain",
+                            "data": f"retained {index}".encode()} for index in range(3)]
+    row = journal.admit(message, external_id="event1", account="account1")
+    row = journal.change(row, execution="completed", delivery="delivered", reply={"text": "answer"})
+    paths = [delivery._blob_path(row["id"], item["sha256"]) for item in row["message"]["attachments"]]
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: row["updated_at"] + delivery.RETENTION_SECONDS + 1))
+    return message, row, paths
+
+
+@pytest.mark.parametrize("failure_index", [0, 1, 2])
+def test_retention_resumes_partial_deletion_after_restart_without_replay(isolated, monkeypatch, failure_index):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    message, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    unlink = Path.unlink
+
+    def interrupted(path, *args, **kwargs):
+        if path == paths[failure_index]:
+            raise PermissionError("attachment temporarily locked")
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", interrupted)
+        with pytest.raises(PermissionError, match="temporarily locked"):
+            isolated.compact_delivered()
+    pending = delivery.DeliveryJournal().get(row["id"])
+    assert pending["cleanup_pending"] == [path.name for path in paths]
+    assert pending["message"] == {} and not pending["compacted"]
+    assert [path.exists() for path in paths] == [index >= failure_index for index in range(3)]
+    # The intent's fresh timestamp must not postpone cleanup another 30 days.
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: pending["updated_at"]))
+    reopened = delivery.DeliveryJournal()
+    assert reopened.compact_delivered() == 1
+    assert all(not path.exists() for path in paths)
+    completed = reopened.get(row["id"])
+    assert completed["compacted"] and completed["cleanup_pending"] == []
+    assert completed["execution"] == "completed" and completed["delivery"] == "delivered"
+    assert reopened.admit(message, external_id="event1", account="account1")["compacted"]
+    assert reopened.claim_execution(completed) is None
+    assert sum(reopened.compact_delivered() for _ in range(3)) == 0
+
+
+def test_retention_recovers_when_final_completion_write_fails(isolated, monkeypatch):
+    _, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    change = isolated.change
+
+    def interrupted(receipt, **updates):
+        if updates.get("compacted"):
+            raise OSError("receipt publication interrupted")
+        return change(receipt, **updates)
+
+    monkeypatch.setattr(isolated, "change", interrupted)
+    with pytest.raises(OSError, match="publication interrupted"):
+        isolated.compact_delivered()
+    assert all(not path.exists() for path in paths)
+    assert isolated.get(row["id"])["cleanup_pending"] == [path.name for path in paths]
+    assert delivery.DeliveryJournal().compact_delivered() == 1
+    assert isolated.get(row["id"])["compacted"]
+
+
+def test_retention_stale_intent_never_deletes_files(isolated, monkeypatch):
+    _, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    change = isolated.change
+
+    def competing_hold(receipt, **updates):
+        change(receipt, restore_hold=True)
+        return change(receipt, **updates)
+
+    monkeypatch.setattr(isolated, "change", competing_hold)
+    assert isolated.compact_delivered() == 0
+    assert all(path.exists() for path in paths)
+    held = isolated.get(row["id"])
+    assert held["restore_hold"] and "cleanup_pending" not in held
+    assert held["message"]["attachments"]
+
+
+def test_concurrent_retention_completion_is_idempotent(isolated, monkeypatch):
+    _, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    change = isolated.change
+    other_counts = []
+
+    def competing_completion(receipt, **updates):
+        if updates.get("compacted"):
+            other_counts.append(delivery.DeliveryJournal().compact_delivered())
+        return change(receipt, **updates)
+
+    monkeypatch.setattr(isolated, "change", competing_completion)
+    assert isolated.compact_delivered() == 0
+    assert other_counts == [1]
+    assert all(not path.exists() for path in paths)
+    assert isolated.get(row["id"])["compacted"]
+
+
+def test_retention_preserves_pending_files_under_restore_hold(isolated, monkeypatch):
+    _, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    isolated.change(row, message={}, cleanup_pending=[path.name for path in paths], compacted=False, restore_hold=True)
+    assert delivery.DeliveryJournal().compact_delivered() == 0
+    assert all(path.exists() for path in paths)
+
+
+def test_retention_recovers_legacy_compacted_orphans(isolated, monkeypatch):
+    message, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    isolated.change(row, message={}, reply=None, route={}, chunks={}, compacted=True)
+    assert delivery.DeliveryJournal().compact_delivered() == 1
+    assert all(not path.exists() for path in paths)
+    assert isolated.get(row["id"])["cleanup_pending"] == []
+    assert isolated.admit(message, external_id="event1", account="account1")["compacted"]
+
+
+@pytest.mark.parametrize("invalid_entry", ["unknown-name", "directory", "over-capacity"])
+def test_legacy_retention_refuses_invalid_or_unbounded_directory(isolated, monkeypatch, invalid_entry):
+    _, row, paths = _delivered_with_blobs(isolated, monkeypatch)
+    isolated.change(row, message={}, compacted=True)
+    directory = paths[0].parent
+    if invalid_entry == "unknown-name":
+        (directory / "unrelated.txt").write_text("keep", encoding="utf-8")
+    elif invalid_entry == "directory":
+        (directory / ("a" * 64)).mkdir()
+    else:
+        for index in range(delivery.MAX_ATTACHMENTS):
+            (directory / f"{index:064x}").write_bytes(b"keep")
+    with pytest.raises(ValueError, match="Invalid channel attachment"):
+        delivery.DeliveryJournal().compact_delivered()
+    assert all(path.exists() for path in paths)
+    assert "cleanup_pending" not in isolated.get(row["id"])
+
+
+def test_failed_cleanup_does_not_starve_later_receipts(isolated, monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    _, first, paths = _delivered_with_blobs(isolated, monkeypatch)
+    second = isolated.admit(_message(), external_id="event2", account="account1")
+    second = isolated.change(second, execution="completed", delivery="delivered")
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(
+        time=lambda: second["updated_at"] + delivery.RETENTION_SECONDS + 1))
+    # Start directly before the attachment-bearing receipt in the real scan.
+    from maverick.governed_records import GovernedRecordStore
+    ordered = list(isolated.store.iter_record_ids(limit=10))
+    index = next(i for i, (_, record_id) in enumerate(ordered) if record_id == first["id"])
+    before = ordered[(index - 1) % len(ordered)][0]
+    cursors = GovernedRecordStore("channel-delivery-cursors", "chc", "channel_delivery_cursor")
+    cursors.create({"id": "chc-" + delivery._digest(["maintenance", "retention", 1])[:56],
+                    "cursor": before, "purpose": "retention"},
+                   action="retention_cursor_created", actor="system:channel", max_records=1000)
+    unlink = Path.unlink
+
+    def locked(path, *args, **kwargs):
+        if path in paths:
+            raise PermissionError("locked")
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", locked)
+        with pytest.raises(PermissionError, match="locked"):
+            isolated.compact_delivered(limit=1)
+        assert delivery.DeliveryJournal().compact_delivered(limit=1) == 1
+        assert isolated.get(second["id"])["compacted"]
+        with pytest.raises(PermissionError, match="locked"):
+            delivery.DeliveryJournal().compact_delivered(limit=1)
+    assert delivery.DeliveryJournal().compact_delivered() == 1
+    assert all(not path.exists() for path in paths)
+
+
 def test_recovered_telegram_download_retries_before_execution_claim(isolated):
     from types import SimpleNamespace
 

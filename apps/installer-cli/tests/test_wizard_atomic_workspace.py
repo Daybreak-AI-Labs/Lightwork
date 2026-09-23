@@ -129,5 +129,5 @@ def test_remote_workspace_is_not_provisioned_on_installer_host(monkeypatch):
         raise AssertionError("remote workspace must not create local directories")
 
     monkeypatch.setattr(wizard.Path, "mkdir", unexpected)
-    config = {"backend": "ssh", "workdir": "/remote/customer-job"}
+    config = {"backend": "ssh", "host": "customer@remote", "workdir": "/remote/customer-job"}
     assert wizard._prepare_wizard_workspace(config) == config

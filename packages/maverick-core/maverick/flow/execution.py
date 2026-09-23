@@ -826,6 +826,17 @@ def default_agent_runner(
                 f"agent step failed: {type(e).__name__}: {_safe_failure(e)}", 0.0,
                 usage[-1] if usage else 0.0,
             )
+        from ..run_outcome import GoalAdmissionRefused
+
+        if (
+            isinstance(result, GoalAdmissionRefused)
+            and result.goal_id == gid
+            and result.stop_kind in {"budget", "organization_budget"}
+        ):
+            # This newly-created goal never entered orchestration. A string
+            # status, a zero bill, or a budget-looking error after execution
+            # began cannot establish the same replay-safe fact.
+            raise FlowBudgetExceeded(result.detail)
         g = world.get_goal(gid)
         outcome = 1.0 if (g and g.status == "done") else 0.0
         # Attribute this goal's tool usage back to the node (from the ContextVar

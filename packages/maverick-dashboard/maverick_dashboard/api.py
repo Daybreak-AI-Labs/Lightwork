@@ -9171,8 +9171,9 @@ def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
 def cancel_goal(request: Request, goal_id: int) -> None:
     """Mark a goal as cancelled.
 
-    The agent loop checks status at each tool-call boundary; setting
-    'cancelled' here causes the next check to short-circuit the run.
+    The agent checks status at work boundaries and while awaiting model/tool
+    work. The next check requests cooperative cancellation and retains ownership
+    until cleanup finishes; it cannot undo an already committed external effect.
     Already-done goals are a no-op.
     """
     require_permission(request, "operate")

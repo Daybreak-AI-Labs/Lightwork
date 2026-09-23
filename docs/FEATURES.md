@@ -99,7 +99,10 @@ here.
   generated limits. Settings can suppress saved task defaults reversibly.
   Organization allowance checks remain independent and admit each physical
   provider attempt against current recorded spend plus durable holds. Reported
-  provider cost can exceed its projection and is still recorded. See
+  provider cost can exceed its projection and is still recorded. Certified
+  allowance refusals before orchestration preserve resumable workflow progress;
+  later stops remain conservative about prior effects. Goal cancellation is
+  checked during model/tool awaits, with execution owned until cleanup finishes. See
   [task limits and spend accounting](task-limits.md).
 - **Killswitch** — `~/.maverick/HALT` aborts all running goals (`killswitch.py`).
 - **Long-horizon review checkpoint** — opt-in `[safety] review_checkpoint`

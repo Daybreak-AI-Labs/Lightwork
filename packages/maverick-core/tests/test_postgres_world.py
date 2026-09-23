@@ -240,6 +240,37 @@ def test_goal_execution_claim_is_atomic(world):
     assert world.claim_goal_for_run(gid) is False
 
 
+@pytest.mark.parametrize("status", ["pending", "active", "running", "blocked", "done", "cancelled"])
+def test_admission_refusal_preserves_terminal_results_and_tenant_authority(world, status):
+    from maverick.paths import tenant_scope
+
+    tenant = "admission-" + uuid.uuid4().hex
+    with tenant_scope(tenant=tenant):
+        gid = world.create_goal("allowance admission")
+        world.set_goal_status(gid, "done", result="original")
+        world.record_signoff(gid, "approved")
+        # Include repair of an existing stale sign-off on a non-terminal row.
+        with world._tx() as cursor:
+            cursor.execute("UPDATE goals SET status=%s WHERE id=%s", (status, gid))
+        before = world.get_goal(gid)
+    with tenant_scope(tenant=tenant + "-other"):
+        assert world.block_goal_admission(gid, result="wrong tenant") is False
+    with tenant_scope(tenant=tenant):
+        eligible = status not in {"done", "cancelled"}
+        assert world.block_goal_admission(gid, result="allowance refused") is eligible
+        after = world.get_goal(gid)
+        if eligible:
+            assert after.status == "blocked" and after.result == "allowance refused"
+            assert after.updated_at > before.updated_at
+            with world._tx() as cursor:
+                cursor.execute("SELECT completed_at FROM goals WHERE id=%s", (gid,))
+                assert cursor.fetchone()[0] is None
+            assert world.signoff_for(gid) is None
+        else:
+            assert after == before
+            assert world.signoff_for(gid)["decision"] == "approved"
+
+
 def test_goal_execution_claim_honors_expected_owner(world):
     gid = world.create_goal("owner-scoped claim", owner="agent:alice")
 

@@ -283,6 +283,12 @@ class KnowledgeBase:
                     "knowledge document digest is already bound to different provenance"
                 )
             return int(existing["chunk_count"])
+        guarded_add = getattr(self.store, "add_with_identity", None)
+        if not callable(guarded_add):
+            raise RuntimeError(
+                "knowledge store cannot atomically publish document provenance; "
+                "use SQLite or pgvector for ingestion"
+            )
         with operation_scope(
             category="storage",
             service=f"embedder:{type(self.embedder).__name__}",
@@ -320,15 +326,15 @@ class KnowledgeBase:
             service=f"vector-store:{type(self.store).__name__}",
             operation="knowledge-document-storage",
         ):
-            guarded_add = getattr(self.store, "add_with_identity", None)
-            if callable(guarded_add):
-                guarded_add(collection, items, fingerprint)
-            else:
-                self.store.add(collection, items)
+            guarded_add(collection, items, fingerprint)
         self._require_embedding_identity(collection, fingerprint)
         if callable(exact_reader):
             stored = self.exact_document(collection, document_sha256)
-            if stored["text"] != document_text or stored["metadata"] != base_meta:
+            # A concurrent matching admission or partial repair retains the
+            # first admitted timestamp. It must match every immutable field.
+            stored_meta = {key: value for key, value in stored["metadata"].items() if key != "ingested_at"}
+            expected_meta = {key: value for key, value in base_meta.items() if key != "ingested_at"}
+            if stored["text"] != document_text or stored_meta != expected_meta:
                 raise RuntimeError("knowledge document storage verification failed")
             return int(stored["chunk_count"])
         return len(items)
@@ -601,14 +607,14 @@ class KnowledgeBase:
         """Replace vectors atomically without changing content, provenance or IDs.
 
         Only stores providing compare-and-replace support can migrate in place.
-        Other backends must ingest originals into a new collection and then
-        explicitly switch the configured source after validating it.
+        Other backends must migrate originals into a new SQLite or pgvector
+        collection and switch the configured source after validating it.
         """
         reader = getattr(self.store, "read_collection", None)
         replace = getattr(self.store, "replace_embeddings", None)
         if not callable(reader) or not callable(replace):
             raise RuntimeError("in-place reindex is unsupported for this backend; "
-                               "ingest originals into a new collection and switch sources")
+                               "ingest originals into a new collection in SQLite or pgvector and switch sources")
         rows = reader(collection, limit=max_chunks)
         if len(rows) > max_chunks:
             raise RuntimeError("knowledge reindex exceeds its chunk limit")

@@ -38,6 +38,12 @@ class StoredChunk:
 class VectorStore(Protocol):
     def add(self, collection: str, items: list[tuple[str, str, list[float], dict]]) -> None: ...
 
+    def add_with_identity(
+        self, collection: str, items: list[tuple[str, str, list[float], dict]], fingerprint: str,
+    ) -> None:
+        """Atomically bind immutable document provenance and embedding identity."""
+        ...
+
     def search(self, collection: str, vector: list[float], k: int = 5) -> list[Match]: ...
 
     def delete_collection(self, collection: str) -> None: ...
@@ -64,6 +70,39 @@ def _cosine(a: list[float], b: list[float]) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+def _document_publication(items: list, existing: list[StoredChunk]) -> list:
+    """Validate admitted provenance under the writer's transaction/fence.
+
+    Matching retries keep the admitted rows (including timestamps and vectors).
+    A partial matching document can add missing chunks with its original time.
+    The caller must hold the publication fence until these additions commit.
+    """
+    incoming = {cid: (text, vec, meta) for cid, text, vec, meta in items}
+    if len(incoming) != len(items):
+        raise ValueError("knowledge publication has duplicate chunk identifiers")
+    documents = {meta["doc_sha256"] for _cid, _text, _vec, meta in items}
+    timestamps = {}
+    admitted = set()
+    for row in existing:
+        digest = row.meta.get("doc_sha256")
+        if row.chunk_id not in incoming and digest not in documents:
+            continue
+        candidate = incoming.get(row.chunk_id)
+        if (candidate is None or row.text != candidate[0]
+                or {key: value for key, value in row.meta.items() if key != "ingested_at"}
+                != {key: value for key, value in candidate[2].items() if key != "ingested_at"}):
+            raise RuntimeError("knowledge document digest is already bound to different provenance")
+        timestamp = row.meta["ingested_at"]
+        if digest in timestamps and timestamps[digest] != timestamp:
+            raise RuntimeError("knowledge document admitted timestamps are inconsistent")
+        timestamps[digest] = timestamp
+        admitted.add(row.chunk_id)
+    return [
+        (cid, text, vec, {**meta, "ingested_at": timestamps.get(meta["doc_sha256"], meta["ingested_at"])})
+        for cid, text, vec, meta in items if cid not in admitted
+    ]
 
 
 class SqliteVectorStore:
@@ -105,16 +144,26 @@ class SqliteVectorStore:
             self._db.commit()
 
     def add_with_identity(self, collection, items, fingerprint: str) -> None:
-        """Fence identity validation and publication against migration writers."""
+        """Bind document provenance and identity in one publication transaction."""
         with self._lock, self._db:
             self._db.execute("BEGIN IMMEDIATE")
-            rows = self._db.execute("SELECT meta FROM chunks WHERE collection = ?", (collection,))
-            if any(json.loads(row[0]).get("embedding_fingerprint") != fingerprint for row in rows):
-                raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ?", (collection,),
+            )
+            chunk_ids = {item[0] for item in items}
+            documents = {item[3]["doc_sha256"] for item in items}
+            existing = []
+            for cid, text, raw_meta in rows:
+                meta = json.loads(raw_meta)
+                if meta.get("embedding_fingerprint") != fingerprint:
+                    raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+                if cid in chunk_ids or meta.get("doc_sha256") in documents:
+                    existing.append(StoredChunk(cid, text, meta))
+            pending = _document_publication(items, existing)
             self._db.executemany(
-                "INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?)",
+                "INSERT INTO chunks VALUES (?,?,?,?,?)",
                 [(collection, cid, text, json.dumps(vec), json.dumps(meta))
-                 for cid, text, vec, meta in items],
+                 for cid, text, vec, meta in pending],
             )
 
     def search(self, collection, vector, k: int = 5) -> list[Match]:
@@ -466,13 +515,21 @@ class PgVectorStore:
                 ).fetchone()
                 if found is not None:
                     raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+                rows = cur.execute(
+                    f"SELECT id, text, meta FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s "
+                    "AND (id = ANY(%s) OR meta ->> 'doc_sha256' = ANY(%s)) FOR UPDATE",
+                    (self._namespace, collection, [item[0] for item in items],
+                     list({item[3]["doc_sha256"] for item in items})),
+                ).fetchall()
+                pending = _document_publication(
+                    items, [StoredChunk(cid, text, dict(meta)) for cid, text, meta in rows],
+                )
                 cur.executemany(
                     f"INSERT INTO {self._table} (namespace, collection, id, text, embedding, meta) "
-                    "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb) "
-                    "ON CONFLICT (namespace, collection, id) DO UPDATE SET "
-                    "text = EXCLUDED.text, embedding = EXCLUDED.embedding, meta = EXCLUDED.meta",
+                    "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb)",
                     [(self._namespace, collection, cid, text, _to_pgvector(vec), json.dumps(meta))
-                     for cid, text, vec, meta in items],
+                     for cid, text, vec, meta in pending],
                 )
         with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
                                operation="knowledge-identity-fenced-add") as call:
@@ -707,9 +764,11 @@ class PgVectorStore:
 
 
 class QdrantStore:
-    """Qdrant-backed vector store — the certified external engine for clients
-    with dedicated retrieval infrastructure or corpora beyond pgvector's
-    comfortable range.
+    """Qdrant retrieval/erasure adapter for existing collections.
+
+    Its unconditional upsert is a low-level adapter operation, not atomic
+    document admission. KnowledgeBase refuses ingestion through this adapter
+    until it supports a shared provenance/identity publication fence.
 
     Same protocol + per-collection compartments as the other stores. One Qdrant
     collection per (namespace, knowledge collection) pair, named

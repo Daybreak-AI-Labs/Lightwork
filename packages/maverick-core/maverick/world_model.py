@@ -2046,6 +2046,20 @@ class WorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
 
+    def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
+        """Record a pre-dispatch refusal without replacing a terminal outcome."""
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET status = 'blocked', completed_at = NULL, "
+                "updated_at = MAX(updated_at + 0.000001, ?), result = ? "
+                "WHERE id = ? AND status IN ('pending', 'active', 'running', 'blocked')",
+                (time.time(), _enc_field(result), int(goal_id)),
+            )
+            changed = cur.rowcount == 1
+            if changed:
+                conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
+            return changed
+
     def set_goal_partial_result(self, goal_id: int, text: str) -> bool:
         """Replace a RUNNING goal's result with the answer written so far.
 

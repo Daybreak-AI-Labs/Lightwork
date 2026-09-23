@@ -14,14 +14,17 @@ store    = "sqlite"    # sqlite | pgvector | qdrant
 
 ## Storage: pick a backend per deployment
 
-One `VectorStore` protocol supports three backends. Operational limits and
-reindex support differ; qualify the selected backend with your corpus.
+The adapters support three backends, with different publication guarantees.
+SQLite and pgvector support atomic governed document ingestion. Qdrant supports
+existing-corpus reads and erasure; new governed publication is refused because
+the adapter lacks a shared atomic provenance and embedding-identity fence.
+Qualify the selected backend with your corpus.
 
 | Backend    | When                                            | Notes |
 |------------|-------------------------------------------------|-------|
 | **sqlite** (default) | Single box, SMB, air-gapped | Brute-force cosine over local records; measure latency at the intended corpus size. |
 | **pgvector** | Deployments already operating Postgres | Needs `maverick-knowledge[pgvector]`, the `vector` extension, and verified database isolation, backup and permissions. |
-| **qdrant** | Dedicated retrieval infrastructure | Needs `maverick-knowledge[qdrant]`. Existing collections migrate by re-ingesting into a new collection; in-place reindex is refused. |
+| **qdrant** | Existing retrieval infrastructure | Needs `maverick-knowledge[qdrant]`. Existing exact documents remain readable and erasable. New ingestion, interrupted-document repair and in-place reindex are refused; migrate ingestion to SQLite or pgvector. |
 
 We do **not** ship a managed-only vector service as the default: the platform
 sells "your data never leaves your boundary," so the knowledge store — the
@@ -52,6 +55,16 @@ dim     = 1024
 # api_key via QDRANT_API_KEY
 ```
 
+This adapter's low-level upsert does not provide atomic document admission.
+New governed ingestion fails with an actionable error before document embedding
+or vector/document writes. Read attempts may still produce local accounting
+receipts. A complete existing document with the same text and provenance can
+still satisfy an idempotent, read-only retry. No backend is silently substituted.
+Qdrant's newer conditional point writes do not by themselves supply this
+adapter's required multi-chunk document and collection-identity transaction;
+this release does not claim distributed publication qualification for Qdrant.
+Chroma is a separate core recall adapter, not a `KnowledgeBase` storage backend.
+
 ## Embedders
 
 `hosted` (Voyage, needs `VOYAGE_API_KEY`), `local` (on-box
@@ -71,9 +84,9 @@ atomic against the captured collection state; a concurrent corpus change
 requires a retry. This in-place operation is bounded to 100,000 chunks. A
 pgvector store also requires the replacement vectors to match the existing
 table dimension; changing dimensions requires a new store and an explicit
-corpus migration. For Qdrant, ingest into a new collection and switch the
-configured knowledge sources after verifying it; in-place reindex is refused
-before embedding work begins.
+corpus migration. For Qdrant, migrate the source corpus into a SQLite or pgvector
+store and switch the configured knowledge sources after verifying it; Qdrant
+in-place reindex and new governed ingestion are refused before embedding work.
 
 Hosted identities bind the configured provider, model, endpoint, dimensions
 and optional `[knowledge] revision`. That revision is an operator-supplied
@@ -89,6 +102,14 @@ Every chunk is provenance-stamped at ingest: `source` (the citation), `subject`
 (3 first-party … 0 external), `sensitivity`, `ingested_by`, `ingested_at`, and a
 `doc_sha256` content hash. Ingestion is screened for prompt-injection on the way
 in and recorded on the signed audit chain (`evidence_capture`).
+
+Within one collection, a document digest binds its content, chunk layout and
+provenance at publication. SQLite and pgvector compare that binding inside the
+same transaction as insertion, including when independent workers have both
+read an absent document. Conflicting provenance is rejected without partial
+publication. Matching retries retain the first admitted rows and timestamp;
+repair of missing matching chunks uses that same timestamp. Embedding-identity
+checks remain inside the transaction and continue to fence reindex operations.
 
 Because chunks carry a subject, the knowledge plane participates in the platform's
 compliance flows:

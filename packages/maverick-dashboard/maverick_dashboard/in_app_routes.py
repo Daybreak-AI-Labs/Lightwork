@@ -16,8 +16,7 @@ router = APIRouter(prefix="/api/v1", tags=["v1"])
 # policy and Settings overlays retain precedence through the normal loader.
 INITIAL_SETTINGS = '''# Initial Lightwork settings. Manage these in the app.
 [budget]
-max_dollars = 1.0
-max_wall_seconds = 600.0
+strict_pricing = true
 [safety]
 profile = "strict"
 block_threshold = "medium"

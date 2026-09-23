@@ -208,6 +208,49 @@ def clamp_task_limit(requested: float | None, configured: float | None) -> float
     return min(requested, configured) if configured is not None else requested
 
 
+def _allowance_admission(world, goal_id: int, budget):
+    """Refuse a known exhausted allowance before entering any goal work.
+
+    Once orchestration starts, any later error remains an ordinary blocked
+    result: this boundary cannot certify that the trajectory had no effects.
+    """
+    from .budget import BudgetExceeded
+    from .orchestrator import _budget_stop_message
+    from .run_outcome import GoalAdmissionRefused
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        return "blocked"
+    if goal.status not in {"pending", "active", "running", "blocked"}:
+        return goal.status
+    try:
+        if reason := getattr(budget, "_tenant_refusal", None):
+            raise OrganizationBudgetExceeded(reason)
+        budget.check()
+    except BudgetExceeded as exc:
+        message = _budget_stop_message(budget, goal_id, exc)
+        if not world.block_goal_admission(goal_id, result=message):
+            # Cancellation/completion may have won after the initial read.
+            # This invocation holds no certificate over that outcome.
+            return _finished_goal_status(world, goal_id) or "blocked"
+        return GoalAdmissionRefused(
+            goal_id,
+            stop_kind=("organization_budget" if isinstance(exc, OrganizationBudgetExceeded) else "budget"),
+            detail=message,
+        )
+    return None
+
+
+def _finished_goal_status(world, goal_id: int) -> str | None:
+    try:
+        goal = world.get_goal(goal_id)
+        return goal.status if goal else None
+    except Exception:  # pragma: no cover -- read-back may fail independently of execution
+        log.exception("run_goal_in_thread: status read-back failed (goal_id=%s)", goal_id)
+        return None
+
+
 def run_goal_in_thread(
     goal_id: int,
     max_dollars: float | None = None,
@@ -336,8 +379,6 @@ def run_goal_in_thread(
                     goal_id,
                 )
                 return None
-        llm = LLM()
-        sandbox = build_sandbox()
         # Precedence: explicit caller arg > [budget] config > the
         # background runner's conservative defaults (tighter than the
         # interactive Budget defaults on purpose).
@@ -349,6 +390,11 @@ def run_goal_in_thread(
             max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds,
         )
+        admission = _allowance_admission(world, goal_id, budget)
+        if admission is not None:
+            return admission
+        llm = LLM()
+        sandbox = build_sandbox()
         # Trace pinning: stamp the run with the workspace's git state so the
         # trace/replay ties to an exact commit. Best-effort, never blocks.
         from .trace_pin import pin_trace
@@ -376,12 +422,7 @@ def run_goal_in_thread(
             # worker re-executes the whole swarm and re-spends budget.
             return "error"
         # Read back the terminal status so the worker can decide retry.
-        try:
-            g = world.get_goal(goal_id)
-            return g.status if g else None
-        except Exception:  # pragma: no cover
-            log.exception("run_goal_in_thread: status read-back failed (goal_id=%s)", goal_id)
-            return None
+        return _finished_goal_status(world, goal_id)
     except Exception:
         log.exception("background goal run failed (goal_id=%s)", goal_id)
         return None

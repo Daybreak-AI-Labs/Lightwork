@@ -25,6 +25,7 @@ from . import killswitch
 from ._envparse import env_float, env_int
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .llm import model_for_role
+from .run_outcome import GoalCancelled, cancellation_message
 from .swarm import SwarmContext
 from .tools import ToolRegistry, base_registry
 from .tools.agent_bus_tool import delegate_to_agent, recv_from_agent, send_to_agent
@@ -1286,6 +1287,7 @@ class AgentResult:
     # carries the machine-readable specifics (e.g. "tool_calls=100").
     stop_kind: str | None = None
     stop_detail: str = ""
+    tool_execution_unknown: bool = False
 
 
 def _final_uncertainty_reasons(
@@ -3114,6 +3116,7 @@ class Agent:
                         "BudgetExceeded": "budget_exceeded",
                         "Halted": "halted",
                         "CancelledError": "cancelled",
+                        "GoalCancelled": "cancelled",
                     }.get(type(exc).__name__, "exception")
                     if getattr(exc, "tool_execution_unknown", False):
                         disposition = "execution_unknown"
@@ -3130,6 +3133,7 @@ class Agent:
                 if type(exc).__name__ in {
                     "BudgetExceeded",
                     "CancelledError",
+                    "GoalCancelled",
                     "Halted",
                     "KeyboardInterrupt",
                     "SystemExit",
@@ -3659,10 +3663,11 @@ class Agent:
         /budget.check() calls beside it, so no throttling here. Fails open
         (a transient world-read error must not itself stop the run).
         """
-        if self.ctx.goal_id is None:
+        goal_id = getattr(self.ctx, "goal_id", None)
+        if goal_id is None:
             return False
         try:
-            goal = self.ctx.world.get_goal(self.ctx.goal_id)
+            goal = self.ctx.world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run
             log.debug("goal-cancelled check skipped: %s", e)
             return False
@@ -3674,11 +3679,11 @@ class Agent:
 
     async def _await_wall_clock_guarded(self, make_coro, *, in_flight_note: str):
         """Await ``make_coro()``, but ABORT it when the wall-clock budget is
-        exhausted or the killswitch trips — instead of letting it run to
-        completion and blow the SLA or ignore a HALT (the cap/halt were
-        otherwise only checked at turn boundaries). Raises
-        :class:`BudgetExceeded` (wall) or :class:`killswitch.Halted`, both
-        already handled by every caller the same way. ``in_flight_note``
+        exhausted, the goal is cancelled, or the killswitch trips. Raises
+        :class:`BudgetExceeded` (wall), :class:`GoalCancelled`, or
+        :class:`killswitch.Halted`. The owned coroutine is cancelled and drained
+        before this guard exits; cancellation cannot reverse a remote effect.
+        ``in_flight_note``
         names what was in flight (e.g. "mid-generation",
         "mid-tool-execution") for the wall-cap message.
 
@@ -3694,6 +3699,8 @@ class Agent:
         ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
         """
         budget = self.ctx.budget
+        if Agent._goal_cancelled(self):
+            raise GoalCancelled("cancelled by the goal owner before dispatch")
         remaining = budget.remaining_wall()
         if remaining <= 0:
             raise BudgetExceeded(
@@ -3705,6 +3712,8 @@ class Agent:
             while True:
                 slice_s = min(self._HALT_POLL_SECONDS, deadline - loop.time())
                 done, _ = await asyncio.wait({task}, timeout=max(0.0, slice_s))
+                if Agent._goal_cancelled(self):
+                    raise GoalCancelled("cancelled by the goal owner during execution")
                 if task in done:
                     return task.result()  # re-raises any error from the call
                 if loop.time() >= deadline:
@@ -3716,10 +3725,23 @@ class Agent:
             # Wall cap, halt, or an upstream cancellation: cancel the in-flight
             # call (aborts the provider HTTP request / tool coroutine) before
             # propagating.
+            if isinstance(stop_signal, GoalCancelled) and in_flight_note == "mid-tool-execution":
+                # The tool coroutine was admitted. Cancellation cannot prove an
+                # external operation did not commit, even if its coroutine
+                # cooperates or returns normally while draining cancellation.
+                stop_signal.tool_execution_unknown = True
             if not task.done():
                 task.cancel()
                 try:
                     await task
+                except BaseException as cancelled:
+                    if getattr(cancelled, "tool_execution_unknown", False):
+                        stop_signal.tool_execution_unknown = True
+            else:
+                # Retrieve a racing terminal exception so cancelling the goal
+                # cannot orphan an unobserved exception from the owned task.
+                try:
+                    task.result()
                 except BaseException as cancelled:
                     if getattr(cancelled, "tool_execution_unknown", False):
                         stop_signal.tool_execution_unknown = True
@@ -3777,6 +3799,19 @@ class Agent:
             in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
+        try:
+            return await self._run_traced()
+        except GoalCancelled as exc:
+            # Keep Agent.run's structured-result contract for parents and
+            # standalone callers. The root orchestrator preserves this stop
+            # separately from success, budget refusal, and ordinary failures.
+            return AgentResult(
+                error=cancellation_message(exc), role=self.role, name=self.name,
+                stop_kind="cancelled", stop_detail=str(exc),
+                tool_execution_unknown=bool(getattr(exc, "tool_execution_unknown", False)),
+            )
+
+    async def _run_traced(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
         # span (gen_ai.agent.name/id), the third semconv leg alongside the
         # LLM (chat) and tool (execute_tool) spans. No-op when tracing is off.

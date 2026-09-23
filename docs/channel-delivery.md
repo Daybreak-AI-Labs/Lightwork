@@ -20,6 +20,18 @@ clears eligible content, not deduplication identities, so it does not remove
 the 10,000-receipt admission bound. Monitor capacity and plan namespace
 migration before exhaustion; never erase uncertain receipts to create space.
 
+Before deleting source files, compaction saves a bounded list of their digests
+in the receipt. An interrupted unlink or final receipt write leaves that cleanup
+pending; the rotating scan resumes it on its next visit without another
+30-day delay, including after a process restart. The receipt is marked compacted only after every listed file
+is absent. Completed execution and delivery remain terminal throughout, so
+cleanup cannot replay business work. Older compacted receipts without this
+cleanup marker are checked for leftover files in their own attachment directory;
+only valid digest filenames within the existing attachment count bound are
+eligible for removal. Invalid directory entries require operator investigation.
+Cleanup failures are reported while the scan cursor advances, allowing later
+receipts to be maintained before the rotating scan retries the failed record.
+
 Bootstrap restores apply a hold to each restored delivery and polling record.
 The recovery UI supplies the exact readback template for an authenticated
 administrator to complete using provider/source evidence. The record,

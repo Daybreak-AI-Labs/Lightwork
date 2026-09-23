@@ -51,6 +51,12 @@ Built-in workflow agents meter actual cost and return their business result text
 A known refusal before dispatch becomes `budget_limited`, retains the unfinished
 invocation and does not publish a success result or train on a business failure.
 An authorized retry with a larger finite total allowance continues saved work.
+An agent step refused by the runner's allowance admission before orchestration
+starts also retains a resumable hold. Repair its configured task or organization
+limit, then retry the saved workflow; completed earlier nodes are preserved.
+Only the typed admission result certifies this boundary. A limit stop after
+orchestration starts remains indeterminate because prior effects may have occurred,
+even when recorded spend is zero.
 Nested invocation frames preserve completed iterations, branch outputs and the
 captured subflow definition. HALT and allowance signals escape business-error
 catch blocks.
@@ -61,3 +67,13 @@ Agent checkpoints retain the existing opt-in `[durable] enabled` or
 checkpointing on. Legacy embedded two-value executors without metered usage keep
 their explicit `agent_budget_dollars` reservation contract, whose compatibility
 default is $5. Production metered agents do not use that fallback.
+
+## Cancelling in-flight work
+
+The existing one-second guard checks goal cancellation during model and tool
+awaits even when no task deadline is configured. It requests cancellation of the
+owned coroutine and waits for its cleanup before releasing execution capacity.
+Cleanup can take longer if a connector does not promptly cooperate. Cancelling
+does not undo a remote effect: an admitted tool call remains potentially committed
+and its outcome must be reviewed before retrying. Goal and episode records retain
+that warning and an interrupted outcome rather than reporting success.

@@ -96,7 +96,7 @@
   {% if needs_initial_settings %}
   <section class="panel" aria-labelledby="initial-settings-title" style="margin-bottom:var(--space-5)">
     <h2 id="initial-settings-title">Set up Lightwork</h2>
-    <p>Initial defaults are a $1 limit and a 10-minute limit per task, strict safety checks, and computer control and file-changing tools turned off. Existing administrator policies and choices saved in Settings remain in effect. {% if can_configure %}Review <a href="/permissions">Permissions</a> and <a href="/settings">Settings</a> before starting work.{% else %}Your administrator reviews permissions before work starts.{% endif %}</p>
+    <p>Initial settings add no per-task spending or time limits. Usage is still metered; organization allowances and any explicit limits remain in effect. Strict safety checks are enabled, and computer control and file-changing tools are turned off. Existing administrator policies and choices saved in Settings remain in effect. {% if can_configure %}Review <a href="/permissions">Permissions</a> and choose optional task limits in <a href="/settings">Settings</a> before starting work.{% else %}Your administrator reviews permissions before work starts.{% endif %}</p>
     {% if can_configure %}
     <form id="setup-initialize">
       <label><input type="checkbox" id="setup-confirm" required> I reviewed these initial settings.</label>
