@@ -114,6 +114,7 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
     now = clock()
     cadence = StreamCadence(now, now, poll, max_poll, heartbeat, lifetime, poll)
     last, sent = since, 0
+    last_result: str | None = None
     try:
         yield "retry: 3000\n\n" if legacy else ": connected\n\n"
         cadence.sent(clock())
@@ -123,19 +124,17 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
             if cadence.expired(clock()):
                 yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
                 return
-            current = await run_in_threadpool(stream_state, world, goal_id)
+            current = await run_in_threadpool(stream_state, world, goal_id, include_result=legacy)
             if current is None or not visible(current):
                 yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
                 return
             events = await run_in_threadpool(world.goal_events, goal_id, since_id=last, limit=max_batch)
-            if legacy and (events or current.status in TERMINAL_RUN_STATUSES):
-                current = await run_in_threadpool(stream_state, world, goal_id, include_result=True)
-                if current is None or not visible(current):
-                    yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
-                    return
-            if events:
+            result_changed = legacy and (current.result or "") != last_result
+            if events or result_changed:
                 if legacy:
-                    last = events[-1].id
+                    if events:
+                        last = events[-1].id
+                    last_result = current.result or ""
                     payload = {"status": current.status, "result": current.result or "",
                                "next_id": last, "terminal": False,
                                "events": [_event_dict(event) for event in events]}
@@ -163,7 +162,7 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                     payload = {"status": current.status, "next_id": last, "terminal": True}
                     yield f"event: end\ndata: {json.dumps(payload)}\n\n"
                 return
-            cadence.backoff(bool(events))
+            cadence.backoff(bool(events) or result_changed)
             await sleep(cadence.delay(clock()))
     except asyncio.CancelledError:
         return

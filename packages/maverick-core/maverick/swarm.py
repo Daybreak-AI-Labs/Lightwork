@@ -87,6 +87,10 @@ class SwarmContext:
     mcp_clients: list = field(default_factory=list)
     channel: str | None = None
     user_id: str | None = None
+    # The chat thread (dashboard or channel conversation) this run answers in,
+    # or None for a standalone goal. A conversational run streams its answer
+    # preview and may skip the self-verifier on a plain prose reply (agent.py).
+    conversation_id: int | None = None
     # P0 identity layer: the root principal's capability grant for this run.
     # None == unrestricted (the default). Set when capability enforcement is
     # enabled; children inherit an *attenuated* copy so a sub-agent can never

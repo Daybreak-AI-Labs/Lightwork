@@ -1157,6 +1157,20 @@ class _ProviderAttemptTracker:
             raise ProviderAccountingUnavailable
 
 
+def _stream_kwargs(provider: str, on_delta) -> dict[str, Any]:
+    """Token streaming is an Anthropic-provider feature (see ``complete``);
+    every other provider gets the buffered call."""
+    if on_delta is not None and provider == "anthropic":
+        return {"on_delta": on_delta}
+    return {}
+
+
+def _hedge_ms_for(on_delta) -> float | None:
+    """A hedged backup would stream a second copy of the answer into the same
+    callback, so a streaming call is never hedged."""
+    return None if on_delta is not None else _hedge_ms()
+
+
 def _hedge_ms() -> float | None:
     """Tail-latency hedging delay (ms): opt-in, default OFF.
 
@@ -1988,6 +2002,7 @@ class LLM:
         model: str | None = None,
         effort: str | None = None,
         tool_choice: dict | None = None,
+        on_delta=None,
         _no_failover: bool = False,
         _provider_sequence: _ProviderAttemptSequence | None = None,
     ) -> LLMResponse:
@@ -2012,7 +2027,7 @@ class LLM:
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, effort=effort, tool_choice=tool_choice,
-                        _no_failover=True,
+                        on_delta=on_delta, _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
@@ -2093,6 +2108,7 @@ class LLM:
                     if model_effort:
                         _ekw["effort"] = model_effort
                 _add_tool_choice(_ekw, tool_choice, client, "complete_async", tools)
+                _ekw.update(_stream_kwargs(provider, on_delta))
 
                 async def _call():
                     # Each physical hedge has independent capacity and a receipt.
@@ -2119,7 +2135,7 @@ class LLM:
                     finally:
                         tracker.finalize(response, sys.exc_info()[1])
 
-                hedge = _hedge_ms()
+                hedge = _hedge_ms_for(on_delta)
                 if hedge is None:
                     _resp = await _call()
                     return _resp

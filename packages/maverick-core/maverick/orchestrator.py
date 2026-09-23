@@ -1622,6 +1622,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             mcp_clients=mcp_clients,
             channel=channel, user_id=user_id, capability=capability,
             allowed_suites=allowed_suites, episode_id=episode_id,
+            conversation_id=conversation_id,
         )
 
         brief, _planning_mode = await _build_orchestrator_brief(

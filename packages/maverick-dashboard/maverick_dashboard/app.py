@@ -615,6 +615,24 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
+def _warm_goal_runtime() -> None:
+    """Pay the kernel's once-per-process start-up cost (hook discovery across
+    installed distributions, about 1.5 s cold) now, in the background, instead
+    of on the first chat turn after start. Fail-open: never blocks startup."""
+
+    def _warm() -> None:
+        try:
+            import asyncio as _asyncio
+
+            from maverick import hooks
+
+            _asyncio.run(hooks.ensure_loaded())
+        except Exception:  # pragma: no cover - warm-up is best-effort
+            log.debug("goal runtime warm-up skipped", exc_info=True)
+
+    threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
@@ -681,6 +699,7 @@ async def _lifespan(app: FastAPI):
         await _reclaim_orphans()
         await _install_queue_dispatcher()
         await _install_automation_scheduler()
+        _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -9869,7 +9888,7 @@ async def api_goal_events_stream(
         request, world, goal_id,
         since=replay_cursor(since, request.headers.get("last-event-id")),
         lease=lease, visible=lambda state: can_access_goal(request, state),
-        legacy=True, max_batch=_SSE_MAX_BATCH,
+        legacy=True, max_batch=_SSE_MAX_BATCH, max_poll=2.0,
     )
     return LeasedStreamingResponse(content, lease=lease, media_type="text/event-stream",
                                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

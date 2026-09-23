@@ -1559,6 +1559,24 @@ class PostgresWorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
 
+    def set_goal_partial_result(self, goal_id: int, text: str) -> bool:
+        """Replace a running goal's result with the answer written so far;
+        matches the SQLite backend (non-terminal rows only, no sign-off effect)."""
+        now = time.time()
+        frag, fparams = _tenant_scope()
+        sql = (
+            "UPDATE goals SET result=%s, updated_at=GREATEST(updated_at + 0.000001, %s) "
+            "WHERE id=%s AND status NOT IN "
+            "('done','completed','failed','cancelled','blocked','error')"
+        )
+        params: list = [_seal(text), now, goal_id]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount == 1
+
     def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
         """Complete department totals, bound to this request's tenant."""
         from ..shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements

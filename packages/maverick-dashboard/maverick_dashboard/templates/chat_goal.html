@@ -881,7 +881,9 @@
           const changed = d.result !== lastResult;
           lastResult = d.result;
           // A clean finish shows its result; a 'blocked' result is a terse
-          // stop-reason that the halt card renders instead.
+          // stop-reason that the halt card renders instead. While the run is
+          // still open the result is the answer being written, streamed by
+          // the server as the model produces it.
           if (d.status !== 'blocked') {
             resultSection.style.display = 'block';
             if (STRUCTURED) {
@@ -889,7 +891,9 @@
               // deliverable changed after this page loaded.
               if (changed && deliverableStaleEl) deliverableStaleEl.style.display = 'block';
             } else if (resultEl) {
-              renderResult(d.result);
+              if (changed) renderResult(d.result);
+              if (d.terminal === true) resultEl.removeAttribute('aria-busy');
+              else resultEl.setAttribute('aria-busy', 'true');
             }
           }
         }

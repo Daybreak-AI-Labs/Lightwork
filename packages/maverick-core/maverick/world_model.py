@@ -2046,6 +2046,25 @@ class WorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
 
+    def set_goal_partial_result(self, goal_id: int, text: str) -> bool:
+        """Replace a RUNNING goal's result with the answer written so far.
+
+        The chat page's live preview. It never touches a terminal goal, so the
+        orchestrator's final write wins any race with a late preview; it
+        advances the optimistic review version like every goal write; and it
+        revokes no sign-off because a non-terminal goal cannot carry one.
+        Returns whether a row changed.
+        """
+        now = time.time()
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET result = ?, updated_at = MAX(updated_at + 0.000001, ?) "
+                "WHERE id = ? AND status NOT IN "
+                "('done', 'completed', 'failed', 'cancelled', 'blocked', 'error')",
+                (_enc_field(text), now, goal_id),
+            )
+            return cur.rowcount == 1
+
     def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
         """Complete department totals in one read snapshot, without a row cap."""
         from .shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
