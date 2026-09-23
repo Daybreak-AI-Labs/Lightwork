@@ -18,7 +18,7 @@ def resume_env(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     world = world_model.WorldModel(world_model.DEFAULT_DB)
     monkeypatch.setattr(api, "_world", lambda: world)
-    monkeypatch.setattr(api, "DEFAULT_MAX_DOLLARS", 2.0)
+    monkeypatch.setattr(api, "configured_max_dollars", lambda: 2.0)
     calls = []
 
     async def run(*args, **kwargs):
@@ -59,6 +59,26 @@ def test_invalid_or_excessive_limit_cannot_change_goal_or_start_work(resume_env,
     assert world.get_goal(goal_id).status == "blocked"
     assert world.get_goal(goal_id).result == "Budget exhausted"
     assert not calls
+
+
+def test_ceiling_is_the_deployment_spend_cap_not_the_fallback(resume_env, monkeypatch):
+    """The Settings page's spend cap is the ceiling; the $2 default is only the
+    fallback for a deployment that configured nothing."""
+    from maverick import runner, runtime_overrides
+    from maverick_dashboard import api
+
+    client, world, goal_id, calls = resume_env
+    monkeypatch.setattr(api, "configured_max_dollars", runner.configured_max_dollars)
+    runtime_overrides.set_budget(25000.01)
+    over = client.post(f"/api/v1/goals/{goal_id}/resume", json={"max_dollars": 25000.02})
+    assert over.status_code == 400
+    assert "$25,000.01" in over.json()["detail"]
+    assert world.get_goal(goal_id).status == "blocked" and not calls
+
+    response = client.post(f"/api/v1/goals/{goal_id}/resume", json={"max_dollars": 24000})
+    assert response.status_code == 204, response.text
+    assert world.get_goal(goal_id).status == "pending"
+    assert calls and calls[0][1]["max_dollars"] == 24000
 
 
 def test_budget_control_does_not_bypass_goal_ownership(resume_env, monkeypatch):

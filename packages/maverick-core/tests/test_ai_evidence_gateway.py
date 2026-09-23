@@ -374,6 +374,39 @@ def test_every_delivery_gets_disclosure_and_caller_cannot_consume_it_early(
         )
 
 
+def test_first_delivery_provisions_the_default_policy(monkeypatch):
+    """A tenant with no policy yet is receipted and disclosed, not withheld."""
+    _enable(monkeypatch)
+    assert gateway.get_policy("default") is None
+
+    delivered = _deliver()
+
+    policy = gateway.get_policy("default")
+    assert policy is not None and policy["revision"] == 1
+    assert policy["settings"]["disclosure_text"] == gateway.DEFAULT_DISCLOSURE_TEXT
+    assert policy["settings"]["machine_marker"] == gateway.DEFAULT_MACHINE_MARKER
+    assert policy["settings"]["supported_modalities"] == ["text"]
+    assert delivered["delivered_text"].startswith(gateway.DEFAULT_DISCLOSURE_TEXT)
+    assert delivered["receipt"]["policy_id"] == "default"
+    assert gateway.verify_interaction_receipt(delivered["receipt"])
+
+    # The provisioned policy is the tenant's policy from then on: a second
+    # delivery reuses revision 1 instead of publishing another snapshot.
+    _deliver(idempotency_key="turn-2", generated_text="Second answer.")
+    assert gateway.get_policy("default")["revision"] == 1
+
+
+def test_only_the_default_policy_is_provisioned_on_delivery(monkeypatch):
+    _enable(monkeypatch)
+    with pytest.raises(
+        gateway.EvidenceGatewayStateError,
+        match="policy 'custom' does not exist",
+    ):
+        _deliver(policy_id="custom")
+    assert gateway.get_policy("custom") is None
+    assert gateway.get_policy("default") is None
+
+
 def test_delivery_caller_cannot_disable_ai_content_marking(monkeypatch):
     _enable(monkeypatch)
     _policy()

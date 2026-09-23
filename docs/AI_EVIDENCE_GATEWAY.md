@@ -36,6 +36,15 @@ The runtime also requires an explicit tenant binding (`MAVERICK_TENANT` or an
 authenticated client/tenant context). It refuses the legacy unbound namespace
 instead of allowing evidence from different customers to share a store.
 
+A tenant needs no manual setup before its first goal. The orchestrator delivers
+every human-facing output under the `default` policy; when a tenant has not
+published one yet, the first delivery provisions revision 1 from the built-in
+defaults (the disclosure text, the machine-readable marker, text only) as an
+audited `policy_created` mutation, and the output is receipted and disclosed
+rather than withheld. Review or revise that policy through the operator API
+like any other; only the `default` id is provisioned, an explicit policy id
+must already exist.
+
 ### Enforced output seam
 
 When the gateway is enabled, the orchestrator sends its final human-facing

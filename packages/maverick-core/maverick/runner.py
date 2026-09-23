@@ -25,6 +25,7 @@ import concurrent.futures
 import contextvars
 import functools
 import logging
+import math
 import threading
 import time
 from typing import Any, Protocol
@@ -162,6 +163,30 @@ def drain_inflight(timeout: float = 25.0, poll: float = 0.5) -> int:
 DEFAULT_MAX_DOLLARS = env_float("MAVERICK_DEFAULT_MAX_DOLLARS", 2.0)
 DEFAULT_MAX_WALL_SECONDS = env_float("MAVERICK_DEFAULT_MAX_WALL_SECONDS", 1800.0)
 DEFAULT_MAX_DEPTH = env_int("MAVERICK_DEFAULT_MAX_DEPTH", 3)
+
+
+def configured_max_dollars() -> float:
+    """The deployment's per-goal spend ceiling, in USD.
+
+    The same precedence a run's budget is built with -- the Settings page's
+    spend cap, else the ``[budget]`` config section, else
+    ``MAVERICK_BUDGET_DOLLARS``, else ``DEFAULT_MAX_DOLLARS`` -- resolved
+    without reserving tenant allowance.  The dashboard clamps requested
+    per-goal limits to this value; ``DEFAULT_MAX_DOLLARS`` alone is only the
+    fallback for a deployment that configured nothing, so using it as the
+    ceiling rejected the very cap the operator had set.
+    """
+    from .budget import resolve_budget_caps
+
+    caps = resolve_budget_caps(defaults={"max_dollars": DEFAULT_MAX_DOLLARS})
+    value = caps.get("max_dollars", DEFAULT_MAX_DOLLARS)
+    try:
+        ceiling = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_DOLLARS
+    if not math.isfinite(ceiling) or ceiling <= 0:
+        return DEFAULT_MAX_DOLLARS
+    return ceiling
 
 
 def run_goal_in_thread(

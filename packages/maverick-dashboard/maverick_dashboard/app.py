@@ -7579,14 +7579,14 @@ def goal_cost_preview(request: Request, goal_id: int, iterations: int = 1) -> JS
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    from maverick.budget import Budget
     from maverick.cost.projection import compare_against_budget, project_plan
+    from maverick.runner import configured_max_dollars
 
     text = (g.description or g.title or "").strip()
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     steps = [{"text": ln} for ln in (lines or [text])]
     projection = project_plan(steps, iterations=max(1, min(int(iterations), 10)))
-    budget_dollars = Budget().max_dollars
+    budget_dollars = configured_max_dollars()
     verdict = compare_against_budget(projection, budget_dollars)
     return JSONResponse(
         {
@@ -8346,7 +8346,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
         owner=caller_principal(request) or "",
     )
 
-    from maverick.runner import DEFAULT_MAX_DOLLARS, run_goal_in_background_async
+    from maverick.runner import configured_max_dollars, run_goal_in_background_async
 
     budget = payload.get("budget")
     max_dollars = None
@@ -8360,7 +8360,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
         # its own, so an unclamped webhook value (negative, or arbitrarily
         # large) would defeat the budget ceiling -- budget caps are not
         # optional, even on an externally reachable signed endpoint.
-        max_dollars = min(max(max_dollars, 0.0), DEFAULT_MAX_DOLLARS)
+        max_dollars = min(max(max_dollars, 0.0), configured_max_dollars())
     bg.add_task(run_goal_in_background_async, goal_id, max_dollars)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
@@ -9371,8 +9371,14 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     root_id = _thread_root_id(g)
     root = g if root_id == g.id else (w.get_goal(root_id) or g)
     from maverick.attachment_submissions import SubmissionStore
+    from maverick.runner import configured_max_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
+
+    try:
+        spend_ceiling = configured_max_dollars()
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        spend_ceiling = None
 
     return templates.TemplateResponse(
         request,
@@ -9381,6 +9387,10 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "goal": g,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
+            "spend_ceiling": spend_ceiling,
+            "spend_ceiling_text": (
+                f"{spend_ceiling:,.2f}" if spend_ceiling is not None else ""
+            ),
             "thread_title": root.title,
             "thread_turns": _thread_turns(w, g, root),
             "threads": _chat_threads(request, w, active_root=root_id),

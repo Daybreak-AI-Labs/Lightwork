@@ -456,8 +456,8 @@
           <summary>Set a spending limit for this attempt</summary>
           <div class="field">
             <label for="halt-resume-budget">Spending limit (USD, optional)</label>
-            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01" placeholder="Use the deployment’s default limit" aria-describedby="halt-resume-budget-hint">
-            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt. Your organization’s spending and safety limits still apply.</p>
+            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling %}Up to ${{ spend_ceiling_text }}{% else %}Use the deployment’s default limit{% endif %}" aria-describedby="halt-resume-budget-hint">
+            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use this deployment’s spend cap of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>

@@ -2151,6 +2151,34 @@ def _reproduce_delivery(
     return signed, delivered
 
 
+def _ensure_default_policy(policy_id: str, *, actor: str) -> None:
+    """Provision the tenant's ``default`` policy from the module defaults.
+
+    The orchestrator delivers every human-facing goal output under the
+    ``default`` policy.  A tenant that has not published one yet used to have
+    every goal withheld with "policy 'default' does not exist" until an
+    operator created it by hand through the assurance API, which a per-user
+    isolation tenant or a session-selected workspace cannot reach with the
+    static dashboard token.  The gateway now creates revision 1 itself, from
+    the same defaults the API applies (disclosure text, machine marker,
+    text-only), so the first delivery is receipted and disclosed rather than
+    blocked.  The creation is an ordinary audited ``policy_created`` mutation;
+    operators review and revise it exactly as a hand-made policy.  Only the
+    ``default`` id is provisioned: an explicit policy id must still exist.
+
+    Runs before the delivery transaction so the policy lock is never taken
+    inside the delivery lock.  A concurrent creator is harmless: the upsert
+    re-reads the record under the policy lock and returns the existing
+    revision when its snapshot is identical.
+    """
+
+    if _token(policy_id, "policy_id") != "default":
+        return
+    if _policy_record("default") is not None:
+        return
+    upsert_policy("default", actor=actor)
+
+
 def deliver_text(
     generated_text: str,
     *,
@@ -2180,6 +2208,7 @@ def deliver_text(
     from .file_lock import cross_process_lock
 
     receipt_path = _receipt_path()
+    _ensure_default_policy(policy_id, actor=actor)
     # Windows mandatory file locks reject a second thread in the same process
     # with EDEADLK instead of waiting.  Serialize local contenders before
     # acquiring the cross-process transaction; the inner use is an RLock and

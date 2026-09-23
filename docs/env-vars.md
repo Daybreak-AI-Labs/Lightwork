@@ -40,7 +40,7 @@ for false unless noted otherwise.
 | --- | --- | --- |
 | `MAVERICK_BUDGET_DOLLARS` | config `[budget]` | Override the dollar budget cap for a run. |
 | `MAVERICK_BILLING_STRICT` | `true` | Require verified pricing for live accounting. `false` explicitly enables warning-labelled estimate-only accounting for legacy/custom gateways. |
-| `MAVERICK_DEFAULT_MAX_DOLLARS` | `2.0` | Default per-goal dollar ceiling when none is supplied. |
+| `MAVERICK_DEFAULT_MAX_DOLLARS` | `2.0` | Fallback per-goal dollar cap for a deployment that configured none; the Settings spend cap and `[budget] max_dollars` outrank it and set the ceiling the dashboard accepts. |
 | `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | `1800` | Default per-goal wall-clock ceiling (seconds). |
 | `MAVERICK_DEFAULT_MAX_DEPTH` | `3` | Default max recursion depth for spawned sub-goals. |
 
