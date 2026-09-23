@@ -39,10 +39,46 @@ implementation and its failure tests remain future work.
 
 ## Qualification
 
-Final combined local qualification is being recorded before publication. The
-evidence directory is `consolidation-evidence-20260923/pre-ci-fixes` beside the
-working checkout. It contains JUnit results, commands, review notes and the
-source/evidence digests; fixture credentials are excluded from published files.
+The full suite ran at `4acec337575dfe2c06fc088b47f6168cc194f838`. Runtime source remains identical to that
+snapshot. Three test files subsequently received fixture-only corrections,
+preserving every existing assertion; their complete modules passed in both
+modes. Source digests and the exact correction are recorded separately. The
+following results are local; overlapping cohorts must not be added together.
+
+| Check | Result |
+| --- | --- |
+| Full secure-mode Python suite, excluding heavy concurrency | 31,128 passed; 480 skipped; 5 failures/errors |
+| Corrected runner-fixture modules, ordinary and secure | 61 passed; 0 skipped; 0 failures/errors in each mode; resolves every full-suite failure |
+| Full-suite cases qualified by the full run plus corrected-module rerun | 31,133 passed; 480 skipped; 0 failures/errors |
+| Heavy concurrency, secure and serial after the ordinary suite | 7 passed; 8 skipped; 0 failures/errors |
+| Setup/SSH/VPS affected cohort, ordinary and secure | 108 passed; 0 skipped; 0 failures/errors in each mode |
+| Knowledge plus core/dashboard callers, ordinary and secure | 292 passed; 3 skipped; 0 failures/errors in each mode |
+| Final knowledge configuration/wizard/publication follow-up | 30 passed; 0 skipped; 0 failures/errors in each mode |
+| Channel package, ordinary | 378 passed; 8 skipped; 0 failures/errors |
+| Final retention regressions, secure | 31 passed; 0 skipped; 0 failures/errors |
+| Cancellation, workflows, runner and world backends, secure | 340 passed; 0 skipped; 0 failures/errors |
+| Same runtime cohort, ordinary | 340 distinct cases passed after correcting four new PostgreSQL test assertions and rerunning its complete 96-case module |
+| Required static/contract/governance checks | All 16 passed, including whole-repository Ruff and Vulture |
+| Fresh setup in real Chromium | One journey passed at 320px and 1280px, including actual save, reload and saved-policy inspection |
+| Signed governance and harness benchmark evidence | Refreshed for this source and both tracked-artifact verifiers passed |
+| Local secret delta scan | No new findings; baseline unchanged; no network verification |
+
+Skipped tests are not passes. The separate native PostgreSQL cohorts execute
+backend cases that the default full-suite run skips. Three parser-dependent
+knowledge cases lack optional native document libraries in this Python runtime.
+The initial channel-wide invocation was interrupted without a final receipt;
+the bounded rerun above is the qualification result. Initial failures in newly
+added PostgreSQL assertions were test cursor-access errors, corrected before
+the final focused secure run. The full run then exposed stale runner fixtures
+that pre-labelled goals completed or supplied an object without the Budget
+contract. Their correction uses pending-to-done goals and real uncapped Budgets;
+production checks and existing assertions are unchanged. Failed and incomplete
+attempt logs are retained. A second complete repository run was not performed.
+
+The evidence directory is `consolidation-evidence-20260923/pre-ci-fixes` beside
+the working checkout. `qualification.json` records exact JUnit counts, source
+and artifact digests, review receipts and limitations. No fixture credentials
+are published. Hosted CI is intentionally deferred.
 
 ## Boundaries
 
