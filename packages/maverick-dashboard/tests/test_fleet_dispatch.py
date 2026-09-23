@@ -138,7 +138,7 @@ def test_authenticated_owner_can_observe_real_principal_bound_fleet_run(
 
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", _Sandbox)
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: object())
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: budget_mod.Budget())
     monkeypatch.setattr(trace_pin, "pin_trace", lambda *_a, **_kw: None)
     monkeypatch.setattr(orchestrator, "run_goal_sync", _finish_without_provider)
 

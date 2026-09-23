@@ -84,7 +84,7 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
         def get_goal(self, goal_id):
             return SimpleNamespace(
                 id=goal_id,
-                status="done",
+                status="done" if captured else "pending",
                 execution_principal="agent:acme.bob",
             )
 
@@ -97,7 +97,7 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
         ctx = SwarmContext(
             llm=kwargs.get("llm") or args[0],
             world=FakeWorld(),
-            budget=object(),
+            budget=args[2],
             blackboard=object(),
             sandbox=object(),
             goal_id=kwargs["goal_id"] if "goal_id" in kwargs else args[3],
@@ -111,7 +111,7 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
     monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: object())
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     cap = Capability(principal="agent:acme.bob", allow_tools=frozenset({"read_file"}))
@@ -130,12 +130,13 @@ def test_run_goal_in_thread_closes_sandbox(monkeypatch):
     from maverick import sandbox as sandbox_mod
 
     closed = {"sandbox": False, "world": False}
+    completed = []
 
     class FakeWorld:
         def get_goal(self, goal_id):
             return SimpleNamespace(
                 id=goal_id,
-                status="done",
+                status="done" if completed else "pending",
                 execution_principal="user:local",
             )
 
@@ -149,8 +150,8 @@ def test_run_goal_in_thread_closes_sandbox(monkeypatch):
     monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: FakeSandbox())
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: object())
-    monkeypatch.setattr(orchestrator, "run_goal_sync", lambda *args, **kwargs: None)
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
+    monkeypatch.setattr(orchestrator, "run_goal_sync", lambda *args, **kwargs: completed.append(True))
 
     assert runner.run_goal_in_thread(7) == "done"
     assert closed == {"sandbox": True, "world": True}
@@ -168,7 +169,7 @@ def test_run_goal_in_thread_default_capability_is_none(monkeypatch):
         def get_goal(self, goal_id):
             return SimpleNamespace(
                 id=goal_id,
-                status="done",
+                status="done" if captured else "pending",
                 execution_principal="user:local",
             )
 
@@ -182,7 +183,7 @@ def test_run_goal_in_thread_default_capability_is_none(monkeypatch):
     monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: object())
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     runner.run_goal_in_thread(7)

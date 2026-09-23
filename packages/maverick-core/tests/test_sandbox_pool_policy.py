@@ -313,19 +313,25 @@ def test_actual_runner_keeps_fresh_lifecycle_and_does_not_claim_pool_savings(tmp
         original_close(sandbox)
 
     class World:
-        def get_goal(self, goal_id):
-            return SimpleNamespace(id=goal_id, status="done", execution_principal="user:alice")
+        def __init__(self):
+            self.goals = {}
 
-    def execute(*args, **kwargs):
+        def get_goal(self, goal_id):
+            return self.goals.setdefault(
+                goal_id, SimpleNamespace(id=goal_id, status="pending", execution_principal="user:alice"),
+            )
+
+    def execute(_llm, world, _budget, goal_id, **kwargs):
         sandbox = kwargs["sandbox"]
         built.append(sandbox)
         assert sandbox.exec("synthetic task").ok
+        world.get_goal(goal_id).status = "done"
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(world_model, "open_world", World)
     monkeypatch.setattr(world_model, "close_world_if_owned", lambda world: None)
     monkeypatch.setattr(llm, "LLM", object)
-    monkeypatch.setattr(budget, "budget_from_config", lambda **kw: object())
+    monkeypatch.setattr(budget, "budget_from_config", lambda **kw: budget.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", execute)
     monkeypatch.setattr(trace_pin, "pin_trace", lambda *a: None)
     monkeypatch.setattr(DockerBackend, "close", close)
