@@ -164,7 +164,7 @@ def mailbox(monkeypatch):
 
 
 IMAP_CONFIG = {"host": "mail.invalid", "username": "synthetic",
-               "password_env": "SYNTHETIC_IMAP_PASSWORD", "include_body": True}
+               "password_env": "SYNTHETIC_IMAP_PASSWORD", "include_body": True}  # pragma: allowlist secret - synthetic environment-variable name
 
 
 def test_imap_initial_highwater_fetches_no_history_and_reset_rebaselines(mailbox):
