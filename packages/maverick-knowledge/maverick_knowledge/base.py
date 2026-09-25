@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 _EXACT_DOCUMENT_SCHEMA = "lightwork.vector-document-layout.v1"
 _EXACT_CHUNK_KEYS = {"chunk_index", "chunk_start", "chunk_end"}
+MAX_DOCUMENT_CHUNKS = 2048
 
 # Built-in injection tripwire applied to every ingested chunk, even when no
 # Shield is configured. maverick-knowledge is standalone (no maverick-core dep),
@@ -168,10 +169,26 @@ class KnowledgeBase:
         except Exception:  # pragma: no cover -- never block ingest on a scan bug
             return True
 
+    def _source_replacement_snapshot(self, collection: str, source: str, metadata: dict) -> list:
+        if not source or metadata["source"] != source:
+            raise ValueError("knowledge source replacement requires an unmodified source")
+        reader = getattr(self.store, "read_where", None)
+        if not callable(reader):
+            raise RuntimeError("knowledge store cannot snapshot a source for replacement")
+        with operation_scope(
+            category="retrieval",
+            service=f"vector-store:{type(self.store).__name__}",
+            operation="knowledge-source-replacement-read",
+        ):
+            snapshot = list(reader(collection, "source", source, limit=MAX_DOCUMENT_CHUNKS))
+        if len(snapshot) > MAX_DOCUMENT_CHUNKS:
+            raise ValueError("knowledge prior source exceeds its replacement boundary")
+        return snapshot
+
     def ingest_text(self, collection: str, text: str, source: str = "", *,
                     subject: str = "", trust_tier: int = 2,
                     sensitivity: str = "internal", ingested_by: str = "",
-                    extra_meta: dict | None = None) -> int:
+                    extra_meta: dict | None = None, replace_source: bool = False) -> int:
         """Chunk, shield-scan, embed and store one document's text. Returns the
         number of chunks stored (poisoned chunks are dropped).
 
@@ -187,15 +204,22 @@ class KnowledgeBase:
         * ``sensitivity``— data-classification label (public/internal/…).
         * ``ingested_by``— the principal that loaded it (audit attribution).
         * ``doc_sha256`` — content hash (dedup + tamper-evidence).
+
+        At most 2,048 chunks are admitted, matching the default exact-document
+        projection. ``replace_source`` stages a revision before atomically
+        replacing this source's prior rows; a concurrent source change refuses
+        the replacement. Matching retries retain the admitted rows unchanged.
         """
         document_text = str(text or "")
         if not document_text.strip():
             return 0
-        descriptor, fingerprint = identity(self.embedder)
-        self._require_embedding_identity(collection, fingerprint)
         size = max(1, int(self.chunk_size))
         overlap = max(0, min(int(self.chunk_overlap), size - 1))
         step = size - overlap
+        if (len(document_text) + step - 1) // step > MAX_DOCUMENT_CHUNKS:
+            raise ValueError(f"knowledge document exceeds {MAX_DOCUMENT_CHUNKS} chunks")
+        descriptor, fingerprint = identity(self.embedder)
+        self._require_embedding_identity(collection, fingerprint)
         raw_chunks = [
             (start, min(start + size, len(document_text)), document_text[start:start + size])
             for start in range(0, len(document_text), step)
@@ -238,6 +262,10 @@ class KnowledgeBase:
             embedding_fingerprint=fingerprint,
         )
         exact_reader = getattr(self.store, "read_where", None)
+        source_snapshot = (
+            self._source_replacement_snapshot(collection, source, base_meta)
+            if replace_source else None
+        )
         try:
             existing = (
                 self.exact_document(collection, document_sha256)
@@ -261,7 +289,7 @@ class KnowledgeBase:
                         collection,
                         "doc_sha256",
                         document_sha256,
-                        limit=max(2048, len(chunks) + 1),
+                        limit=MAX_DOCUMENT_CHUNKS,
                     )
                 )
             for row in surviving:
@@ -282,8 +310,12 @@ class KnowledgeBase:
                 raise RuntimeError(
                     "knowledge document digest is already bound to different provenance"
                 )
-            return int(existing["chunk_count"])
-        guarded_add = getattr(self.store, "add_with_identity", None)
+            if not replace_source or all(
+                row.meta.get("doc_sha256") == document_sha256 for row in source_snapshot
+            ):
+                return int(existing["chunk_count"])
+        publication_method = "replace_source_with_identity" if replace_source else "add_with_identity"
+        guarded_add = getattr(self.store, publication_method, None)
         if not callable(guarded_add):
             raise RuntimeError(
                 "knowledge store cannot atomically publish document provenance; "
@@ -326,7 +358,10 @@ class KnowledgeBase:
             service=f"vector-store:{type(self.store).__name__}",
             operation="knowledge-document-storage",
         ):
-            guarded_add(collection, items, fingerprint)
+            if replace_source:
+                guarded_add(collection, items, fingerprint, source=source, snapshot=source_snapshot)
+            else:
+                guarded_add(collection, items, fingerprint)
         self._require_embedding_identity(collection, fingerprint)
         if callable(exact_reader):
             stored = self.exact_document(collection, document_sha256)
@@ -344,7 +379,7 @@ class KnowledgeBase:
         collection: str,
         doc_sha256: str,
         *,
-        max_chunks: int = 2048,
+        max_chunks: int = MAX_DOCUMENT_CHUNKS,
     ) -> dict:
         """Read one complete ingested document by its immutable digest.
 

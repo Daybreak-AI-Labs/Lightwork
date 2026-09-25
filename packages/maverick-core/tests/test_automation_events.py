@@ -10,20 +10,20 @@ def test_first_poll_is_baseline_only():
     # Newest-first feed; empty cursor -> record newest id, fire nothing.
     items = [{"id": "3"}, {"id": "2"}, {"id": "1"}]
     r = ev.diff_new_items(items, cursor="", id_field="id")
-    assert r.events == [] and r.cursor == "3"
+    assert r.events == [] and ev._decode_cursor(r.cursor, "feed") == "3"
 
 
 def test_only_items_after_cursor_fire_oldest_first():
     items = [{"id": "5"}, {"id": "4"}, {"id": "3"}, {"id": "2"}, {"id": "1"}]
     r = ev.diff_new_items(items, cursor="3", id_field="id")
     assert [e["id"] for e in r.events] == ["4", "5"]   # oldest-first
-    assert r.cursor == "5"
+    assert ev._decode_cursor(r.cursor, "feed") == "5"
 
 
 def test_no_new_items_keeps_cursor():
     items = [{"id": "3"}, {"id": "2"}, {"id": "1"}]
     r = ev.diff_new_items(items, cursor="3", id_field="id")
-    assert r.events == [] and r.cursor == "3"
+    assert r.events == [] and ev._decode_cursor(r.cursor, "feed") == "3"
 
 
 def test_nested_fields_flatten_for_params():
@@ -37,7 +37,7 @@ def test_nested_fields_flatten_for_params():
 def test_dotted_id_field():
     items = [{"meta": {"id": "b"}}, {"meta": {"id": "a"}}]
     r = ev.diff_new_items(items, cursor="a", id_field="meta.id")
-    assert r.cursor == "b" and len(r.events) == 1
+    assert ev._decode_cursor(r.cursor, "feed") == "b" and len(r.events) == 1
 
 
 def test_event_burst_is_bounded():
@@ -53,11 +53,11 @@ def test_burst_over_cap_drains_oldest_first_without_loss():
     items = [{"id": str(i)} for i in range(40, 0, -1)]  # 40..1, newest-first
     first = ev.diff_new_items(items, cursor="0", id_field="id")
     assert [e["id"] for e in first.events] == [str(i) for i in range(1, 26)]  # 1..25
-    assert first.cursor == "25"
+    assert ev._decode_cursor(first.cursor, "feed") == "25"
     # Next poll continues from the cursor: the remaining 26..40 fire, none lost.
     second = ev.diff_new_items(items, cursor=first.cursor, id_field="id")
     assert [e["id"] for e in second.events] == [str(i) for i in range(26, 41)]
-    assert second.cursor == "40"
+    assert ev._decode_cursor(second.cursor, "feed") == "40"
 
 
 def test_http_json_source_with_injected_fetch(monkeypatch):
@@ -66,7 +66,7 @@ def test_http_json_source_with_injected_fetch(monkeypatch):
         lambda url, headers=None, timeout=15.0: {"data": [{"id": "9", "who": "acme"}]})
     r = ev.HttpJsonSource().poll(
         {"url": "http://x/api", "items_path": "data", "id_field": "id"}, cursor="8")
-    assert r.events[0]["who"] == "acme" and r.cursor == "9"
+    assert r.events[0]["who"] == "acme" and ev._decode_cursor(r.cursor, "feed") == "9"
 
 
 def test_http_json_rejects_large_content_length(monkeypatch):
@@ -147,7 +147,7 @@ _RSS = """<?xml version="1.0"?><rss><channel>
 def test_rss_source_parses_and_dedups(monkeypatch):
     monkeypatch.setattr(ev, "_http_get_text", lambda url, headers=None, timeout=15.0: _RSS)
     r = ev.RssSource().poll({"url": "http://x/feed"}, cursor="a")   # 'a' already seen
-    assert r.cursor == "b" and len(r.events) == 1
+    assert ev._decode_cursor(r.cursor, "feed") == "b" and len(r.events) == 1
     assert r.events[0]["title"] == "Newer" and r.events[0]["id"] == "b"
 
 
@@ -173,7 +173,7 @@ def test_oauth_http_json_uses_a_vaulted_bearer_token(monkeypatch, tmp_path):
         {"provider": "acme", "url": "https://x/api", "items_path": "data", "id_field": "id"},
         cursor="8")
     assert seen["auth"] == "Bearer T0K3N"
-    assert r.events[0]["who"] == "acme" and r.cursor == "9"
+    assert r.events[0]["who"] == "acme" and ev._decode_cursor(r.cursor, "feed") == "9"
 
 
 def test_oauth_source_errors_when_vault_off(monkeypatch):
@@ -232,7 +232,7 @@ def test_github_issues_source_dedups_by_number_and_drops_prs(monkeypatch):
     monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: feed)
     r = ev.GithubIssuesSource().poll({"owner": "o", "repo": "r"}, cursor="10")
     assert [e["number"] for e in r.events] == ["12"]   # PR + already-seen excluded
-    assert r.cursor == "12"
+    assert ev._decode_cursor(r.cursor, "feed") == "12"
 
 
 def test_github_issues_requires_owner_repo():

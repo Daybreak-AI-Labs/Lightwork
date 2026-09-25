@@ -3353,7 +3353,7 @@ def tenant_rls_preflight(dsn: str | None) -> None:
     """Check readiness to enable Postgres Row-Level Security.
 
     Reports, per tenant-scoped table, whether this DB role owns it (only the
-    owner can install the RLS policy) and how many legacy NULL-tenant rows remain
+    owner can install the RLS policy) and how many legacy unscoped rows remain
     (which RLS would hide). Assign those rows with `maverick tenant backfill`,
     then set [world_model] rls = true.
     """
@@ -3381,25 +3381,27 @@ def tenant_rls_preflight(dsn: str | None) -> None:
                else f"NOT owned (owner={info['owner']})")
         click.echo(f"  {t}: {own}, {info['null_tenant_rows']} legacy "
                    f"NULL-tenant row(s)")
+        if info.get("empty_tenant_rows"):
+            click.echo(f"    {info['empty_tenant_rows']} legacy empty-tenant event row(s)")
     if rep["ready"]:
         click.echo("READY: set [world_model] rls = true (or MAVERICK_PG_RLS=1) "
                    "to enforce database tenant isolation.")
     else:
-        click.echo("NOT READY: assign NULL rows with `maverick tenant backfill "
+        click.echo("NOT READY: assign unscoped rows with `maverick tenant backfill "
                    "--tenant <id>` and ensure this role owns every table above.")
 
 
 @tenant.command("backfill")
 @click.option("--tenant", "tenant_id", required=True,
-              help="Tenant id to assign legacy NULL-tenant rows to.")
+              help="Tenant id to assign legacy unscoped rows to.")
 @click.option("--dsn", default=None,
               help="Postgres DSN (else MAVERICK_PG_DSN / [world_model] dsn).")
 @click.option("--dry-run", is_flag=True,
               help="Report how many rows would be assigned without writing.")
 def tenant_backfill(tenant_id: str, dsn: str | None, dry_run: bool) -> None:
-    """Assign legacy NULL-tenant rows to a tenant before enabling RLS.
+    """Assign legacy unscoped rows to a tenant before enabling RLS.
 
-    Pre-tenancy rows have a NULL tenant_id and RLS (strict equality) would hide
+    Pre-tenancy rows have a NULL tenant_id (empty for event records) and RLS would hide
     them. This assigns them to --tenant so they stay visible under that tenant.
     Idempotent and safe to re-run. Run `maverick tenant rls-preflight` first.
     """

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from .file_lock import (
     atomic_create_bytes,
     cross_process_lock,
@@ -48,7 +49,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 39
+SCHEMA_VERSION = 40
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -421,6 +422,7 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
     # v11: per-goal owner principal for multi-user dashboard authz (owner-scoped
     # reads/mutations). Legacy goals get '' (treated as unowned -> admin-only).
     11: ["ALTER TABLE goals ADD COLUMN owner TEXT NOT NULL DEFAULT ''"],
@@ -1100,6 +1102,8 @@ class WorldModel:
         *,
         _managed_path: bool = False,
     ):
+        from .paths import current_tenant_id_strict
+        self._event_admission_tenant = current_tenant_id_strict()
         path, default_managed = _resolve_world_path(path)
         _managed_path = _managed_path or default_managed
         self.path = path

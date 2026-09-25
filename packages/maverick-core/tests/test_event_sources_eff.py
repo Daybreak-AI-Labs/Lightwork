@@ -43,21 +43,21 @@ def test_file_dir_missing_dir_errors(tmp_path):
 def test_imap_baseline_then_fires_new_mail(monkeypatch):
     calls = {"since": []}
 
-    def fake_fetch(config, since_uid):
+    def fake_fetch(config, since_uid, uidvalidity=None):
         calls["since"].append(since_uid)
-        if since_uid == 0:
-            return [], 5                            # baseline: high-water 5
+        if since_uid is None:
+            return [], 5, "123"                     # baseline: high-water 5
         return ([{"id": "6", "uid": 6, "from": "a@b.com",
-                  "subject": "hi", "date": "", "message_id": "<6>"}], 6)
+                  "subject": "hi", "date": "", "message_id": "<6>"}], 6, "123")
 
     monkeypatch.setattr(ev, "_fetch_imap", fake_fetch)
     src = ev.get_source("imap_email")
     base = src.poll({"host": "h", "username": "u", "password_env": "P"}, "")
-    assert base.events == [] and base.cursor == "5"
+    assert base.events == [] and ev._decode_cursor(base.cursor, "imap") == ["123", 5]
     out = src.poll({"host": "h", "username": "u", "password_env": "P"}, base.cursor)
     assert len(out.events) == 1 and out.events[0]["subject"] == "hi"
-    assert out.cursor == "6"
-    assert calls["since"] == [0, 5]
+    assert ev._decode_cursor(out.cursor, "imap") == ["123", 6]
+    assert calls["since"] == [None, 5]
 
 
 def test_imap_requires_config():
@@ -76,12 +76,12 @@ def test_form_source_fires_new_submissions(tmp_path, monkeypatch):
     cfg = {"token": "signup"}
     form_store.append("signup", {"email": "old@x.com"})
     base = src.poll(cfg, "")                        # baseline over existing rows
-    assert base.events == [] and base.cursor == "1"
+    assert base.events == [] and ev._decode_cursor(base.cursor, "form") == "1"
     form_store.append("signup", {"email": "new@x.com", "plan": "pro"})
     out = src.poll(cfg, base.cursor)
     assert len(out.events) == 1
     assert out.events[0]["email"] == "new@x.com" and out.events[0]["plan"] == "pro"
-    assert out.cursor == "2"
+    assert ev._decode_cursor(out.cursor, "form") == "2"
 
 
 def test_form_source_first_submission_fires_when_store_absent(tmp_path, monkeypatch):
@@ -94,7 +94,7 @@ def test_form_source_first_submission_fires_when_store_absent(tmp_path, monkeypa
     src = ev.get_source("form")
     cfg = {"token": "waitlist"}
     base = src.poll(cfg, "")                        # store file does not exist yet
-    assert base.events == [] and base.cursor == "0"  # locked, not empty
+    assert base.events == [] and ev._decode_cursor(base.cursor, "form") == "0"
     form_store.append("waitlist", {"email": "first@x.com"})
     out = src.poll(cfg, base.cursor)
     assert [e["email"] for e in out.events] == ["first@x.com"]   # the first one fires
@@ -115,12 +115,12 @@ def test_new_sources_are_registered():
 def test_imap_include_body_is_passed_and_surfaced(monkeypatch):
     captured = {}
 
-    def fake_fetch(config, since_uid):
+    def fake_fetch(config, since_uid, uidvalidity=None):
         captured["include_body"] = config.get("include_body")
-        if since_uid == 0:
-            return [], 1
+        if since_uid is None:
+            return [], 1, "123"
         return ([{"id": "2", "uid": 2, "from": "a@b.com", "subject": "s",
-                  "date": "", "message_id": "<2>", "body": "hello world"}], 2)
+                  "date": "", "message_id": "<2>", "body": "hello world"}], 2, "123")
 
     monkeypatch.setattr(ev, "_fetch_imap", fake_fetch)
     src = ev.get_source("imap_email")
@@ -152,7 +152,7 @@ def test_http_json_follows_next_page(monkeypatch):
            "next_path": "next", "max_pages": 5, "newest_first": True}
     # baseline records the newest across BOTH pages
     base = src.poll(cfg, "")
-    assert base.cursor == "1"          # newest-first: page1[0] id after full walk
+    assert ev._decode_cursor(base.cursor, "feed") == "1"  # page1[0] id after full walk
     # a later poll that finds new items ahead of the cursor fires them
     pages["https://api/x?page=1"] = {"items": [{"id": "5"}, {"id": "1"}], "next": None}
     out = src.poll(cfg, base.cursor)

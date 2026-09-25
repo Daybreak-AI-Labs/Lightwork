@@ -2164,6 +2164,30 @@ here.
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
 
+  Polled batches are retained in the tenant world database before dispatch,
+  using the configured at-rest encryption. A failed queue reservation or cursor
+  write retries that retained batch even if the feed no longer contains it.
+  Template events commit their goals and admission receipts together, and both
+  manual polling and scheduled polling publish through the durable queue. Queue
+  admission receipts survive completed-job cleanup. This prevents automatic
+  duplicate admission; it does not make an external service's effects reversible.
+  An unconfirmed non-idempotent callback remains held for reconciliation.
+
+  Source cursors distinguish an initialized empty feed from a new trigger, so
+  its first later item runs. Stored cursor-format metadata preserves legacy raw
+  IDs, including IDs resembling the new envelope format. Flow admission uses
+  the exact source identity rather than truncated display fields. During cursor
+  migration, an existing legacy flow run is reused only when its retained fields
+  establish the same identity; ambiguous truncated records require reconciliation.
+  File batches drain timestamp ties, including new arrivals at the current
+  boundary. A boundary holds at most 4,096 file identities; overflow is reported
+  before advancing, and files arriving with timestamps older than an already
+  advanced boundary remain historical. Legacy timestamps cannot reconstruct
+  files previously skipped by an older installation. IMAP initialization reads
+  the complete UID high-water without fetching historical message bodies;
+  UIDVALIDITY changes establish a new baseline. Provider-wide OAuth vault
+  authorizations and token rotations are serialized across local processes.
+
 - **Migration fidelity** (`automation_import.to_flow`) — a per-source
   `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
   Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, Workato

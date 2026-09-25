@@ -120,7 +120,7 @@ class SubmissionStore:
                 "detail": json.loads(self.open(row[3]))}
 
     def create(self, *, token, fingerprint, owner, title, description, manifest,
-               parent_id=None, domain="", project_id=None):
+               parent_id=None, domain="", project_id=None, chat_text=None, chat_root_id=None):
         key = self.token_key(token, owner)
         with self.transaction("submission:" + key) as connection:
             prior = self._receipt(connection, key)
@@ -129,6 +129,15 @@ class SubmissionStore:
                     raise SubmissionConflict("Submission key already belongs to different content")
                 prior["created"] = False
                 return prior
+            chat = None
+            if chat_text is not None:
+                from .chat_threads import ChatThreads
+
+                chat = ChatThreads(self.world)
+                if chat_root_id is not None:
+                    if parent_id != chat_root_id:
+                        raise SubmissionConflict("Chat parent does not match its root")
+                    chat.require_idle(connection, chat_root_id, owner)
             now = time.time()
             if parent_id is not None:
                 parent_sql, parent_values = "SELECT id FROM goals WHERE id=?", (parent_id,)
@@ -147,6 +156,9 @@ class SubmissionStore:
             cursor = self.execute(connection, sql + ("" if self.sqlite else " RETURNING id"), tuple(values))
             goal_id = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
             detail = {"manifest": manifest, "message": "Submission admitted as a draft; preparing attachments."}
+            if chat is not None:
+                detail["conversation_id"] = chat.record(connection, root_id=chat_root_id or goal_id,
+                                                       goal_id=goal_id, owner=owner, text=chat_text)
             self.execute(connection, "INSERT INTO attachment_submissions "
                          "(submission_key,tenant_id,owner,goal_id,fingerprint,state,detail,updated_at) "
                          "VALUES(?,?,?,?,?,'draft',?,?)",
@@ -176,6 +188,12 @@ class SubmissionStore:
             receipt = self._receipt(connection, key)
             if receipt is None or receipt["state"] != "ready":
                 return False
+            from .chat_threads import ChatThreads
+
+            chat = ChatThreads(self.world)
+            binding = chat.binding(receipt["goal_id"], connection=connection)
+            if binding is not None:
+                chat.require_idle(connection, binding.root_id, binding.owner, except_goal=receipt["goal_id"])
             changed = self.execute(connection, "UPDATE goals SET status='pending',updated_at=? WHERE id=? AND status='draft'",
                                    (time.time(), receipt["goal_id"]))
             if changed.rowcount != 1:

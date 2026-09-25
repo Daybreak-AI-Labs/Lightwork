@@ -1633,14 +1633,12 @@ def answer_question(
     qs = w.open_questions(goal_id=goal_id)
     if not any(q.id == payload.question_id for q in qs):
         raise HTTPException(status_code=404, detail="no such open question for this goal")
-    w.answer(payload.question_id, answer)
     # Close the human-in-the-loop turn here. ``ask_user`` parks the goal as
     # 'blocked' with no result; once every question it filed has an answer,
     # the run picks back up on its own (the resumed brief carries the Q&A, see
     # orchestrator.qa_block) instead of sitting blocked until someone finds
     # the Resume button. A goal that is still running keeps running.
-    if g.status == "blocked" and not w.open_questions(goal_id=goal_id):
-        _requeue_goal(request, bg, goal_id)
+    _requeue_goal(request, bg, goal_id, answer_question=(payload.question_id, answer))
 
 
 @router.post(
@@ -10179,13 +10177,9 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     when the feature is on."""
     require_permission(request, "operate")
     _require_event_triggers()
-    from maverick.paths import current_tenant_id
-
     from maverick_dashboard import event_poll
-    from maverick_dashboard.app import _run_trigger_goal_in_tenant
 
     principal = caller_principal(request) or ""
-    tenant = current_tenant_id() or ""
     triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
@@ -10200,19 +10194,8 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     ]
 
     def _fire(goal_id: int) -> None:
-        goal = _world().get_goal(goal_id)
-        if goal is None:
-            raise RuntimeError("event-created goal is unavailable")
-        owner, user_id, allowed_suites = stored_automation_identity(goal.owner)
-        bg.add_task(
-            _run_trigger_goal_in_tenant,
-            goal_id,
-            None,
-            None,
-            tenant=tenant,
-            owner=owner,
-            allowed_suites=allowed_suites,
-        )
+        from maverick_dashboard.automation_queue import enqueue_event_goal
+        enqueue_event_goal(goal_id)
 
     def _fire_flow(
         flow_id: str,
@@ -10221,6 +10204,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         idem_key: str = "",
         origin: str = "manual",
         expected_revision: str = "",
+        legacy_event: dict | None = None,
     ) -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
@@ -10239,11 +10223,13 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
             user_id=user_id,
             allowed_suites=allowed_suites,
             expected_revision=expected_revision,
+            legacy_event=legacy_event,
         )
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(
-            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow
+            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow,
+            fire_is_durable=True,
         )
     )
     return {"polled": len(results), "triggers": results}
@@ -14371,19 +14357,7 @@ def resume_goal(
     _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
 
 
-def _requeue_goal(
-    request: Request,
-    bg: BackgroundTasks,
-    goal_id: int,
-    *,
-    max_dollars: float | None = None,
-) -> None:
-    """Flip a parked goal back to 'pending' and hand it to the runner.
-
-    Shared by the explicit Resume button and by answering the last open
-    question, so both paths pass the same admission gate and the same
-    execution identity / suite scoping into the run.
-    """
+def _require_goal_restart_admission(goal_id: int) -> None:
     from maverick.outcome_pilot_start_gate import (
         OutcomePilotAdmissionRequired,
         require_work_item_admission,
@@ -14405,12 +14379,42 @@ def _requeue_goal(
                 ),
             },
         ) from exc
-    _world().set_goal_status(goal_id, "pending", result=None)
+
+
+def _requeue_goal(
+    request: Request,
+    bg: BackgroundTasks,
+    goal_id: int,
+    *,
+    max_dollars: float | None = None,
+    answer_question: tuple[int, str] | None = None,
+) -> None:
+    """Reserve a restart before dispatch, preserving chat/clarification state."""
+    from maverick.attachment_submissions import SubmissionConflict
+    from maverick.chat_threads import ChatThreads
+
+    world = _world()
+    try:
+        if answer_question is None:
+            _require_goal_restart_admission(goal_id)
+            conversation_id = ChatThreads(world).resume(goal_id)
+        else:
+            outcome = ChatThreads(world).answer(
+                goal_id, *answer_question, require_admission=lambda: _require_goal_restart_admission(goal_id))
+            if not outcome.admitted:
+                return
+            conversation_id = outcome.conversation_id
+    except SubmissionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     budget_options = {"max_dollars": max_dollars} if max_dollars is not None else {}
+    if conversation_id is not None:
+        budget_options["conversation_id"] = conversation_id
     if user_id:
         bg.add_task(
             run_goal_in_background_async,

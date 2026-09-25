@@ -22,20 +22,16 @@ from __future__ import annotations
 
 import json
 import math
-import os
-import threading
 import time
 from collections.abc import Callable
 
+from .file_lock import atomic_read_bytes, atomic_write_bytes, cross_process_lock
 from .paths import data_dir
 from .tenant.kms import seal_text_for_tenant, unseal_text_for_tenant
 
 # Default clock skew (seconds) treated as "already expired" so a token isn't
 # handed out moments before the provider rejects it.
 _DEFAULT_SKEW = 60
-
-_lock = threading.Lock()
-
 
 class OAuthRefreshError(RuntimeError):
     """Authorization must be replaced after an unconfirmed token rotation."""
@@ -136,7 +132,7 @@ class OAuthVault:
         if not path.exists():
             return {}
         try:
-            raw = unseal_text_for_tenant(self._seal_tenant(), path.read_bytes())
+            raw = unseal_text_for_tenant(self._seal_tenant(), atomic_read_bytes(path))
             data = json.loads(raw)
             return data if isinstance(data, dict) else {}
         except FileNotFoundError:
@@ -145,14 +141,14 @@ class OAuthVault:
     def _save(self, data: dict[str, dict]) -> None:
         path = self._path()
         blob = seal_text_for_tenant(self._seal_tenant(), json.dumps(data, sort_keys=True))
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # Atomic replace via a 0600 temp file so a crash can't leave a partial
-        # (or world-readable) sealed vault.
-        tmp = path.with_suffix(".sealed.tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(blob)
-        os.replace(tmp, path)
+        # Unique private temporary file, fsync and atomic publication. The
+        # caller owns the stable sidecar lock for its entire read/modify/write.
+        atomic_write_bytes(path, blob)
+
+    def _locked(self):
+        # This fence also spans provider refresh: after waiting, another
+        # process MUST reread the rotated credential (or uncertainty hold).
+        return cross_process_lock(self._path(), strict=True)
 
     # -- public surface -----------------------------------------------------
     def put(self, provider: str, record: dict) -> None:
@@ -161,19 +157,19 @@ class OAuthVault:
         if not provider:
             raise ValueError("provider is required")
         rec = _validated_token(record)
-        with _lock:
+        with self._locked():
             data = self._load()
             data[provider] = rec
             self._save(data)
 
     def get(self, provider: str) -> dict | None:
         """The stored record for ``provider`` (decrypted), or ``None``."""
-        with _lock:
+        with self._locked():
             return self._load().get(provider)
 
     def delete(self, provider: str) -> bool:
         """Remove ``provider``'s record. Returns whether one was present."""
-        with _lock:
+        with self._locked():
             data = self._load()
             existed = provider in data
             if existed:
@@ -183,7 +179,7 @@ class OAuthVault:
 
     def providers(self) -> list[str]:
         """Providers with a stored record (sorted)."""
-        with _lock:
+        with self._locked():
             return sorted(self._load())
 
     def status(self, provider: str, *, now: float | None = None) -> dict | None:
@@ -192,7 +188,7 @@ class OAuthVault:
         or refresh token itself, only metadata: whether it's expired, its
         absolute expiry, granted scopes, whether a refresh token is on file, and
         when it was obtained."""
-        with _lock:
+        with self._locked():
             record = self._load().get(provider)
         if record is None:
             return None
@@ -221,7 +217,7 @@ class OAuthVault:
         provider's response omits it, per the OAuth spec) and its access token
         returned. Returns ``None`` if there is no record, or it's expired and no
         refresher was given."""
-        with _lock:
+        with self._locked():
             data = self._load()
             record = data.get(provider)
             if record is None:

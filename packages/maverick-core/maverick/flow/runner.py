@@ -21,6 +21,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -623,7 +624,9 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
     # retry of an external mutation that actually committed.
     import concurrent.futures as _cf
     with _cf.ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(_call)
+        # Tenant, connector authority and execution controls are ContextVars.
+        # Each submission needs its own Context, including nested fan-out.
+        fut = ex.submit(copy_context().run, _call)
         try:
             return fut.result(timeout=node.timeout)
         except _cf.TimeoutError:
@@ -906,7 +909,7 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         first_error = None
         if threaded:
             with _cf.ThreadPoolExecutor(max_workers=len(threaded)) as ex:
-                futs = [ex.submit(_run_chain_with_parallel_slot, node.body, sub,
+                futs = [ex.submit(copy_context().run, _run_chain_with_parallel_slot, node.body, sub,
                                   ctx.branched(str(index)), node.body.start)
                         for index, sub in threaded]
                 for index, sub in inline:
@@ -967,7 +970,7 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         first_error = None
         if futs:
             with _cf.ThreadPoolExecutor(max_workers=len(futs)) as ex:
-                futs = [ex.submit(_run_chain_with_parallel_slot, br, sub,
+                futs = [ex.submit(copy_context().run, _run_chain_with_parallel_slot, br, sub,
                                   ctx.branched(str(index)), br.start)
                         for index, br, sub in futs]
                 for index, br, sub in inline:

@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS dispatch_envelope_claims (
 );
 CREATE INDEX IF NOT EXISTS idx_dispatch_claim_expiry
   ON dispatch_envelope_claims(expires_at);
+-- Admission receipts outlive purged completed jobs. A retry cannot recreate
+-- a previously dispatched event after routine queue retention cleanup.
+CREATE TABLE IF NOT EXISTS job_admissions (
+  admission_key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  job_id INTEGER NOT NULL,
+  created_at REAL NOT NULL
+);
 """
 
 
@@ -244,6 +253,35 @@ class JobQueue:
         from .task_file_recovery import mutation_gate
         with mutation_gate(), self._lock, self._conn() as c:
             return self._insert_job(c, kind, payload or {}, rid, now)
+
+    def enqueue_once(self, kind: str, payload: dict, *, idempotency_key: str,
+                     run_at: float | None = None) -> int:
+        """Atomically admit an immutable job once, including after completion.
+
+        Retrying an uncertain enqueue returns its original ID. Reusing a key
+        for different work refuses instead of silently substituting payloads.
+        """
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise ValueError("job admission key is required")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        from .task_file_recovery import mutation_gate
+        now = time.time()
+        with mutation_gate(), self._transaction() as conn:
+            row = conn.execute(
+                "SELECT kind,payload_hash,job_id FROM job_admissions WHERE admission_key=?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is not None:
+                if row["kind"] != kind or row["payload_hash"] != digest:
+                    raise ValueError("job admission key is bound to different work")
+                return int(row["job_id"])
+            job_id = self._insert_job(
+                conn, kind, payload, now if run_at is None else run_at, now)
+            conn.execute(
+                "INSERT INTO job_admissions(admission_key,kind,payload_hash,job_id,created_at) "
+                "VALUES(?,?,?,?,?)", (idempotency_key, kind, digest, job_id, now))
+            return job_id
 
     def claim_dispatch_envelope(
         self,
@@ -646,6 +684,33 @@ class JobQueue:
                     "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,),
                 ).fetchall()
         return [self._row_to_job(r) for r in rows]
+
+    def iter_pending(self, kind: str, *, page_size: int = 256,
+                     include_running: bool = False) -> Iterator[Job]:
+        """Inspect every pending job of one kind, without a dashboard page cutoff.
+
+        Keyset pages tolerate cancellation during reconciliation. A fixed high
+        water mark bounds the pass if producers keep appending new jobs.
+        """
+        if not 1 <= page_size <= 1000:
+            raise ValueError("page_size must be between 1 and 1000")
+        # Reconciliation also needs claimed occurrences whose successor has
+        # not yet been armed. Dashboard callers retain pending-only behavior.
+        status = "status IN ('pending','running')" if include_running else "status='pending'"
+        with self._conn() as c:
+            upper = c.execute("SELECT COALESCE(MAX(id), 0) FROM jobs").fetchone()[0]
+        after = 0
+        while after < upper:
+            with self._conn() as c:
+                rows = c.execute(
+                    f"SELECT * FROM jobs WHERE kind=? AND {status} "
+                    "AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    (kind, after, upper, page_size),
+                ).fetchall()
+            if not rows:
+                return
+            after = rows[-1]["id"]
+            yield from (self._row_to_job(row) for row in rows)
 
     def find_for_run(self, kind: str, run_id: str, tenant: str = "") -> Job | None:
         """Latest exact run delivery, including terminal jobs; never a scan cutoff."""

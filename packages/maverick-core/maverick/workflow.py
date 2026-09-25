@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -216,7 +217,7 @@ def _drive(coro):
         return asyncio.run(coro)
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda: asyncio.run(coro)).result()
+        return pool.submit(copy_context().run, asyncio.run, coro).result()
 
 
 __all__ = [

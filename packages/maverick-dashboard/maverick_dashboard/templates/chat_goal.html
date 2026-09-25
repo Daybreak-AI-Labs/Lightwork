@@ -235,6 +235,10 @@
       </svg>
 {%- endmacro %}
 <div class="convo">
+  {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
+  <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
+    <a href="/chat/goal/{{ latest_chat_goal_id }}">Open the latest message in this chat</a>.</p>
+  {% endif %}
   {% if submission and (goal.status == 'draft' or submission.detail.coverage) %}
   <section class="panel" id="submission-status" role="status">
     {% if goal.status == 'draft' %}<h2>Submission saved as a draft</h2>{% endif %}
@@ -733,6 +737,18 @@
       const composerHint = document.getElementById('composer-hint');
       const replyFiles = document.getElementById('reply-files');
       const replyAttach = document.getElementById('reply-attach');
+      let submitting = false;
+
+      function submissionError(detail, fallback) {
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+          return detail.map(function (error) {
+            return error && typeof error.msg === 'string' ? error.msg : '';
+          }).filter(Boolean).join('; ') || fallback;
+        }
+        if (detail && typeof detail.message === 'string') return detail.message;
+        return fallback;
+      }
 
       function composerMessage(text, danger) {
         if (!composerHint) return;
@@ -778,11 +794,13 @@
 
       answerForm.addEventListener('submit', async function(ev) {
         ev.preventDefault();
+        if (submitting) return;
         const text = answerInput.value.trim();
         if (!text) return;
         if (currentQuestionId != null) {
           const qid = currentQuestionId;
           const ans = text;
+          submitting = true;
           answerInput.disabled = true;
           actionMsg.textContent = '';
           try {
@@ -800,9 +818,13 @@
             } else {
               const j = await r.json().catch(function() { return {}; });
               actionMsg.style.color = 'var(--danger)';
-              actionMsg.textContent = j.detail || ('Submit failed: ' + r.status);
+              actionMsg.textContent = submissionError(j.detail, 'Submit failed: ' + r.status);
             }
+          } catch (e) {
+            actionMsg.style.color = 'var(--danger)';
+            actionMsg.textContent = 'Could not send — check your connection and try again.';
           } finally {
+            submitting = false;
             answerInput.disabled = false;
           }
           return;
@@ -813,17 +835,21 @@
         }
         // The next message of this chat: a follow-up goal, run with the
         // earlier turns as context. The server answers with the new page.
+        // Disabled controls are excluded from native form serialization.
+        const formData = new FormData(answerForm);
+        submitting = true;
         if (sendBtn) sendBtn.disabled = true;
         answerInput.disabled = true;
         composerMessage('Sending…');
         try {
-          const r = await fetch(answerForm.action, { method: 'POST', body: new FormData(answerForm) });
+          const r = await fetch(answerForm.action, { method: 'POST', body: formData });
           if (r.redirected) { window.location.href = r.url; return; }
           const j = await r.json().catch(function () { return {}; });
-          composerMessage(j.detail || ('Could not send (' + r.status + ').'), true);
+          composerMessage(submissionError(j.detail, 'Could not send (' + r.status + ').'), true);
         } catch (e) {
           composerMessage('Could not send — check your connection and try again.', true);
         } finally {
+          submitting = false;
           if (sendBtn) sendBtn.disabled = false;
           answerInput.disabled = false;
         }

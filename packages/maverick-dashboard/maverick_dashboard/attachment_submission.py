@@ -85,7 +85,8 @@ def publish_batch(world, goal_id, records):
     return ids
 
 
-async def submit(world, files, *, token, owner, title, description, parent_id=None, domain="", project_id=None):
+async def submit(world, files, *, token, owner, title, description, parent_id=None, domain="", project_id=None,
+                 chat_text=None, chat_root_id=None):
     async with stage_uploads(files) as records:
         files_manifest = manifest(records)
         fingerprint = hashlib.sha256(json.dumps([title, description, parent_id, domain, project_id, files_manifest],
@@ -94,7 +95,8 @@ async def submit(world, files, *, token, owner, title, description, parent_id=No
         try:
             receipt = await run_in_threadpool(store.create, token=token, fingerprint=fingerprint, owner=owner,
                                               title=title, description=description, manifest=files_manifest,
-                                              parent_id=parent_id, domain=domain, project_id=project_id)
+                                              parent_id=parent_id, domain=domain, project_id=project_id,
+                                              chat_text=chat_text, chat_root_id=chat_root_id)
         except SubmissionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if receipt["state"] in {"dispatching", "dispatched"}:
