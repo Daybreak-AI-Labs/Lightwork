@@ -1,55 +1,19 @@
-/* California DROP operator workbench. Closed inputs only; tenant, identity,
-   registration, subject binding, DSAR, and outcome evidence remain server-owned. */
+/* California DROP requests page. Requests, brokers and waiting changes are
+   listed on arrival; files are fingerprinted by the server and only their
+   fingerprints are sent. Tenant, identity and DSAR composition stay server-owned. */
 (function () {
   "use strict";
 
-  var MAX_RESPONSE_BYTES = 64 * 1024;
-
-  function show(element, value) {
-    element.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  }
-
-  function positiveInteger(value, label) {
-    var selected = Number(value);
-    if (!Number.isSafeInteger(selected) || selected < 1 || selected > 2147483647) {
-      throw new Error(label + " must be a positive integer.");
-    }
-    return selected;
-  }
-
-  function nonnegativeInteger(value, label) {
-    var selected = Number(value);
-    if (!Number.isSafeInteger(selected) || selected < 0 || selected > 2147483647) {
-      throw new Error(label + " must be a non-negative integer.");
-    }
-    return selected;
-  }
-
-  function positiveNumber(value, label) {
-    var selected = Number(value);
-    if (!Number.isFinite(selected) || selected <= 0 || selected >= 100000000000) {
-      throw new Error(label + " must be a positive finite timestamp.");
-    }
-    return selected;
-  }
-
-  function values(form) {
-    var formData = new FormData(form);
-    var result = {};
-    formData.forEach(function (value, key) {
-      if (key !== "confirmation") result[key] = String(value).trim();
-    });
-    return result;
-  }
+  var MAX_RESPONSE_BYTES = 512 * 1024;
 
   function responseTooLarge() {
-    var error = new Error("The server response exceeded the 64 KiB safety limit.");
+    var error = new Error("The answer from Lightwork was too large to show.");
     error.code = "response_too_large";
     return error;
   }
 
   function invalidResponse() {
-    var error = new Error("The server returned an invalid JSON response.");
+    var error = new Error("Lightwork sent an answer this page could not read.");
     error.code = "response_invalid_json";
     return error;
   }
@@ -130,341 +94,471 @@
   }
   if (typeof document === "undefined") return;
   var shell = document.getElementById("drop-workbench");
-  if (!shell) return;
-  var apiBase = shell.dataset.apiBase || "";
-  var operations = document.getElementById("drop-operations");
-  var authorityOperations = document.getElementById("drop-authority-operations");
-  var readiness = document.getElementById("drop-readiness");
-  var readinessDetail = document.getElementById("drop-readiness-detail");
-  var statusBadge = document.getElementById("drop-status-badge");
-  var statusOutput = document.getElementById("drop-status-output");
-  var operationStatus = document.getElementById("drop-operation-status");
-  var operationOutput = document.getElementById("drop-operation-output");
-  var updateForm = document.getElementById("drop-update-form");
+  var R = window.LwRecords;
+  if (!shell || !R || shell.dataset.clientBound === "true") return;
+  shell.dataset.clientBound = "true";
+  var apiBase = shell.dataset.apiBase || "/api/v1/privacy/drop";
+  var can = {
+    operate: shell.dataset.canOperate === "true",
+    audit: shell.dataset.canAudit === "true",
+    admin: shell.dataset.canAdmin === "true"
+  };
+  var canList = can.operate || can.audit;
+  var statusEl = byId("drop-status");
+  var state = { requests: [], brokers: [], waiting: [], keys: [], dependencies: {} };
+  var outcomeRow = null;
 
-  async function request(path, options) {
-    var response = await fetch(apiBase + path, Object.assign({
+  var TYPE = { DataDeletion: "Delete their data", OptOut: "Stop selling or sharing" };
+  var LANGUAGE = { en: "English", es: "Spanish", zh: "Chinese", vi: "Vietnamese", tl: "Tagalog", ko: "Korean" };
+  var RESULT = {
+    PENDING: ["In progress", "info"], DELETED: ["Data deleted", "active"], OPTED_OUT: ["Opted out", "active"],
+    EXEMPTED: ["Exempt", "warn"], NOT_FOUND: ["No data found", "active"]
+  };
+  var CHANGE = {
+    enroll_broker: "Add a data broker", revoke_broker: "Remove a data broker", import_record: "Add a DROP request",
+    revoke_record: "Withdraw a DROP request", approve_outcome: "Approve a result", rotate_key: "Replace the signing key",
+    retire_key: "Retire an old signing key", revoke_key: "Block an old signing key", record_key_migration: "Record a signing key move"
+  };
+  var KEY_STATE = { current: ["In use", "active"], previous: ["Replaced", "warn"], retired: ["Retired", "idle"], revoked: ["Blocked", "blocked"] };
+  var TEMPLATE_RE = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$/;
+
+  function byId(id) { return document.getElementById(id); }
+  function say(text) { statusEl.textContent = text; }
+  function fail(failure, action) { say(R.errorText(failure, action)); }
+  function language(code) { return LANGUAGE[String(code || "").toLowerCase()] || String(code || "").toUpperCase(); }
+  function brokerName(ref) { return R.human(ref); }
+  function badge(map, value) { var s = map[value] || [R.human(value), "info"]; return R.badge(s[0], s[1]); }
+  function nowSeconds() { return Math.floor(Date.now() / 1000); }
+
+  async function request(path, method, body) {
+    var settings = {
+      method: method || "GET",
       cache: "no-store",
       credentials: "same-origin",
-      headers: {Accept: "application/json"}
-    }, options || {}));
-    return parseResponse(response);
-  }
-
-  async function run(label, action) {
-    operationStatus.textContent = label + "…";
-    operationStatus.classList.remove("danger-text");
-    operationOutput.textContent = "";
-    try {
-      var payload = await action();
-      show(operationOutput, payload);
-      operationStatus.textContent = label + " completed.";
-      return payload;
-    } catch (error) {
-      operationStatus.classList.add("danger-text");
-      operationStatus.textContent = label + " failed" +
-        (Number.isInteger(error.status) ? " (" + error.status + ")" : "") +
-        ": " + String(error.message || error);
-      throw error;
+      headers: { Accept: "application/json" }
+    };
+    if (body !== undefined) {
+      settings.headers["Content-Type"] = "application/json";
+      settings.body = JSON.stringify(body);
     }
+    return parseResponse(await fetch(apiBase + path, settings));
   }
 
+  async function fileFingerprint(input, label) {
+    var file = input && input.files && input.files[0];
+    if (!file) { var missing = new Error(label); missing.code = "missing_file"; throw missing; }
+    var result = await R.fingerprint(file);
+    return result.sha256;
+  }
+
+  async function propose(path, body, doneText) {
+    await request("/authority/" + path, "POST", Object.assign({}, body, { idempotency_key: R.newKey() }));
+    say(doneText || "Sent for approval. A different administrator must approve it under “Waiting for a second administrator”.");
+    await load();
+  }
+
+  // ---- readiness ---------------------------------------------------------------
   async function refreshStatus() {
-    readiness.textContent = "Checking…";
-    readinessDetail.textContent = "Checking service availability.";
-    statusBadge.className = "badge pending";
-    statusBadge.textContent = "Checking";
-    statusOutput.textContent = "";
-    operations.disabled = true;
-    if (authorityOperations) authorityOperations.disabled = true;
+    var el = byId("drop-readiness");
     try {
-      var payload = await request("/status");
-      show(statusOutput, payload);
-      if (payload.ready === true) {
-        readiness.textContent = "Ready";
-        readinessDetail.textContent = "Readiness was verified for this workspace.";
-        statusBadge.className = "badge healthy";
-        statusBadge.textContent = "Ready";
-        operations.disabled = false;
-        if (authorityOperations) authorityOperations.disabled = false;
-      } else if (payload.enabled !== true) {
-        readiness.textContent = "Disabled";
-        readinessDetail.textContent = "Enable DROP and its privacy-rights parent before operating.";
-        statusBadge.className = "badge pending";
-        statusBadge.textContent = "Disabled";
-      } else if (payload.configured === true) {
-        readiness.textContent = "Not verified";
-        readinessDetail.textContent = "Server dependencies are configured, but operational readiness has not been verified.";
-        statusBadge.className = "badge warning";
-        statusBadge.textContent = "Unready";
+      var st = await request("/status");
+      if (st.ready === true) {
+        el.textContent = "Ready: California DROP requests are set up for this workspace.";
+      } else if (st.enabled !== true) {
+        el.textContent = "California DROP requests are turned off. Ask whoever runs Lightwork to turn them on, together with privacy request handling.";
       } else {
-        readiness.textContent = "Setup incomplete";
-        readinessDetail.textContent = "Enabled, but one or more server-owned authorities are missing.";
-        statusBadge.className = "badge warning";
-        statusBadge.textContent = "Unready";
+        var missing = [];
+        var config = st.configuration || {};
+        var counts = st.authority_counts || {};
+        if (config.store_factory_configured === false || config.authority_resolver_configured === false) missing.push("request storage has not been set up");
+        if (!counts.active_brokers) missing.push("no data broker has been added");
+        if (!counts.active_records) missing.push("no DROP request has been added");
+        if (!missing.length) missing.push("the setup has not been checked yet");
+        el.textContent = "Not ready yet: " + missing.join("; ") + ".";
       }
-    } catch (error) {
-      readiness.textContent = "Unavailable";
-      readinessDetail.textContent = String(error.message || error);
-      statusBadge.className = "badge danger";
-      statusBadge.textContent = "Error";
+    } catch (failure) {
+      el.textContent = R.errorText(failure, "check whether DROP requests are set up");
     }
   }
 
-  document.getElementById("drop-refresh").addEventListener("click", refreshStatus);
-
-  document.getElementById("drop-create-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    var selected = values(event.currentTarget);
+  // ---- loading -------------------------------------------------------------------
+  async function load() {
+    if (!canList) { renderLookup(); return; }
     try {
-      var dropId = positiveInteger(selected.drop_id, "DROP ID");
-      var payload = await run("Creating DROP request", function () {
-        return request("/" + encodeURIComponent(dropId) + "/request", {
-          method: "POST",
-          headers: {Accept: "application/json", "Content-Type": "application/json"},
-          body: JSON.stringify({
-            request_type: selected.request_type,
-            template_id: selected.template_id,
-            language: selected.language,
-            expected_revision: 0,
-            idempotency_key: selected.idempotency_key
-          })
-        });
-      });
-      document.querySelector('#drop-get-form [name="drop_id"]').value = payload.drop_id || dropId;
-      if (updateForm) {
-        updateForm.querySelector('[name="drop_id"]').value = payload.drop_id || dropId;
-        updateForm.querySelector('[name="expected_revision"]').value = payload.revision || "";
-      }
-    } catch (_error) {
-      // The governed status region already contains the error.
+      var overview = await request("/authority/overview");
+      state.requests = overview.requests || [];
+      state.brokers = overview.brokers || [];
+      state.waiting = overview.waiting || [];
+      render();
+    } catch (failure) {
+      fail(failure, "load the DROP requests");
     }
-  });
-
-  document.getElementById("drop-get-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    var selected = values(event.currentTarget);
-    try {
-      var dropId = positiveInteger(selected.drop_id, "DROP ID");
-      var payload = await run("Loading DROP request", function () {
-        return request("/" + encodeURIComponent(dropId));
-      });
-      if (updateForm) {
-        updateForm.querySelector('[name="drop_id"]').value = payload.drop_id || dropId;
-        updateForm.querySelector('[name="expected_revision"]').value = payload.revision || "";
-      }
-    } catch (_error) {
-      // The governed status region already contains the error.
-    }
-  });
-
-  var integrityButton = document.getElementById("drop-integrity");
-  if (integrityButton) {
-    integrityButton.addEventListener("click", async function () {
-      try { await run("Verifying DROP integrity", function () { return request("/integrity"); }); }
-      catch (_error) { /* The governed status region already contains the error. */ }
-    });
   }
 
-  function authorityButton(id, label, path) {
-    var button = document.getElementById(id);
-    if (!button) return;
-    button.addEventListener("click", async function () {
-      try { await run(label, function () { return request(path); }); }
-      catch (_error) { /* The governed status region already contains the error. */ }
-    });
+  function activeOutcome(row) {
+    return (row.outcomes || []).filter(function (o) { return o.state === "active"; })[0] || null;
+  }
+  function outcomeFor(row, status) {
+    return (row.outcomes || []).filter(function (o) { return o.status === status; })[0] || null;
+  }
+  function requestStatus(row) {
+    if (!row.usable) return R.badge(row.state === "revoked" ? "Withdrawn" : "Past its handle-by date", "idle");
+    if (!row.request) return R.badge("Not started", "warn");
+    if (row.request.status === "PENDING" && activeOutcome(row)) return R.badge("Result approved, ready to close", "info");
+    return badge(RESULT, row.request.status);
   }
 
-  authorityButton("drop-authorities", "Loading DROP authorities", "/authority/authorities");
-  authorityButton("drop-revisions", "Loading DROP key revisions", "/authority/revisions");
-  authorityButton(
-    "drop-authority-integrity",
-    "Verifying DROP authority integrity",
-    "/authority/integrity"
-  );
+  function render() {
+    R.table(byId("drop-requests"), [
+      { label: "DROP request", value: function (r) { return String(r.drop_id); } },
+      { label: "Asked for", value: function (r) { return TYPE[r.request_type] || R.human(r.request_type); } },
+      { label: "Reply language", value: function (r) { return language(r.language); } },
+      { label: "Handle by", value: function (r) { return R.day(r.valid_until); } },
+      { label: "Status", value: requestStatus }
+    ], state.requests, [
+      { label: "Start", kind: "primary", when: function (r) { return can.operate && r.usable && !r.request; }, run: startRequest },
+      { label: "Record the result", when: function (r) { return can.admin && r.usable && r.request && r.request.status === "PENDING" && !activeOutcome(r); }, run: openOutcome },
+      { label: "Close request", kind: "primary", when: function (r) { return can.admin && r.usable && r.request && r.request.status === "PENDING" && activeOutcome(r); }, run: closeRequest },
+      { label: "Withdraw", kind: "danger", when: function (r) { return can.admin && r.state === "active"; }, run: withdrawRecord }
+    ], { text: can.admin ? "No DROP requests yet. Use “Add a DROP request” when DROP sends you one." : "No DROP requests yet." });
 
-  function proposalForm(id, label, path, payloadBuilder) {
-    var form = document.getElementById(id);
-    if (!form) return;
-    form.addEventListener("submit", async function (event) {
-      event.preventDefault();
+    var waiting = byId("drop-waiting");
+    if (waiting) {
+      R.table(waiting, [
+        { label: "Change", value: function (w) { return CHANGE[w.kind] || R.human(w.kind); } },
+        { label: "Details", value: describe },
+        { label: "Proposed", value: function (w) { return R.when(w.created_at); } },
+        { label: "By", value: function (w) { return w.proposed_by_you ? "You" : "Another administrator"; } }
+      ], state.waiting, [
+        { label: "Approve", kind: "primary", when: function (w) { return can.admin && !w.proposed_by_you; }, run: approve }
+      ], { text: "Nothing is waiting for approval." });
+    }
+
+    var brokers = byId("drop-brokers");
+    if (brokers) {
+      R.table(brokers, [
+        { label: "Data broker", value: function (b) { return brokerName(b.broker_ref); } },
+        { label: "Status", value: function (b) { return b.state === "active" ? R.badge("Active", "active") : R.badge("Removed", "idle"); } },
+        { label: "Registration valid until", value: function (b) { return b.valid_until ? R.day(b.valid_until) : ""; } }
+      ], state.brokers, [
+        { label: "Remove", kind: "danger", when: function (b) { return can.admin && b.state === "active"; }, run: removeBroker }
+      ], { text: can.admin ? "No data brokers yet. Add the broker registration your DROP requests arrive under." : "No data brokers yet." });
+    }
+    fillBrokers();
+  }
+
+  function describe(w) {
+    var s = w.summary || {};
+    var parts = [];
+    if (s.drop_id) parts.push("DROP request " + s.drop_id);
+    if (s.broker_ref) parts.push(brokerName(s.broker_ref));
+    if (s.request_type) parts.push(TYPE[s.request_type] || R.human(s.request_type));
+    if (s.status) parts.push((RESULT[s.status] || [R.human(s.status)])[0]);
+    if (s.key_revision) parts.push("Key " + s.key_revision);
+    if (s.valid_until) parts.push("until " + R.day(s.valid_until));
+    return parts.join(" · ");
+  }
+
+  // Everyone else can still look a request up by the number they were given.
+  function renderLookup() {
+    var box = byId("drop-requests");
+    box.textContent = "";
+    box.appendChild(R.button("Look up a request", "primary", async function () {
+      var values = await R.form("Look up a DROP request", [
+        { key: "number", label: "DROP request number", type: "number", required: true }
+      ], "Look up");
+      if (!values) return;
+      var number = Number(values.number);
+      if (!Number.isSafeInteger(number) || number < 1 || number > 2147483647) { say("Enter the request number as a whole number."); return; }
       try {
-        var payload = await run(label, function () {
-          return request(path, {
-            method: "POST",
-            headers: {Accept: "application/json", "Content-Type": "application/json"},
-            body: JSON.stringify(payloadBuilder(form, values(form)))
-          });
-        });
-        var approval = document.getElementById("drop-approval-form");
-        if (approval && payload.proposal_id) {
-          approval.elements.proposal_id.value = payload.proposal_id;
-        }
-      } catch (_error) {
-        // The governed status region already contains the error.
+        var found = await request("/" + encodeURIComponent(number));
+        say("DROP request " + number + ": " + (RESULT[found.status] || [R.human(found.status)])[0] + ". Last updated " + R.when(found.updated_at) + ".");
+      } catch (failure) {
+        if (failure && failure.status === 404) { say("There is no DROP request " + number + " in progress here."); return; }
+        fail(failure, "look up the request");
       }
-    });
+    }));
   }
 
-  proposalForm(
-    "drop-broker-form",
-    "Creating broker authority proposal",
-    "/authority/brokers/proposals",
-    function (_form, selected) {
-      var payload = {
-        action: selected.action,
-        broker_ref: selected.broker_ref,
-        evidence_sha256: selected.evidence_sha256,
-        expected_version: nonnegativeInteger(selected.expected_version, "Expected version"),
-        idempotency_key: selected.idempotency_key
-      };
-      if (selected.action === "enroll_broker") {
-        payload.registration_sha256 = selected.registration_sha256;
-        payload.valid_until = positiveNumber(selected.valid_until, "Valid until");
-      }
-      return payload;
-    }
-  );
-
-  proposalForm(
-    "drop-record-form",
-    "Creating DROP record authority proposal",
-    "/authority/records/proposals",
-    function (_form, selected) {
-      var payload = {
-        action: selected.action,
-        drop_id: positiveInteger(selected.drop_id, "DROP ID"),
-        evidence_sha256: selected.evidence_sha256,
-        expected_version: nonnegativeInteger(selected.expected_version, "Expected version"),
-        idempotency_key: selected.idempotency_key
-      };
-      if (selected.action === "import_record") {
-        payload.broker_ref = selected.broker_ref;
-        payload.broker_registration_sha256 = selected.registration_binding_digest;
-        payload.subject_binding_sha256 = selected.binding_digest;
-        payload.request_type = selected.request_type;
-        payload.template_id = selected.template_id;
-        payload.language = selected.language;
-        payload.record_revision = positiveInteger(selected.record_revision, "Record revision");
-        payload.valid_until = positiveNumber(selected.valid_until, "Valid until");
-      }
-      return payload;
-    }
-  );
-
-  proposalForm(
-    "drop-outcome-form",
-    "Creating DROP outcome proposal",
-    "/authority/outcomes/proposals",
-    function (form, selected) {
-      return {
-        drop_id: positiveInteger(selected.drop_id, "DROP ID"),
-        status: selected.status,
-        evidence_sha256: selected.evidence_sha256,
-        evidence_revision: positiveInteger(selected.evidence_revision, "Evidence revision"),
-        observed_at: positiveNumber(selected.observed_at, "Observed at"),
-        valid_until: positiveNumber(selected.valid_until, "Valid until"),
-        deletion_verified: form.elements.deletion_verified.checked,
-        opt_out_verified: form.elements.opt_out_verified.checked,
-        search_complete: form.elements.search_complete.checked,
-        exemption_approved: form.elements.exemption_approved.checked,
-        provider_operations_complete: form.elements.provider_operations_complete.checked,
-        expected_version: nonnegativeInteger(selected.expected_version, "Expected version"),
-        idempotency_key: selected.idempotency_key
-      };
-    }
-  );
-
-  proposalForm(
-    "drop-key-form",
-    "Creating DROP key lifecycle proposal",
-    "/authority/keys/proposals",
-    function (_form, selected) {
-      var payload = {action: selected.action, idempotency_key: selected.idempotency_key};
-      if (selected.action === "rotate_key") {
-        payload.new_key_ref = selected.new_key_ref;
-        payload.expected_current_revision = positiveInteger(
-          selected.expected_current_revision,
-          "Current version"
-        );
-      } else if (selected.action === "retire_key" || selected.action === "revoke_key") {
-        payload.key_revision = positiveInteger(selected.key_revision, "Key revision");
-      } else {
-        payload.migration_id = selected.migration_id;
-        payload.from_revision = positiveInteger(selected.from_revision, "From revision");
-        payload.to_revision = positiveInteger(selected.to_revision, "To revision");
-        payload.objects_migrated = nonnegativeInteger(
-          selected.objects_migrated,
-          "Objects migrated"
-        );
-        payload.remaining_dependencies = nonnegativeInteger(
-          selected.remaining_dependencies,
-          "Remaining dependencies"
-        );
-      }
-      return payload;
-    }
-  );
-
-  var approvalForm = document.getElementById("drop-approval-form");
-  if (approvalForm) approvalForm.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    var selected = values(approvalForm);
-    if (!approvalForm.elements.confirmation.checked) {
-      operationStatus.textContent = "Confirm independent proposal review first.";
-      operationStatus.classList.add("danger-text");
-      return;
-    }
+  // ---- request actions -------------------------------------------------------------
+  async function startRequest(row) {
+    if (!(await R.confirm("Start work on DROP request " + row.drop_id + "? Lightwork opens a privacy request for your team to handle.", "Start"))) return;
     try {
-      await run("Approving DROP authority proposal", function () {
-        return request(
-          "/authority/proposals/" + encodeURIComponent(selected.proposal_id) + "/approve",
-          {
-            method: "POST",
-            headers: {Accept: "application/json", "Content-Type": "application/json"},
-            body: JSON.stringify({
-              expected_revision: positiveInteger(selected.expected_revision, "Expected revision"),
-              idempotency_key: selected.idempotency_key
-            })
-          }
-        );
+      var dropId = row.drop_id;
+      await request("/" + encodeURIComponent(dropId) + "/request", "POST", {
+        request_type: row.request_type, template_id: row.template_id, language: row.language,
+        expected_revision: 0, idempotency_key: R.newKey()
       });
-      approvalForm.elements.confirmation.checked = false;
-      await refreshStatus();
-    } catch (_error) {
-      // The governed status region already contains the error.
+      say("DROP request " + row.drop_id + " started.");
+      await load();
+    } catch (failure) { fail(failure, "start the request"); }
+  }
+
+  async function closeRequest(row) {
+    var outcome = activeOutcome(row);
+    var label = (RESULT[outcome.status] || [R.human(outcome.status)])[0];
+    if (!(await R.confirm("Close DROP request " + row.drop_id + " as “" + label + "”? This cannot be undone.", "Close request"))) return;
+    try {
+      var dropId = row.drop_id;
+      await request("/" + encodeURIComponent(dropId), "PUT", {
+        status: outcome.status, expected_revision: row.request.revision, idempotency_key: R.newKey()
+      });
+      say("DROP request " + row.drop_id + " closed as “" + label + "”.");
+      await load();
+    } catch (failure) { fail(failure, "close the request"); }
+  }
+
+  async function withdrawRecord(row) {
+    if (!(await R.confirm("Withdraw DROP request " + row.drop_id + "? Next, choose the file that shows why. A second administrator must approve.", "Choose file"))) return;
+    var file = await R.pickFile();
+    if (!file) { say("Nothing was sent. Choose a file to withdraw the request."); return; }
+    try {
+      var digest = (await R.fingerprint(file)).sha256;
+      await propose("records/proposals", { action: "revoke_record", drop_id: row.drop_id, evidence_sha256: digest, expected_version: row.version });
+    } catch (failure) { fail(failure, "send the withdrawal for approval"); }
+  }
+
+  function openPanel(id) {
+    var panel = byId(id);
+    panel.hidden = false;
+    if (typeof panel.scrollIntoView === "function") panel.scrollIntoView({ block: "start" });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-close]"), function (btn) {
+    btn.addEventListener("click", function () { byId(btn.getAttribute("data-close")).hidden = true; });
+  });
+
+  function openOutcome(row) {
+    outcomeRow = row;
+    byId("drop-outcome-for").textContent = "DROP request " + row.drop_id + " · " + (TYPE[row.request_type] || "");
+    byId("drop-outcome-status").value = row.request_type === "OptOut" ? "OPTED_OUT" : "DELETED";
+    byId("drop-outcome-observed").value = R.isoDateIn(0);
+    byId("drop-outcome-until").value = R.isoDateIn(30);
+    openPanel("drop-outcome-panel");
+  }
+
+  var outcomeForm = byId("drop-outcome-form");
+  if (outcomeForm) outcomeForm.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var row = outcomeRow;
+    if (!row) return;
+    var status = byId("drop-outcome-status").value;
+    var observed = R.toEpoch(byId("drop-outcome-observed").value);
+    var until = R.toEpoch(byId("drop-outcome-until").value);
+    if (!observed || !until) { say("Choose both dates."); return; }
+    if (until <= nowSeconds()) { say("The evidence must still be valid after today."); return; }
+    var previous = outcomeFor(row, status);
+    try {
+      var digest = await fileFingerprint(byId("drop-outcome-evidence"), "Choose the evidence file.");
+      await propose("outcomes/proposals", {
+        drop_id: row.drop_id, status: status, evidence_sha256: digest,
+        evidence_revision: previous ? previous.version + 1 : 1,
+        observed_at: Math.min(observed, nowSeconds()), valid_until: until,
+        deletion_verified: byId("drop-check-deletion").checked, opt_out_verified: byId("drop-check-optout").checked,
+        search_complete: byId("drop-check-search").checked, exemption_approved: byId("drop-check-exemption").checked,
+        provider_operations_complete: byId("drop-check-providers").checked,
+        expected_version: previous ? previous.version : 0
+      });
+      outcomeForm.reset();
+      byId("drop-outcome-panel").hidden = true;
+    } catch (failure) {
+      if (failure && failure.code === "missing_file") { say(failure.message); return; }
+      fail(failure, "send the result for approval");
     }
   });
 
-  if (updateForm) updateForm.addEventListener("submit", async function (event) {
+  // ---- adding requests and brokers -----------------------------------------------------
+  function fillBrokers() {
+    var select = byId("drop-import-broker");
+    if (!select) return;
+    var active = state.brokers.filter(function (b) { return b.state === "active" && b.registration_sha256; });
+    select.textContent = "";
+    var first = R.el("option", "", active.length ? "Choose a data broker" : "Add a data broker first");
+    first.value = "";
+    select.appendChild(first);
+    active.forEach(function (b) {
+      var option = R.el("option", "", brokerName(b.broker_ref));
+      option.value = b.broker_ref;
+      select.appendChild(option);
+    });
+  }
+
+  var importButton = byId("drop-import");
+  if (importButton) importButton.addEventListener("click", function () {
+    byId("drop-import-until").value = R.isoDateIn(45);
+    openPanel("drop-import-panel");
+  });
+  var importForm = byId("drop-import-form");
+  if (importForm) importForm.addEventListener("submit", async function (event) {
     event.preventDefault();
-    var form = event.currentTarget;
-    var selected = values(form);
-    if (!form.elements.confirmation.checked) {
-      operationStatus.textContent = "Confirm the evidence-backed terminal update first.";
-      operationStatus.classList.add("danger-text");
+    var number = Number(byId("drop-import-number").value);
+    if (!Number.isSafeInteger(number) || number < 1 || number > 2147483647) { say("Enter the DROP request number as a whole number."); return; }
+    var brokerRef = byId("drop-import-broker").value;
+    var broker = state.brokers.filter(function (b) { return b.broker_ref === brokerRef; })[0];
+    if (!broker) { say("Choose the data broker this request arrived under."); return; }
+    var template = byId("drop-import-template").value.trim();
+    if (!TEMPLATE_RE.test(template)) { say("Enter the reply template number exactly as DROP shows it."); return; }
+    var until = R.toEpoch(byId("drop-import-until").value);
+    if (!until || until <= nowSeconds()) { say("Choose a handle-by date after today."); return; }
+    var existing = state.requests.filter(function (r) { return r.drop_id === number; })[0];
+    try {
+      var match = await fileFingerprint(byId("drop-import-match"), "Choose the identity match file from DROP.");
+      var evidence = await fileFingerprint(byId("drop-import-evidence"), "Choose the copy of the DROP record.");
+      await propose("records/proposals", {
+        action: "import_record", drop_id: number, broker_ref: broker.broker_ref,
+        broker_registration_sha256: broker.registration_sha256, subject_binding_sha256: match,
+        request_type: byId("drop-import-type").value, template_id: template.toLowerCase(),
+        language: byId("drop-import-language").value, record_revision: 1, valid_until: until,
+        evidence_sha256: evidence, expected_version: existing ? existing.version : 0
+      });
+      importForm.reset();
+      byId("drop-import-panel").hidden = true;
+    } catch (failure) {
+      if (failure && failure.code === "missing_file") { say(failure.message); return; }
+      fail(failure, "send the request for approval");
+    }
+  });
+
+  var brokerButton = byId("drop-add-broker");
+  if (brokerButton) brokerButton.addEventListener("click", function () {
+    byId("drop-broker-until").value = R.isoDateIn(365);
+    openPanel("drop-broker-panel");
+  });
+  var brokerForm = byId("drop-broker-form");
+  if (brokerForm) brokerForm.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var ref = R.slug(byId("drop-broker-name").value, "");
+    if (!ref) { say("Enter the broker name."); return; }
+    var until = R.toEpoch(byId("drop-broker-until").value);
+    if (!until || until <= nowSeconds()) { say("Choose a date after today."); return; }
+    var existing = state.brokers.filter(function (b) { return b.broker_ref === ref; })[0];
+    try {
+      var registration = await fileFingerprint(byId("drop-broker-registration"), "Choose the registration document.");
+      var evidence = await fileFingerprint(byId("drop-broker-evidence"), "Choose the proof of registration.");
+      await propose("brokers/proposals", {
+        action: "enroll_broker", broker_ref: ref, registration_sha256: registration,
+        evidence_sha256: evidence, valid_until: until, expected_version: existing ? existing.version : 0
+      });
+      brokerForm.reset();
+      byId("drop-broker-panel").hidden = true;
+    } catch (failure) {
+      if (failure && failure.code === "missing_file") { say(failure.message); return; }
+      fail(failure, "send the broker for approval");
+    }
+  });
+
+  async function removeBroker(broker) {
+    if (!(await R.confirm("Remove " + brokerName(broker.broker_ref) + "? New DROP requests cannot be added under it. Next, choose the file that shows why.", "Choose file"))) return;
+    var file = await R.pickFile();
+    if (!file) { say("Nothing was sent. Choose a file to remove the broker."); return; }
+    try {
+      var digest = (await R.fingerprint(file)).sha256;
+      await propose("brokers/proposals", { action: "revoke_broker", broker_ref: broker.broker_ref, evidence_sha256: digest, expected_version: broker.version });
+    } catch (failure) { fail(failure, "send the removal for approval"); }
+  }
+
+  async function approve(change) {
+    var text = "Approve “" + (CHANGE[change.kind] || R.human(change.kind)) + "”" + (describe(change) ? " (" + describe(change) + ")" : "") +
+      "? Only approve changes you have checked yourself. It takes effect straight away.";
+    if (!(await R.confirm(text, "Approve"))) return;
+    try {
+      await request("/authority/proposals/" + encodeURIComponent(change.proposal_id) + "/approve", "POST",
+        { expected_revision: change.revision, idempotency_key: R.newKey() });
+      say("Approved. The change is now in effect.");
+      await load();
+    } catch (failure) {
+      if (failure && failure.status === 409) { say("This change could not be approved. Changes cannot be approved by the person who proposed them, and the records may have changed since. Refresh and check."); return; }
+      fail(failure, "approve the change");
+    }
+  }
+
+  // ---- integrity ----------------------------------------------------------------------
+  var integrity = byId("drop-integrity");
+  if (integrity) integrity.addEventListener("click", async function () {
+    try {
+      await request("/integrity");
+      await request("/authority/integrity");
+      say("All DROP records are intact.");
+    } catch (failure) {
+      if (failure && failure.status === 503) { say("A problem was found in the DROP records. Tell whoever runs Lightwork before closing more requests."); return; }
+      fail(failure, "check the records");
+    }
+  });
+
+  // ---- signing key (advanced) --------------------------------------------------------------
+  function currentKey() { return state.keys.filter(function (k) { return k.state === "current"; })[0] || null; }
+
+  async function loadKeys() {
+    var box = byId("drop-keys");
+    try {
+      var data = await request("/authority/revisions");
+      state.keys = data.keys || [];
+      state.dependencies = data.dependency_counts || {};
+      R.table(box, [
+        { label: "Key", value: function (k) { return "Key " + k.revision; } },
+        { label: "Status", value: function (k) { return badge(KEY_STATE, k.state); } },
+        { label: "Since", value: function (k) { return R.day(k.created_at); } },
+        { label: "Records still using it", value: function (k) { var n = state.dependencies[k.revision]; return n === undefined ? "" : String(n); } }
+      ], state.keys, [
+        { label: "Record data moved", when: function (k) { return can.admin && k.state === "previous"; }, run: recordMove },
+        { label: "Retire", when: function (k) { return can.admin && k.state === "previous"; }, run: function (k) { retireKey(k, false); } },
+        { label: "Block", kind: "danger", when: function (k) { return can.admin && k.state === "previous"; }, run: function (k) { retireKey(k, true); } }
+      ], { text: "No signing key has been set up yet." });
+    } catch (failure) {
+      box.textContent = R.errorText(failure, "load the signing key history");
+    }
+  }
+  var keysPanel = byId("drop-keys-panel");
+  if (keysPanel) keysPanel.addEventListener("toggle", function () { if (keysPanel.open) loadKeys(); });
+
+  async function retireKey(key, block) {
+    var text = block
+      ? "Block key " + key.revision + "? Anything still signed with it can no longer be checked. Use this only if the key may have leaked."
+      : "Retire key " + key.revision + "? Do this once nothing uses it any more.";
+    if (!(await R.confirm(text, block ? "Block key" : "Retire key"))) return;
+    try {
+      await propose("keys/proposals", { action: block ? "revoke_key" : "retire_key", key_revision: key.revision });
+      await loadKeys();
+    } catch (failure) { fail(failure, block ? "block the key" : "retire the key"); }
+  }
+
+  async function recordMove(key) {
+    var current = currentKey();
+    if (!current) { say("There is no key in use to move to."); return; }
+    var remaining = state.dependencies[key.revision];
+    var values = await R.form("Record data moved from key " + key.revision + " to key " + current.revision, [
+      { key: "moved", label: "Records moved", type: "number", required: true, default: 0 },
+      { key: "remaining", label: "Records still to move", type: "number", required: true, default: remaining === undefined ? 0 : remaining }
+    ], "Send for approval");
+    if (!values) return;
+    var moved = Number(values.moved), left = Number(values.remaining);
+    if (!Number.isSafeInteger(moved) || moved < 0 || !Number.isSafeInteger(left) || left < 0) { say("Enter whole numbers of 0 or more."); return; }
+    try {
+      await propose("keys/proposals", {
+        action: "record_key_migration", migration_id: R.newId("key-move"), from_revision: key.revision,
+        to_revision: current.revision, objects_migrated: moved, remaining_dependencies: left
+      });
+    } catch (failure) { fail(failure, "record the move"); }
+  }
+
+  var rotate = byId("drop-rotate");
+  if (rotate) rotate.addEventListener("click", async function () {
+    if (!state.keys.length) await loadKeys();
+    var current = currentKey();
+    var values = await R.form("Replace the signing key", [
+      { key: "location", label: "Where the new key is kept (from your key vault)", type: "text", required: true }
+    ], "Continue");
+    if (!values) return;
+    var location = String(values.location || "").trim();
+    if (!/^(?:env:[A-Z][A-Z0-9_]{0,127}|(?:kms|secret|vault|aws-kms|azure-keyvault|gcp-kms):\/\/[A-Za-z0-9][A-Za-z0-9_./:@+\-]{0,239})$/.test(location)) {
+      say("Enter the key location exactly as your key vault shows it. Ask whoever manages your keys.");
       return;
     }
+    if (!(await R.confirm("Replace the signing key? Existing records keep working and a second administrator must approve.", "Send for approval"))) return;
     try {
-      var dropId = positiveInteger(selected.drop_id, "DROP ID");
-      var revision = positiveInteger(selected.expected_revision, "Expected revision");
-      var payload = await run("Recording terminal DROP status", function () {
-        return request("/" + encodeURIComponent(dropId), {
-          method: "PUT",
-          headers: {Accept: "application/json", "Content-Type": "application/json"},
-          body: JSON.stringify({
-            status: selected.status,
-            expected_revision: revision,
-            idempotency_key: selected.idempotency_key
-          })
-        });
-      });
-      form.elements.expected_revision.value = payload.revision || "";
-      form.elements.confirmation.checked = false;
-    } catch (_error) {
-      // The governed status region already contains the error.
-    }
+      await propose("keys/proposals", { action: "rotate_key", new_key_ref: location, expected_current_revision: current ? current.revision : 1 });
+    } catch (failure) { fail(failure, "send the key change for approval"); }
   });
 
   refreshStatus();
-}());
+  load();
+})();
