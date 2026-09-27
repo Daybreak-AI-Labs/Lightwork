@@ -278,6 +278,56 @@
         if (text != null) e.textContent = text;
         return e;
       };
+      // Plain-language error text for a failed request. Pass the fetch
+      // Response (or a thrown error) and, optionally, what the person was
+      // trying to do ("save the policy"). Never shows HTTP codes, exception
+      // class names or server internals.
+      window.mvErrorText = function (failure, action) {
+        var what = action ? ('Could not ' + action + '. ') : '';
+        var status = failure && typeof failure.status === 'number' ? failure.status : 0;
+        if (!status) {
+          var name = failure && failure.name;
+          if (name === 'AbortError') return what + 'It took too long. Please try again.';
+          if (name === 'TypeError' || (failure && /fetch|network/i.test(String(failure.message || failure)))) {
+            return what + 'Lightwork could not be reached. Check your connection and try again.';
+          }
+          return what + 'Something went wrong. Please try again.';
+        }
+        if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check the highlighted fields and try again.';
+        if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
+        if (status === 403) return what + 'You do not have permission to do this. Ask an administrator.';
+        if (status === 404) return what + 'That item no longer exists. Refresh the page to see the latest.';
+        if (status === 409) return what + 'This was changed since you opened it. Refresh the page and try again.';
+        if (status === 413) return what + 'That is too large. Try a smaller file or fewer items.';
+        if (status === 429) return what + 'Too many requests right now. Wait a moment and try again.';
+        if (status === 503) return what + 'This feature is not available right now. It may need to be turned on or set up first.';
+        if (status >= 500) return what + 'Something went wrong on our side. Please try again in a minute.';
+        return what + 'Something went wrong. Please try again.';
+      };
+      // Show that error as a toast; returns the text for callers that also
+      // write it into the page.
+      window.mvFail = function (failure, action) {
+        var text = window.mvErrorText(failure, action);
+        mvToast(text, { error: true });
+        return text;
+      };
+      // A stored value (status, kind, slug) as a readable label:
+      // "pending_review" -> "Pending review", "ai_act" -> "AI Act".
+      var WORDS = { ai: 'AI', api: 'API', id: 'ID', ids: 'IDs', url: 'URL', sso: 'SSO',
+        dsar: 'DSAR', gdpr: 'GDPR', ccpa: 'CCPA', hipaa: 'HIPAA', soc2: 'SOC 2', pii: 'personal data',
+        sla: 'SLA', mfa: 'MFA', eu: 'EU', us: 'US', uk: 'UK', llm: 'AI model', mcp: 'MCP',
+        sha256: 'fingerprint', csv: 'CSV', pdf: 'PDF', iso: 'ISO', nist: 'NIST', dpia: 'DPIA',
+        ropa: 'record of processing', cmp: 'consent banner', ok: 'OK' };
+      window.mvHuman = function (value) {
+        if (value === null || value === undefined) return '';
+        var words = String(value).trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
+        if (!words.length) return '';
+        var out = words.map(function (w) {
+          var key = w.toLowerCase();
+          return Object.prototype.hasOwnProperty.call(WORDS, key) ? WORDS[key] : key;
+        }).join(' ');
+        return out.charAt(0).toUpperCase() + out.slice(1);
+      };
       window.mvWhen = function (ts) {
         // Return '' for missing/invalid timestamps rather than formatting the
         // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,

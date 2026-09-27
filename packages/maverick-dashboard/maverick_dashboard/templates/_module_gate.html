@@ -33,14 +33,16 @@
   <strong>{{ label }} is turned off.</strong>
   {% if status and status in _status_badges %}<span class="badge {{ _status_badges[status][0] }}" data-module-status="{{ status }}">{{ _status_badges[status][1] }}</span>{% endif %}
   <span class="mg-copy">{{ detail or 'Turn this feature on before using it.' }}
-    Turning it on applies immediately. Connections, workspace settings, and
-    evidence safeguards still need to be checked before use.</span>
+    It takes effect right away. Review its settings before relying on it.</span>
   {% if can_activate %}
-  <span class="mg-actions">
+  {# The shell marks whether this viewer can turn modules on; a viewer who
+     cannot sees who can instead of a button that would fail. #}
+  <span class="mg-actions mg-admin-only">
     <button type="button" class="btn btn--primary mg-on">Turn on {{ label|lower }}</button>
   </span>
+  <span class="mg-actions muted mg-nonadmin-note" role="note">Ask an administrator to turn this on.</span>
   {% else %}
-  <span class="mg-actions muted" role="note">A global administrator must turn this on.</span>
+  <span class="mg-actions muted" role="note">Ask an administrator to turn this on.</span>
   {% endif %}
   <span class="mg-err" role="alert" aria-live="assertive"></span>
 </div>

@@ -439,7 +439,12 @@ def _nav_context(request: Request) -> dict:
         show_logout = browser_session_enabled()
     except Exception:  # pragma: no cover -- shell rendering stays fail-soft
         show_logout = False
+    try:
+        viewer_global_admin = has_global_permission(request, "admin")
+    except Exception:  # pragma: no cover -- shell rendering stays fail-closed
+        viewer_global_admin = False
     return {
+        "viewer_global_admin": viewer_global_admin,
         "nav_groups": groups,
         "finder_pages": finder,
         "show_settings_link": show_settings,

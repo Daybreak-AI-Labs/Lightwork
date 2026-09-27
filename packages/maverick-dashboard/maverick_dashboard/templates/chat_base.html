@@ -149,7 +149,7 @@
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
-<body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}">
+<body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
   <a class="skip-link" href="#content">Skip to content</a>
   <aside class="cs-side" aria-label="Chats">
     <a class="cs-brand" href="/overview" title="Open the Lightwork dashboard">

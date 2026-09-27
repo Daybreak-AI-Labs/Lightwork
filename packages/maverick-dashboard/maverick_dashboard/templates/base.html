@@ -29,7 +29,7 @@
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
-<body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}">
+<body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
   <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>

@@ -148,8 +148,10 @@ def test_viewer_sees_module_recovery_without_an_activation_button(monkeypatch):
     response = client.get("/external-agents")
     assert response.status_code == 200
     assert 'data-module-gate="external_agents"' in response.text
-    assert "A global administrator must turn this on." in response.text
+    assert "Ask an administrator to turn this on." in response.text
     assert "mg-on" not in response.text
+    # The shell marks the viewer, so shared gates hide their Turn on button.
+    assert 'data-global-admin="0"' in response.text
 
 
 def test_switch_survives_other_overlay_writes():

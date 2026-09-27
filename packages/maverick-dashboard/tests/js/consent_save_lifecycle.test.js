@@ -6,7 +6,10 @@ const {webcrypto} = require("node:crypto");
 const {JSDOM} = require("jsdom");
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const read = name => fs.readFileSync(path.join(root, name), "utf8");
-const flush = async () => { for (let i=0;i<12;i++) await new Promise(setImmediate); };
+// The SDK hashes with WebCrypto, which settles on the thread pool, not the
+// event loop: a fixed number of immediates loses that race under load. Give
+// the pool real time as well.
+const flush = async () => { for (let i=0;i<40;i++) { await new Promise(setImmediate); await new Promise(resolve=>setTimeout(resolve,5)); } };
 const response = (status, body) => ({ok:status<400,status,headers:{get:()=>null},text:async()=>JSON.stringify(body),json:async()=>body});
 function windowFor(html) {
   const dom = new JSDOM(html,{url:"https://customer.example.test/",runScripts:"outside-only"});
