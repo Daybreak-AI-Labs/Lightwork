@@ -10690,7 +10690,11 @@ def graph_editor_page(request: Request) -> HTMLResponse:
 @app.get("/goal-builder", response_class=HTMLResponse)
 async def goal_builder_page(request: Request) -> HTMLResponse:
     """Drag-and-drop goal builder: compose a brief from blocks, then run it."""
-    return templates.TemplateResponse(request, "goal_builder.html", {})
+    from .control_plane import _discover_channels
+
+    return templates.TemplateResponse(
+        request, "goal_builder.html", {"channels": _discover_channels()}
+    )
 
 
 @app.get("/workflow-builder", response_class=HTMLResponse)

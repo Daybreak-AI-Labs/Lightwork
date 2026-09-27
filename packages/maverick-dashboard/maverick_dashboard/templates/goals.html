@@ -13,7 +13,8 @@
     background: var(--glass-soft, var(--surface-1)); box-shadow: var(--glass-edge);
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     padding: var(--space-3) var(--space-4); }
-  .g-row__id{ font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-sm); flex: none; width: 3.5rem; }
+  .g-row__id{ font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-sm); flex: none; width: 6.5rem; }
+  .g-filters{ display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); }
   .g-row__main{ flex: 1; min-width: 0; }
   .g-row__title{ font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g-row__desc{ color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -35,43 +36,50 @@
   {% from "_hero.html" import hero, state %}
   {% set running = goals | selectattr('status', 'equalto', 'running') | list | length %}
   {% call hero('Your AI workforce', 'Tasks',
-               subtitle='Every run on record',
+               subtitle='Every task on record',
                lede='Find your work, read its result, and open a task to review or continue it.') %}
     {{ state('Current state',
-             goals | length ~ ' recent run' ~ ('' if goals | length == 1 else 's'),
-             badge=(running ~ ' running') if running else ('ready' if goals else 'none yet'),
+             goals | length ~ ' recent task' ~ ('' if goals | length == 1 else 's'),
+             badge=(running ~ ' running') if running else ('Ready' if goals else 'None yet'),
              badge_class='ok' if goals else 'idle',
              copy='Review recent tasks, including their plans, recorded results
-                   and any errors. Available actions depend on your workspace role.') }}
+                   and any problems. Available actions depend on your workspace role.') }}
   {% endcall %}
 
   <div class="g-bar">
     {% if can_create_goal %}
-    <a class="btn btn--primary" href="/chat">New task in Chat</a>
-    <a class="btn" href="/goal-builder">Quick Goal form</a>
-    <a class="btn btn--ghost" href="/graph-editor">Goal Map editor</a>
+    <a class="btn btn--primary" href="/chat">New task</a>
+    <a class="btn" href="/goal-builder">Step-by-step form</a>
+    <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
     {% endif %}
     {% if goals %}
-    <input id="run-search-q" type="search" placeholder="Search across runs…"
-           aria-label="Search runs by title or description" autocomplete="off"
+    <input id="run-search-q" type="search" placeholder="Search tasks…"
+           aria-label="Search tasks by title or description" autocomplete="off"
            class="input g-bar__search">
     {% endif %}
   </div>
 
   {% if goals %}
+  <div class="g-filters" role="group" aria-label="Show tasks">
+    <button type="button" class="btn btn--primary" data-g-filter="">All</button>
+    <button type="button" class="btn" data-g-filter="running active pending">Running</button>
+    <button type="button" class="btn" data-g-filter="blocked awaiting_approval">Waiting for you</button>
+    <button type="button" class="btn" data-g-filter="failed">Failed</button>
+    <button type="button" class="btn" data-g-filter="done">Done</button>
+  </div>
   <div class="g-list" id="run-list">
     {% for g in goals %}
-    <div class="g-row" id="{{ g.id }}">
-      <span class="g-row__id">#{{ g.id }}</span>
-      <span class="badge {{ g.status }}" title="{{ g.status }}">{{ g.status | replace('_', ' ') | capitalize }}</span>
+    <div class="g-row" id="{{ g.id }}" data-status="{{ g.status }}">
+      <span class="g-row__id">{{ (g.created_at | datetime) if g.created_at else '' }}</span>
+      <span class="badge {{ g.status }}">{{ g.status | humanize }}</span>
       <span class="g-row__main">
         <div class="g-row__title"><a href="/chat/goal/{{ g.id }}">{{ g.title }}</a></div>
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
       </span>
       <span class="g-row__actions">
-        <a href="/goals/{{ g.id }}/plan">plan</a>
-        <a href="/goals/{{ g.id }}/trajectory">replay</a>
-        <a href="/goals/{{ g.id }}/errors">errors</a>
+        <a href="/goals/{{ g.id }}/plan">Plan</a>
+        <a href="/goals/{{ g.id }}/trajectory">Step by step</a>
+        {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems</a>{% endif %}
       </span>
     </div>
     {% endfor %}
@@ -105,20 +113,22 @@
     }
     function render(goals) {
       if (!goals.length) {
-        listEl.innerHTML = '<div class="g-empty" style="padding:var(--space-5);">No matching runs.</div>';
+        listEl.innerHTML = '<div class="g-empty" style="padding:var(--space-5);">No matching tasks.</div>';
         return;
       }
       listEl.innerHTML = goals.map(function (g) {
         var d = (g.description || '').slice(0, 160);
-        return '<div class="g-row" id="' + g.id + '">' +
-          '<span class="g-row__id">#' + g.id + '</span>' +
-          '<span class="badge ' + esc(g.status) + '" title="' + esc(g.status) + '">' + esc(String(g.status).replace(/_/g, ' ')) + '</span>' +
+        var when = g.created_at && window.mvWhen ? mvWhen(g.created_at) : '';
+        var label = window.mvHuman ? mvHuman(g.status) : String(g.status).replace(/_/g, ' ');
+        return '<div class="g-row" id="' + g.id + '" data-status="' + esc(g.status) + '">' +
+          '<span class="g-row__id">' + esc(when) + '</span>' +
+          '<span class="badge ' + esc(g.status) + '">' + esc(label) + '</span>' +
           '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + encodeURIComponent(g.id) + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
-          '<a href="/goals/' + g.id + '/plan">plan</a>' +
-          '<a href="/goals/' + g.id + '/trajectory">replay</a>' +
-          '<a href="/goals/' + g.id + '/errors">errors</a></span></div>';
+          '<a href="/goals/' + g.id + '/plan">Plan</a>' +
+          '<a href="/goals/' + g.id + '/trajectory">Step by step</a>' +
+          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + g.id + '/errors">Problems</a>' : '') + '</span></div>';
       }).join('');
     }
     function search(immediate) {
@@ -137,7 +147,7 @@
             if (attempt !== generation) return null;
             if (r.status === 401 || r.status === 403) {
               expired = true; original = ''; listEl.replaceChildren(); input.disabled = true;
-              throw new Error('Your sign-in or access changed. Sign in again and reload your goals.');
+              throw new Error('Your sign-in or access changed. Sign in again, then reload your tasks.');
             }
             if (!r.ok) throw new Error('Search could not be loaded. Previous results remain below. Retry when the service is available.');
             return r.json();
@@ -145,7 +155,7 @@
           .then(function (rows) {
             if (attempt !== generation || rows === null) return;
             if (!Array.isArray(rows)) throw new Error('The search response could not be read. Previous results remain below.');
-            render(rows); status.textContent = rows.length ? rows.length + ' matching runs.' : 'No matching runs.';
+            render(rows); applyFilter(); status.textContent = rows.length ? rows.length + (rows.length === 1 ? ' matching task.' : ' matching tasks.') : 'No matching tasks.';
           })
           .catch(function (error) {
             if (attempt !== generation || error.name === 'AbortError') return;
@@ -156,6 +166,21 @@
       }, immediate ? 0 : 200);
     }
     input.addEventListener('input', function () { search(false); });
+    // Status filter chips (client-side over the rows on screen).
+    var filterBtns = document.querySelectorAll('[data-g-filter]'), active = '';
+    function applyFilter() {
+      var wanted = active ? active.split(' ') : null;
+      listEl.querySelectorAll('.g-row').forEach(function (row) {
+        row.hidden = !!wanted && wanted.indexOf(row.dataset.status) === -1;
+      });
+    }
+    filterBtns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        active = b.getAttribute('data-g-filter') || '';
+        filterBtns.forEach(function (x) { x.classList.toggle('btn--primary', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        applyFilter();
+      });
+    });
     retry.addEventListener('click', function () { search(true); });
     window.addEventListener('pagehide', function () { ++generation; clearTimeout(timer); if (controller) controller.abort(); });
   })();
