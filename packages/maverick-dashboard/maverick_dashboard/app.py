@@ -3398,7 +3398,14 @@ async def tenant_features_page(request: Request, tenant_id: str) -> HTMLResponse
 
 @app.get("/skills", response_class=HTMLResponse)
 async def skills_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "skills.html", {"skills": _load_skills()})
+    # Same opt-in the create/install API enforces; the page only reads it so
+    # it can say "switched off" instead of offering forms that would fail.
+    install_allowed = os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"}
+    return templates.TemplateResponse(request, "skills.html", {
+        "skills": sorted(_load_skills(), key=lambda s: s.name),
+        "is_admin": has_permission(request, "admin"),
+        "install_allowed": install_allowed,
+    })
 
 
 @app.get("/learned", response_class=HTMLResponse)

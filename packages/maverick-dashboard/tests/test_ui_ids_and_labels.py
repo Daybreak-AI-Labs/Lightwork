@@ -59,7 +59,7 @@ def test_overview_goal_input_has_accessible_name(monkeypatch, tmp_path):
 def test_skill_source_input_has_accessible_name(monkeypatch, tmp_path):
     client, _ = _setup_all(monkeypatch, tmp_path)
     r = client.get("/skills")
-    assert 'aria-label="Skill source: a GitHub repo or URL"' in r.text
+    assert 'aria-label="Web address of the skill"' in r.text
 
 
 def test_audit_search_button_disables_during_search(monkeypatch, tmp_path):
