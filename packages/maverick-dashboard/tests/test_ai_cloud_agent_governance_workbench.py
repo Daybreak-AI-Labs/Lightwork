@@ -146,3 +146,11 @@ def test_dashboard_mounts_page_api_visibility_and_security_link() -> None:
         Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "security.html"
     ).read_text(encoding="utf-8")
     assert 'href="/assurance/cloud-agents"' in security
+
+
+def test_cloud_agent_script_is_served() -> None:
+    from maverick_dashboard.app import app
+
+    response = TestClient(app).get("/static/lightwork-ai-cloud-agent-governance.js")
+    assert response.status_code == 200
+    assert "cag-root" in response.text
