@@ -15070,6 +15070,9 @@ router.include_router(people_picker_router)
 from .knowledge_library_api import router as knowledge_library_router  # noqa: E402
 
 router.include_router(knowledge_library_router)
+from .agent_action_trace_api import router as agent_action_trace_router  # noqa: E402
+
+router.include_router(agent_action_trace_router)
 router.include_router(assessment_evidence_autopopulation_router)
 router.include_router(ai_entity_tasks_router)
 router.include_router(governance_agents_router)

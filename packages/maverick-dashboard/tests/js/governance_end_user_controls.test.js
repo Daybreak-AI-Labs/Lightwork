@@ -209,5 +209,5 @@ test("alert refresh stays on the page and distinguishes unavailable sections fro
   assert.equal(requests[0].path, "/alerts");
   assert.equal(ui.nodes["gov-attention-status"].textContent, "Alerts refreshed.");
   assert.equal(ui.form.elements.limit.value, "17");
-  assert.match(ui.nodes["gov-attention-summary"].children[1].textContent, /Vendors alerts are unavailable/);
+  assert.match(ui.nodes["gov-attention-summary"].children[1].textContent, /Suppliers alerts could not be loaded/);
 });

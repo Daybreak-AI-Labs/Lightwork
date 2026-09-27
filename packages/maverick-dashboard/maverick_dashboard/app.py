@@ -4803,6 +4803,7 @@ async def _governance_workspace_page_data(
         "literacy_plane_status": {},
         "literacy_error": "",
         "literacy_training_keys": [],
+        "literacy_roles": [],
         "grc_sync_enabled": sync.enabled(),
         "grc_status": {},
         "grc_outbound": [],
@@ -4905,6 +4906,9 @@ async def _governance_workspace_page_data(
         data["literacy_training_keys"] = [
             {"key": key, "title": title} for key, title in sorted(keys.items())
         ][:200]
+        data["literacy_roles"] = sorted(
+            {str(row.get("role")) for row in requirements if row.get("role")}
+        )[:200]
     if data["grc_sync_enabled"]:
         status_result, outbound_result = await asyncio.gather(
             run_in_threadpool(sync.sync_status),
@@ -5033,6 +5037,7 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             "literacy_plane_status": workspace["literacy_plane_status"],
             "literacy_error": workspace["literacy_error"],
             "literacy_training_keys": workspace["literacy_training_keys"],
+            "literacy_roles": workspace["literacy_roles"],
             "ai_incident_enabled": ai_incident_data["enabled"],
             "ai_incident_declarations": ai_incident_data["declarations"],
             "ai_incident_error": ai_incident_data["error"],

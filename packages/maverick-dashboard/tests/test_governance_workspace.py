@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 
@@ -117,11 +118,13 @@ def test_disabled_modules_fail_closed_and_page_explains_the_knobs():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert "Governance Workspace" in page.text
-    assert "Enable EU conformity workflows" in page.text
-    assert "Enable the AI-literacy register" in page.text
-    assert "Enable AI incident reporting" in page.text
-    assert "The outbound GRC sync is not configured" in page.text
+    assert "Governance workspace" in page.text
+    assert "EU AI Act workflows is turned off" in page.text
+    assert "Staff AI training tracking is turned off" in page.text
+    assert "Serious-incident reporting is turned off" in page.text
+    assert "is not set up" in page.text
+    # Config section names are never shown to people.
+    assert "[eu_conformity]" not in page.text and "[ai_literacy]" not in page.text
 
 
 def test_governance_page_is_registered_for_the_sidebar():
@@ -247,7 +250,7 @@ def test_fria_lifecycle_through_the_api_and_page():
     page = client.get("/security/governance")
     assert page.status_code == 200
     assert opened["id"] in page.text
-    assert "6/6 elements" in page.text
+    assert "6 of 6 questions answered" in page.text
     assert "Work on it" in page.text
 
 
@@ -411,8 +414,9 @@ def test_art43_route_lifecycle_through_the_api_and_page():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert "Conformity assessment route (Art. 43)" in page.text
-    assert "reassessment required" in page.text
+    assert "Approval route before launch" in page.text
+    assert "Needs a new assessment" in page.text
+    assert "data-route-change=" in page.text
 
 
 # ---------------------------------------------------------------------------
@@ -565,11 +569,12 @@ def test_market_obligations_through_the_api_and_page():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert "Post-market monitoring plan (Art. 72)" in page.text
+    assert "Monitoring plan" in page.text
     assert "wiki/models/pmm-plan-v2" in page.text
     assert "EUDB-2026-17" in page.text
-    assert "Instructions for use (Art. 13)" in page.text
-    assert "Download the audit bundle" in page.text
+    assert "Instructions for use" in page.text
+    assert "Download all records" in page.text
+    assert "data-pmm-review=" in page.text
 
 
 # ---------------------------------------------------------------------------
@@ -709,8 +714,8 @@ def test_needs_attention_digest_on_api_and_page():
     page = client.get("/security/governance")
     assert page.status_code == 200
     assert "Needs attention" in page.text
-    assert "incident report(s) OVERDUE" in page.text
-    assert "training(s) missing" in page.text
+    assert re.search(r"\d+ incident reports? overdue", page.text)
+    assert re.search(r"\d+ trainings? not done", page.text)
     # The alerts stand on their own; the CLI that mirrors them is not shown
     # to a non-technical user.
     assert "governance-alerts due" not in page.text
@@ -804,6 +809,25 @@ def test_fria_review_is_four_eyes_gated():
     assert "other than the assessor" in denied.json()["detail"]
 
 
+def test_page_speaks_plainly_and_uses_in_page_dialogs():
+    _enable_governance()
+    _assurance_incident()
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    main = page.text.split('<main id="content"', 1)[1].split("</main>", 1)[0]
+    script = main[main.index("<script>"):]
+    visible = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>", " ", main)
+    assert not re.search(
+        r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|revision|"
+        r"MAA-[0-9a-f]|MRI-[0-9a-f]|GPAI|FRIA|UNASSIGNED|OVERDUE)\b|/api/v1|\[eu_conformity\]",
+        visible,
+    ), visible
+    assert "window.prompt" not in script
+    assert "window.location.reload()" in script  # tables refresh; the message survives via done()
+    assert "mvForm" in script
+    assert 'id="agent-check"' in page.text and 'id="agent-lineage"' in page.text
+
+
 # ---------------------------------------------------------------------------
 # Pickers: nobody pastes raw ids
 # ---------------------------------------------------------------------------
@@ -814,10 +838,11 @@ def test_page_offers_asset_and_incident_pickers():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert 'list="governed-assets"' in page.text
-    assert "Triage model" in page.text
-    assert 'list="assurance-incidents"' in page.text
-    assert incident["id"] in page.text
+    # Selects, not typed identifiers: the value is the id, the label the name.
+    assert 'list="governed-assets"' not in page.text
+    assert re.search(r'<option value="MAA-[0-9a-f]{32}">Triage model', page.text)
+    assert f'<option value="{incident["id"]}">' in page.text
+    assert 'placeholder="MAA-' not in page.text and 'placeholder="MRI-' not in page.text
 
 
 # ---------------------------------------------------------------------------
@@ -896,8 +921,8 @@ def test_literacy_register_through_the_api_and_page():
     page = client.get("/security/governance")
     assert page.status_code == 200
     assert "analyst@example.com" in page.text
-    assert "model-limits (missing)" in page.text
-    assert "Evidence review required" in page.text
+    assert "Model limitations: Not done" in page.text
+    assert "Evidence review needed" in page.text
 
 
 # ---------------------------------------------------------------------------
@@ -1326,9 +1351,9 @@ def test_workspace_page_renders_the_gpai_and_deployer_panels():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert "General-purpose AI obligations (Art. 53 / Art. 55)" in page.text
-    assert "Deployer duties (Art. 26)" in page.text
-    assert "UNASSIGNED" in page.text          # oversight not yet named
+    assert "General-purpose AI models you provide" in page.text
+    assert "High-risk AI systems you use" in page.text
+    assert "Nobody named yet" in page.text          # oversight not yet named
     assert 'id="gpai-assert"' in page.text
     assert 'id="deployer-oversight"' in page.text
     assert asset_id in page.text
