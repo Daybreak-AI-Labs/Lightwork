@@ -1,11 +1,11 @@
 """Specialist routing: rank packs by relevance to a task.
 
-The roster is 1,118 specialists. ``list_specialists`` lets the orchestrator
+The roster is 2,031 specialists. ``list_specialists`` lets the orchestrator
 drill down suite-by-suite, but there was no way to search the whole roster by
 what the task actually IS -- so an ambiguous or cross-suite request forced the
 model to guess the suite and browse it. This module is the deterministic
 pre-filter: a dependency-free lexical retriever (weighted TF-IDF over each
-pack's name, description, and persona) that narrows 1,118 packs to the handful
+pack's name, description, and persona) that narrows 2,031 packs to the handful
 worth showing. The LLM still makes the final pick; it just picks from a relevant
 shortlist instead of a haystack.
 

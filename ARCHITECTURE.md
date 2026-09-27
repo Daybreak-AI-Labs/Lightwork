@@ -40,10 +40,10 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
 | `orchestrator.py` | Entry point `run_goal()` — wires SwarmContext, spawns external MCP clients, runs the root agent, distills the trajectory into a skill. |
 | `swarm.py` | `SwarmContext` shared by all agents in a run. |
 | `blackboard.py` | Append-only shared workspace for one run. Mirrors entries into `world.goal_events` when `attach_world()` is called so the dashboard can stream live progress. |
-| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only schema migrations (v1 → v23). |
+| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only, checksum-locked schema migrations (v1 → v36). |
 | `budget.py` | Hard caps on tokens, $, wall-clock, tool calls. Raises `BudgetExceeded`. |
 | `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM (+ OpenAI-compatible). Per-role model routing via config. |
-| `providers/` | One adapter file per provider + a shared OpenAI ↔ Anthropic translator (`translator.py`). |
+| `providers/` | One adapter file per provider; OpenAI ↔ Anthropic message translation lives in `openai_provider.py`. |
 | `config.py` | TOML config loader. Per-role model choice + persona + MCP server table. |
 | `skills.py` | Auto-distill successful trajectories into reusable SKILL.md files. Strict skill source validation (`gh:`, `https:`, `mvk:`); rejects bare paths, `file://`, etc. |
 | `skill_embeddings.py` | Optional ONNX embeddings via fastembed; falls back to lexical match if unavailable. |
@@ -51,7 +51,7 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
 | `mcp_client.py` | Spawns external MCP servers as subprocesses, drains their stderr, registers their tools. |
 | `runner.py` | `run_goal_in_thread(...)` — process-wide BoundedSemaphore-capped background runner shared by the dashboard, REST API, and MCP server. |
 | `health.py` | `maverick doctor` — every red/yellow row carries an actionable `fix=...` remediation. |
-| `cli.py` | `maverick start / status / answer / resume / fact / facts / skills / chat / dashboard / mcp / budget / template / doctor / version / config / logs`. |
+| `cli/` | The `maverick` / `lightwork` command tree (161 top-level commands; `cli/__init__.py` plus `_*_groups.py` modules). |
 | `sandbox/` | Execution backends: `local.py` (subprocess), `docker.py` (`--network=none` default), gVisor (`runsc` runtime), `podman.py`, `devcontainer.py`, `kubernetes.py`, `firecracker.py`, `ssh.py` (uses user's `ssh` binary + keys), `modal_backend.py` — nine selectable. |
 | `tools/` | `read_file`, `write_file`, `list_dir`, `shell`, `ask_user`, `spawn_subagent`, `spawn_swarm`. |
 
@@ -63,7 +63,7 @@ Thin Python wrapper over `agent-shield`. Provides three chokepoints:
 - `Shield.scan_tool_call(name, args)` — before any tool executes
 - `Shield.scan_output(text)` — before the final answer reaches the user
 
-If `agent-shield` is not installed, Lightwork falls back to ~20 high-impact built-in rules (`builtin_rules.py`): ignore-previous prompt injection, ChatML/DAN jailbreak, `rm -rf /`, curl-pipe-shell, sensitive file reads, etc. The shield never silently no-ops — `Shield.backend` reports which backend is active.
+If `agent-shield` is not installed, Lightwork falls back to the built-in rule set (43 rules) (`builtin_rules.py`): ignore-previous prompt injection, ChatML/DAN jailbreak, `rm -rf /`, curl-pipe-shell, sensitive file reads, etc. The shield never silently no-ops — `Shield.backend` reports which backend is active.
 
 ### `packages/maverick-dashboard/`
 
@@ -88,18 +88,9 @@ One adapter per messaging surface, all normalizing to the same `IncomingMessage`
 
 This is how phone-companion mode works: the swarm lives on Desktop or VPS, the user talks to it from their phone via Telegram/iMessage/etc.
 
-### `packages/maverick-installer/` (`apps/installer-cli/` from spec)
+### `apps/installer-cli/` (`maverick_installer`)
 
-`maverick init` — the interactive wizard. The single source of truth for user-facing UX. Walks through:
-
-1. Deployment target (Desktop / Docker / VPS / Phone companion)
-2. AI providers (Anthropic / OpenAI / Azure / Bedrock / Gemini / xAI / DeepSeek / Moonshot / OpenRouter / Ollama / TGI / vLLM)
-3. Per-role model picks
-4. Safety profile (Strict / Balanced / Permissive / Off)
-5. Sandbox backend
-6. Budget caps
-7. Channels (which surfaces to enable)
-8. API keys (stored in `~/.maverick/.env`, chmod 600)
+`maverick init` — the interactive wizard, the single source of truth for user-facing UX. Three modes: **consumer** (five questions: name, governance level, key, workdir, budget), **express**, and **advanced**, which walks every capability knob in order (deployment, providers, per-role models, channels, safety, sandbox, budget, learning loops, flows, knowledge, connectors, security suites, plugins, tool ACLs, retention, notifications, A2A, …) followed by API keys, connectors and suites. API keys are stored in `~/.maverick/.env` (mode 0600).
 
 Writes `~/.maverick/config.toml`, then runs a smoke test.
 
@@ -139,11 +130,11 @@ What makes Lightwork different from OpenClaw / Hermes on the long-horizon axis:
 
 What makes Lightwork a real multi-agent system, not just N parallel instances:
 
-1. **Shared blackboard.** Specialists never talk directly; they post observations and findings to a single board the orchestrator reads.
+1. **Shared blackboard.** Specialists post observations and findings to a single board the orchestrator reads; they can also message peers directly (`send_to_agent` / `recv_from_agent`), which no pack allowlist removes.
 2. **Shared world model.** Facts written by one agent are visible to siblings.
 3. **Shared budget.** Tokens, $, tool calls are counted across the entire swarm. One greedy worker can't drain the run.
 4. **Shared sandbox.** All workers see the same filesystem and tool state.
-5. **Verifier role.** The orchestrator verifies child outputs before synthesizing. On failure, a `revisor` re-runs with extended thinking.
+5. **Verifier role.** The root agent's `FINAL:` answer is verified (`verifier.verify_final`, or the fail-to-pass tests in coding mode). On rejection the same agent revises once with the critique.
 
 ## Deployment targets
 

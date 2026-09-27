@@ -16,8 +16,8 @@ captured Operating Record that runs the whole loop, grounded in real outcomes.
 
 ``run_once`` is one turn of the flywheel; scheduled between shifts (``maverick
 flywheel`` / a cron / the dashboard) the workforce compounds from its own
-experience. OFF by default: ``maybe_run`` is the safe entry point, a no-op empty
-report unless ``[data_engine]`` is enabled.
+experience. ``[data_engine]`` is ON by default; ``maybe_run`` is the governed
+entry point and returns an empty report when it is disabled.
 
 (This supersedes the earlier standalone ``data_engine_runner``: it composes
 *every* engine, not just triage->mine.)
@@ -92,6 +92,12 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         outcome_fn=outcome_fn)
     check_learning_halt("flywheel", "procedural_memory_persistence")
     mem_store.update(mems)
+
+    # Learned-state writes are audited like every other learning loop
+    # (dreaming, self-harness): one LEARNING_UPDATE row per turn.
+    from .audit import EventKind, record
+    record(EventKind.LEARNING_UPDATE, agent="flywheel", episodes=n_eps,
+           guardrails_written=len(rails), memories_written=len(mems))
 
     hyps = operations_scientist.propose(classes, mems, top_k=top_k)
     sims: tuple = ()

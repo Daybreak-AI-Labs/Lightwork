@@ -1273,3 +1273,12 @@ def test_write_config_emits_chat_and_limit_knobs(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={
         "stream_answers": True, "query_timeout_seconds": 30, "connector_max_attempts": 3})
     assert not {"chat", "query_limits", "connector_limits"} & parsed.keys()
+
+
+def test_write_config_emits_immune_canaries_when_enabled(tmp_path: Path, monkeypatch):
+    # [immune] canaries is a kernel knob (maverick.config.get_immune); the
+    # wizard step is what makes it reachable (rule 6). Off by default.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"immune_canaries": True})
+    assert parsed["immune"]["canaries"] is True
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"fleet_memory": True})
+    assert "immune" not in parsed

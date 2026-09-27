@@ -10,11 +10,9 @@ By default, no auth -- the server binds to `127.0.0.1` only.
 
 For VPS / remote deployments, set `MAVERICK_DASHBOARD_TOKEN` and
 bind to `0.0.0.0` behind Caddy (TLS). Every API request then needs
-either:
-
-- `Authorization: Bearer <token>` header (recommended), or
-- `?token=<token>` query parameter (legacy; **leaks via Referer / proxy
-  logs / browser history**, prefer the header).
+an `Authorization: Bearer <token>` header. (The legacy `?token=` query
+parameter was removed: it leaked the bearer via Referer, proxy logs and
+browser history.)
 
 Exempt from auth (so external tooling and probes work without creds):
 `/healthz`, `/livez`, `/readyz`, `/openapi.json`, `/docs`, `/redoc`, and the
@@ -59,8 +57,9 @@ Individual goal budget caps are also bounded server-side:
 
 Note on polling: the events endpoint is **short-poll** (returns
 immediately with whatever's available since `?since=<last_id>`). The
-client drives the poll cadence (suggest 2-3s). A future v0.2 version
-may add SSE for push-based streaming.
+client drives the poll cadence (suggest 2-3s). For push-based streaming use
+Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
+`Last-Event-ID`) or the WebSocket at `/ws/v1/runs/{id}/events`.
 
 ### Facts
 

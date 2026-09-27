@@ -98,12 +98,11 @@ Store the copies at least as well-protected as the originals, and not next to th
 data they unlock. Operators who inject `MAVERICK_ENCRYPTION_KEY` already hold the
 key in their secrets manager and need no on-disk backup.
 
-**Backend:** at-rest sealing is implemented in the **SQLite** backend only. The
-**Postgres** backend does not seal content at rest yet, so `open_world` **fails closed**
-— selecting Postgres (`[world_model] backend = "postgres"` / `MAVERICK_WORLD_BACKEND`)
-while encryption-at-rest is enabled raises `PostgresAtRestUnsupported` rather than
-silently storing plaintext. Use the SQLite backend for encrypted / regulated
-deployments until Postgres sealing lands (tracked in `FIXES.md`).
+**Backend:** both backends seal the same sensitive content columns through the
+shared field-sealing path, so selecting Postgres (`[world_model] backend =
+"postgres"` / `MAVERICK_WORLD_BACKEND`) keeps content encrypted at rest. Postgres
+additionally needs TLS to the database (`sslmode=verify-full`, see
+`deploy/postgres/README.md`) to protect data in transit.
 
 ## Search trade-off
 

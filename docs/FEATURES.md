@@ -5078,6 +5078,26 @@ tested without spawning py-spy.
   interoperability, subject matching, legal/regulator acceptance or production
   delivery.
 
+## Adaptive immunity
+
+- **Composition-risk discovery** (`immune/network.py`, `maverick immune network`):
+  finds data paths from sensitive reads to external reach across agents
+  (Rule of Two), evaluated at each pack's runtime capability or on any agent
+  graph, with a tool-level witness and the risk of the least-guarded sink.
+  `domains-audit` reports `runtime_expansion` / `runtime_reachable_dangerous`.
+- **Proof of Oversight** (`immune/oversight.py`): opt-in canary approvals
+  (`[immune] canaries`) measure reviewer catch rates per person and decision
+  class; Wilson-bounded earned authority; no-agent capability drills; crux
+  finding; signed oversight records. Canaries never feed agent graduation.
+- **Discovery Title** (`immune/title.py`): commit-reveal priority, pre-run
+  input commitments, human conception gates with a claim-to-conception map,
+  verification and coverage; signed and verified offline.
+- **Analyses** (`immune/policy.py`, `invariance.py`, `reliability.py`,
+  `epistemic.py`, `envelope.py`, `market.py`): rule replay and contradiction
+  discovery, evaluation-awareness gap and model-swap drift, conservative bonds
+  and a verification-allocating truth market, fact contamination tracing,
+  Art. 43(4) learning envelopes, and pricing-parallelism signals.
+
 ## Unified cross-suite audit projection
 
 - **Closed, signed projection plane** (`unified_audit.py`): the default-off

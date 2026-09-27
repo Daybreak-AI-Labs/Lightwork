@@ -524,7 +524,15 @@ def _coerce_approvals(history) -> list[dict]:
             out.append(r)
         elif hasattr(r, "__dict__"):
             out.append(vars(r))
-    return out
+    # Oversight canaries measure people, not agents: never learn from them.
+    try:
+        from .immune.oversight import canary_ids
+        canaries = canary_ids()
+    except Exception:
+        # Fail closed: unknown canaries could inflate an agent's record and
+        # graduate it; no evidence means no graduation.
+        return []
+    return [r for r in out if r.get("id") not in canaries]
 
 
 def auto_graduate_enabled() -> bool:

@@ -19,6 +19,7 @@ from .domain import (
     DomainProfile,
     available_domains,
     declared_prompt_gate,
+    domain_capability,
     enforced_gate,
     suite_for,
 )
@@ -64,6 +65,12 @@ class PackAudit:
     knowledge_sources: list[str] = field(default_factory=list)
     autonomy: str = "suggest"              # baseline authority rung (pack block or suite default)
     autonomy_onboarding: bool = True       # starts supervised until graduated
+    # What the runtime capability (domain_capability: autonomy levels, data
+    # grounding) grants beyond the declared allowlist under current settings,
+    # and which dangerous tools that runtime capability can reach. The declared
+    # posture above is what the pack asks for; this is what it actually gets.
+    runtime_expansion: list[str] = field(default_factory=list)
+    runtime_reachable_dangerous: list[str] = field(default_factory=list)
 
 
 def audit_profile(profile: DomainProfile) -> PackAudit:
@@ -82,6 +89,7 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
     )
     reachable = [t for t in dangerous if cap.permits(t)]
     denied = [t for t in _IRREVERSIBLE if t in set(profile.deny_tools)]
+    runtime = domain_capability(profile, None, f"agent:{profile.name}")
     refusals = refusals_for(profile.name, profile.refuse)
     from .agent_autonomy import default_profile_for
     _auto = profile.autonomy or default_profile_for(profile.name)
@@ -106,6 +114,8 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
         knowledge_sources=list(profile.knowledge_sources),
         autonomy=_auto.default.value,
         autonomy_onboarding=_auto.onboarding,
+        runtime_expansion=sorted(runtime.allow_tools - allow),
+        runtime_reachable_dangerous=[t for t in dangerous if runtime.permits(t)],
     )
 
 

@@ -70,6 +70,7 @@ KNOWN_SECTIONS = frozenset({
     "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",
     "workspace", "world_model", "threat_hunt", "env_hunt",
     "chat", "connector_limits", "query_limits",
+    "immune",
     "ai_inventory", "evidence_gateway", "evidence_graph",
     "model_risk_assurance", "model_improvement", "policy_packs",
     "agent_topology", "drift_monitoring", "portfolio_risk", "red_team_assurance",

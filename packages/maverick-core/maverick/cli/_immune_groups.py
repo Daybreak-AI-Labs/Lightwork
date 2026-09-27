@@ -1,0 +1,166 @@
+"""``maverick immune`` -- discover, prove and remember what policies miss.
+
+Split out of cli/__init__.py and registered on package import. The kernel
+surface is :mod:`maverick.immune`; this module only renders it.
+"""
+from __future__ import annotations
+
+import json
+from collections import Counter
+from pathlib import Path
+
+import click
+
+from . import _strip_terminal_control, main, open_world
+
+
+def _load(path: str) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _emit(obj) -> None:
+    click.echo(json.dumps(obj, indent=2, sort_keys=True, default=list))
+
+
+@main.group("immune")
+def immune_group() -> None:
+    """Adaptive immunity: composition risk, oversight assurance, discovery title."""
+
+
+@immune_group.command("network")
+@click.option("--graph", "graph_file", type=click.Path(exists=True, dir_okay=False),
+              help="Agent graph JSON ({agents: {name: [tools]}, flows: [[a, b]]}). "
+                   "Default: the installed pack roster at its runtime capability.")
+@click.option("--levels/--no-levels", default=None,
+              help="Override autonomy levels (default: this deployment's setting).")
+@click.option("--grounding/--no-grounding", default=None,
+              help="Override data grounding (default: this deployment's setting).")
+@click.option("--swarm", is_flag=True, help="Model packs sharing one swarm (peer messaging).")
+@click.option("--json", "as_json", is_flag=True)
+@click.option("--limit", default=20, show_default=True, help="Findings to print.")
+def network_cmd(graph_file, levels, grounding, swarm, as_json, limit) -> None:
+    """Find data paths from sensitive reads to external reach (Rule of Two)."""
+    from ..immune import network as n
+    if graph_file:
+        g = n.load_graph(_load(graph_file))
+    else:
+        with n.settings(levels=levels, grounding=grounding):
+            g = n.roster_graph(swarm=swarm)
+    found = n.findings(g)
+    if as_json:
+        _emit([f.__dict__ for f in found])
+        return
+    counts = Counter((f.kind, f.sink_risk) for f in found)
+    click.echo(f"{len(g.agents)} agents, {len(found)} findings: "
+               + ", ".join(f"{k}/{r} sink={c}" for (k, r), c in sorted(counts.items())))
+    for f in found[:limit]:
+        w = "; ".join(f"{cls}={a}:{t}" for cls, (a, t) in sorted(f.witness.items()))
+        click.echo(f"  {f.kind:<12} {' -> '.join(f.path)}  [{w}]")
+
+
+@immune_group.command("canary")
+@click.option("--action", required=True, help="What the approver sees.")
+@click.option("--detail", required=True)
+@click.option("--class", "decision_class", required=True, help="e.g. payments, contracts.")
+@click.option("--flaw", required=True, help="The known flaw (kept private).")
+@click.option("--risk", default="medium", show_default=True)
+@click.option("--requested-by", default=None)
+def canary_cmd(action, detail, decision_class, flaw, risk, requested_by) -> None:
+    """Seed one known-flawed approval into the real queue ([immune] canaries)."""
+    from ..immune import oversight as o
+    try:
+        aid = o.seed_canary(open_world(), action=action, detail=detail,
+                            decision_class=decision_class, flaw=flaw, risk=risk,
+                            requested_by=requested_by)
+    except PermissionError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"seeded canary approval #{aid}")
+
+
+@immune_group.command("drill")
+@click.argument("person")
+@click.argument("decision_class")
+@click.option("--passed/--failed", required=True)
+def drill_cmd(person, decision_class, passed) -> None:
+    """Record a no-agent capability drill outcome."""
+    from ..immune import oversight as o
+    o.record_drill(person, decision_class, passed)
+    click.echo("recorded")
+
+
+@immune_group.command("oversight")
+@click.option("--drills", is_flag=True, help="Report drills instead of canaries.")
+@click.option("--min-n", default=10, show_default=True)
+@click.option("--threshold", default=0.8, show_default=True)
+def oversight_cmd(drills, min_n, threshold) -> None:
+    """Catch rates and earned authority per person and decision class."""
+    from ..immune import oversight as o
+    stats = o.score(open_world(), "drill" if drills else "canary")
+    if not stats:
+        click.echo("no decided canaries or drills yet")
+    for (person, cls), s in sorted(stats.items()):
+        earned = "earned" if o.authority(s, min_n=min_n, threshold=threshold) else "not earned"
+        click.echo(f"  {_strip_terminal_control(person):<24} {cls:<18} "
+                   f"caught {s.caught}/{s.n}  assured {s.assured:.0%}  {earned}")
+
+
+@immune_group.group("title")
+def title_group() -> None:
+    """Discovery Title dossiers: conception, priority, verification, coverage."""
+
+
+@title_group.command("check")
+@click.argument("dossier", type=click.Path(exists=True, dir_okay=False))
+def title_check(dossier) -> None:
+    """List what would not survive scrutiny; exit 1 if anything does not."""
+    from ..immune import title as t
+    problems = t.problems(_load(dossier))
+    for p in problems:
+        click.echo(f"  - {p}")
+    if problems:
+        raise SystemExit(1)
+    click.echo("no problems found")
+
+
+@title_group.command("seal")
+@click.argument("dossier", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", type=click.Path(dir_okay=False), required=True)
+def title_seal(dossier, out) -> None:
+    """Sign a dossier with this deployment's audit identity."""
+    from ..immune import title as t
+    Path(out).write_text(json.dumps(t.seal(_load(dossier)), indent=2), encoding="utf-8")
+    click.echo(f"sealed -> {out}")
+
+
+@title_group.command("verify")
+@click.argument("sealed", type=click.Path(exists=True, dir_okay=False))
+@click.option("--pubkey", help="Ed25519 public key hex; default: this deployment's trusted key.")
+def title_verify(sealed, pubkey) -> None:
+    """Verify a sealed dossier offline; exit 1 if it does not verify."""
+    from ..audit.signing import trusted_audit_public_keys
+    from ..immune import title as t
+    doc = _load(sealed)
+    key = pubkey or trusted_audit_public_keys().get(doc["signature"]["key_id"])
+    if not key or not t.verify(doc, key):
+        raise click.ClickException("dossier does NOT verify")
+    click.echo("dossier verifies")
+
+
+@immune_group.command("rules")
+@click.argument("rules_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--candidate", type=click.Path(exists=True, dir_okay=False),
+              help="Candidate rules to compare on --events.")
+@click.option("--events", type=click.Path(exists=True, dir_okay=False))
+@click.option("--max-extra-friction", default=0, show_default=True)
+def rules_cmd(rules_file, candidate, events, max_extra_friction) -> None:
+    """Find contradictions in a rule set; optionally replay a candidate against it."""
+    from ..immune import policy
+    rules = _load(rules_file)["rules"]
+    for f, r, when in policy.contradictions(rules):
+        click.echo(f"  contradiction: {f} forbids what {r} requires when {when}")
+    if candidate:
+        if not events:
+            raise click.UsageError("--candidate needs --events")
+        ok, report = policy.better(_load(candidate)["rules"], rules, _load(events)["events"],
+                                   max_extra_friction=max_extra_friction)
+        _emit({"promote": ok, **report})
