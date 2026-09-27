@@ -120,13 +120,20 @@ class SegmentSnapshot:
         finally:
             reset_tenant(token)
 
-    def validate(self) -> None:
+    def validate(self, *, allow_append: bool = False) -> None:
         opened, visible = os.fstat(self.source.fileno()), self.path.lstat()
         identity = (self.initial.st_dev, self.initial.st_ino)
+        unchanged = (opened.st_size == self.initial.st_size
+                     and opened.st_mtime_ns == self.initial.st_mtime_ns)
+        # A full read (verification, export) must be the whole segment, so any
+        # append is a change. A tail reads no byte past the initial size, and
+        # the writer only appends to the active segment: a concurrent append
+        # (same file, grown) leaves everything it read intact. A rewrite (new
+        # inode) or truncation still fails either read.
+        appended = allow_append and opened.st_size > self.initial.st_size
         if ((opened.st_dev, opened.st_ino) != identity
                 or (visible.st_dev, visible.st_ino) != identity
-                or opened.st_size != self.initial.st_size
-                or opened.st_mtime_ns != self.initial.st_mtime_ns):
+                or not (unchanged or appended)):
             raise SegmentReadError("audit segment changed during snapshot read")
 
     def __enter__(self):
@@ -203,7 +210,7 @@ class SegmentSnapshot:
                         raise SegmentReadError("audit segment was truncated")
                 end = start
             suffix = chunk + suffix
-        self.validate()
+        self.validate(allow_append=True)
         if not suffix.endswith(b"\n"):
             self.report.problem(self.path, "incomplete_final_row")
             suffix = suffix.rpartition(b"\n")[0] + b"\n" if b"\n" in suffix else b""
