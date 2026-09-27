@@ -70,10 +70,19 @@ def test_vendor_detail_renders_record_without_form_tokens():
     body = page.text
     assert "Acme Analytics" in body
     assert "contracts/acme-dpa.pdf" in body
-    assert "vendor_risk" in body
+    assert "Data processing agreement" in body
     # The hosted-form token addresses a public endpoint; it never renders.
     token = record["questionnaires"][0]["token"]
     assert token not in body
+    # Every section has its button; no raw IDs or lowercase keys to read.
+    for label in ("Add contract", "Send a questionnaire", "Link a record", "Add a note",
+                  "Mark as under review", "Stop using this vendor"):
+        assert label in body
+    assert f'data-revision="{record["revision"]}"' in body
+    assert "window.confirm" not in body
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(body) == []
 
 
 def test_vendor_detail_404_and_403(tmp_path):

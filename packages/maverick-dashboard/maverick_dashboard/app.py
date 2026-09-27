@@ -3679,10 +3679,10 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     from maverick import vendor_management
     if not vendor_management.enabled():
         raise HTTPException(status_code=403,
-                            detail="vendor_management is not enabled")
+                            detail="Vendor management is turned off. An administrator can turn it on from the Privacy workspace.")
     record = vendor_management.get_vendor(vendor_id[:64])
     if record is None:
-        raise HTTPException(status_code=404, detail="no such vendor")
+        raise HTTPException(status_code=404, detail="That vendor could not be found.")
     record["registered_at_date"] = _date(record.get("registered_at"))
     now = _time.time()
     for c in record.get("contracts") or []:
@@ -3693,8 +3693,30 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
         q["requested_at_date"] = _date(q.get("requested_at"))
     for n in record.get("monitoring_notes") or []:
         n["recorded_at_date"] = _date(n.get("recorded_at"))
+    # Choices for the page's buttons: questionnaire templates and saved
+    # assessments a person can link, so nothing is typed as an ID.
+    from maverick.assessment import list_saved, list_templates
+
+    try:
+        questionnaire_types = [{"value": t.type, "label": t.title} for t in list_templates()]
+    except Exception:
+        questionnaire_types = []
+    try:
+        assessments = [
+            {"value": s["id"], "label": f"{s.get('subject') or 'Assessment'} · {_idfmt.humanize(s.get('type'))} · {_date(s.get('created_at'))}"}
+            for s in list_saved()[:200]
+        ]
+    except Exception:
+        assessments = []
+    titles = {t["value"]: t["label"] for t in questionnaire_types}
+    for q in record.get("questionnaires") or []:
+        q["title"] = titles.get(q.get("assessment_type")) or _idfmt.humanize(q.get("assessment_type"))
+    labels = {a["value"]: a["label"] for a in assessments}
+    for link in record.get("links") or []:
+        link["label"] = labels.get(link.get("reference")) or link.get("reference")
     return templates.TemplateResponse(
-        request, "vendor_detail.html", {"vendor": record})
+        request, "vendor_detail.html",
+        {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments})
 
 
 @app.get("/privacy/dsar/{request_id}", response_class=HTMLResponse)
