@@ -3723,6 +3723,7 @@ async def consent_preferences_page(request: Request) -> HTMLResponse:
         {
             "consent_preferences_enabled": consent_preferences.enabled(),
             "consent_analytics_enabled": consent_analytics.enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
         },
     )
 
@@ -10050,6 +10051,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-project-reviews.js")
 @app.get("/static/lightwork-workspace-members.js")
 @app.get("/static/lightwork-consent-picker.js")
+@app.get("/static/lightwork-consent-workbench.js")
+@app.get("/static/lightwork-consent-workbench.css")
 @app.get("/static/lightwork-markdown.js")
 @app.get("/static/lightwork-draft-recovery.css")
 async def in_app_ui_asset(request: Request) -> FileResponse:

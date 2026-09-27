@@ -36,35 +36,38 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
 
     assert response.status_code == 200
     page = response.text
-    # The page's own heading: the workbench is held back from the sidebar and
-    # finder until it is customer-ready, so no nav entry carries the name.
-    assert "<h1>Consent & Preferences</h1>" in page
+    assert "Consent &amp; Preferences" in page or "Consent & Preferences" in page
     # Default-off is explicit, and the gate is switchable IN-APP: the shared
     # module-gate banner with a Turn on control, no config keys in the UI.
     assert 'data-module-gate="consent_preferences"' in page
     assert "Consent preferences is turned off." in page
     assert "[consent_preferences] enable = true" not in page
     assert "Consent management" in page
-    assert "cp-policy-form" in page
-    assert "cp-preference-form" in page
-    assert "cp-decision-form" in page
-    assert "cp-tracker-form" in page
-    assert "cp-analytics-form" in page
+    for form in (
+        "cp-policy-form",
+        "cp-preference-form",
+        "cp-decision-form",
+        "cp-tracker-form",
+        "cp-analytics-form",
+        "cp-identity-form",
+        "cp-profile-form",
+    ):
+        assert f'id="{form}"' in page
     assert 'data-module-gate="consent_preferences.analytics"' in page
     assert "[consent_preferences.analytics] enable = true" not in page
-    assert "small cohorts are hidden" in page
-    assert "cp-identity-form" in page
-    assert "Link, unlink, relink &amp; account transition evidence" in page
+    assert "Small groups are hidden" in page
     assert "/identity-links/integrity?limit=500" in page
-    assert "Unlinking or changing the link requires a newly verified identity" in page
+    assert "Links change only when the person verifies themselves" in page
     assert 'value="web_tracker"' in page
     assert "consent_required" not in page
 
 
-def test_enabled_consent_page_uses_integer_policy_versions(
+def test_consent_page_lists_records_with_row_buttons_and_no_typed_plumbing(
     _isolated_consent_page,
 ):
     from maverick import config
+
+    from test_support.plain_language import developer_terms
 
     _isolated_consent_page.write_text(
         "[consent_preferences]\nenable = true\n"
@@ -78,10 +81,36 @@ def test_enabled_consent_page_uses_integer_policy_versions(
     assert response.status_code == 200
     page = response.text
     assert "Module disabled." not in page
-    assert 'name="version" type="number" min="1" step="1"' in page
-    assert 'name="policy_version" type="number" min="1" step="1"' in page
-    assert 'name="expected_current_version" type="number" min="0" step="1" readonly required' in page
-    assert 'id="cp-policy-load" type="button"' in page
-    # The consent_save_lifecycle DOM suite executes publication and verifies
-    # integer version/CAS payloads; local JavaScript variable spelling may vary.
-    assert "Analytics is independently disabled." not in page
+    # Records load on page open and every row carries its own buttons.
+    for host in ("cp-policy-table", "cp-profile-table", "cp-tracker-table"):
+        assert f'id="{host}"' in page
+    for label in ("New policy", "Add a person", "Add a tracker", "Record a choice",
+                  "Check consent", "Linked accounts", "Publish new version"):
+        assert label in page
+    assert '/profiles?limit=500' in page and '/trackers?limit=500' in page
+    # Versions, fingerprints and request references are carried, never typed.
+    assert '<input type="hidden" name="version">' in page
+    assert '<input type="hidden" name="expected_current_version">' in page
+    assert '<input type="hidden" name="notice_sha256">' in page
+    assert '<input type="hidden" name="expected_revision">' in page
+    assert 'data-auto-reference name="idempotency_key"' in page
+    assert 'type="datetime-local"' in page and 'type="date"' in page
+    assert 'id="cp-notice-select"' in page and 'type="file"' in page
+    assert "Subject SHA-256" not in page and "Notice SHA-256" not in page
+    assert "Effective timestamp" not in page
+    assert "mvConfirm" not in page or "CW.confirm" in page
+    assert "CW.confirm(" in page
+    assert developer_terms(page) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [
+        ("lightwork-consent-workbench.js", "application/javascript"),
+        ("lightwork-consent-workbench.css", "text/css"),
+    ],
+)
+def test_consent_workbench_assets_are_served(name, kind):
+    response = client.get(f"/static/{name}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(kind)
