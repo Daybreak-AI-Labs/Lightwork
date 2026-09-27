@@ -358,3 +358,19 @@ def test_env_float_rejects_non_numeric(monkeypatch):
 
 # /healthz exception-text sanitization is exercised in the dashboard
 # tests (test_api.py) since it requires importing maverick_dashboard.
+
+
+def test_mcp_tools_the_model_api_would_refuse_are_not_registered():
+    """A registered name is sent to the model as-is: a dotted or over-long one
+    would fail every model call that lists this server's tools."""
+    from types import SimpleNamespace
+
+    from maverick.mcp_tools import tools_from_mcp
+    client = SimpleNamespace(
+        spec=SimpleNamespace(name="srv"),
+        tools=[{"name": "good_tool", "description": "ok", "inputSchema": {}},
+               {"name": "dotted.name", "description": "x", "inputSchema": {}},
+               {"name": "y" * 60, "description": "x", "inputSchema": {}}],
+        call_tool=None,
+    )
+    assert {t.name for t in tools_from_mcp(client)} == {"mcp_srv__good_tool"}

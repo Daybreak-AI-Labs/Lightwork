@@ -29,6 +29,9 @@ log = logging.getLogger(__name__)
 # server's `mcp_<server>__<tool>` entry in the registry. Matches the MCP
 # spec's recommended tool-name shape.
 _VALID_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
+# The registered name is sent to the model unchanged, and model APIs accept
+# only this shape: one unacceptable name would fail every call that lists it.
+_MODEL_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _MAX_SCHEMA_SCAN_DEPTH = 64
 
 
@@ -71,6 +74,12 @@ def tools_from_mcp(client: MCPClient, *, authorize: Callable[[str], bool] | None
             )
             continue
         prefixed = f"mcp_{client.spec.name}__{name}"
+        if not _MODEL_TOOL_NAME.fullmatch(prefixed):
+            log.warning(
+                "mcp tool from %s rejected: registered name %r is not a valid model tool "
+                "name ([A-Za-z0-9_-], <=64 chars)", client.spec.name, prefixed,
+            )
+            continue
         if hasattr(client, "catalog") and client.catalog.identity(name) != identity:
             continue
         out.append(_build_tool(client, prefixed, name, spec, identity=identity, authorize=authorize))
