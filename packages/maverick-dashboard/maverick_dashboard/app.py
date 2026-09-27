@@ -11145,6 +11145,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
     snap = _benchmark_snapshot()
     for s in snap["suites"]:
         s["spark"] = _sparkline_points([e["score"] for e in s["entries"]])
+    snap["can_record"] = has_global_permission(request, "admin")
     return templates.TemplateResponse(request, "benchmarks.html", snap)
 
 
