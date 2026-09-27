@@ -11184,6 +11184,18 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "AI incident reporting",
         "requires": ("evidence_graph", "model_risk_assurance"),
     },
+    "explainability": {  # explainability.enabled
+        "label": "Decision explanations",
+        "requires": (),
+    },
+    "content_provenance": {  # content_provenance.enabled
+        "label": "Content credentials",
+        "requires": (),
+    },
+    "breach_notification": {  # breach_notification.enabled
+        "label": "Breach notifications",
+        "requires": (),
+    },
     "privacy_automation.drop_management": {  # privacy_drop_management.enabled
         "label": "Data broker deletion requests",
         "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),

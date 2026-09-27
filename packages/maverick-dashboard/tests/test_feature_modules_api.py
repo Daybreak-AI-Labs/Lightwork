@@ -345,6 +345,9 @@ _KERNEL_GATES = {
     "evidence_gateway": lambda: __import__("maverick.ai_evidence_gateway", fromlist=["x"]).enabled(),
     "drift_monitoring": lambda: __import__("maverick.drift_monitoring", fromlist=["x"]).enabled(),
     "ai_incident_reporting": lambda: __import__("maverick.ai_incident_reporting", fromlist=["x"]).enabled(),
+    "explainability": lambda: __import__("maverick.explainability", fromlist=["x"]).enabled(),
+    "content_provenance": lambda: __import__("maverick.content_provenance", fromlist=["x"]).enabled(),
+    "breach_notification": lambda: __import__("maverick.breach_notification", fromlist=["x"]).enabled(),
     "privacy_automation.drop_management": lambda: __import__(
         "maverick.privacy_drop_management", fromlist=["x"]).enabled(),
 }

@@ -1171,6 +1171,9 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "drift_monitoring",
     "ai_incident_reporting",
     "privacy_automation.drop_management",
+    "explainability",
+    "content_provenance",
+    "breach_notification",
 })
 
 # Top-level tables the module paths live under; _dump is an allowlist, so a
