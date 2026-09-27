@@ -12,16 +12,16 @@
   .legend { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
   .legend .live { margin-inline-start: auto; }
 </style>
-<p class="muted"><a href="/goals">← all goals</a> · <a href="/graph-editor">2D editor</a></p>
+<p class="muted"><a href="/goals">← All tasks</a> · <a href="/graph-editor">Flat view</a></p>
 <h1 class="page-title">3D plan view</h1>
-<p class="page-subtitle">Your goals and their sub-goals as an explorable 3D scene.</p>
+<p class="page-subtitle">Your tasks and their smaller steps as a 3D map you can move around.</p>
 <div class="panel">
   <div class="legend">
-    <span><span class="badge active">active</span></span>
-    <span><span class="badge done">done</span></span>
-    <span><span class="badge blocked">blocked</span></span>
-    <span><span class="badge pending">pending</span></span>
-    <span class="live" id="gl-status" role="status" aria-live="polite">loading…</span>
+    <span><span class="badge active">Running</span></span>
+    <span><span class="badge done">Done</span></span>
+    <span><span class="badge blocked">Blocked</span></span>
+    <span><span class="badge pending">Waiting</span></span>
+    <span class="live" id="gl-status" role="status" aria-live="polite">Loading…</span>
   </div>
   <div class="gl-wrap">
     {# The canvas is a purely visual enhancement; the accessible
@@ -32,23 +32,23 @@
   </div>
   <button type="button" id="vr-btn">Enter VR</button>
   <p class="muted" style="font-size: 0.8rem;">
-    Drag to orbit, scroll to zoom, click a node to focus it.
-    {{ node_count }} goal{{ 's' if node_count != 1 }}.
+    Drag to turn, scroll to zoom, click a dot to see that task.
+    {{ node_count }} task{{ 's' if node_count != 1 }}.
   </p>
 
   <details id="tree-fallback">
-    <summary>Accessible text tree (screen-reader / no-WebGL view)</summary>
+    <summary>Show as a list (easier to read and for screen readers)</summary>
     <div class="tree" style="margin-top: 0.75rem;">{{ fallback_html | safe }}</div>
   </details>
   <noscript>
     {# Without JS the <details> above IS the page content. #}
-    <p class="muted">JavaScript is off — use the text tree above.</p>
+    <p class="muted">The 3D view needs scripts turned on — use the list above.</p>
   </noscript>
 </div>
 <p class="muted" style="font-size: 0.78rem;">
-  WebXR: the "Enter VR" button appears only when the browser reports
-  immersive-vr support. The VR path is implemented against the WebXR spec but
-  is <strong>untested without headset hardware</strong> — expect rough edges.
+  Virtual reality: the "Enter VR" button appears only when your browser and
+  headset support it. This is <strong>not yet tested with real headsets</strong>
+  — expect rough edges.
 </p>
 
 <script>
@@ -68,7 +68,7 @@
     // Progressive enhancement: no WebGL -> the text tree IS the view.
     canvas.style.display = "none";
     if (fallback) fallback.open = true;
-    statusEl.textContent = "WebGL unavailable — showing the text tree";
+    statusEl.textContent = "3D isn't available in this browser — showing the list";
     return;
   }
 
@@ -154,7 +154,7 @@
   function buildBuffers(data) {
     nodes = data.nodes || [];
     const edges = data.edges || [];
-    if (!nodes.length) { statusEl.textContent = "no goals yet"; return; }
+    if (!nodes.length) { statusEl.textContent = "No tasks yet"; return; }
     // Map the server's 2D layered layout onto a vertical plane:
     // rows spread on X, depth descends on Y, Z = 0 (orbit supplies the 3D).
     const xs = nodes.map((n) => n.y), ds = nodes.map((n) => n.x);
@@ -186,7 +186,7 @@
     gl.bindBuffer(gl.ARRAY_BUFFER, edgeBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ev), gl.STATIC_DRAW);
     edgeVerts = ev.length / 3;
-    statusEl.textContent = world.length + " goals — drag to orbit";
+    statusEl.textContent = world.length + (world.length === 1 ? " task" : " tasks") + " — drag to turn";
   }
 
   function camMatrices(w, h) {
@@ -262,16 +262,16 @@
     if (!wn) { infoEl.style.display = "none"; return; }
     infoEl.replaceChildren();
     const strong = document.createElement("strong");
-    strong.textContent = "#" + wn.id + " " + (wn.title || "(untitled)");
+    strong.textContent = wn.title || "(untitled)";
     const badge = document.createElement("span");
     badge.className = "badge " + wn.status;
-    badge.textContent = wn.status;
+    badge.textContent = String(wn.status || "").replace(/_/g, " ");
     const link = document.createElement("a");
-    link.href = "/goals/" + wn.id + "/plan";
-    link.textContent = "open plan →";
+    link.href = "/goals/" + encodeURIComponent(wn.id) + "/plan";
+    link.textContent = "Open its steps";
     const parent = document.createElement("span");
     parent.className = "muted";
-    parent.textContent = wn.parent_id != null ? ("parent #" + wn.parent_id) : "root goal";
+    parent.textContent = wn.parent_id != null ? "Part of a bigger task" : "Main task";
     [strong, document.createElement("br"), badge, document.createTextNode(" "),
      parent, document.createElement("br"), link].forEach((el) => infoEl.appendChild(el));
     infoEl.style.display = "block";
@@ -350,14 +350,14 @@
         requestAnimationFrame(frame);
       });
     } catch (e) {
-      statusEl.textContent = "could not start VR: " + e.message;
+      statusEl.textContent = "Could not start virtual reality on this device.";
     }
   });
 
   fetch("/api/v1/goal-tree", { headers: { Accept: "application/json" } })
-    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((r) => { if (!r.ok) throw new Error("load"); return r.json(); })
     .then((data) => { buildBuffers(data); requestAnimationFrame(frame); })
-    .catch((e) => { statusEl.textContent = "could not load the tree: " + e.message; });
+    .catch(() => { statusEl.textContent = "Could not load your tasks. Refresh the page to try again."; });
 })();
 </script>
 {% endblock %}

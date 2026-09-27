@@ -75,7 +75,7 @@ def test_forest_html_escapes_titles():
 
 
 def test_forest_html_empty():
-    assert "No goals yet" in forest_html([])
+    assert "No tasks yet" in forest_html([])
 
 
 # ---------- API + page ----------

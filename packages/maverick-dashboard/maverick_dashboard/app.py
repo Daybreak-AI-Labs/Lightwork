@@ -9864,9 +9864,8 @@ def _render_tree_html(node: dict) -> str:
     def _render(n: dict) -> str:
         dollars_html = f' <span class="cost">${n["dollars"]:.4f}</span>' if n.get("dollars") else ""
         node_html = (
-            f'<a class="node" href="/goals#{n["id"]}">'
-            f'<span class="nid">#{_esc(n["id"])}</span> '
-            f'<span class="badge {_esc(n["status"])}">{_esc(n["status"])}</span> '
+            f'<a class="node" href="/chat/goal/{_esc(n["id"])}">'
+            f'<span class="badge {_esc(n["status"])}">{_esc(_idfmt.humanize(n["status"]))}</span> '
             f'<span class="title">{_esc(n.get("title") or "(untitled)")}</span>'
             f"{dollars_html}"
             f"</a>"
