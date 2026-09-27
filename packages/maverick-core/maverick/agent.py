@@ -2734,7 +2734,8 @@ class Agent:
         if tracker is None:
             return None
         from . import ifc
-        decision = tracker.decide(self.name, name, args)
+        decision = tracker.decide(self.name, name, args,
+                                  sandbox=getattr(self.ctx, "sandbox", None))
         if decision is None:
             return None
         goal_id = getattr(self.ctx, "goal_id", None)
@@ -2757,7 +2758,7 @@ class Agent:
                 copied = " The data appears literally in the call."
             else:
                 copied = " The call is too large to rule out that it carries the data literally."
-            to = ifc.display_destination(decision.destination)
+            to = decision.shown
             try:
                 if replayed is not None:
                     raise _ReplayedDecision(replayed)
@@ -2777,8 +2778,7 @@ class Agent:
             if replayed is None:  # a twin's replayed answer is no human's decision
                 ifc.record(decision, agent=self.name, goal_id=goal_id,
                            outcome="approved" if granted else "denied")
-                if not granted:
-                    twin.record_refusal(self.ctx.goal_id, name, args)
+                twin.record_gate(self.ctx.goal_id, name, args, granted=granted)
             if granted:
                 tracker.grant(decision)
                 return None
@@ -2791,6 +2791,22 @@ class Agent:
         return (f"⚠ BLOCKED by information-flow control: this agent holds data from {labels}, "
                 f"and '{name}' sends outside the tenant boundary. Do not retry through "
                 "another external tool; finish with what can stay inside.")
+
+    async def _human_decision(self, name: str, args: dict, ask) -> tuple[bool, bool]:
+        """A human approval gate's answer: ``(granted, replayed)``. In a production
+        twin nobody is asked -- the recording answers -- and otherwise the answer
+        is recorded for later twins. ``ask`` runs off the event loop and any
+        failure of it is a refusal (fail closed)."""
+        from .immune import twin as _twin
+        answer = _twin.human_gate(name, args)
+        if answer is not None:
+            return answer, True
+        try:
+            granted = bool(await asyncio.to_thread(ask))
+        except Exception:  # consent unavailable -> fail closed
+            granted = False
+        _twin.record_gate(self.ctx.goal_id, name, args, granted=granted)
+        return granted, False
 
     async def _governance_denial(
         self,
@@ -2982,18 +2998,11 @@ class Agent:
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
-        from .immune import twin as _twin
-        replayed = _twin.human_gate(name, args)  # a twin never pings a human
-        import asyncio as _asyncio
-        granted = False
-        try:
-            if replayed is not None:
-                raise _ReplayedDecision(replayed)
+        def _ask() -> bool:
             from .safety.consent import require_consent
             from .safety.tool_risk import tool_risk
-            decision = await _asyncio.to_thread(
-                require_consent, name,
-                risk=tool_risk(name), detail=_gov.reason,
+            return bool(require_consent(
+                name, risk=tool_risk(name), detail=_gov.reason,
                 provenance="governance",
                 allow_auto_approve=False,
                 # When the operator opts into per-action oversight, a prior
@@ -3004,21 +3013,15 @@ class Agent:
                 consult_ledger=not (
                     _gov_policy.require_fresh_human_approval if _gov_policy else False
                 ),
-            )
-            granted = bool(decision.granted)
-        except _ReplayedDecision as replay_decision:
-            granted = replay_decision.granted
-        except Exception:  # pragma: no cover -- consent unavailable -> fail closed
-            granted = False
+            ).granted)
+        granted, replayed = await self._human_decision(name, args, _ask)
         if granted:
             return None, _gov.compliance_profiles
         self.ctx.blackboard.post(
             self.name, "error",
             f"tool={name} BLOCKED: governance requires human approval",
         )
-        if replayed is None:
-            _twin.record_refusal(self.ctx.goal_id, name, args)
-        else:
+        if replayed:
             # A production twin: no human decided, so nothing is audited as a
             # human denial or learned as an operator's "no".
             return (

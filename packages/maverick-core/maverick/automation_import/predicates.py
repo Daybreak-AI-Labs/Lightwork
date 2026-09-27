@@ -56,7 +56,7 @@ def n8n_key(value: Any) -> str:
     if len(value) > 1024:  # no data reference is this long; bounds all work below
         raise repair("unsupported data reference")
     # Linear delimiter parse (a lazy regex here was cubic on "{{" + spaces).
-    body = value[1:] if value.startswith("=") else value
+    body = value.removeprefix("=")
     if body.startswith("{{") and body.endswith("}}") and len(body) >= 4:
         value = body[2:-2].strip()
     if value.startswith("$json"):

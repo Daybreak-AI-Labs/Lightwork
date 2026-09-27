@@ -168,7 +168,7 @@ def code_renew(pid) -> None:
     world = open_world()
     try:
         aid = features.request_approval(world, features.find(pid))
-    except vault.VaultError as exc:
+    except (vault.VaultError, ValueError) as exc:  # ValueError: the card could not be built
         _fail(exc)
     finally:
         world.close()

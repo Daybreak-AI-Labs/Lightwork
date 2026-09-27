@@ -63,7 +63,8 @@ def test_record_then_replay_serves_production_results_in_order(recording_on):
     assert out[3].startswith("ERROR: email failed")
     assert live_during_replay == [("spawn_subagent", {"role": "r"})]  # only coordination ran
     assert replay.report() == {"recorded": 3, "served": 3, "exact": 3, "approximate": [],
-                               "unserved": 0,
+                               "unserved": 0, "human_decisions": 0,
+                               "human_decisions_not_reached": 0,
                                "unmatched": [{"tool": "email", "args": {"to": "x"}}]}
     assert not twin.recording_path(99).exists()  # a twin is never itself recorded
 
@@ -436,3 +437,17 @@ async def test_twin_gate_answers_are_not_audited_as_human_decisions(recording_on
         await agent._run_tool("http_fetch", {"url": "https://partner"})
     assert [r["outcome"] for r in _ledger.read(ifc.ledger_path())
             if r["outcome"] in ("approved", "denied")] == []
+
+
+def test_an_approved_call_stopped_later_is_not_divergence_and_refusal_beats_near_match(
+        recording_on):
+    twin.record_gate(4, "email", {"to": "a@x.io"}, granted=True)     # approved, then a hook stopped it
+    twin.record_gate(4, "wire", {"account": "1"}, granted=False)     # refused
+    asyncio.run(_d(twin, 4, "wire", {"account": "12"}, _live([])))  # a similar call that ran
+    replay = twin.Replay(twin.load(4))
+    with twin.replaying(replay):
+        assert twin.human_gate("email", {"to": "a@x.io"}) is True
+        assert twin.human_gate("wire", {"account": "1"}) is False    # not the near match
+    report = replay.report()
+    assert report["unmatched"] == [] and report["human_decisions"] == 2
+    assert report["human_decisions_not_reached"] == 0 and report["recorded"] == 1

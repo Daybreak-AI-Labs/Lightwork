@@ -205,17 +205,27 @@ def _approval_expired(appr) -> bool:
 
 def request_approval(world, p: dict) -> int:
     """Park a (new) ``codebase_merge`` approval for a pending proposal: after
-    propose, or when the earlier one expired unanswered or failed to park."""
-    if p["status"] != "pending":
-        raise VaultError(f"proposal {p['id']} is {p['status']}")
-    appr = world.get_approval(p["approval_id"]) if p.get("approval_id") else None
-    if appr is not None and not (appr.status == "pending" and _approval_expired(appr)):
-        raise VaultError(f"proposal {p['id']} already has approval #{appr.id} ({appr.status})")
-    p["approval_id"] = world.create_approval(
-        "codebase_merge", risk="high", scope=p["repo"], provenance="codebase",
-        requested_by="agent:codebase", detail=_approval_detail(p))
-    _save(p)
-    return p["approval_id"]
+    propose, or when the earlier one expired (unanswered, or approved but never
+    merged) or failed to park. Serialised per proposal, so two concurrent
+    renewals cannot leave one approval that nothing reads."""
+    caller = p
+    with cross_process_lock(_proposal_dir(p["repo"]) / f"{p['id']}.renew", strict=True):
+        try:
+            p = {**p, **_load(p["repo"], p["id"])}  # the stored approval, not a stale copy
+        except (OSError, ValueError, KeyError, VaultError):
+            pass  # not saved yet (propose parks before its first read-back)
+        if p["status"] != "pending":
+            raise VaultError(f"proposal {p['id']} is {p['status']}")
+        appr = world.get_approval(p["approval_id"]) if p.get("approval_id") else None
+        if appr is not None and not (appr.status in ("pending", "approved")
+                                     and _approval_expired(appr)):
+            raise VaultError(f"proposal {p['id']} already has approval #{appr.id} ({appr.status})")
+        p["approval_id"] = world.create_approval(
+            "codebase_merge", risk="high", scope=p["repo"], provenance="codebase",
+            requested_by="agent:codebase", detail=_approval_detail(p))
+        _save(p)
+        caller.update(p)
+        return p["approval_id"]
 
 
 APPROVAL_TTL = 7 * 24 * 3600.0  # the longest an operation card may stay open
@@ -282,8 +292,8 @@ def status(world, p: dict) -> str:
     appr = world.get_approval(p["approval_id"]) if p["approval_id"] else None
     if appr is None:
         return "unrequested"  # its approval failed to park: `maverick code renew`
-    if appr.status == "pending" and _approval_expired(appr):
-        return "expired"      # unanswered for 7 days: `maverick code renew`
+    if appr.status in ("pending", "approved") and _approval_expired(appr):
+        return "expired"      # past its card's expiry: `maverick code renew`
     return {"approved": "approved", "denied": "rejected"}.get(appr.status, "pending")
 
 
@@ -295,6 +305,11 @@ def _require_approved(world, p: dict) -> None:
             or appr.scope != p["repo"]):
         raise VaultError(f"proposal {p['id']} is {status(world, p)}; "
                          "a human must approve it first")
+    if _approval_expired(appr):
+        # Like every other approved operation: an approval past its card's
+        # expiry no longer authorizes the change it described.
+        raise VaultError(f"proposal {p['id']}'s approval #{appr.id} has expired; "
+                         f"run `maverick code renew {p['id']}` and approve it again")
 
 
 def _fetch_proposal(p: dict, host: Path) -> None:

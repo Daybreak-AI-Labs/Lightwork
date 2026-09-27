@@ -94,82 +94,127 @@ def _is_source(tool: str) -> bool:
     return SENSITIVE in classify(tool)
 
 
-def _is_sink(tool: str) -> bool:
-    from .immune.network import EXTERNAL, classify
+def sandbox_has_egress(sandbox: object) -> bool:
+    """Whether the sandbox this run actually uses can reach the network. Only a
+    backend that states it cannot counts as isolated; anything else (the host
+    ``LocalBackend``, ssh, an unknown backend) is assumed to have egress."""
+    for attr in ("backend", "_backend", "inner"):
+        wrapped = getattr(sandbox, attr, None)
+        if wrapped is not None and wrapped is not sandbox:
+            return sandbox_has_egress(wrapped)
+    network = getattr(sandbox, "network", None)
+    if isinstance(network, str):
+        return network.strip().lower() != "egress-deny"
+    allow = getattr(sandbox, "allow_network", None)
+    if allow is None:
+        return True
+    return bool(allow) and str(allow).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _is_sink(tool: str, sandbox: object = None) -> bool:
+    from .immune.network import _SANDBOXED, EXTERNAL, classify
+    if tool in _SANDBOXED and sandbox is not None:
+        return sandbox_has_egress(sandbox)  # the real sandbox, not the config
     return EXTERNAL in classify(tool)
 
 
-# Argument names that say where a call sends. Query text is deliberately not a
-# destination: it is where exfiltrated data sits, and a search engine is one.
+# Top-level arguments that carry the message, not where it goes. Only for sinks
+# whose argument schema is known; for every other sink (generic transports such
+# as http_fetch and openapi_runner, REST connectors, MCP tools) ANY argument can
+# choose the recipient, so the whole request is the destination.
+_CONTENT_KEYS = frozenset({
+    "subject", "body", "text", "message", "content", "html", "markdown", "caption",
+    "title", "summary", "description", "notes", "comment", "q", "query", "prompt",
+    "attachments",
+})
+_KNOWN_SCHEMA_SINKS = frozenset({
+    "email", "gmail", "ses", "sns", "twilio", "slack_bot", "discord_bot", "teams",
+    "notify", "calendar", "github_issues", "web_search", "web_archive", "browser",
+    "computer", "git_advanced",
+})
+# Argument names shown to the approver as "where it goes".
 _DEST_KEYS = frozenset({
     "to", "cc", "bcc", "recipient", "recipients", "email", "address", "phone", "number",
     "url", "uri", "endpoint", "host", "domain", "webhook", "channel", "chat_id", "room",
-    "repo", "repository", "remote", "bucket", "channel_id", "user_id", "username",
+    "repo", "repository", "owner", "remote", "bucket", "channel_id", "user_id", "username",
+    "topic_arn", "spec", "base_url", "op_id",
 })
-_DEST_SUFFIXES = ("_url", "_uri", "_email", "_address", "_phone", "_number", "_webhook")
+_DEST_SUFFIXES = ("_url", "_uri", "_email", "_address", "_phone", "_number", "_webhook",
+                  "_arn", "_id")
+_URL_KEYS = ("url", "uri", "endpoint", "webhook", "spec")
+_MAX_SHOWN = 1500
 
 
-_MAX_DEST_PARTS = 256
+def _canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
-class _Unidentifiable(Exception):
-    pass
+def destination(args: object, tool: str = "") -> str:
+    """The grant key: everything that could choose where a call sends. For a
+    sink with a known schema, every argument except the message content; for
+    any other sink, the whole request. Fail-safe by construction: an argument
+    this module has never heard of is part of the destination, so a grant never
+    silently covers a new recipient. ``""`` means the call has no destination
+    argument at all, and such a call is never covered by a grant."""
+    if not isinstance(args, dict):
+        return _canonical(args) if args not in (None, "") else ""
+    if tool in _KNOWN_SCHEMA_SINKS:
+        args = {k: v for k, v in args.items() if str(k).casefold() not in _CONTENT_KEYS}
+    return _canonical(args) if args else ""
 
 
-def _dest_parts(value: object, prefix: str, depth: int, out: list[str]) -> None:
-    if depth > 6 or len(out) >= _MAX_DEST_PARTS:
-        raise _Unidentifiable
-    if isinstance(value, str) and value[:1] in "{[" and depth:
+def _shown_parts(value: object, prefix: str, depth: int, out: list[str]) -> None:
+    if depth > 6 or len(out) > 64:
+        return
+    if isinstance(value, str) and value.lstrip()[:1] in "{[" and depth:
         try:
             value = json.loads(value)  # REST connectors pass the body as JSON text
         except ValueError:
             return
     if isinstance(value, dict):
-        for key in sorted(str(k) for k in value):
+        for key in sorted(value, key=str):
             v = value[key]
-            path = f"{prefix}.{key}" if prefix else key
-            k = key.casefold()
+            path = f"{prefix}.{key}" if prefix else str(key)
+            k = str(key).casefold()
             if (k in _DEST_KEYS or k.endswith(_DEST_SUFFIXES)) and not isinstance(v, dict):
-                # A list of recipients is recorded whole (cc/bcc included).
-                out.append(f"{path}={json.dumps(v, sort_keys=True, default=str)}")
-                if len(out) > _MAX_DEST_PARTS:
-                    raise _Unidentifiable
+                text = _canonical(v)
+                if k.endswith(_URL_KEYS):
+                    # Query strings and fragments of a URL are where data rides.
+                    text = re.sub(r"(https?://[^\s\"?#]*)[?#][^\s\"]*", r"\1?…", text)
+                out.append(f"{path}={text}")
             else:
-                _dest_parts(v, path, depth + 1, out)
+                _shown_parts(v, path, depth + 1, out)
     elif isinstance(value, list):
         for i, v in enumerate(value):
-            _dest_parts(v, f"{prefix}[{i}]", depth + 1, out)
+            _shown_parts(v, f"{prefix}[{i}]", depth + 1, out)
 
 
-def destination(args: object) -> str:
-    """Where a call sends, from its conventional argument names at any depth
-    (sorted, bounded). A grant is for one destination: approving a send to
-    finance@ is not approval to send the same data anywhere else. ``""`` means
-    the destination could not be identified, and such a call is never covered
-    by a grant."""
+def shown_destination(args: object) -> tuple[str, bool]:
+    """What the approver is shown as the destination, and whether that is the
+    whole of it. Message content is never shown (it would land in the consent
+    record); a destination that cannot be shown in full is never remembered as
+    a grant."""
     out: list[str] = []
-    try:
-        _dest_parts(args, "", 0, out)
-    except _Unidentifiable:
-        return ""  # too deep or too many to state honestly: ask every time
-    return "&".join(out)
+    _shown_parts(args, "", 0, out)
+    text = "&".join(out)
+    if len(text) <= _MAX_SHOWN and len(out) <= 64:
+        return text, True
+    return f"{text[:_MAX_SHOWN]} … (+{max(0, len(text) - _MAX_SHOWN)} more characters)", False
 
 
-def display_destination(dest: str) -> str:
-    """``dest`` for a human prompt: URL query strings and fragments (where data
-    rides) are elided. Never silently cut: a long list says how much is hidden."""
-    text = re.sub(r"[?#][^\"&\s]*", "?…", dest)
-    return text if len(text) <= 1500 else f"{text[:1500]} … (+{len(text) - 1500} more characters)"
-
-
-def _mcp_server(tool: str) -> tuple[str, str] | None:
-    """Both readings of ``mcp_<server>__<tool>``: server names may contain "__"
-    and tool names may start with "_", so the split is ambiguous. Two names
-    are the same server only when both readings agree."""
-    if not tool.startswith("mcp_") or "__" not in tool[4:]:
+def _mcp_server(tool: str) -> str | None:
+    """The server of ``mcp_<server>__<tool>`` when that split is unambiguous.
+    Server names may contain "__" and tool names may start with "_", so a name
+    with more than one reading has no known server (and earns no exemption)."""
+    if not tool.startswith("mcp_"):
         return None
     rest = tool[4:]
-    return rest.split("__", 1)[0], rest.rsplit("__", 1)[0]
+    if rest.count("__") != 1:
+        return None
+    server, name = rest.split("__", 1)
+    if not server or not name or server.endswith("_") or name.startswith("_"):
+        return None
+    return server
 
 
 def stricter(a: str, b: str) -> str:
@@ -184,6 +229,8 @@ class Decision:
     mode: str
     destination: str = ""
     witnessed: bool = True     # False: a scan cap hit, ``explicit`` is assumed, not seen
+    shown: str = ""            # the destination as the approver sees it
+    grantable: bool = True     # False: it could not be shown in full
 
 
 @dataclass
@@ -289,9 +336,10 @@ class FlowTracker:
             found = frozenset(label for fp in fps if (label := self._fps.get(fp)))
         return None if unknowable else found
 
-    def decide(self, agent: str, tool: str, args: object) -> Decision | None:
+    def decide(self, agent: str, tool: str, args: object,
+               sandbox: object = None) -> Decision | None:
         """``None`` when the call carries no labelled flow to an external sink."""
-        if self.mode == "off" or tool in self.allow_sinks or not _is_sink(tool):
+        if self.mode == "off" or tool in self.allow_sinks or not _is_sink(tool, sandbox):
             return None
         labels = self.labels(agent)
         server = _mcp_server(tool)
@@ -305,19 +353,23 @@ class FlowTracker:
         explicit = labels if seen is None else seen & labels
         if self.scope == "explicit" and not explicit:
             return None
-        return Decision(tool, labels, explicit, self.mode, destination(args), seen is not None)
+        shown, whole = shown_destination(args)
+        return Decision(tool, labels, explicit, self.mode, destination(args, tool),
+                        seen is not None, shown, whole)
 
     def granted(self, decision: Decision) -> bool:
         """A grant covers the same sink and destination, no new labels, and no
         literal copy the approver was not told about."""
-        if not decision.destination:
-            return False  # an unidentified destination is asked about every time
+        if not decision.destination or not decision.grantable:
+            return False  # an unidentified or unshowable destination is asked every time
         with self._lock:
             return any(t == decision.tool and d == decision.destination
                        and decision.labels <= ls and decision.explicit <= ex
                        for t, d, ls, ex in self._granted)
 
     def grant(self, decision: Decision) -> None:
+        if not decision.destination or not decision.grantable:
+            return
         with self._lock:
             self._granted.add((decision.tool, decision.destination,
                                decision.labels, decision.explicit))
@@ -442,4 +494,5 @@ def record(decision: Decision, *, agent: str, goal_id: int | None, outcome: str,
 
 
 __all__ = ["Decision", "FlowTracker", "MODES", "destination", "labelled_run", "record",
+           "sandbox_has_egress", "shown_destination",
            "stricter", "tracker_for_run"]

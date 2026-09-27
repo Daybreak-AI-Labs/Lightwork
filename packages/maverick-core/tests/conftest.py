@@ -192,7 +192,9 @@ def _reset_cluster_halt_cache():
         from maverick import killswitch
         killswitch._last_shared_check_ts = 0.0
         killswitch._last_shared_halt = None
-        killswitch._shared_world = None
+        world, killswitch._shared_world = killswitch._shared_world, None
+        if world is not None and hasattr(world, "close"):
+            world.close()
     except Exception:
         pass
 
