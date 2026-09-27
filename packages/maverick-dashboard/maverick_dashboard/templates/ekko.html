@@ -200,6 +200,7 @@
   var current = initial;
   var candidates = [];
   var DEVICE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+  var MALFORMED = 'Lightwork sent back a reply this page could not read. Try again.';
   var deviceSelect = document.getElementById('ekko-device');
   var otherWrap = document.getElementById('ekko-device-other');
   var otherName = document.getElementById('ekko-device-name');
@@ -257,7 +258,7 @@
       }
       throw new Error(mvErrorText(response, action));
     }
-    if (data === null) throw new Error(mvErrorText({status: 500}, action));
+    if (data === null) throw new Error(MALFORMED);
     return data;
   }
 
@@ -321,6 +322,7 @@
 
   function renderStatus(status) {
     current = status;
+    fillDevices();
     var session = status.session;
     var collectorState = status.collector_state || 'waiting';
     var state = (!status.enabled) ? 'idle'
@@ -599,7 +601,6 @@
     var remembered = localStorage.getItem('lightwork.ekko.device');
     if (remembered && DEVICE_RE.test(remembered) && !/[?&]device_id=/.test(location.search)) chosenDevice = remembered;
   } catch (e) {}
-  fillDevices();
   renderStatus(initial);
   refresh();
 }());

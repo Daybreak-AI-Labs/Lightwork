@@ -25,6 +25,11 @@ const JSON_CLIENTS = [
   ["ekko.html", "request", ["/probe"]],
 ];
 
+// Pages rebuilt for non-technical readers say the same thing in plain words.
+const MALFORMED_MESSAGE = {
+  "ekko.html": "Lightwork sent back a reply this page could not read. Try again.",
+};
+
 const TEXT_CLIENTS = [
   "ai_cloud_agent_governance.html",
   "third_party_lifecycle.html",
@@ -198,7 +203,7 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
     };
 
     await assert.rejects(harness(file, functionName, args).invoke(response), (error) => {
-      assert.equal(error.message, "Request failed: the server returned an invalid JSON response.");
+      assert.equal(error.message, MALFORMED_MESSAGE[file] || "Request failed: the server returned an invalid JSON response.");
       assert.equal(error.message.includes(secret), false);
       return true;
     });
