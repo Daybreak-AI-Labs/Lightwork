@@ -1298,6 +1298,10 @@ app.include_router(create_ott_ctv_privacy_rights_router())
 from .admin_pages import router as admin_pages_router  # noqa: E402
 
 app.include_router(admin_pages_router)
+# Settings > All settings (/settings/all + its catalog save/reset API).
+from .settings_all_page import router as settings_all_router  # noqa: E402
+
+app.include_router(settings_all_router)
 # Ekko Work Discovery: a human review/control surface only.  Endpoint
 # collectors do not enter through HTTP; they write through the local core
 # daemon's owner/device/tenant-scoped store.

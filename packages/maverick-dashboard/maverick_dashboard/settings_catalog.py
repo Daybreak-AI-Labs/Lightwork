@@ -876,6 +876,17 @@ def _period_text(seconds: int) -> str:
     return f"{seconds} seconds"
 
 
+def warning_lead(setting: Setting) -> str:
+    """How the page introduces a setting's safety note."""
+    if setting.control == "toggle":
+        return "If you turn this on:" if setting.weaker is True else "If you turn this off:"
+    if setting.weaker == "lower":
+        return "If you lower this:"
+    if setting.weaker == "higher":
+        return "If you raise this:"
+    return "If you loosen this:"
+
+
 def _fmt(number: float) -> str:
     return str(int(number)) if float(number) == int(number) else str(number)
 
@@ -929,7 +940,7 @@ def display_value(setting: Setting, value: object) -> str:
     if setting.secret:
         return "Set" if value else "Not set"
     if value is None or value == "" or value == []:
-        if setting.control == "number":
+        if setting.control in {"number", "rate"}:
             return "No limit"
         if setting.control == "select":
             return dict(setting.choices).get("", "Not set")
@@ -958,7 +969,7 @@ def display_value(setting: Setting, value: object) -> str:
 __all__ = [
     "BY_ID", "CATALOG_TOP_SECTIONS", "GROUPS", "GROUP_INTROS", "SETTINGS",
     "RATE_PERIODS", "Setting", "SettingError", "coerce", "cross_checks",
-    "display_value", "lookup", "parse_rate", "weakens",
+    "display_value", "lookup", "parse_rate", "warning_lead", "weakens",
 ]
 
 
