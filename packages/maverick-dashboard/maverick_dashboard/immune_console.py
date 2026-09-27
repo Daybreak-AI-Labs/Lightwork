@@ -45,7 +45,10 @@ def _code_summary() -> dict:
     world = _world_or_none()
     if world is None:
         raise HTTPException(status_code=503, detail="world model unavailable")
-    return features.summary(world)
+    try:
+        return features.summary(world)
+    except vault.VaultError as exc:
+        raise HTTPException(status_code=503, detail="code vault unavailable") from exc
 
 
 def create_immune_console_router() -> APIRouter:

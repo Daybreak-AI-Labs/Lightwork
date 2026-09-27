@@ -156,3 +156,15 @@ def test_canaries_are_valid_cards_a_reviewer_can_approve(client, monkeypatch, tm
             "X-Lightwork-Approval-Binding": row["approval_card"]["binding_sha256"]})
         assert response.status_code in (200, 204), response.text[:300]
     assert sum(s.missed for s in oversight.score(world).values()) == 2
+
+
+def test_a_vault_error_is_a_503_not_a_crash(client, monkeypatch):
+    from maverick import config
+    from maverick.codebase import features, vault
+    monkeypatch.setattr(config, "get_codebase", lambda: {"enable": True, "default_protect": "block"})
+
+    def broken(world):
+        raise vault.VaultError("git exited 128: /srv/secret/path")
+    monkeypatch.setattr(features, "summary", broken)
+    response = client.get("/api/v1/code/summary")
+    assert response.status_code == 503 and "secret" not in response.text
