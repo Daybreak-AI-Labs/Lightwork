@@ -1,699 +1,518 @@
 "use strict";
 
+// Contracts and engagements page: records load as a list on arrival, with a
+// button per next step (view, edit, change status, archive, delete). The add
+// and edit form uses dropdowns filled from real vendors, people and existing
+// contracts; custom fields and calculations are built with buttons. Record
+// references, versions and request keys come from the chosen row or are made
+// here, never typed.
 (function (global) {
-  var MAX_RESPONSE_BYTES = 64 * 1024;
-  var MAX_JSON_INPUT_BYTES = 32 * 1024;
-  var ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
-  var OP_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/;
-  var FIELD_TYPES = new Set([
-    "boolean", "decimal", "digest", "integer", "multi_choice",
-    "single_choice", "text_ref", "timestamp"
-  ]);
-  var SENSITIVITIES = new Set(["public", "internal", "confidential", "restricted"]);
-  var FORMULA_OPERATORS = new Set([
-    "add", "subtract", "multiply", "divide", "minimum", "maximum", "count"
-  ]);
-  var CONTRACT_LIFECYCLE_KEYS = [
-    "agreement_type", "agreement_ref", "effective_at", "expires_at",
-    "renewal_mode", "notice_period_days", "governing_law_ref", "parent_contract_id"
-  ];
-  var ENGAGEMENT_LIFECYCLE_KEYS = [
-    "engagement_type", "service_category_ref", "start_at", "end_at",
-    "operational_criticality", "data_access", "hosting_model",
-    "linked_contract_ids", "business_owner_ref"
-  ];
+  var document = global.document;
+  var shell = document.getElementById("third-party-contracts-shell");
+  if (!shell || !global.LwRecords) { return; }
+  var R = global.LwRecords;
+  var API = shell.dataset.apiBase || "/api/v1/third-party/contracts";
+  var canOperate = shell.dataset.canOperate === "true";
+  var canAudit = shell.dataset.canAudit === "true";
+  var canAdmin = shell.dataset.canAdmin === "true";
+  var operations = document.getElementById("tpc-operations");
+  var listStatus = document.getElementById("tpc-list-status");
+  var formStatus = document.getElementById("tpc-form-status");
+  var opStatus = document.getElementById("tpc-operation-status");
+  var editor = document.getElementById("tpc-editor");
+  var form = document.getElementById("tpc-create-form");
+  var filters = document.getElementById("tpc-filter-form");
+  var S = { records: [], vendors: [], people: [] };
 
-  function failure(message, code, status) {
-    var error = new Error(message);
-    error.code = code;
-    error.status = status || 0;
-    return error;
-  }
+  var STATUS = {
+    draft: "Draft", negotiation: "In negotiation", active: "Active", suspended: "Suspended", expired: "Expired",
+    terminated: "Ended", archived: "Archived", planned: "Planned", paused: "Paused", completed: "Completed", cancelled: "Cancelled",
+  };
+  var TRANSITIONS = {
+    contract: { draft: ["negotiation", "active", "terminated"], negotiation: ["draft", "active", "terminated"], active: ["suspended", "expired", "terminated"],
+      suspended: ["active", "terminated"], expired: ["terminated"], terminated: [], archived: [] },
+    engagement: { planned: ["active", "cancelled"], active: ["paused", "completed", "terminated"], paused: ["active", "terminated"],
+      completed: [], cancelled: [], terminated: [], archived: [] },
+  };
+  var FIELD_TYPES = [["boolean", "Yes or no"], ["integer", "Whole number"], ["decimal", "Number"], ["timestamp", "Date"],
+    ["single_choice", "Pick one"], ["multi_choice", "Pick several"], ["text_ref", "Document name"]];
+  var SENSITIVITY = [["internal", "Internal"], ["public", "Public"], ["confidential", "Confidential"], ["restricted", "Restricted"]];
+  var OPERATORS = [["add", "Add up"], ["subtract", "Subtract"], ["multiply", "Multiply"], ["divide", "Divide"], ["minimum", "Smallest of"], ["maximum", "Largest of"], ["count", "Count filled in"]];
 
+  function F(name) { return form.elements.namedItem(name); }
+  function say(el, text) { if (el) { el.textContent = text; } }
+  function fail(el, action) { return function (f) { say(el, f && f.plain ? f.plain : R.errorText(f, action)); }; }
+  function plain(text) { var e = new Error("plain"); e.plain = text; return e; }
+  // Same-origin, uncached, redirect-refusing requests whose answers are read
+  // with a size bound; a failure is thrown as { status } so it can be worded
+  // plainly with R.errorText.
+  var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
   async function readBoundedJson(response) {
     var declared = response.headers.get("Content-Length");
     if (declared !== null && Number(declared) > MAX_RESPONSE_BYTES) {
-      if (response.body && typeof response.body.cancel === "function") {
-        await response.body.cancel();
+      if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
+      throw plain("There were too many records to show. Narrow the filters.");
+    }
+    var responseText;
+    if (response.body && typeof response.body.getReader === "function") {
+      var reader = response.body.getReader();
+      var chunks = [];
+      var total = 0;
+      while (true) {
+        var part = await reader.read();
+        if (part.done) { break; }
+        total += part.value.byteLength;
+        if (total > MAX_RESPONSE_BYTES) { await reader.cancel(); throw plain("There were too many records to show. Narrow the filters."); }
+        chunks.push(part.value);
       }
-      throw failure("Server response exceeded the 64 KiB safety limit.", "response_too_large", response.status);
+      var bytes = new Uint8Array(total);
+      var offset = 0;
+      chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
+      responseText = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } else {
+      responseText = await response.text();
     }
-    if (!response.body || typeof response.body.getReader !== "function") {
-      throw failure("Server response stream is unavailable.", "response_stream_unavailable", response.status);
-    }
-    var reader = response.body.getReader();
-    var chunks = [];
-    var total = 0;
-    while (true) {
-      var part = await reader.read();
-      if (part.done) { break; }
-      total += part.value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) {
-        await reader.cancel();
-        throw failure("Server response exceeded the 64 KiB safety limit.", "response_too_large", response.status);
-      }
-      chunks.push(part.value);
-    }
-    var bytes = new Uint8Array(total);
-    var offset = 0;
-    chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
-    var responseText = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    try {
-      return JSON.parse(responseText);
-    } catch (_error) {
-      throw failure("Server returned invalid JSON.", "response_invalid_json", response.status);
-    }
+    if (!responseText) { return {}; }
+    try { return JSON.parse(responseText); }
+    catch (_error) { throw plain("Lightwork sent an answer this page could not read. Please try again."); }
+  }
+  async function request(path, method, body) {
+    var options = { method: method || "GET", credentials: "same-origin", cache: "no-store", redirect: "error",
+      referrerPolicy: "no-referrer", headers: { Accept: "application/json" } };
+    if (body !== undefined) { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body); }
+    var response = await global.fetch(API + path, options);
+    if (!response.ok) { throw { status: response.status }; }
+    return readBoundedJson(response);
   }
 
-  async function parseResponse(response) {
-    var payload = await readBoundedJson(response);
-    if (!response.ok) {
-      var detail = payload && typeof payload.detail === "string"
-        ? payload.detail.slice(0, 500)
-        : "Contract lifecycle request failed.";
-      throw failure(detail, "request_failed", response.status);
-    }
-    return payload;
+  // Words become a stored reference and read back as words.
+  function ref(text, prefix) {
+    var s = String(text || "");
+    if (s.normalize) { s = s.normalize("NFKD"); }
+    s = s.replace(/[^A-Za-z0-9 _.-]+/g, "").trim().replace(/\s+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, 110);
+    return (prefix || "") + (s || R.newId("item"));
+  }
+  function words(value) {
+    if (value === null || value === undefined || value === "") { return "—"; }
+    var s = String(value).replace(/^(doc|field|calc)\./, "").replace(/[-_.:]+/g, " ").trim();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  function personRef(principal) { return String(principal || "").replace(/@/g, ".at.").slice(0, 128); }
+  function personName(refValue) {
+    var p = S.people.filter(function (x) { return personRef(x.value) === refValue; })[0];
+    return p ? p.label : words(String(refValue || "").replace(/^user:/, "").replace(/\.at\./, "@"));
+  }
+  function vendorName(id) { var v = S.vendors.filter(function (x) { return x.vendor_id === id; })[0]; return v ? v.display_label : "A vendor"; }
+  function dayOf(ts) { return ts ? R.day(ts) : "—"; }
+  function dateValue(ts) { return ts ? new Date(ts * 1000).toISOString().slice(0, 10) : ""; }
+  function epoch(value) { if (!value) { return null; } var t = new Date(value + "T00:00:00Z").getTime(); return isFinite(t) ? t / 1000 : null; }
+  function fill(select, options, keepFirst) {
+    var first = keepFirst ? select.options[0] : null;
+    select.textContent = "";
+    if (first) { select.appendChild(first); }
+    options.forEach(function (o) { var opt = R.el("option", "", o.label); opt.value = o.value; select.appendChild(opt); });
   }
 
-  function identifier(value, label, operation) {
-    var selected = String(value || "").trim();
-    var pattern = operation ? OP_PATTERN : ID_PATTERN;
-    if (!pattern.test(selected)) { throw failure(label + " must be a valid opaque reference.", "invalid_input"); }
-    return selected;
+  // ---- loading -----------------------------------------------------------------
+  function setReady(ready, headline, detail, badgeKind) {
+    operations.disabled = !ready;
+    say(document.getElementById("tpc-readiness"), headline);
+    var mark = document.getElementById("tpc-status-mark");
+    mark.textContent = ready ? "Ready" : "Unavailable";
+    mark.className = "badge " + (badgeKind || (ready ? "ok" : "warn"));
+    say(document.getElementById("tpc-readiness-detail"), detail);
   }
-
-  function optionalIdentifier(value, label) {
-    var selected = String(value || "").trim();
-    return selected ? identifier(selected, label, false) : null;
-  }
-
-  function positiveInteger(value, label, maximum) {
-    var selected = Number(value);
-    if (!Number.isInteger(selected) || selected < 1 || selected > maximum) {
-      throw failure(label + " must be an integer between 1 and " + maximum + ".", "invalid_input");
-    }
-    return selected;
-  }
-
-  function nonnegativeInteger(value, label, maximum) {
-    var selected = Number(value);
-    if (!Number.isInteger(selected) || selected < 0 || selected > maximum) {
-      throw failure(label + " must be an integer between 0 and " + maximum + ".", "invalid_input");
-    }
-    return selected;
-  }
-
-  function optionalTimestamp(value, label) {
-    if (value === null || value === undefined || String(value).trim() === "") { return null; }
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) { return value; }
-    var parsed = Date.parse(String(value));
-    if (!Number.isFinite(parsed) || parsed <= 0) { throw failure(label + " is invalid.", "invalid_input"); }
-    return parsed / 1000;
-  }
-
-  function splitIds(value, label, maximum) {
-    var raw = String(value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
-    var unique = Array.from(new Set(raw.map(function (item) { return identifier(item, label, false); })));
-    if (unique.length > maximum) { throw failure(label + " exceeds its maximum of " + maximum + ".", "invalid_input"); }
-    return unique.sort();
-  }
-
-  function exactKeys(value, allowed, label) {
-    if (!value || Array.isArray(value) || typeof value !== "object") {
-      throw failure(label + " must be a JSON object.", "invalid_input");
-    }
-    Object.keys(value).forEach(function (key) {
-      if (!allowed.includes(key)) { throw failure(label + " contains an unsupported field.", "invalid_input"); }
-    });
-    allowed.forEach(function (key) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) {
-        throw failure(label + " is missing " + key + ".", "invalid_input");
-      }
-    });
-    return value;
-  }
-
-  function choice(value, allowed, label) {
-    if (!allowed.includes(value)) { throw failure(label + " is unsupported.", "invalid_input"); }
-    return value;
-  }
-
-  function parseJson(value, label, expected) {
-    var parsed = value;
-    if (typeof value === "string") {
-      if (new TextEncoder().encode(value).byteLength > MAX_JSON_INPUT_BYTES) {
-        throw failure(label + " exceeds the 32 KiB input bound.", "invalid_input");
-      }
-      try { parsed = JSON.parse(value); }
-      catch (_error) { throw failure(label + " must be valid JSON.", "invalid_input"); }
-    }
-    if (expected === "array" && !Array.isArray(parsed)) {
-      throw failure(label + " must be a JSON array.", "invalid_input");
-    }
-    if (expected === "object" && (!parsed || Array.isArray(parsed) || typeof parsed !== "object")) {
-      throw failure(label + " must be a JSON object.", "invalid_input");
-    }
-    return parsed;
-  }
-
-  function validateFieldSchema(value) {
-    var fields = parseJson(value, "Custom field schema", "array");
-    if (fields.length > 128) { throw failure("Custom field schema exceeds 128 fields.", "invalid_input"); }
-    var seen = new Set();
-    return fields.map(function (raw) {
-      var field = exactKeys(raw, ["field_id", "label_ref", "field_type", "required", "sensitivity", "options"], "Custom field");
-      var fieldId = identifier(field.field_id, "Custom field ID", false);
-      if (seen.has(fieldId)) { throw failure("Custom field IDs must be unique.", "invalid_input"); }
-      seen.add(fieldId);
-      if (!FIELD_TYPES.has(field.field_type) || !SENSITIVITIES.has(field.sensitivity) || typeof field.required !== "boolean") {
-        throw failure("Custom field type, sensitivity, or required flag is invalid.", "invalid_input");
-      }
-      if (!Array.isArray(field.options) || field.options.length > 256) {
-        throw failure("Custom field options are invalid.", "invalid_input");
-      }
-      var options = Array.from(new Set(field.options.map(function (item) { return identifier(item, "Custom option", false); })));
-      var isChoice = field.field_type === "single_choice" || field.field_type === "multi_choice";
-      if ((isChoice && options.length === 0) || (!isChoice && options.length !== 0)) {
-        throw failure("Custom field options do not match the selected type.", "invalid_input");
-      }
-      return {
-        field_id: fieldId, label_ref: identifier(field.label_ref, "Custom label reference", false),
-        field_type: field.field_type, required: field.required,
-        sensitivity: field.sensitivity, options: options
-      };
+  function loadChoices() {
+    return Promise.all([
+      R.call("GET", "/api/v1/third-party/intelligence/vendors").then(function (d) {
+        S.vendors = (d.items || []).filter(function (v) { return v.state === "active"; });
+      }).catch(function () { S.vendors = []; }),
+      R.call("GET", "/api/v1/choices/people").then(function (d) { S.people = d.people || []; }).catch(function () { S.people = []; }),
+    ]).then(function () {
+      var vendorOptions = S.vendors.map(function (v) { return { value: v.vendor_id, label: v.display_label }; });
+      var peopleOptions = S.people.map(function (p) { return { value: personRef(p.value), label: p.label }; });
+      fill(filters.elements.namedItem("vendor_id"), vendorOptions, true);
+      fill(filters.elements.namedItem("owner_ref"), peopleOptions, true);
+      fill(filters.elements.namedItem("status"), Object.keys(STATUS).map(function (k) { return { value: k, label: STATUS[k] }; }), true);
+      fill(F("vendor_id"), vendorOptions, false);
+      fill(F("owner_ref"), peopleOptions, false);
+      fill(F("business_owner_ref"), peopleOptions, false);
     });
   }
-
-  function validateFieldValues(value) {
-    var values = parseJson(value, "Custom field values", "object");
-    var keys = Object.keys(values);
-    if (keys.length > 128) { throw failure("Custom field values exceed 128 fields.", "invalid_input"); }
-    var normalized = {};
-    keys.sort().forEach(function (key) {
-      var fieldId = identifier(key, "Custom value field ID", false);
-      var selected = values[key];
-      var scalar = selected === null || typeof selected === "boolean" ||
-        typeof selected === "number" || typeof selected === "string";
-      if (Array.isArray(selected)) {
-        if (selected.length > 256) { throw failure("Custom value list is too large.", "invalid_input"); }
-        selected = selected.map(function (item) { return identifier(item, "Custom value option", false); });
-      } else if (!scalar || selected === null || (typeof selected === "number" && !Number.isFinite(selected))) {
-        throw failure("Custom values must be bounded scalars or option lists.", "invalid_input");
-      } else if (typeof selected === "string") {
-        selected = identifier(selected, "Custom value reference", false);
-      }
-      normalized[fieldId] = selected;
-    });
-    return normalized;
-  }
-
-  function validateFormulas(value) {
-    var formulas = parseJson(value, "Formula definitions", "array");
-    if (formulas.length > 64) { throw failure("Formula definitions exceed 64 formulas.", "invalid_input"); }
-    var seen = new Set();
-    return formulas.map(function (raw) {
-      var formula = exactKeys(raw, ["formula_id", "operator", "operands", "round_digits"], "Formula");
-      var formulaId = identifier(formula.formula_id, "Formula ID", false);
-      if (seen.has(formulaId)) { throw failure("Formula IDs must be unique.", "invalid_input"); }
-      seen.add(formulaId);
-      if (!FORMULA_OPERATORS.has(formula.operator) || !Array.isArray(formula.operands) ||
-          formula.operands.length < 1 || formula.operands.length > 16) {
-        throw failure("Formula operator or operands are invalid.", "invalid_input");
-      }
-      var operands = formula.operands.map(function (rawOperand) {
-        var operand = exactKeys(rawOperand, ["source", "field_id", "value"], "Formula operand");
-        if (operand.source === "field") {
-          if (operand.value !== null) { throw failure("Field operands cannot contain a literal.", "invalid_input"); }
-          return { source: "field", field_id: identifier(operand.field_id, "Formula field ID", false), value: null };
-        }
-        if (operand.source === "literal" && operand.field_id === null &&
-            typeof operand.value === "number" && Number.isFinite(operand.value)) {
-          return { source: "literal", field_id: null, value: operand.value };
-        }
-        throw failure("Formula operand is invalid.", "invalid_input");
-      });
-      return {
-        formula_id: formulaId, operator: formula.operator, operands: operands,
-        round_digits: nonnegativeInteger(formula.round_digits, "Formula round digits", 8)
-      };
-    });
-  }
-
-  function validateLifecycle(kind, value) {
-    var lifecycle = parseJson(value, "Lifecycle", "object");
-    if (kind === "contract") {
-      exactKeys(lifecycle, CONTRACT_LIFECYCLE_KEYS, "Lifecycle");
-      return {
-        agreement_type: choice(lifecycle.agreement_type, [
-          "data_processing", "license", "master_services", "nda", "other",
-          "statement_of_work", "subscription"
-        ], "Agreement type"),
-        agreement_ref: identifier(lifecycle.agreement_ref, "Agreement reference", false),
-        effective_at: optionalTimestamp(lifecycle.effective_at, "Effective time"),
-        expires_at: optionalTimestamp(lifecycle.expires_at, "Expiry time"),
-        renewal_mode: choice(lifecycle.renewal_mode, ["none", "manual", "automatic"], "Renewal mode"),
-        notice_period_days: nonnegativeInteger(lifecycle.notice_period_days, "Notice period", 3650),
-        governing_law_ref: optionalIdentifier(lifecycle.governing_law_ref, "Governing-law reference"),
-        parent_contract_id: optionalIdentifier(lifecycle.parent_contract_id, "Parent Contract ID")
-      };
-    }
-    exactKeys(lifecycle, ENGAGEMENT_LIFECYCLE_KEYS, "Lifecycle");
-    return {
-      engagement_type: choice(lifecycle.engagement_type, [
-        "consulting", "data_processing", "other", "outsourcing", "service", "software"
-      ], "Engagement type"),
-      service_category_ref: identifier(lifecycle.service_category_ref, "Service category reference", false),
-      start_at: optionalTimestamp(lifecycle.start_at, "Start time"),
-      end_at: optionalTimestamp(lifecycle.end_at, "End time"),
-      operational_criticality: choice(lifecycle.operational_criticality, ["low", "medium", "high", "critical"], "Operational criticality"),
-      data_access: choice(lifecycle.data_access, ["none", "metadata", "confidential", "restricted"], "Data access"),
-      hosting_model: choice(lifecycle.hosting_model, ["none", "vendor_cloud", "customer_cloud", "on_premises", "hybrid"], "Hosting model"),
-      linked_contract_ids: Array.isArray(lifecycle.linked_contract_ids)
-        ? splitIds(lifecycle.linked_contract_ids.join(","), "Linked Contract ID", 128)
-        : splitIds(lifecycle.linked_contract_ids, "Linked Contract ID", 128),
-      business_owner_ref: identifier(lifecycle.business_owner_ref, "Business owner reference", false)
-    };
-  }
-
-  function buildCreatePayload(values) {
-    var kind = values.record_kind === "engagement" ? "engagement" : "contract";
-    var payload = {
-      vendor_id: identifier(values.vendor_id, "Vendor ID", false),
-      vendor_revision: positiveInteger(values.vendor_revision, "Vendor revision", 2147483647),
-      title_ref: identifier(values.title_ref, "Title reference", false),
-      owner_ref: identifier(values.owner_ref, "Owner reference", false),
-      status: kind === "contract"
-        ? choice(values.contract_status, ["draft", "active"], "Contract status")
-        : choice(values.engagement_status, ["planned", "active"], "Engagement status"),
-      lifecycle: validateLifecycle(kind, kind === "contract" ? {
-        agreement_type: values.agreement_type,
-        agreement_ref: identifier(values.agreement_ref, "Agreement reference", false),
-        effective_at: optionalTimestamp(values.effective_at, "Effective time"),
-        expires_at: optionalTimestamp(values.expires_at, "Expiry time"),
-        renewal_mode: values.renewal_mode,
-        notice_period_days: nonnegativeInteger(values.notice_period_days, "Notice period", 3650),
-        governing_law_ref: optionalIdentifier(values.governing_law_ref, "Governing-law reference"),
-        parent_contract_id: optionalIdentifier(values.parent_contract_id, "Parent Contract ID")
-      } : {
-        engagement_type: values.engagement_type,
-        service_category_ref: identifier(values.service_category_ref, "Service category reference", false),
-        start_at: optionalTimestamp(values.start_at, "Start time"),
-        end_at: optionalTimestamp(values.end_at, "End time"),
-        operational_criticality: values.operational_criticality,
-        data_access: values.data_access,
-        hosting_model: values.hosting_model,
-        linked_contract_ids: splitIds(values.linked_contract_ids, "Linked Contract ID", 128),
-        business_owner_ref: identifier(values.business_owner_ref, "Business owner reference", false)
-      }),
-      field_schema: validateFieldSchema(values.field_schema_json),
-      field_values: validateFieldValues(values.field_values_json),
-      formulas: validateFormulas(values.formulas_json),
-      idempotency_key: identifier(values.idempotency_key, "Idempotency key", true)
-    };
-    var recordId = optionalIdentifier(values.record_id, "Record ID");
-    if (recordId !== null) { payload.record_id = recordId; }
-    return { kind: kind, payload: payload };
-  }
-
-  function buildUpdatePayload(values) {
-    var kind = values.record_kind === "engagement" ? "engagement" : "contract";
-    var payload = {
-      expected_revision: positiveInteger(values.expected_revision, "Expected revision", 2147483647),
-      idempotency_key: identifier(values.idempotency_key, "Idempotency key", true)
-    };
-    if (values.include_title_ref === true) { payload.title_ref = identifier(values.update_title_ref, "Title reference", false); }
-    if (values.include_owner_ref === true) { payload.owner_ref = identifier(values.update_owner_ref, "Owner reference", false); }
-    if (values.include_status === true) { payload.status = identifier(values.update_status, "Lifecycle status", false); }
-    if (values.include_lifecycle === true) { payload.lifecycle = validateLifecycle(kind, values.lifecycle_json); }
-    if (values.include_field_schema === true) { payload.field_schema = validateFieldSchema(values.update_field_schema_json); }
-    if (values.include_field_values === true) { payload.field_values = validateFieldValues(values.update_field_values_json); }
-    if (values.include_formulas === true) { payload.formulas = validateFormulas(values.update_formulas_json); }
-    if (Object.keys(payload).length === 2) { throw failure("Select at least one field to update.", "invalid_input"); }
-    return { kind: kind, payload: payload };
-  }
-
-  global.LightworkThirdPartyContractsClient = {
-    MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
-    buildCreatePayload: buildCreatePayload,
-    buildUpdatePayload: buildUpdatePayload,
-    parseResponse: parseResponse,
-    readBoundedJson: readBoundedJson,
-    splitIds: splitIds,
-    validateFieldSchema: validateFieldSchema,
-    validateFieldValues: validateFieldValues,
-    validateFormulas: validateFormulas,
-    validateLifecycle: validateLifecycle
-  };
-
-  if (typeof document === "undefined") { return; }
-  var shell = document.getElementById("third-party-contracts-shell");
-  if (!shell) { return; }
-  var apiBase = shell.dataset.apiBase;
-  var operations = document.getElementById("tpc-operations");
-  var readiness = document.getElementById("tpc-readiness");
-  var readinessDetail = document.getElementById("tpc-readiness-detail");
-  var statusMark = document.getElementById("tpc-status-mark");
-  var statusOutput = document.getElementById("tpc-status-output");
-  var operationStatus = document.getElementById("tpc-operation-status");
-  var operationOutput = document.getElementById("tpc-operation-output");
-  var recordList = document.getElementById("tpc-record-list");
-  var createForm = document.getElementById("tpc-create-form");
-  var updateForm = document.getElementById("tpc-update-form");
-  var inspectForm = document.getElementById("tpc-inspect-form");
-
-  function field(form, name) {
-    var selected = form.elements.namedItem(name);
-    if (!selected) { throw failure("Required form control is unavailable.", "ui_contract"); }
-    return selected;
-  }
-
-  function values(form, names) {
-    var result = {};
-    names.forEach(function (name) {
-      var selected = field(form, name);
-      result[name] = selected.type === "checkbox" ? selected.checked : selected.value;
-    });
-    return result;
-  }
-
-  function renderJson(element, value) {
-    element.textContent = JSON.stringify(value, null, 2).slice(0, MAX_RESPONSE_BYTES);
-  }
-
-  async function request(path, options) {
-    var response = await fetch(apiBase + path, Object.assign({
-      credentials: "same-origin",
-      cache: "no-store",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-      headers: { "Accept": "application/json" }
-    }, options || {}));
-    return parseResponse(response);
-  }
-
-  async function run(label, callback) {
-    operationStatus.textContent = label + "…";
-    operationStatus.dataset.state = "checking";
-    try {
-      var result = await callback();
-      operationStatus.textContent = label + " completed.";
-      operationStatus.dataset.state = "ready";
-      renderJson(operationOutput, result);
-      return result;
-    } catch (error) {
-      operationStatus.textContent = String(error.message || "Operation failed.").slice(0, 500);
-      operationStatus.dataset.state = "failed";
-      operationOutput.textContent = "";
-      error.rendered = true;
-      throw error;
-    }
-  }
-
-  function addDefinition(list, term, value) {
-    var dt = document.createElement("dt");
-    var dd = document.createElement("dd");
-    dt.textContent = term;
-    dd.textContent = String(value === null || value === undefined ? "—" : value).slice(0, 300);
-    list.appendChild(dt);
-    list.appendChild(dd);
-  }
-
-  function selectRecord(record) {
-    [inspectForm, updateForm, document.getElementById("tpc-archive-form"), document.getElementById("tpc-delete-form")].forEach(function (form) {
-      field(form, "record_id").value = String(record.record_id || "");
-      if (form !== inspectForm && form !== updateForm) { field(form, "expected_revision").value = String(record.revision || ""); }
-    });
-    field(updateForm, "record_kind").value = record.record_kind;
-    field(updateForm, "expected_revision").value = String(record.revision || "");
-    operationStatus.textContent = "Selected " + String(record.record_kind) + " " + String(record.record_id) + ".";
-    renderJson(operationOutput, record);
-  }
-
-  function renderRecords(records) {
-    recordList.replaceChildren();
-    if (!records.length) {
-      var empty = document.createElement("p");
-      empty.className = "tpc-empty";
-      empty.textContent = "No contracts or engagements match these filters.";
-      recordList.appendChild(empty);
-      return;
-    }
-    records.forEach(function (record) {
-      var article = document.createElement("article");
-      article.className = "tpc-record";
-      var head = document.createElement("div");
-      head.className = "tpc-record__head";
-      var title = document.createElement("h3");
-      title.textContent = String(record.title_ref || record.record_id || "Record").slice(0, 300);
-      var pill = document.createElement("span");
-      pill.className = "tpc-pill";
-      pill.textContent = String(record.record_kind || "record");
-      head.appendChild(title); head.appendChild(pill); article.appendChild(head);
-      var details = document.createElement("dl");
-      addDefinition(details, "Record", record.record_id);
-      addDefinition(details, "Vendor", record.vendor_id);
-      addDefinition(details, "Vendor type", record.vendor_type);
-      addDefinition(details, "Status", record.status);
-      addDefinition(details, "Owner", record.owner_ref);
-      addDefinition(details, "Revision", record.revision);
-      addDefinition(details, "Redacted", record.redaction && record.redaction.applied === true ? "yes" : "no");
-      article.appendChild(details);
-      var button = document.createElement("button");
-      button.className = "btn";
-      button.type = "button";
-      button.textContent = "Select and inspect";
-      button.addEventListener("click", function () { selectRecord(record); });
-      article.appendChild(button);
-      recordList.appendChild(article);
-    });
-  }
-
-  function filterQuery() {
-    var selected = values(document.getElementById("tpc-filter-form"), [
-      "record_kind", "vendor_id", "status", "owner_ref", "limit", "include_sensitive_fields"
-    ]);
-    var params = new URLSearchParams();
-    ["record_kind", "vendor_id", "status", "owner_ref"].forEach(function (key) {
-      if (String(selected[key]).trim()) { params.set(key, String(selected[key]).trim()); }
-    });
-    params.set("limit", String(positiveInteger(selected.limit, "Maximum results", 1000)));
-    if (selected.include_sensitive_fields === true) { params.set("include_sensitive_fields", "true"); }
-    return params.toString();
-  }
-
-  async function loadRecords() {
-    var page = await request("?" + filterQuery());
-    var records = Array.isArray(page.items) ? page.items : [];
-    document.getElementById("tpc-list-count").textContent = records.length + (records.length === 1 ? " record" : " records");
-    document.getElementById("tpc-list-status").textContent = "Loaded " + records.length + " tenant-scoped records.";
-    renderRecords(records);
-    return page;
-  }
-
-  async function refreshStatus() {
+  function refreshStatus() {
     operations.disabled = true;
-    readiness.textContent = "Checking…";
-    statusMark.textContent = "Checking";
-    statusMark.dataset.state = "checking";
-    try {
-      var status = await request("/status");
-      renderJson(statusOutput, status);
+    setReady(false, "Checking…", "Checking that contracts are available…", "idle");
+    return request("/status").then(function (status) {
       var ready = status && status.enabled === true && status.configured === true && status.ready === true;
       if (!ready) {
-        readiness.textContent = "Unavailable";
-        statusMark.textContent = "Closed";
-        statusMark.dataset.state = "failed";
-        readinessDetail.textContent = "Controls are unavailable until this workspace is enabled, configured, and ready.";
+        operations.disabled = true;
+        setReady(false, "Not available", status && status.enabled === false
+          ? "Contracts are turned off for this workspace. An administrator can turn them on above."
+          : "Contracts aren't set up for this workspace yet. Ask your IT team to finish the setup.");
         return;
       }
-      readiness.textContent = "Ready";
-      statusMark.textContent = "Ready";
-      statusMark.dataset.state = "ready";
-      readinessDetail.textContent = "This workspace is ready. Available actions depend on your permissions.";
+      setReady(true, "Ready", "Available actions depend on your permissions.");
       operations.disabled = false;
-      await loadRecords();
-    } catch (error) {
-      readiness.textContent = "Unavailable";
-      statusMark.textContent = "Failed";
-      statusMark.dataset.state = "failed";
-      readinessDetail.textContent = String(error.message || "Readiness check failed.").slice(0, 500);
+      return loadChoices().then(loadRecords);
+    }).catch(function (f) {
       operations.disabled = true;
-    }
-  }
-
-  function switchKind() {
-    var engagement = field(createForm, "record_kind").value === "engagement";
-    var contractFields = document.getElementById("tpc-contract-fields");
-    var engagementFields = document.getElementById("tpc-engagement-fields");
-    contractFields.hidden = engagement;
-    contractFields.disabled = engagement;
-    engagementFields.hidden = !engagement;
-    engagementFields.disabled = !engagement;
-  }
-
-  field(createForm, "record_kind").addEventListener("change", switchKind);
-  document.getElementById("tpc-refresh-status").addEventListener("click", refreshStatus);
-  document.getElementById("tpc-filter-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try { await run("Loading Contract and Engagement register", loadRecords); }
-    catch (_error) { /* governed status already rendered */ }
-  });
-  document.getElementById("tpc-clear-filters").addEventListener("click", function () {
-    document.getElementById("tpc-filter-form").reset();
-    loadRecords().catch(function () {});
-  });
-
-  createForm.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var built = buildCreatePayload(values(createForm, [
-        "record_kind", "record_id", "vendor_id", "vendor_revision", "title_ref", "owner_ref",
-        "contract_status", "agreement_type", "agreement_ref", "effective_at", "expires_at",
-        "renewal_mode", "notice_period_days", "governing_law_ref", "parent_contract_id",
-        "engagement_status", "engagement_type", "service_category_ref", "start_at", "end_at",
-        "operational_criticality", "data_access", "hosting_model", "linked_contract_ids",
-        "business_owner_ref", "field_schema_json", "field_values_json", "formulas_json", "idempotency_key"
-      ]));
-      var created = await run("Creating " + built.kind, function () {
-        return request("/" + (built.kind === "contract" ? "contracts" : "engagements"), {
-          method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify(built.payload)
-        });
-      });
-      selectRecord(created);
-      field(createForm, "idempotency_key").value = "";
-      await loadRecords();
-    } catch (error) {
-      if (error.rendered !== true) { operationStatus.textContent = String(error.message || error).slice(0, 500); operationStatus.dataset.state = "failed"; }
-    }
-  });
-
-  updateForm.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var selected = values(updateForm, [
-        "record_id", "record_kind", "expected_revision", "idempotency_key",
-        "include_title_ref", "update_title_ref", "include_owner_ref", "update_owner_ref",
-        "include_status", "update_status", "include_lifecycle", "lifecycle_json",
-        "include_field_schema", "update_field_schema_json", "include_field_values",
-        "update_field_values_json", "include_formulas", "update_formulas_json"
-      ]);
-      var recordId = encodeURIComponent(identifier(selected.record_id, "Record ID", false));
-      var built = buildUpdatePayload(selected);
-      var updated = await run("Updating " + built.kind, function () {
-        return request("/" + (built.kind === "contract" ? "contracts/" : "engagements/") + recordId, {
-          method: "PATCH", headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify(built.payload)
-        });
-      });
-      selectRecord(updated);
-      field(updateForm, "idempotency_key").value = "";
-      await loadRecords();
-    } catch (error) {
-      if (error.rendered !== true) { operationStatus.textContent = String(error.message || error).slice(0, 500); operationStatus.dataset.state = "failed"; }
-    }
-  });
-
-  function inspectRecordId() { return encodeURIComponent(identifier(field(inspectForm, "record_id").value, "Record ID", false)); }
-  function sensitiveQuery() { return field(inspectForm, "include_sensitive_fields").checked ? "?include_sensitive_fields=true" : ""; }
-  inspectForm.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try { selectRecord(await run("Loading exact record", function () { return request("/" + inspectRecordId() + sensitiveQuery()); })); }
-    catch (_error) { /* governed status already rendered */ }
-  });
-  document.getElementById("tpc-load-history").addEventListener("click", async function () {
-    try { await run("Loading change history", function () { return request("/" + inspectRecordId() + "/history" + sensitiveQuery()); }); }
-    catch (_error) { /* governed status already rendered */ }
-  });
-  document.getElementById("tpc-load-tombstone").addEventListener("click", async function () {
-    try { await run("Loading the permanent deletion record", function () { return request("/" + inspectRecordId() + "/tombstone"); }); }
-    catch (_error) { /* governed status already rendered */ }
-  });
-
-  function bindRevisionOperation(formId, label, method, suffix, confirmationRequired) {
-    document.getElementById(formId).addEventListener("submit", async function (event) {
-      event.preventDefault();
-      var form = event.currentTarget;
-      if (confirmationRequired && !field(form, "confirmation").checked) {
-        operationStatus.textContent = "Confirm this irreversible or retention-sensitive action first.";
-        operationStatus.dataset.state = "failed";
-        return;
-      }
-      try {
-        var recordId = encodeURIComponent(identifier(field(form, "record_id").value, "Record ID", false));
-        var payload = {
-          expected_revision: positiveInteger(field(form, "expected_revision").value, "Expected revision", 2147483647),
-          idempotency_key: identifier(field(form, "idempotency_key").value, "Idempotency key", true)
-        };
-        var result = await run(label, function () {
-          return request("/" + recordId + suffix, {
-            method: method, headers: { "Content-Type": "application/json", "Accept": "application/json" },
-            body: JSON.stringify(payload)
-          });
-        });
-        if (result && result.record_kind) { selectRecord(result); }
-        field(form, "idempotency_key").value = "";
-        if (confirmationRequired) { field(form, "confirmation").checked = false; }
-        await loadRecords();
-      } catch (error) {
-        if (error.rendered !== true) { operationStatus.textContent = String(error.message || error).slice(0, 500); operationStatus.dataset.state = "failed"; }
-      }
+      setReady(false, "Not available", R.errorText(f, "check contracts"), "danger");
     });
   }
-  bindRevisionOperation("tpc-archive-form", "Archiving record", "POST", "/archive", true);
-  bindRevisionOperation("tpc-delete-form", "Deleting archived record", "DELETE", "", true);
+  function filterQuery() {
+    var params = new URLSearchParams({ limit: "200" });
+    ["record_kind", "vendor_id", "status", "owner_ref"].forEach(function (k) {
+      var v = filters.elements.namedItem(k).value;
+      if (v) { params.set(k, v); }
+    });
+    var sensitive = filters.elements.namedItem("include_sensitive_fields");
+    if (sensitive && sensitive.checked) { params.set("include_sensitive_fields", "true"); }
+    return params.toString();
+  }
+  function loadRecords() {
+    say(listStatus, "Loading…");
+    return request("?" + filterQuery()).then(function (page) {
+      S.records = page.items || [];
+      render();
+      say(listStatus, "Showing " + S.records.length + " contract" + (S.records.length === 1 ? "" : "s") + " and engagements.");
+    }).catch(fail(listStatus, "load the contracts"));
+  }
 
-  document.getElementById("tpc-verify-integrity").addEventListener("click", async function () {
-    try { await run("Verifying Contract lifecycle integrity", function () { return request("/operations/integrity"); }); }
-    catch (_error) { /* governed status already rendered */ }
-  });
-  document.getElementById("tpc-retention-due").addEventListener("click", async function () {
-    try {
-      var limit = positiveInteger(document.getElementById("tpc-retention-limit").value, "Retention limit", 1000);
-      await run("Loading retention-due records", function () { return request("/operations/retention-due?limit=" + encodeURIComponent(limit)); });
-    } catch (error) {
-      if (error.rendered !== true) { operationStatus.textContent = String(error.message || error).slice(0, 500); operationStatus.dataset.state = "failed"; }
+  function render() {
+    R.table(document.getElementById("tpc-record-list"), [
+      { label: "Name", value: function (r) { return words(r.title_ref); } },
+      { label: "Kind", value: function (r) { return r.record_kind === "engagement" ? "Engagement" : "Contract"; } },
+      { label: "Vendor", value: function (r) { return vendorName(r.vendor_id); } },
+      { label: "Owner", value: function (r) { return personName(r.owner_ref); } },
+      { label: "Status", value: function (r) { return R.badge(STATUS[r.status] || words(r.status), r.status === "active" ? "ok" : r.status === "archived" ? "idle" : "info"); } },
+      { label: "Ends", value: function (r) { var l = r.lifecycle || {}; return dayOf(l.expires_at || l.end_at); } },
+    ], S.records, [
+      { label: "View details", kind: "primary", run: showDetail },
+      { label: "Edit", when: function (r) { return canOperate && r.status !== "archived"; }, run: openEditor },
+      { label: "Change status", when: function (r) { return canOperate && ((TRANSITIONS[r.record_kind] || {})[r.status] || []).length; }, run: changeStatus },
+      { label: "Archive", when: function (r) { return canOperate && r.status !== "archived"; }, run: archive },
+      { label: "Delete permanently", kind: "danger", when: function (r) { return canAdmin && r.status === "archived"; }, run: remove },
+    ], { text: "No contracts or engagements match. Add one, or change the filters.", action: canOperate ? { label: "Add a contract or engagement", run: function () { openEditor(null); } } : null });
+  }
+
+  function showDetail(r) {
+    var host = document.getElementById("tpc-detail");
+    host.hidden = false; host.textContent = "";
+    host.appendChild(R.el("h3", "", words(r.title_ref)));
+    var l = r.lifecycle || {};
+    var dl = R.el("dl");
+    function row(k, v) { dl.appendChild(R.el("dt", "", k)); dl.appendChild(R.el("dd", "", v === undefined || v === null || v === "" ? "—" : String(v))); }
+    row("Vendor", vendorName(r.vendor_id));
+    row("Owner", personName(r.owner_ref));
+    row("Status", STATUS[r.status] || words(r.status));
+    if (r.record_kind === "contract") {
+      row("Type", words(l.agreement_type)); row("Signed document", words(l.agreement_ref)); row("Starts", dayOf(l.effective_at));
+      row("Ends", dayOf(l.expires_at)); row("Renewal", { none: "Doesn't renew", manual: "We renew it", automatic: "Renews automatically" }[l.renewal_mode]);
+      row("Notice period", (l.notice_period_days || 0) + " days"); row("Governing law", words(l.governing_law_ref));
+    } else {
+      row("Type", words(l.engagement_type)); row("Business owner", personName(l.business_owner_ref)); row("Starts", dayOf(l.start_at));
+      row("Ends", dayOf(l.end_at)); row("How critical", words(l.operational_criticality)); row("Access to our data", words(l.data_access));
     }
-  });
-  document.getElementById("tpc-recovery-preflight").addEventListener("click", async function () {
-    try {
-      await run("Running recovery preflight", async function () {
-        var status = await request("/status");
-        var integrity = await request("/operations/integrity");
-        return {
-          schema: "lightwork.third-party-contract-recovery-preflight.v1",
-          ready: status.ready === true && integrity.verified === true,
-          integrity: integrity,
-          browser_supplied_recovery_path_accepted: false,
-          next_step: "Run the server-configured recovery backup job with global administrator authority."
-        };
+    (r.field_schema || []).forEach(function (f) {
+      var v = (r.field_values || {})[f.field_id];
+      row(words(f.label_ref), Array.isArray(v) ? v.map(words).join(", ") : typeof v === "boolean" ? (v ? "Yes" : "No") : f.field_type === "timestamp" ? dayOf(v) : v === undefined ? "Hidden or not set" : words(v));
+    });
+    Object.keys(r.computed_values || {}).forEach(function (k) { row(words(k), r.computed_values[k]); });
+    host.appendChild(dl);
+    var actions = R.el("div", "tpc-actions");
+    actions.appendChild(R.button("Show history", "", function () { history(r, host); }));
+    if (canAudit && r.status === "archived") { actions.appendChild(R.button("Show the deletion note", "", function () { tombstone(r, host); })); }
+    host.appendChild(actions);
+    host.scrollIntoView({ behavior: "smooth" });
+  }
+  function history(r, host) {
+    request("/" + encodeURIComponent(r.record_id) + "/history").then(function (d) {
+      var box = R.el("div");
+      host.appendChild(box);
+      R.table(box, [
+        { label: "When", value: function (h) { return R.when(h.created_at); } },
+        { label: "What happened", value: function (h) { return words(h.event_type); } },
+        { label: "By", value: function (h) { return personName(h.actor_ref); } },
+        { label: "Changed", value: function (h) { return (h.changed_fields || []).map(words).join(", ") || "—"; } },
+      ], d.items || [], [], { text: "No history yet." });
+    }, fail(listStatus, "load the history"));
+  }
+  function tombstone(r, host) {
+    request("/" + encodeURIComponent(r.record_id) + "/tombstone").then(function (t) {
+      host.appendChild(R.el("p", "muted", "Deleted on " + R.when(t.deleted_at) + " by " + personName(t.deleted_by_ref) + "."));
+    }, function (f) { host.appendChild(R.el("p", "muted", f && f.status === 404 ? "This record hasn't been deleted." : R.errorText(f, "load the deletion note"))); });
+  }
+
+  // ---- add and edit --------------------------------------------------------------
+  var editing = null;
+  function switchKind() {
+    var engagement = F("record_kind").value === "engagement";
+    var c = document.getElementById("tpc-contract-fields");
+    var e = document.getElementById("tpc-engagement-fields");
+    c.hidden = engagement; c.disabled = engagement;
+    e.hidden = !engagement; e.disabled = !engagement;
+    F("agreement").required = !engagement;
+  }
+  function contractOptions(exclude) {
+    return S.records.filter(function (r) { return r.record_kind === "contract" && r.record_id !== exclude; })
+      .map(function (r) { return { value: r.record_id, label: words(r.title_ref) + " (" + vendorName(r.vendor_id) + ")" }; });
+  }
+  function customFieldRow(f, value) {
+    var host = document.getElementById("tpc-custom-fields");
+    var row = R.el("div", "tpc-row tpc-custom-field");
+    var grid = R.el("div", "tpc-grid");
+    function control(tag, name, labelText, cls) {
+      var label = R.el("label", "", labelText);
+      var el = R.el(tag, cls || "input");
+      el.name = name;
+      label.appendChild(el);
+      grid.appendChild(label);
+      return el;
+    }
+    var name = control("input", "cf_name", "Field name"); name.maxLength = 100; name.value = f ? words(f.label_ref) : "";
+    var type = control("select", "cf_type", "Type", "select");
+    FIELD_TYPES.forEach(function (p) { var o = R.el("option", "", p[1]); o.value = p[0]; type.appendChild(o); });
+    type.value = f ? f.field_type : "text_ref";
+    var sens = control("select", "cf_sensitivity", "Who may see it", "select");
+    SENSITIVITY.forEach(function (p) { var o = R.el("option", "", p[1]); o.value = p[0]; sens.appendChild(o); });
+    sens.value = f ? f.sensitivity : "internal";
+    var choices = control("input", "cf_choices", "Choices (separate with commas)");
+    choices.value = f ? (f.options || []).map(words).join(", ") : "";
+    var valueInput = control("input", "cf_value", "Value");
+    var req = R.el("label", "tpc-actions"); var cb = R.el("input"); cb.type = "checkbox"; cb.name = "cf_required"; cb.checked = f ? !!f.required : false;
+    req.appendChild(cb); req.appendChild(document.createTextNode(" Must be filled in")); grid.appendChild(req);
+    row.appendChild(grid);
+    row.appendChild(R.button("Remove field", "ghost", function () { row.remove(); }));
+    row.dataset.fieldId = f ? f.field_id : "";
+    function sync() {
+      var t = type.value;
+      choices.parentElement.hidden = !(t === "single_choice" || t === "multi_choice");
+      valueInput.type = t === "timestamp" ? "date" : (t === "integer" || t === "decimal") ? "number" : "text";
+      valueInput.step = t === "decimal" ? "any" : "1";
+      valueInput.placeholder = t === "boolean" ? "Yes or no" : (t === "single_choice" || t === "multi_choice") ? "One of the choices" : "";
+    }
+    type.addEventListener("change", sync);
+    sync();
+    if (value !== undefined && value !== null) {
+      valueInput.value = Array.isArray(value) ? value.map(words).join(", ") : typeof value === "boolean" ? (value ? "Yes" : "No") : f && f.field_type === "timestamp" ? dateValue(value) : f && (f.field_type === "text_ref" || f.field_type === "single_choice") ? words(value) : String(value);
+    }
+    host.appendChild(row);
+  }
+  function formulaRow(fm) {
+    var host = document.getElementById("tpc-formulas");
+    var row = R.el("div", "tpc-row tpc-formula");
+    var grid = R.el("div", "tpc-grid");
+    var nameLabel = R.el("label", "", "Calculation name"); var name = R.el("input", "input"); name.name = "fm_name"; name.value = fm ? words(fm.formula_id) : "";
+    nameLabel.appendChild(name); grid.appendChild(nameLabel);
+    var opLabel = R.el("label", "", "What it does"); var op = R.el("select", "select"); op.name = "fm_op";
+    OPERATORS.forEach(function (p) { var o = R.el("option", "", p[1]); o.value = p[0]; op.appendChild(o); });
+    op.value = fm ? fm.operator : "add"; opLabel.appendChild(op); grid.appendChild(opLabel);
+    var fieldsLabel = R.el("label", "", "Using the number fields named (separate with commas)"); var fieldsInput = R.el("input", "input"); fieldsInput.name = "fm_fields";
+    fieldsInput.value = fm ? fm.operands.filter(function (o) { return o.source === "field"; }).map(function (o) { return words(o.field_id); }).join(", ") : "";
+    fieldsLabel.appendChild(fieldsInput); grid.appendChild(fieldsLabel);
+    var constLabel = R.el("label", "", "And this number (optional)"); var constant = R.el("input", "input"); constant.type = "number"; constant.step = "any"; constant.name = "fm_const";
+    var lit = fm ? fm.operands.filter(function (o) { return o.source === "literal"; })[0] : null; constant.value = lit ? lit.value : "";
+    constLabel.appendChild(constant); grid.appendChild(constLabel);
+    row.appendChild(grid);
+    row.appendChild(R.button("Remove calculation", "ghost", function () { row.remove(); }));
+    host.appendChild(row);
+  }
+  function openEditor(r) {
+    editing = r;
+    form.reset();
+    document.getElementById("tpc-custom-fields").textContent = "";
+    document.getElementById("tpc-formulas").textContent = "";
+    fill(F("parent_contract_id"), [{ value: "", label: "No" }].concat(contractOptions(r && r.record_id)), false);
+    var linkedHost = document.getElementById("tpc-linked");
+    linkedHost.textContent = "";
+    contractOptions(r && r.record_id).forEach(function (c) {
+      var label = R.el("label"); var cb = R.el("input"); cb.type = "checkbox"; cb.name = "linked"; cb.value = c.value;
+      cb.checked = !!(r && r.lifecycle && (r.lifecycle.linked_contract_ids || []).indexOf(c.value) >= 0);
+      label.appendChild(cb); label.appendChild(document.createTextNode(" " + c.label)); linkedHost.appendChild(label);
+    });
+    if (!linkedHost.childNodes.length) { linkedHost.appendChild(R.el("p", "muted", "No contracts to link yet.")); }
+    if (!S.vendors.length) { say(formStatus, "Add the vendor on the Third-party Intelligence page first; contracts are linked to those vendors."); }
+    F("record_kind").disabled = !!r;
+    F("vendor_id").disabled = !!r;
+    document.getElementById("tpc-editor-title").textContent = r ? "Edit " + words(r.title_ref) : "Add a Contract or Engagement";
+    if (r) {
+      var l = r.lifecycle || {};
+      F("record_kind").value = r.record_kind;
+      F("vendor_id").value = r.vendor_id;
+      F("title").value = words(r.title_ref);
+      F("owner_ref").value = r.owner_ref;
+      if (r.record_kind === "contract") {
+        F("agreement_type").value = l.agreement_type; F("agreement").value = words(l.agreement_ref); F("renewal_mode").value = l.renewal_mode;
+        F("effective_at").value = dateValue(l.effective_at); F("expires_at").value = dateValue(l.expires_at);
+        F("notice_period_days").value = l.notice_period_days || 0; F("governing_law").value = l.governing_law_ref || "";
+        F("parent_contract_id").value = l.parent_contract_id || "";
+      } else {
+        F("engagement_type").value = l.engagement_type; F("service_category").value = l.service_category_ref; F("business_owner_ref").value = l.business_owner_ref;
+        F("start_at").value = dateValue(l.start_at); F("end_at").value = dateValue(l.end_at); F("operational_criticality").value = l.operational_criticality;
+        F("data_access").value = l.data_access; F("hosting_model").value = l.hosting_model;
+      }
+      (r.field_schema || []).forEach(function (f) { customFieldRow(f, (r.field_values || {})[f.field_id]); });
+      (r.formulas || []).forEach(formulaRow);
+    }
+    switchKind();
+    editor.hidden = false;
+    editor.scrollIntoView({ behavior: "smooth" });
+    F("title").focus();
+  }
+  F("record_kind").addEventListener("change", switchKind);
+  document.getElementById("tpc-new").addEventListener("click", function () { openEditor(null); });
+  document.getElementById("tpc-cancel").addEventListener("click", function () { editor.hidden = true; editing = null; });
+  document.getElementById("tpc-add-field").addEventListener("click", function () { customFieldRow(null); });
+  document.getElementById("tpc-add-formula").addEventListener("click", function () { formulaRow(null); });
+
+  function customFields() {
+    var schema = [];
+    var values = {};
+    var byName = {};
+    document.querySelectorAll("#tpc-custom-fields .tpc-custom-field").forEach(function (row) {
+      var q = function (n) { return row.querySelector('[name="' + n + '"]'); };
+      var label = q("cf_name").value.trim();
+      if (!label) { return; }
+      var type = q("cf_type").value;
+      var id = row.dataset.fieldId || ref(label, "field.").toLowerCase().slice(0, 100);
+      var options = (type === "single_choice" || type === "multi_choice")
+        ? q("cf_choices").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean).map(function (s) { return ref(s, ""); }) : [];
+      if ((type === "single_choice" || type === "multi_choice") && !options.length) { throw plain("Add the choices for \"" + label + "\"."); }
+      schema.push({ field_id: id, label_ref: ref(label, ""), field_type: type, required: q("cf_required").checked, sensitivity: q("cf_sensitivity").value, options: options });
+      byName[label.toLowerCase()] = id;
+      var raw = q("cf_value").value.trim();
+      if (!raw) { if (q("cf_required").checked) { throw plain("Fill in \"" + label + "\"."); } return; }
+      var v;
+      if (type === "boolean") { v = /^(y|yes|true)$/i.test(raw); }
+      else if (type === "integer") { v = parseInt(raw, 10); }
+      else if (type === "decimal") { v = parseFloat(raw); }
+      else if (type === "timestamp") { v = epoch(raw); }
+      else if (type === "multi_choice") { v = raw.split(",").map(function (s) { return ref(s.trim(), ""); }).filter(function (s) { return options.indexOf(s) >= 0; }); }
+      else if (type === "single_choice") { v = ref(raw, ""); if (options.indexOf(v) < 0) { throw plain("Pick one of the choices for \"" + label + "\"."); } }
+      else { v = ref(raw, "doc."); }
+      if (v === null || (typeof v === "number" && !isFinite(v))) { throw plain("Check the value of \"" + label + "\"."); }
+      values[id] = v;
+    });
+    var formulas = [];
+    document.querySelectorAll("#tpc-formulas .tpc-formula").forEach(function (row) {
+      var q = function (n) { return row.querySelector('[name="' + n + '"]'); };
+      var name = q("fm_name").value.trim();
+      if (!name) { return; }
+      var operands = q("fm_fields").value.split(",").map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean).map(function (n) {
+        if (!byName[n]) { throw plain("\"" + n + "\" isn't one of your custom fields."); }
+        return { source: "field", field_id: byName[n] };
       });
-    } catch (_error) { /* governed status already rendered */ }
-  });
-  document.getElementById("tpc-purge-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    var form = event.currentTarget;
-    if (!field(form, "confirmation").checked) {
-      operationStatus.textContent = "Confirm the retention-authorized purge before continuing.";
-      operationStatus.dataset.state = "failed";
-      return;
+      var c = q("fm_const").value;
+      if (c !== "") { operands.push({ source: "literal", value: Number(c) }); }
+      if (!operands.length) { throw plain("Choose what \"" + name + "\" calculates from."); }
+      formulas.push({ formula_id: ref(name, "calc.").toLowerCase().slice(0, 100), operator: q("fm_op").value, operands: operands, round_digits: 2 });
+    });
+    return { schema: schema, values: values, formulas: formulas };
+  }
+  function lifecycle(kind) {
+    if (kind === "contract") {
+      var body = { agreement_type: F("agreement_type").value, agreement_ref: ref(F("agreement").value, "doc."),
+        effective_at: epoch(F("effective_at").value), expires_at: epoch(F("expires_at").value), renewal_mode: F("renewal_mode").value,
+        notice_period_days: Math.max(0, parseInt(F("notice_period_days").value, 10) || 0) };
+      if (F("governing_law").value) { body.governing_law_ref = F("governing_law").value; }
+      if (F("parent_contract_id").value) { body.parent_contract_id = F("parent_contract_id").value; }
+      if (!F("agreement").value.trim()) { throw plain("Say where the signed document is."); }
+      return body;
     }
-    try {
-      var limit = positiveInteger(field(form, "limit").value, "Purge limit", 1000);
-      await run("Purging retention-due records", function () {
-        return request("/operations/purge-expired", {
-          method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify({ limit: limit })
+    return { engagement_type: F("engagement_type").value, service_category_ref: F("service_category").value,
+      start_at: epoch(F("start_at").value), end_at: epoch(F("end_at").value), operational_criticality: F("operational_criticality").value,
+      data_access: F("data_access").value, hosting_model: F("hosting_model").value, business_owner_ref: F("business_owner_ref").value,
+      linked_contract_ids: Array.prototype.map.call(form.querySelectorAll('input[name="linked"]:checked'), function (c) { return c.value; }) };
+  }
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var kind = editing ? editing.record_kind : F("record_kind").value;
+    Promise.resolve().then(function () {
+      if (!F("title").value.trim()) { throw plain("Give it a name."); }
+      if (!editing && !F("vendor_id").value) { throw plain("Choose the vendor."); }
+      if (!F("owner_ref").value) { throw plain("Choose the owner."); }
+      var custom = customFields();
+      var life = lifecycle(kind);
+      if (editing) {
+        return request("/" + (kind === "contract" ? "contracts/" : "engagements/") + encodeURIComponent(editing.record_id), "PATCH", {
+          expected_revision: editing.revision, title_ref: ref(F("title").value, ""), owner_ref: F("owner_ref").value, lifecycle: life,
+          field_schema: custom.schema, field_values: custom.values, formulas: custom.formulas, idempotency_key: R.newKey(),
         });
-      });
-      field(form, "confirmation").checked = false;
-      await loadRecords();
-    } catch (error) {
-      if (error.rendered !== true) { operationStatus.textContent = String(error.message || error).slice(0, 500); operationStatus.dataset.state = "failed"; }
-    }
+      }
+      var vendor = S.vendors.filter(function (v) { return v.vendor_id === F("vendor_id").value; })[0];
+      var body = { vendor_id: vendor.vendor_id, vendor_revision: vendor.revision, title_ref: ref(F("title").value, ""), owner_ref: F("owner_ref").value,
+        status: kind === "contract" ? F("contract_status").value : F("engagement_status").value, lifecycle: life,
+        field_schema: custom.schema, field_values: custom.values, formulas: custom.formulas, idempotency_key: R.newKey() };
+      return request("/" + (kind === "contract" ? "contracts" : "engagements"), "POST", body);
+    }).then(function () {
+      say(formStatus, "Saved.");
+      editor.hidden = true; editing = null;
+      return loadRecords();
+    }).catch(fail(formStatus, "save it"));
   });
 
-  switchKind();
+  // ---- row actions ---------------------------------------------------------------
+  function changeStatus(r) {
+    var next = (TRANSITIONS[r.record_kind] || {})[r.status] || [];
+    R.form("Change the status of " + words(r.title_ref), [
+      { key: "status", label: "New status", type: "select", default: next[0], options: next.map(function (s) { return { value: s, label: STATUS[s] }; }) },
+    ], "Change").then(function (v) {
+      if (!v) { return; }
+      var ask = v.status === "terminated" ? R.confirm("End " + words(r.title_ref) + "? It can only be archived afterwards.", "End it") : Promise.resolve(true);
+      return ask.then(function (ok) {
+        if (!ok) { return; }
+        return request("/" + (r.record_kind === "contract" ? "contracts/" : "engagements/") + encodeURIComponent(r.record_id), "PATCH",
+          { expected_revision: r.revision, status: v.status, idempotency_key: R.newKey() }).then(function () { say(listStatus, "Status changed."); return loadRecords(); });
+      });
+    }).catch(fail(listStatus, "change the status"));
+  }
+  function archive(r) {
+    R.confirm("Archive " + words(r.title_ref) + "? It can no longer be edited and will be deleted when its keep period ends.", "Archive").then(function (ok) {
+      if (!ok) { return; }
+      return request("/" + encodeURIComponent(r.record_id) + "/archive", "POST", { expected_revision: r.revision, idempotency_key: R.newKey() })
+        .then(function () { say(listStatus, "Archived."); return loadRecords(); });
+    }).catch(fail(listStatus, "archive it"));
+  }
+  function remove(r) {
+    R.confirm("Delete " + words(r.title_ref) + " permanently? The contract and its history are deleted. A short note that it existed is kept.", "Delete").then(function (ok) {
+      if (!ok) { return; }
+      return request("/" + encodeURIComponent(r.record_id), "DELETE", { expected_revision: r.revision, idempotency_key: R.newKey() })
+        .then(function () { say(listStatus, "Deleted."); return loadRecords(); });
+    }).catch(fail(listStatus, "delete it"));
+  }
+
+  // ---- administrator tools -------------------------------------------------------
+  document.getElementById("tpc-verify-integrity").addEventListener("click", function () {
+    request("/operations/integrity").then(function () { say(opStatus, "No changes found in the contract records."); }, fail(opStatus, "check the records"));
+  });
+  document.getElementById("tpc-retention-due").addEventListener("click", function () {
+    request("/operations/retention-due?limit=200").then(function (d) {
+      say(opStatus, (d.items || []).length + " archived record(s) are due for deletion.");
+      R.table(document.getElementById("tpc-admin-list"), [
+        { label: "Name", value: function (r) { return words(r.title_ref); } },
+        { label: "Vendor", value: function (r) { return vendorName(r.vendor_id); } },
+        { label: "Keep until", value: function (r) { return dayOf(r.retained_until); } },
+      ], d.items || [], [], { text: "Nothing is due for deletion." });
+    }, fail(opStatus, "load the records due for deletion"));
+  });
+  document.getElementById("tpc-recovery-preflight").addEventListener("click", function () {
+    Promise.all([request("/status"), request("/operations/integrity")]).then(function (res) {
+      var ok = res[0] && res[0].ready === true;
+      say(opStatus, ok ? "Records are consistent and ready to be backed up. Backups run on the schedule your IT team set." : "Contracts aren't ready, so a backup would be incomplete. Ask your IT team.");
+    }, fail(opStatus, "check backup readiness"));
+  });
+  document.getElementById("tpc-purge").addEventListener("click", function () {
+    R.confirm("Delete archived contracts whose keep period has ended? A short note that each existed is kept. This can't be undone.", "Delete").then(function (ok) {
+      if (!ok) { return; }
+      return request("/operations/purge-expired", "POST", { limit: 1000 }).then(function (d) {
+        say(opStatus, (d.removed && d.removed.length !== undefined ? d.removed.length : d.removed || 0) + " expired record(s) deleted.");
+        return loadRecords();
+      });
+    }).catch(fail(opStatus, "delete expired contracts"));
+  });
+
+  Array.prototype.forEach.call(filters.elements, function (el) { el.addEventListener("change", function () { loadRecords(); }); });
+  filters.addEventListener("submit", function (ev) { ev.preventDefault(); loadRecords(); });
+  document.getElementById("tpc-refresh-status").addEventListener("click", refreshStatus);
   refreshStatus();
 }(typeof window !== "undefined" ? window : this));

@@ -1,239 +1,141 @@
 // Run with: node --test packages/maverick-dashboard/tests/js/third_party_contracts_client.test.js
 "use strict";
-
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
+const { JSDOM } = require("jsdom");
 
-function client() {
-  const window = {};
-  const context = { Date, Set, TextDecoder, TextEncoder, URLSearchParams, console, window };
-  vm.createContext(context);
-  const source = fs.readFileSync(
-    path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-third-party-contracts.js"),
-    "utf8",
-  );
-  vm.runInContext(source, context, { filename: "lightwork-third-party-contracts.js" });
-  return window.LightworkThirdPartyContractsClient;
+const folder = path.resolve(__dirname, "../../maverick_dashboard");
+const markup = fs.readFileSync(path.join(folder, "templates/third_party_contracts.html"), "utf8")
+  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+  .replace(/{% if not contracts_[a-z_]+ %}[\s\S]*?{% endif %}/g, "")
+  .replace(/{%-?[\s\S]*?-?%}/g, "").replace(/{{[\s\S]*?}}/g, "");
+const helpers = fs.readFileSync(path.join(folder, "static/lightwork-record-workflows.js"), "utf8");
+const source = fs.readFileSync(path.join(folder, "static/lightwork-third-party-contracts.js"), "utf8");
+
+function record(extra = {}) {
+  return Object.assign({ record_id: "contract-1", record_kind: "contract", vendor_id: "vendor-x", title_ref: "Acme-master-agreement", owner_ref: "user:ann.at.example.com",
+    status: "active", revision: 4, lifecycle: { agreement_type: "master_services", agreement_ref: "doc.Legal-drive", renewal_mode: "manual", expires_at: 1893456000, notice_period_days: 30 },
+    field_schema: [], field_values: {}, formulas: [], computed_values: {} }, extra);
 }
 
-function headers(contentLength = null) {
-  return {
-    get(name) { return name.toLowerCase() === "content-length" ? contentLength : null; },
+async function fixture({ ready = true, records = [record()], intercept = () => undefined, roles = { canOperate: "true", canAudit: "true", canAdmin: "true" } } = {}) {
+  const dom = new JSDOM(markup, { url: "https://lightwork.example/third-party/contracts", runScripts: "outside-only" });
+  const { window } = dom;
+  const shell = window.document.getElementById("third-party-contracts-shell");
+  Object.assign(shell.dataset, roles, { apiBase: "/api/v1/third-party/contracts" });
+  const ui = { answer: true, confirms: [], formValues: [], calls: [] };
+  window.mvConfirm = async (m) => { ui.confirms.push(m); return ui.answer; };
+  window.mvForm = async () => ui.formValues.shift() || null;
+  window.mvErrorText = (f, a) => "Could not " + a + ".";
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  window.TextDecoder = TextDecoder;
+  window.fetch = async (url, opts = {}) => {
+    const call = { url: new URL(url, window.location), method: opts.method || "GET", body: opts.body ? JSON.parse(opts.body) : null, opts };
+    ui.calls.push(call);
+    let reply = await intercept(call);
+    const p = call.url.pathname;
+    if (reply === undefined) {
+      if (p.endsWith("/contracts/status")) reply = { enabled: true, configured: true, ready };
+      else if (p === "/api/v1/third-party/intelligence/vendors") reply = { items: [{ vendor_id: "vendor-x", display_label: "Acme Corp", revision: 7, state: "active" }] };
+      else if (p === "/api/v1/choices/people") reply = { people: [{ value: "user:ann@example.com", label: "ann@example.com" }] };
+      else if (p === "/api/v1/third-party/contracts" && call.method === "GET") reply = { items: records };
+      else reply = { ok: true };
+    }
+    const status = reply.__status || 200;
+    return new Response(JSON.stringify(reply), { status, headers: { "Content-Type": "application/json" } });
   };
+  window.eval(helpers);
+  window.eval(source);
+  async function settle() { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); }
+  await settle();
+  const el = (id) => window.document.getElementById(id);
+  const rowButton = (text, label) => {
+    const row = [...el("tpc-record-list").querySelectorAll("tr")].find((tr) => tr.textContent.includes(text));
+    return row && [...row.querySelectorAll("button")].find((b) => b.textContent === label);
+  };
+  return Object.assign(ui, { window, document: window.document, el, settle, rowButton });
 }
 
-function streamingResponse(chunks, { contentLength = null, ok = true, status = 200 } = {}) {
-  let reads = 0;
-  let cancelled = false;
-  const reader = {
-    async read() {
-      const value = chunks[reads];
-      reads += 1;
-      return value === undefined ? { done: true } : { done: false, value };
-    },
-    async cancel() { cancelled = true; },
-  };
-  const body = {
-    getReader() { return reader; },
-    async cancel() { cancelled = true; },
-  };
-  return {
-    response: { headers: headers(contentLength), body, ok, status },
-    state: () => ({ reads, cancelled }),
-  };
-}
-
-function plain(value) { return JSON.parse(JSON.stringify(value)); }
-
-function commonCreate() {
-  return {
-    record_kind: "contract",
-    record_id: "contract-7",
-    vendor_id: "vendor-1",
-    vendor_revision: "4",
-    title_ref: "contract-title",
-    owner_ref: "owner-risk",
-    contract_status: "draft",
-    agreement_type: "subscription",
-    agreement_ref: "agreement-vault-ref",
-    effective_at: "2033-05-18T03:33:20Z",
-    expires_at: "2034-05-18T03:33:20Z",
-    renewal_mode: "automatic",
-    notice_period_days: "45",
-    governing_law_ref: "law-ref",
-    parent_contract_id: "",
-    engagement_status: "planned",
-    engagement_type: "software",
-    service_category_ref: "ai-service",
-    start_at: "",
-    end_at: "",
-    operational_criticality: "high",
-    data_access: "confidential",
-    hosting_model: "vendor_cloud",
-    linked_contract_ids: "",
-    business_owner_ref: "business-owner",
-    field_schema_json: JSON.stringify([
-      {
-        field_id: "annual_cost", label_ref: "label-cost", field_type: "decimal",
-        required: true, sensitivity: "confidential", options: [],
-      },
-      {
-        field_id: "regions", label_ref: "label-regions", field_type: "multi_choice",
-        required: true, sensitivity: "internal", options: ["us", "ca"],
-      },
-    ]),
-    field_values_json: JSON.stringify({ annual_cost: 60000, regions: ["us", "ca"] }),
-    formulas_json: JSON.stringify([
-      {
-        formula_id: "cost_per_region", operator: "divide", round_digits: 2,
-        operands: [
-          { source: "field", field_id: "annual_cost", value: null },
-          { source: "field", field_id: "regions", value: null },
-        ],
-      },
-    ]),
-    idempotency_key: "create-contract-7",
-    tenant_id: "attacker-tenant",
-    actor_ref: "attacker",
-    vendor_type: "attacker-controlled",
-    vendor_authority_sha256: "f".repeat(64),
-    storage_path: "C:/attacker",
-  };
-}
-
-test("declared oversized lifecycle response is rejected before allocation", async () => {
-  const api = client();
-  const fixture = streamingResponse([new Uint8Array([123])], {
-    contentLength: String(api.MAX_RESPONSE_BYTES + 1),
-  });
-  await assert.rejects(api.readBoundedJson(fixture.response), (error) => {
-    assert.equal(error.code, "response_too_large");
-    return true;
-  });
-  assert.deepEqual(fixture.state(), { reads: 0, cancelled: true });
+test("records load on arrival with names, not references, and a button per next step", async (t) => {
+  const ui = await fixture(); t.after(() => ui.window.close());
+  const text = ui.el("tpc-record-list").textContent;
+  assert.match(text, /Acme master agreement/);
+  assert.match(text, /Acme Corp/);
+  assert.match(text, /ann@example.com/);
+  for (const label of ["View details", "Edit", "Change status", "Archive"]) assert.ok(ui.rowButton("Acme", label), label);
+  assert.equal(ui.rowButton("Acme", "Delete permanently"), undefined);
+  assert.doesNotMatch(ui.document.body.textContent, /vendor-x|contract-1|master_services/);
+  assert.equal(ui.el("tpc-operations").disabled, false);
+  const list = ui.calls.find((c) => c.url.pathname === "/api/v1/third-party/contracts");
+  assert.equal(list.opts.credentials, "same-origin");
+  assert.equal(list.opts.redirect, "error");
 });
 
-test("streaming lifecycle response cancels immediately after 64 KiB", async () => {
-  const api = client();
-  const fixture = streamingResponse([
-    new Uint8Array(api.MAX_RESPONSE_BYTES),
-    new Uint8Array([1]),
-    new TextEncoder().encode('{"never":"read"}'),
-  ]);
-  await assert.rejects(api.readBoundedJson(fixture.response), (error) => {
-    assert.equal(error.code, "response_too_large");
-    return true;
-  });
-  assert.deepEqual(fixture.state(), { reads: 2, cancelled: true });
+test("the page stays locked with a plain sentence when contracts aren't ready", async (t) => {
+  const ui = await fixture({ ready: false }); t.after(() => ui.window.close());
+  assert.equal(ui.el("tpc-operations").disabled, true);
+  assert.match(ui.el("tpc-readiness-detail").textContent, /aren't set up/);
 });
 
-test("invalid server JSON is rejected without echoing its content", async () => {
-  const api = client();
-  const secret = "private-contract-response";
-  const fixture = streamingResponse([new TextEncoder().encode(secret)]);
-  await assert.rejects(api.parseResponse(fixture.response), (error) => {
-    assert.equal(error.code, "response_invalid_json");
-    assert.equal(error.message.includes(secret), false);
-    return true;
-  });
+test("adding a contract uses the chosen vendor's current version and a generated request key", async (t) => {
+  const ui = await fixture(); t.after(() => ui.window.close());
+  ui.el("tpc-new").click();
+  const form = ui.el("tpc-create-form");
+  form.elements.namedItem("title").value = "Beta support contract";
+  form.elements.namedItem("agreement").value = "Signed PDF in legal drive";
+  form.elements.namedItem("expires_at").value = "2027-01-31";
+  ui.el("tpc-add-field").click();
+  const row = form.querySelector(".tpc-custom-field");
+  row.querySelector('[name="cf_name"]').value = "Annual fee";
+  row.querySelector('[name="cf_type"]').value = "decimal";
+  row.querySelector('[name="cf_value"]').value = "1200.5";
+  form.dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
+  await ui.settle();
+  const post = ui.calls.find((c) => c.method === "POST" && c.url.pathname.endsWith("/contracts"));
+  assert.equal(post.body.vendor_id, "vendor-x");
+  assert.equal(post.body.vendor_revision, 7);
+  assert.equal(post.body.title_ref, "Beta-support-contract");
+  assert.equal(post.body.owner_ref, "user:ann.at.example.com");
+  assert.equal(post.body.lifecycle.agreement_ref, "doc.Signed-PDF-in-legal-drive");
+  assert.equal(post.body.lifecycle.expires_at, Date.UTC(2027, 0, 31) / 1000);
+  assert.deepEqual(post.body.field_values, { "field.annual-fee": 1200.5 });
+  assert.equal(post.body.field_schema[0].field_type, "decimal");
+  assert.ok(post.body.idempotency_key);
 });
 
-test("contract create payload is closed and preserves safe schema formulas", () => {
-  const api = client();
-  const built = plain(api.buildCreatePayload(commonCreate()));
-  assert.equal(built.kind, "contract");
-  assert.equal(built.payload.record_id, "contract-7");
-  assert.equal(built.payload.vendor_revision, 4);
-  assert.equal(built.payload.lifecycle.agreement_type, "subscription");
-  assert.equal(built.payload.lifecycle.notice_period_days, 45);
-  assert.equal(built.payload.field_schema[0].sensitivity, "confidential");
-  assert.equal(built.payload.formulas[0].operator, "divide");
-  for (const forbidden of [
-    "tenant_id", "actor_ref", "vendor_type", "vendor_authority_sha256",
-    "storage_path", "recovery_path", "provider", "adapter",
-  ]) {
-    assert.equal(forbidden in built.payload, false);
-  }
+test("status changes offer only allowed next steps and carry the row version", async (t) => {
+  const ui = await fixture(); t.after(() => ui.window.close());
+  ui.formValues.push({ status: "suspended" });
+  ui.rowButton("Acme", "Change status").click();
+  await ui.settle();
+  const patch = ui.calls.find((c) => c.method === "PATCH");
+  assert.deepEqual({ status: patch.body.status, rev: patch.body.expected_revision }, { status: "suspended", rev: 4 });
 });
 
-test("engagement payload contains only exact engagement lifecycle fields", () => {
-  const api = client();
-  const values = commonCreate();
-  values.record_kind = "engagement";
-  values.record_id = "engagement-7";
-  values.engagement_status = "planned";
-  values.linked_contract_ids = "contract-7,contract-7,contract-8";
-  values.idempotency_key = "create-engagement-7";
-  const built = plain(api.buildCreatePayload(values));
-  assert.equal(built.kind, "engagement");
-  assert.deepEqual(built.payload.lifecycle.linked_contract_ids, ["contract-7", "contract-8"]);
-  assert.equal(built.payload.lifecycle.data_access, "confidential");
-  assert.equal("agreement_ref" in built.payload.lifecycle, false);
+test("archiving and deleting are confirmed first", async (t) => {
+  const ui = await fixture({ records: [record(), record({ record_id: "contract-2", title_ref: "Old-agreement", status: "archived", revision: 9 })] });
+  t.after(() => ui.window.close());
+  ui.answer = false;
+  ui.rowButton("Acme", "Archive").click();
+  await ui.settle();
+  assert.equal(ui.calls.some((c) => c.url.pathname.endsWith("/archive")), false);
+  ui.answer = true;
+  ui.rowButton("Old agreement", "Delete permanently").click();
+  await ui.settle();
+  const del = ui.calls.find((c) => c.method === "DELETE");
+  assert.equal(del.body.expected_revision, 9);
+  assert.equal(ui.confirms.length, 2);
 });
 
-test("update payload sends only explicitly selected closed fields", () => {
-  const api = client();
-  const built = plain(api.buildUpdatePayload({
-    record_kind: "contract",
-    expected_revision: "5",
-    idempotency_key: "update-contract-7",
-    include_title_ref: false,
-    update_title_ref: "ignored-title",
-    include_owner_ref: true,
-    update_owner_ref: "owner-legal",
-    include_status: true,
-    update_status: "active",
-    include_lifecycle: false,
-    lifecycle_json: "{}",
-    include_field_schema: false,
-    update_field_schema_json: "[]",
-    include_field_values: true,
-    update_field_values_json: '{"annual_cost":75000,"regions":["us"]}',
-    include_formulas: false,
-    update_formulas_json: "[]",
-    tenant_id: "attacker",
-    principal_ref: "attacker",
-  }));
-  assert.deepEqual(built, {
-    kind: "contract",
-    payload: {
-      expected_revision: 5,
-      idempotency_key: "update-contract-7",
-      owner_ref: "owner-legal",
-      status: "active",
-      field_values: { annual_cost: 75000, regions: ["us"] },
-    },
-  });
-  assert.equal("tenant_id" in built.payload, false);
-  assert.equal("principal_ref" in built.payload, false);
-});
-
-test("schema and formula validators reject extra or executable material", () => {
-  const api = client();
-  assert.throws(() => api.validateFieldSchema(JSON.stringify([
-    {
-      field_id: "risk", label_ref: "risk-label", field_type: "integer",
-      required: true, sensitivity: "internal", options: [], prompt: "licensed content",
-    },
-  ])), /unsupported field/);
-  assert.throws(() => api.validateFormulas(JSON.stringify([
-    {
-      formula_id: "risk", operator: "add", operands: [
-        { source: "literal", field_id: null, value: 1 },
-      ], round_digits: 0, expression: "eval(secret)",
-    },
-  ])), /unsupported field/);
-  assert.throws(() => api.buildUpdatePayload({
-    record_kind: "contract", expected_revision: "1", idempotency_key: "empty-update",
-    include_title_ref: false, include_owner_ref: false, include_status: false,
-    include_lifecycle: false, include_field_schema: false,
-    include_field_values: false, include_formulas: false,
-  }), /Select at least one/);
-  const invalidCreate = commonCreate();
-  invalidCreate.agreement_type = "caller_defined";
-  assert.throws(() => api.buildCreatePayload(invalidCreate), /Agreement type is unsupported/);
-  assert.throws(() => api.validateLifecycle("contract", { agreement_type: "subscription" }), /missing agreement_ref/);
+test("a failed save is a plain sentence", async (t) => {
+  const ui = await fixture({ intercept: (c) => (c.method === "POST" ? { __status: 409 } : undefined) }); t.after(() => ui.window.close());
+  ui.el("tpc-new").click();
+  const form = ui.el("tpc-create-form");
+  form.elements.namedItem("title").value = "X";
+  form.elements.namedItem("agreement").value = "Y";
+  form.dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
+  await ui.settle();
+  assert.equal(ui.el("tpc-form-status").textContent, "Could not save it.");
 });
