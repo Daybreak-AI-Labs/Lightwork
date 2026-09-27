@@ -475,6 +475,7 @@ def _dump(data: dict) -> str:
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
                     "research_execution",
+                    *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
                     *SWITCHABLE_SECTIONS)):
         tbl = data.get(section) or {}
@@ -970,6 +971,61 @@ def set_section_enable(section: str, enabled: bool) -> None:
         data = _load_overlay_for_update()
         data.setdefault(section, {})["enable"] = bool(enabled)
         _write(data)
+
+
+# Compliance controls the /compliance page can strengthen from inside the app.
+# Only these exact (section, key) pairs are writable, and only to the value
+# types listed; nothing here can turn a protection off except retention
+# periods, which only accept whole days within the bounds below.
+COMPLIANCE_SETTINGS: dict[tuple[str, str], type] = {
+    ("audit", "sign"): bool,
+    ("privacy", "anonymous"): bool,
+    ("encryption", "at_rest"): bool,
+    ("enterprise", "mode"): bool,
+    ("compliance", "disclosure_text"): str,
+    ("retention", "audit_days"): int,
+    ("retention", "episodes_days"): int,
+    ("retention", "events_days"): int,
+    ("retention", "messages_days"): int,
+    ("retention", "usage_days"): int,
+}
+COMPLIANCE_SETTING_SECTIONS: tuple[str, ...] = tuple(
+    dict.fromkeys(section for section, _key in COMPLIANCE_SETTINGS)
+)
+_RETENTION_DAY_BOUNDS = (1, 3650)
+
+
+def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
+    """Write a bounded group of compliance settings in one overlay save."""
+    if not isinstance(updates, dict) or not updates:
+        raise ValueError("unknown setting")
+    clean: dict[tuple[str, str], object] = {}
+    for pair, value in updates.items():
+        kind = COMPLIANCE_SETTINGS.get(pair)
+        if kind is None:
+            raise ValueError("unknown setting")
+        if kind is bool:
+            if value is not True:
+                # Protections can only be switched on from the dashboard.
+                raise ValueError("unknown setting")
+        elif kind is int:
+            low, high = _RETENTION_DAY_BOUNDS
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError("retention days are out of range")
+        elif not isinstance(value, str) or not value.strip() or len(value) > 1000:
+            raise ValueError("text setting is empty or too long")
+        clean[pair] = value
+    with _locked():
+        data = _load_overlay_for_update()
+        for (section, key), value in clean.items():
+            table = data.setdefault(section, {})
+            if not isinstance(table, dict):
+                raise SecuritySuiteConfigUnavailable(
+                    "dashboard settings are unreadable; settings were not changed"
+                )
+            table[key] = value
+        _write(data)
+    config.reset_config_cache()
 
 
 # Governance-module enable flags an admin may switch from inside the app --

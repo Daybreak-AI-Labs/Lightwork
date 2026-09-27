@@ -1168,6 +1168,9 @@ app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
 app.include_router(create_cortex_page_router(templates))
 app.include_router(create_autonomous_compliance_page_router(templates))
+from .compliance_controls_api import router as _compliance_controls_router  # noqa: E402
+
+app.include_router(_compliance_controls_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -6152,7 +6155,10 @@ def _compliance_view(framework: str) -> dict:
     if framework != "all":
         checks = [c for c in checks if c.framework == framework]
     # Group by framework bucket ("eu"/"us") for labelled tables on the page.
-    labels = {"eu": "EU AI Act / GDPR", "us": "NIST AI RMF + US state/sector law"}
+    labels = {
+        "eu": "European Union (AI Act and GDPR)",
+        "us": "United States (federal and state rules)",
+    }
     groups: dict[str, dict] = {}
     for c in checks:
         bucket = groups.setdefault(
@@ -6182,6 +6188,13 @@ async def compliance_page(request: Request) -> HTMLResponse:
     state so a missing core install never 500s the console.
     """
     view = _compliance_view(request.query_params.get("framework") or "all")
+    from .compliance_controls_api import RETENTION_FIELDS, guide_for
+
+    view["guide_for"] = guide_for
+    view["retention_fields"] = RETENTION_FIELDS
+    view["can_admin"] = has_permission(request, "admin")
+    view["can_operate"] = has_permission(request, "operate")
+    view["can_global_admin"] = has_global_permission(request, "admin")
     return templates.TemplateResponse(request, "compliance.html", view)
 
 

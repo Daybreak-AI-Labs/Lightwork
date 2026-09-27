@@ -26,6 +26,41 @@ PRICING_MAILTO = (
 )
 
 
+#: One plain sentence per module, shown on its card instead of the page address.
+MODULE_SUMMARIES: dict[str, str] = {
+    "/governance-agents": "Ready-made agents that keep your AI inventory and reviews up to date.",
+    "/ai-entity-tasks": "Review and fix-up tasks for each AI system you use.",
+    "/ai-evidence-analysis": "Read uploaded documents and pull out evidence about your AI systems.",
+    "/assurance/cloud-agents": "Keep track of AI agents running in your cloud accounts.",
+    "/privacy": "Assessments, vendors, data requests, breaches and consent in one place.",
+    "/privacy/rights-orchestration": "Handle requests from people to see, correct or delete their data.",
+    "/privacy/data-discovery": "Scan your storage to find where personal data lives.",
+    "/privacy/notice-governance": "Approve and publish new versions of your privacy notices.",
+    "/privacy/drop": "Handle California deletion and opt-out requests.",
+    "/consent": "Record and honour what each person agreed to.",
+    "/consent/publishing": "Publish your consent banner and preference center.",
+    "/consent/global-opt-out": "Honour browser opt-out signals such as Global Privacy Control.",
+    "/consent/scan-inventory": "Scan your websites for cookies and trackers.",
+    "/compliance": "See which regulations you meet and what still needs doing.",
+    "/compliance/continuous-evidence": "Collect proof that your controls keep working.",
+    "/security/governance": "Prepare for the EU AI Act and train your people.",
+    "/assess/evidence-autopopulation": "Fill in assessment answers from evidence you already have.",
+    "/third-party/intelligence": "Watch your vendors for risk signals.",
+    "/third-party/lifecycle": "Onboard, review and offboard vendors step by step.",
+    "/third-party/contracts": "Keep vendor contracts and engagements on record.",
+    "/data-use": "Decide what data may be used for which purpose.",
+    "/data-use/providers": "Apply your data-use rules inside your data platforms.",
+}
+
+#: Plain meanings for the three status labels (the catalog's own wording is
+#: written for reviewers).
+STATUS_MEANINGS: dict[str, str] = {
+    "shipped": "Ready to use today.",
+    "preview": "Works, but is still being expanded. Try it and tell us what you need.",
+    "external": "Needs an outside service, licence or certification before it can be used.",
+}
+
+
 def visible_suites(suites, not_ready) -> list:
     """The catalog with every module held back from customers removed, and any
     suite left empty dropped: the landing must never link a visitor into a
@@ -74,7 +109,8 @@ def create_autonomous_compliance_page_router(
                 "module_count": sum(len(s.modules) for s in catalog_suites),
                 "status_order": catalog.STATUS_ORDER,
                 "status_labels": catalog.STATUS_LABELS,
-                "status_meanings": catalog.STATUS_MEANINGS,
+                "status_meanings": {**catalog.STATUS_MEANINGS, **STATUS_MEANINGS},
+                "module_summaries": MODULE_SUMMARIES,
                 "status_badge_class": catalog.STATUS_BADGE_CLASS,
                 "pricing_mailto": PRICING_MAILTO,
             },
@@ -86,4 +122,4 @@ def create_autonomous_compliance_page_router(
     return router
 
 
-__all__ = ["PAGE_PATH", "PRICING_MAILTO", "create_autonomous_compliance_page_router"]
+__all__ = ["MODULE_SUMMARIES", "PAGE_PATH", "PRICING_MAILTO", "create_autonomous_compliance_page_router"]

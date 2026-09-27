@@ -11,7 +11,7 @@
   .acm-card { text-decoration: none; color: inherit; gap: .6rem; }
   .acm-card__row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
   .acm-card__name { font-weight: 600; }
-  .acm-card__path { color: var(--muted); font-size: var(--text-sm); word-break: break-all; }
+  .acm-card__path { color: var(--muted); font-size: var(--text-sm);  }
   .acm-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; margin: .5rem 0 0; padding: 0; list-style: none; }
   .acm-legend li { display: flex; flex-direction: column; gap: .3rem; }
   .acm-legend p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
@@ -22,15 +22,14 @@
   {% from "_hero.html" import hero %}
   {% call hero('Compliance, run by governed agents', 'Autonomous Compliance',
                subtitle='One product, six suites, one workforce',
-               lede='The six compliance suites are one platform, operated by governed
-                     agents. Every module below is labelled with its honest status
-                     &mdash; shipped, preview or external &mdash; and links straight to
-                     the working page.') %}
+               lede='Everything you need to run your compliance program, in six areas.
+                     Pick a card to open that part of Lightwork. Each card says whether
+                     it is ready to use today.') %}
     {% from "_hero.html" import state %}
-    {{ state('Status vocabulary',
-             module_count ~ ' modules across ' ~ (suites | length) ~ ' suites',
-             badge='shipped · preview · external', badge_class='info',
-             copy='Status is read from the shared compliance catalog, not written here.') }}
+    {{ state('What is here',
+             module_count ~ ' tools in ' ~ (suites | length) ~ ' areas',
+             badge='Ready · Preview · Needs outside service', badge_class='info',
+             copy='The labels are explained at the bottom of the page.') }}
   {% endcall %}
 
   {% for suite in suites %}
@@ -46,7 +45,7 @@
           <span class="acm-card__name">{{ module.label }}</span>
           <span class="badge {{ status_badge_class[module.status] }}">{{ status_labels[module.status] }}</span>
         </span>
-        <span class="acm-card__path">{{ module.path }}</span>
+        <span class="acm-card__path">{{ module_summaries.get(module.path, "Open " ~ module.label ~ ".") }}</span>
       </a>
       {% endfor %}
     </div>
