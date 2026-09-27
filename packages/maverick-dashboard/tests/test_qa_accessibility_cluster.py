@@ -33,7 +33,7 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
     assert "</main>" not in source
 
     heading_levels = [int(level) for level in re.findall(r"<h([1-6])(?:\s|>)", source)]
-    if "{% call hero(" in source:
+    if "{% call hero(" in source or "{{ hero(" in source:
         # _hero.html renders the page title as the single H1.
         heading_levels.insert(0, 1)
     assert heading_levels.count(1) == 1
