@@ -7,25 +7,65 @@
   var review = null;
   var repairReview = false;
   var identityTransition = null;
+  var AUTHORIZATION = /^[0-9a-f]{32}:[0-9a-f]{64}$/;
+  var FAILED = "Lightwork could not complete that step.";
+  var STATUS_LABELS = {
+    prepared: "getting ready", applying: "in progress", incomplete: "interrupted",
+    upgraded: "updated", upgrade_recovered: "returned to the previous version",
+    repaired: "repaired", repair_recovered: "repaired", rolled_back: "returned to the previous version"
+  };
+  var COMPLETED = ["upgraded", "upgrade_recovered", "repaired", "repair_recovered", "rolled_back"];
   function invoke(command, args) {
     if (!window.__TAURI__ || !window.__TAURI__.core) return Promise.reject(new Error("Open this page in Lightwork Desktop."));
     return window.__TAURI__.core.invoke(command, args);
   }
+  // The approval code is copied between two screens, so forgive stray spaces
+  // and line breaks from the copy. The format check itself is unchanged.
+  function code() { return String(get("maintenance-authorization").value || "").replace(/\s+/g, ""); }
+  function hint(text, tone) {
+    var node = get("maintenance-authorization-hint");
+    if (!node) return;
+    node.textContent = text;
+    node.className = "hint" + (tone ? " " + tone : "");
+  }
+  function describeCode() {
+    var value = code();
+    if (!value) hint("No code yet. Copy it in Workspace recovery mode, then select Paste code.");
+    else if (AUTHORIZATION.test(value)) hint("Code ready. It works for 15 minutes after it was made.", "ok");
+    else hint("This isn't a complete approval code. Copy the whole code again in Workspace recovery mode and paste it here.", "bad");
+  }
   function controls() {
     get("check-update").disabled = busy || !configured || !recoveryAvailable;
     get("repair-install").disabled = busy || !configured;
-    var authorized = /^[0-9a-f]{32}:[0-9a-f]{64}$/.test(get("maintenance-authorization").value || "");
+    var authorized = AUTHORIZATION.test(code());
     get("install-update").disabled = busy || !review || (!repairReview && !authorized);
     get("rollback-install").disabled = busy || !authorized;
     get("resume-maintenance").disabled = busy || !get("maintenance-incomplete").value;
     get("maintenance-logs").disabled = busy || !get("maintenance-log-point").value;
     get("back").disabled = busy;
     get("save-identity-transition").disabled = busy || !identityTransition;
+    if (get("paste-authorization")) get("paste-authorization").disabled = busy;
+    if (get("clear-authorization")) get("clear-authorization").disabled = busy;
   }
   function status(text) { get("maintenance-status").textContent = text; }
   function failure(error) {
-    status("Lightwork could not complete that step. Open Troubleshooting details for the reason, then check again or contact your administrator.");
-    get("maintenance-details").textContent = String(error);
+    var detail = String(error);
+    var reason = "Open Details for support to see why, then try again or contact your administrator.";
+    if (/expired or was (already used|retired)/i.test(detail)) {
+      reason = "The approval code has expired or was already used. Get a new code in Workspace recovery mode and paste it again.";
+      hint("That code can't be used any more. Get a new one in Workspace recovery mode.", "bad");
+    } else if (/authorization does not match|Use the rollback authorization/i.test(detail)) {
+      reason = "This approval code was made for a different action. Get a new code for this exact action in Workspace recovery mode.";
+      hint("That code was made for a different action. Get a new one in Workspace recovery mode.", "bad");
+    } else if (/Copy the current maintenance authorization|Authorize this installation in Workspace recovery first/i.test(detail)) {
+      reason = "Paste a current approval code from Workspace recovery mode, then try again.";
+    }
+    status(FAILED + " " + reason);
+    get("maintenance-details").textContent = detail;
+  }
+  function pointLabel(point, waiting) {
+    var label = waiting ? "needs finishing" : STATUS_LABELS[point.status] || "unknown state";
+    return point.old_version + " → " + point.new_version + " · " + label;
   }
   async function check(repair) {
     if (busy || !configured || (!repair && !recoveryAvailable)) return;
@@ -35,7 +75,7 @@
     get("identity-transition-notice").hidden = true; get("save-identity-transition").hidden = true;
     get("update-review").hidden = true;
     controls();
-    status(repair ? "Finding a verified copy of your installed version…" : "Checking for updates…");
+    status(repair ? "Looking for a safe copy of your installed version…" : "Checking for updates…");
     try {
       var result = await invoke("check_desktop_update", { repair: repair });
       if (result) {
@@ -48,23 +88,30 @@
           get("identity-transition-notice").hidden = false; get("save-identity-transition").hidden = false;
         }
         get("update-version").textContent = (result.repair ? "Repair version " : "Install version ") + result.version;
-        get("update-notes").textContent = result.notes || "No release notes were supplied.";
+        get("update-notes").textContent = result.notes || "No details were provided for this version.";
         get("install-update").textContent = result.repair ? "Repair and restart" : "Install and restart";
+        if (get("update-steps")) get("update-steps").hidden = repairReview;
+        if (get("repair-steps")) get("repair-steps").hidden = !repairReview;
         get("update-review").hidden = false;
-        status("Review the version below. Installation starts only when you confirm.");
+        status(repairReview
+          ? "Review the repair below. Nothing changes until you select Repair and restart."
+          : "Review the update below and follow its steps. Nothing is installed until you select Install and restart.");
       } else {
-        status(repair ? "A verified repair package for this version is not available. Contact your administrator." : "No newer version is available on your update channel.");
+        status(repair ? "A repair copy of this version isn't available right now. Contact your administrator." : "You have the latest version. No update is available.");
       }
     } catch (error) { review = null; identityTransition = null; get("update-review").hidden = true; failure(error); }
     finally { busy = false; controls(); }
+  }
+  function download(text, name, type) {
+    var url = URL.createObjectURL(new Blob([text], { type: type }));
+    var link = document.createElement("a"); link.href = url; link.download = name; link.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
   get("check-update").addEventListener("click", function () { return check(false); });
   get("repair-install").addEventListener("click", function () { return check(true); });
   get("save-identity-transition").addEventListener("click", function () {
     if (busy || !identityTransition) return;
-    var url = URL.createObjectURL(new Blob([JSON.stringify(identityTransition, null, 2)], { type: "application/json" }));
-    var link = document.createElement("a"); link.href = url; link.download = "lightwork-signing-transition.json"; link.click();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    download(JSON.stringify(identityTransition, null, 2), "lightwork-signing-transition.json", "application/json");
   });
   get("install-update").addEventListener("click", async function () {
     if (busy || !review || get("install-update").disabled) return;
@@ -72,41 +119,71 @@
     review = null;
     busy = true;
     controls();
-    status("Downloading and verifying the installer. Lightwork will close when installation begins…");
+    status("Downloading and checking the installer. Lightwork will close when installation begins…");
     try {
       var args = { review: selected, confirm: true };
-      if (!repairReview) args.authorization = get("maintenance-authorization").value;
+      if (!repairReview) args.authorization = code();
       get("maintenance-authorization").value = "";
+      describeCode();
       await invoke("install_desktop_update", args);
-      status("The verified installer has started. Follow its progress to reopen Lightwork.");
+      status("The installer has started. Lightwork will reopen when it finishes.");
     } catch (error) { failure(error); }
     finally { busy = false; get("update-review").hidden = true; controls(); }
   });
   get("back").addEventListener("click", function () {
     if (!busy) window.location.replace("index.html");
   });
-  get("maintenance-authorization").addEventListener("input", controls);
+  get("maintenance-authorization").addEventListener("input", function () { describeCode(); controls(); });
+  if (get("paste-authorization")) get("paste-authorization").addEventListener("click", async function () {
+    if (busy) return;
+    var clip = typeof navigator !== "undefined" && navigator.clipboard;
+    try {
+      if (!clip || !clip.readText) throw new Error("Clipboard reading is unavailable.");
+      get("maintenance-authorization").value = String(await clip.readText()).replace(/\s+/g, "");
+      describeCode();
+    } catch (_) {
+      hint("Lightwork couldn't read the clipboard. Click in the Approval code box and press Ctrl+V instead.", "bad");
+    }
+    controls();
+  });
+  if (get("clear-authorization")) get("clear-authorization").addEventListener("click", function () {
+    if (busy) return;
+    get("maintenance-authorization").value = "";
+    describeCode(); controls();
+  });
   get("maintenance-incomplete").addEventListener("change", controls);
   get("maintenance-log-point").addEventListener("change", controls);
   get("maintenance-logs").addEventListener("click", async function () {
     if (busy || !get("maintenance-log-point").value) return;
     busy = true; controls();
-    try { var result = await invoke("desktop_maintenance_logs", { id: get("maintenance-log-point").value }); get("maintenance-details").textContent = result.details || "No installation output was recorded."; }
+    try { var result = await invoke("desktop_maintenance_logs", { id: get("maintenance-log-point").value }); get("maintenance-details").textContent = result.details || "Nothing was recorded for this one."; }
     catch (error) { failure(error); }
     finally { busy = false; controls(); }
+  });
+  if (get("maintenance-details-copy")) get("maintenance-details-copy").addEventListener("click", function () {
+    var text = get("maintenance-details").textContent || "";
+    var say = function (message) { if (get("maintenance-details-copied")) get("maintenance-details-copied").textContent = message; };
+    var clip = typeof navigator !== "undefined" && navigator.clipboard;
+    if (clip && clip.writeText) return clip.writeText(text).then(function () { say("Copied."); }, function () { say("Couldn't copy. Use Save instead."); });
+    say("Couldn't copy. Use Save instead.");
+  });
+  if (get("maintenance-details-save")) get("maintenance-details-save").addEventListener("click", function () {
+    download(get("maintenance-details").textContent || "", "Lightwork-installation-details.txt", "text/plain");
   });
   async function recover(resume) {
     if (busy || (resume ? get("resume-maintenance").disabled : get("rollback-install").disabled)) return;
     busy = true; controls();
-    var args = resume ? { id: get("maintenance-incomplete").value, confirm: true } : { authorization: get("maintenance-authorization").value, confirm: true };
+    var args = resume ? { id: get("maintenance-incomplete").value, confirm: true } : { authorization: code(), confirm: true };
     get("maintenance-authorization").value = "";
-    status("Preparing the reviewed installation recovery. Lightwork will reopen with its result…");
+    describeCode();
+    status(resume ? "Finishing the interrupted update. Lightwork will reopen with the result…" : "Getting ready to go back to the previous version. Lightwork will reopen with the result…");
     try { await invoke(resume ? "resume_desktop_maintenance" : "rollback_desktop_update", args); }
     catch (error) { failure(error); }
     finally { busy = false; controls(); }
   }
   get("rollback-install").addEventListener("click", function () { return recover(false); });
   get("resume-maintenance").addEventListener("click", function () { return recover(true); });
+  describeCode();
   controls();
   invoke("maintenance_status").then(function (result) {
     get("installed-version").textContent = result.version;
@@ -114,16 +191,16 @@
     var recovery = result.recovery || {};
     recoveryAvailable = recovery.unavailable !== true;
     (recovery.recovery_points || []).forEach(function (point) {
-      var logOption = document.createElement("option"); logOption.value = point.id; logOption.textContent = point.old_version + " → " + point.new_version + " · " + point.status; get("maintenance-log-point").appendChild(logOption);
+      var logOption = document.createElement("option"); logOption.value = point.id; logOption.textContent = pointLabel(point, false); get("maintenance-log-point").appendChild(logOption);
       if (point.pending_finalization || ["prepared", "applying", "incomplete"].indexOf(point.status) >= 0) {
-        var option = document.createElement("option"); option.value = point.id; option.textContent = point.old_version + " → " + point.new_version + " · " + (point.pending_finalization && ["upgraded", "upgrade_recovered", "repaired", "repair_recovered", "rolled_back"].indexOf(point.status) >= 0 ? "awaiting finalization" : point.status); get("maintenance-incomplete").appendChild(option);
+        var option = document.createElement("option"); option.value = point.id; option.textContent = pointLabel(point, point.pending_finalization && COMPLETED.indexOf(point.status) >= 0); get("maintenance-incomplete").appendChild(option);
       }
     });
     if (recovery.incomplete) configured = false;
-    var completed = (recovery.recovery_points || []).filter(function (point) { return ["upgraded", "upgrade_recovered", "repaired", "repair_recovered", "rolled_back"].indexOf(point.status) >= 0; }).map(function (point) { if (point.status === "rolled_back" || point.status === "upgrade_recovered") return "returned to " + point.old_version; if (point.status === "repaired" || point.status === "repair_recovered") return "repaired " + point.old_version; return "updated to " + point.new_version; }).join(", ");
+    var completed = (recovery.recovery_points || []).filter(function (point) { return COMPLETED.indexOf(point.status) >= 0; }).map(function (point) { if (point.status === "rolled_back" || point.status === "upgrade_recovered") return "returned to " + point.old_version; if (point.status === "repaired" || point.status === "repair_recovered") return "repaired " + point.old_version; return "updated to " + point.new_version; }).join(", ");
     if (recovery.incomplete) get("resume-maintenance").textContent = "Recover and restart";
-    get("maintenance-recovery-result").textContent = recovery.incomplete ? "An unfinished installation is blocking normal workspace startup. Recover the previously verified installation above; its snapshots and installation logs remain saved." : completed ? "Completed operations: " + completed : "No completed operations recorded.";
-    status(recovery.incomplete ? "An unfinished reviewed installation is blocking workspace startup. Recover it above before reopening workspace work." : !recoveryAvailable ? "Installation recovery details could not be read. Repair can restore this version's application files; updates require readable recovery state." : configured ? "Check for an update, or repair the installed version." : "This build has no verified customer update channel. Contact your administrator for the customer installer.");
+    get("maintenance-recovery-result").textContent = recovery.incomplete ? "An unfinished installation is blocking normal workspace startup. Choose it above and select Recover and restart to put back the last working version. Its saved copies and installation records are kept." : completed ? "Completed: " + completed + "." : "Nothing has been updated or repaired here yet.";
+    status(recovery.incomplete ? "An unfinished update is stopping your workspace from opening. Finish it under Go back to the previous version below." : !recoveryAvailable ? "Lightwork couldn't read its saved restore points. You can still repair this version, but updates are paused. Contact your administrator if this continues." : configured ? "Check for an update, or repair the installed version." : "This copy of Lightwork can't check for updates by itself. Contact your administrator for the latest installer.");
     if (recovery.detail) get("maintenance-details").textContent = recovery.detail;
     controls();
   }, failure);

@@ -24,7 +24,7 @@
     if (busy) return;
     busy = true;
     get("enter-recovery").disabled = get("leave-recovery").disabled = true;
-    get("status").textContent = "Closing this app's local workspace and starting the selected mode…";
+    get("status").textContent = recovery ? "Closing your workspace and opening recovery mode… This can take up to a minute." : "Closing recovery mode and reopening your workspace… This can take up to a minute.";
     var modeChanged = false;
     try {
       if (!window.__TAURI__ || !window.__TAURI__.core) throw new Error("Open these controls from Lightwork Desktop.");
@@ -34,14 +34,22 @@
       window.location.replace(recovery ? "http://127.0.0.1:8765/workspace/recovery" : "http://127.0.0.1:8765/");
     } catch (error) {
       get("status").textContent = modeChanged
-        ? "The mode change was acknowledged, but the workspace is not responding. Retry or review startup details."
-        : "Lightwork could not confirm the mode change. Retry or review the details.";
+        ? "Lightwork switched modes, but your workspace isn't answering yet. Select the button again, or choose Reconnect Lightwork from the Lightwork menu."
+        : "Lightwork couldn't switch modes. Nothing was changed. Try again, and if it keeps happening, copy the Details for support and send them to your support contact.";
       get("details").textContent = String(error);
     } finally {
       busy = false;
       get("enter-recovery").disabled = get("leave-recovery").disabled = false;
     }
   }
+  get("details-copy").addEventListener("click", function () {
+    var text = get("details").textContent || "";
+    var done = function () { get("details-copied").textContent = "Copied."; };
+    var failed = function () { get("details-copied").textContent = "Couldn't copy. Select the text above and copy it yourself."; };
+    var clip = typeof navigator !== "undefined" && navigator.clipboard;
+    if (clip && clip.writeText) return clip.writeText(text).then(done, failed);
+    failed();
+  });
   get("enter-recovery").addEventListener("click", function () { return switchMode(true); });
   get("leave-recovery").addEventListener("click", function () { return switchMode(false); });
 })();
