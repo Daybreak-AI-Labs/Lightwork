@@ -65,7 +65,8 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
             source += (STATIC / script).read_text(encoding="utf-8")
         # Either wording fails closed; the plain one keeps code words off the page.
         assert ("Request failed: the server returned an invalid JSON response." in source
-                or "could not be confirmed" in source), name
+                or "could not be confirmed" in source
+                or "Could not read the result." in source), name
         assert swallowed_json.search(source) is None, name
         assert raw_body_fallback.search(source) is None, name
 

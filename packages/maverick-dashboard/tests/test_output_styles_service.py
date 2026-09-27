@@ -27,7 +27,10 @@ def test_set_then_active_shown():
     assert r.status_code == 303
     from maverick import runtime_overrides as ro
     assert ro.style_override() == "concise"
-    assert "Active:" in client.get("/styles").text
+    page = client.get("/styles").text
+    assert "In use now: Concise" in page
+    from test_support.plain_language import developer_terms
+    assert developer_terms(page) == []
 
 
 def test_clear_with_empty_value():
