@@ -364,3 +364,23 @@ def test_operator_cli_reconciles_a_parked_schedule(tmp_path, monkeypatch):
     assert done.exit_code == 0, done.output
     assert not real(path).get(1).recurrence_reconcile_required
     assert len(real(path).list(status="pending")) == 1
+
+
+def test_cron_rows_inserted_by_an_older_binary_are_backfilled_on_every_start(tmp_path):
+    import json
+    import sqlite3
+    import time
+
+    from maverick.job_queue import JobQueue
+    db = tmp_path / "q.db"
+    JobQueue(db)                                            # schema already upgraded
+    now = time.time() - 5
+    with sqlite3.connect(db) as c:                          # a rolled-back binary's insert
+        c.execute("INSERT INTO jobs (kind, payload, run_at, created_at, updated_at) VALUES (?,?,?,?,?)",
+                  ("run_goal", json.dumps({"goal_id": 1, "__cron__": "*/5 * * * *"}), now, now, now))
+    q = JobQueue(db)
+    job = q.claim()
+    assert job.recurrence_id
+    current = q.rearm(job.id, expected_attempts=job.attempts)
+    assert current.successor_id and [j.id for j in q.list(status="pending")]
+

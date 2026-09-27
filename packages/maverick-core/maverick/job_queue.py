@@ -173,7 +173,6 @@ class JobQueue:
             c.executescript(_SCHEMA)
             c.execute("BEGIN IMMEDIATE")
             columns = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
-            migrate = "recurrence_id" not in columns
             for name, definition in _RECURRENCE_COLUMNS.items():
                 if name not in columns:
                     c.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
@@ -185,24 +184,30 @@ class JobQueue:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_job_successor "
                 "ON jobs(successor_id) WHERE successor_id IS NOT NULL"
             )
-            if migrate:
+            # Backfill EVERY cron row without a schedule identity, not only on
+            # the first upgrade: rows an older binary inserted after the
+            # columns existed (a rollback, a mixed-version rollout) would
+            # otherwise run once and silently never re-arm.
+            rows = [self._row_to_job(row) for row in c.execute(
+                "SELECT * FROM jobs WHERE recurrence_id IS NULL")]
+            for job in rows:
+                if not job.payload.get("__cron__"):
+                    continue
                 # Old rows have no reliable schedule identity. Never merge two
-                # legitimate schedules merely because their payloads match.
-                for row in c.execute("SELECT * FROM jobs"):
-                    job = self._row_to_job(row)
-                    if not job.payload.get("__cron__"):
-                        continue
-                    uncertain = job.attempts > 0 and not job.payload.get("__rearmed__")
-                    c.execute(
-                        "UPDATE jobs SET recurrence_id=?, occurrence=0, "
-                        "scheduled_at=run_at, recurrence_payload=?, "
-                        "recurrence_reconcile_required=?, "
-                        "status=CASE WHEN ? THEN 'failed' ELSE status END, "
-                        "last_error=CASE WHEN ? THEN ? ELSE last_error END WHERE id=?",
-                        (uuid.uuid4().hex, json.dumps(_recurrence_template(job.kind, job.payload),
-                                                    default=str), int(uncertain), uncertain,
-                         uncertain, _RECONCILE_REASON, job.id),
-                    )
+                # legitimate schedules merely because their payloads match: a
+                # row that ran without its re-arm marker goes to an operator
+                # (`maverick queue reconcile`), who links or re-arms it.
+                uncertain = job.attempts > 0 and not job.payload.get("__rearmed__")
+                c.execute(
+                    "UPDATE jobs SET recurrence_id=?, occurrence=0, "
+                    "scheduled_at=run_at, recurrence_payload=?, "
+                    "recurrence_reconcile_required=?, "
+                    "status=CASE WHEN ? THEN 'failed' ELSE status END, "
+                    "last_error=CASE WHEN ? THEN ? ELSE last_error END WHERE id=?",
+                    (uuid.uuid4().hex, json.dumps(_recurrence_template(job.kind, job.payload),
+                                                default=str), int(uncertain), uncertain,
+                     uncertain, _RECONCILE_REASON, job.id),
+                )
             c.commit()
 
     @contextmanager
