@@ -1261,3 +1261,13 @@ def test_write_config_emits_immune_canaries_when_enabled(tmp_path: Path, monkeyp
     assert parsed["immune"]["canaries"] is True
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={"fleet_memory": True})
     assert "immune" not in parsed
+
+
+def test_write_config_emits_swarm_scale_when_raised(tmp_path: Path, monkeypatch):
+    # [swarm] is a kernel knob (maverick.config.get_swarm); the wizard step
+    # is what makes raising the 64-agent default reachable (rule 6).
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "swarm_max_total_spawns": 300, "swarm_max_concurrent_model_calls": 12})
+    assert parsed["swarm"] == {"max_total_spawns": 300, "max_concurrent_model_calls": 12}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "swarm" not in parsed

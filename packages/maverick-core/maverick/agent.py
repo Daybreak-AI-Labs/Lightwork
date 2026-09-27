@@ -3551,9 +3551,13 @@ class Agent:
         ignore a HALT (the cap/halt were otherwise only checked at turn
         boundaries). Raises :class:`BudgetExceeded` (wall) or
         :class:`killswitch.Halted`, both already handled by the caller."""
+        async def _call():
+            # Waiting for a swarm model slot counts against the wall clock too.
+            slot = getattr(self.ctx, "model_slot", None)
+            async with slot() if slot else contextlib.nullcontext():
+                return await self.ctx.llm.complete_async(**kw)
         return await self._await_wall_clock_guarded(
-            lambda: self.ctx.llm.complete_async(**kw),
-            in_flight_note="mid-generation")
+            _call, in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
