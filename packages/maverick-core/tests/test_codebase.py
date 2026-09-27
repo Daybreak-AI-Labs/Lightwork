@@ -12,7 +12,7 @@ from maverick.world_model import WorldModel
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
-SECRET_LINE = "def pricing_model(): return 0.4217  # proprietary"
+SECRET_LINE = "def pricing_model(): return 0.4217  # proprietary"  # pragma: allowlist secret
 
 
 def _sh(*args, cwd):
@@ -71,7 +71,7 @@ def test_register_seals_the_repo_and_checkout_is_temporary(upstream, monkeypatch
     with pytest.raises(vault.VaultError):
         vault.register("pricing", str(upstream))
     with pytest.raises(vault.VaultError):
-        vault.register("x", "https://user:pw@example.com/r.git")
+        vault.register("x", "https://user:pw@example.com/r.git")  # pragma: allowlist secret
 
 
 def test_feature_swarm_runs_labelled_and_waits_for_approval(upstream, tmp_path):
