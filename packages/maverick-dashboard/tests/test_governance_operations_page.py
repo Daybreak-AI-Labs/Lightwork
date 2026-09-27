@@ -147,7 +147,9 @@ def test_assurance_page_renders_all_governance_operator_contracts():
     assert "persisted. Adapter-reported validation" in page
     assert "Lightwork certification, proof of authorship or truth" in page
     assert "regulatory acceptance" in page
-    assert "No backend detail was displayed" in page
+    # Failures are plain sentences: no status codes or server wording.
+    assert "(HTTP ${response.status})" not in page
+    assert "This was changed since you opened it" in page
 
 
 def test_governance_panels_render_api_values_as_text_only():
@@ -329,7 +331,9 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
 
     assert 'maxlength="16384"' in page
     assert 'maxlength="32768"' in page
-    assert 'pattern="MAA-[0-9a-f]{32}"' in page
+    # AI systems are picked from the inventory, never typed as MAA- IDs.
+    assert 'pattern="MAA-[0-9a-f]{32}"' not in page
+    assert '<select class="select" name="asset_id" required><option value="">Choose an AI system</option>' in page
     assert 'pattern="[0-9a-f]{64}"' in page
     assert "JSON exceeds the ${maxLength}-character bound." in page
     assert "encodeURIComponent(key)" in page
