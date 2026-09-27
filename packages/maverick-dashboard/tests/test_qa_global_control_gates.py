@@ -233,9 +233,9 @@ def test_savings_reports_global_save_and_effective_tenant_override(tmp_path):
 
     page = client.get("/savings", headers=_headers())
     assert page.status_code == 200
-    assert "Active tenant override" in page.text
-    assert "333.0/hour" in page.text
-    assert "111.0/hour" in page.text
+    assert "This workspace uses its own numbers" in page.text
+    assert "333.0 an hour" in page.text
+    assert "111.0 an hour" in page.text
 
 
 def test_tenant_admin_cannot_accept_shared_harness_ground_truth(monkeypatch):

@@ -7,31 +7,31 @@
   .cost-cell__bar { height: 3px; border-radius: var(--radius-pill); background: var(--brand); opacity: 0.5; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .toolbar h2 { margin: 0; }
+  .spend-download { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 </style>
 
   {% from "_hero.html" import hero, state %}
   {% call hero('Value & spend', 'Spend',
-               subtitle='Run economics, from the ledger',
-               lede='Cost, tokens, and per-run economics across completed
-                     episodes — read straight from this deployment\'s own run
-                     ledger, never estimated. Need the monthly statement?
-                     Open the <a href="/billing">Billing statement</a>.') %}
+               subtitle='What your AI work has cost',
+               lede='Costs for every finished task, taken from Lightwork\'s own
+                     records, never estimated. Need the monthly statement?
+                     Open <a href="/billing">Billing</a>.') %}
     {{ state('Current state',
              '$' ~ '{:,.2f}'.format(total.dollars) ~ ' total spent',
-             badge=total.runs ~ ' completed run' ~ ('' if total.runs == 1 else 's'),
+             badge=total.runs ~ ' finished task' ~ ('' if total.runs == 1 else 's'),
              badge_class='ok' if total.runs else 'idle',
-             copy='The same episodes power <a href="/savings">Savings</a> and
-                   the monthly statement — one ledger, three views.') }}
+             copy='The same records power <a href="/savings">Savings</a> and
+                   the monthly statement.') }}
   {% endcall %}
 
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
     <div class="bd-slicer" role="group" aria-label="Time range">
-      <button type="button" data-days="30" aria-pressed="false">30d</button>
-      <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
-      <button type="button" data-days="180" aria-pressed="false">180d</button>
-      <button type="button" data-days="365" aria-pressed="false">1y</button>
+      <button type="button" data-days="30" aria-pressed="false">30 days</button>
+      <button type="button" data-days="90" class="on" aria-pressed="true">90 days</button>
+      <button type="button" data-days="180" aria-pressed="false">6 months</button>
+      <button type="button" data-days="365" aria-pressed="false">1 year</button>
     </div>
   </div>
 
@@ -39,35 +39,42 @@
 
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
-      <h2>Burn rate</h2>
-      <p class="viz-sub">Dollars through the ledger over time (weekly at longer ranges). Hover for cost and runs.</p>
+      <h2>Spending over time</h2>
+      <p class="viz-sub">Dollars spent over time (by week for longer ranges). Hover for cost and tasks.</p>
       <div id="bd-burn"></div>
     </div>
     <div class="panel viz-card">
-      <h2>Run outcomes</h2>
-      <p class="viz-sub">How runs in this window ended.</p>
+      <h2>How tasks ended</h2>
+      <p class="viz-sub">Results of tasks in this period.</p>
       <div id="bd-outcomes"></div>
     </div>
     <div class="panel viz-card viz-card--wide">
-      <h2>Cost per run</h2>
-      <p class="viz-sub">The most recent runs, oldest to newest — spikes are the expensive ones.</p>
+      <h2>Cost of each task</h2>
+      <p class="viz-sub">The most recent tasks, oldest to newest. Tall bars are the expensive ones.</p>
       <div id="bd-per-run"></div>
     </div>
     <div class="panel viz-card">
-      <h2>Top goals by cost</h2>
+      <h2>Most expensive tasks</h2>
       <p class="viz-sub">Where the money actually went.</p>
       <div id="bd-top-goals"></div>
     </div>
     <div class="panel viz-card" id="bd-by-platform-card" hidden>
-      <h2>External-agent spend</h2>
-      <p class="viz-sub">Reported by bring-your-own agents, by home platform.</p>
+      <h2>Outside agents</h2>
+      <p class="viz-sub">Spending reported by agents from other platforms you connected.</p>
       <div id="bd-by-platform"></div>
     </div>
   </div>
 
   <div class="toolbar">
-    <h2>Recent episodes</h2>
-    <a class="btn" href="/api/v1/cost.csv" download>⤓ Download CSV</a>
+    <h2>Recent tasks</h2>
+    <form class="spend-download" id="spend-download">
+      <label for="spend-month">Download</label>
+      <select class="select" id="spend-month">
+        <option value="">All months</option>
+        {% for m in csv_months %}<option value="{{ m.value }}">{{ m.label }}</option>{% endfor %}
+      </select>
+      <a class="btn" id="spend-download-link" href="/api/v1/cost.csv" download>Download spreadsheet (CSV)</a>
+    </form>
   </div>
   <div class="panel">
     {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
@@ -75,25 +82,24 @@
     <table>
       <thead>
         <tr>
-          <th scope="col">id</th><th scope="col">goal</th><th scope="col">outcome</th><th scope="col">cost</th>
-          <th scope="col">in tok</th><th scope="col">out tok</th><th scope="col">tools</th>
+          <th scope="col">Task</th><th scope="col">Result</th><th scope="col">Cost</th>
+          <th scope="col" title="How much text the AI read">Text Read</th><th scope="col" title="How much text the AI wrote">Text Written</th><th scope="col">Steps</th>
         </tr>
       </thead>
       <tbody>
         {% for e in episodes %}
           <tr>
-            <td><code>#{{ e.id }}</code></td>
-            <td>#{{ e.goal_id }}</td>
+            <td>{% if e.goal_id %}<a href="/chat/goal/{{ e.goal_id }}">{{ goal_titles.get(e.goal_id) or 'Task' }}</a>{% else %}Task{% endif %}</td>
             <td>
               {% if e.outcome %}
-                <span class="badge {{ 'done' if e.outcome == 'success' else 'blocked' }}">{{ e.outcome }}</span>
+                <span class="badge {{ 'done' if e.outcome == 'success' else 'blocked' }}">{{ 'Succeeded' if e.outcome == 'success' else (e.outcome | humanize) }}</span>
               {% else %}
-                <span class="badge active">running</span>
+                <span class="badge active">Running</span>
               {% endif %}
             </td>
             <td>
               <div class="cost-cell">
-                <span>${{ '%.4f'|format(e.cost_dollars) }}</span>
+                <span title="${{ '%.6f'|format(e.cost_dollars) }}">{{ e.cost_dollars | money }}</span>
                 <span class="cost-cell__bar" style="width: {{ ((e.cost_dollars / _max * 100) if _max else 0) | round(1) }}%;"></span>
               </div>
             </td>
@@ -105,11 +111,9 @@
       </tbody>
     </table>
     {% else %}
-      <p class="muted">No completed episodes yet.</p>
+      <p class="muted">No finished tasks yet.</p>
+      <p><a class="btn btn--primary" href="/chat">Start a task</a></p>
     {% endif %}
-    <p class="muted" style="margin: var(--space-3) 0 0; font-size: var(--text-xs);">
-      Append <code>?month=YYYY-MM</code> to the CSV link for a single month.
-    </p>
   </div>
 
   <script src="/static/board.js"></script>
@@ -133,19 +137,19 @@
                 format: B.money },
         sub: 'last ' + D.days + ' days',
         spark: D.daily.map(function (r) { return r.cost; }) }));
-      k.appendChild(B.kpi({ label: 'Completed runs', value: D.totals.runs,
+      k.appendChild(B.kpi({ label: 'Finished tasks', value: D.totals.runs,
         chip: { cur: D.totals.runs, prev: D.prev.runs },
         sub: 'last ' + D.days + ' days', sparkCls: 'ok',
         spark: D.daily.map(function (r) { return r.runs; }) }));
-      k.appendChild(B.kpi({ label: 'Avg cost / run',
+      k.appendChild(B.kpi({ label: 'Average cost per task',
         value: D.totals.runs ? D.totals.dollars / D.totals.runs : 0,
         format: B.money,
-        sub: D.totals.tool_calls ? B.fmt(D.totals.tool_calls) + ' tool calls' : '' }));
-      k.appendChild(B.kpi({ label: 'Tokens',
+        sub: D.totals.tool_calls ? B.fmt(D.totals.tool_calls) + ' steps' : '' }));
+      k.appendChild(B.kpi({ label: 'AI text processed',
         value: D.totals.input_tokens + D.totals.output_tokens,
         format: compact,
-        sub: compact(D.totals.input_tokens) + ' in · ' +
-             compact(D.totals.output_tokens) + ' out' }));
+        sub: compact(D.totals.input_tokens) + ' read · ' +
+             compact(D.totals.output_tokens) + ' written (tokens)' }));
 
       if (D.totals.runs || D.prev.runs) {
         var weekly = D.days > 60;
@@ -162,7 +166,7 @@
           } });
       } else {
         B.empty(document.getElementById('bd-burn'),
-          'No completed episodes in this window — the burn chart draws from the first finished run.');
+          'No finished tasks in this period. The chart starts with the first finished task.');
       }
 
       B.donut(document.getElementById('bd-outcomes'), {
@@ -170,18 +174,18 @@
           { label: 'Succeeded', value: D.outcomes.success, cls: 'ok' },
           { label: 'Failed', value: D.outcomes.failed, cls: 'danger' },
           { label: 'Running', value: D.outcomes.running, cls: 'brand' }],
-        centerSub: 'runs',
-        aria: 'Run outcomes: ' + D.outcomes.success + ' succeeded, ' +
+        centerSub: 'tasks',
+        aria: 'How tasks ended: ' + D.outcomes.success + ' succeeded, ' +
               D.outcomes.failed + ' failed, ' + D.outcomes.running + ' running.' });
 
       if ((D.per_run || []).length) {
         B.strip(document.getElementById('bd-per-run'),
           D.per_run.slice().reverse().map(function (r) {
             return { v: r.cost,
-                     title: '#' + r.id + ' · ' + B.money(r.cost) };
-          }), 'Cost of the ' + D.per_run.length + ' most recent runs, oldest on the left.');
+                     title: B.money(r.cost) };
+          }), 'Cost of the ' + D.per_run.length + ' most recent tasks, oldest on the left.');
       } else {
-        B.empty(document.getElementById('bd-per-run'), 'No completed episodes yet.');
+        B.empty(document.getElementById('bd-per-run'), 'No finished tasks yet.');
       }
 
       var tmax = 1;
@@ -193,9 +197,9 @@
                      pct: r.cost / tmax * 100,
                      title: r.title + ' — ' + B.money(r.cost) + ' across ' +
                             r.runs + ' run(s)' };
-          }), 'The most expensive goals in this window.');
+          }), 'The most expensive tasks in this period.');
       } else {
-        B.empty(document.getElementById('bd-top-goals'), 'No costed goals in this window.');
+        B.empty(document.getElementById('bd-top-goals'), 'No task costs in this period.');
       }
 
       if ((D.by_platform || []).length) {
@@ -213,6 +217,11 @@
     }
 
     B.attach({ board: 'spend', render: render });
+    var month = document.getElementById('spend-month');
+    var link = document.getElementById('spend-download-link');
+    if (month && link) month.addEventListener('change', function () {
+      link.href = '/api/v1/cost.csv' + (month.value ? '?month=' + encodeURIComponent(month.value) : '');
+    });
   })();
   </script>
 {% endblock %}

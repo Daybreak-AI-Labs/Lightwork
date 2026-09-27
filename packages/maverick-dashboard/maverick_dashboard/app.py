@@ -3430,10 +3430,28 @@ def spend_page(request: Request) -> HTMLResponse:
     # goal_owner_filter returns None for admins / auth-off, preserving that view.
     owner = goal_owner_filter(request)
     w = _world()
+    episodes = w.list_episodes(limit=50, owner=owner)
+    # Task titles for the table (the episodes are already scoped to the caller).
+    goal_titles: dict[int, str] = {}
+    for gid in {e.goal_id for e in episodes if e.goal_id}:
+        try:
+            g = w.get_goal(gid)
+            if g is not None and getattr(g, "title", ""):
+                goal_titles[gid] = g.title
+        except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
+            continue
+    import datetime as _dt
+    today = _dt.date.today().replace(day=1)
+    months = []
+    for back in range(12):
+        year, month = divmod(today.month - 1 - back, 12)
+        first = _dt.date(today.year + year, month + 1, 1)
+        months.append({"value": first.strftime("%Y-%m"), "label": first.strftime("%B %Y")})
     return templates.TemplateResponse(
         request,
         "spend.html",
-        {"episodes": w.list_episodes(limit=50, owner=owner), "total": w.total_spend(owner=owner)},
+        {"episodes": episodes, "total": w.total_spend(owner=owner),
+         "goal_titles": goal_titles, "csv_months": months},
     )
 
 
