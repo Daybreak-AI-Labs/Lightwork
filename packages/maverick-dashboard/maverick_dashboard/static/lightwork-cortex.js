@@ -99,7 +99,7 @@
         ctx.beginPath(); ctx.arc(q2[0], q2[1], 1.1 + q2[3] * 1.5, 0, 6.283); ctx.fill();
       }
       ctx.fillStyle = "#8E97AC"; ctx.font = MONO; ctx.textAlign = "left";
-      ctx.fillText("CORTEX · knowledge · skills · lessons · the record · fleet", 20, H - 18);
+      ctx.fillText("Documents · skills · lessons · decisions · shared notes", 20, H - 18);
       raf = running() ? requestAnimationFrame(draw) : 0;
     }
     function resume() {
@@ -129,6 +129,46 @@
 
   /* ---- 2. the recall console ---- */
   var apiBase = root.dataset.apiBase || "/api/v1/cortex";
+  var LABELS = {};
+  try { LABELS = JSON.parse(root.dataset.sourceLabels || "{}") || {}; } catch (_e) { LABELS = {}; }
+  function sourceLabel(name) {
+    return Object.prototype.hasOwnProperty.call(LABELS, name) ? LABELS[name]
+      : (window.mvHuman ? window.mvHuman(name) : String(name));
+  }
+
+  /* Turn on a source that is off (lessons, outside assistants' notes) through
+     the same admin-only feature switch the Learning page uses. */
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cortex-switch]"), function (btn) {
+    btn.addEventListener("click", async function () {
+      if (btn.disabled) { return; }
+      var section = btn.getAttribute("data-cortex-switch");
+      var label = btn.getAttribute("data-label") || "this source";
+      var msg = document.querySelector('[data-cortex-switch-msg="' + section + '"]');
+      var ok = window.mvConfirm ? await window.mvConfirm("Turn on " + label + " for everyone in this installation?",
+        { okText: "Turn on" }) : false;
+      if (!ok) { return; }
+      btn.disabled = true; btn.setAttribute("aria-busy", "true");
+      if (msg) { msg.textContent = "Turning on…"; }
+      try {
+        var r = await fetch("/api/v1/features/switches", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ section: section, enabled: true })
+        });
+        if (!r.ok) {
+          var why = r.status === 409 ? "This is controlled by your installation settings, so it cannot be turned on here."
+            : window.mvErrorText(r, "turn this on");
+          if (msg) { msg.textContent = why; }
+          btn.disabled = false; btn.removeAttribute("aria-busy");
+          return;
+        }
+        location.reload();
+      } catch (error) {
+        if (msg) { msg.textContent = window.mvErrorText(error, "turn this on"); }
+        btn.disabled = false; btn.removeAttribute("aria-busy");
+      }
+    });
+  });
   var form = document.getElementById("ctx-recall-form");
   var stateEl = document.getElementById("ctx-recall-state");
   var resultEl = document.getElementById("ctx-result");
@@ -153,34 +193,23 @@
     return node;
   }
 
-  function detailText(payload) {
-    var detail = payload && payload.detail;
-    if (typeof detail === "string") { return detail; }
-    if (Array.isArray(detail)) {
-      return detail.map(function (item) {
-        var loc = Array.isArray(item.loc) ? item.loc.filter(function (part) { return part !== "body"; }).join(".") : "";
-        return (loc ? loc + ": " : "") + (item.msg || "invalid");
-      }).join("; ");
-    }
-    return "Search failed.";
-  }
 
   async function readJson(response) {
     var declared = Number(response.headers.get("content-length") || 0);
     if (declared > maxResponseBytes) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
-      throw fail("Response exceeds the console byte bound.");
+      throw fail("Too many results came back. Choose fewer sources or fewer results and try again.");
     }
     var text = await response.text();
-    if (text.length > maxResponseBytes) { throw fail("Response exceeds the console byte bound."); }
+    if (text.length > maxResponseBytes) { throw fail("Too many results came back. Choose fewer sources or fewer results and try again."); }
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
     catch (_error) { throw fail("The search response could not be read. Try again."); }
     if (!response.ok) {
       if (response.status === 403) {
-        throw fail("Your role cannot read Cortex, or the request was not same-origin. Reload the page and try again.");
+        throw fail("You do not have access to search knowledge, or your session changed. Reload the page and try again.");
       }
-      throw fail(detailText(payload));
+      throw fail(window.mvErrorText ? window.mvErrorText(response, "search") : "The search did not work. Try again.");
     }
     return payload;
   }
@@ -191,8 +220,8 @@
     var sources = data.getAll("sources").map(String);
     var domain = String(data.get("domain") || "").trim();
     var k = parseInt(String(data.get("k") || ""), 10);
-    if (!query) { throw fail("Ask the brain something first."); }
-    if (!sources.length) { throw fail("Pick at least one source."); }
+    if (!query) { throw fail("Type what you would like to find first."); }
+    if (!sources.length) { throw fail("Choose at least one source."); }
     var body = { query: query, sources: sources, k: isFinite(k) ? Math.min(MAX_K, Math.max(1, k)) : DEFAULT_K };
     if (domain) { body.domain = domain; }
     return body;
@@ -209,12 +238,10 @@
     metaEl.textContent = "";
     var hits = Array.isArray(result.hits) ? result.hits : [];
     metaEl.appendChild(el("span", "badge " + (result.audited ? "ok" : "denied"),
-      result.audited ? "audited" : "not audited"));
-    metaEl.appendChild(chip("hits", hits.length));
-    metaEl.appendChild(chip("took", result.took_ms === null || result.took_ms === undefined ? "—" : result.took_ms + " ms"));
-    metaEl.appendChild(chip("workspace", result.tenant || "none selected"));
+      result.audited ? "Recorded in the activity log" : "Not recorded in the activity log"));
+    metaEl.appendChild(chip("Results: ", hits.length));
     var per = result.per_source || {};
-    Object.keys(per).forEach(function (source) { metaEl.appendChild(chip(source, per[source])); });
+    Object.keys(per).forEach(function (source) { metaEl.appendChild(chip(sourceLabel(source) + ": ", per[source])); });
   }
 
   function renderDenied(result) {
@@ -227,7 +254,7 @@
     var list = el("ul");
     names.forEach(function (source) {
       var item = el("li");
-      item.appendChild(el("code", "", source));
+      item.appendChild(el("strong", "", sourceLabel(source)));
       item.appendChild(document.createTextNode(": " + denied[source]));
       list.appendChild(item);
     });
@@ -247,15 +274,17 @@
       var mine = hits.filter(function (hit) { return hit.source === source; });
       if (!mine.length) { return; }
       var group = el("section", "ctx-group");
-      group.appendChild(el("h3", "", source + " · " + mine.length));
+      group.appendChild(el("h3", "", sourceLabel(source) + " · " + mine.length));
       var list = el("ol", "ctx-hits");
       mine.forEach(function (hit) {
         var item = el("li", "ctx-hit");
         var head = el("div", "ctx-hit__head");
-        head.appendChild(el("span", "ctx-hit__cite", hit.citation || "uncited"));
-        head.appendChild(el("span", "badge", hit.kind || "—"));
+        head.appendChild(el("span", "ctx-hit__cite", hit.citation || "Source not recorded"));
+        if (hit.kind) { head.appendChild(el("span", "badge", window.mvHuman ? window.mvHuman(hit.kind) : hit.kind)); }
         var score = Number(hit.score);
-        head.appendChild(el("span", "", "score " + (isFinite(score) ? score.toFixed(2) : "—")));
+        if (isFinite(score) && score >= 0 && score <= 1) {
+          head.appendChild(el("span", "", "Match " + Math.round(score * 100) + "%"));
+        }
         item.appendChild(head);
         item.appendChild(el("p", "ctx-hit__text", hit.text || ""));
         list.appendChild(item);
@@ -292,11 +321,13 @@
       resultEl.hidden = false;
       var count = Array.isArray(result.hits) ? result.hits.length : 0;
       var asked = Object.keys(result.per_source || {}).length;
-      stateEl.textContent = count + (count === 1 ? " hit" : " hits") + " across " + asked +
-        (asked === 1 ? " source" : " sources") + (result.audited ? ", audited." : "; the audit write failed.");
+      stateEl.textContent = count + (count === 1 ? " result" : " results") + " from " + asked +
+        (asked === 1 ? " source" : " sources") + (result.audited ? ". This search is recorded in the activity log."
+          : ". This search could not be recorded in the activity log.");
       if (lattice) { lattice.pulse(Math.max(3, count * 2)); }
     } catch (error) {
-      stateEl.textContent = error && error.message ? error.message : "Search failed.";
+      stateEl.textContent = error && error.code === "invalid_input" ? error.message
+        : (window.mvErrorText ? window.mvErrorText(error, "search") : "The search did not work. Try again.");
     } finally {
       submit.disabled = false;
       submit.removeAttribute("aria-busy");
