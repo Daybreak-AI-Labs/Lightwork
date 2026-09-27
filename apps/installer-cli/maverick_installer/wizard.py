@@ -5928,7 +5928,7 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             "  ntfy topic (any unique string; treat as a password)",
             default="",
         ).strip()
-        return ({"backend": "ntfy", "topic": topic}, []) if topic else ({}, [])
+        return ({"backend": "ntfy", "ntfy_topic": topic}, []) if topic else ({}, [])
     if backend == "pushover":
         return (
             {
@@ -5940,12 +5940,12 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         )
     if backend == "slack":
         return (
-            {"backend": "slack", "webhook_url": "${SLACK_NOTIFY_WEBHOOK}"},
+            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}"},
             ["SLACK_NOTIFY_WEBHOOK"],
         )
     if backend == "discord":
         return (
-            {"backend": "discord", "webhook_url": "${DISCORD_NOTIFY_WEBHOOK}"},
+            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}"},
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []

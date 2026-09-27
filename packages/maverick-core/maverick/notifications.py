@@ -204,9 +204,14 @@ def notify(
             return batcher.submit(body, title=title, priority=priority,
                                   category=category)
 
+    def _legacy_url(section: dict, backend: str):
+        # Older installers wrote ``webhook_url`` next to a single backend.
+        return section.get("webhook_url") if section.get("backend") == backend else None
+
     def _dispatch(backend: str) -> bool:
         if backend == "ntfy":
-            topic = _resolve_env_ref(cfg.get("ntfy_topic"))
+            # ``topic`` is what older installers wrote; keep honouring it.
+            topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
             server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
             if not topic:
                 topic = os.environ.get("MAVERICK_NTFY_TOPIC")
@@ -217,11 +222,11 @@ def notify(
         if backend == "pushover":
             return _send_pushover(title, body, priority)
         if backend == "discord":
-            url = _resolve_env_ref(cfg.get("discord_webhook")) or \
+            url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
                   os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
             return _send_discord(title, body, url or "")
         if backend == "slack":
-            url = _resolve_env_ref(cfg.get("slack_webhook")) or \
+            url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
                   os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
             return _send_slack(title, body, url or "")
         log.warning("notify: unknown backend %r", backend)

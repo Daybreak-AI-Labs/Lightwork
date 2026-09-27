@@ -1316,3 +1316,19 @@ def test_write_config_emits_codebase_when_enabled(tmp_path: Path, monkeypatch):
     assert parsed["codebase"] == {"enable": True, "default_protect": "approve"}
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
     assert "codebase" not in parsed
+
+
+def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
+    from maverick_installer import wizard
+
+    answers = iter(["ntfy      - free, no signup, push to phone via ntfy.sh"])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **_k: True)
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_k: "my-alerts")
+    cfg, _ = wizard.pick_notifications()
+    assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts"}
+    for choice, key in (("slack     - incoming webhook", "slack_webhook"),
+                        ("discord   - webhook URL", "discord_webhook")):
+        monkeypatch.setattr(wizard, "_q_select", lambda *_a, choice=choice, **_k: choice)
+        cfg, _ = wizard.pick_notifications()
+        assert key in cfg and "webhook_url" not in cfg
