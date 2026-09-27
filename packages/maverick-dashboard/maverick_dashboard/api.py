@@ -15100,6 +15100,9 @@ router.include_router(assessment_reviewers_router)
 from .run_tree_actions_api import router as run_tree_actions_router  # noqa: E402
 
 router.include_router(run_tree_actions_router)
+from .queue_status_api import router as queue_status_router  # noqa: E402
+
+router.include_router(queue_status_router)
 from .knowledge_library_api import router as knowledge_library_router  # noqa: E402
 
 router.include_router(knowledge_library_router)

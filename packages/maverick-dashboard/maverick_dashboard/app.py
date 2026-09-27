@@ -3203,7 +3203,10 @@ async def action_center_page(request: Request) -> HTMLResponse:
     from .draft_api import context_for
 
     require_enabled(request)
-    return templates.TemplateResponse(request, "action_center.html", {"action_context": context_for(request)})
+    return templates.TemplateResponse(
+        request, "action_center.html",
+        {"action_context": context_for(request), "can_admin": has_permission(request, "admin")},
+    )
 
 
 @app.get("/workflow-readiness", response_class=HTMLResponse)

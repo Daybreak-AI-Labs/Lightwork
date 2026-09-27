@@ -66,10 +66,10 @@ test("uncertain external action explains observations and offers only a read-onl
   const ui = await setup([value({items:[item],coverage:[{kind:"vendor_reconciliation",status:"current"}],
     counts:{unread:1,overdue:0,snoozed:0}})]);
   const text = ui.d.getElementById("ac-items").textContent;
-  assert.match(text,/Attempted action: jira.create/);
-  assert.match(text,/authoritative readback: no match · 0 matches/);
+  assert.match(text,/What Lightwork tried: Create a Jira issue/);
+  assert.match(text,/Checked Jira: no matching issue found · 0 matches/);
   assert.match(text,/read-only and cannot create another Jira task/);
-  assert.match(text,/Responsible operator: user:alice/);
+  assert.match(text,/Who looks after this: alice/);
   assert.match(text,/separate reviewed action/);
   assert.equal(ui.d.querySelector("img"),null);
   assert.equal(ui.d.querySelector("a.btn--primary").getAttribute("href"),item.href);
@@ -159,7 +159,7 @@ test("lost preference acknowledgement keeps the action visible and never retries
   const ui = await setup([value(),new Error("Connection lost; refresh before retrying.")]);
   ui.button("Snooze for one day").click(); await tick();
   assert.equal(ui.calls.length,2);
-  assert.match(ui.d.getElementById("ac-status").textContent,/Connection lost/);
+  assert.match(ui.d.getElementById("ac-status").textContent,/could not be reached/);
   assert.equal(ui.d.querySelectorAll("article").length,1);
   const body = JSON.parse(ui.calls[1].options.body);
   assert.ok(body.snoozed_until>Date.now()/1000+86000);

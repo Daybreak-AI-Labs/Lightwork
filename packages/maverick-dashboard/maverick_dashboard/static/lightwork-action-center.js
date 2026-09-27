@@ -7,7 +7,19 @@
   const coverage = document.getElementById("ac-coverage"), previous = document.getElementById("ac-previous");
   const next = document.getElementById("ac-next"), page = document.getElementById("ac-page");
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
-  const labels = {approval:"Approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Uncertain external actions"};
+  const labels = {approval:"Approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
+  const ACTIONS = {"jira.create":"Create a Jira issue"};
+  const OBSERVATIONS = {
+    execution_attempt: { recorded: "Lightwork recorded the attempt" },
+    provider_receipt: { recorded: "Jira confirmed it received the request", not_recorded: "No confirmation from Jira was recorded" },
+    authoritative_readback: {
+      not_completed: "Lightwork hasn't checked Jira yet", access_unavailable: "Lightwork couldn't check Jira (no access)",
+      no_match: "Checked Jira: no matching issue found", multiple_matches: "Checked Jira: more than one matching issue found",
+      readback_mismatch: "Checked Jira: an issue was found but it doesn't match", readback_unavailable: "Checking Jira didn't work",
+      exact_match_verified: "Checked Jira: exactly one matching issue found",
+    },
+  };
+  function person(value) { return String(value || "").replace(/^[a-z]+:/, ""); }
   function node(tag, text, className) {
     const el = document.createElement(tag); if (text !== undefined) el.textContent = text;
     if (className) el.className = className; return el;
@@ -108,14 +120,19 @@
     pending(false);
   }
   async function request(url, options) {
-    const response = await fetch(url, {credentials:"same-origin", cache:"no-store", ...options,
-      headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)}});
+    let response;
+    try {
+      response = await fetch(url, {credentials:"same-origin", cache:"no-store", ...options,
+        headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)}});
+    } catch (_) { throw new Error("Lightwork could not be reached. Check your connection and try again."); }
     if ([401,403].includes(response.status)) {
       invalidate(); throw new Error("Your sign-in or access changed. Sign in again and reload Action Center.");
     }
     let value;
     try { value = await response.json(); } catch (_) { throw new Error("The result could not be read. Refresh the list before trying again."); }
-    if (!response.ok) throw new Error(typeof value.detail === "string" ? value.detail : "Could not load your actions. Refresh the list.");
+    if (!response.ok) throw new Error(response.status === 409
+      ? "This changed since the list loaded. Refresh the list and try again."
+      : "Could not load your actions. Refresh the list.");
     return value;
   }
   function render() {
@@ -124,7 +141,18 @@
     model.coverage.forEach(source => {
       if (source.status !== "current") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
     });
-    if (!model.items.length) list.append(node("p", model.coverage.some(source=>source.status !== "current") ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "No items match this filter."));
+    if (!model.items.length) {
+      const partial = model.coverage.some(source=>source.status !== "current");
+      const empty = node("div", undefined, "mv-empty");
+      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "You're all caught up.", "mv-empty__title"));
+      const filtered = form.elements.view.value !== "active" || form.elements.kind.value !== "all" || form.elements.assignment.value !== "all";
+      if (filtered) {
+        const all = node("button", "Show everything", "btn"); all.type = "button";
+        all.addEventListener("click", () => { form.elements.view.value = "all"; form.elements.kind.value = "all"; form.elements.assignment.value = "all"; offset = 0; load(); });
+        empty.append(all);
+      }
+      list.append(empty);
+    }
     model.items.forEach(item => {
       const article = node("article", undefined, "panel"); article.dataset.item = item.id; article.style.marginBlock = "var(--space-3)";
       article.append(node("h2", item.title));
@@ -137,22 +165,23 @@
         const details = node("section", undefined, "panel");
         details.append(node("h3", "What Lightwork knows"));
         const attempted = reconciliation.attempted_action;
-        details.append(node("p", `Attempted action: ${words(attempted.action)} · ${Number(attempted.attempt_count) || 0} recorded attempt${Number(attempted.attempt_count) === 1 ? "" : "s"} · Jira project ${attempted.target?.project || "unavailable"}.`));
+        details.append(node("p", `What Lightwork tried: ${ACTIONS[attempted.action] || words(attempted.action)} · ${Number(attempted.attempt_count) || 0} recorded attempt${Number(attempted.attempt_count) === 1 ? "" : "s"} · Jira project ${attempted.target?.project || "unavailable"}.`));
         const observations = node("ul");
         reconciliation.known_observations.forEach(observation => {
           const count = Number.isInteger(observation.match_count) ? ` · ${observation.match_count} match${observation.match_count === 1 ? "" : "es"}` :
             Number.isInteger(observation.match_count_lower_bound) ? ` · at least ${observation.match_count_lower_bound} matches` : "";
-          observations.append(node("li", `${words(observation.kind)}: ${words(observation.state)}${count}`));
+          const sentence = (OBSERVATIONS[observation.kind] || {})[observation.state] || `${words(observation.kind)}: ${words(observation.state)}`;
+          observations.append(node("li", `${sentence}${count}`));
         });
         details.append(observations);
-        details.append(node("p", `Uncertainty: ${reconciliation.uncertainty.explanation}`));
+        details.append(node("p", `What is unclear: ${reconciliation.uncertainty.explanation}`));
         details.append(node("p", `Safe next step: ${reconciliation.safe_next_check.label}. This check is read-only and cannot create another Jira task.`));
         if (reconciliation.safe_next_check.kind === "restore_access") {
           const access = node("a", "Resolve connection access", "btn");
           access.href = reconciliation.safe_next_check.href; details.append(access);
         }
         const operator = reconciliation.responsible_operator.principal || reconciliation.responsible_operator.business_owner || "an authorized operator";
-        details.append(node("p", `Responsible operator: ${operator}.`));
+        details.append(node("p", `Who looks after this: ${person(operator)}.`));
         details.append(node("p", reconciliation.resolution.explanation, "muted"));
         article.append(details);
       }
@@ -176,6 +205,11 @@
       snooze.dataset.preference="snooze";
       snooze.setAttribute("aria-label", `${item.snoozed ? "Show now" : "Snooze for one day"}: ${item.title}`);
       snooze.addEventListener("click", () => save(item, item.read, item.snoozed ? 0 : Date.now()/1000+86400, "snooze")); actions.append(snooze);
+      if (!item.snoozed) {
+        const week = node("button", "Snooze for a week", "btn btn--ghost"); week.type="button";
+        week.setAttribute("aria-label", `Snooze for a week: ${item.title}`);
+        week.addEventListener("click", () => save(item, item.read, Date.now()/1000+7*86400, "snooze")); actions.append(week);
+      }
       article.append(actions); list.append(article);
     });
     page.textContent = model.total ? `${offset+1}–${Math.min(offset+model.limit,model.total)} of ${model.total}` : "0 items";
