@@ -14,7 +14,7 @@ whether that data may leave.
 ## Labels
 
 - A tool that reads tenant data labels the calling agent `data:<tool>`. The
-  classification is the one composition risk uses: `read_file`,
+  classification matches composition risk: `read_file`,
   `knowledge_search`, SQL and spreadsheet reads, enterprise connectors, `*_read`
   tools and `mcp_*`.
 - A run can start labelled. A codebase run is labelled `code:<repo>` from its
