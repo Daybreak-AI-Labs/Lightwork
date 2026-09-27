@@ -14,15 +14,20 @@ whether that data may leave.
 ## Labels
 
 - A tool that reads tenant data labels the calling agent `data:<tool>`. The
-  classification matches composition risk: `read_file`,
-  `knowledge_search`, SQL and spreadsheet reads, enterprise connectors, `*_read`
-  tools and `mcp_*`.
+  classification matches composition risk: files, attachments and PDFs,
+  `knowledge_search`, `memory` and `kv_memory`, `database`, SQL and spreadsheet
+  reads, the data-platform and SaaS tools (`salesforce`, `snowflake`,
+  `bigquery`, `mongodb`, `notion`, `confluence`, `msgraph`, `gmail`, `s3` and
+  others), enterprise connectors, `*_read` tools and `mcp_*`. `read_tool_result`
+  is not a source: it re-reads output the agent was already labelled for.
 - A run can start labelled. A codebase run is labelled `code:<repo>` from its
   first token.
 
 ## Propagation
 
-Labels only accumulate within a run.
+Labels only accumulate. They are also kept per goal and per conversation, so a
+resumed goal or a follow-up turn starts with every label an earlier run of it
+saw.
 
 | Channel | Rule |
 |---|---|
@@ -33,23 +38,31 @@ Labels only accumulate within a run.
 ## Enforcement
 
 A call to an external sink by a labelled agent is checked at the tool gate,
-after org governance and before hooks. External sinks include `email`,
-`notify`, `calendar`, `http_fetch`, `web_search`, `browser`, `webhook`, chat
-connectors, public-data connectors and `mcp_*`. What happens depends on the
-mode:
+after org governance and before hooks. External sinks are tools that can send
+to a destination chosen in the call: `email`, `gmail`, `sendgrid`, `mailgun`,
+`twilio`, `notify`, `calendar`, `teams`, `slack_bot`, `discord_bot`,
+`telegram`, `twitter`, `github_issues`, `http_fetch`, `openapi_runner`,
+`git_advanced`, `web_search`, `browser`, public-data connectors and `mcp_*`.
+`shell` and `notebook_exec` count only when `[sandbox] allow_network` is on. A
+tool can be both a source and a sink (`gmail`). A remote MCP server is not
+tainted by its own output: labels from `mcp_<server>__*` are ignored on calls
+back to that server. What happens depends on the mode:
 
 | Mode | Behaviour |
 |---|---|
 | `off` | No tracking. |
 | `audit` (default) | Record an `ifc_flow` audit row and allow. |
-| `approve` | A human approves through the consent path; auto-approve modes count as denial. A grant covers that sink for those labels for the rest of the run. |
+| `approve` | A human approves through the consent path, shown the destination; auto-approve modes count as denial. A grant covers that sink, that destination and those labels for the rest of the run. A new destination, a new label, or a literal copy the approver was not told about asks again. |
 | `block` | Refuse. The agent is told not to route the data through another external tool. |
 
 `scope = "explicit"` acts only when the labelled data appears literally in the
 outgoing arguments. The default `context` scope acts on anything the agent has
 seen, because a model can paraphrase. Either way, each decision carries a
 witness: sensitive outputs are fingerprinted, and any copied span of 47 or
-more characters is reported as an explicit flow.
+more characters (compared case-folded, URL-decoded and whitespace-normalised)
+is reported as an explicit flow. When a scan cap makes that unknowable (output
+past 1M characters, arguments nested deeper than 32 levels or longer than 1M
+characters, 200k fingerprints held), `explicit` scope acts as `context` does.
 
 ```toml
 [ifc]
@@ -64,15 +77,18 @@ repository's protection mode whatever the global setting.
 ## Evidence
 
 Each decision writes an `ifc_flow` audit row containing the tool, labels,
-explicit labels, mode and outcome (`recorded`, `approved`, `denied` or
-`blocked`), plus a counts-only local projection for the dashboard. Neither
-records arguments or data.
+explicit labels, a short digest of the destination, mode and outcome
+(`recorded`, `approved`, `denied`, `allowed_by_grant` or `blocked`), plus a
+counts-only local projection for the dashboard. Neither records arguments or
+data. A repeat of the same decision and outcome in one run is written once.
 
 ## Limits
 
-- Tracking is per run. Data an agent writes to durable memory and a later run
-  recalls is not labelled by this module; `memory_guard` governs recall.
+- Memory recall is labelled because `memory`, `kv_memory` and
+  `knowledge_search` are sources, but the label names the recall tool, not the
+  run that wrote the data.
 - Blackboard propagation is conservative: a reader absorbs a poster's labels
   even if the specific excerpt it was shown held none.
-- The witness detects literal copies, not encodings or paraphrase. That is why
-  context taint is the default gate.
+- The witness detects literal copies (after case-folding and URL-decoding),
+  not other encodings such as base64, or paraphrase. That is why context taint
+  is the default gate.

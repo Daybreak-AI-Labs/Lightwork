@@ -23530,10 +23530,16 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 223,
+          "line": 339,
           "function": "ledger_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'ifc.jsonl')"
+        },
+        {
+          "line": 344,
+          "function": "_labels_path",
+          "kind": "data_dir",
+          "expression": "data_dir('immune', 'ifc-labels', f'{key}.jsonl')"
         }
       ]
     },

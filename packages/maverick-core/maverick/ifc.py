@@ -20,24 +20,36 @@ Enforcement
     A call to an external sink (``classify`` -> external: email, http_fetch,
     web_search, notify, mcp_* ...) by a labelled agent is checked against the
     mode: ``off``; ``audit`` (record, allow); ``approve`` (a human must approve
-    through the consent path; a grant covers that sink for those labels for the
-    rest of the run); ``block``. ``scope = "explicit"`` only acts when the
-    labelled data itself appears in the outgoing arguments.
+    through the consent path; a grant covers that sink, that destination and those
+    labels for the rest of the run, and a later call that copies the data
+    literally asks again unless the grant saw that too); ``block``.
+    ``scope = "explicit"`` only acts when the labelled data itself appears in the
+    outgoing arguments -- and when that cannot be ruled out (a scan cap was hit)
+    it acts as ``context`` does. A remote MCP server is not tainted by its own
+    output: labels from ``mcp_<server>__*`` are ignored on calls to that server.
+Persistence
+    Labels outlive the run: they are kept per goal and per conversation, so a
+    follow-up turn or a resumed goal starts with what the earlier run saw (memory
+    and knowledge reads are sources in their own right).
 Witness
     Sensitive outputs are fingerprinted (hashed 32-character windows), so a
     decision says whether the data was copied into the call literally (any
-    span of 47+ characters is detected) or the agent's context merely held it. A model can paraphrase, so context taint is
+    span of 47+ characters is detected, compared case-folded, URL-decoded and
+    whitespace-normalised) or the agent's context merely held it. A model can paraphrase, so context taint is
     the sound default and the witness is evidence, not the gate.
 """
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import threading
 import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 
 MODES = ("off", "audit", "approve", "block")
 _RANK = {m: i for i, m in enumerate(MODES)}
@@ -48,7 +60,9 @@ _MAX_SCAN_CHARS = 1_000_000
 
 
 def _norm(text: str) -> str:
-    return " ".join(text.split())
+    # URL-decoding twice undoes the common double encoding; case-folding stops
+    # a trivial upper-casing from hiding a copy.
+    return " ".join(unquote(unquote(text)).casefold().split())
 
 
 def _fp(chunk: str) -> int:
@@ -56,9 +70,13 @@ def _fp(chunk: str) -> int:
                                           digest_size=8).digest(), "big")
 
 
+class _TooDeep(Exception):
+    pass
+
+
 def _strings(value: object, depth: int = 0) -> Iterator[str]:
     if depth > 32:
-        return
+        raise _TooDeep
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
@@ -80,6 +98,32 @@ def _is_sink(tool: str) -> bool:
     return EXTERNAL in classify(tool)
 
 
+_DEST_KEYS = frozenset({
+    "to", "cc", "bcc", "recipient", "recipients", "email", "address", "phone", "number",
+    "url", "uri", "endpoint", "host", "domain", "webhook", "channel", "chat_id", "room",
+    "repo", "repository", "remote", "bucket", "path", "query", "q",
+})
+
+
+def destination(args: object) -> str:
+    """Where a call sends, from its conventional argument names (sorted, bounded).
+    A grant is for one destination: approving a send to finance@ is not approval
+    to send the same data anywhere else."""
+    if not isinstance(args, dict):
+        return ""
+    parts = []
+    for key in sorted(str(k) for k in args):
+        if key.casefold() in _DEST_KEYS:
+            v = args[key]
+            parts.append(f"{key}={json.dumps(v, sort_keys=True, default=str)[:512]}")
+    return "&".join(parts)[:2048]
+
+
+def _mcp_server(tool: str) -> str | None:
+    m = re.match(r"mcp_(.+?)__", tool)
+    return m.group(1) if m else None
+
+
 def stricter(a: str, b: str) -> str:
     return a if _RANK[a] >= _RANK[b] else b
 
@@ -90,6 +134,8 @@ class Decision:
     labels: frozenset[str]
     explicit: frozenset[str]   # labels whose data appears literally in the arguments
     mode: str
+    destination: str = ""
+    witnessed: bool = True     # False: a scan cap hit, ``explicit`` is assumed, not seen
 
 
 @dataclass
@@ -101,7 +147,12 @@ class FlowTracker:
     base_labels: frozenset[str] = frozenset()
     _agents: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False)
     _fps: dict[int, str] = field(default_factory=dict, init=False, repr=False)
-    _granted: set[tuple[str, frozenset[str]]] = field(default_factory=set, init=False, repr=False)
+    _granted: set[tuple[str, str, frozenset[str], frozenset[str]]] = field(
+        default_factory=set, init=False, repr=False)
+    _saturated: bool = field(default=False, init=False, repr=False)
+    _recorded: set[tuple] = field(default_factory=set, init=False, repr=False)
+    _persist_keys: tuple[str, ...] = field(default=(), init=False, repr=False)
+    _persisted: set[str] = field(default_factory=set, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -120,6 +171,11 @@ class FlowTracker:
         if new:
             with self._lock:
                 self._agents.setdefault(agent, set()).update(new)
+                fresh = new - self._persisted
+                self._persisted |= fresh
+                keys = self._persist_keys
+            if fresh and keys:
+                _persist(keys, fresh)
 
     def inherit(self, child: str, parent: str) -> None:
         self.absorb(child, self.labels(parent))
@@ -131,11 +187,16 @@ class FlowTracker:
         label = f"data:{tool}"
         self.absorb(agent, (label,))
         text = _norm(output[:_MAX_SCAN_CHARS])
+        fps = [_fp(text[i:i + _WINDOW])
+               for i in range(0, max(0, len(text) - _WINDOW + 1), _STRIDE)]
         with self._lock:
-            for i in range(0, max(0, len(text) - _WINDOW + 1), _STRIDE):
+            if len(output) > _MAX_SCAN_CHARS:
+                self._saturated = True  # the tail was never fingerprinted
+            for fp in fps:
                 if len(self._fps) >= _MAX_FINGERPRINTS:
+                    self._saturated = True
                     break
-                self._fps.setdefault(_fp(text[i:i + _WINDOW]), label)
+                self._fps.setdefault(fp, label)
 
     def read_blackboard(self, agent: str, posters: Iterable[str]) -> None:
         for poster in set(posters) - {agent}:
@@ -147,41 +208,96 @@ class FlowTracker:
         self.absorb(recipient, self.labels(sender))
 
     # -- enforcement -------------------------------------------------------
-    def witness(self, args: object) -> frozenset[str]:
+    def witness(self, args: object) -> frozenset[str] | None:
         """Labels whose fingerprinted data appears literally in ``args``' string
         values. Any copied span of at least ``_WINDOW + _STRIDE - 1`` (47)
-        characters, after whitespace normalisation, is detected."""
-        found: set[str] = set()
+        characters, after normalisation, is detected. ``None`` when a cap made
+        the answer unknowable (too-deep arguments, over-long text, a saturated
+        fingerprint table): callers must then assume the data could be there."""
         with self._lock:
-            if not self._fps:
+            if not self._fps and not self._saturated:
                 return frozenset()
+            unknowable = self._saturated
+        # Hash outside the lock: a large argument must not stall every agent's
+        # label bookkeeping.
+        fps: set[int] = set()
+        budget = _MAX_SCAN_CHARS
+        try:
             for value in _strings(args):
-                text = _norm(value[:_MAX_SCAN_CHARS])
-                for i in range(max(0, len(text) - _WINDOW + 1)):
-                    label = self._fps.get(_fp(text[i:i + _WINDOW]))
-                    if label:
-                        found.add(label)
-        return frozenset(found)
+                if len(value) > budget:
+                    unknowable = True
+                text = _norm(value[:budget])
+                budget -= len(text)
+                fps.update(_fp(text[i:i + _WINDOW])
+                           for i in range(max(0, len(text) - _WINDOW + 1)))
+                if budget <= 0:
+                    break
+        except _TooDeep:
+            unknowable = True
+        with self._lock:
+            found = frozenset(label for fp in fps if (label := self._fps.get(fp)))
+        return None if unknowable else found
 
     def decide(self, agent: str, tool: str, args: object) -> Decision | None:
         """``None`` when the call carries no labelled flow to an external sink."""
         if self.mode == "off" or tool in self.allow_sinks or not _is_sink(tool):
             return None
         labels = self.labels(agent)
+        server = _mcp_server(tool)
+        if server is not None:
+            labels = frozenset(lb for lb in labels if _mcp_server(lb[len("data:"):]) != server)
         if not labels:
             return None
-        explicit = self.witness(args) & labels
+        seen = self.witness(args)
+        explicit = labels if seen is None else seen & labels
         if self.scope == "explicit" and not explicit:
             return None
-        return Decision(tool, labels, explicit, self.mode)
+        return Decision(tool, labels, explicit, self.mode, destination(args), seen is not None)
 
     def granted(self, decision: Decision) -> bool:
+        """A grant covers the same sink and destination, no new labels, and no
+        literal copy the approver was not told about."""
         with self._lock:
-            return any(t == decision.tool and decision.labels <= ls for t, ls in self._granted)
+            return any(t == decision.tool and d == decision.destination
+                       and decision.labels <= ls and decision.explicit <= ex
+                       for t, d, ls, ex in self._granted)
 
     def grant(self, decision: Decision) -> None:
         with self._lock:
-            self._granted.add((decision.tool, decision.labels))
+            self._granted.add((decision.tool, decision.destination,
+                               decision.labels, decision.explicit))
+
+    def first_record(self, key: tuple) -> bool:
+        """True once per distinct (agent, decision, outcome): a loop that retries
+        a blocked send is one ledger row, not thousands."""
+        with self._lock:
+            if key in self._recorded:
+                return False
+            self._recorded.add(key)
+            return True
+
+    def resume(self, *, goal_id: int | None, conversation_id: int | None) -> None:
+        """Start from the labels earlier runs of this goal and conversation saw,
+        and keep what this run learns for the next one."""
+        keys = tuple(k for k in (f"goal-{int(goal_id)}" if goal_id is not None else None,
+                                 f"conv-{int(conversation_id)}" if conversation_id is not None else None)
+                     if k)
+        if not keys:
+            return
+        prior: set[str] = set()
+        for key in keys:
+            prior |= _load(key)
+        with self._lock:
+            self.base_labels = frozenset(self.base_labels | prior)
+            known = prior | set(self.base_labels)
+            for agent_labels in self._agents.values():
+                known |= agent_labels
+            self._persisted = set(prior)
+            self._persist_keys = keys
+            fresh = known - prior
+            self._persisted |= fresh
+        if fresh:
+            _persist(keys, fresh)
 
 
 # -- configuration and run scoping ---------------------------------------------
@@ -223,13 +339,44 @@ def ledger_path():
     return data_dir("immune", "ifc.jsonl")
 
 
-def record(decision: Decision, *, agent: str, goal_id: int | None, outcome: str) -> None:
-    """Audit row plus a counts-only local ledger for the dashboard. Labels and
-    tool names only: never arguments or data."""
+def _labels_path(key: str):
+    from .paths import data_dir
+    return data_dir("immune", "ifc-labels", f"{key}.jsonl")
+
+
+def _load(key: str) -> set[str]:
+    from .immune import _ledger
+    try:
+        return {str(r["label"]) for r in _ledger.read(_labels_path(key)) if "label" in r}
+    except (OSError, ValueError):
+        return set()
+
+
+def _persist(keys: tuple[str, ...], labels: Iterable[str]) -> None:
+    from .immune import _ledger
+    for key in keys:
+        for label in sorted(labels):
+            try:
+                _ledger.append(_labels_path(key), {"label": label, "at": time.time()})
+            except OSError:
+                pass  # best effort: this run is still enforced from memory
+
+
+def record(decision: Decision, *, agent: str, goal_id: int | None, outcome: str,
+           tracker: FlowTracker | None = None) -> None:
+    """Audit row plus a counts-only local ledger for the dashboard. Labels, tool
+    names and a destination digest only: never arguments or data. With
+    ``tracker``, a repeat of the same row in the run is not written again."""
+    if tracker is not None and not tracker.first_record(
+            (agent, decision.tool, decision.destination, decision.labels,
+             decision.explicit, outcome)):
+        return
     from .audit import EventKind, audit_event
     from .immune import _ledger
     row = {"tool": decision.tool, "labels": sorted(decision.labels),
-           "explicit": sorted(decision.explicit), "mode": decision.mode, "outcome": outcome}
+           "explicit": sorted(decision.explicit), "mode": decision.mode, "outcome": outcome,
+           "to": hashlib.sha256(decision.destination.encode()).hexdigest()[:12]
+           if decision.destination else ""}
     audit_event(EventKind.IFC_FLOW, agent=agent, goal_id=goal_id, **row)
     try:
         _ledger.append(ledger_path(), {**row, "goal_id": goal_id, "at": time.time()})
@@ -237,5 +384,5 @@ def record(decision: Decision, *, agent: str, goal_id: int | None, outcome: str)
         pass  # the signed audit row is the authority; the ledger is a projection
 
 
-__all__ = ["Decision", "FlowTracker", "MODES", "labelled_run", "record",
+__all__ = ["Decision", "FlowTracker", "MODES", "destination", "labelled_run", "record",
            "stricter", "tracker_for_run"]

@@ -23,18 +23,35 @@ from ..safety.tool_risk import risk_rank, tool_risk
 SENSITIVE, MUTATE, EXTERNAL = "sensitive", "mutate", "external"
 
 # Tools that read tenant data. Non-public enterprise connectors are added by
-# :func:`classify` as sensitive, not external: the tenant's own SaaS is inside its
-# trust boundary. Unknown remote (``mcp_*``) tools are treated as all three.
+# :func:`classify` as sensitive: the tenant's own SaaS is inside its trust
+# boundary. Unknown remote (``mcp_*``) tools are treated as all three. A tool can
+# be both (``gmail`` reads a mailbox and sends to any address).
 _SENSITIVE = frozenset({
     "read_file", "list_dir", "knowledge_search", "sql_query", "sql_query_read",
-    "spreadsheet", "spreadsheet_read", "database_tool", "memory_search",
-    "read_tool_result",
+    "spreadsheet", "spreadsheet_read", "database", "memory", "kv_memory",
+    "read_attachment", "read_pdf", "ocr", "pandas_query", "salesforce", "hubspot",
+    "snowflake", "bigquery", "mongodb", "notion", "confluence", "msgraph", "jira",
+    "gmail", "s3", "dropbox", "github_issues",
 })
-# Tools whose inputs leave the tenant boundary (query strings count).
+# Tools whose inputs can reach a destination outside the tenant chosen in the
+# call (query strings count).
 _EXTERNAL = frozenset({
     "email", "notify", "calendar", "http_fetch", "web_search", "web_archive",
-    "browser", "computer", "webhook", "websocket", "sms", "slack", "teams",
+    "browser", "computer", "teams", "gmail", "sendgrid", "mailgun", "twilio",
+    "slack_bot", "discord_bot", "telegram", "twitter", "github_issues",
+    "openapi_runner", "git_advanced",
 })
+# Code execution reaches outside only when the sandbox allows egress.
+_SANDBOXED = frozenset({"shell", "notebook_exec"})
+
+
+def _sandbox_egress() -> bool:
+    try:
+        from ..config import load_config
+        v = ((load_config() or {}).get("sandbox") or {}).get("allow_network", False)
+    except Exception:  # noqa: BLE001 -- unreadable config: assume egress (conservative)
+        return True
+    return v is True or str(v).strip().lower() in ("1", "true", "yes", "on")
 
 
 def classify(tool: str) -> frozenset[str]:
@@ -48,9 +65,11 @@ def classify(tool: str) -> frozenset[str]:
     if tool.startswith("mcp_"):
         return frozenset({SENSITIVE, MUTATE, EXTERNAL})
     out = set()
-    if tool in PUBLIC_DATA_CONNECTOR_NAMES or tool in _EXTERNAL:
+    if (tool in PUBLIC_DATA_CONNECTOR_NAMES or tool in _EXTERNAL
+            or (tool in _SANDBOXED and _sandbox_egress())):
         out.add(EXTERNAL)
-    elif tool in _SENSITIVE or tool in ENTERPRISE_CONNECTOR_NAMES or tool.endswith("_read"):
+    if tool in _SENSITIVE or (tool in ENTERPRISE_CONNECTOR_NAMES
+                              and tool not in PUBLIC_DATA_CONNECTOR_NAMES) or tool.endswith("_read"):
         out.add(SENSITIVE)
     if tool_risk(tool) == "high":
         out.add(MUTATE)

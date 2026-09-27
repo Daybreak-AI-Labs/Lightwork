@@ -2691,23 +2691,35 @@ class Agent:
             return None
         from . import ifc
         decision = tracker.decide(self.name, name, args)
-        if decision is None or tracker.granted(decision):
+        if decision is None:
             return None
         goal_id = getattr(self.ctx, "goal_id", None)
+        if tracker.granted(decision):
+            ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="allowed_by_grant",
+                       tracker=tracker)
+            return None
         labels = ", ".join(sorted(decision.labels))
         if decision.mode == "audit":
-            ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="recorded")
+            ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="recorded",
+                       tracker=tracker)
             return None
         if decision.mode == "approve":
             granted = False
+            if not decision.explicit:
+                copied = ""
+            elif decision.witnessed:
+                copied = " The data appears literally in the call."
+            else:
+                copied = " The call is too large to rule out that it carries the data literally."
+            to = decision.destination[:300]
             try:
                 from .safety.consent import require_consent
                 verdict = await asyncio.to_thread(
                     require_consent, name, risk="high", provenance="ifc",
+                    scope=(f"{name} -> {to}" if to else name)[:512],
                     detail=(f"Agent {self.name} holds data from {labels} and wants to send "
-                            f"through '{name}', which leaves the tenant boundary."
-                            + (" The data appears literally in the call."
-                               if decision.explicit else "")),
+                            f"through '{name}'" + (f" to {to}" if to else "")
+                            + ", which leaves the tenant boundary." + copied),
                     allow_auto_approve=False, consult_ledger=False)
                 granted = bool(verdict.granted)
             except Exception:  # consent unavailable -> fail closed
@@ -2720,7 +2732,7 @@ class Agent:
             return (f"⚠ '{name}' requires human approval: this agent holds data from "
                     f"{labels}, and '{name}' sends outside the tenant boundary. Not granted. "
                     "Finish without sending it, or ask a human to share it.")
-        ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="blocked")
+        ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="blocked", tracker=tracker)
         self.ctx.blackboard.post(self.name, "error",
                                  f"tool={name} BLOCKED by information-flow control")
         return (f"⚠ BLOCKED by information-flow control: this agent holds data from {labels}, "

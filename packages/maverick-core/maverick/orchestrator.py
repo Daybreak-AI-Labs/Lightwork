@@ -1688,6 +1688,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             allowed_suites=allowed_suites, episode_id=episode_id,
             conversation_id=conversation_id,
         )
+        if ctx.ifc is not None:
+            # Labels outlive a run: a follow-up turn or a resumed goal starts
+            # with what earlier runs of it saw.
+            try:
+                ctx.ifc.resume(goal_id=goal_id, conversation_id=conversation_id)
+            except Exception as e:  # noqa: BLE001 -- this run is still tracked from its start
+                log.warning("ifc: could not load earlier labels for goal #%s: %s", goal_id, e)
 
         brief, _planning_mode = await _build_orchestrator_brief(
             llm=llm, world=world, budget=budget, blackboard=blackboard,
