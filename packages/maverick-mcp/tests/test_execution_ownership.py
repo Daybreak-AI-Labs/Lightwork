@@ -607,3 +607,31 @@ def test_stdio_cancel_received_before_async_admission_cannot_execute(monkeypatch
         release.set()
         session.close()
         server.shutdown()
+
+
+def test_one_owner_cannot_hold_every_worker():
+    import asyncio
+    import threading
+
+    pool = RequestExecutions()
+    release = threading.Event()
+
+    def blocking():
+        release.wait(5)
+        return "A"
+
+    async def main():
+        held = []
+        for i in range(64):
+            try:
+                pool.submit("A:s", i, blocking, quota_owner="A")
+                held.append(i)
+            except RequestAdmissionError:
+                break
+        assert 0 < len(held) < 8
+        assert await asyncio.wait_for(pool.run("B:s", 1, lambda: "B", quota_owner="B"), 2) == "B"
+        release.set()
+    try:
+        asyncio.run(main())
+    finally:
+        release.set()

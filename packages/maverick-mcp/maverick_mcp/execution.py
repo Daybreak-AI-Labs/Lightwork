@@ -138,12 +138,19 @@ class RequestAdmissionError(ValueError):
 class RequestExecutions:
     """Bounded connection-owned work; cancellation never releases a live slot."""
 
-    def __init__(self, *, workers: int = 4, capacity: int = 128, per_owner: int = 32):
+    def __init__(self, *, workers: int = 8, capacity: int = 128, per_owner: int = 32):
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-request")
         self._entries: dict[tuple, tuple[ExecutionHandle, Future, str]] = {}
         self._capacity = capacity
         self._per_owner = per_owner
+        # One owner may never hold every worker THREAD: a cancelled call keeps
+        # its thread until the tool returns, so one owner's blocking calls could
+        # otherwise stall every other owner. With 4+ workers, a quarter always
+        # remain for others. (Async waits occupy no thread and are not counted.)
+        # A serial pool (fewer than 4 workers) queues by design instead.
+        self._thread_share = workers - workers // 4 if workers >= 4 else per_owner
+        self._threaded: dict[tuple, str] = {}
         self._closed = False
 
     @staticmethod
@@ -156,7 +163,8 @@ class RequestExecutions:
             raise RequestAdmissionError("request id exceeds limit")
         return owner, type(request_id).__name__, request_id
 
-    def _admit(self, owner: str, request_id: object, quota_owner: str | None = None, handle: ExecutionHandle | None = None):
+    def _admit(self, owner: str, request_id: object, quota_owner: str | None = None,
+               handle: ExecutionHandle | None = None, *, threaded: bool = False):
         key = self._key(owner, request_id)
         quota_owner = owner if quota_owner is None else quota_owner
         with self._lock:
@@ -166,8 +174,12 @@ class RequestExecutions:
                 raise RequestAdmissionError("request id is already active")
             if len(self._entries) >= self._capacity or sum(entry[2] == quota_owner for entry in self._entries.values()) >= self._per_owner:
                 raise RequestAdmissionError("too many active requests")
+            if threaded and sum(o == quota_owner for o in self._threaded.values()) >= self._thread_share:
+                raise RequestAdmissionError("too many active requests")
             handle, marker = handle or ExecutionHandle(), Future()
             self._entries[key] = handle, marker, quota_owner
+            if threaded:
+                self._threaded[key] = quota_owner
         return key, handle, marker
 
     def _finish(self, key, handle, marker, *, result=None, error=None):
@@ -180,9 +192,10 @@ class RequestExecutions:
             marker.set_exception(error)
         with self._lock:
             self._entries.pop(key, None)
+            self._threaded.pop(key, None)
 
     def submit(self, owner: str, request_id: object, function, *, quota_owner: str | None = None, handle: ExecutionHandle | None = None):
-        key, handle, marker = self._admit(owner, request_id, quota_owner, handle)
+        key, handle, marker = self._admit(owner, request_id, quota_owner, handle, threaded=True)
         context = copy_context()
 
         def execute():
