@@ -59,7 +59,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -625,6 +625,8 @@ class Reservation:
     projected: float
     path: Path | None = field(repr=False)
     shared: object = field(default=None, repr=False, compare=False)
+    # The tenant whose organization admission this call holds, if any.
+    organization_tenant: str | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -1155,6 +1157,8 @@ def reserve(
         )
         if handle is not None:
             organization.attach_reference(handle, reservation_reference(hold))
+            if hold is not None:
+                hold = replace(hold, organization_tenant=handle[0])
         return hold
     except BaseException:
         # Neither authority has released dispatch to the caller. Failure here
@@ -1274,7 +1278,8 @@ def settle(
                                 pricing_evidence=pricing_evidence, attempt_state=attempt_state)
     try:
         from .tenant.provider_admission import settle_call
-        settle_call(reservation.provider, reservation.request_id, snapshot.reference, snapshot.actual)
+        settle_call(reservation.provider, reservation.request_id, snapshot.reference, snapshot.actual,
+                    tenant=reservation.organization_tenant)
     except Exception as exc:
         # The provider receipt remains durable; do not convert a failed second
         # acknowledgement into permission to retry another paid request.

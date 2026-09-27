@@ -160,8 +160,16 @@ def run_scope(budget, principal):
         _CURRENT.reset(token)
 
 
-def _held(call):
+def _held(call, today=None):
+    """What an unacknowledged call still counts against TODAY's cap. A call's
+    cost belongs to the UTC day it was admitted -- the same day the usage
+    ledger books spend under -- so a hold from an earlier day (a goal that died
+    before its ledger acknowledgement, or a cost that never became known) stops
+    counting when that day ends instead of shrinking every future day's cap."""
     if call['released'] or call['state'] == 'not_dispatched':
+        return 0.0
+    from ..quotas import _today
+    if call.get('day', today or _today()) != (today or _today()):
         return 0.0
     if call['state'] == 'settled':
         return call['actual']
@@ -172,7 +180,9 @@ def _held(call):
 
 
 def outstanding(tenant):
-    return sum(_held(call) for call in _load(tenant)['calls'].values())
+    from ..quotas import _today
+    today = _today()
+    return sum(_held(call, today) for call in _load(tenant)['calls'].values())
 
 
 def reserve_call(provider, request_id, projected, *, projection_known=True, budget=None):
@@ -198,7 +208,9 @@ def reserve_call(provider, request_id, projected, *, projection_known=True, budg
             data = _load(tenant, key=key, run_ids=getattr(budget, '_organization_run_ids', ()))
             if key in data['calls']:
                 raise ValueError('organization physical attempt identity was already used')
-            held = sum(_held(call) for call in data['calls'].values())
+            from ..quotas import _today
+            today = _today()
+            held = sum(_held(call, today) for call in data['calls'].values())
             used = registry.tenant_spend_today(tenant) + registry._legacy_outstanding_reservations(tenant)
             if cap > 0 and (not math.isfinite(used + held) or used + held >= cap or used + held + projected > cap):
                 raise OrganizationBudgetExceeded(
@@ -227,7 +239,8 @@ def reserve_call(provider, request_id, projected, *, projection_known=True, budg
             data['runs'][identity] = run
             data['calls'][key] = {'provider': provider, 'request_id': request_id,
                                   'run_id': identity, 'projected': projected, 'actual': None,
-                                  'state': 'held', 'released': False, 'reference': None}
+                                  'state': 'held', 'released': False, 'reference': None,
+                                  'day': today}
             _save(tenant, data)
     return tenant, key
 
@@ -294,8 +307,11 @@ def _acknowledge_scope(tenant, data, scope, principal, *, direct=False):
             call['released'] = True
 
 
-def settle_call(provider, request_id, reference, actual):
-    tenant = current_tenant_id_strict()
+def settle_call(provider, request_id, reference, actual, *, tenant=None):
+    """Settle under the tenant the call was ADMITTED under (``tenant``, carried
+    on the reservation), never whichever tenant the settling code happens to
+    run as -- a settlement in another context silently left the hold forever."""
+    tenant = tenant or current_tenant_id_strict()
     if not tenant:
         return
     # Legacy provider receipts may have no organization hold; do not invent one.
