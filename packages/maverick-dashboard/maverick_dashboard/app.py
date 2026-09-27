@@ -4000,7 +4000,13 @@ async def privacy_rights_orchestration_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "privacy_rights_orchestration.html",
-        {"privacy_rights_orchestration_enabled": (privacy_rights_orchestration_enabled_for_page())},
+        {
+            "privacy_rights_orchestration_enabled": (
+                privacy_rights_orchestration_enabled_for_page()
+            ),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 

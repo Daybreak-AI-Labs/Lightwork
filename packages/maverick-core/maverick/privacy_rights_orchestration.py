@@ -1366,6 +1366,62 @@ class PrivacyRightsOrchestrationStore:
             payload, digest_value = self._get_case_row(connection, tenant, case)
             return self._case(payload, digest_value)
 
+    def list_cases(self, tenant_id: str, *, limit: int = 200) -> tuple[RightsCase, ...]:
+        """Read-only, newest-first rights cases for one tenant (integrity-checked)."""
+
+        tenant = _tenant(tenant_id)
+        bounded_limit = _integer(limit, "limit", 1, _MAX_LIST)
+        self._actor()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM rights_cases WHERE tenant_id=? ORDER BY rowid DESC LIMIT ?",
+                (tenant, bounded_limit),
+            ).fetchall()
+            return tuple(
+                self._case(self._payload(row, "rights case"), row["integrity_sha256"])
+                for row in rows
+            )
+
+    def case_work(self, tenant_id: str, case_id: str) -> dict[str, tuple]:
+        """Read-only view of one case's source tasks, evidence, completeness
+        manifests, response packages and exports (integrity-checked)."""
+
+        tenant = _tenant(tenant_id)
+        case = _id(case_id, "case_id")
+        self._actor()
+        with self._connect() as connection:
+            self._get_case_row(connection, tenant, case)
+
+            def rows(table: str) -> list[sqlite3.Row]:
+                return connection.execute(
+                    f"SELECT * FROM {table} WHERE tenant_id=? AND case_id=? "  # noqa: S608
+                    "ORDER BY rowid LIMIT ?",
+                    (tenant, case, _MAX_LIST),
+                ).fetchall()
+
+            return {
+                "tasks": tuple(
+                    self._task(self._payload(row, "source task"), row["integrity_sha256"])
+                    for row in rows("rights_tasks")
+                ),
+                "evidence": tuple(
+                    self._evidence(self._payload(row, "source evidence"), row["integrity_sha256"])
+                    for row in rows("rights_evidence")
+                ),
+                "manifests": tuple(
+                    self._manifest(self._payload(row, "manifest"), row["integrity_sha256"])
+                    for row in rows("rights_manifests")
+                ),
+                "packages": tuple(
+                    self._package(self._payload(row, "response package"), row["integrity_sha256"])
+                    for row in rows("rights_packages")
+                ),
+                "exports": tuple(
+                    self._export(self._payload(row, "case export"), row["integrity_sha256"])
+                    for row in rows("rights_exports")
+                ),
+            }
+
     def get_task(self, tenant_id: str, task_id: str) -> SourceTask:
         """Return one tenant-bound source task for worker authority revalidation."""
 

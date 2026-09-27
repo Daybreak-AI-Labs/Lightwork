@@ -606,3 +606,29 @@ def test_major_routes_and_network_free_adapter_surface(environment) -> None:
     source = Path(api.__file__).read_text(encoding="utf-8")
     for primitive in ("requests.", "httpx.", "urllib.request", "socket."):
         assert primitive not in source
+
+
+def test_case_list_and_case_work_are_workspace_scoped_and_never_echo_raw_refs(
+    environment,
+) -> None:
+    client, _database, state = environment
+    assert client.get(f"{API}/cases").json() == {"items": [], "count": 0}
+    _enroll(client, ["discover", "retrieve", "redact"])
+    case = _open_and_verify(client, "case-list", ["access"])
+    client.post(
+        f"{API}/cases/case-list/sources/crm/plan",
+        json={"phases": None, "max_attempts": 3,
+              "expected_case_revision": case["revision"], "idempotency_key": "plan-list"},
+    )
+    listed = client.get(f"{API}/cases")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["count"] == 1 and body["items"][0]["case_id"] == "case-list"
+    assert "subject/case-list" not in listed.text and "request/case-list" not in listed.text
+    work = client.get(f"{API}/cases/case-list/work").json()
+    assert {task["phase"] for task in work["tasks"]} == {"discover", "retrieve", "redact"}
+    assert work["evidence"] == [] and work["packages"] == []
+    assert ("tenant", "view") in state["permission_calls"]
+    assert client.get(f"{API}/cases/nope/work").status_code == 404
+    state["tenant"] = "tenant-b"
+    assert client.get(f"{API}/cases").json()["count"] == 0

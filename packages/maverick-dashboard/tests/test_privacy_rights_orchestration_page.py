@@ -32,7 +32,7 @@ def page_client() -> TestClient:
         return templates.TemplateResponse(
             request,
             "privacy_rights_orchestration.html",
-            {"privacy_rights_orchestration_enabled": enabled},
+            {"privacy_rights_orchestration_enabled": enabled, "can_admin": True, "can_audit": True},
         )
 
     return TestClient(app, headers={"Origin": "http://testserver"})
@@ -42,12 +42,18 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     response = page_client.get("/privacy/rights-orchestration")
     assert response.status_code == 200
     page = response.text
-    assert "Privacy Rights Orchestration" in page
-    assert "Provider execution stays closed" in page
-    assert "Microsoft Graph, Google Workspace, Salesforce, and" in page
-    assert "reconcile ambiguous deletes" in page
-    assert "protected and are not returned here" in page
+    assert "Privacy requests" in page
+    assert "About this page&rsquo;s safeguards" in page
+    assert "Microsoft 365, Google Workspace, Salesforce, ServiceNow" in page
+    assert "never shown again" in page
     assert "/api/v1/privacy/rights-orchestration" in page
+    for element in ('id="pro-cases"', 'id="pro-new-case"', 'id="pro-sources"', 'id="pro-case"',
+                    "lightwork-privacy-rights-orchestration.js"):
+        assert element in page
+    before, technical = page.split("<summary>Technical details: advanced operations</summary>", 1)
+    for jargon in ("JSON", "Tenant", "principal", "callback", "lease", "Operation"):
+        assert jargon not in before.split("<main", 1)[-1], jargon
+    assert 'id="pro-operation"' in technical
     for operation in (
         "source-enroll",
         "case-open",
@@ -81,7 +87,7 @@ def test_page_fails_closed_and_new_template_uses_safe_dom(page_client) -> None:
     disabled = page_client.get("/privacy/rights-orchestration", params={"enabled": False})
     assert disabled.status_code == 200
     assert 'data-module-gate="privacy_automation.rights_orchestration"' in disabled.text
-    assert "Privacy-rights orchestration is turned off." in disabled.text
+    assert "Privacy request handling is turned off." in disabled.text
     assert "[privacy_automation.rights_orchestration] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]
