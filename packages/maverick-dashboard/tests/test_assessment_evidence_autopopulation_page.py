@@ -39,7 +39,7 @@ def _templates() -> Jinja2Templates:
 
 @pytest.fixture()
 def client(monkeypatch):
-    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda *_args: None)
     monkeypatch.setattr(page, "has_permission", lambda *_args: True)
     monkeypatch.setattr(page, "has_global_permission", lambda *_args: True)
@@ -65,7 +65,7 @@ def test_liquid_glass_workbench_is_store_free_closed_and_copilot_bound(client):
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Review evidence before adding answers" in response.text
+    assert "Suggested assessment answers" in response.text
     assert "fills only unanswered questions" in response.text
     assert f'data-api-base="{page.API_BASE}"' in response.text
     assert f'data-copilot-page="{page.PAGE_PATH}"' in response.text
@@ -85,17 +85,10 @@ def test_page_collects_no_tenant_actor_evidence_bytes_or_mapping_authority(clien
         if tag in {"input", "select", "textarea"}
         if isinstance((value := attrs.get("name")), str)
     }
-    assert {
-        "assessment_id",
-        "analysis_ids",
-        "proposal_id",
-        "decision",
-        "rationale",
-        "expected_revision",
-        "expected_assessment_revision",
-        "idempotency_key",
-        "confirm",
-    }.issubset(names)
+    assert {"assessment_id", "rationale", "idempotency_key"}.issubset(names)
+    # Records and versions come from the lists; nothing is typed.
+    for typed in ("proposal_id", "expected_revision", "expected_assessment_revision", "analysis_ids"):
+        assert typed not in names
     for forbidden in (
         "tenant_id",
         "actor_ref",
@@ -113,11 +106,11 @@ def test_page_rejects_query_authority_and_requires_selected_tenant(client, monke
     assert client.get(f"{page.PAGE_PATH}?tenant_id=attacker").status_code == 404
     assert client.get(f"{page.PAGE_PATH}?theme=light&density=compact").status_code == 200
 
-    def missing():
-        raise page.HTTPException(status_code=409, detail="select a tenant")
-
-    monkeypatch.setattr(page, "_tenant_selected", missing)
-    assert client.get(page.PAGE_PATH).status_code == 409
+    monkeypatch.setattr(page, "_tenant_selected", lambda: False)
+    missing = client.get(page.PAGE_PATH)
+    assert missing.status_code == 200
+    assert "Choose a workspace first" in missing.text
+    assert page.SCRIPT_PATH not in missing.text
 
 
 def test_role_gate_disables_every_mutating_form(client, monkeypatch):
@@ -125,4 +118,23 @@ def test_role_gate_disables_every_mutating_form(client, monkeypatch):
     parser = _Markup()
     parser.feed(client.get(page.PAGE_PATH).text)
     disabled_fieldsets = [attrs for tag, attrs in parser.tags if tag == "fieldset" and "disabled" in attrs]
-    assert len(disabled_fieldsets) >= 3
+    assert len(disabled_fieldsets) >= 2
+
+
+def test_page_is_plain_language_with_pickers_and_a_suggestion_list(client):
+    import re
+
+    body = client.get(page.PAGE_PATH).text
+    main = body.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL))
+    banned = re.compile(
+        r"\b(tenant|principals?|payload|endpoint|schema|uuid|sha-?256|digest|idempoten\w*|"
+        r"revision|json|CAS|proposal id|analysis ids?)\b|/api/v1|HTTP \d{3}",
+        re.IGNORECASE,
+    )
+    assert banned.search(text) is None, banned.search(text)
+    assert '<select class="select" id="aep-assessment-id" name="assessment_id"' in body
+    assert 'id="aep-analysis-choices"' in body and 'id="aep-queue"' in body
+    assert "<textarea" in body and 'name="analysis_ids"' not in body
+    for label in ("Suggest answers", "Suggestions", "Approve selected answers", "Reject all suggestions"):
+        assert label in text

@@ -45,10 +45,10 @@ def assessment_evidence_copilot_context():
 
     return CopilotPageContext(
         path=PAGE_PATH,
-        title="Assessment Evidence Proposals",
+        title="Suggested assessment answers",
         summary=(
-            "Turn released multimodal evidence analyses into reviewable, cited "
-            "assessment answer proposals without treating documents as attestations."
+            "Suggest questionnaire answers from evidence your team already approved; "
+            "a person reviews them before any are added."
         ),
         capabilities=(
             "Generate questionnaire-bound proposals from exact released evidence analyses.",
@@ -57,13 +57,13 @@ def assessment_evidence_copilot_context():
         ),
         boundaries=(
             "Proposal generation never changes an assessment answer or score.",
-            "Application fills only unanswered questions under assessment CAS and never overwrites an answer.",
+            "Adding answers fills only unanswered questions, re-checks the assessment is unchanged, and never overwrites an answer.",
             "Evidence-assisted answers remain subject to final assessment review and are not attestations, certifications, legal conclusions, or live provider acceptance.",
         ),
         next_steps=(
             "Confirm the proposal and AI Evidence Analysis compositions are ready.",
-            "Generate a proposal against an open pinned assessment and released analysis IDs.",
-            "Have a different human review eligible answers before invoking Apply.",
+            "Choose an open assessment and approved evidence, then press Suggest answers.",
+            "Have a different person review the suggestions before adding them.",
         ),
         suggested_questions=(
             "What does proposal eligibility mean?",
@@ -73,14 +73,11 @@ def assessment_evidence_copilot_context():
     )
 
 
-def _tenant_selected() -> None:
+def _tenant_selected() -> bool:
+    """Whether a workspace is selected; every API call still requires one."""
     from maverick.paths import current_tenant_id_strict
 
-    if current_tenant_id_strict() is None:
-        raise HTTPException(
-            status_code=409,
-            detail="select an active tenant before using assessment evidence proposals",
-        )
+    return current_tenant_id_strict() is not None
 
 
 def create_assessment_evidence_autopopulation_page_router(
@@ -95,7 +92,7 @@ def create_assessment_evidence_autopopulation_page_router(
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
-        _tenant_selected()
+        workspace_selected = _tenant_selected() is not False
         if any(
             key not in {"theme", "density", "font", "lang"}
             for key in request.query_params
@@ -113,6 +110,7 @@ def create_assessment_evidence_autopopulation_page_router(
                 "script_path": SCRIPT_PATH,
                 "style_path": STYLE_PATH,
                 "csp_style_nonce": style_nonce,
+                "proposal_workspace_missing": not workspace_selected,
                 "proposal_can_operate": has_permission(request, "operate"),
                 "proposal_can_audit": has_global_permission(request, "audit"),
                 "proposal_can_admin": has_global_permission(request, "admin"),
