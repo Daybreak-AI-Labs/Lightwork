@@ -3820,7 +3820,11 @@ async def consent_profile_data_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_profile_data.html",
-        {"consent_profile_data_enabled": profile_data_enabled_for_page()},
+        {
+            "consent_profile_data_enabled": profile_data_enabled_for_page(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
