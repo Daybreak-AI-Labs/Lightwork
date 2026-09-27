@@ -153,6 +153,18 @@ with a two-proportion test, so noise is not reported as awareness:
 
 Each goal costs two model-driven runs. Only aggregate results are ledgered.
 
+## Dashboard
+
+**Govern → Immune layer** (`/immune`, audit permission) shows:
+- the roster's composition-risk trifectas and exfiltration counts;
+- catch rates and earned authority from decided canaries;
+- twin replays and awareness probes;
+- recent labelled data at external sinks.
+
+It reads one summary (`GET /api/v1/immune/summary`). The summary holds
+counts, scores, labels and statuses only: never canary flaws, tool arguments
+or recorded outputs.
+
 ## Configuration
 
 ```toml

@@ -57,6 +57,14 @@ maverick code export payments ./payments   # plaintext clone for the owner
    vault untouched and marks the proposal `conflict`. `push` also requires the
    approval.
 
+## Dashboard
+
+**Operate → Code** (`/code`, operate permission) lists vaulted repositories and
+each proposal's files, test result, review verdict and approval state. It
+reads one summary (`GET /api/v1/code/summary`) that never includes code, diffs
+or test output. Approve in the approvals queue; merges run through
+`maverick code merge --approved`.
+
 ## Configuration
 
 ```toml

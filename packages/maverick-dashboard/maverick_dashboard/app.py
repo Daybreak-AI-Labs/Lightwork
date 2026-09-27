@@ -1120,6 +1120,7 @@ from .evolution_ledger_page import (  # noqa: E402
 from .governed_document_vault_page import (  # noqa: E402
     create_governed_document_vault_page_router,
 )
+from .immune_console import create_immune_console_page_router  # noqa: E402
 from .no_code_grc_studio_page import create_no_code_grc_studio_page_router  # noqa: E402
 from .privacy_drop_management_page import (  # noqa: E402
     create_privacy_drop_management_page_router,
@@ -1164,6 +1165,7 @@ app.include_router(create_cortex_page_router(templates))
 app.include_router(create_autonomous_compliance_page_router(templates))
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
+app.include_router(create_immune_console_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
 from .vendor_onboarding_api import router as vendor_onboarding_router  # noqa: E402
@@ -1194,6 +1196,7 @@ from .agent_control_plane_api import router as agent_control_plane_router  # noq
 from .cortex_api import router as cortex_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
 from .evolution_ledger_api import router as evolution_ledger_router  # noqa: E402
+from .immune_console import router as immune_console_router  # noqa: E402
 from .regulatory_obligations_api import router as regulatory_obligations_router  # noqa: E402
 from .shared_governance_inventory_api import (  # noqa: E402
     router as shared_governance_inventory_router,
@@ -1211,6 +1214,7 @@ app.include_router(trust_receipts_router, prefix="/api/v1")
 app.include_router(cortex_router, prefix="/api/v1")
 app.include_router(shoring_router, prefix="/api/v1")
 app.include_router(evolution_ledger_router, prefix="/api/v1")
+app.include_router(immune_console_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
@@ -10330,6 +10334,20 @@ async def cortex_script() -> FileResponse:
         _STATIC_DIR / "lightwork-cortex.js",
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-immune-console.js")
+async def immune_console_client() -> FileResponse:
+    """Client for the read-only Immune layer and Code consoles."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-immune-console.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

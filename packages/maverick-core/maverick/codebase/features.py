@@ -275,3 +275,23 @@ def default_reviewer() -> Reviewer:
 
 __all__ = ["default_reviewer", "default_runner", "find", "list_proposals", "merge",
            "propose", "push", "run_tests", "settle", "status"]
+
+
+def summary(world) -> dict:
+    """Read-only projection for the dashboard: repositories and proposals, never
+    code, diffs or test output."""
+    repos = [{"name": r.name, "default_branch": r.default_branch, "head": r.head[:12],
+              "protect": r.protect, "tests": bool(r.test_command), "updated_at": r.updated_at}
+             for r in vault.list_repos()]
+    proposals = []
+    for p in list_proposals()[:200]:
+        tests = p.get("tests")
+        review = p.get("review")
+        proposals.append({
+            "id": p["id"], "repo": p["repo"], "title": p["title"], "branch": p["branch"],
+            "status": status(world, p), "files": len(p["files"]),
+            "tests": None if tests is None else tests["passed"],
+            "review": None if review is None else bool(review.get("approves")),
+            "approval_id": p["approval_id"], "created_at": p["created_at"]})
+    return {"schema": "lightwork.codebase-summary.v1", "enabled": vault.enabled(),
+            "repos": repos, "proposals": proposals}

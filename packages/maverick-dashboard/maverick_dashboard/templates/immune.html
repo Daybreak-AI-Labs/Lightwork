@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Immune layer - Lightwork{% endblock %}
+{% block head_extra %}{% include "_console_style.html" %}{% endblock %}
+{% block content %}
+<div class="ic-shell" id="ic-root" data-console="immune" data-api-url="{{ api_url }}" data-copilot-page="{{ page_path }}" data-read-only="true">
+  <section class="ic-card" aria-labelledby="ic-title">
+    <p class="ic-kicker">Read-only oversight evidence</p>
+    <h1 id="ic-title">Immune layer</h1>
+    <p class="ic-lede">What agents could do together, whether reviewers catch planted flaws, how replays of real work diverge, and where labelled data tried to leave. Counts, scores and labels only: no canary flaws, tool arguments or recorded outputs reach this page.</p>
+    <p class="ic-help" id="ic-status" role="status" aria-live="polite">Loading the summary.</p>
+  </section>
+  <section class="ic-metrics" aria-label="Immune summary">
+    <article class="ic-card ic-metric"><span>Trifecta paths</span><strong id="ic-trifectas">—</strong></article>
+    <article class="ic-card ic-metric"><span>Exfiltration paths</span><strong id="ic-exfil">—</strong></article>
+    <article class="ic-card ic-metric"><span>Information-flow events</span><strong id="ic-ifc-events">—</strong></article>
+    <article class="ic-card ic-metric"><span>Twin replays</span><strong id="ic-replays">—</strong></article>
+  </section>
+  <section class="ic-grid">
+    <article class="ic-card ic-wide" aria-labelledby="ic-comp-title">
+      <h2 id="ic-comp-title">Composition risk: sensitive data, state change and external reach on one path</h2>
+      <div class="ic-table-wrap"><table class="ic-table"><caption>Trifecta paths across the installed roster</caption><thead><tr><th scope="col">Path</th><th scope="col">Sensitive read</th><th scope="col">State change</th><th scope="col">Way out</th><th scope="col">Sink risk</th></tr></thead><tbody id="ic-comp-rows"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
+    </article>
+    <article class="ic-card" aria-labelledby="ic-ifc-title">
+      <h2 id="ic-ifc-title">Information flow</h2>
+      <p class="ic-help" id="ic-ifc-mode">Mode: —</p>
+      <div class="ic-table-wrap"><table class="ic-table"><caption>Recent labelled data at external sinks</caption><thead><tr><th scope="col">Goal</th><th scope="col">Tool</th><th scope="col">Labels</th><th scope="col">Literal copy</th><th scope="col">Outcome</th></tr></thead><tbody id="ic-ifc-rows"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
+    </article>
+    <article class="ic-card" aria-labelledby="ic-over-title">
+      <h2 id="ic-over-title">Proof of oversight</h2>
+      <p class="ic-help" id="ic-over-state">Canaries: —</p>
+      <div class="ic-table-wrap"><table class="ic-table"><caption>Catch rates on planted flaws (Wilson lower bound)</caption><thead><tr><th scope="col">Person</th><th scope="col">Decision class</th><th scope="col">Caught</th><th scope="col">Missed</th><th scope="col">Assured</th><th scope="col">Authority</th></tr></thead><tbody id="ic-over-rows"><tr><td colspan="6">Loading.</td></tr></tbody></table></div>
+    </article>
+    <article class="ic-card ic-wide" aria-labelledby="ic-twin-title">
+      <h2 id="ic-twin-title">Production twin replays</h2>
+      <div class="ic-table-wrap"><table class="ic-table"><caption>Replays of recorded goals against production's inputs</caption><thead><tr><th scope="col">Production goal</th><th scope="col">Twin goal</th><th scope="col">Cue</th><th scope="col">Twin status</th><th scope="col">Served</th><th scope="col">Approximate</th><th scope="col">Unmatched</th><th scope="col">Answer similarity</th></tr></thead><tbody id="ic-twin-rows"><tr><td colspan="8">Loading.</td></tr></tbody></table></div>
+    </article>
+  </section>
+  <noscript><p class="ic-card">JavaScript is required to load the summary.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-immune-console.js"></script>{% endblock %}

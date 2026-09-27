@@ -1,0 +1,104 @@
+"""Read-only consoles for the immune layer (/immune) and the code vault (/code).
+
+Both render a server template whose same-origin script reads one JSON summary.
+Summaries carry counts, scores, labels, statuses and names only -- never canary
+flaws, tool arguments, recorded outputs, diffs or code. Nothing here mutates:
+approvals are decided in the approvals queue, merges run through ``maverick code``.
+"""
+from __future__ import annotations
+
+import secrets
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
+
+from .auth import require_permission
+from .evolution_ledger_page import _HEADERS
+
+IMMUNE_PATH = "/immune"
+CODE_PATH = "/code"
+ASSET_PATH = "/static/lightwork-immune-console.js"
+_PERMISSION = {IMMUNE_PATH: "audit", CODE_PATH: "operate"}
+
+
+def _world_or_none() -> Any:
+    from ._shared import _world
+    try:
+        return _world()
+    except Exception:  # noqa: BLE001 -- the summary reports the section unavailable
+        return None
+
+
+def _immune_summary() -> dict:
+    from maverick.immune import report
+    return report.summary(_world_or_none())
+
+
+def _code_summary() -> dict:
+    from maverick.codebase import features, vault
+    if not vault.enabled():
+        return {"schema": "lightwork.codebase-summary.v1", "enabled": False,
+                "repos": [], "proposals": []}
+    world = _world_or_none()
+    if world is None:
+        raise HTTPException(status_code=503, detail="world model unavailable")
+    return features.summary(world)
+
+
+def create_immune_console_router() -> APIRouter:
+    router = APIRouter(tags=["immune-console"])
+
+    @router.get("/immune/summary")
+    async def immune_summary(request: Request) -> dict:
+        require_permission(request, "audit")
+        if request.query_params:
+            raise HTTPException(status_code=404, detail="immune summary unavailable")
+        return await run_in_threadpool(_immune_summary)
+
+    @router.get("/code/summary")
+    async def code_summary(request: Request) -> dict:
+        require_permission(request, "operate")
+        if request.query_params:
+            raise HTTPException(status_code=404, detail="code summary unavailable")
+        return await run_in_threadpool(_code_summary)
+
+    return router
+
+
+def create_immune_console_page_router(templates: Jinja2Templates) -> APIRouter:
+    if not isinstance(templates, Jinja2Templates):
+        raise TypeError("immune consoles require a Jinja template authority")
+    router = APIRouter(tags=["immune-console-pages"])
+
+    def _render(request: Request, path: str, template: str) -> HTMLResponse:
+        require_permission(request, _PERMISSION[path])
+        if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
+            raise HTTPException(status_code=404, detail="page unavailable")
+        nonce = secrets.token_urlsafe(18)
+        response = templates.TemplateResponse(request, template, {
+            "api_url": f"/api/v1{path}/summary", "page_path": path,
+            "csp_style_nonce": nonce})
+        for name, value in _HEADERS.items():
+            if name == "Content-Security-Policy":
+                value = value.replace("style-src 'self'", f"style-src 'self' 'nonce-{nonce}'")
+            response.headers[name] = value
+        return response
+
+    @router.get(IMMUNE_PATH, response_class=HTMLResponse, include_in_schema=False)
+    async def immune_page(request: Request) -> HTMLResponse:
+        return _render(request, IMMUNE_PATH, "immune.html")
+
+    @router.get(CODE_PATH, response_class=HTMLResponse, include_in_schema=False)
+    async def code_page(request: Request) -> HTMLResponse:
+        return _render(request, CODE_PATH, "code.html")
+
+    return router
+
+
+router = create_immune_console_router()
+
+__all__ = ["ASSET_PATH", "CODE_PATH", "IMMUNE_PATH", "create_immune_console_page_router",
+           "create_immune_console_router", "router"]

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Code - Lightwork{% endblock %}
+{% block head_extra %}{% include "_console_style.html" %}{% endblock %}
+{% block content %}
+<div class="ic-shell" id="ic-root" data-console="code" data-api-url="{{ api_url }}" data-copilot-page="{{ page_path }}" data-read-only="true">
+  <section class="ic-card" aria-labelledby="ic-title">
+    <p class="ic-kicker">Software development</p>
+    <h1 id="ic-title">Code</h1>
+    <p class="ic-lede">Repositories held sealed in Lightwork and the changes swarms have proposed. Nothing merges or pushes until a person approves the change in the approvals queue; then run <code>maverick code merge --approved</code>. Diffs and test output stay out of this page: inspect them with <code>maverick code show</code>.</p>
+    <p class="ic-help" id="ic-status" role="status" aria-live="polite">Loading the summary.</p>
+  </section>
+  <section class="ic-metrics" aria-label="Code summary">
+    <article class="ic-card ic-metric"><span>Repositories</span><strong id="ic-repos">—</strong></article>
+    <article class="ic-card ic-metric"><span>Awaiting approval</span><strong id="ic-pending">—</strong></article>
+    <article class="ic-card ic-metric"><span>Approved, not merged</span><strong id="ic-approved">—</strong></article>
+    <article class="ic-card ic-metric"><span>Merged</span><strong id="ic-merged">—</strong></article>
+  </section>
+  <section class="ic-grid">
+    <article class="ic-card" aria-labelledby="ic-repo-title">
+      <h2 id="ic-repo-title">Vaulted repositories</h2>
+      <div class="ic-table-wrap"><table class="ic-table"><caption>Registered repositories and their protection</caption><thead><tr><th scope="col">Name</th><th scope="col">Branch</th><th scope="col">Head</th><th scope="col">Protection</th><th scope="col">Tests</th></tr></thead><tbody id="ic-repo-rows"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
+    </article>
+    <article class="ic-card" aria-labelledby="ic-prop-title">
+      <h2 id="ic-prop-title">Change proposals</h2>
+      <div class="ic-table-wrap"><table class="ic-table"><caption>Swarm-built changes and their state</caption><thead><tr><th scope="col">Proposal</th><th scope="col">Repository</th><th scope="col">Title</th><th scope="col">Files</th><th scope="col">Tests</th><th scope="col">Review</th><th scope="col">State</th></tr></thead><tbody id="ic-prop-rows"><tr><td colspan="7">Loading.</td></tr></tbody></table></div>
+    </article>
+  </section>
+  <noscript><p class="ic-card">JavaScript is required to load the summary.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-immune-console.js"></script>{% endblock %}
