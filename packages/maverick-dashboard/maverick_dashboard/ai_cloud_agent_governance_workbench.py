@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import require_permission
+from .auth import has_permission, require_permission
 
 
 def _tenant_id() -> str:
@@ -60,6 +60,10 @@ def create_ai_cloud_agent_governance_workbench_router(
             {
                 "ai_cloud_agent_governance_enabled": available,
                 "ai_cloud_agent_governance_configuration_available": (configuration_available),
+                # Only hides buttons a role cannot use; the API still enforces each.
+                "cag_can_operate": has_permission(request, "operate"),
+                "cag_can_admin": has_permission(request, "admin"),
+                "cag_can_audit": has_permission(request, "audit"),
             },
         )
         response.headers["Cache-Control"] = "no-store, max-age=0"

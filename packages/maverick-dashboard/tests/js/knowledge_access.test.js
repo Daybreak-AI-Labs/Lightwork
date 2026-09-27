@@ -22,7 +22,15 @@ const template = fs.readFileSync(
   .replaceAll('{{ knowledge_tenant }}', TENANT)
   .replaceAll('{{ knowledge_actor }}', ACTOR)
   .replaceAll('{{ knowledge_api_base }}', '/api/v1/knowledge-access')
-  .replaceAll("{{ 'true' if knowledge_can_review else 'false' }}", 'true');
+  .replaceAll("{{ 'true' if knowledge_can_review else 'false' }}", 'true')
+  .replaceAll('{{ code }}', 'product_research')
+  .replaceAll('{{ code | humanize }}', 'Product research');
+
+const assertVerifyFailure = (document, reason) => {
+  const status = document.getElementById('ka-status');
+  assert.match(status.textContent, /Something changed while loading/);
+  assert.match(status.dataset.technical || '', reason);
+};
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const ref = (asset = 'customer-source', manifest = '1'.repeat(64), kind = 'dataset') => ({
@@ -294,7 +302,7 @@ test('search withholds content when cache, purpose, or actor authority crosses t
     await tick();
     assert.equal(ui.document.getElementById('ka-results').textContent, '');
     assert.equal(ui.document.getElementById('ka-export').disabled, true);
-    assert.match(ui.document.getElementById('ka-status').textContent, /failed its source eligibility contract/i);
+    assertVerifyFailure(ui.document, /failed its source eligibility contract/i);
     ui.dom.window.close();
   }
 });
@@ -312,7 +320,7 @@ test('search rejects a response bound to another requested purpose or actor', as
     await tick();
     assert.equal(ui.document.getElementById('ka-results').textContent, '');
     assert.equal(ui.document.getElementById('ka-export').disabled, true);
-    assert.match(ui.document.getElementById('ka-status').textContent, /search response failed validation/i);
+    assertVerifyFailure(ui.document, /search response failed validation/i);
     ui.dom.window.close();
   }
 });
@@ -339,7 +347,7 @@ test('export refuses a same-context response for a different exact source versio
   assert.equal(ui.document.getElementById('ka-results').textContent, '');
   assert.equal(ui.document.getElementById('ka-detail-panel').hidden, true);
   assert.equal(ui.document.getElementById('ka-submit-request').disabled, true);
-  assert.match(ui.document.getElementById('ka-status').textContent, /did not match the selected source versions/);
+  assertVerifyFailure(ui.document, /did not match the selected source versions/);
   assert.doesNotMatch(ui.document.getElementById('ka-status').textContent, /Other tenant summary/);
   ui.dom.window.close();
 });
@@ -367,7 +375,7 @@ test('export downloads only exact action-bound evidence and clears on malformed 
   await tick();
   assert.equal(denied.downloads(), 0);
   assert.equal(denied.document.getElementById('ka-results').textContent, '');
-  assert.match(denied.document.getElementById('ka-status').textContent, /authority evidence was malformed/);
+  assertVerifyFailure(denied.document, /authority evidence was malformed/);
   denied.dom.window.close();
 });
 
@@ -383,7 +391,7 @@ test('export refuses a well-formed digest that does not bind its authority evide
   await tick();
   assert.equal(ui.downloads(), 0);
   assert.equal(ui.document.getElementById('ka-results').textContent, '');
-  assert.match(ui.document.getElementById('ka-status').textContent, /binding did not match/i);
+  assertVerifyFailure(ui.document, /binding did not match/i);
   ui.dom.window.close();
 });
 
@@ -409,7 +417,7 @@ test('failed request preserves inputs and exact retry key, then refreshes status
   await tick();
   const retryKey = form.dataset.requestKey;
   assert.equal(form.elements.reason.value, 'The customer found an error.');
-  assert.match(ui.document.getElementById('ka-status').textContent, /inputs are still here/);
+  assert.match(ui.document.getElementById('ka-status').textContent, /answers are still here/);
   form.dispatchEvent(new ui.window.Event('submit', {bubbles: true, cancelable: true}));
   await tick(); await tick();
   const first = JSON.parse(ui.calls[3].options.body);
@@ -432,7 +440,7 @@ test('review shows derivative retirement, hashes plain-language rationale, and k
       workflow_state: 'retire_or_retrain_model_required'}]});
   const ui = await setup([requestList([submitted]), {context: CONTEXT, ...approved}, requestList([approved])]);
   const card = ui.document.querySelector('.ka-request');
-  assert.match(card.textContent, /retire or retrain model/);
+  assert.match(card.textContent, /retire or retrain the model/);
   assert.match(card.textContent, /does not erase its influence from learned weights/);
   card.querySelector('textarea').value = 'I checked the exact customer request and derivatives.';
   card.querySelector('input[type="checkbox"]').checked = true;
@@ -441,8 +449,8 @@ test('review shows derivative retirement, hashes plain-language rationale, and k
   const body = JSON.parse(ui.calls[1].options.body);
   assert.equal(body.evidence_sha256, '01'.repeat(32));
   assert.equal(body.confirm, true);
-  assert.match(ui.document.getElementById('ka-requests').textContent, /external source deletion unverified/);
-  assert.match(ui.document.getElementById('ka-requests').textContent, /retire or retrain model required/);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /not yet confirmed deleted at the original source/i);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /retire or retrain the model required/i);
   ui.dom.window.close();
 });
 
@@ -559,7 +567,8 @@ test('a tampered active hold carrying release material fails closed', async () =
     release_evidence_sha256: '9'.repeat(64)
   }});
   const ui = await setup([requestList([tampered])]);
-  assert.match(ui.document.getElementById('ka-requests').textContent, /unexpected hold release material/i);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /Something changed while loading/);
+  assert.match(ui.document.querySelector('#ka-requests p').dataset.technical, /unexpected hold release material/i);
   assert.doesNotMatch(ui.document.getElementById('ka-requests').textContent, /matter-tampered/);
   ui.dom.window.close();
 });

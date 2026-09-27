@@ -3025,6 +3025,28 @@ class GovernanceAgentStore:
                 revision,
             )
 
+    def list_policies(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[GovernanceAgentPolicy, ...]:
+        """Current revision of each tenant policy, each verified, for pickers."""
+
+        tenant = _tenant(tenant_id)
+        self._actor()
+        count = _positive_int(limit, "limit", 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT policy_id FROM policies WHERE tenant_id=? "
+                "GROUP BY policy_id ORDER BY policy_id LIMIT ?",
+                (tenant, count),
+            ).fetchall()
+            return tuple(
+                self._get_policy(connection, tenant, str(row["policy_id"]))
+                for row in rows
+            )
+
     def list_runs(
         self,
         tenant_id: str,

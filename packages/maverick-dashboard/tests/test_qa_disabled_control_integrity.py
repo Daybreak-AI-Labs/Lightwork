@@ -170,8 +170,10 @@ def test_composition_workbenches_start_mutations_disabled_until_ready() -> None:
         proposals,
         "aep-create-controls",
         "aep-review-controls",
-        "aep-apply-controls",
     )
+    # Adding approved answers is a per-row button the script only creates
+    # once the service reports ready, so there is no static apply form.
+    assert "aep-apply-controls" not in proposals.by_id
 
     reports = _render(
         "third_party_executive_reports.html",
@@ -212,8 +214,10 @@ def test_disabled_composition_gates_stay_operable_outside_fieldsets() -> None:
         proposals,
         "aep-create-controls",
         "aep-review-controls",
-        "aep-apply-controls",
     )
+    # Adding approved answers is a per-row button the script only creates
+    # once the service reports ready, so there is no static apply form.
+    assert "aep-apply-controls" not in proposals.by_id
 
     reports = _render(
         "third_party_executive_reports.html",

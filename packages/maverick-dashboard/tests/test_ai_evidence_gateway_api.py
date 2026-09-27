@@ -573,10 +573,9 @@ def test_empty_assurance_cockpit_has_safe_synthetic_demo_path(monkeypatch):
     assert response.status_code == 200, response.text
     assert "Not started" in response.text
     assert "Create and bind the first production policy" in response.text
-    assert "SYNTHETIC DEMO" in response.text
-    assert "Load synthetic no-network demo" in response.text
-    assert "dedicated" in response.text
-    assert 'aria-label="Production evidence readiness"' in response.text
+    assert "Load sample data" in response.text
+    assert "empty workspace only" in response.text
+    assert 'aria-label="Setup progress"' in response.text
 
 
 def test_assurance_cockpit_disabled_state_is_product_copy(monkeypatch):
@@ -585,8 +584,8 @@ def test_assurance_cockpit_disabled_state_is_product_copy(monkeypatch):
     response = client.get("/security/assurance")
 
     assert response.status_code == 200, response.text
-    assert "AI Evidence-Ready Gateway is disabled" in response.text
-    assert "Ask an administrator to enable" in response.text
+    assert "Evidence recording is off" in response.text
+    assert "Ask an administrator to turn on" in response.text
     # The cockpit is a product surface: no CLI invocations on the page.
     assert "maverick preflight" not in response.text
 
@@ -651,9 +650,9 @@ def test_assurance_cockpit_explains_missing_tenant_without_reading_records(
     response = client.get("/security/assurance")
 
     assert response.status_code == 200, response.text
-    assert "Select a company or tenant before loading evidence" in response.text
-    assert "No records were read" in response.text
-    assert "MAVERICK_TENANT" in response.text
+    assert "Choose a workspace first to see evidence" in response.text
+    assert "Nothing was read" in response.text
+    assert "MAVERICK_TENANT" not in response.text
 
 
 def test_assurance_cockpit_renders_gateway_evidence_without_raw_content(
@@ -714,12 +713,12 @@ def test_assurance_cockpit_renders_gateway_evidence_without_raw_content(
     response = client.get("/security/assurance")
 
     assert response.status_code == 200, response.text
-    assert "AI Evidence-Ready Gateway" in response.text
+    assert "AI assurance" in response.text
     assert "Review required" in response.text
-    assert "Next best action" in response.text
-    assert "unavailable after" in response.text
-    assert "Load synthetic no-network demo" not in response.text
-    assert "Published benchmark report" in response.text
+    assert "Next step" in response.text
+    assert "can't be loaded once real records exist" in response.text
+    assert 'id="gateway-demo-seed"' not in response.text
+    assert "Governance benchmarks" in response.text
     assert "AER-page-1" in response.text
     assert "2025-07-24 12:00:00 UTC" in response.text
     assert "Complete:" in response.text

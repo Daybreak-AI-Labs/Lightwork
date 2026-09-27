@@ -320,3 +320,21 @@ def test_projection_uses_server_resolved_target_authority(environment) -> None:
         ).status_code
         == 422
     )
+
+
+def test_backup_list_is_admin_scoped_and_newest_first(environment, monkeypatch) -> None:
+    client, _state = environment
+    assert client.get(f"{BASE}/operations/recovery/backups").json()["items"] == []
+    created = client.post(f"{BASE}/operations/recovery/backups")
+    assert created.status_code == 200, created.text
+    listed = client.get(f"{BASE}/operations/recovery/backups")
+    assert listed.status_code == 200
+    assert listed.headers["cache-control"].startswith("no-store")
+    assert [row["backup_id"] for row in listed.json()["items"]] == [created.json()["backup_id"]]
+
+    def deny(_request, permission):
+        if permission == "admin":
+            raise api.HTTPException(status_code=403, detail="denied")
+
+    monkeypatch.setattr(api, "require_global_permission", deny)
+    assert client.get(f"{BASE}/operations/recovery/backups").status_code == 403

@@ -174,3 +174,19 @@ def test_bad_kind_400(monkeypatch, tmp_path):
         json={"expected_revision": 0},
     )
     assert r.status_code == 400
+
+
+def test_page_uses_selectors_and_plain_language(monkeypatch, tmp_path):
+    import re
+
+    _isolate(monkeypatch, tmp_path)
+    body = _client().get("/assessments").text
+    main = body.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL))
+    assert re.search(r"\b(JSON|lens|cadence|HTTP \d{3})\b", text, re.IGNORECASE) is None
+    assert '<select id="as-agent"' in body and "<datalist" not in body
+    assert "format=json" not in body and "Download spreadsheet" in text
+    script = main[main.index("<script>"):]
+    for label in ("Approve ' + esc", "Add evidence", "Review again", "Every 6 months"):
+        assert label in script
+    assert "replace('_', ' ')" not in script and "(HTTP " not in script

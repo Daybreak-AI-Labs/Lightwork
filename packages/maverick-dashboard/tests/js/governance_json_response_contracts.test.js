@@ -26,7 +26,6 @@ const JSON_CLIENTS = [
 ];
 
 const TEXT_CLIENTS = [
-  "ai_cloud_agent_governance.html",
   "third_party_lifecycle.html",
   "third_party_collaboration.html",
   "consumer_trust_center_authority.html",

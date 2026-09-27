@@ -106,7 +106,8 @@ def test_async_drafts_and_assessment_failures_stay_with_visible_context():
 
     assert 'id="as-page-msg"' in assessments
     assert "document.getElementById('as-detail-msg') || pageMsg" in assessments
-    assert "Could not load the assessment register (HTTP " in assessments
+    assert "Could not load the assessment register. Reload to try again." in assessments
+    assert "(HTTP " not in assessments and "Request failed (" not in assessments
     assert "The assessment register is temporarily unavailable" in assessments
 
     assert workflow.count("if (shouldScroll !== false)") == 2

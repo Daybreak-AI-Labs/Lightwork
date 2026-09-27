@@ -2928,6 +2928,45 @@ class GRCStudioStore:
             connection.commit()
         return manifest
 
+    def list_recovery_backups(self, tenant_id: str, *, limit: int = 50) -> tuple[dict, ...]:
+        """List this tenant's backup manifests, newest first.
+
+        This is an index only: each entry still has to pass
+        :meth:`verify_recovery_backup` before it can be trusted.
+        """
+
+        self._gate()
+        self._actor()
+        if _tenant(tenant_id) != self.tenant_id:
+            raise GRCStudioNotFound("recovery scope not found")
+        bound = _integer(limit, "limit", 1, 500)
+        if self._recovery_directory is None or not self._recovery_directory.is_dir():
+            return ()
+        scope = hashlib.sha256(self.tenant_id.encode()).hexdigest()
+        rows: list[dict[str, object]] = []
+        for manifest_path in self._recovery_directory.glob("grc-*.json"):
+            backup_id = manifest_path.stem
+            if not _ID_RE.fullmatch(backup_id):
+                continue
+            try:
+                raw = manifest_path.read_bytes()
+                manifest = json.loads(raw) if len(raw) <= 64 * 1024 else None
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if (
+                not isinstance(manifest, Mapping)
+                or manifest.get("schema") != RECOVERY_SCHEMA
+                or manifest.get("backup_id") != backup_id
+                or manifest.get("tenant_scope_sha256") != scope
+            ):
+                continue
+            created_at = manifest.get("created_at")
+            if isinstance(created_at, bool) or not isinstance(created_at, (int, float)):
+                continue
+            rows.append({"backup_id": backup_id, "created_at": float(created_at)})
+        rows.sort(key=lambda row: (-float(row["created_at"]), str(row["backup_id"])))
+        return tuple(rows[:bound])
+
     def verify_recovery_backup(self, tenant_id: str, backup_id: str) -> dict[str, object]:
         self._gate()
         self._actor()

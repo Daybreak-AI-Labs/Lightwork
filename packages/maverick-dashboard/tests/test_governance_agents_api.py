@@ -754,3 +754,15 @@ def test_lower_tenant_item_limit_blocks_context_and_adapter_resolution(environme
     assert response.status_code == 422
     assert response.json()["detail"] == "context is outside its tenant item bound"
     assert state["adapter_calls"] == []
+
+
+def test_policy_list_is_view_scoped_and_tenant_isolated(environment):
+    client, state = environment
+    _publish_and_analyze(client)
+    listed = client.get(f"{API}/policies")
+    assert listed.status_code == 200, listed.text
+    items = listed.json()["items"]
+    assert [item["policy_id"] for item in items] == ["breach"]
+    assert items[0]["agent_kind"] == "breach_response"
+    state["tenant"] = "tenant-b"
+    assert client.get(f"{API}/policies").json()["items"] == []

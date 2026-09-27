@@ -1257,6 +1257,117 @@ class EvidenceAuthorityRegistry:
             )
         return authority
 
+    @staticmethod
+    def _slug(value: object, fallback: str) -> str:
+        text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "")).strip("-").lower()[:100]
+        return text or fallback
+
+    def enroll_uploaded_artifact(
+        self,
+        content: bytes,
+        *,
+        media_type: str,
+        display_name: str,
+        matter: str,
+        received_at: float,
+        valid_seconds: int,
+    ) -> tuple[evidence.EvidenceArtifactAuthority, int]:
+        """Register an uploaded document by fingerprint, computed here.
+
+        The bytes are hashed and measured, then dropped: only the digest,
+        size and labels enter the append-only registry. The document name
+        becomes a readable reference so pickers can show it.
+        """
+
+        if not isinstance(content, (bytes, bytearray)) or not content:
+            raise AIEvidenceAnalysisCompositionError("uploaded evidence is empty")
+        seconds = _integer(valid_seconds, "valid_seconds", 3_600, _MAX_VALID_SECONDS - 60)
+        digest = hashlib.sha256(bytes(content)).hexdigest()
+        now = self._now()
+        received = _timestamp(received_at, "received_at")
+        return self.enroll_artifact(
+            artifact_id=f"{self._slug(display_name, 'document')}.{digest[:8]}",
+            case_ref=self._slug(matter, "matter"),
+            media_type=media_type,
+            content_sha256=digest,
+            byte_length=len(content),
+            source_ref="direct-upload",
+            source_revision=1,
+            acquired_at=min(received, now),
+            valid_until=now + seconds,
+            expected_registry_revision=0,
+        )
+
+    def _current_object_keys(self, kind: str, limit: int) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT object_key FROM ai_evidence_authority_records "
+                "WHERE tenant_id=? AND kind=? GROUP BY object_key "
+                "ORDER BY object_key LIMIT ?",
+                (self.tenant_id, kind, limit),
+            ).fetchall()
+        return [str(row["object_key"]) for row in rows]
+
+    def list_usable_artifacts(self, *, limit: int = 200) -> list[dict[str, object]]:
+        """Current, unrevoked, unexpired artifact authorities for pickers.
+
+        Metadata and digests only (the same material an analysis record
+        already carries); each row is re-verified through ``resolve_artifact``.
+        """
+
+        bounded = _integer(limit, "limit", 1, 500)
+        now = self._now()
+        items: list[dict[str, object]] = []
+        for key in self._current_object_keys("artifact", bounded):
+            try:
+                authority = self.resolve_artifact(self.tenant_id, key)
+                case_ref = self.artifact_case_ref(key)
+            except AIEvidenceAnalysisCompositionError:
+                continue
+            if authority.revoked or authority.valid_until <= now:
+                continue
+            items.append(
+                {
+                    "artifact_id": authority.artifact_id,
+                    "case_ref": case_ref,
+                    "media_type": authority.media_type,
+                    "content_sha256": authority.content_sha256,
+                    "byte_length": authority.byte_length,
+                    "source_ref": authority.source_ref,
+                    "source_revision": authority.source_revision,
+                    "acquired_at": authority.acquired_at,
+                    "valid_until": authority.valid_until,
+                    "authority_sha256": authority.authority_sha256,
+                    "registry_revision": self.current_registry_revision("artifact", key),
+                }
+            )
+        return items
+
+    def list_usable_criteria(self, *, limit: int = 200) -> list[dict[str, object]]:
+        """Current, unrevoked, unexpired criteria sets for pickers."""
+
+        bounded = _integer(limit, "limit", 1, 500)
+        now = self._now()
+        items: list[dict[str, object]] = []
+        for key in self._current_object_keys("criteria", bounded):
+            try:
+                authority = self.resolve_criteria(self.tenant_id, key)
+            except AIEvidenceAnalysisCompositionError:
+                continue
+            if authority.revoked or authority.valid_until <= now:
+                continue
+            items.append(
+                {
+                    "criteria_set_id": authority.criteria_set_id,
+                    "revision": authority.revision,
+                    "criterion_ids": [item.criterion_id for item in authority.criteria],
+                    "valid_until": authority.valid_until,
+                    "authority_sha256": authority.authority_sha256,
+                    "registry_revision": self.current_registry_revision("criteria", key),
+                }
+            )
+        return items
+
     def artifact_case_ref(self, artifact_id: str) -> str:
         payload, _revision = self._current_payload(
             "artifact",

@@ -1013,3 +1013,67 @@ def test_cross_tenant_authority_and_idempotency_collision_fail_closed() -> None:
             expected_revision=1,
             idempotency_key=f"bind-azure_ai_foundry-{tenant_a.tenant_sha256}",
         )
+
+
+def test_registers_list_only_the_callers_tenant_records() -> None:
+    runtime, tenant, _evaluator, _transport, _clock = _bound_enforcement_runtime()
+    intent = _prepared_intent(runtime, tenant)
+    evaluations = runtime.authority.list_policy_evaluations(tenant)
+    assert [row.evaluation_ref for row in evaluations] == [intent.evaluation_ref]
+    assert [row.intent_ref for row in runtime.authority.list_enforcement_intents(tenant)] == [
+        intent.intent_ref
+    ]
+    other = _tenant("register-outsider")
+    runtime.authority.enroll_tenant(other, idempotency_key="enroll-register-outsider")
+    assert runtime.authority.list_policy_evaluations(other) == ()
+    assert runtime.authority.list_enforcement_intents(other) == ()
+    with pytest.raises(CloudAgentBindingError):
+        runtime.authority.list_enforcement_intents(_tenant("never-enrolled"))
+    with pytest.raises(ValueError):
+        runtime.authority.list_enforcement_intents(tenant, limit=0)
+
+
+def test_policy_catalog_is_optional_and_refuses_malformed_entries() -> None:
+    runtime, _clock = _runtime("azure_ai_foundry", evaluator=_AllowEvaluator())
+    assert runtime.authority.policy_catalog() == ()
+
+    class _Catalogued(_AllowEvaluator):
+        def __init__(self, entries) -> None:
+            super().__init__()
+            self.entries = entries
+
+        def catalog(self):
+            return self.entries
+
+    good = {
+        "policy_ref": _ref("pol", "disable"),
+        "revision": 2,
+        "sha256": _digest("disable-v2"),
+        "title": "Disable risky agents",
+    }
+    runtime, _clock = _runtime("azure_ai_foundry", evaluator=_Catalogued([good]))
+    assert runtime.authority.policy_catalog() == (
+        {
+            "policy_ref": good["policy_ref"],
+            "policy_revision": 2,
+            "policy_sha256": good["sha256"],
+            "title": "Disable risky agents",
+        },
+    )
+    bad = dict(good, sha256="not-a-digest")
+    runtime, _clock = _runtime("azure_ai_foundry", evaluator=_Catalogued([bad]))
+    with pytest.raises(CloudAgentAdapterError):
+        runtime.authority.policy_catalog()
+
+
+def test_framework_register_is_gated_and_lists_the_approval_chain() -> None:
+    runtime, _clock = _runtime("aws_bedrock")
+    tenant = _tenant("framework-register-off")
+    _bind(runtime, tenant, "aws_bedrock")
+    with pytest.raises(CloudAgentGovernanceDisabled):
+        runtime.authority.framework_register(tenant)
+    runtime, _clock = _runtime("aws_bedrock", databricks=True)
+    tenant = _tenant("framework-register-on")
+    _bind(runtime, tenant, "aws_bedrock")
+    register = runtime.authority.framework_register(tenant)
+    assert register == {"packs": [], "reviews": [], "attestations": [], "activation": None}

@@ -472,6 +472,95 @@ class CloudAgentGovernanceOperatorRuntime:
             "verified": True,
         }
 
+    def list_policies(self) -> Mapping[str, object]:
+        return {
+            "schema": "lightwork.cloud-agent-governance-policies.v1",
+            "items": [dict(item) for item in self._authority.policy_catalog()],
+        }
+
+    def list_evaluations(self) -> Mapping[str, object]:
+        items: list[dict[str, object]] = []
+        for record in self._authority.list_policy_evaluations(self._tenant_authority):
+            items.append(
+                {
+                    "evaluation_ref": record.evaluation_ref,
+                    "provider": record.request.provider,
+                    "agent_ref": record.request.agent_ref,
+                    "agent_revision": record.request.agent_revision,
+                    "policy_ref": record.request.policy_ref,
+                    "policy_revision": record.request.policy_revision,
+                    "requested_action": record.request.requested_action,
+                    "target_ref": record.request.target_ref,
+                    "decision": record.decision,
+                    "action": record.action,
+                    "reason_codes": list(record.reason_codes),
+                    "evaluated_at": record.evaluated_at,
+                }
+            )
+        return {"schema": "lightwork.cloud-agent-governance-evaluations.v1", "items": items}
+
+    def list_intents(self) -> Mapping[str, object]:
+        items: list[dict[str, object]] = []
+        for intent in self._authority.list_enforcement_intents(self._tenant_authority):
+            items.append(
+                {
+                    "intent_ref": intent.intent_ref,
+                    "evaluation_ref": intent.evaluation_ref,
+                    "provider": intent.provider,
+                    "agent_ref": intent.agent_ref,
+                    "agent_revision": intent.agent_revision,
+                    "inventory_revision": intent.inventory_revision,
+                    "action": intent.action,
+                    "target_ref": intent.target_ref,
+                    "status": intent.status,
+                    "revision": intent.revision,
+                    "attempts": intent.attempts,
+                }
+            )
+        return {"schema": "lightwork.cloud-agent-governance-intents.v1", "items": items}
+
+    def list_framework(self) -> Mapping[str, object]:
+        register = self._authority.framework_register(self._tenant_authority)
+        activation = register["activation"]
+        return {
+            "schema": "lightwork.cloud-agent-governance-framework.v1",
+            "packs": [
+                {"version": pack.version, "control_ids": [m.control_id for m in pack.mappings]}
+                for pack in register["packs"]
+            ],
+            "reviews": [
+                {
+                    "review_ref": review.review_ref,
+                    "pack_version": review.pack_version,
+                    "decision": review.decision,
+                    "revision": review.revision,
+                    "reviewed_at": review.reviewed_at,
+                    "reviewed_by_you": review.reviewer_ref == self.principal_ref,
+                }
+                for review in register["reviews"]
+            ],
+            "attestations": [
+                {
+                    "attestation_ref": attestation.attestation_ref,
+                    "review_ref": attestation.review_ref,
+                    "revision": attestation.revision,
+                    "attested_at": attestation.attested_at,
+                }
+                for attestation in register["attestations"]
+            ],
+            "activation": (
+                None
+                if activation is None
+                else {
+                    "version": activation.version,
+                    "prior_version": activation.prior_version,
+                    "action": activation.action,
+                    "revision": activation.revision,
+                    "activated_at": activation.activated_at,
+                }
+            ),
+        }
+
     def evaluate_policy(self, **kwargs: object) -> object:
         return self._authority.evaluate_policy(self._tenant_authority, **kwargs)
 
@@ -747,6 +836,34 @@ def create_ai_cloud_agent_governance_router(  # noqa: C901
         require_permission(request, "admin")
         cloud, _tenant, _principal, runtime = authority(request)
         return _response(await call(cloud, runtime.prepare_intent, **body.model_dump()))
+
+    async def register(request: Request, permission: str, name: str):
+        require_permission(request, permission)
+        cloud, _tenant, _principal, runtime = authority(request)
+        reader = getattr(runtime, name, None)
+        if not callable(reader):
+            raise _http(503, "cloud_agent_governance_register_unavailable")
+        return _response(await call(cloud, reader))
+
+    @router.get("/policies")
+    async def list_policies(request: Request):
+        """Policies the configured evaluator publishes, for the check picker."""
+        return await register(request, "view", "list_policies")
+
+    @router.get("/policy-evaluations")
+    async def list_evaluations(request: Request):
+        """This workspace's policy checks, newest first."""
+        return await register(request, "view", "list_evaluations")
+
+    @router.get("/enforcement-intents")
+    async def list_intents(request: Request):
+        """This workspace's prepared changes and their current state."""
+        return await register(request, "view", "list_intents")
+
+    @router.get("/databricks/framework")
+    async def framework_register(request: Request):
+        """Databricks mapping packs, reviews, attestations and active version."""
+        return await register(request, "view", "list_framework")
 
     @router.get("/enforcement-intents/{intent_ref}")
     async def get_intent(request: Request, intent_ref: IntentRef):

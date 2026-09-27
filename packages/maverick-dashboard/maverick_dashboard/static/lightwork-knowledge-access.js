@@ -54,9 +54,14 @@
   nextButton.hidden = true;
   searchNote.after(nextButton);
 
+  // A reply this page could not verify is shown as one plain sentence; the
+  // precise reason stays on the error for the technical record. Messages
+  // meant for people pass an explicit code.
+  var UNVERIFIED = "Something changed while loading. Refresh the page and try again.";
   function failure(message, code) {
-    var error = new Error(message);
+    var error = new Error(code ? message : UNVERIFIED);
     error.code = code || "invalid_response";
+    error.technical = message;
     return error;
   }
 
@@ -311,13 +316,17 @@
   function ensureContext(payload) {
     if (!payload || typeof payload !== "object" || payload.context !== context) {
       access.invalidate("context");
-      throw failure("Your account or workspace changed. Private knowledge was cleared; reload the page.", "context_changed");
+      throw failure("Your account or workspace changed, so private results were cleared. Reload the page.", "context_changed");
     }
     return payload;
   }
 
-  function errorDetail(payload) {
-    return payload && typeof payload.detail === "string" ? payload.detail : "Knowledge access failed.";
+  function errorDetail(response) {
+    if (response.status === 409) {
+      return "This changed since you loaded it, or current access couldn't be confirmed. Refresh and try again.";
+    }
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, "finish this");
+    return "Something went wrong. Please try again.";
   }
 
   async function readJson(response, token, path, readScope) {
@@ -328,8 +337,8 @@
     if (["session", "scope", "capability"].includes(meaning.kind)) {
       if (meaning.kind === "capability") deniedPaths.add(path);
       var denial = failure(meaning.kind === "capability" ?
-        "This action is unavailable. Check its permissions and reload knowledge access." :
-        "Your sign-in or knowledge access changed. Sign in again and reload this page.");
+        "You can't do this with your current access. Ask an administrator." :
+        "Your sign-in or access changed. Sign in again and reload this page.", "access_changed");
       denial.accessKind = meaning.kind;
       throw denial;
     }
@@ -351,9 +360,10 @@
       throw unreadable;
     }
     if (!response.ok) {
-      var message = errorDetail(payload);
+      var message = errorDetail(response);
       meaning = access.observe(response, payload, policy);
       var rejected = failure(message, response.status === 409 ? "conflict" : "request_failed");
+      rejected.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
       rejected.accessKind = meaning.kind;
       throw rejected;
     }
@@ -362,8 +372,8 @@
 
   async function api(path, body, method) {
     var token = access.capture();
-    if (deniedPaths.has(path)) throw failure("This action is unavailable. Check its permissions and reload knowledge access.");
-    if (unconfirmedPaths.has(path)) throw failure("The previous result is not confirmed. Refresh request status before deciding whether to retry.");
+    if (deniedPaths.has(path)) throw failure("You can't do this with your current access. Ask an administrator.", "access_changed");
+    if (unconfirmedPaths.has(path)) throw failure("The last attempt wasn't confirmed. Press Refresh under Request status before trying again.", "unconfirmed");
     var response = await fetch(apiBase + path, {
       method: method || "POST",
       credentials: "same-origin",
@@ -386,8 +396,21 @@
     catch (_error) { return "Unavailable"; }
   }
 
+  var LABELS = {
+    unchanged_pending_review: "Unchanged until reviewed", pending_source_review: "Waiting for review",
+    retire_or_retrain_model: "Retire or retrain the model", invalidate_dataset: "Rebuild the dataset",
+    retention_hold_active: "Legal hold active", retention_hold_released: "Legal hold released",
+    external_source_deletion_unverified: "Not yet confirmed deleted at the original source",
+    external_retention_and_deletion_unverified: "Not yet confirmed at the original source",
+    revoked_for_new_use: "Stopped for new use",
+    submitted: "Waiting for a decision", applying: "Being applied", approved: "Approved", denied: "Denied",
+    correction: "Correction", exclusion: "Stop future use", deletion: "Deletion"
+  };
   function friendly(value) {
-    return String(value || "unknown").replace(/_/g, " ");
+    var key = String(value || "unknown");
+    if (Object.prototype.hasOwnProperty.call(LABELS, key)) { return LABELS[key]; }
+    var textValue = key.replace(/_/g, " ");
+    return textValue.charAt(0).toUpperCase() + textValue.slice(1);
   }
 
   function shortReference(value) {
@@ -411,8 +434,14 @@
     if (access.blocked) root.querySelectorAll("button,input,textarea,select").forEach(function (control) { control.disabled = true; });
   }
 
-  function announce(message, focus) {
+  function announce(message, focus, error) {
     status.textContent = message;
+    // Keep the precise reason for support staff without showing it.
+    if (error && typeof error.technical === "string" && error.technical) {
+      status.dataset.technical = error.technical;
+    } else {
+      delete status.dataset.technical;
+    }
     if (focus) { status.focus(); }
   }
 
@@ -473,13 +502,10 @@
     head.appendChild(badge("Eligible now", "approved"));
     card.appendChild(head);
     card.appendChild(node("p", "", value.content_available ? value.summary : "No governed content preview is available for this registered source."));
-    var sourceLabel = node("p", "ka-source", shortReference(value.source.source_ref) +
-      " · version " + value.source.version);
-    sourceLabel.title = value.source.source_ref;
-    card.appendChild(sourceLabel);
+    card.appendChild(node("p", "muted", "Version " + value.source.version));
     var meta = node("div", "ka-meta");
-    meta.appendChild(node("span", "", "Fresh through " + date(value.eligibility.fresh_until)));
-    meta.appendChild(node("span", "", "Use: " + friendly(value.eligibility.permitted_action)));
+    meta.appendChild(node("span", "", "Up to date until " + date(value.eligibility.fresh_until)));
+    meta.appendChild(node("span", "", "Allowed use: " + friendly(value.eligibility.permitted_action)));
     if (value.correction_history.length) {
       meta.appendChild(node("span", "", value.correction_history.length + " rights request" + (value.correction_history.length === 1 ? "" : "s")));
     }
@@ -558,34 +584,36 @@
     var provenance = node("div");
     provenance.appendChild(node("h3", "", "Source and provenance"));
     var sourceList = node("ul", "ka-detail-list");
-    sourceList.appendChild(listItem("Source", value.source.source_ref));
     sourceList.appendChild(listItem("Version", value.source.version));
-    sourceList.appendChild(listItem("Provenance", friendly(value.source.provenance_kind)));
-    sourceList.appendChild(listItem("Claim status", value.claim_state));
+    sourceList.appendChild(listItem("Where it came from", friendly(value.source.provenance_kind)));
+    sourceList.appendChild(listItem("Status", value.claim_state === "verified" ? "Verified" : "Inferred"));
     sourceList.appendChild(listItem("Observed", date(value.observed_at)));
     sourceList.appendChild(listItem("Verified", date(value.verified_at)));
+    sourceList.appendChild(listItem("License", friendly(value.source.license_id)));
     provenance.appendChild(sourceList);
     grid.appendChild(provenance);
     var eligibility = node("div");
-    eligibility.appendChild(node("h3", "", "Current use check"));
+    eligibility.appendChild(node("h3", "", "Can you use it?"));
     var useList = node("ul", "ka-detail-list");
-    useList.appendChild(listItem("Checked", date(value.eligibility.checked_at)));
-    useList.appendChild(listItem("Fresh through", date(value.eligibility.fresh_until)));
-    useList.appendChild(listItem("Consent through", date(value.eligibility.consent_until)));
-    useList.appendChild(listItem("Purpose", value.eligibility.purpose));
-    useList.appendChild(listItem("Permitted action", friendly(value.eligibility.permitted_action)));
-    useList.appendChild(listItem("Use checked for", friendly(value.eligibility.requested_action)));
-    useList.appendChild(listItem("Authorized user", value.eligibility.actor));
-    useList.appendChild(listItem(
-      "Authorization evidence",
-      value.eligibility.actor_authorization_sha256.slice(0, 12) + "…"
-    ));
-    useList.appendChild(listItem("Cache", value.cache.hit ? "revalidated cache hit" : "current source projection"));
-    useList.appendChild(listItem(
-      "Cached copy",
-      "Temporary in-app view; the source remains in its governed store"
-    ));
+    useList.appendChild(listItem("Last checked", date(value.eligibility.checked_at)));
+    useList.appendChild(listItem("Up to date until", date(value.eligibility.fresh_until)));
+    useList.appendChild(listItem("Consent lasts until", date(value.eligibility.consent_until)));
+    useList.appendChild(listItem("For", friendly(value.eligibility.purpose)));
+    useList.appendChild(listItem("Allowed use", friendly(value.eligibility.permitted_action)));
     eligibility.appendChild(useList);
+    var technical = document.createElement("details");
+    technical.appendChild(node("summary", "", "Technical details"));
+    var techList = node("ul", "ka-detail-list");
+    techList.appendChild(listItem("Source", value.source.source_ref));
+    techList.appendChild(listItem("Checked for", friendly(value.eligibility.requested_action)));
+    techList.appendChild(listItem("Checked for person", value.eligibility.actor.replace(/^user:/, "")));
+    techList.appendChild(listItem("Saved copy", value.cache.hit ?
+      "A recent copy was used after its source was checked again (revalidated cache hit)" :
+      "Read straight from the source"));
+    techList.appendChild(listItem("Where the copy lives",
+      "Temporary in-app view; the source remains in its governed store"));
+    technical.appendChild(techList);
+    eligibility.appendChild(technical);
     grid.appendChild(eligibility);
     detail.appendChild(node("h3", "", value.title));
     detail.appendChild(node("p", "", value.content_available ? value.summary : "This source has no governed content preview."));
@@ -603,7 +631,7 @@
     } else {
       var historyList = node("ul", "ka-detail-list");
       value.correction_history.forEach(function (record) {
-        historyList.appendChild(node("li", "", friendly(record.request_type) + " · " + friendly(record.status) + " · " + record.reason));
+        historyList.appendChild(node("li", "", friendly(record.request_type) + " — " + friendly(record.status) + ": " + record.reason));
       });
       history.appendChild(historyList);
     }
@@ -612,9 +640,7 @@
     detailPanel.hidden = false;
     selectedReference = value.reference;
     if (requestSource) {
-      requestSource.textContent = value.title + " · " + shortReference(value.reference.asset_id) +
-        " · version " + value.reference.version;
-      requestSource.title = value.reference.asset_id;
+      requestSource.textContent = value.title + " · version " + value.reference.version;
     }
     if (submitRequest) { submitRequest.disabled = false; }
     detailHeading.focus();
@@ -643,7 +669,7 @@
       announce("Source detail is current and ready for review.", false);
     } catch (error) {
       clearEligibleResults();
-      announce(error.message || "Source detail could not be revalidated.", true);
+      announce(error.message || "Could not open this source. Please try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -663,13 +689,13 @@
   }
 
   function renderDerivativeList(records) {
-    if (!records.length) { return node("p", "muted", "No registered derivatives are linked to this exact version."); }
+    if (!records.length) { return node("p", "muted", "Nothing else is built from this source."); }
     var list = node("ul", "ka-lineage");
     records.forEach(function (entry) {
-      var row = node("li", "", shortReference(entry.reference.asset_id) + " · " +
-        entry.reference.version + " · registry state " + friendly(entry.current_state) +
-        " · " + friendly(entry.required_action) + " · " + friendly(entry.workflow_state));
-      row.title = entry.reference.asset_id;
+      var row = node("li", "", "Used in " + (entry.reference.kind === "model" ? "the model " : "the dataset ") +
+        friendly(entry.reference.asset_id) + " (version " + entry.reference.version + ") — " +
+        friendly(entry.required_action).toLowerCase() + " (" + friendly(entry.required_action) + " required) · " +
+        friendly(entry.workflow_state) + " · currently " + friendly(entry.current_state).toLowerCase());
       list.appendChild(row);
     });
     return list;
@@ -677,7 +703,7 @@
 
   async function sha256(value) {
     if (!window.crypto || !window.crypto.subtle || typeof window.crypto.subtle.digest !== "function") {
-      throw failure("This browser cannot prepare tamper-evident decision evidence.");
+      throw failure("This browser can't record the decision securely. Try a current version of Chrome, Edge, Firefox or Safari.", "browser");
     }
     var buffer = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
     return Array.from(new Uint8Array(buffer)).map(function (byte) {
@@ -713,13 +739,12 @@
       box.appendChild(node(
         "p",
         "ka-honesty",
-        "Recovery is waiting after the source-retirement boundary. Re-enter the exact rationale used by " +
-          record.decided_by + "; its SHA-256 must match " +
-          record.decision_evidence_sha256.slice(0, 12) + "…."
+        "Recovery is waiting: an approval was interrupted part-way. To finish it, enter exactly the same reason " +
+          String(record.decided_by || "").replace(/^user:/, "") + " gave when approving."
       ));
     }
     var label = node("label", "ka-field", recovering ?
-      "Exact prior decision rationale" : "Decision rationale");
+      "The reason given when it was approved" : "Reason for your decision");
     var input = node("textarea", "textarea");
     input.rows = 3;
     input.maxLength = 2000;
@@ -731,14 +756,14 @@
     confirm.type = "checkbox";
     confirmLabel.appendChild(confirm);
     confirmLabel.appendChild(node("span", "", recovering ?
-      "I verified this is an exact recovery of the recorded approval." :
-      "I reviewed the source and every affected derivative shown above."));
+      "I'm finishing the approval that was already given." :
+      "I reviewed the source and everything built from it listed above."));
     box.appendChild(confirmLabel);
     var actions = node("div", "ka-actions");
     (recovering ? [
-      ["Recover approved retirement", "approve", "btn btn--danger"]
+      ["Finish the approved removal", "approve", "btn btn--danger"]
     ] : [
-      ["Approve and retire source version", "approve", "btn btn--danger"],
+      ["Approve and stop using this source", "approve", "btn btn--danger"],
       ["Deny request", "deny", "btn"]
     ]).forEach(function (choice) {
       var button = node("button", choice[2], choice[0]);
@@ -747,7 +772,7 @@
       button.addEventListener("click", async function () {
         var note = input.value.trim();
         if (!note || !confirm.checked) {
-          announce("Add a decision rationale and confirm the derivative review.", true);
+          announce("Add a reason and tick the confirmation first.", true);
           return;
         }
         if (pending) { return; }
@@ -773,13 +798,13 @@
             clearRequestInputs();
           }
           announce(choice[1] === "approve" ?
-            "The exact source version is retired from new use. Derivative follow-up is recorded." :
-            "The request was denied; source use remains unchanged.", true);
+            "The source is no longer used. The follow-up for material built from it is recorded." :
+            "The request was denied; the source can still be used.", true);
         } catch (error) {
           if (!["capability", "transient"].includes(error.accessKind)) {
             try { await loadRequests(); } catch (_refreshError) { /* retain the decision error */ }
           }
-          announce(error.message || "The rights decision could not be completed.", true);
+          announce(error.message || "Could not save your decision. Please try again.", true, error);
         } finally {
           setBusy(false);
         }
@@ -792,14 +817,15 @@
 
   function retentionHoldControls(record) {
     var box = node("div", "ka-review");
-    box.appendChild(node("h4", "", "Preservation hold"));
+    box.appendChild(node("h4", "", "Preservation hold (legal hold)"));
     var hold = record.retention_hold;
     if (!hold) {
-      var identityLabel = node("label", "ka-field", "Hold ID");
+      var identityLabel = node("label", "ka-field", "Name of the legal matter");
       var identity = document.createElement("input");
       identity.className = "input";
-      identity.maxLength = 128;
+      identity.maxLength = 80;
       identity.required = true;
+      identity.placeholder = "For example: Smith v Acme 2026";
       identityLabel.appendChild(identity);
       box.appendChild(identityLabel);
       var basisLabel = node("label", "ka-field", "Legal or preservation basis");
@@ -821,18 +847,23 @@
       var confirm = document.createElement("input");
       confirm.type = "checkbox";
       confirmLabel.appendChild(confirm);
-      confirmLabel.appendChild(node("span", "", "I verified the hold identity, basis, and expiry."));
+      confirmLabel.appendChild(node("span", "", "I checked the matter, the reason and the end date."));
       box.appendChild(confirmLabel);
       var place = node("button", "btn", "Place retention hold");
+      place.setAttribute("aria-label", "Place a legal hold on this deletion request");
       place.type = "button";
       place.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/retention-hold";
       place.addEventListener("click", async function () {
         var holdId = identity.value.trim();
+        if (holdId && !ID.test(holdId)) {
+          // A matter name becomes the hold's reference: letters and numbers joined by dashes.
+          holdId = holdId.normalize("NFKD").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
+        }
         var holdBasis = basis.value.trim();
         var expiresAt = new Date(expiry.value).getTime() / 1000;
         if (!ID.test(holdId) || !holdBasis || !Number.isFinite(expiresAt) ||
             expiresAt <= Date.now() / 1000 || !confirm.checked) {
-          announce("Add a valid hold ID, basis, future expiry, and confirmation.", true);
+          announce("Add the matter name, the reason, an end date in the future, and tick the confirmation.", true);
           return;
         }
         if (pending) { return; }
@@ -854,12 +885,12 @@
             evidence_sha256: evidence
           });
           await loadRequests();
-          announce("The retention hold is active and bound to this deletion request.", true);
+          announce("The legal hold is in place for this deletion request.", true);
         } catch (error) {
           if (!["capability", "transient"].includes(error.accessKind)) {
             try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
           }
-          announce(error.message || "The retention hold could not be placed.", true);
+          announce(error.message || "Could not place the hold. Please try again.", true, error);
         } finally {
           setBusy(false);
         }
@@ -883,12 +914,13 @@
     releaseConfirmLabel.appendChild(node("span", "", "I verified the preservation duty has ended."));
     box.appendChild(releaseConfirmLabel);
     var release = node("button", "btn btn--danger", "Release retention hold");
+    release.setAttribute("aria-label", "Release the legal hold");
     release.type = "button";
     release.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/retention-hold/release";
     release.addEventListener("click", async function () {
       var releaseReason = reason.value.trim();
       if (!releaseReason || !releaseConfirm.checked) {
-        announce("Add the release reason and confirm the preservation review.", true);
+        announce("Add the reason for releasing the hold and tick the confirmation.", true);
         return;
       }
       if (pending) { return; }
@@ -907,12 +939,12 @@
           evidence_sha256: evidence
         });
         await loadRequests();
-        announce("The retention hold was released with evidence.", true);
+        announce("The legal hold was released.", true);
       } catch (error) {
         if (!["capability", "transient"].includes(error.accessKind)) {
           try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
         }
-        announce(error.message || "The retention hold could not be released.", true);
+        announce(error.message || "Could not release the hold. Please try again.", true, error);
       } finally {
         setBusy(false);
       }
@@ -931,13 +963,12 @@
       var card = node("article", "ka-request");
       var head = node("div", "ka-request__head");
       head.appendChild(node("h3", "", friendly(record.request_type) + " request"));
+      head.appendChild(node("span", "muted", friendly(record.status).toLowerCase()));
       head.appendChild(badge(friendly(record.status), record.status === "approved" ? "approved" :
         record.status === "denied" ? "denied" : record.status === "applying" ? "warning" : "pending"));
       card.appendChild(head);
-      var source = node("p", "ka-source", shortReference(record.source_reference.asset_id) +
-        " · version " + record.source_reference.version);
-      source.title = record.source_reference.asset_id;
-      card.appendChild(source);
+      card.appendChild(node("p", "muted", "Source: " + friendly(record.source_reference.asset_id) +
+        " (version " + record.source_reference.version + ")"));
       card.appendChild(node("p", "", record.reason));
       if (record.proposed_correction) {
         card.appendChild(node("p", "", "Proposed correction: " + record.proposed_correction));
@@ -946,9 +977,8 @@
         card.appendChild(node(
           "p",
           "",
-          "Corrected replacement: " + shortReference(record.replacement_reference.asset_id) +
-            " · version " + record.replacement_reference.version +
-            " · " + friendly(record.replacement_status)
+          "Corrected replacement: " + record.replacement_reference.asset_id +
+            " (version " + record.replacement_reference.version + ") · " + friendly(record.replacement_status).toLowerCase()
         ));
       } else if (record.request_type === "correction" && record.status === "submitted") {
         card.appendChild(node(
@@ -958,23 +988,23 @@
         ));
       }
       card.appendChild(node("p", "", "Source use: " + friendly(record.source_use_status) +
-        ". Raw record: " + friendly(record.raw_record_status) +
-        ". Preservation and retention review: " + friendly(record.retention_review_status) + "."));
+        ". Original record: " + friendly(record.raw_record_status) +
+        ". Keep-or-delete review: " + friendly(record.retention_review_status) + "."));
       if (record.retention_hold) {
         var hold = record.retention_hold;
         card.appendChild(node(
           "p",
           "ka-honesty",
-          "Retention hold " + hold.hold_id + " is " + friendly(hold.effective_status) +
-            " through " + date(hold.expires_at) + ". Basis: " + hold.basis +
+          "Legal hold " + hold.hold_id + " is " + friendly(hold.effective_status).toLowerCase() +
+            " until " + date(hold.expires_at) + ". Reason: " + hold.basis +
             (hold.release_reason ? " Release: " + hold.release_reason : "")
         ));
       }
-      card.appendChild(node("p", "ka-lineage-label", "Current affected derivatives · rechecked before display"));
+      card.appendChild(node("p", "ka-lineage-label", "Also affects"));
       card.appendChild(renderDerivativeList(record.derivatives));
       if (JSON.stringify(record.derivatives_at_request) !== JSON.stringify(record.derivatives)) {
         var recorded = document.createElement("details");
-        recorded.appendChild(node("summary", "", "Affected derivatives recorded when submitted"));
+        recorded.appendChild(node("summary", "", "What it affected when the request was made"));
         recorded.appendChild(renderDerivativeList(record.derivatives_at_request));
         card.appendChild(recorded);
       }
@@ -1042,7 +1072,7 @@
       exportButton.disabled = true;
       nextCursor = null;
       nextButton.hidden = true;
-      announce(error.message || "Knowledge search failed.", true);
+      announce(error.message || "Could not search. Please try again.", true, error);
     } finally {
       if (generation === searchGeneration || activeSearch === null) { setBusy(false); }
     }
@@ -1054,7 +1084,7 @@
     var purpose = document.getElementById("ka-purpose").value.trim();
     var limit = Number(document.getElementById("ka-limit").value);
     if (!PURPOSE.test(purpose) || !Number.isInteger(limit) || limit < 1 || limit > 50) {
-      announce("Choose a valid intended use and result count.", true);
+      announce("Choose what you'll use the information for. If the list is empty, add sources first.", true);
       return;
     }
     await runSearch({query: document.getElementById("ka-query").value.trim(), purpose: purpose, limit: limit});
@@ -1160,7 +1190,7 @@
       announce("Exported " + clean.length + " currently eligible source" + (clean.length === 1 ? "." : "s."), false);
     } catch (error) {
       if (!["capability", "transient"].includes(error.accessKind)) clearEligibleResults();
-      announce(error.message || "Knowledge export failed closed.", true);
+      announce(error.message || "Could not download the results. Please try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -1206,7 +1236,7 @@
         await loadRequests();
         announce("The source-rights request and affected derivatives are recorded.", true);
       } catch (error) {
-        announce((error.message || "The rights request could not be recorded.") + " Your inputs are still here for an exact retry.", true);
+        announce((error.message || "Could not send the request.") + " Your answers are still here, so you can try again.", true, error);
       } finally {
         setBusy(false);
       }
@@ -1218,9 +1248,9 @@
     setBusy(true);
     try {
       await loadRequests();
-      announce("Rights-request status is current.", false);
+      announce("Requests are up to date.", false);
     } catch (error) {
-      announce(error.message || "Rights-request status could not be loaded.", true);
+      announce(error.message || "Could not load requests. Please try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -1228,6 +1258,8 @@
 
   loadRequests().catch(function (error) {
     requests.textContent = "";
-    requests.appendChild(node("p", "muted", error.message || "Rights-request status is unavailable."));
+    var note = node("p", "muted", error.message || "Requests are not available right now.");
+    if (error && error.technical) { note.dataset.technical = error.technical; }
+    requests.appendChild(note);
   });
 })();

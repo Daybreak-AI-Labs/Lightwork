@@ -169,3 +169,86 @@ test("empty update and malformed collaborator references fail before transport",
     Array.from({ length: 65 }, (_, index) => "person:" + index).join(","),
   ), /64 collaborators/);
 });
+
+// ---- page behaviour (jsdom) -------------------------------------------
+const { JSDOM } = require("jsdom");
+const pageTemplate = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/ai_entity_tasks.html"), "utf8");
+const pageSource = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ai-entity-tasks.js"), "utf8");
+const pageBody = pageTemplate.slice(pageTemplate.indexOf('<div class="aet-shell"'), pageTemplate.lastIndexOf("{% endblock %}", pageTemplate.indexOf("{% block scripts_extra %}")))
+  .replace("{{ api_base }}", "/api/v1/ai-entity-tasks")
+  .replace(/\{\{\s*hero\([^}]*\}\}/, "").replace(/\{%[^%]*%\}/g, "").replace(/\{\{[^}]*\}\}/g, "true");
+const TASK = { task_id: "task-1", entity_id: "asset-7", title: "Review owner", status: "open", priority: "medium",
+  assignee_ref: "user:local", collaborator_refs: [], due_at: null, revision: 3 };
+
+function streamed(value, status = 200) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let sent = false;
+  return { ok: status < 400, status, headers: { get: () => null },
+    body: { getReader: () => ({ async read() { if (sent) return { done: true }; sent = true; return { done: false, value: bytes }; }, async cancel() {} }) },
+    async text() { return JSON.stringify(value); } };
+}
+
+function page(t) {
+  const dom = new JSDOM(`<main>${pageBody}</main>`, { url: "https://lightwork.test/ai-entity-tasks", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  w.TextDecoder = TextDecoder;
+  const calls = [];
+  w.fetch = async (url, options = {}) => {
+    const key = (options.method || "GET") + " " + url;
+    calls.push({ key, body: options.body ? JSON.parse(options.body) : undefined });
+    if (key.endsWith("/ai-entity-tasks/status")) return streamed({ ready: true, enabled: true, configured: true });
+    if (key.endsWith("/assurance/ai-inventory")) return streamed({ assets: [{ asset_id: "asset-7", revision: 8, status: "present", display_name: "Claims assistant", asset_type: "agent" }] });
+    if (key.endsWith("/people/assignable")) return streamed({ items: [{ ref: "user:local", label: "Local operator", is_you: true }, { ref: "person:abc", label: "Dana" }] });
+    if (key.includes("/ai-entity-tasks?")) return streamed({ items: [TASK], count: 1 });
+    if (key === "GET /api/v1/ai-entity-tasks/task-1") return streamed(TASK);
+    if (key.startsWith("PATCH")) return streamed({ ...TASK, status: "in_progress", revision: 4 });
+    if (key.startsWith("POST /api/v1/ai-entity-tasks") && !key.includes("operations")) return streamed({ ...TASK, task_id: "task-2" }, 201);
+    return streamed({ count: 0, items: [] });
+  };
+  w.eval(pageSource);
+  const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
+  return { w, calls, settle, $: (id) => w.document.getElementById(id) };
+}
+
+test("tasks load as a table with names instead of references", async (t) => {
+  const h = page(t);
+  await h.settle();
+  const text = h.$("aet-task-list").textContent;
+  assert.match(text, /Review owner/);
+  assert.match(text, /Claims assistant \(Agent\)/);
+  assert.match(text, /Local operator \(you\)/);
+  assert.doesNotMatch(text, /asset-7|task-1|user:local/);
+});
+
+test("editing sends only what changed with the task's version", async (t) => {
+  const h = page(t);
+  await h.settle();
+  [...h.$("aet-task-list").querySelectorAll("button")].find((b) => b.textContent === "Edit").click();
+  await h.settle();
+  assert.equal(h.$("aet-update-panel").hidden, false);
+  const form = h.$("aet-update-form");
+  form.elements.namedItem("status").value = "in_progress";
+  form.dispatchEvent(new h.w.Event("submit", { cancelable: true }));
+  await h.settle();
+  const patch = h.calls.find((c) => c.key.startsWith("PATCH"));
+  assert.equal(patch.body.expected_revision, 3);
+  assert.equal(patch.body.status, "in_progress");
+  assert.equal("assignee_ref" in patch.body, false);
+  assert.equal("due_at" in patch.body, false);
+});
+
+test("creating a task pins the AI system version from the picker", async (t) => {
+  const h = page(t);
+  await h.settle();
+  const form = h.$("aet-create-form");
+  form.elements.namedItem("entity_id").value = "asset-7";
+  form.elements.namedItem("title").value = "Check the model card";
+  form.elements.namedItem("assignee_ref").value = "person:abc";
+  form.dispatchEvent(new h.w.Event("submit", { cancelable: true }));
+  await h.settle();
+  const post = h.calls.find((c) => c.key === "POST /api/v1/ai-entity-tasks");
+  assert.equal(post.body.entity_id, "asset-7");
+  assert.equal(post.body.entity_revision, 8);
+  assert.equal(post.body.assignee_ref, "person:abc");
+});

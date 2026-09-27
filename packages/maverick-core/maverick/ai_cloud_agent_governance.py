@@ -193,6 +193,15 @@ def _provider(value: object) -> CloudProvider:
     return value  # type: ignore[return-value]
 
 
+_MAX_REGISTER_ROWS = 500
+
+
+def _register_limit(value: object) -> int:
+    if type(value) is not int or not 1 <= value <= _MAX_REGISTER_ROWS:
+        raise ValueError("register limit is invalid")
+    return value
+
+
 def _reference(value: object, label: str, *, prefixes: set[str]) -> str:
     if not isinstance(value, str) or not _REF_RE.fullmatch(value):
         raise ValueError(f"{label} must be a pseudonymous reference")
@@ -4226,6 +4235,133 @@ class CloudAgentGovernanceAuthority:
             state.activation = activation
             self._remember(state, "activate_framework_pack", idempotency_key, semantic, activation)
             return activation
+
+    # ---- read-only registers for operator pickers -------------------------
+    # These never widen authority: each read is bound to the caller's tenant
+    # authority, verifies every record's integrity before returning it, and is
+    # capped so a page can offer selectors instead of typed references.
+
+    def list_policy_evaluations(
+        self,
+        authority: TenantAuthority,
+        *,
+        limit: int = _MAX_REGISTER_ROWS,
+    ) -> tuple[PolicyEvaluationRecord, ...]:
+        bound = _register_limit(limit)
+        with self._lock:
+            state = self._tenant(authority)
+            rows = [
+                record
+                for record in state.evaluations.values()
+                if isinstance(record, PolicyEvaluationRecord)
+                and record.tenant_sha256 == authority.tenant_sha256
+            ]
+        for record in rows:
+            record.verify()
+        rows.sort(key=lambda record: (-record.evaluated_at, record.evaluation_ref))
+        return tuple(rows[:bound])
+
+    def list_enforcement_intents(
+        self,
+        authority: TenantAuthority,
+        *,
+        limit: int = _MAX_REGISTER_ROWS,
+    ) -> tuple[EnforcementIntent, ...]:
+        bound = _register_limit(limit)
+        with self._lock:
+            state = self._tenant(authority)
+            rows = [
+                intent
+                for intent in state.intents.values()
+                if isinstance(intent, EnforcementIntent)
+                and intent.tenant_sha256 == authority.tenant_sha256
+            ]
+        for intent in rows:
+            intent.verify()
+        rows.sort(key=lambda intent: intent.intent_ref)
+        return tuple(rows[:bound])
+
+    def framework_register(self, authority: TenantAuthority) -> dict[str, object]:
+        """Registered packs, reviews, attestations and the active version."""
+
+        self._require_framework_enabled()
+        with self._lock:
+            state = self._tenant(authority)
+            packs = list(state.packs.values())
+            reviews = [
+                review
+                for review in state.reviews.values()
+                if isinstance(review, FrameworkReview)
+                and review.tenant_sha256 == authority.tenant_sha256
+            ]
+            attestations = [
+                attestation
+                for attestation in state.attestations.values()
+                if isinstance(attestation, FrameworkAttestation)
+                and attestation.tenant_sha256 == authority.tenant_sha256
+            ]
+            activation = state.activation
+        for pack in packs:
+            pack.verify()
+        for review in reviews:
+            review.verify()
+        for attestation in attestations:
+            attestation.verify()
+        if activation is not None:
+            activation.verify()
+        return {
+            "packs": sorted(packs, key=lambda pack: pack.version),
+            "reviews": sorted(reviews, key=lambda review: (-review.reviewed_at, review.review_ref)),
+            "attestations": sorted(
+                attestations,
+                key=lambda attestation: (-attestation.attested_at, attestation.attestation_ref),
+            ),
+            "activation": activation,
+        }
+
+    def policy_catalog(self) -> tuple[dict[str, object], ...]:
+        """Policies the configured evaluator offers, when it publishes a catalog.
+
+        The evaluator protocol only requires ``evaluate``; an evaluator may also
+        expose ``catalog()`` returning ``policy_ref``/``revision``/``sha256`` and
+        a display ``title``. Anything malformed is refused, never guessed.
+        """
+
+        self._require_enabled()
+        evaluator = self._policy_evaluator
+        catalog = getattr(evaluator, "catalog", None)
+        if evaluator is None or not callable(catalog):
+            return ()
+        try:
+            entries = catalog()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise CloudAgentAdapterError("policy catalog failed closed") from exc
+        if isinstance(entries, (str, bytes, Mapping)) or not isinstance(entries, Sequence):
+            raise CloudAgentAdapterError("policy catalog is invalid")
+        selected: list[dict[str, object]] = []
+        for entry in list(entries)[:_MAX_REGISTER_ROWS]:
+            if not isinstance(entry, Mapping):
+                raise CloudAgentAdapterError("policy catalog entry is invalid")
+            title = entry.get("title")
+            if not isinstance(title, str) or not title.strip() or len(title) > 200:
+                raise CloudAgentAdapterError("policy catalog title is invalid")
+            try:
+                selected.append(
+                    {
+                        "policy_ref": _reference(
+                            entry.get("policy_ref"), "policy_ref", prefixes={"pol"}
+                        ),
+                        "policy_revision": _revision(entry.get("revision"), "policy_revision"),
+                        "policy_sha256": _digest(entry.get("sha256"), "policy_sha256"),
+                        "title": title.strip(),
+                    }
+                )
+            except ValueError as exc:
+                raise CloudAgentAdapterError("policy catalog entry is invalid") from exc
+        selected.sort(key=lambda item: (str(item["title"]).casefold(), str(item["policy_ref"])))
+        return tuple(selected)
 
     def verify_tenant_integrity(self, authority: TenantAuthority) -> str:
         """Verify all canonical hashes and return a tenant state root."""

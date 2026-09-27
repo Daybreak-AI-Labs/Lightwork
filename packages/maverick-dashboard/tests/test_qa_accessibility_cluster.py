@@ -83,8 +83,8 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "model_risk_assurance.html",
             (
-                'aria-label="Review {{ row.vendor }} assessment"',
-                'aria-label="Project {{ row.vendor }} assessment to asset"',
+                'aria-label="Review the {{ row.vendor }} assessment"',
+                'aria-label="Attach the {{ row.vendor }} review to an AI system"',
             ),
         ),
         (

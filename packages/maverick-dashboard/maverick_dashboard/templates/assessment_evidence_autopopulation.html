@@ -1,129 +1,95 @@
 {% extends "base.html" %}
-{% block title %}Assessment Evidence Proposals - Lightwork{% endblock %}
+{% from "_hero.html" import hero %}
+{% from "_module_gate.html" import module_gate %}
+{% block title %}Suggested Assessment Answers · Lightwork{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="{{ style_path }}">
 {% endblock %}
 {% block content %}
-{% from "_module_gate.html" import module_gate %}
 {% if not proposal_module_enabled %}
-{{ module_gate('assessment_evidence_autopopulation', 'Assessment evidence proposals',
-               detail='Activates proposal generation after AI Evidence Analysis is enabled; released evidence, mapping authority and apply controls remain separately checked.',
+{{ module_gate('assessment_evidence_autopopulation', 'Suggested assessment answers',
+               detail='Turn this on to have Lightwork suggest questionnaire answers from evidence your team has already approved. AI evidence analysis must be on too.',
                can_activate=proposal_can_admin) }}
 {% endif %}
 <div class="aep-shell" id="assessment-evidence-shell"
       data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
       data-module-enabled="{{ 'true' if proposal_module_enabled else 'false' }}"
       data-can-operate="{{ 'true' if proposal_can_operate else 'false' }}">
-  <header class="aep-glass aep-hero">
-    <div>
-      <p class="eyebrow">Privacy + third-party assessment intelligence</p>
-      <h1>Evidence-assisted assessment proposals</h1>
-      <p class="aep-lede">Use approved evidence analyses to draft questionnaire answers. Review the answers first, then choose which approved answers to add to the assessment.</p>
-    </div>
-    <div class="aep-runtime" aria-live="polite">
-      <span class="aep-pill" id="aep-status-pill" data-state="checking">Checking</span>
-      <strong id="aep-status-title">Service availability</strong>
-      <span id="aep-status-detail">Checking whether evidence proposals are available.</span>
-      <button class="btn" id="aep-refresh-status" type="button">Refresh status</button>
-    </div>
-  </header>
-
-  <aside class="aep-glass aep-boundary" aria-labelledby="aep-boundary-title">
-    <p class="eyebrow">Decision boundary</p>
-    <h2 id="aep-boundary-title">Review evidence before adding answers</h2>
-    <ul>
-      <li>Only current, human-approved AI Evidence Analysis records can support a proposal.</li>
-      <li>Partial, missing, conflicting, or low-confidence evidence can never become an automatically applicable answer.</li>
-      <li>Approval selects exact eligible questions; it does not change the assessment.</li>
-      <li>Before adding answers, Lightwork checks that the evidence and assessment are unchanged. It fills only unanswered questions and never overwrites a human answer.</li>
-      <li>Evidence references and integrity checks do not establish legal conclusions, prove a provider's claims, confirm customer acceptance, or provide an independently stored audit record.</li>
+  {{ hero('Assessments', 'Suggested assessment answers', lede='Use evidence your team has already approved to suggest answers for an open questionnaire. Someone reviews the suggestions, then chooses which ones to add.') }}
+{% if proposal_workspace_missing %}
+  <section class="panel" aria-labelledby="aep-workspace-title">
+    <h2 id="aep-workspace-title">Choose a workspace first</h2>
+    <p>Assessments are kept separately for each workspace. Choose a workspace from the workspace menu, then open this page again.</p>
+  </section>
+{% else %}
+  <p class="muted">Suggestions never change an assessment until someone adds them, and they only ever fill unanswered questions.</p>
+  <details>
+    <summary>About this page's safeguards</summary>
+    <ul class="muted">
+      <li>Only evidence a person has approved can support a suggestion.</li>
+      <li>Partial, missing, conflicting or low-confidence evidence is never offered as an answer that can be added.</li>
+      <li>Approving picks exact questions; it does not change the assessment.</li>
+      <li>Before adding answers Lightwork checks that the evidence and the assessment are unchanged. It fills only unanswered questions and never overwrites an answer a person gave.</li>
+      <li>Suggestions are not legal conclusions and do not prove a supplier's claims.</li>
     </ul>
-  </aside>
+  </details>
 
-  <section class="aep-grid">
-    <article class="aep-glass aep-panel">
-      <p class="eyebrow">Step 1</p>
-      <h2>Generate proposal</h2>
-      <form class="aep-form" id="aep-create-form" autocomplete="off" novalidate>
-        <fieldset id="aep-create-controls" data-aep-mutation disabled aria-disabled="true">
-          <label for="aep-assessment-id">Open assessment ID</label>
-          <input class="input" id="aep-assessment-id" name="assessment_id" maxlength="128" required>
-          <label for="aep-analysis-ids">Released evidence analysis IDs <span>one per line</span></label>
-          <textarea class="input" id="aep-analysis-ids" name="analysis_ids" rows="5" maxlength="4128" required></textarea>
-          <label for="aep-create-idempotency">Request reference (reuse when retrying)</label>
-          <input class="input" id="aep-create-idempotency" name="idempotency_key" maxlength="192" required>
-          <button class="btn btn-primary" type="submit">Generate proposal only</button>
-        </fieldset>
-      </form>
-    </article>
-
-    <article class="aep-glass aep-panel">
-      <p class="eyebrow">Step 2</p>
-      <h2>Review proposed answers</h2>
-      <form class="aep-form" id="aep-review-form" autocomplete="off" novalidate>
-        <fieldset id="aep-review-controls" data-aep-mutation disabled aria-disabled="true">
-          <label for="aep-review-id">Proposal ID</label>
-          <input class="input" id="aep-review-id" name="proposal_id" maxlength="128" required>
-          <label for="aep-review-revision">Current proposal version</label>
-          <input class="input" id="aep-review-revision" name="expected_revision" type="number" min="1" max="9223372036854775807" step="1" required>
-          <label for="aep-review-decision">Decision</label>
-          <select class="select" id="aep-review-decision" name="decision"><option value="approve">Approve selected eligible answers</option><option value="reject">Reject proposal</option></select>
-          <fieldset class="aep-selection" id="aep-candidate-selection">
-            <legend>Eligible questions loaded from inspected proposal</legend>
-            <p class="aep-muted">Inspect a proposal to load its independently eligible questions.</p>
-          </fieldset>
-          <label for="aep-review-rationale">Reason for your decision</label>
-          <textarea class="input" id="aep-review-rationale" name="rationale" rows="4" maxlength="4000" required></textarea>
-          <label for="aep-review-idempotency">Request reference (reuse when retrying)</label>
-          <input class="input" id="aep-review-idempotency" name="idempotency_key" maxlength="192" required>
-          <button class="btn btn-primary" type="submit">Record review decision</button>
-        </fieldset>
-      </form>
-    </article>
-
-    <article class="aep-glass aep-panel aep-panel--apply">
-      <p class="eyebrow">Step 3</p>
-      <h2>Apply approved answers</h2>
-      <form class="aep-form" id="aep-apply-form" autocomplete="off" novalidate>
-        <fieldset id="aep-apply-controls" data-aep-mutation disabled aria-disabled="true">
-          <label for="aep-apply-id">Approved proposal ID</label>
-          <input class="input" id="aep-apply-id" name="proposal_id" maxlength="128" required>
-          <div class="aep-row">
-            <label for="aep-apply-revision">Current proposal version
-              <input class="input" id="aep-apply-revision" name="expected_revision" type="number" min="1" max="9223372036854775807" step="1" required>
-            </label>
-            <label for="aep-assessment-revision">Assessment version being reviewed
-              <input class="input" id="aep-assessment-revision" name="expected_assessment_revision" type="number" min="1" max="9223372036854775807" step="1" required>
-            </label>
-          </div>
-          <label for="aep-apply-idempotency">Request reference (reuse when retrying)</label>
-          <input class="input" id="aep-apply-idempotency" name="idempotency_key" maxlength="192" required>
-          <label class="aep-confirm"><input id="aep-apply-confirm" name="confirm" type="checkbox" required> I understand this adds only the approved answers to unanswered questions. The assessment still requires final review.</label>
-          <button class="btn btn-primary" type="submit">Add selected approved answers</button>
-        </fieldset>
-      </form>
-    </article>
+  <section class="panel" aria-labelledby="aep-status-title">
+    <div class="section-head"><h2 id="aep-status-title">Availability</h2><button class="btn btn--ghost" id="aep-refresh-status" type="button">Check again</button></div>
+    <p><span class="badge idle" id="aep-status-pill" data-state="checking">Checking</span> <span id="aep-status-detail" role="status" aria-live="polite">Checking whether suggestions are available.</span></p>
   </section>
 
-  <section class="aep-glass aep-panel aep-panel--wide" aria-labelledby="aep-inspect-title">
-    <div class="aep-panel-head">
-      <div><p class="eyebrow">Evidence and provenance</p><h2 id="aep-inspect-title">Inspect proposal</h2></div>
-      <form class="aep-inline" id="aep-inspect-form" autocomplete="off" novalidate>
-        <label class="sr-only" for="aep-inspect-id">Proposal ID</label>
-        <input class="input" id="aep-inspect-id" name="proposal_id" placeholder="AEP-…" maxlength="128" required>
-        <button class="btn" type="submit">Inspect</button>
-        <button class="btn" id="aep-refresh-list" type="button">Refresh queue</button>
-      </form>
-    </div>
-    <p class="aep-status" id="aep-operation-status" role="status" aria-live="polite"></p>
+  <section class="panel" aria-labelledby="aep-create-title">
+    <div class="section-head"><h2 id="aep-create-title">Suggest answers from approved evidence</h2></div>
+    <form class="aep-form" id="aep-create-form" autocomplete="off" novalidate>
+      <fieldset id="aep-create-controls" data-aep-mutation disabled aria-disabled="true">
+        <legend class="sr-only">Suggest answers</legend>
+        <label for="aep-assessment-id">Open assessment</label>
+        <select class="select" id="aep-assessment-id" name="assessment_id" required><option value="">Loading…</option></select>
+        <fieldset class="aep-selection" id="aep-analysis-choices">
+          <legend>Approved evidence to use</legend>
+          <p class="muted">Loading approved evidence…</p>
+        </fieldset>
+        <input type="hidden" id="aep-create-idempotency" name="idempotency_key" data-auto-reference>
+        <button class="btn btn--primary" type="submit">Suggest answers</button>
+      </fieldset>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="aep-queue-title">
+    <div class="section-head"><h2 id="aep-queue-title">Suggestions</h2><button class="btn btn--ghost" id="aep-refresh-list" type="button">Refresh</button></div>
+    <div class="aep-table"><table><caption class="sr-only">Suggested answer sets and what you can do with each</caption>
+      <thead><tr><th scope="col">Assessment</th><th scope="col">Status</th><th scope="col">Suggested answers</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead>
+      <tbody id="aep-queue"><tr><td colspan="5">Loading…</td></tr></tbody></table></div>
+  </section>
+
+  <section class="panel" id="aep-review-panel" aria-labelledby="aep-review-title" hidden>
+    <div class="section-head"><h2 id="aep-review-title" tabindex="-1">Review suggestions</h2></div>
+    <p id="aep-review-subject"></p>
     <div class="aep-candidates" id="aep-candidates" aria-live="polite"></div>
-    <details hidden class="aep-details"><summary>Technical details</summary><pre class="aep-output" id="aep-output" tabindex="0"></pre></details>
+    <form class="aep-form" id="aep-review-form" autocomplete="off" novalidate>
+      <fieldset id="aep-review-controls" data-aep-mutation disabled aria-disabled="true">
+        <legend class="sr-only">Your decision</legend>
+        <fieldset class="aep-selection" id="aep-candidate-selection">
+          <legend>Answers you approve</legend>
+        </fieldset>
+        <label for="aep-review-rationale">Reason for your decision</label>
+        <textarea class="textarea input" id="aep-review-rationale" name="rationale" rows="3" maxlength="4000" required></textarea>
+        <input type="hidden" id="aep-review-idempotency" name="idempotency_key" data-auto-reference>
+        <div class="aep-actions">
+          <button class="btn btn--primary" type="submit" name="decision" value="approve">Approve selected answers</button>
+          <button class="btn btn--danger" type="submit" name="decision" value="reject">Reject all suggestions</button>
+        </div>
+      </fieldset>
+    </form>
   </section>
 
-  <section class="aep-glass aep-panel aep-panel--wide" aria-labelledby="aep-queue-title">
-    <div class="aep-panel-head"><div><p class="eyebrow">Review queue</p><h2 id="aep-queue-title">Recent proposals</h2></div><span class="aep-pill" id="aep-queue-count">0</span></div>
-    <div class="aep-queue" id="aep-queue"></div>
+  <section class="panel" aria-labelledby="aep-result-title">
+    <div class="section-head"><h2 id="aep-result-title">Last action</h2></div>
+    <p class="aep-status" id="aep-operation-status" role="status" aria-live="polite">Nothing has been done yet.</p>
+    <details class="aep-details"><summary>Technical details</summary><pre class="aep-output" id="aep-output" tabindex="0"></pre></details>
   </section>
+{% endif %}
 </div>
-<script src="{{ script_path }}" defer></script>
+{% if not proposal_workspace_missing %}<script src="{{ script_path }}" defer></script>{% endif %}
 {% endblock %}

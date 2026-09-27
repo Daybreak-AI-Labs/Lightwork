@@ -184,6 +184,7 @@ def test_healthy_window_passes_without_alert_and_retry_is_idempotent():
         expected_revision=baseline["revision"],
     )
     assert retry["revision"] == baseline["revision"]
+    assert [row["id"] for row in service.list_baselines()] == [baseline["id"]]
     report = service.evaluate(
         baseline["id"],
         run_id="stable-run",

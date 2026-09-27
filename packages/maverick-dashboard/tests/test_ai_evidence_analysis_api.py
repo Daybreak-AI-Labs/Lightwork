@@ -188,6 +188,10 @@ class Store:
     def revoke(self, *args, **kwargs):
         return self._call("revoke", args, kwargs)
 
+    def list_analyses(self, *args, **kwargs):
+        self.calls.append(("list_analyses", args, kwargs))
+        return (self.record,)
+
     def history(self, *args, **kwargs):
         self.calls.append(("history", args, kwargs))
         return (self.record, _record(status="review_approved", revision=2))
@@ -892,3 +896,21 @@ def test_api_round_trip_with_real_core_store_and_distinct_human_reviewer(
     assert raw not in persisted
     assert b"user:submitter" not in persisted
     assert b"user:independent-reviewer" not in persisted
+
+
+def test_analysis_list_is_view_scoped_to_the_callers_workspace_and_safe(environment) -> None:
+    client, state, _app = environment
+    response = client.get(f"{BASE}/analyses?status=pending_review&limit=5")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["count"] == 1
+    assert body["items"][0]["analysis_id"] == "EVA-0123456789abcdef"
+    assert state.permissions == ["view"]
+    store = state.stores[0]
+    assert store.tenant_id == TENANT
+    assert store.calls == [("list_analyses", (TENANT,), {"status": "pending_review", "limit": 5})]
+    text = response.text
+    assert RAW_SECRET not in text and "tenant-digest-must-not-be-returned" not in text
+    assert client.get(f"{BASE}/analyses?status=anything").status_code == 422
+    state.enabled = False
+    assert client.get(f"{BASE}/analyses").status_code == 403

@@ -1212,6 +1212,21 @@ async def capture_drift_baseline(
     return _safe_drift_baseline(record)
 
 
+@router.get("/drift/baselines")
+async def list_drift_baselines(
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=500),
+) -> dict[str, Any]:
+    """Captured baselines for pickers: operational metadata only, no samples."""
+
+    require_permission(request, "view")
+    _require_active_tenant()
+    drift = _module("drift_monitoring", "drift_monitoring")
+    rows = await _call(drift.list_baselines, limit=limit)
+    items = [_safe_drift_baseline(row) for row in rows]
+    return {"items": items, "count": len(items)}
+
+
 @router.get("/drift/baselines/{baseline_id}")
 async def get_drift_baseline(
     request: Request,
@@ -1275,6 +1290,16 @@ async def list_drift_evaluations(
 
 
 # Agent and MCP topology -----------------------------------------------------
+
+
+@router.get("/agent-topology/agents")
+async def list_agent_topology_agents(request: Request) -> dict[str, Any]:
+    """Configured agent names, so the topology view is picked, not typed."""
+
+    require_permission(request, "view")
+    topology = _module("agent_topology", "agent_topology")
+    names = await _call(topology.agent_names)
+    return {"items": names, "count": len(names)}
 
 
 @router.get("/agent-topology/agents/{agent_name}")

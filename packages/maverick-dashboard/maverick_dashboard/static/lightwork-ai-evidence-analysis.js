@@ -1,23 +1,83 @@
 "use strict";
 
+/* AI evidence analysis page. Documents and review criteria are chosen from
+   the workspace registry; analyses load as a list with row buttons. Record
+   references, versions and fingerprints are carried from the chosen row or
+   computed from the chosen file -- never typed. */
+
 const shell = document.getElementById("evidence-shell");
 const apiBase = shell ? shell.dataset.apiBase : "";
+const can = {
+  operate: Boolean(shell && shell.dataset.canOperate === "true"),
+  audit: Boolean(shell && shell.dataset.canAudit === "true"),
+  admin: Boolean(shell && shell.dataset.canAdmin === "true"),
+  register: Boolean(shell && shell.dataset.canRegister === "true"),
+};
 const runtimeStatus = document.getElementById("runtime-status");
-const statusOutput = document.getElementById("status-output");
 const operations = document.getElementById("evidence-operations");
 const operationStatus = document.getElementById("operation-status");
 const operationOutput = document.getElementById("operation-output");
+
+const MEDIA = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpeg",
+  "image/png": "png",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/plain": "text",
+};
+const STATUS = {
+  pending_review: ["Waiting for review", "warn"],
+  review_approved: ["Approved", "ok"],
+  review_rejected: ["Rejected", "failed"],
+  revoked: ["Withdrawn", "idle"],
+};
+const DISPOSITIONS = {
+  evidence_supported: "Supported by the document",
+  evidence_partial: "Partly supported",
+  evidence_missing: "Not found in the document",
+  indeterminate: "Unclear",
+};
+const REVOKE_REASONS = [
+  { value: "document-replaced", label: "The document was replaced" },
+  { value: "wrong-document", label: "The wrong document was analyzed" },
+  { value: "criteria-changed", label: "The review criteria changed" },
+  { value: "other", label: "Another reason" },
+];
+
+const state = { artifacts: [], criteria: [], analyses: [] };
 
 function setStatus(element, message, failed = false) {
   element.textContent = message;
   element.dataset.state = failed ? "failed" : "ready";
 }
 
-function render(element, value) {
-  element.textContent = JSON.stringify(value, null, 2);
+function technical(value) {
+  if (!operationOutput) return;
+  operationOutput.textContent = value === undefined ? "" :
+    typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
-async function apiRequest(path, options = {}) {
+function human(value) {
+  if (typeof window !== "undefined" && typeof window.mvHuman === "function") return window.mvHuman(value);
+  const text = String(value || "").replace(/[_.:-]+/g, " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+}
+
+function when(ts) {
+  if (typeof window !== "undefined" && typeof window.mvWhen === "function") return window.mvWhen(ts);
+  return ts ? new Date(ts * 1000).toLocaleString() : "";
+}
+
+function plainError(status, action) {
+  if (typeof window !== "undefined" && typeof window.mvErrorText === "function") {
+    return window.mvErrorText({ status }, action);
+  }
+  if (status === 403) return `Could not ${action}. You do not have permission to do this.`;
+  if (status === 409) return `Could not ${action}. This changed since you opened it. Refresh the page and try again.`;
+  return `Could not ${action}. Something went wrong. Please try again.`;
+}
+
+async function apiRequest(path, options = {}, action = "finish this") {
   const response = await fetch(`${apiBase}${path}`, {
     cache: "no-store",
     credentials: "same-origin",
@@ -33,16 +93,14 @@ async function apiRequest(path, options = {}) {
   try {
     payload = await response.json();
   } catch (_error) {
-    const error = new Error("The server returned an invalid JSON response.");
+    const error = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
     error.status = response.status;
     throw error;
   }
   if (!response.ok) {
-    const error = new Error(
-      payload && typeof payload.detail === "string" ?
-        payload.detail : "The operation failed."
-    );
+    const error = new Error(plainError(response.status, action));
     error.status = response.status;
+    error.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
     throw error;
   }
   return payload;
@@ -50,188 +108,417 @@ async function apiRequest(path, options = {}) {
 
 async function run(label, operation) {
   setStatus(operationStatus, `${label}…`);
-  operationOutput.textContent = "";
+  technical(undefined);
   try {
-    const payload = await operation();
-    render(operationOutput, payload);
-    setStatus(operationStatus, `${label} completed.`);
-    return payload;
+    return await operation();
   } catch (error) {
-    const status = Number.isInteger(error.status) ? ` (${error.status})` : "";
-    setStatus(operationStatus, `${label} failed${status}: ${error.message}`, true);
+    setStatus(operationStatus, error && error.message ? error.message : "Something went wrong. Please try again.", true);
+    technical(error && error.technical ? error.technical : undefined);
     throw error;
   }
 }
 
-function value(id) {
-  return document.getElementById(id).value.trim();
+function done(message, details) {
+  setStatus(operationStatus, message);
+  technical(details);
 }
 
-function integer(id) {
-  const parsed = Number(value(id));
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new Error(`${id} must be a positive integer.`);
+function reference(prefix) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function slug(value, fallback) {
+  const cleaned = String(value || "").normalize("NFKD").replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "").toLowerCase().slice(0, 100);
+  return cleaned || fallback;
+}
+
+function documentName(artifactId) {
+  const match = /^(.+)\.[0-9a-f]{8}$/.exec(String(artifactId || ""));
+  return match ? human(match[1]) : `Document ${artifactId}`;
+}
+
+function artifactLabel(item) {
+  return `${documentName(item.artifact_id)} (${human(item.case_ref)})`;
+}
+
+function option(select, value, label) {
+  const item = document.createElement("option");
+  item.value = value;
+  item.textContent = label;
+  select.appendChild(item);
+}
+
+function cell(text) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  return td;
+}
+
+function button(label, handler, cls = "btn") {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = cls;
+  item.textContent = label;
+  item.addEventListener("click", () => {
+    if (item.disabled) return;
+    item.disabled = true;
+    Promise.resolve().then(handler).catch(() => {}).then(() => { item.disabled = false; });
+  });
+  return item;
+}
+
+// ---- pickers -----------------------------------------------------------
+async function loadPickers() {
+  const artifactSelect = document.getElementById("artifact-select");
+  const criteriaSelect = document.getElementById("criteria-select");
+  try {
+    const [artifacts, criteria] = await Promise.all([
+      apiRequest("/authorities/artifacts", {}, "load registered documents"),
+      apiRequest("/authorities/criteria", {}, "load review criteria"),
+    ]);
+    state.artifacts = Array.isArray(artifacts.items) ? artifacts.items : [];
+    state.criteria = Array.isArray(criteria.items) ? criteria.items : [];
+  } catch (error) {
+    state.artifacts = [];
+    state.criteria = [];
+    setStatus(operationStatus, error.message, true);
   }
-  return parsed;
+  artifactSelect.textContent = "";
+  option(artifactSelect, "", state.artifacts.length ? "Choose a document…" :
+    can.register ? "No documents yet — register one below" : "No documents yet — ask an administrator to register one");
+  state.artifacts.forEach((item, index) => option(artifactSelect, String(index), artifactLabel(item)));
+  criteriaSelect.textContent = "";
+  option(criteriaSelect, "", state.criteria.length ? "Choose review criteria…" : "No review criteria yet — ask an administrator to set them up");
+  state.criteria.forEach((item, index) => option(
+    criteriaSelect,
+    String(index),
+    `${human(item.criteria_set_id)} (${item.criterion_ids.length} ${item.criterion_ids.length === 1 ? "check" : "checks"})`,
+  ));
 }
 
-function analysisId() {
-  const selected = value("analysis-id");
-  if (!selected) {
-    throw new Error("Enter an analysis reference first.");
+// ---- analyses list -----------------------------------------------------
+function summaryText(record) {
+  const summary = record.summary || {};
+  const total = Number(summary.total_criteria) || 0;
+  const supported = Number(summary.evidence_supported) || 0;
+  const justification = record.justification || {};
+  const score = Number(justification.maximum_bps) > 0
+    ? Math.round((Number(justification.score_bps) / Number(justification.maximum_bps)) * 100) : null;
+  return `${supported} of ${total} supported` + (score === null ? "" : ` · score ${score}%`);
+}
+
+async function loadAnalyses() {
+  const filter = document.getElementById("analysis-filter").value;
+  const query = filter ? `?status=${encodeURIComponent(filter)}&limit=200` : "?limit=200";
+  const payload = await apiRequest(`/analyses${query}`, {}, "load analyses");
+  state.analyses = Array.isArray(payload.items) ? payload.items : [];
+  renderAnalyses();
+}
+
+function renderAnalyses() {
+  const tbody = document.getElementById("analyses-rows");
+  tbody.textContent = "";
+  if (!state.analyses.length) {
+    const tr = document.createElement("tr");
+    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet.");
+    td.colSpan = 6;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
   }
-  return encodeURIComponent(selected);
+  for (const record of state.analyses) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.scope = "row";
+    th.textContent = documentName(record.artifact && record.artifact.artifact_id);
+    tr.appendChild(th);
+    tr.appendChild(cell(human(record.criteria && record.criteria.criteria_set_id)));
+    tr.appendChild(cell(summaryText(record)));
+    const status = document.createElement("td");
+    const badge = document.createElement("span");
+    const pair = STATUS[record.status] || [human(record.status), "idle"];
+    badge.className = `badge ${pair[1]}`;
+    badge.textContent = pair[0];
+    status.appendChild(badge);
+    tr.appendChild(status);
+    tr.appendChild(cell(when(record.created_at)));
+    const actions = document.createElement("td");
+    const wrap = document.createElement("div");
+    wrap.className = "actions";
+    wrap.appendChild(button("View findings", () => showDetail(record), "btn btn--ghost"));
+    if (can.operate && record.status === "pending_review") {
+      wrap.appendChild(button("Approve", () => review(record, "approve"), "btn btn--primary"));
+      wrap.appendChild(button("Reject", () => review(record, "reject")));
+    }
+    if (can.admin && record.status !== "revoked") {
+      wrap.appendChild(button("Withdraw", () => revoke(record), "btn btn--danger"));
+    }
+    if (can.audit) {
+      wrap.appendChild(button("History", () => history(record), "btn btn--ghost"));
+    }
+    actions.appendChild(wrap);
+    tr.appendChild(actions);
+    tbody.appendChild(tr);
+  }
 }
 
+function showDetail(record) {
+  const panel = document.getElementById("detail-panel");
+  const body = document.getElementById("detail-body");
+  body.textContent = "";
+  const heading = document.createElement("p");
+  heading.textContent = `${documentName(record.artifact && record.artifact.artifact_id)} checked against ${human(record.criteria && record.criteria.criteria_set_id)}: ${summaryText(record)}.`;
+  body.appendChild(heading);
+  const findings = Array.isArray(record.findings) ? record.findings : [];
+  if (findings.length) {
+    const list = document.createElement("ul");
+    for (const finding of findings) {
+      const item = document.createElement("li");
+      const confidence = Number.isFinite(finding.confidence_bps) ? ` (confidence ${Math.round(finding.confidence_bps / 100)}%)` : "";
+      item.textContent = `${human(finding.criterion_id)}: ${DISPOSITIONS[finding.disposition] || human(finding.disposition)}${confidence}`;
+      list.appendChild(item);
+    }
+    body.appendChild(list);
+  }
+  const gaps = Array.isArray(record.gaps) ? record.gaps : [];
+  if (gaps.length) {
+    const title = document.createElement("h3");
+    title.textContent = "What's missing and what to do";
+    body.appendChild(title);
+    const list = document.createElement("ul");
+    for (const gap of gaps) {
+      const item = document.createElement("li");
+      item.textContent = `${human(gap.criterion_id)}: ${human(gap.gap_code)}. Suggested next step: ${human(gap.remediation_code)}.`;
+      list.appendChild(item);
+    }
+    body.appendChild(list);
+  }
+  const review = record.human_review || {};
+  const note = document.createElement("p");
+  note.className = "help";
+  note.textContent = review.decision ? `Reviewed ${when(review.reviewed_at)}: ${human(review.decision)}.` : "Not reviewed yet.";
+  body.appendChild(note);
+  panel.hidden = false;
+  document.getElementById("detail-title").focus();
+  technical(record);
+}
+
+async function ask(message, okText) {
+  if (typeof window !== "undefined" && typeof window.mvConfirm === "function") return window.mvConfirm(message, { okText });
+  return false;
+}
+
+async function review(record, decision) {
+  const name = documentName(record.artifact && record.artifact.artifact_id);
+  const ok = await ask(decision === "approve"
+    ? `Approve the findings for ${name}? They can then be used as evidence.`
+    : `Reject the findings for ${name}? They won't be used as evidence.`, decision === "approve" ? "Approve" : "Reject");
+  if (!ok) return;
+  await run(decision === "approve" ? "Approving" : "Rejecting", async () => {
+    const payload = await apiRequest(`/analyses/${encodeURIComponent(record.analysis_id)}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: record.revision, decision, idempotency_key: reference("review") }),
+    }, decision === "approve" ? "approve the findings" : "reject the findings");
+    await loadAnalyses();
+    done(decision === "approve" ? `Findings for ${name} approved.` : `Findings for ${name} rejected.`, payload);
+  });
+}
+
+async function revoke(record) {
+  const name = documentName(record.artifact && record.artifact.artifact_id);
+  let choice = null;
+  if (typeof window !== "undefined" && typeof window.mvForm === "function") {
+    choice = await window.mvForm(`Withdraw the analysis of ${name}`, [{
+      key: "reason", label: "Why?", type: "select", required: true, default: "document-replaced",
+      options: REVOKE_REASONS, help: "Withdrawn findings can no longer be used as evidence.",
+    }], { okText: "Withdraw" });
+  }
+  if (!choice || !choice.reason) return;
+  await run("Withdrawing", async () => {
+    const payload = await apiRequest(`/analyses/${encodeURIComponent(record.analysis_id)}/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: record.revision, reason_code: choice.reason, idempotency_key: reference("revoke") }),
+    }, "withdraw the analysis");
+    await loadAnalyses();
+    done(`The analysis of ${name} was withdrawn.`, payload);
+  });
+}
+
+async function history(record) {
+  await run("Loading history", async () => {
+    const payload = await apiRequest(`/analyses/${encodeURIComponent(record.analysis_id)}/history`, {}, "load the history");
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const body = document.getElementById("detail-body");
+    body.textContent = "";
+    const list = document.createElement("ol");
+    for (const item of items) {
+      const entry = document.createElement("li");
+      const pair = STATUS[item.status] || [human(item.status)];
+      entry.textContent = `${when(item.updated_at || item.created_at)} — ${pair[0]}`;
+      list.appendChild(entry);
+    }
+    body.appendChild(list);
+    document.getElementById("detail-panel").hidden = false;
+    document.getElementById("detail-title").focus();
+    done(`Showing ${items.length} ${items.length === 1 ? "step" : "steps"} in the history of ${documentName(record.artifact && record.artifact.artifact_id)}.`, payload);
+  });
+}
+
+// ---- status ------------------------------------------------------------
 async function refreshStatus() {
-  setStatus(runtimeStatus, "Checking service availability…");
-  statusOutput.textContent = "";
+  setStatus(runtimeStatus, "Checking whether analysis is available…");
   operations.disabled = true;
   try {
-    const payload = await apiRequest("/status");
-    render(statusOutput, payload);
+    const payload = await apiRequest("/status", {}, "check availability");
     const tesseractDetected = payload.external_parser_binaries_detected &&
       payload.external_parser_binaries_detected.tesseract === true;
     const ocrNotice = tesseractDetected ? "" :
-      " Image text recognition is unavailable because OCR support is not installed.";
+      " Text inside images can't be read on this installation.";
     if (payload.ready === true && payload.operational_composition_verified === true) {
       setStatus(runtimeStatus, `Evidence analysis is ready.${ocrNotice}`);
       operations.disabled = false;
-    } else if (payload.configured_for_operation_attempt === true) {
-      setStatus(
-        runtimeStatus,
-        "Evidence analysis is configured. " +
-          "Document access and permissions have not been checked yet; " +
-          `they will be checked when you start.${ocrNotice}`
-      );
+      return true;
+    }
+    if (payload.configured_for_operation_attempt === true) {
+      setStatus(runtimeStatus, `Evidence analysis is set up. Your access is checked when you start.${ocrNotice}`);
       operations.disabled = false;
-    } else if (payload.enabled === true) {
-      setStatus(runtimeStatus, "Evidence analysis is enabled, but setup is incomplete.", true);
+      return true;
+    }
+    if (payload.enabled === true) {
+      setStatus(runtimeStatus, "Evidence analysis is turned on, but setup isn't finished. Ask an administrator to complete it.", true);
     } else {
-      setStatus(runtimeStatus, "Evidence analysis is disabled for this workspace.", true);
+      setStatus(runtimeStatus, "Evidence analysis is turned off for this workspace.", true);
     }
   } catch (error) {
-    setStatus(runtimeStatus, `Status unavailable: ${error.message}`, true);
+    setStatus(runtimeStatus, error.message, true);
+  }
+  return false;
+}
+
+async function loadAll() {
+  const ready = await refreshStatus();
+  if (!ready) return;
+  await loadPickers();
+  try {
+    await loadAnalyses();
+  } catch (error) {
+    const tbody = document.getElementById("analyses-rows");
+    tbody.textContent = "";
+    const tr = document.createElement("tr");
+    const td = cell(error.message);
+    td.colSpan = 6;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  await refreshRetention();
+}
+
+async function refreshRetention() {
+  const summary = document.getElementById("retention-summary");
+  if (!can.audit || !summary) return;
+  try {
+    const payload = await apiRequest("/retention/due?limit=500", {}, "count expired records");
+    const count = Number(payload.count) || 0;
+    summary.textContent = count ? `${count} expired ${count === 1 ? "record is" : "records are"} ready to be deleted.` : "No records have expired.";
+    const purge = document.getElementById("purge-expired");
+    if (purge) {
+      purge.textContent = count ? `Delete expired records (${count})` : "Delete expired records";
+      purge.disabled = !count;
+    }
+  } catch (error) {
+    summary.textContent = error.message;
   }
 }
 
-document.getElementById("refresh-status").addEventListener("click", refreshStatus);
+// ---- wiring ------------------------------------------------------------
+document.getElementById("refresh-status").addEventListener("click", () => { loadAll().catch(() => {}); });
+document.getElementById("analysis-filter").addEventListener("change", () => {
+  loadAnalyses().catch((error) => setStatus(operationStatus, error.message, true));
+});
 
 document.getElementById("analyze-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const fileInput = document.getElementById("artifact-file");
-  const file = fileInput.files[0];
-  if (!file) {
-    setStatus(operationStatus, "Select an artifact file.", true);
-    return;
-  }
-  const acquired = Date.parse(value("acquired-at"));
-  if (!Number.isFinite(acquired) || acquired <= 0) {
-    setStatus(operationStatus, "Enter a valid acquisition timestamp.", true);
-    return;
-  }
-  let operationStarted = false;
+  const file = fileInput.files && fileInput.files[0];
+  const artifact = state.artifacts[Number(document.getElementById("artifact-select").value)];
+  const criteria = state.criteria[Number(document.getElementById("criteria-select").value)];
   try {
-    const metadata = {
-      schema: "lightwork.ai-evidence.upload-metadata.v1",
-      artifact_id: value("artifact-id"),
-      source_ref: value("source-ref"),
-      source_revision: integer("source-revision"),
-      acquired_at: acquired / 1000,
-      expected_artifact_authority_sha256: value("artifact-authority-digest"),
-      criteria_set_id: value("criteria-set-id"),
-      expected_criteria_revision: integer("criteria-revision"),
-      expected_criteria_authority_sha256: value("criteria-authority-digest"),
-      idempotency_key: value("analyze-operation-id"),
-    };
-    operationStarted = true;
-    const payload = await run("Creating pending analysis", () =>
-      apiRequest("/analyses", {
-        method: "POST",
-        body: file,
-        headers: {
-          "Content-Type": file.type,
-          "X-Lightwork-Evidence-Metadata": JSON.stringify(metadata),
-        },
-      })
-    );
-    document.getElementById("analysis-id").value = payload.analysis_id || "";
-    document.getElementById("review-revision").value = payload.revision || "";
-    document.getElementById("revoke-revision").value = payload.revision || "";
-  } catch (error) {
-    if (!operationStarted) {
-      setStatus(operationStatus, `Upload metadata is invalid: ${error.message}`, true);
-    }
+    await run("Analyzing the document", async () => {
+      if (!artifact || document.getElementById("artifact-select").value === "") throw new Error("Choose a document first.");
+      if (!criteria || document.getElementById("criteria-select").value === "") throw new Error("Choose review criteria first.");
+      if (!file) throw new Error("Choose the document's file from your computer.");
+      if (file.size !== artifact.byte_length) {
+        throw new Error("That file doesn't match the registered document. Choose the same file that was registered.");
+      }
+      const metadata = {
+        schema: "lightwork.ai-evidence.upload-metadata.v1",
+        artifact_id: artifact.artifact_id,
+        source_ref: artifact.source_ref,
+        source_revision: artifact.source_revision,
+        acquired_at: artifact.acquired_at,
+        expected_artifact_authority_sha256: artifact.authority_sha256,
+        criteria_set_id: criteria.criteria_set_id,
+        expected_criteria_revision: criteria.revision,
+        expected_criteria_authority_sha256: criteria.authority_sha256,
+        idempotency_key: document.getElementById("analyze-operation-id").value || reference("analyze"),
+      };
+      let payload;
+      try {
+        payload = await apiRequest("/analyses", {
+          method: "POST",
+          body: file,
+          headers: { "Content-Type": file.type, "X-Lightwork-Evidence-Metadata": JSON.stringify(metadata) },
+        }, "analyze the document");
+      } catch (error) {
+        // The server compares the file with the registered fingerprint.
+        if (error.status === 409) {
+          error.message = "That file doesn't match the registered document, or the document or criteria changed. Choose the registered file, or refresh and try again.";
+        }
+        throw error;
+      }
+      document.getElementById("analyze-operation-id").value = reference("analyze");
+      document.getElementById("analysis-filter").value = "pending_review";
+      await loadAnalyses();
+      done(`Analysis finished: ${summaryText(payload)}. It now waits for someone else to review it.`, payload);
+    });
+  } catch (_error) {
+    // Status already rendered.
   } finally {
     fileInput.value = "";
   }
 });
 
-document.getElementById("record-form").addEventListener("submit", async (event) => {
+document.getElementById("register-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const fileInput = document.getElementById("register-file");
+  const file = fileInput.files && fileInput.files[0];
   try {
-    await run("Loading current analysis", () => apiRequest(`/analyses/${analysisId()}`));
-  } catch (_error) {
-    // Status already rendered.
-  }
-});
-
-document.getElementById("load-released").addEventListener("click", async () => {
-  try {
-    await run("Loading released analysis", () =>
-      apiRequest(`/analyses/${analysisId()}/released`)
-    );
-  } catch (_error) {
-    // Status already rendered.
-  }
-});
-
-document.getElementById("load-history").addEventListener("click", async () => {
-  try {
-    await run("Loading analysis history", () =>
-      apiRequest(`/analyses/${analysisId()}/history`)
-    );
-  } catch (_error) {
-    // Status already rendered.
-  }
-});
-
-document.getElementById("review-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  try {
-    const payload = await run("Recording human review", () =>
-      apiRequest(`/analyses/${analysisId()}/review`, {
+    await run("Registering the document", async () => {
+      if (!file) throw new Error("Choose the document to register.");
+      if (!MEDIA[file.type]) throw new Error("That kind of file can't be analyzed. Use a PDF, JPEG or PNG image, Excel workbook or plain text file.");
+      const matter = document.getElementById("register-matter").value.trim();
+      if (!matter) throw new Error("Enter the case or matter the document belongs to.");
+      const received = Date.parse(document.getElementById("register-received").value);
+      if (!Number.isFinite(received) || received <= 0) throw new Error("Choose the date the document was received.");
+      const query = new URLSearchParams({
+        name: file.name,
+        matter,
+        received_at: String(received / 1000),
+        valid_days: document.getElementById("register-valid").value || "90",
+      });
+      const payload = await apiRequest(`/authorities/artifacts/register?${query.toString()}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expected_revision: integer("review-revision"),
-          decision: value("review-decision"),
-          idempotency_key: value("review-operation-id"),
-        }),
-      })
-    );
-    document.getElementById("review-revision").value = payload.revision || "";
-    document.getElementById("revoke-revision").value = payload.revision || "";
-  } catch (_error) {
-    // Status already rendered.
-  }
-});
-
-document.getElementById("revoke-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  try {
-    const payload = await run("Revoking analysis", () =>
-      apiRequest(`/analyses/${analysisId()}/revoke`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expected_revision: integer("revoke-revision"),
-          reason_code: value("revocation-reason"),
-          idempotency_key: value("revoke-operation-id"),
-        }),
-      })
-    );
-    document.getElementById("revoke-revision").value = payload.revision || "";
+        body: file,
+        headers: { "Content-Type": file.type },
+      }, "register the document");
+      event.target.reset();
+      await loadPickers();
+      done(`${file.name} is registered and can now be analyzed.`, payload);
+    });
   } catch (_error) {
     // Status already rendered.
   }
@@ -239,43 +526,37 @@ document.getElementById("revoke-form").addEventListener("submit", async (event) 
 
 document.getElementById("verify-integrity").addEventListener("click", async () => {
   try {
-    await run("Verifying tenant integrity", () => apiRequest("/integrity"));
+    await run("Checking records", async () => {
+      const payload = await apiRequest("/integrity", {}, "check the records");
+      done(`All ${payload.analyses} ${payload.analyses === 1 ? "analysis is" : "analyses are"} intact and unaltered.`, payload);
+    });
   } catch (_error) {
     // Status already rendered.
   }
 });
 
-document.getElementById("retention-due").addEventListener("click", async () => {
-  try {
-    await run("Listing retention-due analyses", () =>
-      apiRequest(`/retention/due?limit=${integer("purge-limit")}`)
-    );
-  } catch (_error) {
-    // Status already rendered.
-  }
-});
-
-document.getElementById("purge-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const confirmation = document.getElementById("purge-confirmation");
-  if (!confirmation.checked) {
-    setStatus(operationStatus, "Confirm the retention purge before continuing.", true);
-    return;
-  }
-  try {
-    await run("Purging retention-due analyses", () =>
-      apiRequest("/retention/purge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: integer("purge-limit") }),
-      })
-    );
-    confirmation.checked = false;
-  } catch (_error) {
-    // Status already rendered.
-  }
-});
+const purgeButton = document.getElementById("purge-expired");
+if (purgeButton) {
+  purgeButton.addEventListener("click", async () => {
+    const ok = await ask("Permanently delete every expired analysis record? This can't be undone.", "Delete");
+    if (!ok) return;
+    try {
+      await run("Deleting expired records", async () => {
+        const payload = await apiRequest("/retention/purge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit: 500 }),
+        }, "delete expired records");
+        await refreshRetention();
+        await loadAnalyses();
+        done(`Deleted ${payload.analyses || 0} expired ${payload.analyses === 1 ? "record" : "records"}.`, payload);
+      });
+    } catch (_error) {
+      // Status already rendered.
+    }
+  });
+}
 
 if (shell && apiBase) {
-  refreshStatus();
+  loadAll().catch(() => {});
 }

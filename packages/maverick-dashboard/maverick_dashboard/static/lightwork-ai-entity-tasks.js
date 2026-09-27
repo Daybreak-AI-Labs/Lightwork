@@ -8,13 +8,13 @@
   var OPERATION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/;
 
   function responseTooLarge() {
-    var error = new Error("The server response exceeded the 64 KiB safety limit.");
+    var error = new Error("Lightwork returned more than this page can show. Narrow the filters and try again.");
     error.code = "response_too_large";
     return error;
   }
 
   function invalidResponse() {
-    var error = new Error("The server returned an invalid JSON response.");
+    var error = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
     error.code = "response_invalid_json";
     return error;
   }
@@ -76,19 +76,27 @@
       throw error;
     }
     if (!response.ok) {
-      var failure = new Error(
-        typeof payload.detail === "string" ? payload.detail : "The operation failed."
-      );
+      var failure = new Error(friendly(response.status));
       failure.status = response.status;
+      failure.technical = typeof payload.detail === "string" ? payload.detail : "";
       throw failure;
     }
     return payload;
   }
 
+  function friendly(status) {
+    if (typeof window !== "undefined" && typeof window.mvErrorText === "function") {
+      return window.mvErrorText({status: status}, "finish this");
+    }
+    if (status === 403) return "You do not have permission to do this. Ask an administrator.";
+    if (status === 409) return "This changed since you opened it. Refresh the page and try again.";
+    return "Something went wrong. Please try again.";
+  }
+
   function positiveInteger(raw, label, maximum) {
     var selected = Number(raw);
     if (!Number.isSafeInteger(selected) || selected < 1 || selected > maximum) {
-      throw new Error(label + " must be a positive integer no greater than " + maximum + ".");
+      throw new Error("The page is out of date. Refresh it and try again.");
     }
     return selected;
   }
@@ -96,7 +104,7 @@
   function identifier(raw, label) {
     var selected = String(raw || "").trim();
     if (!ID_PATTERN.test(selected)) {
-      throw new Error(label + " must be a valid reference.");
+      throw new Error(label + " is not a valid choice. Choose it from the list.");
     }
     return selected;
   }
@@ -104,7 +112,7 @@
   function operationKey(raw) {
     var selected = String(raw || "").trim();
     if (!OPERATION_PATTERN.test(selected)) {
-      throw new Error("Enter a valid request reference; reuse it only when retrying the same action.");
+      throw new Error("The page is not ready yet. Refresh it and try again.");
     }
     return selected;
   }
@@ -115,7 +123,7 @@
     var seen = Object.create(null);
     var result = [];
     selected.split(",").forEach(function (candidate) {
-      var reference = identifier(candidate, "Collaborator reference");
+      var reference = identifier(candidate, "A person you chose (not a valid reference)");
       if (!seen[reference]) {
         seen[reference] = true;
         result.push(reference);
@@ -128,18 +136,18 @@
   function futureTimestamp(raw, label) {
     var milliseconds = Date.parse(String(raw || ""));
     if (!Number.isFinite(milliseconds) || milliseconds <= Date.now()) {
-      throw new Error(label + " must be a valid future date and time.");
+      throw new Error(label + " must be in the future.");
     }
     return milliseconds / 1000;
   }
 
   function buildCreatePayload(fields) {
     var title = String(fields.title || "").trim();
-    if (!title || title.length > 500) throw new Error("Title is required and must not exceed 500 characters.");
+    if (!title || title.length > 500) throw new Error("Give the task a title (up to 500 characters).");
     var description = String(fields.description || "").trim();
-    if (description.length > 16000) throw new Error("Description must not exceed 16,000 characters.");
+    if (description.length > 16000) throw new Error("Keep the description under 16,000 characters.");
     var payload = {
-      entity_id: identifier(fields.entity_id, "Inventory entity ID"),
+      entity_id: identifier(fields.entity_id, "The AI system"),
       entity_revision: positiveInteger(fields.entity_revision, "Entity revision", 2147483647),
       kind: String(fields.kind),
       title: title,
@@ -149,13 +157,13 @@
       idempotency_key: operationKey(fields.idempotency_key)
     };
     if (["review", "remediation"].indexOf(payload.kind) === -1) {
-      throw new Error("Task kind is invalid.");
+      throw new Error("Choose a type of task.");
     }
     if (["low", "medium", "high", "critical"].indexOf(payload.priority) === -1) {
       throw new Error("Priority is invalid.");
     }
     var assignee = String(fields.assignee_ref || "").trim();
-    if (assignee) payload.assignee_ref = identifier(assignee, "Assignee reference");
+    if (assignee) payload.assignee_ref = identifier(assignee, "The person assigned");
     var due = String(fields.due_at || "").trim();
     if (due) payload.due_at = futureTimestamp(due, "Due date");
     return payload;
@@ -185,7 +193,7 @@
     }
     var assigneeAction = String(fields.assignee_action || "keep");
     if (assigneeAction === "set") {
-      payload.assignee_ref = identifier(fields.assignee_ref, "Assignee reference");
+      payload.assignee_ref = identifier(fields.assignee_ref, "The person assigned");
       changes += 1;
     } else if (assigneeAction === "clear") {
       payload.assignee_ref = null;
@@ -213,7 +221,7 @@
     } else if (dueAction !== "keep") {
       throw new Error("Due date update action is invalid.");
     }
-    if (changes === 0) throw new Error("Select at least one task field to update.");
+    if (changes === 0) throw new Error("Select at least one change to save. Nothing was changed.");
     return payload;
   }
 
@@ -237,11 +245,15 @@
   var shell = document.getElementById("ai-entity-task-shell");
   if (!shell) return;
   var apiBase = shell.dataset.apiBase || "";
+  var can = {
+    operate: shell.dataset.canOperate === "true",
+    audit: shell.dataset.canAudit === "true",
+    admin: shell.dataset.canAdmin === "true"
+  };
   var operations = document.getElementById("aet-operations");
   var readiness = document.getElementById("aet-readiness");
   var readinessDetail = document.getElementById("aet-readiness-detail");
   var statusMark = document.getElementById("aet-status-mark");
-  var statusOutput = document.getElementById("aet-status-output");
   var operationStatus = document.getElementById("aet-operation-status");
   var operationOutput = document.getElementById("aet-operation-output");
   var taskList = document.getElementById("aet-task-list");
@@ -250,38 +262,51 @@
   var filterForm = document.getElementById("aet-filter-form");
   var createForm = document.getElementById("aet-create-form");
   var updateForm = document.getElementById("aet-update-form");
-  var inspectForm = document.getElementById("aet-inspect-form");
+  var updatePanel = document.getElementById("aet-update-panel");
+  var entities = [];
+  var people = [];
+  var editing = null;
+  var STATUS = {
+    open: ["Open", "idle"], in_progress: ["In progress", "running"], blocked: ["Blocked", "warn"],
+    resolved: ["Resolved", "ok"], dismissed: ["Dismissed", "idle"]
+  };
 
   function field(form, name) {
     var selected = form.elements.namedItem(name);
     if (!selected || typeof selected.value !== "string") {
-      throw new Error("The task form is incomplete.");
+      throw new Error("The form is incomplete. Refresh the page and try again.");
     }
     return selected;
   }
-
-  function values(form, names) {
-    var result = {};
-    names.forEach(function (name) { result[name] = field(form, name).value.trim(); });
-    return result;
+  function human(value) {
+    if (typeof window.mvHuman === "function") return window.mvHuman(value);
+    var text = String(value || "").replace(/[_.-]+/g, " ").trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
   }
-
-  function show(element, value) {
-    element.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  }
-
   function setMark(label, state) {
     statusMark.textContent = label;
     statusMark.dataset.state = state;
+    statusMark.className = "badge " + (state === "ready" ? "ok" : state === "failed" ? "warn" : "idle");
+  }
+  function technical(value) {
+    operationOutput.textContent = value === undefined ? "" :
+      typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function say(message, failed, details) {
+    operationStatus.textContent = message;
+    operationStatus.dataset.state = failed ? "failed" : "ready";
+    technical(details);
+  }
+  function fail(error) {
+    say(error && error.message ? error.message : "Something went wrong. Please try again.", true,
+      error && error.technical ? error.technical : undefined);
+  }
+  function reference(prefix) {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") return prefix + "-" + window.crypto.randomUUID();
+    return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
   }
 
-  function failureText(label, error) {
-    return label + " failed" +
-      (Number.isInteger(error.status) ? " (" + error.status + ")" : "") +
-      ": " + String(error.message || error);
-  }
-
-  async function request(path, options) {
+  async function requestAt(url, options, limit) {
     var supplied = options || {};
     var selected = Object.assign({
       cache: "no-store",
@@ -290,294 +315,377 @@
       referrerPolicy: "no-referrer"
     }, supplied);
     selected.headers = Object.assign({Accept: "application/json"}, supplied.headers || {});
-    return parseResponse(await fetch(apiBase + path, selected));
-  }
-
-  async function run(label, action) {
-    operationStatus.textContent = label + "…";
-    operationStatus.dataset.state = "checking";
-    operationOutput.textContent = "";
-    try {
-      var payload = await action();
-      show(operationOutput, payload);
-      operationStatus.textContent = label + " completed.";
-      operationStatus.dataset.state = "ready";
-      return payload;
-    } catch (error) {
-      operationStatus.textContent = failureText(label, error);
-      operationStatus.dataset.state = "failed";
-      error.rendered = true;
-      throw error;
+    var response = await fetch(url, selected);
+    if (!limit) return parseResponse(response);
+    // Inventory and people lists are larger than one task record; read them
+    // with their own ceiling, then apply the same parsing rules.
+    var declared = response.headers && response.headers.get("Content-Length");
+    if (declared && /^\d+$/.test(declared) && Number(declared) > limit) throw responseTooLarge();
+    var text = await response.text();
+    if (text.length > limit) throw responseTooLarge();
+    var payload;
+    try { payload = JSON.parse(text); } catch (_error) { throw invalidResponse(); }
+    if (!isRecord(payload)) throw invalidResponse();
+    if (!response.ok) {
+      var failure = new Error(friendly(response.status));
+      failure.status = response.status;
+      throw failure;
     }
+    return payload;
   }
+  function request(path, options) { return requestAt(apiBase + path, options); }
 
-  function clear(element) {
-    while (element.firstChild) element.removeChild(element.firstChild);
-  }
-
+  function clear(element) { while (element.firstChild) element.removeChild(element.firstChild); }
   function make(tag, className, text) {
     var element = document.createElement(tag);
     if (className) element.className = className;
     if (text !== undefined) element.textContent = String(text);
     return element;
   }
-
-  function taskDefinition(list, label, value) {
-    list.appendChild(make("dt", "", label));
-    list.appendChild(make("dd", "", value === null || value === undefined || value === "" ? "—" : value));
-  }
-
   function formattedDate(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "—";
     var date = new Date(value * 1000);
-    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+  }
+  function dateInputValue(value) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "";
+    var date = new Date(value * 1000);
+    var month = String(date.getMonth() + 1).padStart(2, "0");
+    var day = String(date.getDate()).padStart(2, "0");
+    return date.getFullYear() + "-" + month + "-" + day;
+  }
+  function endOfDay(value) {
+    if (!value) return "";
+    var parts = String(value).split("-").map(Number);
+    if (parts.length !== 3 || parts.some(function (part) { return !Number.isFinite(part); })) return "";
+    return new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 0).toISOString();
+  }
+  function entityName(entityId) {
+    for (var i = 0; i < entities.length; i += 1) if (entities[i].asset_id === entityId) return entities[i].label;
+    return "An AI system no longer in the inventory";
+  }
+  function personName(ref) {
+    if (!ref) return "Nobody";
+    for (var i = 0; i < people.length; i += 1) if (people[i].ref === ref) return people[i].label;
+    return "Someone outside this list";
   }
 
-  function selectTask(task) {
-    field(inspectForm, "task_id").value = String(task.task_id || "");
-    field(updateForm, "task_id").value = String(task.task_id || "");
-    field(updateForm, "expected_revision").value = String(task.revision || "");
-    field(updateForm, "status").value = "";
-    field(updateForm, "priority").value = "";
-    field(updateForm, "assignee_action").value = "keep";
-    field(updateForm, "collaborator_action").value = "keep";
-    field(updateForm, "due_action").value = "keep";
+  // ---- pickers ---------------------------------------------------------
+  function fillSelect(select, items, keepFirst) {
+    var first = keepFirst ? select.options[0] : null;
+    var previous = select.value;
+    clear(select);
+    if (first) select.appendChild(first);
+    items.forEach(function (item) {
+      var option = document.createElement("option");
+      option.value = item[0]; option.textContent = item[1];
+      select.appendChild(option);
+    });
+    if (items.some(function (item) { return item[0] === previous; })) select.value = previous;
+  }
+  function fillCollaborators(box, selected) {
+    Array.prototype.slice.call(box.querySelectorAll("label, p")).forEach(function (node) { node.remove(); });
+    if (!people.length) { box.appendChild(make("p", "muted", "No people to choose from yet.")); return; }
+    people.forEach(function (person) {
+      var label = document.createElement("label");
+      var box2 = document.createElement("input");
+      box2.type = "checkbox"; box2.name = "collaborator"; box2.value = person.ref;
+      box2.checked = Array.isArray(selected) && selected.indexOf(person.ref) >= 0;
+      label.appendChild(box2); label.appendChild(document.createTextNode(" " + person.label));
+      box.appendChild(label);
+    });
+  }
+  function chosenCollaborators(box) {
+    return Array.prototype.slice.call(box.querySelectorAll('input[name="collaborator"]:checked')).map(function (item) { return item.value; });
+  }
+  async function loadPickers() {
+    try {
+      var inventory = await requestAt("/api/v1/assurance/ai-inventory", {}, 4 * 1024 * 1024);
+      entities = (Array.isArray(inventory.assets) ? inventory.assets : []).filter(function (asset) {
+        return isRecord(asset) && ID_PATTERN.test(String(asset.asset_id || "")) && asset.status === "present";
+      }).map(function (asset) {
+        return {
+          asset_id: asset.asset_id,
+          revision: asset.revision,
+          label: String(asset.display_name || "Unnamed AI system") + (asset.asset_type ? " (" + human(asset.asset_type) + ")" : "")
+        };
+      });
+    } catch (_error) {
+      entities = [];
+    }
+    try {
+      var directory = await requestAt("/api/v1/people/assignable", {}, 512 * 1024);
+      people = Array.isArray(directory.items) ? directory.items.filter(function (item) {
+        return isRecord(item) && ID_PATTERN.test(String(item.ref || ""));
+      }).map(function (item) {
+        return {ref: item.ref, label: String(item.label || item.ref) + (item.is_you ? " (you)" : "")};
+      }) : [];
+    } catch (_error) {
+      people = [];
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-entity-picker]"), function (select) {
+      fillSelect(select, entities.map(function (item) { return [item.asset_id, item.label]; }), true);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-person-picker]"), function (select) {
+      fillSelect(select, people.map(function (item) { return [item.ref, item.label]; }), true);
+    });
+    fillCollaborators(document.querySelector('[data-collaborator-picker="create"]'), []);
+    if (!entities.length) {
+      var createEntity = field(createForm, "entity_id");
+      createEntity.options[0].textContent = "No AI systems in the inventory yet — add them on the AI oversight page";
+    }
   }
 
-  function taskId() {
-    return encodeURIComponent(identifier(field(inspectForm, "task_id").value, "Task ID"));
+  // ---- list ------------------------------------------------------------
+  function rowButton(label, handler, cls, aria) {
+    var button = make("button", cls || "btn", label);
+    button.type = "button";
+    if (aria) button.setAttribute("aria-label", aria);
+    button.addEventListener("click", function () {
+      if (button.disabled) return;
+      button.disabled = true;
+      Promise.resolve().then(handler).catch(fail).then(function () { button.disabled = false; });
+    });
+    return button;
   }
-
   function renderTasks(payload) {
     clear(taskList);
     var items = Array.isArray(payload.items) ? payload.items : [];
     listCount.textContent = items.length + (items.length === 1 ? " task" : " tasks");
     if (!items.length) {
-      taskList.appendChild(make("p", "aet-empty", "No tasks matched these filters."));
+      var tr0 = make("tr");
+      var td0 = make("td", "", can.operate ? "No tasks match. Use New task below to add one." : "No tasks match these filters.");
+      td0.colSpan = 7; tr0.appendChild(td0); taskList.appendChild(tr0);
       return;
     }
     items.forEach(function (task) {
       if (!isRecord(task)) return;
-      var card = make("article", "aet-task");
-      var head = make("div", "aet-task__head");
-      head.appendChild(make("h3", "", task.title || "Untitled task"));
-      head.appendChild(make("span", "aet-pill", task.status || "unknown"));
-      card.appendChild(head);
-      var definitions = make("dl");
-      taskDefinition(definitions, "Task", task.task_id);
-      taskDefinition(definitions, "Entity", task.entity_id);
-      taskDefinition(definitions, "Entity revision", task.entity_revision);
-      taskDefinition(definitions, "Priority", task.priority);
-      taskDefinition(definitions, "Assignee", task.assignee_ref);
-      taskDefinition(definitions, "Due", formattedDate(task.due_at));
-      taskDefinition(definitions, "Authority digest", task.entity_authority_sha256);
-      taskDefinition(definitions, "Task revision", task.revision);
-      card.appendChild(definitions);
-      var actions = make("div", "aet-actions");
-      var inspect = make("button", "btn", "Inspect");
-      inspect.type = "button";
-      inspect.addEventListener("click", async function () {
-        selectTask(task);
-        try { await run("Loading current task", function () { return request("/" + taskId()); }); }
-        catch (_error) { /* The governed status region contains the error. */ }
-      });
-      var edit = make("button", "btn", "Use for update");
-      edit.type = "button";
-      edit.addEventListener("click", function () {
-        selectTask(task);
-        updateForm.scrollIntoView({behavior: "smooth", block: "start"});
-      });
-      actions.appendChild(inspect);
-      actions.appendChild(edit);
-      card.appendChild(actions);
-      taskList.appendChild(card);
+      var tr = make("tr");
+      var th = make("th", "", task.title || "Untitled task"); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(make("td", "", entityName(task.entity_id)));
+      var stateCell = make("td");
+      var pair = STATUS[task.status] || [human(task.status), "idle"];
+      stateCell.appendChild(make("span", "badge " + pair[1], pair[0]));
+      tr.appendChild(stateCell);
+      tr.appendChild(make("td", "", human(task.priority)));
+      tr.appendChild(make("td", "", personName(task.assignee_ref)));
+      tr.appendChild(make("td", "", formattedDate(task.due_at)));
+      var actions = make("td");
+      var wrap = make("div", "aet-actions");
+      if (can.operate) wrap.appendChild(rowButton("Edit", function () { return openEdit(task); }, "btn", "Edit " + (task.title || "task")));
+      wrap.appendChild(rowButton("History", function () { return history(task); }, "btn btn--ghost", "History of " + (task.title || "task")));
+      actions.appendChild(wrap); tr.appendChild(actions);
+      taskList.appendChild(tr);
     });
   }
-
   async function loadTasks() {
-    listStatus.textContent = "Loading tenant tasks…";
+    listStatus.textContent = "Loading tasks…";
     try {
-      var selected = values(filterForm, ["entity_id", "status", "assignee_ref", "priority", "limit"]);
       var query = new URLSearchParams();
-      if (selected.entity_id) identifier(selected.entity_id, "Inventory entity ID");
-      if (selected.assignee_ref) identifier(selected.assignee_ref, "Assignee reference");
       ["entity_id", "status", "assignee_ref", "priority"].forEach(function (name) {
-        if (selected[name]) query.set(name, selected[name]);
+        var value = field(filterForm, name).value.trim();
+        if (value) query.set(name, value);
       });
-      query.set("limit", String(positiveInteger(selected.limit, "Result limit", 500)));
+      query.set("limit", "200");
       var payload = await request("?" + query.toString());
       renderTasks(payload);
-      listStatus.textContent = "Loaded " + String(payload.count || 0) + " tenant task records.";
+      listStatus.textContent = "Showing " + String(payload.count || 0) + " " + (payload.count === 1 ? "task" : "tasks") + ".";
       return payload;
     } catch (error) {
       clear(taskList);
       listCount.textContent = "0 tasks";
-      listStatus.textContent = failureText("Loading tasks", error);
+      listStatus.textContent = error && error.message ? error.message : "Couldn't load tasks.";
       throw error;
     }
   }
 
+  // ---- edit and history --------------------------------------------------
+  async function openEdit(task) {
+    var record = await request("/" + encodeURIComponent(identifier(task.task_id, "The task")));
+    editing = record;
+    field(updateForm, "task_id").value = String(record.task_id || "");
+    field(updateForm, "expected_revision").value = String(record.revision || "");
+    field(updateForm, "status").value = record.status || "open";
+    field(updateForm, "priority").value = record.priority || "medium";
+    field(updateForm, "assignee_ref").value = record.assignee_ref || "";
+    field(updateForm, "due_at").value = dateInputValue(record.due_at);
+    fillCollaborators(document.querySelector('[data-collaborator-picker="update"]'), record.collaborator_refs || []);
+    document.getElementById("aet-update-subject").textContent = (record.title || "Untitled task") + " · " + entityName(record.entity_id);
+    updatePanel.hidden = false;
+    var heading = document.getElementById("aet-update-title");
+    if (heading && typeof heading.focus === "function") heading.focus();
+  }
+  async function history(task) {
+    var payload = await request("/" + encodeURIComponent(identifier(task.task_id, "The task")) + "/history");
+    var list = document.getElementById("aet-history-list");
+    clear(list);
+    var items = Array.isArray(payload.items) ? payload.items : [];
+    items.forEach(function (item) {
+      if (!isRecord(item)) return;
+      var pair = STATUS[item.status] || [human(item.status)];
+      list.appendChild(make("li", "", formattedDate(item.updated_at || item.created_at) + " — " + pair[0] +
+        ", " + human(item.priority) + " priority, assigned to " + personName(item.assignee_ref)));
+    });
+    if (!items.length) list.appendChild(make("li", "", "No history yet."));
+    document.getElementById("aet-history-panel").hidden = false;
+    var heading = document.getElementById("aet-history-title");
+    if (heading && typeof heading.focus === "function") heading.focus();
+    say("Showing the history of " + (task.title || "the task") + ".", false, payload);
+  }
+
+  // ---- status ------------------------------------------------------------
   async function refreshStatus() {
     readiness.textContent = "Checking…";
     readinessDetail.textContent = "Checking availability before enabling actions.";
     setMark("Checking", "checking");
-    statusOutput.textContent = "";
     operations.disabled = true;
     try {
       var payload = await request("/status");
-      show(statusOutput, payload);
       if (payload.ready === true && payload.enabled === true && payload.configured === true) {
         readiness.textContent = "Ready";
         readinessDetail.textContent = "Task controls are ready. Lightwork checks the current inventory item before each change.";
         setMark("Ready", "ready");
         operations.disabled = false;
-        try { await loadTasks(); }
-        catch (_error) { /* List status is independently rendered. */ }
+        await loadPickers();
+        try { await loadTasks(); } catch (_error) { /* shown in the list status */ }
+        refreshRetention();
       } else if (payload.enabled !== true) {
-        readiness.textContent = "Disabled";
-        readinessDetail.textContent = "Enable both AI Inventory and AI Entity Tasks before operating.";
-        setMark("Disabled", "failed");
-      } else if (payload.configured !== true) {
-        readiness.textContent = "Setup incomplete";
-        readinessDetail.textContent = "This feature is enabled, but workspace setup is incomplete.";
-        setMark("Unready", "failed");
+        readiness.textContent = "Turned off";
+        readinessDetail.textContent = "AI system tasks are turned off. An administrator can turn them on above.";
+        setMark("Off", "failed");
       } else {
-        readiness.textContent = "Not verified";
-        readinessDetail.textContent = "Server dependencies are configured, but operational readiness has not been verified.";
-        setMark("Unready", "failed");
+        readiness.textContent = "Setup not finished";
+        readinessDetail.textContent = "AI system tasks are turned on, but setup isn't finished. Ask an administrator to complete it.";
+        setMark("Not ready", "failed");
       }
     } catch (error) {
       readiness.textContent = "Unavailable";
-      readinessDetail.textContent = String(error.message || error);
-      setMark("Error", "failed");
+      readinessDetail.textContent = error && error.message ? error.message : "Couldn't check availability.";
+      setMark("Unavailable", "failed");
+    }
+  }
+  async function refreshRetention() {
+    var summary = document.getElementById("aet-retention-summary");
+    if (!can.audit) return;
+    try {
+      var payload = await request("/operations/retention-due?limit=1000");
+      var count = Array.isArray(payload.items) ? payload.items.length : Number(payload.count) || 0;
+      summary.textContent = count ? count + " expired " + (count === 1 ? "task is" : "tasks are") + " ready to be deleted." : "No tasks have expired.";
+      var purge = document.getElementById("aet-purge-button");
+      purge.textContent = count ? "Delete expired tasks (" + count + ")" : "Delete expired tasks";
+      return count;
+    } catch (error) {
+      summary.textContent = error && error.message ? error.message : "Couldn't count expired tasks.";
+      return 0;
     }
   }
 
+  // ---- wiring ------------------------------------------------------------
   document.getElementById("aet-refresh-status").addEventListener("click", refreshStatus);
-
-  filterForm.addEventListener("submit", async function (event) {
+  filterForm.addEventListener("submit", function (event) {
     event.preventDefault();
-    try { await loadTasks(); }
-    catch (_error) { /* List status is independently rendered. */ }
+    loadTasks().catch(function () {});
   });
-
-  document.getElementById("aet-clear-filters").addEventListener("click", async function () {
+  document.getElementById("aet-clear-filters").addEventListener("click", function () {
     filterForm.reset();
-    field(filterForm, "limit").value = "100";
-    try { await loadTasks(); }
-    catch (_error) { /* List status is independently rendered. */ }
+    loadTasks().catch(function () {});
+  });
+  document.getElementById("aet-update-cancel").addEventListener("click", function () {
+    updatePanel.hidden = true;
+    editing = null;
   });
 
   createForm.addEventListener("submit", async function (event) {
     event.preventDefault();
     try {
-      var payload = buildCreatePayload(values(createForm, [
-        "entity_id", "entity_revision", "kind", "title", "description",
-        "assignee_ref", "collaborator_refs", "priority", "due_at", "idempotency_key"
-      ]));
-      var record = await run("Creating AI entity task", function () {
-        return request("", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload)
-        });
+      var entityId = field(createForm, "entity_id").value;
+      var entity = null;
+      entities.forEach(function (item) { if (item.asset_id === entityId) entity = item; });
+      if (!entity) throw new Error("Choose the AI system this task is about.");
+      var due = field(createForm, "due_at").value;
+      var payload = buildCreatePayload({
+        entity_id: entity.asset_id,
+        entity_revision: entity.revision,
+        kind: field(createForm, "kind").value,
+        title: field(createForm, "title").value,
+        description: field(createForm, "description").value,
+        assignee_ref: field(createForm, "assignee_ref").value,
+        collaborator_refs: chosenCollaborators(document.querySelector('[data-collaborator-picker="create"]')).join(","),
+        priority: field(createForm, "priority").value,
+        due_at: endOfDay(due),
+        idempotency_key: field(createForm, "idempotency_key").value || reference("create")
       });
-      selectTask(record);
+      say("Creating the task…", false);
+      var record = await request("", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+      createForm.reset();
+      field(createForm, "idempotency_key").value = reference("create");
+      fillCollaborators(document.querySelector('[data-collaborator-picker="create"]'), []);
+      say("Task created: " + (record.title || "new task") + ".", false, record);
       await loadTasks();
-    } catch (error) {
-      if (error.rendered !== true) {
-        operationStatus.textContent = String(error.message || error);
-        operationStatus.dataset.state = "failed";
-      }
-    }
+    } catch (error) { fail(error); }
   });
 
   updateForm.addEventListener("submit", async function (event) {
     event.preventDefault();
+    if (!editing) return;
     try {
-      var selected = values(updateForm, [
-        "task_id", "expected_revision", "status", "priority", "assignee_action",
-        "assignee_ref", "collaborator_action", "collaborator_refs", "due_action",
-        "due_at", "idempotency_key"
-      ]);
-      var selectedTask = encodeURIComponent(identifier(selected.task_id, "Task ID"));
-      var payload = buildUpdatePayload(selected);
-      var record = await run("Updating AI entity task", function () {
-        return request("/" + selectedTask, {
-          method: "PATCH",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload)
-        });
+      var status = field(updateForm, "status").value;
+      var priority = field(updateForm, "priority").value;
+      var assignee = field(updateForm, "assignee_ref").value;
+      var dueValue = field(updateForm, "due_at").value;
+      var collaborators = chosenCollaborators(document.querySelector('[data-collaborator-picker="update"]')).sort();
+      var previousCollaborators = (editing.collaborator_refs || []).slice().sort();
+      var collaboratorsChanged = collaborators.join(",") !== previousCollaborators.join(",");
+      var dueChanged = dueValue !== dateInputValue(editing.due_at);
+      var payload = buildUpdatePayload({
+        expected_revision: field(updateForm, "expected_revision").value,
+        idempotency_key: field(updateForm, "idempotency_key").value || reference("update"),
+        status: status !== editing.status ? status : "",
+        priority: priority !== editing.priority ? priority : "",
+        assignee_action: assignee === (editing.assignee_ref || "") ? "keep" : assignee ? "set" : "clear",
+        assignee_ref: assignee,
+        collaborator_action: !collaboratorsChanged ? "keep" : collaborators.length ? "replace" : "clear",
+        collaborator_refs: collaborators.join(","),
+        due_action: !dueChanged ? "keep" : dueValue ? "set" : "clear",
+        due_at: endOfDay(dueValue)
       });
-      selectTask(record);
-      field(updateForm, "idempotency_key").value = "";
+      var taskId = encodeURIComponent(identifier(field(updateForm, "task_id").value, "The task"));
+      say("Saving changes…", false);
+      var record = await request("/" + taskId, {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+      field(updateForm, "idempotency_key").value = reference("update");
+      updatePanel.hidden = true;
+      editing = null;
+      say("Changes saved to " + (record.title || "the task") + ".", false, record);
       await loadTasks();
-    } catch (error) {
-      if (error.rendered !== true) {
-        operationStatus.textContent = String(error.message || error);
-        operationStatus.dataset.state = "failed";
-      }
-    }
-  });
-
-  inspectForm.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var record = await run("Loading current task", function () { return request("/" + taskId()); });
-      selectTask(record);
-    } catch (_error) { /* The governed status region contains the error. */ }
-  });
-
-  document.getElementById("aet-load-history").addEventListener("click", async function () {
-    try { await run("Loading task history", function () { return request("/" + taskId() + "/history"); }); }
-    catch (_error) { /* The governed status region contains the error. */ }
+    } catch (error) { fail(error); }
   });
 
   document.getElementById("aet-verify-integrity").addEventListener("click", async function () {
-    try { await run("Verifying tenant task integrity", function () { return request("/operations/integrity"); }); }
-    catch (_error) { /* The governed status region contains the error. */ }
-  });
-
-  document.getElementById("aet-retention-due").addEventListener("click", async function () {
     try {
-      var limit = positiveInteger(document.getElementById("aet-retention-limit").value, "Retention limit", 1000);
-      await run("Listing retention-due tasks", function () {
-        return request("/operations/retention-due?limit=" + encodeURIComponent(limit));
-      });
-    } catch (error) {
-      if (error.rendered !== true) {
-        operationStatus.textContent = String(error.message || error);
-        operationStatus.dataset.state = "failed";
-      }
-    }
+      var payload = await request("/operations/integrity");
+      say("All task records are intact and unaltered.", false, payload);
+    } catch (error) { fail(error); }
   });
-
+  document.getElementById("aet-retention-due").addEventListener("click", function () {
+    refreshRetention().then(function (count) {
+      say(count ? count + " expired " + (count === 1 ? "task" : "tasks") + " can be deleted." : "No tasks have expired.", false);
+    });
+  });
   document.getElementById("aet-purge-form").addEventListener("submit", async function (event) {
     event.preventDefault();
-    var form = event.currentTarget;
-    var confirmation = form.elements.namedItem("confirmation");
-    if (!confirmation.checked) {
-      operationStatus.textContent = "Confirm the retention-authorized purge before continuing.";
-      operationStatus.dataset.state = "failed";
-      return;
-    }
+    var ok = typeof window.mvConfirm === "function"
+      ? await window.mvConfirm("Permanently delete finished or dismissed tasks whose keep-until date has passed? A record that they were deleted is kept. This can't be undone.", {okText: "Delete"})
+      : false;
+    if (!ok) return;
     try {
-      var limit = positiveInteger(field(form, "limit").value, "Purge limit", 1000);
-      await run("Purging retention-due tasks", function () {
-        return request("/operations/purge-expired", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({limit: limit})
-        });
+      var payload = await request("/operations/purge-expired", {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({limit: 1000})
       });
-      confirmation.checked = false;
+      var removed = Array.isArray(payload.removed) ? payload.removed.length : Number(payload.removed) || 0;
+      say("Deleted " + removed + " expired " + (removed === 1 ? "task" : "tasks") + ".", false, payload);
       await loadTasks();
-    } catch (error) {
-      if (error.rendered !== true) {
-        operationStatus.textContent = String(error.message || error);
-        operationStatus.dataset.state = "failed";
-      }
-    }
+      refreshRetention();
+    } catch (error) { fail(error); }
   });
 
   refreshStatus();

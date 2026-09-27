@@ -34,14 +34,11 @@ _HEADERS = {
 }
 
 
-def _tenant_selected() -> None:
+def _tenant_selected() -> bool:
+    """Whether a workspace is selected; the API still refuses without one."""
     from maverick.paths import current_tenant_id_strict
 
-    if current_tenant_id_strict() is None:
-        raise HTTPException(
-            status_code=409,
-            detail="select an active tenant before using the document vault",
-        )
+    return current_tenant_id_strict() is not None
 
 
 def create_governed_document_vault_page_router(
@@ -59,7 +56,7 @@ def create_governed_document_vault_page_router(
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
         from .api import module_activation_enabled
-        _tenant_selected()
+        workspace_selected = _tenant_selected() is not False
         if any(
             key not in {"theme", "density", "font", "lang", "document"}
             for key in request.query_params
@@ -80,6 +77,7 @@ def create_governed_document_vault_page_router(
                 "document_vault_can_audit": has_permission(request, "audit"),
                 "document_vault_module_enabled": module_activation_enabled("governed_document_vault"),
                 "document_vault_can_activate": has_global_permission(request, "admin"),
+                "document_vault_workspace_missing": not workspace_selected,
             },
         )
         for name, value in _HEADERS.items():

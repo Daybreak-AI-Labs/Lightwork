@@ -46,6 +46,14 @@
   var fleetSelectionState = document.getElementById("acp-fleet-selection-state");
   var haltControls = document.getElementById("acp-halt-controls");
   var clearHalt = document.getElementById("acp-clear-halt");
+  var outputSummary = document.getElementById("acp-output-summary");
+  var verbPrincipal = document.getElementById("acp-verb-principal");
+  var attenuatePrincipal = document.getElementById("acp-attenuate-principal");
+  var denyTools = document.getElementById("acp-deny-tools");
+  var fleetScope = document.getElementById("acp-fleet-scope");
+  var workspaceScopeKnown = root.dataset.workspaceScope === "true";
+  var workspaceScopeValue = root.dataset.workspaceValue || "";
+  var rosterRows = [];
   var fleetSelection = null;
 
   var planeRequested = 0;
@@ -59,6 +67,83 @@
     var error = new Error(message);
     error.code = "invalid_input";
     return error;
+  }
+
+  // A reply that does not match what this page expects. The person sees one
+  // plain sentence; the precise reason stays in Technical details.
+  function failServer(technical) {
+    var error = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
+    error.code = "invalid_response";
+    error.technical = technical;
+    return error;
+  }
+
+  var VERB_LABELS = {
+    suspend: "Pause", resume: "Resume", contain: "Isolate",
+    release: "End isolation", ledger: "View history", attenuate: "Limit"
+  };
+  var STATE_LABELS = {
+    running: ["Working", "running"], active: ["Active", "ok"], idle: ["Idle", "idle"],
+    suspended: ["Paused", "paused"], contained: ["Isolated", "failed"],
+    expired: ["Access expired", "warn"], missing_trust: ["Not yet trusted", "warn"],
+    not_yet_valid: ["Not active yet", "warn"], revoked: ["Paused", "paused"]
+  };
+  var RESULT_CODES = {
+    protected_containment: "This agent is isolated. An administrator must end the isolation first.",
+    dependency_unavailable: "Part of Lightwork needed for this is not available right now. Try again in a minute.",
+    not_applied: "The change did not take effect.",
+    containment_failed: "The agent could not be fully isolated.",
+    schedule_unavailable: "The automatic end of isolation could not be scheduled.",
+    concurrent_containment: "Someone else changed this agent at the same time. Check the list and try again.",
+    already_released: "This agent was already released from isolation.",
+    superseded: "A newer isolation replaced this one, so it was left in place.",
+    release_failed: "The isolation could not be ended.",
+    action_error: "The change could not be completed.",
+    concurrent_halt: "Someone else changed the emergency stop at the same time. Check its state and try again.",
+    idempotent_replay: "This exact change had already been applied.",
+    recovered: "An earlier unfinished change was completed."
+  };
+
+  function human(value) {
+    if (typeof window.mvHuman === "function") { return window.mvHuman(value); }
+    var text = String(value || "").replace(/[_-]+/g, " ").trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+  }
+
+  function nameOf(principal) {
+    for (var index = 0; index < rosterRows.length; index += 1) {
+      if (rosterRows[index].principal === principal) { return displayName(rosterRows[index]); }
+    }
+    return String(principal || "").replace(/^(user|agent|agents|external|service):/, "");
+  }
+
+  function displayName(row) {
+    var label = typeof row.label === "string" ? row.label.trim() : "";
+    return label || String(row.principal).replace(/^(user|agent|agents|external|service):/, "");
+  }
+
+  function duration(seconds) {
+    var value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) { return ""; }
+    if (value < 90) { return Math.round(value) + " seconds"; }
+    if (value < 5400) { return Math.round(value / 60) + " minutes"; }
+    if (value < 129600) { return Math.round(value / 3600) + " hours"; }
+    return Math.round(value / 86400) + " days";
+  }
+
+  function plainFailure(status, detail) {
+    if (detail === "control_plane_disabled") {
+      return "Agent controls are turned off. Ask an administrator to turn them on.";
+    }
+    if (status === 409) {
+      return "This changed since you last looked. The list has been refreshed; check it and try again.";
+    }
+    if (typeof window.mvErrorText === "function") {
+      return window.mvErrorText({ status: status }, "finish this");
+    }
+    if (status === 403) { return "You do not have permission to do this. Ask an administrator."; }
+    if (status === 400 || status === 422) { return "Some of the details need fixing. Check them and try again."; }
+    return "Something went wrong. Please try again.";
   }
 
   function boundedError(error) {
@@ -119,7 +204,7 @@
       if (response.body && typeof response.body.cancel === "function") {
         await response.body.cancel();
       }
-      throw fail("Response exceeds the console byte bound.");
+      throw failServer("The reply was too large.");
     }
     if (response.body && typeof response.body.getReader === "function" &&
         typeof TextDecoder === "function") {
@@ -133,7 +218,7 @@
         received += chunk.value.byteLength;
         if (received > maxResponseBytes) {
           await reader.cancel();
-          throw fail("Response exceeds the console byte bound.");
+          throw failServer("The reply was too large.");
         }
         text += decoder.decode(chunk.value, { stream: true });
       }
@@ -144,7 +229,7 @@
     // browsers take the bounded streaming path above before allocating the body.
     var fallback = await response.text();
     if (utf8ByteLength(fallback) > maxResponseBytes) {
-      throw fail("Response exceeds the console byte bound.");
+      throw failServer("The reply was too large.");
     }
     return fallback;
   }
@@ -153,13 +238,11 @@
     var text = await boundedResponseText(response);
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
-    catch (_error) { throw fail("The server returned invalid JSON."); }
+    catch (_error) { throw failServer("The reply could not be read."); }
     if (!response.ok) {
       var detail = responseDetail(payload);
-      if (detail === "control_plane_disabled") {
-        detail = "The control plane is off: set [control_plane] enable = true.";
-      }
-      var responseError = fail(detail);
+      var responseError = fail(plainFailure(response.status, detail));
+      responseError.technical = detail;
       responseError.status = response.status;
       responseError.payload = payload;
       throw responseError;
@@ -184,7 +267,7 @@
       return await readJson(await fetch(url, settings));
     } catch (error) {
       if (controller && controller.signal.aborted) {
-        throw fail("The control-plane request timed out; no result was assumed.");
+        throw fail("Lightwork took too long to answer. Nothing is assumed to have changed; refresh to check.");
       }
       throw error;
     } finally {
@@ -196,24 +279,67 @@
     return requestAt(apiBase + path, options);
   }
 
+  function summaryLines(payload) {
+    var lines = [];
+    if (!payload || typeof payload !== "object") { return lines; }
+    if (Array.isArray(payload)) {
+      payload.slice(0, 100).forEach(function (item) {
+        if (!item || typeof item !== "object") { return; }
+        var when = typeof window.mvWhen === "function" ? window.mvWhen(item.ts) : "";
+        var text = human(item.kind || "event");
+        if (typeof item.detail === "string" && item.detail) { text += ": " + boundedError(item.detail); }
+        lines.push((when ? when + " — " : "") + text);
+      });
+      if (!lines.length) { lines.push("No history has been recorded yet."); }
+      return lines;
+    }
+    if (Array.isArray(payload.results)) {
+      payload.results.forEach(function (item) {
+        if (!item || typeof item !== "object") { return; }
+        lines.push(nameOf(item.principal) + ": " + (item.ok ? "done" :
+          "not done" + (RESULT_CODES[item.code] ? " — " + RESULT_CODES[item.code] : "")));
+      });
+    }
+    if (Array.isArray(payload.principals) && !Array.isArray(payload.results)) {
+      payload.principals.forEach(function (principal) { lines.push(nameOf(principal)); });
+    }
+    return lines;
+  }
+
   function show(label, payload, ticket) {
     if (ticket !== undefined && ticket !== null && ticket !== operationRequested) {
       return false;
     }
-    var announced = label;
-    if (payload && typeof payload === "object") {
-      if (payload.ok === false && typeof payload.detail === "string" && payload.detail) {
-        announced += ": " + boundedError(payload.detail);
+    var parts = [label];
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      if (payload.ok === false && RESULT_CODES[payload.code]) {
+        parts.push(RESULT_CODES[payload.code]);
       }
       if (Object.prototype.hasOwnProperty.call(payload, "audit_written")) {
-        announced += payload.audit_written === true
-          ? "; control-plane action audit row written"
+        parts.push(payload.audit_written === true
+          ? "It was recorded in the history."
           : payload.audit_written === false
-            ? "; control-plane action audit row was not written"
-            : "; control-plane action audit delivery was not confirmed";
+            ? "Warning: it was not recorded in the history."
+            : "Lightwork could not confirm it was recorded in the history.");
       }
     }
+    var announced = parts.map(function (part) {
+      return /[.!?]$/.test(part) ? part : part + ".";
+    }).join(" ");
     operationState.textContent = announced;
+    if (outputSummary) {
+      outputSummary.textContent = "";
+      var lines = summaryLines(payload);
+      if (lines.length) {
+        var list = document.createElement("ul");
+        lines.forEach(function (line) {
+          var item = document.createElement("li");
+          item.textContent = line;
+          list.appendChild(item);
+        });
+        outputSummary.appendChild(list);
+      }
+    }
     output.textContent = typeof payload === "string"
       ? payload
       : JSON.stringify(payload, null, 2);
@@ -225,8 +351,9 @@
       return false;
     }
     var message = boundedError(error);
-    operationState.textContent = (prefix || "Failed") + ": " + message;
-    output.textContent = message;
+    operationState.textContent = (prefix || "That did not work") + ". " + message;
+    if (outputSummary) { outputSummary.textContent = ""; }
+    output.textContent = error && error.technical ? boundedError({ message: String(error.technical) }) : message;
     return true;
   }
 
@@ -234,13 +361,14 @@
     var principal = String(value || "");
     if (!principal || principal !== principal.trim() || principal.length > 512 ||
         /[\u0000-\u001f\u007f-\u009f]/.test(principal)) {
-      throw fail("Principal must be non-empty printable text without surrounding whitespace (max 512).");
+      throw fail("Choose an agent or person from the list.");
     }
     return principal;
   }
 
   function setMark(marker, text) {
     state.dataset.state = marker;
+    state.className = "badge " + (marker === "ready" ? "ok" : marker === "failed" ? "failed" : "warn");
     state.textContent = text;
   }
 
@@ -305,19 +433,19 @@
 
   async function collectReason(verb, principal) {
     if (typeof window.mvForm !== "function") {
-      throw fail("The governed reason dialog is unavailable; no change was sent.");
+      throw fail("The reason form could not open. Nothing was changed; refresh the page and try again.");
     }
     var values = await window.mvForm(
-      verb.charAt(0).toUpperCase() + verb.slice(1) + " " + principal,
+      VERB_LABELS[verb] + " " + nameOf(principal),
       [{
         key: "reason",
-        label: "Reason recorded with the control attempt",
+        label: "Reason",
         type: "text",
         required: true,
-        placeholder: "Why is this control necessary?",
-        help: "Audit delivery can fail soft; verify the ledger after the state refresh."
+        placeholder: "Why is this needed?",
+        help: "The reason is saved in this agent's history."
       }],
-      { okText: verb.charAt(0).toUpperCase() + verb.slice(1) + " principal" }
+      { okText: VERB_LABELS[verb] }
     );
     if (values === null) { return null; }
     var reason = String(values.reason || "").trim();
@@ -328,7 +456,7 @@
 
   async function confirmAction(message, okText) {
     if (typeof window.mvConfirm !== "function") {
-      throw fail("The governed confirmation dialog is unavailable; no change was sent.");
+      throw fail("The confirmation could not open. Nothing was changed; refresh the page and try again.");
     }
     return window.mvConfirm(message, { okText: okText });
   }
@@ -360,8 +488,10 @@
       verbControls.disabled = false;
       verbControls.removeAttribute("aria-disabled");
     }
-    attenuateControls.disabled = !canOperate || !controlPlaneReady;
-    attenuateControls.setAttribute("aria-disabled", String(attenuateControls.disabled));
+    if (attenuateControls) {
+      attenuateControls.disabled = !canOperate || !controlPlaneReady;
+      attenuateControls.setAttribute("aria-disabled", String(attenuateControls.disabled));
+    }
     updateFleetControls();
     haltControls.disabled = !canHalt || !haltAuthorityReady;
     haltControls.setAttribute("aria-disabled", String(haltControls.disabled));
@@ -376,20 +506,23 @@
     if (!text && !required) { return ""; }
     if (!text || text !== text.trim() || text.length > 160 ||
         /[\u0000-\u001f\u007f-\u009f]/.test(text)) {
-      throw fail(label + " must be exact printable text (max 160 characters).");
+      throw fail("Choose a group from the list.");
     }
     return text;
   }
 
   function fleetScopeFromForm() {
-    if (!fleetForm) { throw fail("Fleet controls are unavailable."); }
+    if (!fleetForm) { throw fail("Group actions are unavailable."); }
     var form = new FormData(fleetForm);
-    var tenant = checkSelectionText(form.get("tenant"), "Tenant", false);
-    var platform = checkSelectionText(form.get("platform"), "Platform", false);
-    if (!tenant && !platform) {
-      throw fail("Provide this console's active tenant ID or a reviewed platform.");
+    var scope = String(form.get("scope") || "");
+    if (scope === "workspace" && workspaceScopeKnown) {
+      return { tenant: workspaceScopeValue, platform: null };
     }
-    return { tenant: tenant || null, platform: platform || null };
+    if (scope.indexOf("platform:") === 0) {
+      var platform = checkSelectionText(scope.slice(9), "Platform", true);
+      return { tenant: null, platform: platform };
+    }
+    throw fail("Choose a group first.");
   }
 
   function sameFleetScope(first, second) {
@@ -405,24 +538,24 @@
         typeof payload.captured_at !== "number" || !Number.isFinite(payload.captured_at) ||
         payload.captured_at <= 0 || !Array.isArray(payload.principals) ||
         !payload.principals.length || payload.principals.length > 500) {
-      throw fail("The server returned an invalid fleet selection contract.");
+      throw failServer("The group review reply was incomplete.");
     }
     if (payload.platform !== null && payload.platform !== undefined &&
         (typeof payload.platform !== "string" || !payload.platform ||
          payload.platform !== payload.platform.trim() || payload.platform.length > 160)) {
-      throw fail("The server returned an invalid fleet platform selection.");
+      throw failServer("The group review reply named an unexpected platform.");
     }
     var principals = payload.principals.map(checkPrincipal);
     var canonical = principals.slice().sort();
     if (principals.some(function (principal, index) { return principal !== canonical[index]; }) ||
         new Set(principals).size !== principals.length) {
-      throw fail("The server returned a non-canonical fleet selection.");
+      throw failServer("The group review reply was not in the expected order.");
     }
-    if (requestedScope.tenant && payload.tenant !== requestedScope.tenant) {
-      throw fail("The server returned a selection outside the requested tenant.");
+    if (requestedScope.tenant !== null && payload.tenant !== requestedScope.tenant) {
+      throw failServer("The group review reply was for a different workspace.");
     }
     if ((requestedScope.platform || null) !== (payload.platform || null)) {
-      throw fail("The server returned a selection outside the requested platform.");
+      throw failServer("The group review reply was for a different platform.");
     }
     return {
       schema: payload.schema,
@@ -442,82 +575,81 @@
   }
 
   function fleetActionFromForm() {
-    if (!fleetForm || !fleetVerb) { throw fail("Fleet controls are unavailable."); }
+    if (!fleetForm || !fleetVerb) { throw fail("Group actions are unavailable."); }
     var form = new FormData(fleetForm);
     var verb = String(fleetVerb.value || "");
     var allowed = (verb === "suspend" || verb === "resume") ? canOperate : canAdmin;
     if (!allowed || !["suspend", "resume", "contain", "release"].includes(verb)) {
-      throw fail("This fleet action is not available to the current role.");
+      throw fail("Your role cannot use this group action.");
     }
     var reason = String(form.get("reason") || "").trim();
     if ((verb === "suspend" || verb === "contain") && !reason) {
-      throw fail("A reason is required for fleet " + verb + ".");
+      throw fail("Give a reason to " + VERB_LABELS[verb].toLowerCase() + " this group.");
     }
     if (reason.length > 500) { throw fail("Reason must be at most 500 characters."); }
     if ((verb === "resume" || verb === "release") && reason) {
-      throw fail("Fleet " + verb + " does not accept a reason.");
+      throw fail("Leave the reason empty to " + VERB_LABELS[verb].toLowerCase() + " a group.");
     }
     var secondsRaw = String(form.get("release_after_seconds") || "").trim();
     var seconds = null;
     if (secondsRaw) {
       seconds = Number(secondsRaw);
       if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 2678400) {
-        throw fail("Auto-release must be a positive number of seconds, at most 31 days.");
+        throw fail("Choose how long the isolation should last from the list.");
       }
     }
     var idempotencyKey = String(form.get("idempotency_key") || "").trim();
     if (seconds !== null) {
       if (verb !== "contain") {
-        throw fail("Auto-release applies only to fleet containment.");
+        throw fail("Automatic ending only applies when you isolate a group. Choose Never, or choose Isolate.");
       }
       if (!/^[A-Za-z0-9._:-]{1,160}$/.test(idempotencyKey)) {
-        throw fail("Time-box idempotency key is required and must use safe ASCII characters.");
+        throw fail("The page is not ready yet. Refresh it and try again.");
       }
-    } else if (idempotencyKey) {
-      throw fail("An idempotency key applies only when auto-release is set.");
     }
     return {
       verb: verb,
       reason: reason || null,
       release_after_seconds: seconds,
-      idempotency_key: idempotencyKey || null
+      idempotency_key: seconds !== null ? idempotencyKey : null
     };
   }
 
   async function reviewFleetSelection(ticket) {
     if (!controlPlaneReady) {
-      throw fail("Control-plane state is not verified; no fleet selection was sent.");
+      throw fail("Lightwork has not confirmed the current state of your agents yet, so nothing was sent. Refresh and try again.");
     }
     var requestedScope = fleetScopeFromForm();
     var payload = {};
-    if (requestedScope.tenant) { payload.tenant = requestedScope.tenant; }
+    if (requestedScope.tenant !== null) { payload.tenant = requestedScope.tenant; }
     if (requestedScope.platform) { payload.platform = requestedScope.platform; }
     var returned = await request("/bulk/select", {
       method: "POST", body: JSON.stringify(payload)
     });
     fleetSelection = validateFleetSelection(returned, requestedScope);
     fleetSelectionState.textContent = "Reviewed " + fleetSelection.principals.length +
-      " principal(s); the action will recheck this exact snapshot.";
+      (fleetSelection.principals.length === 1 ? " agent or person." : " agents and people.") +
+      " You can now apply the action.";
     updateFleetControls();
-    show("Fleet selection reviewed", returned, ticket);
+    show("Group reviewed. These are the agents and people it includes", returned, ticket);
     return returned;
   }
 
   async function applyFleetAction(ticket) {
     if (!controlPlaneReady || !fleetSelection) {
-      throw fail("Review a current fleet selection before applying an action.");
+      throw fail("Press Review group before applying an action.");
     }
     var requestedScope = fleetScopeFromForm();
     if (!sameFleetScope(requestedScope, fleetSelection.requested_scope)) {
-      invalidateFleetSelection("Fleet scope changed; review a new exact selection.");
-      throw fail("Fleet scope changed; review a new exact selection.");
+      invalidateFleetSelection("The group changed. Press Review group again.");
+      throw fail("The group changed. Press Review group again.");
     }
     var action = fleetActionFromForm();
     var count = fleetSelection.principals.length;
     if (!(await confirmAction(
-      "Apply " + action.verb + " to " + count + " reviewed principal(s)? " +
-        "The server will refuse a stale selection and returns per-principal results.",
-      "Apply fleet " + action.verb
+      VERB_LABELS[action.verb] + " " + count + (count === 1 ? " agent or person" : " agents and people") +
+        "? If anyone's status changed since you reviewed the group, nothing will be changed.",
+      VERB_LABELS[action.verb] + " group"
     ))) { return null; }
     var body = {
       selection: {
@@ -544,20 +676,20 @@
     } catch (error) {
       requestError = error;
     }
-    invalidateFleetSelection("Fleet action completed or needs reconciliation; review a new selection.");
+    invalidateFleetSelection("Review the group again before another group action.");
     var refreshed = await refresh();
     if (requestError) {
       if (requestError.payload && typeof requestError.payload === "object") {
-        show("Fleet action was not fully confirmed; enforced state was re-read", requestError.payload, ticket);
+        show("The group action was not fully confirmed. The list below shows the current state", requestError.payload, ticket);
         return requestError.payload;
       }
       showError(requestError, refreshed.planeOk
-        ? "Fleet action request failed; enforced state was re-read"
-        : "Fleet action request failed; enforced state could not be re-read", ticket);
+        ? "The group action did not go through. The list has been refreshed"
+        : "The group action did not go through, and the list could not be refreshed", ticket);
       return null;
     }
-    show("Fleet " + action.verb + " result" +
-      (refreshed.planeOk ? "" : "; enforced state could not be re-read"), result, ticket);
+    show("Group action finished: " + VERB_LABELS[action.verb] +
+      (refreshed.planeOk ? "" : ". The list could not be refreshed, so check it before relying on this"), result, ticket);
     return result;
   }
 
@@ -574,7 +706,7 @@
   function validatePlaneSnapshot(payload) {
     if (!payload || typeof payload !== "object" ||
         !payload.status || !payload.agents) {
-      throw fail("The server returned an invalid control-plane snapshot.");
+      throw failServer("The agent status reply was incomplete.");
     }
     var st = payload.status;
     var agents = payload.agents;
@@ -595,7 +727,7 @@
         st.external, ["agents", "active", "suspended", "contained"]
       );
     if (!complete) {
-      throw fail("The server returned an incomplete control-plane status contract.");
+      throw failServer("The agent status reply was incomplete or out of date.");
     }
     return { status: st, agents: agents };
   }
@@ -611,8 +743,8 @@
     updateRuntimeControls();
     var native = st && st.native ? st.native : {};
     var external = st && st.external ? st.external : {};
-    document.getElementById("acp-native").textContent = String(native.principals ?? "unknown");
-    document.getElementById("acp-external").textContent = String(external.agents ?? "unknown");
+    document.getElementById("acp-native").textContent = String(native.principals ?? "—");
+    document.getElementById("acp-external").textContent = String(external.agents ?? "—");
     var suspended = Number(native.suspended);
     var externalSuspended = Number(external.suspended);
     var nativeContained = Number(native.contained);
@@ -622,35 +754,37 @@
         Number.isFinite(nativeContained) && Number.isFinite(externalContained)
         ? String(suspended + externalSuspended) + " / " +
           String(nativeContained + externalContained)
-        : "unknown";
+        : "—";
 
     var title = document.getElementById("acp-health-title");
     var detail = document.getElementById("acp-health-detail");
     if (!haltStatusComplete) {
-      setMark("partial", "Halt unknown");
-      title.textContent = "Emergency-stop state is unverified";
-      detail.textContent = "The hardened halt status could not be read. Do not assume agents are running.";
+      setMark("partial", "Unknown");
+      title.textContent = "Emergency stop state is unknown";
+      detail.textContent = "Lightwork could not check the emergency stop. Don't assume agents are running or stopped; refresh to try again.";
     } else if (halt.active) {
       if (haltScope === "cluster" && halt.cluster_halt !== true) {
-        setMark("failed", "Partial halt");
-        title.textContent = "Cluster halt is not confirmed";
-        detail.textContent = "This replica may be stopped while other replicas remain active.";
+        setMark("failed", "Partly stopped");
+        title.textContent = "The stop is not confirmed everywhere";
+        detail.textContent = "This Lightwork server is stopped, but others may still be running.";
       } else {
-        setMark("failed", haltScope === "cluster" ? "Fleet halted" : "Local halt");
+        setMark("failed", "Stopped");
         title.textContent = haltScope === "cluster"
-          ? "The shared fleet halt is active"
-          : "This deployment is halted locally";
-        detail.textContent = "The hardened halt status confirms the stop at its configured scope.";
+          ? "All agents on every server are stopped"
+          : "All agents on this server are stopped";
+        detail.textContent = "The emergency stop is on and confirmed. Use Resume all work when it is safe.";
       }
     } else if (!st.enabled) {
-      setMark("partial", "Read-only");
-      title.textContent = "Control plane is off";
-      detail.textContent = "Bounded roster reads remain available, but mutation verbs are refused until [control_plane] enable = true.";
+      setMark("partial", "View only");
+      title.textContent = "Agent controls are turned off";
+      detail.textContent = "You can see your agents, but pausing, isolating and limiting are turned off. Ask an administrator to turn agent controls on.";
     } else {
-      setMark("ready", "Enabled");
-      title.textContent = "Control plane is live";
-      detail.textContent = (st.trust_enforced ? "Trust plane enforced. " : "Trust plane open. ") +
-        (st.external_agents_enabled ? "External-agent gateway on." : "External-agent gateway off.");
+      setMark("ready", "Ready");
+      title.textContent = "Agent controls are ready";
+      detail.textContent = (st.trust_enforced
+        ? "Only trusted agents may act. "
+        : "Agents do not need to be approved as trusted before they act. ") +
+        (st.external_agents_enabled ? "Outside agents can connect." : "Outside agents cannot connect.");
     }
   }
 
@@ -688,18 +822,18 @@
   function ceilingOf(row) {
     if (row.kind !== "external") { return "—"; }
     var parts = [];
-    parts.push(row.max_risk ? "Maximum risk: " + row.max_risk : "No risk cap");
+    parts.push(row.max_risk ? "Highest risk: " + human(row.max_risk) : "No risk limit");
     parts.push(row.max_dollars === null || row.max_dollars === undefined
-      ? "No dollar cap"
-      : "Maximum dollars: $" + row.max_dollars);
+      ? "No spending limit"
+      : "Spending limit: $" + row.max_dollars);
     if (row.deny_tools && row.deny_tools.length) {
-      parts.push("Denied tools: " + row.deny_tools.join(", "));
+      parts.push("Blocked tools: " + row.deny_tools.map(human).join(", "));
     }
     if (row.allow_tools && row.allow_tools.length) {
-      parts.push("Allowed tools: " + row.allow_tools.join(", "));
+      parts.push("Only these tools: " + row.allow_tools.map(human).join(", "));
     }
     if (row.max_wall_seconds !== null && row.max_wall_seconds !== undefined) {
-      parts.push("Maximum wall time: " + row.max_wall_seconds + " seconds");
+      parts.push("Time limit: " + duration(row.max_wall_seconds));
     }
     return parts.join(" · ");
   }
@@ -707,46 +841,49 @@
   function validateToolList(value, field) {
     if (!Array.isArray(value) || value.length > 256 ||
         value.some(function (name) { return !toolPattern.test(name); })) {
-      throw fail("The server returned an invalid " + field + " tool list.");
+      throw failServer("The list contained an invalid " + field + " tool list.");
     }
     return value.slice();
   }
 
   function validateRosterRow(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw fail("The server returned an invalid roster row.");
+      throw failServer("The list contained an invalid roster row.");
     }
     var row = Object.assign({}, value);
     row.principal = checkPrincipal(row.principal);
     if (row.kind !== "native" && row.kind !== "external") {
-      throw fail("The server returned an invalid roster principal kind.");
+      throw failServer("The list contained an invalid roster principal kind.");
     }
     if (typeof row.state !== "string" || !row.state || row.state.length > 64 ||
         /[\u0000-\u001f\u007f-\u009f]/.test(row.state)) {
-      throw fail("The server returned an invalid roster state.");
+      throw failServer("The list contained an invalid roster state.");
     }
     if (!isNonNegativeInteger(row.running_goals) ||
         typeof row.revoked !== "boolean" || typeof row.contained !== "boolean") {
-      throw fail("The server returned invalid roster control state.");
+      throw failServer("The list contained invalid roster control state.");
+    }
+    if (row.label !== undefined && (typeof row.label !== "string" || row.label.length > 512)) {
+      row.label = "";
     }
     if (row.platform !== undefined &&
         (typeof row.platform !== "string" || row.platform.length > 128 ||
          /[\u0000-\u001f\u007f-\u009f]/.test(row.platform))) {
-      throw fail("The server returned an invalid roster platform label.");
+      throw failServer("The list contained an invalid roster platform label.");
     }
     if (row.revoked_reason !== undefined &&
         (typeof row.revoked_reason !== "string" || row.revoked_reason.length > 500 ||
          /[\u0000-\u001f\u007f-\u009f]/.test(row.revoked_reason))) {
-      throw fail("The server returned an invalid roster incident summary.");
+      throw failServer("The list contained an invalid roster incident summary.");
     }
     if (row.max_risk !== null && row.max_risk !== undefined &&
         !["low", "medium", "high"].includes(row.max_risk)) {
-      throw fail("The server returned an invalid roster risk ceiling.");
+      throw failServer("The list contained an invalid roster risk ceiling.");
     }
     ["max_dollars", "max_wall_seconds"].forEach(function (field) {
       if (row[field] !== null && row[field] !== undefined &&
           (typeof row[field] !== "number" || !Number.isFinite(row[field]) || row[field] <= 0)) {
-        throw fail("The server returned an invalid roster numeric ceiling.");
+        throw failServer("The list contained an invalid roster numeric ceiling.");
       }
     });
     row.allow_tools = validateToolList(row.allow_tools || [], "allowed");
@@ -756,7 +893,7 @@
 
   async function mutatePrincipal(verb, principal, reason, ticket) {
     if (!controlPlaneReady) {
-      throw fail("Control-plane state is not verified; no principal change was sent.");
+      throw fail("Lightwork has not confirmed the current state of your agents yet, so nothing was sent. Refresh and try again.");
     }
     var body = { principal: principal };
     if (reason !== undefined) { body.reason = reason; }
@@ -771,18 +908,18 @@
     var refreshed = await refresh();
     if (requestError) {
       if (requestError.payload && requestError.payload.ok === false) {
-        show("Not applied: " + verb + " " + principal +
-          (refreshed.planeOk ? "" : "; enforced state could not be re-read"),
+        show("Not done: " + VERB_LABELS[verb] + " " + nameOf(principal) +
+          (refreshed.planeOk ? "" : ". The list could not be refreshed"),
         requestError.payload, ticket);
         return requestError.payload;
       }
       showError(requestError, refreshed.planeOk
-        ? "Request failed; enforced state was re-read"
-        : "Request failed; enforced state could not be re-read", ticket);
+        ? VERB_LABELS[verb] + " did not go through. The list has been refreshed"
+        : VERB_LABELS[verb] + " did not go through, and the list could not be refreshed", ticket);
       return null;
     }
-    show((result.ok ? "Applied: " : "Not applied: ") + verb + " " + principal +
-      (refreshed.planeOk ? "" : "; enforced state could not be re-read"), result, ticket);
+    show((result.ok ? "Done: " : "Not done: ") + VERB_LABELS[verb] + " " + nameOf(principal) +
+      (refreshed.planeOk ? "" : ". The list could not be refreshed, so check it before relying on this"), result, ticket);
     return result;
   }
 
@@ -791,7 +928,8 @@
     var payload = await request("/principals/ledger?" + query.toString());
     if (ticket === operationRequested) {
       show(
-        "Ledger: " + principal + " (" + payload.count + " event(s))",
+        "History for " + nameOf(principal) + " (" + payload.count +
+          (payload.count === 1 ? " event)" : " events)"),
         payload.items,
         ticket
       );
@@ -799,18 +937,20 @@
     return payload;
   }
 
-  function verbButton(label, principal, handler, isMutation) {
+  function verbButton(verb, row, handler, isMutation) {
+    var label = VERB_LABELS[verb];
+    var principal = row.principal;
     var button = document.createElement("button");
     button.type = "button";
-    button.className = "btn";
+    button.className = verb === "contain" ? "btn btn--danger" : isMutation ? "btn" : "btn btn--ghost";
     button.textContent = label;
     button.dataset.acpPrincipal = principal;
-    button.dataset.acpVerb = label.toLowerCase();
+    button.dataset.acpVerb = verb;
     if (isMutation) {
       button.dataset.requiresControlPlane = "true";
       button.disabled = !controlPlaneReady;
     }
-    button.setAttribute("aria-label", label + " principal " + principal);
+    button.setAttribute("aria-label", label + " " + displayName(row));
     button.addEventListener("click", function () {
       runGuarded(button, isMutation, function (ticket) {
         return handler(button, ticket);
@@ -823,27 +963,35 @@
     var tr = document.createElement("tr");
     var principal = document.createElement("th");
     principal.scope = "row";
-    principal.textContent = row.principal;
+    principal.textContent = displayName(row);
     tr.appendChild(principal);
-    tr.appendChild(cell(row.kind + (row.platform ? " · " + row.platform : "")));
+    tr.appendChild(cell((row.kind === "external" ? "Outside agent" : "Lightwork agent or person") +
+      (row.platform ? " · " + row.platform : "")));
     var stateCell = document.createElement("td");
     var mark = document.createElement("span");
-    mark.className = "acp-state";
+    var stateLabel = STATE_LABELS[row.state] || [human(row.state), "idle"];
+    mark.className = "badge " + stateLabel[1];
     mark.dataset.state = row.state;
-    mark.textContent = row.state + (row.revoked_reason ? " (" + row.revoked_reason + ")" : "");
+    mark.textContent = stateLabel[0];
     stateCell.appendChild(mark);
+    if (row.revoked_reason) {
+      var why = document.createElement("div");
+      why.className = "muted";
+      why.textContent = "Reason: " + row.revoked_reason;
+      stateCell.appendChild(why);
+    }
     tr.appendChild(stateCell);
-    tr.appendChild(cell(String(row.running_goals ?? "unknown")));
+    tr.appendChild(cell(String(row.running_goals ?? "—")));
     tr.appendChild(cell(ceilingOf(row)));
     var actions = document.createElement("td");
     var verbs = document.createElement("div");
     verbs.className = "acp-verbs";
     if (row.contained) {
       if (canAdmin) {
-        verbs.appendChild(verbButton("Release", row.principal, async function (button, ticket) {
+        verbs.appendChild(verbButton("release", row, async function (button, ticket) {
           if (!(await confirmAction(
-            "Release principal " + row.principal + "? Its durable named-principal protection may be lifted.",
-            "Release principal"
+            "End isolation for " + displayName(row) + "? It can then be resumed and work again.",
+            "End isolation"
           ))) { return null; }
           return withBusy(button, function () {
             return mutatePrincipal("release", row.principal, undefined, ticket);
@@ -852,10 +1000,10 @@
       }
     } else if (row.revoked) {
       if (canOperate) {
-        verbs.appendChild(verbButton("Resume", row.principal, async function (button, ticket) {
+        verbs.appendChild(verbButton("resume", row, async function (button, ticket) {
           if (!(await confirmAction(
-            "Resume principal " + row.principal + "? Its capability may be used again.",
-            "Resume principal"
+            "Resume " + displayName(row) + "? It will be able to work again straight away.",
+            "Resume"
           ))) { return null; }
           return withBusy(button, function () {
             return mutatePrincipal("resume", row.principal, undefined, ticket);
@@ -864,7 +1012,7 @@
       }
     } else {
       if (canOperate) {
-        verbs.appendChild(verbButton("Suspend", row.principal, async function (button, ticket) {
+        verbs.appendChild(verbButton("suspend", row, async function (button, ticket) {
           var reason = await collectReason("suspend", row.principal);
           if (reason === null) { return null; }
           return withBusy(button, function () {
@@ -873,7 +1021,7 @@
         }, true));
       }
       if (canAdmin) {
-        verbs.appendChild(verbButton("Contain", row.principal, async function (button, ticket) {
+        verbs.appendChild(verbButton("contain", row, async function (button, ticket) {
           var reason = await collectReason("contain", row.principal);
           if (reason === null) { return null; }
           return withBusy(button, function () {
@@ -882,8 +1030,21 @@
         }, true));
       }
     }
+    if (canOperate && row.kind === "external" && !row.contained) {
+      var limit = document.createElement("button");
+      limit.type = "button";
+      limit.className = "btn";
+      limit.textContent = VERB_LABELS.attenuate;
+      limit.dataset.acpPrincipal = row.principal;
+      limit.dataset.acpVerb = "attenuate";
+      limit.dataset.requiresControlPlane = "true";
+      limit.disabled = !controlPlaneReady;
+      limit.setAttribute("aria-label", "Limit " + displayName(row));
+      limit.addEventListener("click", function () { openLimits(row.principal); });
+      verbs.appendChild(limit);
+    }
     if (canAudit) {
-      verbs.appendChild(verbButton("Ledger", row.principal, function (button, ticket) {
+      verbs.appendChild(verbButton("ledger", row, function (button, ticket) {
         return withBusy(button, function () { return ledger(row.principal, ticket); });
       }, false));
     }
@@ -892,9 +1053,96 @@
     return tr;
   }
 
+  function refillSelect(select, options, emptyLabel) {
+    if (!select) { return; }
+    var previous = select.value;
+    select.textContent = "";
+    var placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = options.length ? "Choose…" : emptyLabel;
+    select.appendChild(placeholder);
+    options.forEach(function (entry) {
+      var option = document.createElement("option");
+      option.value = entry[0];
+      option.textContent = entry[1];
+      select.appendChild(option);
+    });
+    var stillThere = options.some(function (entry) { return entry[0] === previous; });
+    select.value = stillThere ? previous : "";
+  }
+
+  function fillSelectors() {
+    refillSelect(verbPrincipal, rosterRows.map(function (row) {
+      return [row.principal, displayName(row)];
+    }), "No agents or people yet");
+    refillSelect(attenuatePrincipal, rosterRows.filter(function (row) {
+      return row.kind === "external" && !row.contained;
+    }).map(function (row) { return [row.principal, displayName(row)]; }),
+    "No outside agents connected");
+    if (fleetScope) {
+      var groups = [];
+      if (workspaceScopeKnown) { groups.push(["workspace", "Everyone in this workspace"]); }
+      var seen = {};
+      rosterRows.forEach(function (row) {
+        if (row.kind !== "external" || !row.platform || seen[row.platform]) { return; }
+        seen[row.platform] = true;
+        groups.push(["platform:" + row.platform, "Outside agents from " + row.platform]);
+      });
+      refillSelect(fleetScope, groups, "No groups available");
+    }
+    renderTools();
+  }
+
+  function renderTools() {
+    if (!denyTools) { return; }
+    var chosen = attenuatePrincipal ? attenuatePrincipal.value : "";
+    var row = null;
+    rosterRows.forEach(function (candidate) { if (candidate.principal === chosen) { row = candidate; } });
+    Array.prototype.slice.call(denyTools.querySelectorAll("label, .muted")).forEach(function (node) {
+      node.remove();
+    });
+    var names = [];
+    if (row) {
+      (row.allow_tools || []).forEach(function (name) {
+        if (names.indexOf(name) < 0 && (row.deny_tools || []).indexOf(name) < 0) { names.push(name); }
+      });
+    }
+    if (!names.length) {
+      var note = document.createElement("span");
+      note.className = "muted";
+      note.id = "acp-deny-tools-help";
+      note.textContent = !row
+        ? "Choose an outside agent to see its tools."
+        : "This agent has no listed tools to block. You can still limit its risk, spending and time.";
+      denyTools.appendChild(note);
+      return;
+    }
+    names.forEach(function (name) {
+      var label = document.createElement("label");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.name = "deny_tool";
+      box.value = name;
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(" " + human(name)));
+      denyTools.appendChild(label);
+    });
+  }
+
+  function openLimits(principal) {
+    if (!attenuatePrincipal) { return; }
+    attenuatePrincipal.value = principal;
+    renderTools();
+    var heading = document.getElementById("acp-attenuate-title");
+    if (heading && typeof heading.scrollIntoView === "function") { heading.scrollIntoView({ block: "start" }); }
+    if (typeof attenuatePrincipal.focus === "function") { attenuatePrincipal.focus(); }
+  }
+
+  if (attenuatePrincipal) { attenuatePrincipal.addEventListener("change", renderTools); }
+
   function applyRoster(payload) {
     if (!payload || !Array.isArray(payload.items)) {
-      throw fail("The server returned an invalid bounded roster page.");
+      throw failServer("The list contained an invalid bounded roster page.");
     }
     var validatedItems = payload.items.map(validateRosterRow);
     var focus = currentRosterFocus();
@@ -911,16 +1159,18 @@
         end > total || payload.has_more !== expectedHasMore ||
         (expectedHasMore && suppliedNext !== end) ||
         (!expectedHasMore && suppliedNext !== null)) {
-      throw fail("The server returned invalid roster pagination metadata.");
+      throw failServer("The list contained invalid roster pagination metadata.");
     }
     rosterOffset = offset;
     rosterNextOffset = expectedHasMore ? suppliedNext : null;
+    rosterRows = validatedItems;
     rows.textContent = "";
+    fillSelectors();
     if (!validatedItems.length) {
       var empty = document.createElement("tr");
       empty.appendChild(cell(total === 0
-        ? "No governed principals were returned. The API refuses completeness when roster authorities are unreadable."
-        : "No principals were returned for this bounded page."));
+        ? "No agents or people are working in Lightwork yet. Agents you create, and outside agents you connect, appear here."
+        : "This page of the list is empty. Use Previous to go back."));
       empty.firstChild.colSpan = 6;
       rows.appendChild(empty);
     } else {
@@ -928,8 +1178,7 @@
     }
     var first = validatedItems.length ? offset + 1 : 0;
     var last = validatedItems.length ? end : 0;
-    rosterPage.textContent = "Showing " + first + "–" + last + " of " + total +
-      " governed principals (maximum " + rosterLimit + " on this page).";
+    rosterPage.textContent = "Showing " + first + "–" + last + " of " + total + ".";
     rosterPrevious.disabled = offset <= 0;
     rosterNext.disabled = payload.has_more !== true || rosterNextOffset === null;
     restoreRosterFocus(focus);
@@ -941,10 +1190,10 @@
     var message = boundedError(error);
     rows.textContent = "";
     var failed = document.createElement("tr");
-    failed.appendChild(cell("Roster unavailable: " + message));
+    failed.appendChild(cell("Couldn't load the list. " + message));
     failed.firstChild.colSpan = 6;
     rows.appendChild(failed);
-    rosterPage.textContent = "Roster page unavailable: " + message;
+    rosterPage.textContent = "Couldn't load the list. Use Reload list to try again.";
     rosterPrevious.disabled = true;
     rosterNext.disabled = true;
     restoreRosterFocus(focus);
@@ -995,7 +1244,7 @@
         updateRuntimeControls();
         setMark("failed", "Unavailable");
         document.getElementById("acp-health-title").textContent =
-          "Control-plane state is unavailable";
+          "Couldn't check your agents";
         document.getElementById("acp-health-detail").textContent = boundedError(planeError);
         renderRosterError(planeError);
       }
@@ -1010,11 +1259,11 @@
     controlPlaneReady = false;
     haltAuthorityReady = false;
     updateRuntimeControls();
-    setMark("partial", "Refreshing");
+    setMark("partial", "Checking");
     document.getElementById("acp-health-title").textContent =
-      "Refreshing control-plane state";
+      "Checking your agents…";
     document.getElementById("acp-health-detail").textContent =
-      "Mutation controls remain disabled until the bounded snapshot and halt authority agree.";
+      "Actions are unavailable until Lightwork has confirmed the current state.";
     planeRequested += 1;
     if (!planeRefreshPromise) {
       planeRefreshPromise = drainPlaneRefreshes().finally(function () {
@@ -1051,7 +1300,7 @@
 
   async function changeHalt(expectedActive, reason, ticket) {
     if (!haltAuthorityReady) {
-      throw fail("Halt authority is not verified; no halt change was sent.");
+      throw fail("Lightwork could not confirm the emergency stop's current state, so nothing was sent. Refresh and try again.");
     }
     var mutationError = null;
     try {
@@ -1065,27 +1314,24 @@
     var refreshed = await refreshStatus();
     var verified = refreshed.halt;
     if (!refreshed.haltComplete) {
-      var verificationError = refreshed.haltError || fail(
-        "The hardened halt endpoint returned an incomplete status."
-      );
       var combined = mutationError
-        ? boundedError(mutationError) + " Halt state could not be re-read: " + boundedError(verificationError)
-        : "Halt state could not be re-read: " + boundedError(verificationError);
+        ? boundedError(mutationError) + " Lightwork also could not check whether the emergency stop is on. Refresh to check."
+        : "Lightwork could not check whether the emergency stop is on. Refresh to check.";
       throw fail(combined);
     }
     if (mutationError) {
-      show("Halt request failed; current state was re-read: " + boundedError(mutationError), {
+      show("The emergency stop change did not go through. " + boundedError(mutationError), {
         request_error: boundedError(mutationError),
         verified_state: verified
       }, ticket);
       return false;
     }
     if (!haltMatches(verified, expectedActive)) {
-      show("Halt change was not confirmed at the required scope", verified, ticket);
+      show("The emergency stop change could not be confirmed everywhere. Refresh and check the state", verified, ticket);
       return false;
     }
     show(
-      expectedActive ? "Deployment halt verified" : "Deployment halt cleared and verified",
+      expectedActive ? "All agents are stopped. The emergency stop is confirmed" : "The emergency stop is off. Agents can work again",
       verified,
       ticket
     );
@@ -1150,23 +1396,22 @@
       var principal = checkPrincipal(form.get("principal"));
       var reason = String(form.get("reason") || "").trim();
       if (verb === "ledger") {
-        if (!canAudit) { throw fail("Audit permission is required."); }
+        if (!canAudit) { throw fail("You need auditor access to see history."); }
         return withBusy(submitter, function () { return ledger(principal, ticket); });
       }
       var canApplyVerb =
         ((verb === "suspend" || verb === "resume") && canOperate) ||
         ((verb === "contain" || verb === "release") && canAdmin);
       if (!canApplyVerb) {
-        throw fail("This principal action is not available to the current role.");
+        throw fail("Your role cannot use this action.");
       }
       if (verb === "suspend" || verb === "contain") {
-        if (!reason) { throw fail("A reason is required to " + verb + "."); }
-        if (reason.length > 500) { throw fail("Reason must be at most 500 characters."); }
+        if (!reason) { throw fail("Give a reason to " + VERB_LABELS[verb].toLowerCase() + "."); }
+        if (reason.length > 500) { throw fail("Keep the reason under 500 characters."); }
       }
       if (!(await confirmAction(
-        verb.charAt(0).toUpperCase() + verb.slice(1) + " principal " + principal +
-          "? The console will attempt to re-read enforced state after the request.",
-        verb.charAt(0).toUpperCase() + verb.slice(1) + " principal"
+        VERB_LABELS[verb] + " " + nameOf(principal) + "?",
+        VERB_LABELS[verb]
       ))) { return null; }
       return withBusy(submitter, function () {
         return mutatePrincipal(verb, principal,
@@ -1184,23 +1429,30 @@
     var submitter = event.submitter;
     var form = new FormData(formElement);
     runGuarded(formElement, true, async function (ticket) {
-      if (!canOperate) { throw fail("Operate permission is required."); }
+      if (!canOperate) { throw fail("Your role cannot limit agents. Ask an operator or administrator."); }
       var principal = checkPrincipal(form.get("principal"));
       var body = { deny_tools: [] };
-      String(form.get("deny_tools") || "").split(",").forEach(function (tool) {
-        var name = tool.trim();
-        if (name) { body.deny_tools.push(name); }
-      });
+      if (denyTools) {
+        Array.prototype.forEach.call(
+          denyTools.querySelectorAll("input[type=checkbox]:checked"),
+          function (box) { body.deny_tools.push(box.value); }
+        );
+      } else {
+        String(form.get("deny_tools") || "").split(",").forEach(function (tool) {
+          var name = tool.trim();
+          if (name) { body.deny_tools.push(name); }
+        });
+      }
       if (body.deny_tools.length > 64) {
-        throw fail("At most 64 denied tools may be added at once.");
+        throw fail("Block at most 64 tools at a time.");
       }
       if (body.deny_tools.some(function (name) { return !toolPattern.test(name); })) {
-        throw fail("Denied tool names must use letters, digits, _, . or - (max 64 each).");
+        throw fail("One of the chosen tools could not be used. Reload the list and choose again.");
       }
       var risk = String(form.get("max_risk") || "");
       if (risk) {
         if (!["low", "medium", "high"].includes(risk)) {
-          throw fail("Max risk must be low, medium or high.");
+          throw fail("Choose Low, Medium or High for the risk limit.");
         }
         body.max_risk = risk;
       }
@@ -1209,7 +1461,7 @@
         body.max_dollars = Number(dollars);
         if (!Number.isFinite(body.max_dollars) || body.max_dollars <= 0 ||
             body.max_dollars > 1000000) {
-          throw fail("Max dollars must be greater than 0 and at most 1,000,000.");
+          throw fail("Enter a spending limit between $0.01 and $1,000,000.");
         }
       }
       var wall = String(form.get("max_wall_seconds") || "").trim();
@@ -1217,20 +1469,20 @@
         body.max_wall_seconds = Number(wall);
         if (!Number.isFinite(body.max_wall_seconds) || body.max_wall_seconds <= 0 ||
             body.max_wall_seconds > 31536000) {
-          throw fail("Max wall seconds must be greater than 0 and at most 31,536,000.");
+          throw fail("Choose a time limit from the list.");
         }
       }
       if (!body.deny_tools.length && body.max_risk === undefined &&
           body.max_dollars === undefined && body.max_wall_seconds === undefined) {
-        throw fail("At least one attenuation restriction is required.");
+        throw fail("Choose at least one limit to apply.");
       }
       if (!(await confirmAction(
-        "Narrow the capability ceiling for " + principal + "? This operation never widens it.",
-        "Narrow ceiling"
+        "Apply these limits to " + nameOf(principal) + "? Limits can only be tightened here, never loosened.",
+        "Apply limits"
       ))) { return null; }
       return withBusy(submitter, async function () {
         if (!controlPlaneReady) {
-          throw fail("Control-plane state is not verified; no attenuation was sent.");
+          throw fail("Lightwork has not confirmed the current state of your agents yet, so nothing was sent. Refresh and try again.");
         }
         var result = null;
         var requestError = null;
@@ -1245,12 +1497,12 @@
         var refreshed = await refresh();
         if (requestError) {
           showError(requestError, refreshed.planeOk
-            ? "Request failed; enforced state was re-read"
-            : "Request failed; enforced state could not be re-read", ticket);
+            ? "The limits did not go through. The list has been refreshed"
+            : "The limits did not go through, and the list could not be refreshed", ticket);
           return null;
         }
-        show((result.ok ? "Applied: " : "Not applied: ") + "attenuate " + principal +
-          (refreshed.planeOk ? "" : "; enforced state could not be re-read"), result, ticket);
+        show((result.ok ? "Done: limits applied to " : "Not done: limits for ") + nameOf(principal) +
+          (refreshed.planeOk ? "" : ". The list could not be refreshed, so check it before relying on this"), result, ticket);
         return result;
       });
     }, true);
@@ -1262,14 +1514,15 @@
     var submitter = event.submitter;
     var form = new FormData(formElement);
     runGuarded(formElement, true, async function (ticket) {
-      if (!canHalt) { throw fail("The current role cannot change this deployment's halt."); }
+      if (!canHalt) { throw fail("Your role cannot use the emergency stop."); }
       var reason = String(form.get("reason") || "").trim();
-      if (!reason) { throw fail("A reason is required to halt the deployment."); }
-      if (reason.length > 200) { throw fail("Halt reason must be at most 200 characters."); }
+      if (!reason) { throw fail("Give a reason for stopping all agents."); }
+      if (reason.length > 200) { throw fail("Keep the reason under 200 characters."); }
       if (!(await confirmAction(
-        "Halt this deployment at its configured " + haltScope +
-          " scope? Running work stops at the next enforced tool boundary.",
-        "Halt deployment"
+        (haltScope === "cluster" ? "Stop every agent on every Lightwork server now?"
+          : "Stop every agent on this Lightwork server now?") +
+          " Work in progress stops before its next step.",
+        "Stop all agents"
       ))) { return null; }
       return withBusy(submitter, function () { return changeHalt(true, reason, ticket); });
     }, true);
@@ -1278,10 +1531,10 @@
   document.getElementById("acp-clear-halt").addEventListener("click", function (event) {
     var button = event.currentTarget;
     runGuarded(button, true, async function (ticket) {
-      if (!canHalt) { throw fail("The current role cannot change this deployment's halt."); }
+      if (!canHalt) { throw fail("Your role cannot use the emergency stop."); }
       if (!(await confirmAction(
-        "Clear the " + haltScope + " halt? Governed agents may resume work immediately.",
-        "Clear halt"
+        "Turn off the emergency stop? Agents can start working again straight away.",
+        "Resume all work"
       ))) { return null; }
       return withBusy(button, function () { return changeHalt(false, undefined, ticket); });
     }, true);
@@ -1293,7 +1546,7 @@
     updateRuntimeControls();
     setMark("failed", "Unavailable");
     document.getElementById("acp-health-title").textContent =
-      "Initial control-plane state is unavailable";
+      "Couldn't check your agents";
     document.getElementById("acp-health-detail").textContent = boundedError(error);
   });
 })();

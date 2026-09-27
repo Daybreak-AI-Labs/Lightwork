@@ -4411,7 +4411,7 @@ async def _governance_extensions_page_data(
         data["vendor_items"] = list(listing.get("items") or [])[:20]
     except Exception as exc:
         data["vendor_error"] = (
-            "Select a company or tenant before loading AI vendor assessments."
+            "Choose a workspace first to see supplier reviews."
             if "tenant" in str(exc).lower()
             else "AI vendor assessments are temporarily unavailable."
         )
@@ -4573,8 +4573,8 @@ async def _ai_inventory_page_data(
         except Exception as exc:
             if "active tenant" in str(exc).lower():
                 error = (
-                    "Select a company or tenant before loading discovered AI "
-                    "assets. No inventory records were read."
+                    "Choose a workspace first to see discovered AI systems. "
+                    "Nothing was read."
                 )
             else:
                 error = "AI inventory records are temporarily unavailable."
@@ -4666,12 +4666,12 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
                 == "AI evidence gateway records require an explicit tenant scope"
             ):
                 error = (
-                    "Select a company or tenant before loading evidence. "
-                    "No records were read."
+                    "Choose a workspace first to see evidence. "
+                    "Nothing was read."
                 )
                 error_action = (
-                    "Set [client] id in the Lightwork configuration or set "
-                    "MAVERICK_TENANT, then restart the dashboard."
+                    "Pick a workspace from the workspace menu, then reload this "
+                    "page. If there is no workspace to pick, ask an administrator."
                 )
             else:
                 error = (
@@ -4821,6 +4821,10 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "model_risk_assets": assets[:500],
             "model_risk_errors": model_risk_errors,
             "ai_vendor_items": extensions_data["vendor_items"],
+            "ai_vendor_questions": [
+                {"id": question.id, "section": question.section, "text": question.text}
+                for question in ai_vendor_risk.AI_VENDOR_QUESTIONS
+            ],
             "ai_vendor_error": extensions_data["vendor_error"],
             "drift_monitoring_enabled": extensions_data["drift_enabled"],
             "drift_monitoring_items": extensions_data["drift_items"],
@@ -4889,6 +4893,7 @@ async def _governance_workspace_page_data(
         "literacy_plane_status": {},
         "literacy_error": "",
         "literacy_training_keys": [],
+        "literacy_roles": [],
         "grc_sync_enabled": sync.enabled(),
         "grc_status": {},
         "grc_outbound": [],
@@ -4991,6 +4996,9 @@ async def _governance_workspace_page_data(
         data["literacy_training_keys"] = [
             {"key": key, "title": title} for key, title in sorted(keys.items())
         ][:200]
+        data["literacy_roles"] = sorted(
+            {str(row.get("role")) for row in requirements if row.get("role")}
+        )[:200]
     if data["grc_sync_enabled"]:
         status_result, outbound_result = await asyncio.gather(
             run_in_threadpool(sync.sync_status),
@@ -5119,6 +5127,7 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             "literacy_plane_status": workspace["literacy_plane_status"],
             "literacy_error": workspace["literacy_error"],
             "literacy_training_keys": workspace["literacy_training_keys"],
+            "literacy_roles": workspace["literacy_roles"],
             "ai_incident_enabled": ai_incident_data["enabled"],
             "ai_incident_declarations": ai_incident_data["declarations"],
             "ai_incident_error": ai_incident_data["error"],
@@ -10201,6 +10210,9 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-consent-publishing.js")
 @app.get("/static/lightwork-markdown.js")
 @app.get("/static/lightwork-draft-recovery.css")
+@app.get("/static/lightwork-ai-cloud-agent-governance.js")
+@app.get("/static/lightwork-governance-agents.js")
+@app.get("/static/lightwork-knowledge-library.js")
 async def in_app_ui_asset(request: Request) -> FileResponse:
     """Serve only the explicitly registered in-app form assets."""
     name = request.url.path.rsplit("/", 1)[-1]

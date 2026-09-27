@@ -725,6 +725,23 @@ def create_governance_agents_router(  # noqa: C901 - explicit endpoint trust bou
             )
         )
 
+    @router.get("/policies")
+    async def list_policies(
+        request: Request,
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ):
+        """This workspace's current policies, for the page's pickers."""
+        require_permission(request, "view")
+        ops, tenant, _principal_ref, store, _snapshot = authority(request)
+        reader = getattr(store, "list_policies", None)
+        if not callable(reader):
+            raise HTTPException(
+                status_code=503,
+                detail="governance-agent policy list is unavailable",
+            )
+        items = await call(ops, reader, tenant, limit=limit)
+        return {"items": _jsonable(items)}
+
     @router.get("/runs/{run_id}")
     async def get_run(request: Request, run_id: ObjectPath):
         require_permission(request, "view")
