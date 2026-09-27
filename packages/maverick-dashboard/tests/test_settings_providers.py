@@ -114,7 +114,7 @@ def test_tenant_provider_source_is_displayed_and_dashboard_rotation_refused(
     assert state["api_key_source"] == "tenant config"  # pragma: allowlist secret
     assert state["dashboard_can_set_api_key"] is False
     page = c.get("/settings").text
-    assert "managed elsewhere (tenant config)" in page
+    assert "This key is set for this workspace, so it can't be changed here." in page
 
     response = c.post(
         "/settings/providers",

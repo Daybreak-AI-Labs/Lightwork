@@ -104,8 +104,8 @@ def test_cache_html_page_renders(monkeypatch, tmp_path):
     r = client.get("/cache")
     assert r.status_code == 200
     text = r.text
-    assert "Purge" in text
-    assert "files" in text
+    assert "Clear everything" in text
+    assert "Recently read files" in text
     # (Cache is folded out of the sidebar in the moderate declutter; still
     # reachable at /cache and rendered above.)
 

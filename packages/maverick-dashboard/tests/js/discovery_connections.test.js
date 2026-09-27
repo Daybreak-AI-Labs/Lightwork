@@ -18,6 +18,9 @@ test("AWS discovery credentials use guided fields, stay outside drafts, and clea
   const ui=await fixture();t.after(()=>ui.window.close());ui.change("preset","aws_s3");
   assert.equal(ui.el("form").dataset.draftRecovery,"off");assert.equal(ui.el("aws").hidden,false);
   assert.equal(ui.el("save-test").hidden,true);ui.el("base").value="https://bucket.s3.us-east-1.amazonaws.com";
+  // The region is a picker; the raw template's Jinja option loop is not rendered here, so add the one we choose.
+  const regionPicker=ui.el("aws-region");assert.equal(regionPicker.tagName,"SELECT");
+  const usEast=ui.window.document.createElement("option");usEast.value="us-east-1";regionPicker.append(usEast);
   for(const [name,value] of Object.entries({access:"synthetic-access",secret:"synthetic-secret",region:"us-east-1",session:"synthetic-session"}))ui.el("aws-"+name).value=value; // pragma: allowlist secret -- synthetic credential fixture
   // Even a programmatic trigger cannot substitute a generic root probe for a scope test.
   ui.el("save-test").click();await ui.settle();
@@ -36,8 +39,8 @@ test("incomplete AWS credentials fail visibly before any save and retain the ent
 test("editing a discovery connection preserves its sealed token and revision and does not claim scope readiness",async t=>{
   const record={name:"bucket",connector:"aws_s3",base_url:"https://bucket.s3.us-east-1.amazonaws.com",has_token:true,revision:"a".repeat(32),access:"owner",allowed_principals:[],last_test:{authenticated:true}};
   const ui=await fixture([record]);t.after(()=>ui.window.close());
-  assert.doesNotMatch(ui.el("list").textContent,/readiness verified/);assert.match(ui.el("list").textContent,/Check source scope/);
-  const buttons=ui.el("list").querySelectorAll("button");assert.equal(buttons[1].textContent,"Test source access");buttons[0].click();
+  assert.doesNotMatch(ui.el("list").textContent,/readiness verified/);assert.match(ui.el("list").textContent,/Test it from Privacy scanning/);
+  const buttons=ui.el("list").querySelectorAll("button");assert.equal(buttons[1].textContent,"Open Privacy scanning");buttons[0].click();
   ui.el("form").dispatchEvent(new ui.window.Event("submit",{cancelable:true,bubbles:true}));await ui.settle();
   const body=JSON.parse(ui.calls.find(call=>call.method==="POST").body);assert.equal(body.expected_revision,record.revision);assert.equal(Object.hasOwn(body,"token"),false);
 });

@@ -1004,9 +1004,20 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
 
+    tenant_id = body.id.strip()
+    if not tenant_id:
+        # People name a workspace; the stable id is made from that name.
+        from .plain_labels import unique_slug
+        if not body.display_name.strip():
+            raise HTTPException(status_code=422, detail="Give the workspace a name.")
+        tenant_id = unique_slug(
+            body.display_name,
+            {t.id for t in tenant_registry.list_tenants()},
+            fallback="workspace",
+        )
     try:
         rec = tenant_registry.create_tenant(
-            body.id,
+            tenant_id,
             plan=body.plan,
             display_name=body.display_name,
             max_daily_dollars=body.max_daily_dollars,

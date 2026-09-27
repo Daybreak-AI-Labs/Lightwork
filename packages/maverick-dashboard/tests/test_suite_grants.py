@@ -304,7 +304,7 @@ def test_users_page_preselects_current_grant(monkeypatch, tmp_path):
     from maverick_dashboard import suite_grants
     suite_grants.set_suites("user:fin", ["finance"])
     page = c.get("/users").text
-    assert 'value="finance" selected' in page
+    assert 'value="finance" checked' in page
     assert 'value="legal" selected' not in page
 
 

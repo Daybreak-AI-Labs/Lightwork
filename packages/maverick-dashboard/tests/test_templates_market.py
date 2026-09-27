@@ -49,7 +49,7 @@ def test_templates_page_lists_catalog_with_ratings(catalog):
     assert r.status_code == 200
     assert "trip-plan" in r.text and "research-report" in r.text
     assert "★★★★☆" in r.text       # rated template
-    assert "unrated" in r.text      # the other one
+    assert "Not rated yet" in r.text      # the other one
     # (Templates is folded out of the sidebar in the moderate declutter; still
     # reachable at /templates and rendered above.)
 
@@ -59,7 +59,8 @@ def test_use_template_collects_inputs_before_chat_review(catalog):
     # In-app preparation collects declared inputs without exposing drafts in URLs.
     assert 'data-prepare-template' in r.text
     assert 'data-template-param="city"' in r.text
-    assert 'Review in Chat' in r.text
+    assert 'Check in Chat' in r.text
+    assert 'You&#39;ll be asked for: city' in r.text or "You'll be asked for: city" in r.text
     assert 'href="/chat?title=' not in r.text
     # No goal was created by rendering the marketplace.
     from maverick_dashboard.app import _world

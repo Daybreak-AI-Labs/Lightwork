@@ -37,12 +37,12 @@ def test_status_region_is_an_aria_live_region(monkeypatch, tmp_path, path, msg_i
 
 @pytest.mark.parametrize(
     ("path", "detail_expression"),
-    [("/permissions", "result.detail"), ("/cache", "j.detail")],
+    [("/permissions", "mvErrorText"), ("/cache", "mvErrorText")],
 )
 def test_action_errors_read_server_detail(
     monkeypatch, tmp_path, path, detail_expression,
 ):
-    """A failed action shows the server's reason, not a bare status code."""
+    """A failed action shows a plain sentence, never a bare status code or raw server text."""
     _prep(monkeypatch, tmp_path)
     r = _client().get(path)
     assert detail_expression in r.text

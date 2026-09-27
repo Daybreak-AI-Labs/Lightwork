@@ -3,33 +3,35 @@
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-support.css">{% endblock %}
 {% block content %}
 <section id="support-center" data-context="{{ support_context }}" data-draft-recovery="off">
-  <h1>Help and diagnostics</h1>
-  <p>Prepare a redacted report of this installation's versions, readiness checks and recent failures. Review it here, then download the same report to share with your support contact.</p>
-  <section class="support-scope" aria-labelledby="support-scope-title">
-    <h2 id="support-scope-title">What the report will include</h2>
+  <h1 class="page-title">Help and Diagnostics</h1>
+  <p class="page-subtitle">Make a report about this installation for your support contact. Private details are removed. You review it here first, then download exactly what you reviewed.</p>
+  <section class="panel support-scope" aria-labelledby="support-scope-title">
+    <h2 id="support-scope-title">What the Report Includes</h2>
     <ul>
-      <li>Installed Lightwork component versions, Python/runtime version, operating-system platform and machine type.</li>
-      <li>The absolute Python executable and Lightwork data-root paths, plus whether the data root exists and is a directory.</li>
-      <li>License customer, tier, status, enabled suites and expiry; the current client/workspace binding identity.</li>
-      <li>Whether a provider is configured, the names of providers Lightwork recognizes, and readiness of workspace identity, safety controls and trusted agents.</li>
-      <li>Counts of recent failures grouped into fixed categories. Job identifiers, job types and raw error messages are excluded.</li>
-      <li>Configuration shape: hashed configuration-key names, boolean and numeric settings, and collection sizes. Configuration text values are replaced with presence markers.</li>
-      <li>A random support reference and the time the report was prepared.</li>
+      <li>Which versions of Lightwork and its parts are installed, and the kind of computer and operating system.</li>
+      <li>Where Lightwork and its data are installed on this computer (the folder locations), and whether the data folder exists.</li>
+      <li>Your licence: customer, plan, status, included areas and expiry, plus which workspace this installation belongs to.</li>
+      <li>Whether an AI provider is set up, which providers Lightwork recognizes, and whether workspace identity, safety controls and trusted agents are ready.</li>
+      <li>How many recent failures happened, grouped into general kinds. Task names, task types and raw error messages are left out.</li>
+      <li>The general shape of your settings: on/off switches, numbers and how many items are in each list. Setting names are scrambled and text values are replaced with “set” or “not set”.</li>
+      <li>A random support reference and the time the report was made.</li>
     </ul>
-    <p>Document text, prompts, URLs, customer document filenames, passwords, tokens, credential payloads and raw job errors are excluded. Preparing the report stores an encrypted preview on this installation for up to ten minutes. Nothing is sent automatically.</p>
+    <p class="muted">Document text, prompts, web addresses, customer file names, passwords, access keys and raw task errors are left out. The report preview is kept, encrypted, on this installation for up to ten minutes. Nothing is sent automatically.</p>
   </section>
   {% if can_prepare_support %}
   <button type="button" class="btn btn--primary" id="support-prepare">Prepare support report</button>
   <p id="support-status" role="status" aria-live="polite">No report has been collected.</p>
-  <section id="support-result" hidden>
-    <h2>Report summary</h2><p id="support-reference"></p><ul id="support-readiness"></ul>
-    <p class="support-followups"><a href="/settings">Review settings</a><span aria-hidden="true">·</span><a href="/workspace/recovery">Open workspace recovery</a></p>
-    <details><summary>Review the redacted report</summary><pre id="support-preview"></pre></details>
+  <section id="support-result" class="panel" hidden>
+    <h2>Report Summary</h2><p id="support-reference"></p><ul id="support-readiness"></ul>
+    <p class="support-followups"><a class="btn btn--ghost" href="/settings">Review settings</a><a class="btn btn--ghost" href="/workspace/recovery">Open workspace recovery</a></p>
+    <h3>Review the Report</h3>
+    <div id="support-readable" class="support-readable"></div>
+    <details><summary>Technical details: the exact file that will be downloaded</summary><pre id="support-preview"></pre></details>
     <p><label><input type="checkbox" id="support-confirm"> I reviewed the report and want to download it.</label></p>
     <button type="button" class="btn btn--primary" id="support-download" disabled>Download reviewed report</button>
   </section>
-  {% elif not support_enabled %}<p>Support report collection is disabled. An installation administrator can review its availability in Settings.</p><p><a href="/goals">Open your tasks</a></p>
-  {% else %}<p>Your installation administrator can prepare a support report. You can review your task's status and errors from its task page.</p><p><a href="/goals">Open your tasks</a></p>{% endif %}
+  {% elif not support_enabled %}<div class="panel"><p>Support reports are switched off. An administrator can turn them on in Settings.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>
+  {% else %}<div class="panel"><p>Your administrator can make a support report. You can see each task's status and problems on its task page.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>{% endif %}
 </section>
 {% if can_prepare_support %}<script src="/static/lightwork-support.js" defer></script>{% endif %}
 {% endblock %}

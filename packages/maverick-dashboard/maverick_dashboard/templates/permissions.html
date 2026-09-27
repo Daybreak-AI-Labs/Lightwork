@@ -3,8 +3,7 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% macro prerequisite_badge(prerequisite, extra_class='') -%}
-    <span class="badge {{ extra_class }} {{ 'active' if prerequisite.status in ['ready', 'not_required'] else 'blocked' if prerequisite.status == 'blocked' else '' }}"
-          title="{{ prerequisite.detail }}">{{ prerequisite.status | replace('_', ' ') }}</span>
+    <span class="badge {{ extra_class }} {{ 'active' if prerequisite.status in ['ready', 'not_required'] else 'blocked' if prerequisite.status == 'blocked' else '' }}">{{ {'ready': 'Ready', 'blocked': 'Blocked', 'not_required': 'Not needed', 'unknown': 'Not checked yet'}.get(prerequisite.status, 'Not checked yet') }}</span>
   {%- endmacro %}
   {# Plain names for where work runs and what the network allows. #}
   {% set backend = (perm.sandbox.backend or 'local') | lower %}
@@ -13,12 +12,13 @@
                   'podman': 'in an isolated Podman container'}.get(backend, 'in the ' ~ (backend | e) ~ ' environment') %}
   {% set network = 'open' if perm.network == 'open'
                    else 'blocked' if perm.network in ['deny-all', 'deny_all', 'deny']
-                   else (perm.network | e) %}
+                   else 'limited to approved websites' if perm.network in ['allowlist', 'allow-list', 'allow_list']
+                   else 'limited' %}
   {% call hero('Governance', 'Permissions',
                subtitle='What Lightwork can do',
                lede='Choose which tools Lightwork may use and review whether
                      their setup is complete. Blocking a tool here takes effect
-                     on the next goal.') %}
+                     on the next task.') %}
     {{ state('Current state',
              perm.tool_page.admitted_total ~ ' of ' ~ perm.tool_page.catalog_total ~ ' tools allowed by policy',
              badge='on this computer' if perm.sandbox_warning else 'isolated',
@@ -28,30 +28,30 @@
   {% endcall %}
 
   {% if perm.error %}
-    <div class="panel"><p style="color: var(--danger);">{{ perm.error }}</p></div>
+    <div class="panel" role="alert"><p>Some permission details could not be loaded. Reload the page to try again.</p>
+      <details><summary>Technical details</summary><p class="muted">{{ perm.error }}</p></details></div>
   {% endif %}
 
   {% if perm.sandbox_warning %}
     <div class="boundary" role="note">
-      <p style="margin: 0;"><strong>⚠ Runs on this computer.</strong> {{ perm.sandbox_warning }}</p>
+      <p class="perm-flush"><strong>⚠ Runs on this computer.</strong> {{ perm.sandbox_warning }}</p>
     </div>
   {% endif %}
 
   <div class="section-head"><h2>Where work runs</h2></div>
   <div class="panel">
-    <p class="muted" style="margin-top: 0;">
+    <p class="muted perm-lead">
       Choose where Lightwork runs commands and code. Changes apply from the
-      next goal. A container can be selected only while its service is
+      next task. A container can be selected only while its service is
       running. Choosing this computer removes isolation.
     </p>
     {% if not permissions_can_manage_sandbox %}
     <p class="muted" role="note">
-      Read only: only a global administrator can change where work runs.
+      View only: only a global administrator can change where work runs.
     </p>
     {% endif %}
     <div id="sbx-rows" aria-live="polite"><p class="muted">Checking the container services…</p></div>
-    <p id="sbx-err" role="alert" aria-live="assertive"
-       style="color: var(--danger); font-weight: var(--font-medium); margin: var(--space-2) 0 0; white-space: pre-wrap;"></p>
+    <p id="sbx-err" class="perm-error" role="alert" aria-live="assertive"></p>
   </div>
   <script>
   (function () {
@@ -84,11 +84,11 @@
         body: JSON.stringify(body),
       }).then(function (r) {
         if (r.status === 403) {
-          throw new Error('Only a global administrator can change where work runs.');
+          throw new Error('Only an administrator can change where work runs.');
         }
         if (!r.ok) {
           return r.json().catch(function () { return {}; }).then(function (b) {
-            throw new Error(b.detail || ('Could not switch (' + r.status + ').'));
+            throw new Error(typeof mvErrorText === 'function' ? mvErrorText(r, 'change where work runs') : 'Could not change where work runs. Please try again.');
           });
         }
         return r.json().catch(function () {
@@ -116,25 +116,26 @@
       li.style.cssText = 'display:flex; align-items:center; gap: var(--space-3); padding: var(--space-2) 0;';
       var badge = document.createElement('span');
       badge.className = 'badge ' + (name === current ? 'active' : (info.available ? '' : 'blocked'));
-      badge.textContent = name === current ? 'selected' : (info.available ? 'ready' : 'unavailable');
+      badge.textContent = name === current ? 'In use' : (info.available ? 'Ready' : 'Not running');
       var label = document.createElement('strong');
       label.textContent = labels[name] || name;
       var detail = document.createElement('span');
       detail.className = 'muted';
       detail.style.cssText = 'flex: 1 1 auto; font-size: var(--text-sm);';
-      detail.textContent = info.detail || '';
+      detail.textContent = name === current ? 'Work runs here now.'
+        : (info.available ? 'Ready to use.' : (name === 'local' ? '' : 'Start it on this computer, then reload this page.'));
       li.appendChild(badge); li.appendChild(label); li.appendChild(detail);
       if (name !== current) {
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn' + (info.available && name !== 'local' ? ' btn--primary' : '');
-        btn.textContent = canManageSandbox ? 'Use ' + (name === 'local' ? 'this computer' : (labels[name] || name)) : 'Read only';
+        btn.textContent = canManageSandbox ? 'Use ' + (name === 'local' ? 'this computer' : (labels[name] || name)) : 'View only';
         btn.disabled = !info.available || !canManageSandbox;
         btn.setAttribute('aria-disabled', btn.disabled ? 'true' : 'false');
         if (canManageSandbox) {
           btn.addEventListener('click', function () { pick(name); });
         } else {
-          btn.title = 'Only a global administrator can change where work runs.';
+          btn.title = 'Only an administrator can change where work runs.';
         }
         li.appendChild(btn);
       }
@@ -151,7 +152,7 @@
       });
       var note = document.createElement('p');
       note.className = 'muted';
-      note.style.cssText = 'font-size: var(--text-sm); margin: var(--space-2) 0 0;';
+      note.className = 'muted perm-note';
       note.textContent = 'An environment shown as unavailable usually needs its ' +
         'container service started first, for example by opening Docker Desktop. ' +
         'Reload this page after starting it.';
@@ -167,18 +168,18 @@
   <div class="panel">
     {% if not permissions_can_manage_tools %}
     <p class="muted" role="note">
-      Read only: changing tool admission requires an operator or administrator for this tenant.
+      View only: only an administrator can change which tools are allowed.
     </p>
     {% endif %}
     <form method="get" action="/permissions" class="perm-filter" aria-label="Filter tools">
-      <label for="perm-query">Search catalog</label>
+      <label for="perm-query">Search tools</label>
       <input class="input" id="perm-query" name="q" type="search" maxlength="128"
-             value="{{ perm.tool_page.query }}" placeholder="Tool name or policy reason">
-      <label for="perm-state">Access policy</label>
+             value="{{ perm.tool_page.query }}" placeholder="Tool name">
+      <label for="perm-state">Show</label>
       <select class="select" id="perm-state" name="state">
         <option value="all"{% if perm.tool_page.state == 'all' %} selected{% endif %}>All</option>
-        <option value="admitted"{% if perm.tool_page.state == 'admitted' %} selected{% endif %}>Allowed by policy</option>
-        <option value="blocked"{% if perm.tool_page.state == 'blocked' %} selected{% endif %}>Blocked by policy</option>
+        <option value="admitted"{% if perm.tool_page.state == 'admitted' %} selected{% endif %}>Allowed</option>
+        <option value="blocked"{% if perm.tool_page.state == 'blocked' %} selected{% endif %}>Blocked</option>
       </select>
       <input type="hidden" name="per_page" value="{{ perm.tool_page.per_page }}">
       <button class="btn" type="submit">Apply filter</button>
@@ -189,11 +190,10 @@
       ({{ perm.tool_page.catalog_total }} in the catalog).
     </p>
     {% if perm.tools %}
-      <p class="muted">An allowed tool may still need setup. Its AI service,
-        saved connection, enabled features, and execution environment must be
-        checked before it can be shown as usable. Unknown means not yet verified.</p>
+      <p class="muted">An allowed tool may still need its AI service, a saved connection or
+        another feature turned on. Open "Details" on a tool to see what has been checked.</p>
       <table>
-        <thead><tr><th scope="col">Tool</th><th scope="col">Listed</th><th scope="col">AI service</th><th scope="col">Connection</th><th scope="col">Feature</th><th scope="col">Organization policy</th><th scope="col">Additional restriction</th><th scope="col">Environment</th><th scope="col">Overall</th><th scope="col">Change access</th></tr></thead>
+        <thead><tr><th scope="col">Tool</th><th scope="col">Status</th><th scope="col">Access</th></tr></thead>
         <tbody>
         {% for t in perm.tools %}
           <tr data-tool-name="{{ t.name }}" data-tool-usable="{{ 'true' if t.usable else 'false' }}"
@@ -202,30 +202,42 @@
               data-feature-policy-state="{{ t.prerequisites.feature_policy.status }}"
               data-base-acl-state="{{ t.prerequisites.base_acl.status }}"
               data-sandbox-state="{{ t.prerequisites.sandbox.status }}">
-            <td><code>{{ t.name }}</code></td>
-            <td><span class="badge {{ 'active' if t.catalog_present else 'blocked' }}">{{ 'present' if t.catalog_present else 'absent' }}</span></td>
-            <td>{{ prerequisite_badge(t.prerequisites.provider, 'perm-provider') }}</td>
-            <td>{{ prerequisite_badge(t.prerequisites.connection, 'perm-connection') }}</td>
-            <td>{{ prerequisite_badge(t.prerequisites.feature_policy, 'perm-feature-policy') }}</td>
-            <td>{{ prerequisite_badge(t.prerequisites.base_acl, 'perm-base-acl') }}</td>
-            <td>{{ prerequisite_badge(t.prerequisites.dashboard_override, 'perm-override') }}</td>
-            <td>{{ prerequisite_badge(t.prerequisites.sandbox, 'perm-sandbox') }}</td>
-            <td title="{{ t.reason }}">
-              {% if t.usable %}<span class="badge active perm-overall">usable</span>
-              {% elif t.state == 'readiness_unknown' %}<span class="badge perm-overall">readiness unknown</span>
-              {% else %}<span class="badge blocked perm-overall">blocked</span>{% endif %}
+            <td>{{ t.name | humanize }}</td>
+            <td>
+              {% if t.usable %}<span class="badge active perm-overall">Ready to use</span>
+              {% elif t.state == 'readiness_unknown' %}<span class="badge perm-overall">Not checked yet</span>
+              {% else %}<span class="badge blocked perm-overall">Blocked</span>{% endif %}
+              <span class="muted perm-why">
+                {%- if not t.catalog_present %} This tool isn't installed.
+                {%- elif t.overlay_blocked %} Blocked here in Lightwork.
+                {%- elif not t.base_acl_allowed %} Blocked by your organization.
+                {%- elif t.state == 'prerequisite_blocked' %} Something it needs isn't set up.
+                {%- elif t.state == 'readiness_unknown' %} Allowed. Its setup hasn't been checked.
+                {%- endif %}</span>
+              <details class="perm-details">
+                <summary>Details</summary>
+                <ul class="perm-steps">
+                  <li>Installed: <span class="badge {{ 'active' if t.catalog_present else 'blocked' }}">{{ 'Yes' if t.catalog_present else 'No' }}</span></li>
+                  <li>AI service: {{ prerequisite_badge(t.prerequisites.provider, 'perm-provider') }}</li>
+                  <li>Connection: {{ prerequisite_badge(t.prerequisites.connection, 'perm-connection') }}</li>
+                  <li>Feature turned on: {{ prerequisite_badge(t.prerequisites.feature_policy, 'perm-feature-policy') }}</li>
+                  <li>Organization rules: {{ prerequisite_badge(t.prerequisites.base_acl, 'perm-base-acl') }}</li>
+                  <li>Blocked here: {{ prerequisite_badge(t.prerequisites.dashboard_override, 'perm-override') }}</li>
+                  <li>Where work runs: {{ prerequisite_badge(t.prerequisites.sandbox, 'perm-sandbox') }}</li>
+                </ul>
+              </details>
             </td>
             <td>
               {% if not permissions_can_manage_tools %}
-                <span class="muted" title="An operator or administrator is required to change tool admission.">Read only</span>
+                <span class="muted" title="Only an administrator can change which tools are allowed.">View only</span>
               {% elif t.overlay_blocked %}
-                <button class="perm-toggle" data-name="{{ t.name }}" data-action="enable"
-                        aria-label="Clear dashboard block for {{ t.name }} tool">Clear dashboard block</button>
+                <button class="btn perm-toggle" data-name="{{ t.name }}" data-label="{{ t.name | humanize }}" data-action="enable"
+                        aria-label="Allow the {{ t.name | humanize }} tool">Allow</button>
               {% elif t.base_acl_allowed %}
-                <button class="perm-toggle" data-name="{{ t.name }}" data-action="disable"
-                        aria-label="Add dashboard block for {{ t.name }} tool">Add dashboard block</button>
+                <button class="btn perm-toggle" data-name="{{ t.name }}" data-label="{{ t.name | humanize }}" data-action="disable"
+                        aria-label="Block the {{ t.name | humanize }} tool">Block</button>
               {% else %}
-                <span class="muted">Managed by base policy</span>
+                <span class="muted">Set by your organization</span>
               {% endif %}
             </td>
           </tr>
@@ -252,24 +264,29 @@
   <div class="panel">
     <table>
       <tbody>
-        <tr><td>Computer use</td><td>{% if perm.capabilities.computer_use %}<span class="badge blocked">⚠ on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
-        <tr><td>Browser</td><td>{% if perm.capabilities.browser %}<span class="badge blocked">⚠ on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
-        <tr><td>Web search</td><td>{% if perm.capabilities.web_search %}<span class="badge active">on</span>{% else %}<span class="badge done">off</span>{% endif %}</td></tr>
+        <tr><td>Control a desktop</td><td>{% if perm.capabilities.computer_use %}<span class="badge blocked">⚠ On</span>{% else %}<span class="badge done">Off</span>{% endif %}</td></tr>
+        <tr><td>Browse websites</td><td>{% if perm.capabilities.browser %}<span class="badge blocked">⚠ On</span>{% else %}<span class="badge done">Off</span>{% endif %}</td></tr>
+        <tr><td>Search the web</td><td>{% if perm.capabilities.web_search %}<span class="badge active">On</span>{% else %}<span class="badge done">Off</span>{% endif %}</td></tr>
         <tr><td>Where work runs</td><td>{{ where[0] | upper }}{{ where[1:] }}</td></tr>
-        <tr><td>Network access</td><td>{{ network }}</td></tr>
-        <tr><td>Budget per goal</td><td>${{ perm.budget.max_dollars if perm.budget.max_dollars is defined else '?' }} · {{ perm.budget.max_wall_seconds if perm.budget.max_wall_seconds is defined else '?' }}s</td></tr>
+        <tr><td>Internet access</td><td>{{ network[0] | upper }}{{ network[1:] }}</td></tr>
+        <tr><td>Limit for each task</td><td>
+          {%- if perm.budget.max_dollars is defined and perm.budget.max_dollars %}${{ '%.2f' | format(perm.budget.max_dollars | float) }}{% else %}No spending limit{% endif %}
+          {%- if perm.budget.max_wall_seconds is defined and perm.budget.max_wall_seconds %} and {{ ((perm.budget.max_wall_seconds | float) / 60) | round(0) | int }} minutes{% endif %}</td></tr>
       </tbody>
     </table>
+    <p class="perm-links"><a class="btn" href="/settings#settings-controls">Change abilities in Settings</a>
+      <a class="btn btn--ghost" href="/settings#settings-general">Change task limits</a></p>
   </div>
 
-  <div class="section-head"><h2>Channels</h2></div>
+  <div class="section-head"><h2>Chat apps</h2></div>
   <div class="panel">
     {% if perm.channels %}
       {% for c in perm.channels %}
-        <span class="badge {{ 'active' if c.enabled else 'done' }}">{{ c.name }}</span>
+        <span class="badge {{ 'active' if c.enabled else 'done' }}">{{ c.name | humanize }}</span>
       {% endfor %}
+      <p><a class="btn btn--ghost" href="/channels">Manage chat apps</a></p>
     {% else %}
-      <p class="muted">No messaging channels are enabled.</p>
+      <p class="muted">No chat apps are connected. <a class="btn" href="/channels">Connect a chat app</a></p>
     {% endif %}
   </div>
 
@@ -290,16 +307,21 @@
     </ul>
   </div>
 
-  <p id="perm-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em;"></p>
+  <p id="perm-msg" role="status" aria-live="polite" class="muted perm-msg"></p>
 
   <style>
     .perm-filter { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(10rem, auto) auto auto; gap: var(--space-2); align-items: end; }
     .perm-filter label { display: grid; gap: var(--space-1); }
     .perm-pages { display: flex; align-items: center; justify-content: center; gap: var(--space-3); margin-top: var(--space-3); }
     @media (max-width: 720px) { .perm-filter { grid-template-columns: 1fr; } }
-    button.perm-toggle { padding: 0.35rem 0.85rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
-    button.perm-toggle:hover { border-color: var(--brand); }
-    button.perm-toggle[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .perm-flush { margin: 0; }
+    .perm-lead { margin-top: 0; }
+    .perm-error { color: var(--danger); font-weight: var(--font-medium); margin: var(--space-2) 0 0; white-space: pre-wrap; }
+    .perm-note { font-size: var(--text-sm); margin: var(--space-2) 0 0; }
+    .perm-why { display: block; font-size: var(--text-sm); }
+    .perm-steps { margin: var(--space-1) 0; padding-left: var(--space-4); font-size: var(--text-sm); }
+    .perm-links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 0; }
+    .perm-msg { min-height: 1em; }
   </style>
 
   <script>
@@ -309,12 +331,13 @@
         btn.addEventListener('click', async function() {
           if (btn.disabled) return;
           const name = btn.dataset.name;
+          const label = btn.dataset.label || name;
           const action = btn.dataset.action;  // "disable" | "enable"
           btn.disabled = true;
           msg.style.color = 'var(--muted)';
           msg.textContent = action === 'disable'
-            ? 'Adding a dashboard block for ' + name + '…'
-            : 'Clearing the dashboard block for ' + name + '…';
+            ? 'Blocking ' + label + '…'
+            : 'Allowing ' + label + '…';
           try {
             const r = await fetch('/api/v1/permissions/tools/' + encodeURIComponent(name) + '/' + action, {
               method: 'POST',
@@ -338,50 +361,50 @@
               const usable = action === 'enable' && effective.usable === true;
               msg.style.color = 'var(--accent)';
               msg.textContent = action === 'disable'
-                ? 'Dashboard block added for ' + name + '. The tool is not usable.'
-                : 'Dashboard block cleared for ' + name + '. ' +
-                  (effective.reason || 'Refresh to read its prerequisite state.');
+                ? label + ' is now blocked. Tasks can no longer use it.'
+                : label + ' is allowed again.' +
+                  (usable ? ' It is ready to use.' : ' Its setup has not been checked yet.');
               if (row) {
                 const baseBadge = row.querySelector('.perm-base-acl');
                 const overrideBadge = row.querySelector('.perm-override');
                 const overallBadge = row.querySelector('.perm-overall');
                 if (action === 'enable' && baseBadge) {
                   baseBadge.className = 'badge perm-base-acl ' + (baseAllowed ? 'active' : 'blocked');
-                  baseBadge.textContent = baseAllowed ? 'ready' : 'blocked';
+                  baseBadge.textContent = baseAllowed ? 'Ready' : 'Blocked';
                 }
                 if (overrideBadge) {
                   overrideBadge.className = 'badge perm-override ' + (action === 'disable' ? 'blocked' : 'active');
-                  overrideBadge.textContent = action === 'disable' ? 'blocked' : 'ready';
+                  overrideBadge.textContent = action === 'disable' ? 'Blocked' : 'Ready';
                 }
                 if (overallBadge) {
                   overallBadge.className = 'badge perm-overall ' + (usable ? 'active' : (effective.state === 'readiness_unknown' && action === 'enable' ? '' : 'blocked'));
                   overallBadge.textContent = usable
-                    ? 'usable'
-                    : (effective.state === 'readiness_unknown' && action === 'enable' ? 'readiness unknown' : 'blocked');
+                    ? 'Ready to use'
+                    : (effective.state === 'readiness_unknown' && action === 'enable' ? 'Not checked yet' : 'Blocked');
                 }
                 row.dataset.toolUsable = usable ? 'true' : 'false';
                 row.dataset.baseAclState = baseAllowed ? 'ready' : 'blocked';
               }
               if (action === 'disable') {
                 btn.dataset.action = 'enable';
-                btn.textContent = 'Clear dashboard block';
-                btn.setAttribute('aria-label', 'Clear dashboard block for ' + name + ' tool');
+                btn.textContent = 'Allow';
+                btn.setAttribute('aria-label', 'Allow the ' + label + ' tool');
                 btn.disabled = false;
               } else if (baseAllowed) {
                 btn.dataset.action = 'disable';
-                btn.textContent = 'Add dashboard block';
-                btn.setAttribute('aria-label', 'Add dashboard block for ' + name + ' tool');
+                btn.textContent = 'Block';
+                btn.setAttribute('aria-label', 'Block the ' + label + ' tool');
                 btn.disabled = false;
               } else {
                 btn.removeAttribute('data-action');
-                btn.textContent = 'Managed by base policy';
-                btn.setAttribute('aria-label', name + ' tool is managed by base policy');
+                btn.textContent = 'Set by your organization';
+                btn.setAttribute('aria-label', label + ' is set by your organization');
                 btn.disabled = true;
               }
             } else {
               btn.disabled = false;
               msg.style.color = 'var(--danger)';
-              msg.textContent = result && typeof result.detail === 'string' ? result.detail : ('Failed: ' + r.status);
+              msg.textContent = typeof mvErrorText === 'function' ? mvErrorText(r, 'change this tool') : 'Could not change this tool. Please try again.';
             }
           } catch (e) {
             btn.disabled = false;

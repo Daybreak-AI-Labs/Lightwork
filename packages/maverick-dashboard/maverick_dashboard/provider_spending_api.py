@@ -78,8 +78,12 @@ class ApplyIn(BaseModel):
 @router.get("/provider-spending")
 async def page(request: Request):
     _admit(request)
+    from . import settings_store
     from .app import templates
-    response = templates.TemplateResponse(request, "provider_spending.html", {"recovery_mode": enabled(request.app)})
+    response = templates.TemplateResponse(request, "provider_spending.html", {
+        "recovery_mode": enabled(request.app),
+        "provider_options": [{"name": p["name"], "label": p["label"]} for p in settings_store.PROVIDERS],
+    })
     response.headers["Cache-Control"] = "private, no-store"
     return response
 
@@ -100,6 +104,14 @@ async def status(request: Request, period: str | None = Query(default=None, patt
     return _json({**await _call(spending.status, period, provider=provider, offset=offset, limit=limit), "context": context,
                   "isolated": isolated(request.app),
                   "expected_tenant": getattr(request.state, "workspace_expected_tenant", "")})
+
+
+@router.get(BASE + "/reviews")
+async def open_reviews(request: Request):
+    """This administrator's unfinished reviews, so the page can offer them in a
+    list instead of asking for a typed reference. Read-only."""
+    actor, context = _admit(request, mutation=True)
+    return _json({"reviews": await _call(spending.open_reviews, actor=actor, context=context)})
 
 
 @router.get(BASE + "/review/{identifier}")
@@ -135,7 +147,7 @@ async def import_accounting(request: Request):
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > spending.MAX_UPLOAD:
-            raise HTTPException(413, "Select an accounting export no larger than16 MiB.")
+            raise HTTPException(413, "Choose an accounting copy file of 16 MB or less.")
         content.extend(chunk)
     return _json(await _call(spending.stage_import, bytes(content), actor=actor, context=context, isolated=isolated(request.app)))
 

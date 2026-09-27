@@ -1,0 +1,124 @@
+/* Workspaces page: create by name, change plan and daily limit, pause,
+   resume and remove. Every change goes through the admin workspace API. */
+(function () {
+  'use strict';
+  var addMsg = document.getElementById('tenant-add-msg');
+  var rowMsg = document.getElementById('tenant-quota-msg');
+
+  function errorText(failure, action) {
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+  }
+  async function send(url, method, body) {
+    var response = await window.fetch(url, {
+      method: method, credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if (!response.ok) throw response;
+    return response.status === 204 ? {} : response.json().catch(function () { return {}; });
+  }
+  function reloadSoon() { window.setTimeout(function () { window.location.reload(); }, 350); }
+  function base(id) { return '/api/v1/admin/tenants/' + encodeURIComponent(id); }
+  function nameOf(id) {
+    var row = document.querySelector('[data-tenant-row="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+    return row ? row.dataset.tenantName : 'this workspace';
+  }
+
+  // "No limit" disables the amount; unticking asks for one.
+  document.querySelectorAll('[data-limit-toggle]').forEach(function (box) {
+    var scope = box.closest('form');
+    var amount = scope && scope.querySelector('[data-limit-amount]');
+    if (!amount) return;
+    box.addEventListener('change', function () {
+      amount.disabled = box.checked;
+      amount.required = !box.checked;
+      if (!box.checked) amount.focus();
+    });
+  });
+  function limitFrom(form) {
+    var box = form.querySelector('[data-limit-toggle]');
+    if (box && box.checked) return 0;
+    var value = Number(form.querySelector('[data-limit-amount]').value);
+    return isFinite(value) && value > 0 ? value : null;
+  }
+
+  var add = document.getElementById('tenant-add');
+  if (add) {
+    add.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var data = new FormData(add);
+      var limit = limitFrom(add);
+      var name = String(data.get('display_name') || '').trim();
+      if (!name) { addMsg.textContent = 'Give the workspace a name.'; return; }
+      if (limit === null) { addMsg.textContent = 'Enter a daily limit above $0, or tick "No daily limit".'; return; }
+      addMsg.textContent = 'Creating…';
+      try {
+        await send('/api/v1/admin/tenants', 'POST', {display_name: name, plan: String(data.get('plan') || 'free'), max_daily_dollars: limit});
+        addMsg.textContent = 'Workspace "' + name + '" created.';
+        reloadSoon();
+      } catch (failure) {
+        addMsg.textContent = failure && failure.status === 409
+          ? 'A workspace with that name already exists. Choose another name.'
+          : errorText(failure, 'create the workspace');
+      }
+    });
+  }
+
+  document.querySelectorAll('form.tenant-quota').forEach(function (form) {
+    form.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var id = form.getAttribute('data-tenant');
+      var limit = limitFrom(form);
+      if (limit === null) { rowMsg.textContent = 'Enter a daily limit above $0, or tick "No limit".'; return; }
+      rowMsg.textContent = 'Saving…';
+      try {
+        await send(base(id) + '/quota', 'POST', {max_daily_dollars: limit});
+        rowMsg.textContent = 'Daily limit for ' + nameOf(id) + ' is now ' + (limit ? '$' + limit + ' a day' : 'no limit') + '.';
+        reloadSoon();
+      } catch (failure) { rowMsg.textContent = errorText(failure, 'save the daily limit'); }
+    });
+  });
+
+  document.querySelectorAll('[data-tenant-plan]').forEach(function (select) {
+    select.addEventListener('change', async function () {
+      var id = select.dataset.tenantPlan;
+      var plan = select.value;
+      var ok = await window.mvConfirm('Move ' + nameOf(id) + ' to the ' + select.options[select.selectedIndex].textContent + ' plan? The features it can use change straight away.', {okText: 'Change plan'});
+      if (!ok) { select.value = select.dataset.current; return; }
+      rowMsg.textContent = 'Saving…';
+      try {
+        await send(base(id) + '/plan', 'POST', {plan: plan});
+        select.dataset.current = plan;
+        rowMsg.textContent = nameOf(id) + ' is now on the ' + select.options[select.selectedIndex].textContent + ' plan.';
+      } catch (failure) {
+        select.value = select.dataset.current;
+        rowMsg.textContent = errorText(failure, 'change the plan');
+      }
+    });
+  });
+
+  var questions = {
+    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause', 'pause the workspace', 'POST', '/suspend'],
+    resume: ['Resume {name}? Work can start in it again.', 'Resume', 'resume the workspace', 'POST', '/resume'],
+    delete: ['Remove {name} from the list? No one will be able to open it any more. Its stored records stay on this computer.', 'Remove workspace', 'remove the workspace', 'DELETE', '']
+  };
+  document.querySelectorAll('[data-tenant-action]').forEach(function (button) {
+    button.addEventListener('click', async function () {
+      var row = button.closest('[data-tenant-row]');
+      var id = row.dataset.tenantRow;
+      var q = questions[button.dataset.tenantAction];
+      var ok = await window.mvConfirm(q[0].replace('{name}', row.dataset.tenantName), {okText: q[1]});
+      if (!ok) return;
+      button.disabled = true;
+      rowMsg.textContent = 'Saving…';
+      try {
+        await send(base(id) + q[4], q[3]);
+        rowMsg.textContent = 'Done.';
+        reloadSoon();
+      } catch (failure) {
+        rowMsg.textContent = errorText(failure, q[2]);
+        button.disabled = false;
+      }
+    });
+  });
+})();

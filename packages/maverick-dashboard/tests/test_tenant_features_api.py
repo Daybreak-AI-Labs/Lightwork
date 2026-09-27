@@ -129,8 +129,8 @@ def test_past_due_get_plan_features_is_downgraded_baseline():
 def test_features_page_renders():
     _create("acme", plan="pro")
     text = client.get("/tenants/acme/features").text
-    assert "Feature overrides" in text
-    assert "department:finance" in text
+    assert "Workspace features" in text
+    assert 'value="department:finance"' in text
     # the page carries the PUT-target form the light JS submits.
     assert 'id="features-form"' in text
     assert 'data-tenant-id="acme"' in text

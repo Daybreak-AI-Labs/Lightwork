@@ -28,76 +28,92 @@
   .cx__row .name { font-weight: var(--font-semibold); min-width: 0; overflow-wrap: anywhere; }
   .cx__row .meta { color: var(--muted); font-size: var(--text-sm); flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
   .cx__row .cx__badge { max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
-  .cx__badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
-  .cx__badge.ok { color: var(--success, #16a34a); border-color: currentColor; }
-  .cx__badge.no { color: var(--danger, #dc2626); border-color: currentColor; }
   .cx__msg { font-size: var(--text-sm); color: var(--muted); min-height: 1.2em; }
+  .cx__people { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); gap: var(--space-1); max-height: 14rem; overflow: auto; }
+  .cx__people label { font-weight: normal; display: flex; gap: var(--space-2); }
 </style>
 
 {% from "_hero.html" import hero, state %}
 {% call hero('Integrations', 'Connections',
              subtitle='Connect the services you use',
-             lede='Connect an account with provider consent, or save a tool’s API
-                   token. Your workflows can then refer to the saved connection
-                   by name.') %}
+             lede='Connect an account by signing in to it, or save a key from
+                   another service. Your workflows can then use the saved
+                   connection.') %}
   {{ state('Account access', 'Saved connections',
-           badge='encrypted at rest', badge_class='ok',
-           copy='Tokens are sealed the moment you save and are never shown
-                 again. Workspace administrators manage connections;
-                 workflows use them within the access you approve.') }}
+           badge='Stored securely', badge_class='ok',
+           copy='Keys are encrypted when you save them and never shown again.
+                 Administrators manage connections; workflows use them only
+                 with the access you approve.') }}
 {% endcall %}
 
 <div class="cx">
+  {% if not connections_enabled %}
+  {% from "_module_gate.html" import module_gate %}
+  {{ module_gate('connections', 'Connections', detail='Save sign-ins and keys for the services your workflows use.') }}
+  {% endif %}
   {% include "_connection_setup.html" %}
-  <div class="section-head"><h2>Add a connection with an API token</h2></div>
+  <div class="section-head"><h2>Add a connection with a key</h2></div>
   <form class="cx__form" id="cx-form" autocomplete="off" data-draft-recovery="off">
     <div class="cx__fld">
-      <label for="cx-preset">What are you connecting? <span class="sub">— pick one to prefill it</span></label>
-      <select class="input" id="cx-preset">
-        <option value="">— choose a service —</option>
-        <option value="custom">Custom / other</option>
+      <label for="cx-preset">What are you connecting?</label>
+      <select class="select" id="cx-preset">
+        <option value="">Choose a service…</option>
+        <option value="custom">Another service (advanced)</option>
       </select>
     </div>
     <div class="cx__fld">
-      <label for="cx-name">Name <span class="sub">— how you'll refer to it in flows</span></label>
-      <input class="input" id="cx-name" placeholder="salesforce-eu" required>
+      <label for="cx-name">Name for this connection</label>
+      <input class="input" id="cx-name" placeholder="e.g. Salesforce EU" required maxlength="64" aria-describedby="cx-name-as">
+      <p class="cx__sub" id="cx-name-as"></p>
     </div>
     <div class="cx__fld">
-      <label for="cx-token">API token / key <span class="sub">— sealed, never shown again</span></label>
-      <input class="input" id="cx-token" type="password" placeholder="paste the token">
+      <label for="cx-token">Key from the service <span class="sub">— encrypted, never shown again</span></label>
+      <input class="input" id="cx-token" type="password" placeholder="Paste the key">
+      <p class="cx__sub"><a id="cx-key-help" href="#" target="_blank" rel="noopener noreferrer" hidden>Where do I find this key?</a></p>
       <p class="cx__sub" id="cx-credential-help"></p>
     </div>
-    <fieldset id="cx-aws" hidden><legend>AWS read credentials</legend>
+    <fieldset id="cx-aws" hidden><legend>Amazon Web Services sign-in</legend>
       <label for="cx-aws-access">Access key ID</label><input class="input" id="cx-aws-access" autocomplete="off" maxlength="128">
       <label for="cx-aws-secret">Secret access key</label><input class="input" id="cx-aws-secret" type="password" autocomplete="off" maxlength="256">
-      <label for="cx-aws-region">AWS region</label><input class="input" id="cx-aws-region" placeholder="us-east-1" maxlength="63">
-      <label for="cx-aws-session">Session token (optional)</label><input class="input" id="cx-aws-session" type="password" autocomplete="off" maxlength="16384">
-      <p class="cx__sub">Use credentials authorized to read the selected bucket. Values are sealed and cleared after saving.</p>
+      <label for="cx-aws-region">Region</label>
+      <select class="select" id="cx-aws-region">
+        <option value="">Choose the region your storage is in…</option>
+        {% for code, name in [('us-east-1','US East (N. Virginia)'),('us-east-2','US East (Ohio)'),('us-west-1','US West (N. California)'),('us-west-2','US West (Oregon)'),('ca-central-1','Canada (Central)'),('eu-west-1','Europe (Ireland)'),('eu-west-2','Europe (London)'),('eu-west-3','Europe (Paris)'),('eu-central-1','Europe (Frankfurt)'),('eu-north-1','Europe (Stockholm)'),('ap-south-1','Asia Pacific (Mumbai)'),('ap-southeast-1','Asia Pacific (Singapore)'),('ap-southeast-2','Asia Pacific (Sydney)'),('ap-northeast-1','Asia Pacific (Tokyo)'),('sa-east-1','South America (São Paulo)')] %}
+        <option value="{{ code }}">{{ name }}</option>
+        {% endfor %}
+      </select>
+      <label for="cx-aws-session">Session token (only if your IT team gave you one)</label><input class="input" id="cx-aws-session" type="password" autocomplete="off" maxlength="16384">
+      <p class="cx__sub">Use a sign-in that can read the storage you want to scan. The values are encrypted and cleared after saving.</p>
     </fieldset>
 
     <details class="advanced" id="cx-advanced">
-      <summary>Advanced — connector name &amp; base URL
-        <span style="margin-inline-start:auto;">▾</span></summary>
+      <summary>Who can use it, and other settings</summary>
       <div class="advanced__body">
-        <div class="cx__grid">
-          <div class="cx__fld" style="margin-bottom:0;">
-            <label for="cx-connector">Connector (tool name)</label>
-            <input class="input" id="cx-connector" placeholder="salesforce">
+        <div class="cx__fld">
+          <label for="cx-base" id="cx-base-label">Web address of the service</label>
+          <input class="input" id="cx-base" type="url" placeholder="https://…">
+          <p class="cx__sub" id="cx-hint"></p>
+        </div>
+        <div class="cx__fld" id="cx-connector-field" hidden>
+          <label for="cx-connector">Which tool uses it</label>
+          <select class="select" id="cx-connector"><option value="">Choose…</option></select>
+        </div>
+        <div class="cx__fld">
+          <label><input type="checkbox" id="cx-tenant-access"> Everyone in this workspace can use this connection</label>
+          <p class="cx__sub">Off by default. Only administrators can change or remove it either way.</p>
+        </div>
+        <fieldset class="cx__fld">
+          <legend>Also allow these people</legend>
+          {% if people %}
+          <div class="cx__people" id="cx-principals">
+            {% for person in people %}
+            <label><input type="checkbox" value="{{ person.principal }}"> {{ person.label }}</label>
+            {% endfor %}
           </div>
-          <div class="cx__fld" style="margin-bottom:0;">
-            <label for="cx-base">Base URL</label>
-            <input class="input" id="cx-base" placeholder="https://api.example.com">
-          </div>
-        </div>
-        <p class="cx__sub" id="cx-hint" style="margin:var(--space-2) 0 0;"></p>
-        <div class="cx__fld" style="margin-top:var(--space-3);">
-          <label><input type="checkbox" id="cx-tenant-access"> Allow every signed-in user in this workspace to use this connection</label>
-          <p class="cx__sub" style="margin:3px 0 0;">Off by default. Credential management stays admin-only either way.</p>
-        </div>
-        <div class="cx__fld" style="margin-bottom:0;">
-          <label for="cx-principals">Additional allowed principals <span class="sub">— one <code>user:id</code> per line</span></label>
-          <textarea class="input" id="cx-principals" rows="3" placeholder="user:alice"></textarea>
-        </div>
+          {% else %}
+          <p class="cx__sub" id="cx-principals">No one else has signed in yet. People appear here after they sign in.</p>
+          {% endif %}
+        </fieldset>
       </div>
     </details>
 
@@ -136,20 +152,20 @@
   // Advanced fold still lets a power user override either. Org-specific hosts
   // are offered as a hint/placeholder rather than a wrong hard-coded value. ----
   var PRESETS = [
-    { id: 'slack',      label: 'Slack',       connector: 'slack',      base: 'https://slack.com/api' },
-    { id: 'github',     label: 'GitHub',      connector: 'github',     base: 'https://api.github.com' },
-    { id: 'notion',     label: 'Notion',      connector: 'notion',     base: 'https://api.notion.com' },
-    { id: 'hubspot',    label: 'HubSpot',     connector: 'hubspot',    base: 'https://api.hubapi.com' },
-    { id: 'stripe',     label: 'Stripe',      connector: 'stripe',     base: 'https://api.stripe.com' },
-    { id: 'salesforce', label: 'Salesforce',  connector: 'salesforce', base: '', hint: 'https://<your-org>.my.salesforce.com' },
-    { id: 'zendesk',    label: 'Zendesk',     connector: 'zendesk',    base: '', hint: 'https://<subdomain>.zendesk.com' },
-    { id: 'jira',       label: 'Jira',        connector: 'jira',       base: '', hint: 'https://<site>.atlassian.net' },
-    { id: 'aws_s3', label: 'Privacy discovery: AWS S3', connector: 'aws_s3', base: '', hint: 'https://<bucket>.s3.<region>.amazonaws.com', discovery: true, help: 'Enter AWS fields below, or use the advanced token field for an existing structured credential.' },
-    { id: 'azure_blob', label: 'Privacy discovery: Azure Blob', connector: 'azure_blob', base: '', hint: 'https://<account>.blob.core.windows.net', discovery: true, help: 'Use an authorized Azure Storage bearer token. SAS query strings and account keys are not supported by this adapter.' },
-    { id: 'google_cloud_storage', label: 'Privacy discovery: Google Cloud Storage', connector: 'google_cloud_storage', base: 'https://storage.googleapis.com', discovery: true, help: 'Use an authorized Google Cloud Storage bearer token.' },
-    { id: 'snowflake_metadata', label: 'Privacy discovery: Snowflake metadata', connector: 'snowflake_metadata', base: '', hint: 'https://<account>.snowflakecomputing.com', discovery: true, help: 'Use an authorized bearer token for the SQL API. Discovery reads metadata within the selected warehouse, database and schema.' },
-    { id: 'servicenow_cmdb', label: 'Privacy discovery: ServiceNow CMDB', connector: 'servicenow_cmdb', base: '', hint: 'https://<instance>.service-now.com', discovery: true, help: 'Use a bearer token authorized to read the selected CMDB table.' },
-    { id: 'entra_assets', label: 'Privacy discovery: Microsoft Entra assets', connector: 'entra_assets', base: 'https://graph.microsoft.com', discovery: true, help: 'Use a Microsoft Graph bearer token with read permission for the selected device, application or service-principal resource.' },
+    { id: 'slack',      label: 'Slack',       connector: 'slack',      base: 'https://slack.com/api', keyHelp: 'https://api.slack.com/apps' },
+    { id: 'github',     label: 'GitHub',      connector: 'github',     base: 'https://api.github.com', keyHelp: 'https://github.com/settings/tokens' },
+    { id: 'notion',     label: 'Notion',      connector: 'notion',     base: 'https://api.notion.com', keyHelp: 'https://www.notion.so/my-integrations' },
+    { id: 'hubspot',    label: 'HubSpot',     connector: 'hubspot',    base: 'https://api.hubapi.com', keyHelp: 'https://knowledge.hubspot.com/integrations/how-do-i-get-my-hubspot-api-key' },
+    { id: 'stripe',     label: 'Stripe',      connector: 'stripe',     base: 'https://api.stripe.com', keyHelp: 'https://dashboard.stripe.com/apikeys' },
+    { id: 'salesforce', label: 'Salesforce',  connector: 'salesforce', base: '', hint: 'https://your-company.my.salesforce.com', baseLabel: 'Your Salesforce address' },
+    { id: 'zendesk',    label: 'Zendesk',     connector: 'zendesk',    base: '', hint: 'https://your-company.zendesk.com', baseLabel: 'Your Zendesk address' },
+    { id: 'jira',       label: 'Jira',        connector: 'jira',       base: '', hint: 'https://your-team.atlassian.net', baseLabel: 'Your Jira address', keyHelp: 'https://id.atlassian.com/manage-profile/security/api-tokens' },
+    { id: 'aws_s3', label: 'Privacy scanning: Amazon S3 storage', connector: 'aws_s3', base: '', hint: 'https://your-bucket.s3.your-region.amazonaws.com', baseLabel: 'Your storage address', discovery: true, help: 'Fill in the Amazon Web Services sign-in below.' },
+    { id: 'azure_blob', label: 'Privacy scanning: Azure storage', connector: 'azure_blob', base: '', hint: 'https://your-account.blob.core.windows.net', baseLabel: 'Your Azure storage address', discovery: true, help: 'Paste an access token from Azure that can read this storage. Shared access links and account keys are not supported.' },
+    { id: 'google_cloud_storage', label: 'Privacy scanning: Google Cloud Storage', connector: 'google_cloud_storage', base: 'https://storage.googleapis.com', discovery: true, help: 'Paste an access token from Google Cloud that can read this storage.' },
+    { id: 'snowflake_metadata', label: 'Privacy scanning: Snowflake', connector: 'snowflake_metadata', base: '', hint: 'https://your-account.snowflakecomputing.com', baseLabel: 'Your Snowflake address', discovery: true, help: 'Paste an access token from Snowflake. Scanning only reads the names and types of your data, not the data itself.' },
+    { id: 'servicenow_cmdb', label: 'Privacy scanning: ServiceNow', connector: 'servicenow_cmdb', base: '', hint: 'https://your-company.service-now.com', baseLabel: 'Your ServiceNow address', discovery: true, help: 'Paste an access token from ServiceNow that can read your list of systems.' },
+    { id: 'entra_assets', label: 'Privacy scanning: Microsoft Entra', connector: 'entra_assets', base: 'https://graph.microsoft.com', discovery: true, help: 'Paste a Microsoft access token that can read your devices and apps.' },
   ];
   var preset = document.getElementById('cx-preset');
   var nameEl = document.getElementById('cx-name');
@@ -157,6 +173,24 @@
   var baseEl = document.getElementById('cx-base');
   var hintEl = document.getElementById('cx-hint');
   var advanced = document.getElementById('cx-advanced');
+  var nameAs = document.getElementById('cx-name-as');
+  var keyHelp = document.getElementById('cx-key-help');
+  var baseLabel = document.getElementById('cx-base-label');
+  // People type a name; the saved name is tidied into small letters and dashes.
+  function slugName(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 64);
+  }
+  function showNameAs() {
+    var slug = slugName(nameEl.value);
+    nameAs.textContent = slug && slug !== nameEl.value.trim() ? 'Workflows use it as: ' + slug : '';
+  }
+  nameEl.addEventListener('input', showNameAs);
+  var connectorNames = {};
+  PRESETS.forEach(function (p) { connectorNames[p.connector] = p.label; });
+  PRESETS.forEach(function (p) {
+    var o = document.createElement('option'); o.value = p.connector; o.textContent = p.label; connEl.appendChild(o);
+  });
+  function peopleBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#cx-principals input[type="checkbox"]')); }
   function discoveryPreset(connector) { return PRESETS.find(function (p) { return p.connector === connector && p.discovery; }); }
   function credentialFields(connector) {
     var selected = discoveryPreset(connector);
@@ -175,6 +209,9 @@
   preset.addEventListener('change', function () {
     var p = PRESETS.filter(function (x) { return x.id === preset.value; })[0];
     hintEl.textContent = '';
+    keyHelp.hidden = true;
+    document.getElementById('cx-connector-field').hidden = preset.value !== 'custom';
+    baseLabel.textContent = 'Web address of the service';
     if (!p) {                                   // Custom / none: reveal Advanced
       if (preset.value === 'custom') { advanced.open = true; credentialFields(''); }
       return;
@@ -182,14 +219,16 @@
     connEl.value = p.connector;
     credentialFields(p.connector);
     baseEl.value = p.base || '';
-    if (p.hint) { baseEl.placeholder = p.hint; hintEl.textContent = 'Base URL is org-specific — e.g. ' + p.hint; advanced.open = true; }
-    if (!nameEdited && !nameEl.value.trim()) { nameEl.value = p.id; }
+    if (p.keyHelp) { keyHelp.href = p.keyHelp; keyHelp.hidden = false; }
+    if (p.baseLabel) baseLabel.textContent = p.baseLabel;
+    if (p.hint) { baseEl.placeholder = p.hint; hintEl.textContent = 'For example ' + p.hint; advanced.open = true; }
+    if (!nameEdited && !nameEl.value.trim()) { nameEl.value = p.label.replace(/^Privacy scanning: /, ''); showNameAs(); }
   });
 
   function load() {
     if (accessLost) { clearAccess(); return; }
     api('/api/v1/connections').then(function (r) {
-      if (r.status === 403) { say('Connections are turned off — an administrator can enable them in Settings.', true); return { connections: [] }; }
+      if (r.status === 403) { say('Connections are turned off. Use the Turn on button above, or ask an administrator.', true); return { connections: [] }; }
       return r.ok ? r.json() : { connections: [] };
     }).then(function (j) {
       if (accessLost) return;
@@ -201,14 +240,15 @@
       conns.forEach(function (c) {
         var li = el('li', 'cx__row');
         li.appendChild(el('span', 'name', c.name));
-        var scope = c.access === 'tenant' ? 'tenant use' : 'owner/granted use';
-        var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)') + ' · ' + scope);
+        var scope = c.access === 'tenant' ? 'Everyone in the workspace' : 'Only you and people you chose';
+        var meta = el('div', 'meta', (c.connector ? (connectorNames[c.connector] || c.connector) + ' · ' : '') + scope);
         li.appendChild(meta);
-        li.appendChild(el('span', 'cx__badge ' + (c.has_token ? 'ok' : 'no'), c.has_token ? 'configuration saved' : 'saved without token'));
+        li.appendChild(el('span', 'badge ' + (c.has_token ? 'active' : 'blocked'), c.has_token ? 'Key saved' : 'No key saved'));
         var discovery = discoveryPreset(c.connector);
-        var readinessText = discovery ? 'Check source scope in Privacy Discovery' : c.last_test ? (c.last_test.authenticated ? 'readiness verified' : 'readiness failed') : 'readiness untested';
-        li.appendChild(el('span', 'cx__badge ' + (!discovery && c.last_test && c.last_test.authenticated ? 'ok' : 'no'), readinessText));
-        var edit = el('button', 'btn btn--ghost', 'Edit / rotate');
+        var readinessText = discovery ? 'Test it from Privacy scanning' : c.last_test ? (c.last_test.authenticated ? 'Working' : 'Not working') : 'Not tested yet';
+        li.appendChild(el('span', 'badge ' + (!discovery && c.last_test ? (c.last_test.authenticated ? 'active' : 'blocked') : ''), readinessText));
+        var edit = el('button', 'btn btn--ghost', 'Change');
+        edit.setAttribute('aria-label', 'Change connection ' + c.name);
         edit.type = 'button';
         edit.addEventListener('click', function () {
           if (accessLost) return;
@@ -218,12 +258,14 @@
           credentialFields(c.connector);
           baseEl.value = c.base_url || '';
           document.getElementById('cx-tenant-access').checked = c.access === 'tenant';
-          document.getElementById('cx-principals').value = (c.allowed_principals || []).join('\n');
+          peopleBoxes().forEach(function (box) { box.checked = (c.allowed_principals || []).indexOf(box.value) !== -1; });
           document.getElementById('cx-token').value = '';
+          showNameAs();
           advanced.open = true;
-          say('Editing ' + c.name + '. Leave the token blank to keep it, or paste a replacement.');
+          say('Changing ' + c.name + '. Leave the key blank to keep it, or paste a new one.');
         });
-        var test = el('button', 'btn btn--ghost', discoveryPreset(c.connector) ? 'Test source access' : 'Test');
+        var test = el('button', 'btn btn--ghost', discoveryPreset(c.connector) ? 'Open Privacy scanning' : 'Test');
+        test.setAttribute('aria-label', 'Test connection ' + c.name);
         test.type = 'button';
         test.addEventListener('click', function () {
           if (accessLost) return;
@@ -231,19 +273,19 @@
           test.textContent = 'Testing…';
           api('/api/v1/connections/' + encodeURIComponent(c.name) + '/test', { method: 'POST' })
             .then(function (r) { return r.json(); })
-            .then(function (res) { test.textContent = (res.ok ? '✓ ' : '✗ ') + (res.detail || ''); })
-            .catch(function () { test.textContent = '✗ error'; });
+            .then(function (res) { test.textContent = 'Test'; say(res.ok ? c.name + ' is working.' : c.name + ' did not work. Check the key and address, then test again.', !res.ok); load(); })
+            .catch(function (e) { test.textContent = 'Test'; say(mvErrorText(e, 'test the connection'), true); });
         });
-        var del = el('button', 'btn btn--ghost', '🗑');
+        var del = el('button', 'btn btn--danger', 'Remove');
         del.type = 'button';
-        del.setAttribute('aria-label', 'Delete connection ' + c.name);
+        del.setAttribute('aria-label', 'Remove connection ' + c.name);
         del.addEventListener('click', async function () {
           if (accessLost) return;
-          if (!(await mvConfirm('Delete connection “' + c.name + '”?', { okText: 'Delete' }))) return;
+          if (!(await mvConfirm('Remove the connection “' + c.name + '”? Workflows that use it will stop until you connect again.', { okText: 'Remove' }))) return;
           if (accessLost) return;
           api('/api/v1/connections/' + encodeURIComponent(c.name) + '?' + new URLSearchParams({expected_revision:c.revision}), { method: 'DELETE' })
-            .then(function (r) { if (!r.ok) { say(r.status === 409 ? 'This connection changed. Refresh and review it before disconnecting.' : 'Disconnect was not confirmed. Refresh connection status before trying again.', true); } else { say('Connection disconnected. Existing tasks are kept and will require current authorization before they can run.'); } load(); })
-            .catch(function () { say('Disconnect was not confirmed. Refresh connection status before trying again.', true); });
+            .then(function (r) { if (!r.ok) { say(r.status === 409 ? 'This connection changed. Refresh and check it before removing it.' : mvErrorText(r, 'remove the connection'), true); } else { say('Connection removed. Existing tasks are kept and will ask for access again before they run.'); } load(); })
+            .catch(function (e) { say(mvErrorText(e, 'remove the connection'), true); });
         });
         li.appendChild(edit); li.appendChild(test); li.appendChild(del);
         list.appendChild(li);
@@ -252,7 +294,7 @@
   }
 
   function readBody() {
-    var name = document.getElementById('cx-name').value.trim();
+    var name = slugName(document.getElementById('cx-name').value);
     var existing = currentByName[name];
     var body = { name: name };
     var token = document.getElementById('cx-token').value;
@@ -271,7 +313,7 @@
       body.connector = document.getElementById('cx-connector').value.trim();
       body.base_url = document.getElementById('cx-base').value.trim();
       body.access = document.getElementById('cx-tenant-access').checked ? 'tenant' : 'owner';
-      body.allowed_principals = document.getElementById('cx-principals').value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+      body.allowed_principals = peopleBoxes().filter(function (box) { return box.checked; }).map(function (box) { return box.value; });
     }
     if (existing) body.expected_revision = existing.revision;
     return body;
@@ -295,18 +337,18 @@
             load();
             return;
           }
-          say(res.j.detail || 'Save failed', true);
+          say(res.status === 422 ? 'Some details need fixing. Check the name, key and address.' : mvErrorText({status: res.status}, 'save the connection'), true);
           return;
         }
         document.getElementById('cx-token').value = '';
         credentialFields(body.connector || connEl.value);
         editingName = '';
-        if (!thenTest) { say('Saved ✓'); load(); return; }
+        if (!thenTest) { say('Saved.'); load(); return; }
         return api('/api/v1/connections/' + encodeURIComponent(body.name) + '/test', { method: 'POST' })
           .then(function (r) { return r.json(); })
-          .then(function (t) { say((t.ok ? 'Saved ✓ — ' : 'Saved, but test failed: ') + (t.detail || ''), !t.ok); load(); })
-          .catch(function () { say('Saved ✓ (test could not run)', true); load(); });
-      }).catch(function () { say('Save failed', true); });
+          .then(function (t) { say(t.ok ? 'Saved, and the test worked.' : 'Saved, but the test did not work. Check the key and address.', !t.ok); load(); })
+          .catch(function () { say('Saved, but the test could not run. Try Test again.', true); load(); });
+      }).catch(function (e) { say(mvErrorText(e, 'save the connection'), true); });
   }
 
   document.getElementById('cx-form').addEventListener('submit', function (e) { e.preventDefault(); save(false); });

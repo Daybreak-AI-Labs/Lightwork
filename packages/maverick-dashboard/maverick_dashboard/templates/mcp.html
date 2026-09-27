@@ -5,138 +5,152 @@
   {% from "_integration_readiness.html" import integration_readiness %}
   {% set verified = servers | selectattr('readiness.live.status', 'equalto', 'verified') | list %}
   {% call hero('Workforce capability', 'Tool servers',
-               subtitle='Connected systems',
-               lede='Tool servers extend what your workforce can reach —
-                     connected and managed right here.') %}
-    {{ state('Current state', (servers | length) ~ ' configured; ' ~ (verified | length) ~ ' live verified',
-             badge='live verified' if verified else 'verification unknown',
+               subtitle='Extra tools for your agents',
+               lede='Tool servers give your agents more things they can do, such as
+                     working with files or GitHub. Add one below and test it.') %}
+    {{ state('Current state', (servers | length) ~ ' added · ' ~ (verified | length) ~ ' tested and working',
+             badge='Working' if verified else 'Not tested yet',
              badge_class='ok' if verified else 'idle',
-             copy='After saving, test the connection to confirm that the server
-                   responds and makes its tools available.') }}
+             copy='After adding a server, press Test to check that it answers
+                   and offers its tools.') }}
   {% endcall %}
 
   {% if saved %}
-  <div class="panel" role="status"
-       style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4);">
-    <strong>Saved.</strong> {{ saved }}
-  </div>
+  <div class="panel mcp-saved" role="status"><strong>Done.</strong> {{ saved }}</div>
   {% endif %}
 
+  <div class="section-head"><h2>Your tool servers</h2></div>
   <div class="panel">
     {% if servers %}
       <table>
         <thead><tr>
-          <th scope="col">Name</th>
-          <th scope="col">Transport</th>
-          <th scope="col">Command / URL</th>
-          <th scope="col">Args</th>
-          <th scope="col">Source</th>
-          <th scope="col">Readiness</th>
-          <th scope="col">Action</th>
+          <th scope="col">Server</th>
+          <th scope="col">Runs</th>
+          <th scope="col">Added By</th>
+          <th scope="col">Status</th>
+          <th scope="col">Actions</th>
         </tr></thead>
         <tbody>
         {% for s in servers %}
+          {% set label = s.name | humanize %}
           <tr>
-            <td><code>{{ s.name }}</code></td>
-            <td>{{ s.transport }}</td>
-            <td><code>{{ s.url if s.transport == 'http' else (s.command or '-') }}</code></td>
-            <td class="muted" style="font-size: var(--text-sm);">{{ s.args | join(' ') if s.args else '-' }}</td>
-            <td>
-              {% if s.source == 'dashboard' %}<span class="badge active">added here</span>
-              {% else %}<span class="muted">platform</span>{% endif %}
-            </td>
+            <td>{{ label }}</td>
+            <td>{{ 'Online service' if s.transport == 'http' else 'On this computer' }}
+              <details class="mcp-tech"><summary>Technical details</summary>
+                <p class="muted">{{ s.url if s.transport == 'http' else (s.command or '') }} {{ s.args | join(' ') if s.args and s.transport != 'http' else '' }}</p>
+              </details></td>
+            <td>{% if s.source == 'dashboard' %}<span class="badge active">You, on this page</span>{% else %}<span class="muted">Your administrator</span>{% endif %}</td>
             <td>{{ integration_readiness(s.readiness) }}</td>
-            <td>
-              <form method="post" action="/mcp/test" style="margin: 0 0 var(--space-2);">
+            <td class="mcp-actions">
+              <form method="post" action="/mcp/test">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--primary">Test readiness</button>
+                <button type="submit" class="btn btn--primary" aria-label="Test {{ label }}">Test</button>
               </form>
               {% if s.removable %}
-              <form method="post" action="/mcp/remove" style="margin: 0;">
+              <form method="post" action="/mcp/remove"
+                    data-mcp-confirm="Remove the {{ label }} tool server? Agents will stop using its tools.">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--ghost"
-                        aria-label="Remove {{ s.name }} MCP server"
-                        title="Remove this server">Remove</button>
+                <button type="submit" class="btn btn--danger" aria-label="Remove {{ label }}">Remove</button>
               </form>
-              {% else %}<span class="muted">managed by your administrator</span>{% endif %}
+              {% else %}<span class="muted">Only your administrator can remove it.</span>{% endif %}
             </td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="muted" style="margin: 0;">No tool servers connected yet. Add one below.</p>
+      <p class="muted mcp-flush">No tool servers yet. Choose one below to add it.</p>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Add a server running on this machine</h2></div>
-  <div class="panel">
-    <p class="muted" style="margin-top: 0;">
-      Runs a command on this machine that provides tools to your agents.
-      Saving configures the command for the next goal; use Test readiness to
-      check that the service responds and its tools are available.
-    </p>
-    <form method="post" action="/mcp/add"
-          style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
-      <input type="hidden" name="transport" value="stdio" />
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Name</span>
-        <input class="ctl" type="text" name="name" required
-               placeholder="e.g. filesystem" aria-label="MCP server name" />
+  <div class="section-head"><h2>Add a tool server</h2></div>
+  <div class="mcp-cards">
+    {% for key, p in presets.items() %}
+    <form method="post" action="/mcp/add-preset" class="panel mcp-card" aria-labelledby="mcp-{{ key }}-title">
+      <input type="hidden" name="preset" value="{{ key }}" />
+      <h3 id="mcp-{{ key }}-title">{{ p.title }}</h3>
+      <p class="muted">{{ p.description }} <span class="badge">{{ p.where }}</span></p>
+      {% for f in p.fields %}
+      <label class="mcp-field">
+        <span>{{ f.label }}</span>
+        <input class="input" type="{{ f.type }}" name="{{ f.key }}" {% if not f.optional %}required{% endif %}
+               {% if f.placeholder %}placeholder="{{ f.placeholder }}"{% endif %} autocomplete="off"
+               {% if f.help %}aria-describedby="mcp-{{ key }}-{{ f.key }}-help"{% endif %} />
+        {% if f.help %}<span class="muted mcp-help" id="mcp-{{ key }}-{{ f.key }}-help">{{ f.help }}
+          {% if f.link %}<a href="{{ f.link }}" target="_blank" rel="noopener noreferrer">Open that page</a>{% endif %}</span>{% endif %}
       </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Command</span>
-        <input class="ctl" type="text" name="command" required
-               placeholder="e.g. npx" aria-label="MCP server command" />
+      {% endfor %}
+      <label class="mcp-field">
+        <span>Name (optional)</span>
+        <input class="input" type="text" name="display_name" maxlength="60" placeholder="{{ p.title }}" />
       </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Arguments <span class="muted">(one per line)</span></span>
-        <textarea class="ctl" name="args" rows="3"
-                  placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/path/to/dir"
-                  aria-label="MCP server arguments, one per line"></textarea>
-      </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Environment <span class="muted">(KEY=VALUE, one per line)</span></span>
-        <textarea class="ctl" name="env" rows="2"
-                  placeholder="API_BASE=https://example.com"
-                  aria-label="MCP server environment variables, KEY=VALUE per line"></textarea>
-      </label>
-      <p style="margin: 0;"><button type="submit" class="btn btn--primary">Add local server</button></p>
+      <button type="submit" class="btn btn--primary">Add {{ p.title | lower }}</button>
     </form>
+    {% endfor %}
   </div>
 
-  <div class="section-head"><h2>Add a server by web address (URL)</h2></div>
-  <div class="panel">
-    <p class="muted" style="margin-top: 0;">
-      Connects to a tool server hosted elsewhere, using its web address.
-      Saving records the endpoint. It remains live-unverified until the bounded
-      MCP handshake succeeds.
-    </p>
-    <form method="post" action="/mcp/add"
-          style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
-      <input type="hidden" name="transport" value="http" />
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Name</span>
-        <input class="ctl" type="text" name="name" required
-               placeholder="e.g. github" aria-label="Remote MCP server name" />
-      </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>URL</span>
-        <input class="ctl" type="text" name="url" required
-               placeholder="https://host/mcp" aria-label="Remote MCP server URL" />
-      </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Auth token <span class="muted">(optional, sent as a bearer)</span></span>
-        <input class="ctl" type="password" name="auth_token" autocomplete="off"
-               placeholder="Paste a static token" aria-label="Remote MCP server auth token" />
-      </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Headers <span class="muted">(KEY=VALUE, one per line)</span></span>
-        <textarea class="ctl" name="headers" rows="2"
-                  placeholder="X-Org=acme"
-                  aria-label="Remote MCP server headers, KEY=VALUE per line"></textarea>
-      </label>
-      <p style="margin: 0;"><button type="submit" class="btn btn--primary">Add remote server</button></p>
+  <details class="panel mcp-advanced">
+    <summary>Advanced: add a custom tool server</summary>
+    <p class="muted">For IT teams who have a tool server's exact start command or web address.
+      After adding it, press Test to check that it works.</p>
+    <h3>Runs on this computer</h3>
+    <form method="post" action="/mcp/add" class="mcp-form">
+      <input type="hidden" name="transport" value="stdio" />
+      <label class="mcp-field"><span>Name</span>
+        <input class="input" type="text" name="name" required placeholder="e.g. files" aria-label="Custom server name" /></label>
+      <label class="mcp-field"><span>Start command</span>
+        <input class="input" type="text" name="command" required placeholder="e.g. npx" aria-label="Custom server start command" /></label>
+      <label class="mcp-field"><span>Extra words for the command (one per line)</span>
+        <textarea class="textarea" name="args" rows="3" aria-label="Custom server command words, one per line"></textarea></label>
+      <label class="mcp-field"><span>Settings it needs (NAME=value, one per line)</span>
+        <textarea class="textarea" name="env" rows="2" aria-label="Custom server settings, one per line"></textarea></label>
+      <p><button type="submit" class="btn">Add custom server</button></p>
     </form>
-  </div>
+    <h3>Online service</h3>
+    <form method="post" action="/mcp/add" class="mcp-form">
+      <input type="hidden" name="transport" value="http" />
+      <label class="mcp-field"><span>Name</span>
+        <input class="input" type="text" name="name" required placeholder="e.g. crm-tools" aria-label="Custom online server name" /></label>
+      <label class="mcp-field"><span>Web address</span>
+        <input class="input" type="url" name="url" required placeholder="https://…" aria-label="Custom online server web address" /></label>
+      <label class="mcp-field"><span>Access key (optional)</span>
+        <input class="input" type="password" name="auth_token" autocomplete="off" aria-label="Custom online server access key" /></label>
+      <label class="mcp-field"><span>Extra request settings (NAME=value, one per line)</span>
+        <textarea class="textarea" name="headers" rows="2" aria-label="Custom online server extra settings, one per line"></textarea></label>
+      <p><button type="submit" class="btn">Add custom online server</button></p>
+    </form>
+  </details>
+
+  <style>
+    .mcp-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }
+    .mcp-flush { margin: 0; }
+    .mcp-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .mcp-actions form { margin: 0; }
+    .mcp-tech summary { font-size: var(--text-sm); cursor: pointer; }
+    .mcp-tech p { overflow-wrap: anywhere; font-size: var(--text-sm); }
+    .mcp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); }
+    .mcp-card { display: flex; flex-direction: column; gap: var(--space-2); }
+    .mcp-card h3 { margin: 0; }
+    .mcp-card .btn { align-self: flex-start; margin-top: auto; }
+    .mcp-field { display: flex; flex-direction: column; gap: var(--space-1); }
+    .mcp-help { font-size: var(--text-sm); }
+    .mcp-form { display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem; }
+    .mcp-advanced > summary { cursor: pointer; }
+  </style>
+  <script>
+  (function () {
+    'use strict';
+    document.querySelectorAll('form[data-mcp-confirm]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
+        event.preventDefault();
+        window.mvConfirm(form.dataset.mcpConfirm, {okText: 'Remove'}).then(function (ok) {
+          if (!ok) return;
+          form.dataset.confirmed = 'true';
+          if (form.requestSubmit) form.requestSubmit(); else form.submit();
+        });
+      });
+    });
+  })();
+  </script>
 {% endblock %}

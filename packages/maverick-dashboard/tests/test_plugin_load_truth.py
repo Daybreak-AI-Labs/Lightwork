@@ -89,8 +89,9 @@ def test_missing_dependency_is_allowed_but_not_loaded(monkeypatch, tmp_path: Pat
 
     page = client.get("/plugins")
     assert page.status_code == 200
-    assert "0 of 1 plugins loaded" in page.text
-    assert "import failed" in page.text
+    assert "0 of 1 plugins running" in page.text
+    assert "Couldn&#39;t start" in page.text or "Couldn't start" in page.text
+    assert "Why it didn" in page.text
     assert "weather_sdk" in page.text
 
 
@@ -108,9 +109,9 @@ def test_allowlist_denial_never_imports_or_claims_loaded(monkeypatch, tmp_path: 
 
     page = client.get("/plugins")
     assert page.status_code == 200
-    assert "0 of 1 plugins loaded" in page.text
-    assert "not configured" in page.text
-    assert "not evaluated" in page.text
+    assert "0 of 1 plugins running" in page.text
+    assert "Turned off" in page.text
+    assert "Not checked while off" in page.text
     assert ep.load_calls == 0
 
 
@@ -130,9 +131,11 @@ def test_successful_import_and_tool_contract_are_shown_loaded(monkeypatch, tmp_p
 
     page = client.get("/plugins")
     assert page.status_code == 200
-    assert "1 of 1 plugins loaded" in page.text
-    assert "configured" in page.text
-    assert "allowed" in page.text
+    assert "1 of 1 plugins running" in page.text
+    assert "Running" in page.text
+    assert "Allowed" in page.text
+    for jargon in ("import failed", "not configured", "allowlist", "HTTP", "discovered"):
+        assert jargon not in page.text
     assert 'data-plugin-action="disable" data-plugin-target="weather"' in page.text
     assert 'id="plugin-mutation-status"' in page.text
     assert '/static/lightwork-plugins.js' in page.text

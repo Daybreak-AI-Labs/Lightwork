@@ -3,107 +3,117 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Agent factory', 'Roles',
-               subtitle='The core agent roster',
-               lede='The core agent roles that power Lightwork. For any role
-                     you can pick the <strong>model</strong> it runs on, set
-                     its <strong>reasoning effort</strong>, and add a
-                     <strong>system-prompt addendum</strong> — extra
-                     instructions added to its built-in guidance every time it
-                     runs — so you can shape how work is planned or written
-                     for your organization.') %}
+               subtitle='The agents that do the work',
+               lede='Lightwork splits every task between a few kinds of agent.
+                     For each one you can choose the <strong>model</strong> it
+                     uses, how hard it <strong>thinks</strong>, and add
+                     <strong>extra instructions</strong> that suit your
+                     organization.') %}
     {{ state('Current state',
-             roles | length ~ ' core role' ~ ('' if roles | length == 1 else 's'),
-             badge='editable' if editable else 'read-only',
+             roles | length ~ ' role' ~ ('' if roles | length == 1 else 's'),
+             badge='Editable' if editable else 'View only',
              badge_class='ok' if editable else 'idle',
-             copy='Pick a role from the roster to tune it. Changes apply the
-                   next time that role runs — the built-in guidance stays
-                   intact underneath your addendum.') }}
+             copy='Choose a role to change it. Changes apply the next time
+                   that role works; its built-in instructions stay in place.') }}
   {% endcall %}
   {% if not editable %}
-  <p><span class="badge">read-only</span> <span class="muted">Role editing has been turned off
-    by your administrator — viewing only.</span></p>
+  <p><span class="badge">View only</span> <span class="muted">Your administrator has turned off
+    role editing. <a href="/settings#feature-role_editing">Change this in Settings</a>.</span></p>
   {% endif %}
 
-  <div class="panel" style="display: flex; gap: 1.5rem; align-items: flex-start;">
-    <nav aria-label="Role roster" style="min-width: 14rem; max-height: 70vh; overflow: auto;">
+  <div class="panel roles-layout">
+    <nav aria-label="Roles" class="roles-nav">
       {% if roles %}
-      <ul style="list-style: none; padding: 0; margin: 0;">
+      <ul>
         {% for r in roles %}
-        <li style="margin: 0.15rem 0;">
-          <a href="/roles?role={{ r.role }}"
+        <li>
+          <a href="/roles?role={{ r.role | urlencode }}"
              {% if selected and selected.role == r.role %}class="active" aria-current="page"{% endif %}>
-            <code>{{ r.role }}</code>
-            {% if r.is_override %}<span class="badge">custom</span>{% endif %}
+            {{ r.role | agent_role }}
+            {% if r.is_override %}<span class="badge">Changed</span>{% endif %}
           </a>
+          {% if r.role | agent_role_help %}<div class="muted roles-help">{{ r.role | agent_role_help }}</div>{% endif %}
         </li>
         {% endfor %}
       </ul>
       {% else %}
-      <p class="muted">No roles discovered.</p>
+      <p class="muted">The list of roles could not be loaded. <a class="btn" href="/roles">Try again</a></p>
       {% endif %}
     </nav>
 
-    <section aria-label="Role editor" style="flex: 1; min-width: 0;">
+    <section aria-label="Role editor" class="roles-editor">
       {% if selected %}
-      <h2 style="margin-top: 0;"><code>{{ selected.role }}</code></h2>
+      <h2>{{ selected.role | agent_role }}</h2>
+      {% if selected.role | agent_role_help %}<p>{{ selected.role | agent_role_help }}</p>{% endif %}
       <p class="muted">
-        model: <code>{{ selected.model or '—' }}</code>
-        {% if selected.effort %}· effort: <code>{{ selected.effort }}</code>{% endif %}
-        {% if selected.is_override %}· <span class="badge">customized</span>{% endif %}
+        Uses: <strong>{{ (selected.model | model_label) or 'the standard model' }}</strong>
+        {% if selected.effort %}· Thinking level: <strong>{{ selected.effort | effort_label }}</strong>{% endif %}
+        {% if selected.is_override %}· <span class="badge">Changed</span>{% endif %}
       </p>
-      <div id="role-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
+      <div id="role-msg" role="status" aria-live="polite" class="muted roles-msg"></div>
 
-      <form id="role-form" data-role="{{ selected.role }}">
-        <p>
-          <label for="f-model">Model <span class="muted">(which model this role runs on;
-            "Inherit" uses the configured default)</span></label><br>
-          <select id="f-model" name="model" style="width: 100%;">
-            <option value="">Inherit default{% if selected.model %} — {{ selected.model }}{% endif %}</option>
+      <form id="role-form" data-role="{{ selected.role }}" data-role-name="{{ selected.role | agent_role }}">
+        <p class="roles-field">
+          <label for="f-model">Model</label>
+          <select id="f-model" name="model" class="select">
+            <option value="">Use the standard model{% if selected.model %} ({{ selected.model | model_label }}){% endif %}</option>
             {% set cur = selected.model_override %}
             {% set known = model_options | map(attribute=0) | list %}
             {% if cur and cur not in known %}
-              <option value="{{ cur }}" selected>Custom — {{ cur }}</option>
+              <option value="{{ cur }}" selected>{{ cur | model_label }}</option>
             {% endif %}
             {% for spec, label in model_options %}
-              <option value="{{ spec }}"{% if cur == spec %} selected{% endif %}>{{ spec }} · {{ label }}</option>
+              <option value="{{ spec }}"{% if cur == spec %} selected{% endif %}>{{ spec | model_label }}</option>
             {% endfor %}
           </select>
         </p>
-        <p>
-          <label for="f-effort">Reasoning effort <span class="muted">(empty = inherit)</span></label><br>
-          <select id="f-effort" name="effort">
-            <option value="">(inherit{% if selected.effort %} — {{ selected.effort }}{% endif %})</option>
+        <p class="roles-field">
+          <label for="f-effort">Thinking level</label>
+          <select id="f-effort" name="effort" class="select" aria-describedby="f-effort-help">
+            <option value="">Use the standard level{% if selected.effort %} ({{ selected.effort | effort_label }}){% endif %}</option>
             {% for lvl in ['low', 'medium', 'high', 'xhigh', 'max'] %}
-            <option value="{{ lvl }}"{% if selected.effort_override == lvl %} selected{% endif %}>{{ lvl }}</option>
+            <option value="{{ lvl }}"{% if selected.effort_override == lvl %} selected{% endif %}>{{ lvl | effort_label }}</option>
             {% endfor %}
           </select>
+          <span class="muted roles-help" id="f-effort-help">Higher levels think longer, which can give better answers but costs more.</span>
         </p>
-        <p>
-          <label for="f-addendum">System-prompt addendum
-            <span class="muted">(appended to this role's base template; leave empty to clear)</span></label><br>
-          <textarea id="f-addendum" name="system_addendum" rows="12"
-                    style="width: 100%;">{{ selected.system_addendum }}</textarea>
+        <p class="roles-field">
+          <label for="f-addendum">Extra instructions for this role</label>
+          <textarea id="f-addendum" name="system_addendum" rows="10" class="textarea" aria-describedby="f-addendum-help">{{ selected.system_addendum }}</textarea>
+          <span class="muted roles-help" id="f-addendum-help">Added to its built-in instructions. Leave blank for none.</span>
         </p>
         {% if editable %}
-        <p>
-          <button type="button" id="btn-save">Save</button>
-          <button type="button" id="btn-reset">Reset to built-in</button>
+        <p class="roles-actions">
+          <button type="button" id="btn-save" class="btn btn--primary">Save changes</button>
+          <button type="button" id="btn-reset" class="btn">Go back to built-in settings</button>
         </p>
-        {% else %}
-        <p class="muted">Editing is disabled in this deployment.</p>
         {% endif %}
       </form>
 
       {% if selected.errors %}
-      <div class="panel" style="margin-top: 1rem;">
-        {% for e in selected.errors %}<div>⛔ {{ e }}</div>{% endfor %}
+      <div class="panel roles-errors" role="alert">
+        <p><strong>Some saved changes for this role can't be used.</strong> Save the role again to fix them.</p>
+        <details><summary>Technical details</summary>{% for e in selected.errors %}<div class="muted">{{ e }}</div>{% endfor %}</details>
       </div>
       {% endif %}
       {% else %}
-      <p class="muted">Select a role from the roster to view or edit it.</p>
+      <p class="muted">Choose a role from the list to see or change it.</p>
+      {% if roles %}<p><a class="btn btn--primary" href="/roles?role={{ roles[0].role | urlencode }}">Open {{ roles[0].role | agent_role }}</a></p>{% endif %}
       {% endif %}
     </section>
   </div>
+  <style>
+    .roles-layout { display: flex; flex-wrap: wrap; gap: var(--space-6, 1.5rem); align-items: flex-start; }
+    .roles-nav { min-width: min(100%, 15rem); flex: 0 1 18rem; max-height: 70vh; overflow: auto; }
+    .roles-nav ul { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
+    .roles-editor { flex: 1 1 20rem; min-width: 0; }
+    .roles-editor h2 { margin-top: 0; }
+    .roles-field { display: grid; gap: var(--space-1); }
+    .roles-help { font-size: var(--text-sm); }
+    .roles-msg { min-height: 1.2rem; }
+    .roles-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .roles-errors { margin-top: var(--space-4); }
+  </style>
 
   {% if selected and editable %}
   <script>
@@ -111,12 +121,10 @@
       const form = document.getElementById('role-form');
       if (!form) return;
       const role = form.dataset.role;
+      const roleName = form.dataset.roleName || 'this role';
       const msg = document.getElementById('role-msg');
 
-      function show(text, ok) {
-        msg.textContent = text;
-        msg.style.color = ok ? 'var(--ok, green)' : 'var(--danger, crimson)';
-      }
+      function show(text) { msg.textContent = text; }
 
       async function call(method, path, body) {
         const opts = { method, headers: {} };
@@ -127,9 +135,7 @@
         let r;
         try { r = await fetch(path, opts); }
         catch (error) { throw new Error('Could not reach the server — check your connection and try again.'); }
-        let data = {};
-        try { data = await r.json(); } catch (e) { /* 204 etc. */ }
-        return { status: r.status, data };
+        return r;
       }
       function beginMutation(button) {
         if (button.dataset.inFlight === 'true') return false;
@@ -154,14 +160,14 @@
         if (!beginMutation(saveBtn)) return;
         try {
           if (!(await mvConfirm(
-            'Deploy the authority and model override for role “' + role + '”? It applies the next time this role runs.',
-            {okText: 'Deploy role override'}
+            'Save changes to the ' + roleName + ' role? They apply the next time it works.',
+            {okText: 'Save changes'}
           ))) return;
-          const { status, data } = await call('POST', `/api/v1/roles/${role}/override`, body);
-          if (status === 200) { show('Saved.', true); window.location.search = '?role=' + encodeURIComponent(role); }
-          else show('Rejected: ' + (data.detail || ('HTTP ' + status + '. Try again.')), false);
+          const r = await call('POST', `/api/v1/roles/${encodeURIComponent(role)}/override`, body);
+          if (r.ok) { show('Saved.'); window.location.search = '?role=' + encodeURIComponent(role); }
+          else show(mvErrorText(r, 'save your changes'));
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Role deployment failed.', false);
+          show(error instanceof Error ? error.message : 'Your changes could not be saved. Please try again.');
         } finally {
           finishMutation(saveBtn);
         }
@@ -172,14 +178,14 @@
         if (!beginMutation(resetBtn)) return;
         try {
           if (!(await mvConfirm(
-            'Reset role “' + role + '” to its built-in authority and model? The custom override will be removed.',
-            {okText: 'Reset role'}
+            'Put the ' + roleName + ' role back to its built-in settings? Your changes to it will be removed.',
+            {okText: 'Go back to built-in'}
           ))) return;
-          const { status, data } = await call('DELETE', `/api/v1/roles/${role}/override`);
-          if (status === 200) { show('Reverted to built-in.', true); window.location.search = '?role=' + encodeURIComponent(role); }
-          else show('Failed: ' + (data.detail || ('HTTP ' + status + '. Try again.')), false);
+          const r = await call('DELETE', `/api/v1/roles/${encodeURIComponent(role)}/override`);
+          if (r.ok) { show('Back to built-in settings.'); window.location.search = '?role=' + encodeURIComponent(role); }
+          else show(mvErrorText(r, 'reset the role'));
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Role reset failed.', false);
+          show(error instanceof Error ? error.message : 'The role could not be reset. Please try again.');
         } finally {
           finishMutation(resetBtn);
         }

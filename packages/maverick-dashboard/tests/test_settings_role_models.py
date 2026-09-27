@@ -26,7 +26,7 @@ def test_settings_shows_per_role_form(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     r = _client().get("/settings")
     assert r.status_code == 200
-    assert "Per-role models" in r.text
+    assert "Models for each role" in r.text
     assert 'action="/settings/models/roles"' in r.text
     assert 'name="coder"' in r.text  # a per-role select is present
 

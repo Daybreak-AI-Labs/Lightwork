@@ -105,7 +105,7 @@ def test_spend_html_scopes_episodes_and_totals_to_authenticated_user(monkeypatch
     assert response.status_code == 200
     assert f"${total:,.2f} total spent" in response.text
     expected = {"alice": {alice_goal}, "bob": {bob_goal}, "root": {alice_goal, bob_goal}}
-    rendered_goals = {int(value) for value in re.findall(r"<td>\s*#(\d+)\s*</td>", response.text)}
+    rendered_goals = {int(value) for value in re.findall(r'href="/chat/goal/(\d+)"', response.text)}
     assert rendered_goals == expected[user]
 
 

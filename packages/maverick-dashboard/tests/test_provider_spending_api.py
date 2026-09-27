@@ -39,7 +39,8 @@ def test_routes_render_and_exact_review_settles_without_retry(browser):
     held = cap.reserve("openai", 3, request_id="api-unknown")
     cap.settle(held, None)
     page = browser.get("/provider-spending")
-    assert page.status_code == 200 and "Review an unresolved reservation" in page.text
+    assert page.status_code == 200 and "Settle money set aside for a request" in page.text
+    assert 'id="spend-review-pick"' in page.text and "PAR-" not in page.text
     assert browser.get("/static/lightwork-provider-spending.js").status_code == 200
     assert browser.get("/static/lightwork-provider-spending.css").status_code == 200
     context = headers(browser)
@@ -51,11 +52,16 @@ def test_routes_render_and_exact_review_settles_without_retry(browser):
     assert response.headers["Cache-Control"] == "private, no-store"
     review = response.json()
     assert browser.get(api.BASE + "/review/" + review["id"], headers=context).json()["receipt"] == held.request_id
+    # The unfinished review is offered in the page's list (no typed reference).
+    listed = browser.get(api.BASE + "/reviews", headers=context)
+    assert listed.status_code == 200 and [r["id"] for r in listed.json()["reviews"]] == [review["id"]]
+    assert browser.get(api.BASE + "/reviews").status_code == 409  # context header required
     assert browser.post(api.BASE + "/apply", json={"review": review["id"], "confirm": False}, headers=context).status_code == 409
     applied = browser.post(api.BASE + "/apply", json={"review": review["id"], "confirm": True}, headers=context)
     assert applied.status_code == 200, applied.text
     assert cap.check("openai").spent == 2 and cap.check("openai").reserved == 0
     assert browser.post(api.BASE + "/apply", json={"review": review["id"], "confirm": True}, headers=context).json()["state"] == "completed"
+    assert browser.get(api.BASE + "/reviews", headers=context).json()["reviews"] == []
 
 
 def test_global_admin_denial_precedes_read_write_or_export(browser, monkeypatch):
@@ -63,7 +69,7 @@ def test_global_admin_denial_precedes_read_write_or_export(browser, monkeypatch)
     def denied(*_a):
         raise HTTPException(403, "Global administrator required")
     monkeypatch.setattr(api, "require_global_permission", denied)
-    for route in (api.BASE, "/provider-spending", api.BASE + "/diagnostics"):
+    for route in (api.BASE, "/provider-spending", api.BASE + "/diagnostics", api.BASE + "/reviews"):
         assert browser.get(route).status_code == 403
     assert browser.post(api.BASE + "/export", headers=context).status_code == 403
     assert browser.post(api.BASE + "/import", content=b"{}", headers=context).status_code == 403

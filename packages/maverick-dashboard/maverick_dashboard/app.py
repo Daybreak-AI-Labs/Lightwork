@@ -172,6 +172,10 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+# Plain labels for model ids, setting sources and sizes (administration pages).
+from . import plain_labels as _plain_labels  # noqa: E402
+
+_plain_labels.register(templates.env)
 # Make `theme` available unconditionally so templates rendered without
 # a Request object (rare; legacy paths) still resolve `theme or 'dark'`.
 templates.env.globals.setdefault("theme", "dark")
@@ -1040,16 +1044,28 @@ app.include_router(project_reviews_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
+from .channel_check_api import router as channel_check_router  # noqa: E402
+from .mcp_presets import router as mcp_presets_router  # noqa: E402
+from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
+from .store_catalogs import router as store_catalogs_router  # noqa: E402
 from .support_api import router as support_router  # noqa: E402
+from .system_checks_api import router as system_checks_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
 
 app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
+app.include_router(system_checks_router)
+app.include_router(channel_check_router)
+app.include_router(page_assets_router)
+app.include_router(mcp_presets_router)
+app.include_router(store_catalogs_router)
+app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
@@ -3321,11 +3337,11 @@ def _feature_label(feature: str) -> str:
         from maverick.departments import department_title
         return department_title(feature.split(":", 1)[1]) + " department"
     return {
-        "core": "Core",
-        "channels": "Channels",
-        "audit_export": "Audit export",
-        "grpc": "gRPC API",
-    }.get(feature, feature)
+        "core": "Core features",
+        "channels": "Chat apps (Slack, Teams, email and more)",
+        "audit_export": "Download the activity history",
+        "grpc": "Connections for other software (advanced)",
+    }.get(feature, feature.replace("_", " ").capitalize())
 
 
 @app.get("/tenants/{tenant_id}/features", response_class=HTMLResponse)
@@ -3390,7 +3406,14 @@ async def tenant_features_page(request: Request, tenant_id: str) -> HTMLResponse
 
 @app.get("/skills", response_class=HTMLResponse)
 async def skills_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "skills.html", {"skills": _load_skills()})
+    # Same opt-in the create/install API enforces; the page only reads it so
+    # it can say "switched off" instead of offering forms that would fail.
+    install_allowed = os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"}
+    return templates.TemplateResponse(request, "skills.html", {
+        "skills": sorted(_load_skills(), key=lambda s: s.name),
+        "is_admin": has_permission(request, "admin"),
+        "install_allowed": install_allowed,
+    })
 
 
 @app.get("/learned", response_class=HTMLResponse)
@@ -3422,10 +3445,28 @@ def spend_page(request: Request) -> HTMLResponse:
     # goal_owner_filter returns None for admins / auth-off, preserving that view.
     owner = goal_owner_filter(request)
     w = _world()
+    episodes = w.list_episodes(limit=50, owner=owner)
+    # Task titles for the table (the episodes are already scoped to the caller).
+    goal_titles: dict[int, str] = {}
+    for gid in {e.goal_id for e in episodes if e.goal_id}:
+        try:
+            g = w.get_goal(gid)
+            if g is not None and getattr(g, "title", ""):
+                goal_titles[gid] = g.title
+        except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
+            continue
+    import datetime as _dt
+    today = _dt.date.today().replace(day=1)
+    months = []
+    for back in range(12):
+        year, month = divmod(today.month - 1 - back, 12)
+        first = _dt.date(today.year + year, month + 1, 1)
+        months.append({"value": first.strftime("%Y-%m"), "label": first.strftime("%B %Y")})
     return templates.TemplateResponse(
         request,
         "spend.html",
-        {"episodes": w.list_episodes(limit=50, owner=owner), "total": w.total_spend(owner=owner)},
+        {"episodes": episodes, "total": w.total_spend(owner=owner),
+         "goal_titles": goal_titles, "csv_months": months},
     )
 
 
@@ -5299,8 +5340,8 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     if format == "csv":
         sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
         rows = [
-            "episode_id,goal_id,started_at,ended_at,outcome,"
-            "cost_dollars,input_tokens,output_tokens,tool_calls"
+            "Run,Task,Started,Finished,Result,"
+            "Cost (USD),Input tokens,Output tokens,Tool uses"
         ]
         for e in episodes:
             if not e.ended_at:
@@ -5351,8 +5392,20 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "invoice_admin": has_global_permission(request, "admin"),
+            "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
         },
     )
+
+
+def _invoice_workspaces(current: str, current_label: str) -> list[dict]:
+    """Workspaces an administrator can make an invoice for (Billing page)."""
+    try:
+        from maverick.tenant.registry import list_tenants
+        rows = [{"id": t.id, "name": t.display_name or t.id} for t in list_tenants()]
+    except Exception:  # noqa: BLE001 - registry optional
+        rows = []
+    return rows or [{"id": current, "name": current_label}]
 
 
 def _provider_integration_inventory() -> list[dict]:
@@ -5387,10 +5440,13 @@ async def providers_page(request: Request) -> HTMLResponse:
             status_code=503,
             detail="provider inventory is unavailable",
         ) from exc
+    from .auth import has_global_permission
     return templates.TemplateResponse(
         request,
         "providers.html",
-        {"inventory": inventory, "rows": _health().snapshot()},
+        {"inventory": inventory, "rows": _health().snapshot(),
+         "is_admin": has_global_permission(request, "admin"),
+         "tested": request.query_params.get("tested") == "1"},
     )
 
 
@@ -6453,7 +6509,9 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
 
 
 @app.post("/plugins/approvals")
-async def plugins_approvals(request: Request, names: str = Form("")) -> RedirectResponse:
+async def plugins_approvals(
+    request: Request, names: list[str] = Form([])  # ticked boxes plus one new name
+) -> RedirectResponse:
     """Replace the pre-approved install allowlist from the Plugins page.
 
     The allowlist decides WHAT the one-click installer may ever pull, so it is
@@ -6465,7 +6523,7 @@ async def plugins_approvals(request: Request, names: str = Form("")) -> Redirect
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
-    parsed = [p for chunk in names.replace(",", "\n").splitlines() for p in chunk.split()]
+    parsed = [p for value in names for chunk in value.replace(",", "\n").splitlines() for p in chunk.split()]
     try:
         await run_in_threadpool(settings_store.set_installable_plugins, parsed)
     except ValueError as exc:
@@ -6514,14 +6572,15 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
             detail="MCP inventory is unavailable",
         ) from exc
     saved_msg = {
-        "add": "MCP server added.",
-        "remove": "MCP server removed.",
-        "test": "MCP readiness check finished.",
+        "add": "Tool server added. Press Test to check that it works.",
+        "remove": "Tool server removed.",
+        "test": "Test finished. The result is shown next to the server.",
     }.get(saved, "")
+    from .mcp_presets import PRESETS as _MCP_PRESETS
     return templates.TemplateResponse(
         request,
         "mcp.html",
-        {"servers": rows, "saved": saved_msg},
+        {"servers": rows, "saved": saved_msg, "presets": _MCP_PRESETS},
     )
 
 
@@ -7332,19 +7391,26 @@ async def cache_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/store", response_class=HTMLResponse)
-async def store_page(request: Request) -> HTMLResponse:
+async def store_page(request: Request, saved: str = "") -> HTMLResponse:
     """Skill Store: browse + install catalog skills without a terminal."""
     from maverick.catalog import load_catalog
+
+    from .store_catalogs import current_catalogs
 
     try:
         entries = [e.to_dict() for e in load_catalog("skills")]
     except Exception:
         entries = []
     installed = {s.name for s in _load_skills()}
+    catalogs, catalogs_default = current_catalogs()
     return templates.TemplateResponse(
         request,
         "store.html",
-        {"entries": entries, "installed": installed},
+        {"entries": entries, "installed": installed,
+         "is_admin": has_permission(request, "admin"),
+         "catalog_admin": has_global_permission(request, "admin"),
+         "install_allowed": os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"},
+         "catalogs": catalogs, "catalogs_default": catalogs_default, "saved": saved},
     )
 
 
@@ -7478,15 +7544,32 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
             status_code=503,
             detail="channel inventory is unavailable",
         ) from exc
-    saved_msg = {"save": "Channel updated.", "clear": "Channel reset."}.get(saved, "")
+    saved_msg = {
+        "save": "Chat app saved.",
+        "clear": "Saved settings removed.",
+        "tested": "Connection test passed.",
+        "test_failed": "The connection test failed. Check the details and try again.",
+        "sent": "Test message sent. Check that it arrived.",
+        "send_failed": "The test message could not be sent. Check the details and try again.",
+    }.get(saved, "")
+    from . import plain_labels
+    for channel in managed:
+        for field in channel["fields"]:
+            label, help_text, advanced = plain_labels.CHANNEL_FIELDS.get(
+                (channel["name"], field["key"]), (field["label"], "", False))
+            field.update(label=label, help=help_text, advanced=advanced)
+        channel["help_link"] = plain_labels.CHANNEL_HELP_LINKS.get(channel["name"], "")
+    managed_names = {channel["name"] for channel in managed}
     return templates.TemplateResponse(
         request,
         "channels.html",
         {
             "channels": channels,
-            "channel_inventory": channel_inventory,
+            "channel_inventory": [row for row in channel_inventory if row["name"] not in managed_names],
             "managed": managed,
             "saved": saved_msg,
+            "saved_failed": saved in {"test_failed", "send_failed"},
+            "sendable": ["email", "sms", "slack"],
         },
     )
 
@@ -10771,7 +10854,26 @@ async def connections_page(request: Request) -> HTMLResponse:
     """Manage named SaaS connections (base URL + sealed token) so connectors can
     be wired without env vars. CRUD + reachability test go through
     /api/v1/connections; the feature gate is enforced there."""
-    return templates.TemplateResponse(request, "connections.html", {})
+    try:
+        from maverick import connections as _connections
+        enabled = bool(_connections.enabled())
+    except Exception:  # pragma: no cover -- the API still enforces the gate
+        enabled = True
+    people: list[dict] = []
+    if has_global_permission(request, "admin") or has_permission(request, "admin"):
+        # Choices for "Also allow these people"; the grant itself is still
+        # validated by the connections API.
+        try:
+            from . import invites, rbac
+            from .admin_pages import _invite_labels, _people, _signed_in_principals
+            labels = _invite_labels(invites.list_invites())
+            people = _people(rbac.list_users(), labels, _signed_in_principals())
+        except Exception:
+            people = []
+    return templates.TemplateResponse(request, "connections.html", {
+        "connections_enabled": enabled,
+        "people": people,
+    })
 
 
 @app.get(
@@ -10959,6 +11061,7 @@ def walkthroughs_page(request: Request) -> HTMLResponse:
             captions = p.with_suffix(".vtt")
             items.append(
                 {
+                    "title": getattr(g, "title", "") or "",
                     "name": p.name,
                     "size_mb": round(p.stat().st_size / 1_048_576, 2),
                     "mtime": p.stat().st_mtime,
@@ -10968,10 +11071,18 @@ def walkthroughs_page(request: Request) -> HTMLResponse:
             )
     # NB: not named "dir" — the context processor injects the page's text
     # direction under that key (RTL support) and would shadow it.
+    # Recent runs the caller can open, for the "make a video" picker (the
+    # export API still checks access on the chosen run).
+    runs = [
+        {"id": g.id, "title": g.title or "Untitled task", "status": g.status,
+         "has_video": any(it["goal_id"] == g.id for it in items)}
+        for g in _world().list_goals(owner=goal_owner_filter(request), limit=100, order="desc")
+        if g.status not in {"pending", "running"}
+    ]
     return templates.TemplateResponse(
         request,
         "walkthroughs.html",
-        {"items": items, "artifact_dir": str(d)},
+        {"items": items, "runs": runs},
     )
 
 

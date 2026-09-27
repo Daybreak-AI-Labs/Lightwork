@@ -126,7 +126,7 @@ def test_store_page_renders_entries(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert "summarize-url" in r.text
     assert "Summarise any URL" in r.text
-    assert "Install" in r.text
+    assert ">Add</button>" in r.text
     # (Store is folded out of the sidebar in the moderate declutter; still
     # reachable at /store and rendered above.)
 
@@ -139,4 +139,4 @@ def test_store_page_empty_state(monkeypatch, tmp_path):
     client = _client()
     r = client.get("/store")
     assert r.status_code == 200
-    assert "No catalog entries" in r.text
+    assert "No skills to show" in r.text

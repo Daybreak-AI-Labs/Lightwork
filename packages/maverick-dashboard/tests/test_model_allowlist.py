@@ -81,7 +81,7 @@ def test_post_allowlist_restricts_pickers(monkeypatch, tmp_path):
     assert allowed_models() == {_SONNET, _OPUS}
     page = c.get("/settings").text
     # the default picker now offers only the two approved models, not the rest
-    assert 'allow-list is active' in page
+    assert 'Only approved models are offered' in page
     picker = page.split('name="model"', 1)[1].split("</select>", 1)[0]
     assert "openai:gpt-5.4" not in picker and _SONNET in picker and _OPUS in picker
     # and the approved boxes render checked

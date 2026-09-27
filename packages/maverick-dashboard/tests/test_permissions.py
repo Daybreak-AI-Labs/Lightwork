@@ -218,7 +218,7 @@ def test_permissions_page_shows_disable_buttons(monkeypatch, tmp_path):
     client = _client()
     r = client.get("/permissions")
     assert "perm-toggle" in r.text
-    assert "Add dashboard block" in r.text
+    assert ">Block</button>" in r.text
 
 
 def test_permissions_catalog_is_filtered_and_paginated_server_side(monkeypatch, tmp_path):

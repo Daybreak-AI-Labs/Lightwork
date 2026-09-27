@@ -46,20 +46,21 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "permissions.html",
             (
-                'aria-label="Add dashboard block for {{ t.name }} tool"',
-                'aria-label="Clear dashboard block for {{ t.name }} tool"',
+                'aria-label="Block the {{ t.name | humanize }} tool"',
+                'aria-label="Allow the {{ t.name | humanize }} tool"',
                 "btn.setAttribute('aria-label'",
             ),
         ),
         (
             "plugins.html",
             (
-                'aria-label="Disable {{ p.name }} plugin"',
-                'aria-label="Enable {{ p.name }} plugin"',
-                'aria-label="Reset {{ p.name }} plugin"',
+                'aria-label="Turn off {{ pname }}"',
+                'aria-label="Turn on {{ pname }}"',
+                'aria-label="Use your organization\'s default for {{ pname }}"',
+                'aria-label="Install {{ plabel }}"',
             ),
         ),
-        ("mcp.html", ('aria-label="Remove {{ s.name }} MCP server"',)),
+        ("mcp.html", ('aria-label="Test {{ label }}"', 'aria-label="Remove {{ label }}"')),
         (
             "trust.html",
             (
@@ -71,11 +72,12 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "users.html",
             (
-                'aria-label="Delete {{ name }} role"',
-                'aria-label="Save role for {{ principal | identity }}"',
-                'aria-label="Remove {{ principal | identity }} user assignment"',
-                'aria-label="Save department access for {{ principal | identity }}"',
-                'aria-label="Remove department override for {{ principal | identity }}"',
+                'aria-label="Delete the {{ name | role_label }} role"',
+                'aria-label="Save role for {{ name_of(principal) }}"',
+                'aria-label="Remove {{ name_of(principal) }}\'s role"',
+                'aria-label="Save departments for {{ name_of(principal) }}"',
+                'aria-label="Use standard departments for {{ name_of(principal) }}"',
+                'aria-label="Cancel the invitation for {{ inv.email }}"',
             ),
         ),
         (

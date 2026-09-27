@@ -29,7 +29,7 @@ def test_initial_settings_create_once_and_preserve_private_configuration(client,
 
     page = client.get("/start")
     assert page.status_code == 200
-    assert "Initial settings add no per-task spending or time limits" in page.text
+    assert "There is no spending or time limit for each task yet" in page.text
     assert "$1 limit" not in page.text
     with ThreadPoolExecutor(max_workers=2) as workers:
         responses = list(workers.map(lambda _: client.post("/api/v1/setup/initialize", json={"confirm": True}), range(2)))

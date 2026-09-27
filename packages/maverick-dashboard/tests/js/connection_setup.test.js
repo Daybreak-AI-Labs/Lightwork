@@ -59,7 +59,7 @@ test('customer connection setup uses the installed registration and cannot open 
 test('saved connection shows provider account, Lightwork owner, workspace and scope status',async t=>{
   const connection={name:'jira-production',revision:'e'.repeat(32),owner:'user:owner@example.test',oauth:{profile:'jira-cloud',renewal_state:'ready',site_url:'https://customer.atlassian.net',identity:{provider:'atlassian',subject:'account-42',display_name:'Alex Reviewer',email:'alex@example.test',account_status:'active'},workspace:{provider_id:'f13718a7-c4a3-49ac-8db9-20f1da1a3af9',name:'Customer Jira',url:'https://customer.atlassian.net'},requested_scopes:['read:me','read:jira-work','write:jira-work','offline_access'],granted_scopes:['read:me','read:jira-work','write:jira-work','offline_access'],scope_status:'token_response'}};
   const h=await fixture(t,{data:overview({connections:[connection]})});const text=h.el('connections').textContent;
-  assert.match(text,/Connected as Alex Reviewer · alex@example.test/);assert.match(text,/Lightwork owner: user:owner@example.test/);assert.match(text,/Provider workspace: Customer Jira/);assert.match(text,/Provider-reported access:.*read:jira-work/);assert.equal(h.el('connections').querySelector('details')!==null,true);
+  assert.match(text,/Connected as Alex Reviewer · alex@example.test/);assert.match(text,/Set up by: owner@example.test/);assert.doesNotMatch(text,/user:owner/);assert.match(text,/Provider workspace: Customer Jira/);assert.match(text,/Access the provider gave:.*Read Jira issues and projects/);assert.equal(h.el('connections').querySelector('details')!==null,true);
 });
 
 const nativeCallback='http://127.0.0.1:8766/connections',nativeHandle='d'.repeat(64);

@@ -10,7 +10,7 @@ templates.
 from __future__ import annotations
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
@@ -108,18 +108,23 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     from maverick_dashboard import model_pickers
     pickers = model_pickers.build(cfg_state["providers"], allow)
     groups_by_name = {g["name"]: g for g in pickers["model_groups"]}
+    from maverick_dashboard import plain_labels
     for provider in cfg_state["providers"]:
         provider["discovery"] = groups_by_name.get(provider["name"])
+        provider["key_help"] = plain_labels.PROVIDER_KEY_HELP.get(provider["name"], "")
+    for feature in cfg_state["features"]:
+        feature["info"] = plain_labels.feature_help(feature["name"], feature.get("info") or "")
     saved_msg = {
         "appearance": "Appearance updated.",
         "models": "Default model updated.",
-        "roles": "Per-role models updated.",
-        "budget": "Spend cap updated.",
-        "allowed": "Allowed models updated.",
-        "discover": "Model lists refreshed from the provider keys.",
+        "roles": "Role models updated.",
+        "budget": "Task spending limit updated.",
+        "allowed": "Approved models updated.",
+        "discover": "Model lists refreshed from your provider keys.",
         "providers": "Provider keys updated.",
-        "provider_test": "Provider readiness check finished.",
-        "webhooks": "Webhook signing secret updated.",
+        "provider_test": "Connection test finished. The result is shown next to the provider.",
+        "webhooks": "Secret for other apps updated.",
+        "discovery": "Automatic model lists updated.",
         "capabilities": "Capabilities updated.",
         "features": "Features updated.",
         "visibility": "Page visibility updated.",
@@ -132,6 +137,7 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "roles": "models",
         "allowed": "models",
         "discover": "models",
+        "discovery": "models",
         "providers": "integrations",
         "provider_test": "integrations",
         "webhooks": "integrations",
@@ -158,6 +164,8 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "task_limits_enabled": (task_limits_override() if task_limits_override() is not None
                                 else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
         "webhook_configured": _webhook_secret_configured(),
+        "webhook_locked": _webhook_secret_locked(),
+        "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
         "saved": saved_msg,
         "saved_section": saved_section,
     })
@@ -209,7 +217,9 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
             set_task_limits(False)
         elif mode == "configured" and val:
             set_budget(float(val))
-        elif mode == "configured":
+        elif mode in ("configured", "default"):
+            # "default" is the page's "use your installation's standard
+            # limits" choice: drop the Settings amount, keep limits on.
             clear_budget()
             set_task_limits(True)
         else:
@@ -297,6 +307,15 @@ def _webhook_secret_configured() -> bool:
         return False
 
 
+def _webhook_secret_locked() -> bool:
+    """True when an environment-provided secret outranks the Settings value."""
+    try:
+        from maverick.secret_provider import get_secret
+        return bool(get_secret("MAVERICK_WEBHOOK_SECRET"))
+    except Exception:  # pragma: no cover -- never break the settings page
+        return False
+
+
 @router.post("/settings/webhooks")
 def settings_set_webhooks(
     request: Request,
@@ -312,6 +331,58 @@ def settings_set_webhooks(
     from maverick_dashboard import settings_store
     settings_store.set_webhooks_secret(secret)
     return RedirectResponse("/settings?saved=webhooks", status_code=303)
+
+
+@router.post("/settings/webhooks/generate")
+def settings_generate_webhook_secret(request: Request) -> JSONResponse:
+    """Make, save and return a new random signing secret (admin).
+
+    The value is shown once to the administrator who asked for it so they can
+    copy it into the sending app; it is sealed at rest and never displayed
+    again. Refused when an environment-provided secret would outrank it."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    import secrets as _secrets
+
+    from maverick.secret_provider import get_secret
+
+    from maverick_dashboard import settings_store
+    if get_secret("MAVERICK_WEBHOOK_SECRET"):
+        raise HTTPException(
+            status_code=409,
+            detail="The signing secret is set on the computer running Lightwork, so it can't be changed here.",
+        )
+    value = _secrets.token_urlsafe(32)
+    settings_store.set_webhooks_secret(value)
+    return JSONResponse({"secret": value}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/settings/models/discovery")
+def settings_set_model_discovery(request: Request, enabled: str = Form("on")) -> RedirectResponse:
+    """Turn automatic model lists on or off from the Models section (admin)."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    import os as _os
+
+    from maverick_dashboard import settings_store
+    if _os.environ.get("MAVERICK_MODEL_DISCOVERY", "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="Automatic model lists are controlled by your installation, so this can't be changed here.",
+        )
+    try:
+        settings_store.set_model_discovery(enabled == "on")
+    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Settings are unavailable. Retry after storage is restored.",
+        ) from exc
+    try:
+        from maverick import config as _config
+        _config.reset_config_cache()
+    except Exception:  # pragma: no cover -- cache reset is best effort
+        pass
+    return RedirectResponse("/settings?saved=discovery", status_code=303)
 
 
 @router.post("/settings/providers")
@@ -367,7 +438,7 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
 
 @router.post("/settings/providers/test")
 async def settings_test_provider(
-    request: Request, provider: str = Form(...)
+    request: Request, provider: str = Form(...), next: str = Form("")
 ) -> RedirectResponse:
     """Run a bounded live provider probe and bind its receipt to this config."""
     _app()._require_same_origin(request)
@@ -385,6 +456,8 @@ async def settings_test_provider(
         raise HTTPException(status_code=409, detail="provider is not configured")
     await run_in_threadpool(test_provider, name)
     await run_in_threadpool(_refresh_models_quietly, name)
+    if next == "providers":  # the Providers page's own Test connection button
+        return RedirectResponse("/providers?tested=1", status_code=303)
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 
@@ -495,6 +568,43 @@ def _workspace_options(request: Request) -> tuple[list[dict], str]:
     return options, start
 
 
+def _signed_in_principals(limit: int = 200) -> list[str]:
+    """People who have signed in with company sign-in, most recent first."""
+    try:
+        from . import subject_directory
+        index = subject_directory.load_index()
+    except Exception:
+        return []
+    latest: dict[str, float] = {}
+    for entry in index.values():
+        sub = str(entry.get("sub") or "").strip()
+        if sub:
+            latest[sub] = max(latest.get(sub, 0.0), float(entry.get("ts") or 0.0))
+    ordered = sorted(latest, key=lambda sub: latest[sub], reverse=True)[:limit]
+    return [sub if sub.startswith("user:") else f"user:{sub}" for sub in ordered]
+
+
+def _people(users: dict, labels: dict, extra) -> list[dict]:
+    """Everyone the roster knows about, as choices for the people pickers.
+
+    Sources: explicit role holders, accepted invites, department grants,
+    installation administrators and people who have signed in. Each entry
+    carries a readable label; the exact sign-in identity is only the value."""
+    from .identity_format import humanize_principal
+    seen: dict[str, dict] = {}
+    for principal in [*users, *labels, *extra]:
+        principal = str(principal or "").strip()
+        if not principal.startswith("user:") or principal in seen:
+            continue
+        ident = humanize_principal(principal)
+        name = labels.get(principal) or ident.name
+        detail = "" if labels.get(principal) else ident.detail
+        seen[principal] = {"principal": principal,
+                           "label": f"{name} ({detail})" if detail and detail != "Email" else name,
+                           "role": users.get(principal)}
+    return sorted(seen.values(), key=lambda p: p["label"].lower())
+
+
 def _users_context(request: Request) -> dict:
     """Template context for the /users page (shared with the invite handler)."""
     import os as _os
@@ -536,8 +646,21 @@ def _users_context(request: Request) -> dict:
     except Exception:
         all_invites = []
     workspace_options, wm_tenant = _workspace_options(request)
+    role_map = rbac.list_users()
+    labels = _invite_labels(all_invites)
+    grants = suite_grants.list_grants()
+    people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
+    from .identity_format import role_label
+    defaults = set(default_suites) if default_suites is not None else None
     return {
-        "users": sorted(rbac.list_users().items()),
+        "people": people,
+        "people_labels": {p["principal"]: p["label"] for p in people},
+        "role_labels": {r: role_label(r) for r in rbac.known_roles()},
+        "grant_can_use_default": {
+            principal: defaults is not None and defaults.issubset(set(suites))
+            for principal, suites in grants.items()
+        },
+        "users": sorted(role_map.items()),
         "roles": rbac.known_roles(),
         "builtin_roles": rbac.ROLES,
         "custom_roles": custom_roles,
@@ -547,7 +670,7 @@ def _users_context(request: Request) -> dict:
         "auth_on": auth_on,
         "you": auth.caller_principal(request),
         "saved": saved,
-        "suite_grants": sorted(suite_grants.list_grants().items()),
+        "suite_grants": sorted(grants.items()),
         "all_suites": sorted(((k, department_title(k))
                               for k in suite_grants.known_suites()),
                              key=lambda kv: kv[1]),
@@ -555,7 +678,7 @@ def _users_context(request: Request) -> dict:
                            if default_suites is not None else None),
         "invites_on": invites.invites_enabled(),
         "pending_invites": [i for i in all_invites if i.pending],
-        "invite_labels": _invite_labels(all_invites),
+        "invite_labels": labels,
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
     }
@@ -617,9 +740,17 @@ def users_save_custom_role(
     from . import rbac
     atoms = {str(p).strip() for p in permissions if str(p).strip()}
     atoms.add("view")
+    # People type a role name ("Privacy officer"); the stored key is derived
+    # from it (privacy-officer), so saving the same name again updates it.
+    from .plain_labels import slugify
+    key = slugify(name, max_len=32)
+    if key and not key[0].isalpha():
+        key = ("role-" + key)[:32]
+    if len(key) < 2:
+        raise HTTPException(status_code=400, detail="Give the role a name of at least two letters.")
     try:
         rbac.set_custom_role(
-            name.strip(),
+            key,
             sorted(atoms),
             description.strip(),
             actor=auth.caller_principal(request) or "local",

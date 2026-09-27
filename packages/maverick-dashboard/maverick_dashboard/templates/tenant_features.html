@@ -1,90 +1,68 @@
 {% extends "base.html" %}
-{% block title %}Features · {{ tenant.id }} · Lightwork{% endblock %}
+{% set tenant_name = tenant.display_name or (tenant.id | humanize) %}
+{% block title %}Features · {{ tenant_name }} · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% call hero('Administration', 'Feature overrides',
-               subtitle=tenant.display_name or tenant.id,
-               lede='Turn individual capabilities on or off for this workspace,
-                     on top of what its plan already grants. A checked box means
-                     the workspace has that capability. Boxes that match the plan
-                     need no override; the ones you change are stored as
-                     per-workspace overrides.') %}
+  {% call hero('Administration', 'Workspace features',
+               subtitle=tenant_name,
+               lede='Turn features on or off for this workspace. Features included
+                     in its plan are ticked to start with.') %}
     {{ state('Current state',
-             on_count ~ ' feature' ~ ('' if on_count == 1 else 's') ~ ' enabled',
-             badge=tenant.plan ~ ' plan',
+             on_count ~ ' feature' ~ ('' if on_count == 1 else 's') ~ ' on',
+             badge=(tenant.plan | capitalize) ~ ' plan',
              badge_class='ok',
-             copy='Plan (tier) sets the baseline; overrides are the exceptions
-                   you make for this one workspace. Removing a plan feature or
-                   granting one the plan lacks both persist here until changed.') }}
+             copy='The plan sets what is included. Anything you change here
+                   applies to this workspace only, until you change it back.') }}
   {% endcall %}
 
-  <div class="panel" style="margin-bottom: var(--space-3);">
-    <p class="muted" style="margin: 0;">
-      Workspace <code>{{ tenant.id }}</code> is on the <strong>{{ tenant.plan }}</strong>
-      plan. <a href="/tenants">Back to the roster</a>.
-    </p>
-  </div>
+  <p><a class="btn btn--ghost" href="/tenants">Back to workspaces</a></p>
 
-  {% if is_admin %}
+  {% macro feature_box(r) %}
+    <label class="tf-row">
+      <input type="checkbox" name="feature" value="{{ r.feature }}"
+             data-feature="{{ r.feature }}" data-in-plan="{{ '1' if r.in_plan else '0' }}"
+             {% if r.on %}checked{% endif %}>
+      <span>
+        {{ r.label }}
+        {% if r.source == 'plan' %}<span class="badge ok">In plan</span>
+        {% elif r.source == 'added' %}<span class="badge active">Added for this workspace</span>
+        {% elif r.source == 'removed' %}<span class="badge warn">Turned off for this workspace</span>{% endif %}
+      </span>
+    </label>
+  {% endmacro %}
+
   <form id="features-form" data-tenant-id="{{ tenant.id }}">
-    <div class="section-head"><h2>Capabilities</h2></div>
+    <div class="section-head"><h2>Features</h2></div>
     <div class="panel">
-      <fieldset style="border: 0; padding: 0; margin: 0;">
-        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-2);">
-          Cross-cutting features. A checked box is on for this workspace.</legend>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-2);">
-          {% for r in caps %}
-          <label style="display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-1) 0;">
-            <input type="checkbox" name="feature" value="{{ r.feature }}"
-                   data-feature="{{ r.feature }}" data-in-plan="{{ '1' if r.in_plan else '0' }}"
-                   {% if r.on %}checked{% endif %}>
-            <span>
-              {{ r.label }}
-              {% if r.source == 'plan' %}<span class="badge ok">plan</span>
-              {% elif r.source == 'added' %}<span class="badge active">override on</span>
-              {% elif r.source == 'removed' %}<span class="badge warn">override off</span>{% endif %}
-              <br><code class="muted" style="font-size: var(--text-sm);">{{ r.feature }}</code>
-            </span>
-          </label>
-          {% endfor %}
-        </div>
+      <fieldset class="tf-group">
+        <legend class="muted">A ticked box is on for this workspace.</legend>
+        <div class="tf-grid">{% for r in caps %}{{ feature_box(r) }}{% endfor %}</div>
       </fieldset>
     </div>
 
     {% if depts %}
     <div class="section-head"><h2>Departments</h2></div>
     <div class="panel">
-      <fieldset style="border: 0; padding: 0; margin: 0;">
-        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-2);">
-          Per-department access (<code>department:&lt;suite&gt;</code>). A checked box
-          lets this workspace deploy that department.</legend>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: var(--space-1);">
-          {% for r in depts %}
-          <label style="display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-1) 0;">
-            <input type="checkbox" name="feature" value="{{ r.feature }}"
-                   data-feature="{{ r.feature }}" data-in-plan="{{ '1' if r.in_plan else '0' }}"
-                   {% if r.on %}checked{% endif %}>
-            <span>
-              {{ r.label }}
-              {% if r.source == 'plan' %}<span class="badge ok">plan</span>
-              {% elif r.source == 'added' %}<span class="badge active">override on</span>
-              {% elif r.source == 'removed' %}<span class="badge warn">override off</span>{% endif %}
-              <br><code class="muted" style="font-size: var(--text-sm);">{{ r.feature }}</code>
-            </span>
-          </label>
-          {% endfor %}
-        </div>
+      <fieldset class="tf-group">
+        <legend class="muted">Choose which departments this workspace can use.</legend>
+        <div class="tf-grid">{% for r in depts %}{{ feature_box(r) }}{% endfor %}</div>
       </fieldset>
     </div>
     {% endif %}
 
-    <div class="panel" style="margin-top: var(--space-3); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;">
+    <div class="panel tf-actions">
       <button type="submit" class="btn btn--primary">Save features</button>
-      <p id="features-msg" role="status" aria-live="polite" class="muted"
-         style="font-size: var(--text-sm); margin: 0;"></p>
+      <p id="features-msg" role="status" aria-live="polite" class="muted"></p>
     </div>
   </form>
-
+  <style>
+    .tf-group { border: 0; padding: 0; margin: 0; }
+    .tf-group legend { font-size: var(--text-sm); padding: 0 0 var(--space-2); }
+    .tf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--space-2); }
+    .tf-row { display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-1) 0; }
+    .tf-actions { margin-top: var(--space-3); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+    .tf-actions p { font-size: var(--text-sm); margin: 0; }
+  </style>
   <script>
   (function () {
     var form = document.getElementById('features-form');
@@ -106,20 +84,14 @@
           body: JSON.stringify({ add: add, remove: remove }),
         });
         if (!r.ok) {
-          var j = await r.json().catch(function () { return {}; });
-          msg.textContent = j.detail || ('That did not work (error ' + r.status + ').');
+          msg.textContent = r.status === 403 ? 'Only administrators can change workspace features.'
+                                             : window.mvErrorText(r, 'save the features');
           return;
         }
         msg.textContent = 'Saved.';
         setTimeout(function () { window.location.reload(); }, 350);
-      } catch (e) { msg.textContent = 'Connection lost — is the dashboard still running?'; }
+      } catch (e) { msg.textContent = window.mvErrorText(e, 'save the features'); }
     });
   })();
   </script>
-  {% else %}
-  <div class="panel">
-    <p class="muted" style="margin: 0;">Operator (admin) access is required to
-      manage workspace features.</p>
-  </div>
-  {% endif %}
 {% endblock %}

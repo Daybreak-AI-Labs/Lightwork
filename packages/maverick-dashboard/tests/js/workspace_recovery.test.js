@@ -37,13 +37,22 @@ test('channel recovery sends exact structured readback with current administrato
   const h = await harness(async url => url.endsWith('/reconciliation') ? reconciliationReport([item]) : {}, {
     recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
   });
-  const textarea = h.get('reconciliation-items').querySelector('textarea');
-  assert.deepEqual(JSON.parse(textarea.value), template);
-  assert.equal(h.get('reconciliation-items').querySelector('input[type="text"]'), null);
-  const readback = { ...template, observed_at: Date.now() / 1000, evidence_reference: 'provider-audit-123',
+  const items = h.get('reconciliation-items');
+  // A guided form, never a raw JSON box.
+  assert.equal(items.querySelector('textarea'), null);
+  const [when] = items.querySelectorAll('input[type="datetime-local"]');
+  const proof = items.querySelector('input[type="text"]');
+  const [run, sent] = items.querySelectorAll('select');
+  assert.ok(when.value, 'the check time defaults to now');
+  const confirmButton = [...items.querySelectorAll('button')].find(b => /Confirm what I found/.test(b.textContent));
+  // Incomplete answers are refused before anything is sent.
+  confirmButton.click(); await tick(); await tick();
+  assert.equal(h.calls.some(row => row.url.includes('/reconciliation/items/')), false);
+  const observed = new Date(when.value).getTime() / 1000;
+  proof.value = 'provider-audit-123'; run.value = 'recorded'; sent.value = 'absent';
+  const readback = { ...template, observed_at: observed, evidence_reference: 'provider-audit-123',
     outcome: 'confirmed', execution: 'recorded', delivery: 'absent' };
-  textarea.value = JSON.stringify(readback);
-  h.get('reconciliation-items').querySelector('button').click(); await tick(); await tick();
+  confirmButton.click(); await tick(); await tick();
   const call = h.calls.find(row => row.url.includes('/reconciliation/items/'));
   assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'channel_readback_confirmed', channel_readback: readback });
   assert.equal(call.init.headers['X-Lightwork-Recovery-Context'], 'account-context');
@@ -481,7 +490,7 @@ test('oversized custody uploads and programmatic unconfirmed clicks never inspec
   chooseCustody(h, 4 * 1024 * 1024 + 1); confirmCustody(h);
   h.get('custody-test').click(); await settleCustody();
   assert.equal(h.calls.some(call => /inspect|custody-test/.test(call.url)), false);
-  assert.equal(h.get('custody-file').value, ''); assert.match(h.get('status').textContent, /4 MiB/);
+  assert.equal(h.get('custody-file').value, ''); assert.match(h.get('status').textContent, /4 MB/);
   h.dom.window.close();
 });
 
@@ -621,7 +630,7 @@ test('oversized bridge is not uploaded and a changed file cannot use a late tran
   const h = await harness(async url => url.endsWith('/identity-transition') ? new Promise(resolve => { complete = resolve; }) : {});
   chooseTransition(h, 65537); h.get('installation-transition-review').click(); await settleCustody();
   assert.equal(h.calls.some(call => call.url.endsWith('/identity-transition')), false);
-  assert.match(h.get('status').textContent, /64 KiB/);
+  assert.match(h.get('status').textContent, /64 KB/);
   chooseTransition(h); h.get('installation-transition-review').click(); await settleCustody();
   chooseTransition(h); complete(transitionSummary()); await settleCustody();
   assert.equal(h.get('installation-transition-details').textContent, '');
@@ -784,7 +793,7 @@ test('restored work renders as text and records each disposition without complet
   assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'retire_and_create_new_request', evidence_reference: null });
   const evidence = h.get('reconciliation-items').querySelector('input[type="text"]');
   evidence.value = 'ticket-12345';
-  const record = [...h.get('reconciliation-items').querySelectorAll('button')].find(button => /Record the existing external effect/.test(button.textContent));
+  const record = [...h.get('reconciliation-items').querySelectorAll('button')].find(button => /It did happen: record it/.test(button.textContent));
   record.click(); await tick(); await tick();
   call = h.calls.find(row => row.url.endsWith('/' + '2'.repeat(32)));
   assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'external_effect_recorded', evidence_reference: 'ticket-12345' });
@@ -838,4 +847,32 @@ for (const status of [401, 403]) test(`HTML ${status} clears reconciliation evid
   assert.equal(evidence.value, '');
   for (const button of h.dom.window.document.querySelectorAll('#workspace-recovery button')) assert.equal(button.disabled, true);
   h.dom.window.close();
+});
+
+test('held reading positions are recorded with plain fields and exact checkpoint shapes', async () => {
+  const base = { schema: 1, record_id: 'cur-1', source_sha256: 'b'.repeat(64), binding_sha256: 'c'.repeat(64),
+    observed_at: null, evidence_reference: '', outcome: 'unknown' };
+  const cases = [
+    [{ ...base, namespace: 'imessage-intake-cursors', checkpoint: { last_rowid: null } }, (items) => { items.querySelector('input[type="number"]').value = '42'; }, { last_rowid: 42 }],
+    [{ ...base, namespace: 'channel-delivery-cursors', checkpoint: { cursor: '' } }, () => {}, { cursor: '' }],
+    [{ ...base, namespace: 'channel-intake-cursors', checkpoint: { watermark: '' } }, (items) => { items.querySelectorAll('input[type="text"]')[1].value = '1234'; }, { watermark: '1234' }],
+  ];
+  for (const [template, fill, checkpoint] of cases) {
+    const item = reconciliationItem({ category: 'channel_authority', safe_state: 'channel_restore_held',
+      requires_external_readback: true, readback_template: template });
+    const h = await harness(async url => url.endsWith('/reconciliation') ? reconciliationReport([item]) : {}, {
+      recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+    });
+    const items = h.get('reconciliation-items');
+    assert.equal(items.querySelector('textarea'), null);
+    items.querySelector('input[type="text"]').value = 'service-log-2024';
+    fill(items);
+    [...items.querySelectorAll('button')].find(b => /Confirm what I found/.test(b.textContent)).click(); await tick(); await tick();
+    const call = h.calls.find(row => row.url.includes('/reconciliation/items/'));
+    const body = JSON.parse(call.init.body).channel_readback;
+    assert.deepEqual(body.checkpoint, checkpoint);
+    assert.equal(body.outcome, 'confirmed'); assert.equal(body.evidence_reference, 'service-log-2024');
+    assert.equal(typeof body.observed_at, 'number');
+    h.dom.window.close();
+  }
 });
