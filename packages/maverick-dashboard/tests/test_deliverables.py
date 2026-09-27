@@ -146,7 +146,7 @@ class TestDeliverablesPage:
         # a role nobody consumes -> empty state, not a 500
         r = client.get("/deliverables?role=nobody_consumes_this")
         assert r.status_code == 200
-        assert "No deliverables for nobody_consumes_this" in r.text
+        assert "No results for Nobody consumes this" in r.text
         # the real consumer keeps the forecast visible
         assert "13-week cash forecast" in client.get("/deliverables?role=fpa_analyst").text
 
@@ -164,3 +164,13 @@ class TestDeliverablesPage:
         # ?role=all widens back to everything
         t_all = client.get("/deliverables?role=all").text
         assert "13-week cash forecast" in t_all
+
+
+def test_deliverables_page_shows_plain_role_names(tmp_path, monkeypatch):
+    """Role keys stay in the link and picker values; people read names."""
+    TestDeliverablesPage()._world(tmp_path, monkeypatch)
+    r = client.get("/deliverables?role=all")
+    assert r.status_code == 200
+    assert 'id="dlv-role-pick"' in r.text
+    assert "<datalist" not in r.text
+    assert "{{" not in r.text and " gate</span>" not in r.text
