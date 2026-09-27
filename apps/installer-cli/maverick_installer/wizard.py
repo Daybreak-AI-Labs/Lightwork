@@ -4002,6 +4002,26 @@ def _ask_self_harness_evaluation_boundary(advanced: dict[str, Any]) -> None:
     )
 
 
+def _pick_codebase(advanced: dict[str, Any]) -> None:
+    """Software development: vault your repositories, let swarms build features."""
+    if not _q_confirm(
+        "  Enable the code vault? Your repositories are held sealed inside Lightwork, "
+        "swarms build features on branches, and nothing merges or pushes without "
+        "your approval (`maverick code`).",
+        default=False,
+    ):
+        return
+    advanced["codebase_enable"] = True
+    protect = _q_select(
+        "    While a swarm works on your code, a call that would send it outside should",
+        choices=["block   - be refused (recommended)",
+                 "approve - wait for a human",
+                 "audit   - be recorded and allowed"],
+        default="block   - be refused (recommended)",
+    )
+    advanced["codebase_protect"] = (str(protect or "").split() or ["block"])[0]
+
+
 def _pick_ifc(advanced: dict[str, Any]) -> None:
     """Information-flow control: what an agent has read decides where it may send."""
     mode = _q_select(
@@ -5123,6 +5143,7 @@ def pick_advanced() -> dict[str, Any]:
     advanced["connector_max_attempts"] = min(5, max(1, _safe_int(
         _q_text("  REST connector read attempts (1-5)", default="3"), default=3)))
     _pick_ifc(advanced)
+    _pick_codebase(advanced)
     _pick_swarm_scale(advanced)
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
@@ -7960,6 +7981,15 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[fleet_memory]")
         lines.append("enable = true")
+    if advanced.get("codebase_enable"):
+        lines.append("")
+        lines.append("[codebase]")
+        lines.append("# Code vault and feature swarms (maverick.codebase): repositories sealed")
+        lines.append("# at rest; changes merge or push only after a human approves.")
+        lines.append("enable = true")
+        protect = advanced.get("codebase_protect", "block")
+        if protect in ("block", "approve", "audit"):
+            lines.append(f'default_protect = "{protect}"')
     if advanced.get("ifc_mode"):
         lines.append("")
         lines.append("[ifc]")

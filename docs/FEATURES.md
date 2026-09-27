@@ -5078,6 +5078,18 @@ tested without spawning py-spy.
   interoperability, subject matching, legal/regulator acceptance or production
   delivery.
 
+## Software development: the code vault
+
+- **Vaulted repositories** (`codebase/vault.py`, `maverick code add|sync|export`):
+  every branch and tag in one sealed git bundle per repository; plaintext only
+  in private, short-lived working copies; credentials named by environment
+  variable, never stored; hardened host git.
+- **Feature swarms** (`codebase/features.py`, `maverick code feature|proposals|
+  show|merge|push`): a governed swarm builds the change on a branch, labelled
+  `code:<repo>` and enforced at the repository's protection mode; the repo's
+  tests run in the sandbox and the independent reviewer reads the diff; the
+  sealed proposal waits for a `codebase_merge` approval before any merge or push.
+
 ## Information-flow control
 
 - **Runtime label tracking** (`ifc.py`, `[ifc]`): a sensitive read labels the

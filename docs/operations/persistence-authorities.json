@@ -177,7 +177,7 @@
   },
   "counts": {
     "governed": 70,
-    "artifact": 47,
+    "artifact": 48,
     "a2a": 4,
     "preferences": 3,
     "learning": 54,
@@ -187,7 +187,7 @@
     "coordinator": 1,
     "audit": 22,
     "transient": 16,
-    "business_records": 11,
+    "business_records": 13,
     "execution": 21,
     "recovery": 9,
     "derived": 14,
@@ -23536,6 +23536,110 @@
           "expression": "data_dir('immune', 'ifc.jsonl')"
         }
       ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/codebase/vault.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/codebase/vault.py",
+      "purpose": "Code vault: each registered repository as one sealed git bundle plus a registry of names, sources and protection modes (never credentials); plaintext only in private, short-lived working copies.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 61,
+          "function": "_root",
+          "kind": "data_dir",
+          "expression": "data_dir('codebase', *parts)"
+        },
+        {
+          "line": 131,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_registry_path(), json.dumps(registry, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 154,
+          "function": "_store_bundle",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_bundle_path(name), _seal(out.read_bytes(), _context(name)))"
+        },
+        {
+          "line": 167,
+          "function": "register",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_registry_path(), strict=True)"
+        },
+        {
+          "line": 195,
+          "function": "update_registry",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_registry_path(), strict=True)"
+        },
+        {
+          "line": 213,
+          "function": "checkout",
+          "kind": "write_bytes",
+          "expression": "bundle.write_bytes(_unseal(_bundle_path(name).read_bytes(), _context(name)))"
+        },
+        {
+          "line": 237,
+          "function": "sync",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_bundle_path(name), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/codebase/features.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/codebase/features.py",
+      "purpose": "Feature-swarm change proposals: sealed diff, test result, independent review and branch bundle per proposal, merged into the vault only after an approved codebase_merge.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 44,
+          "function": "_save",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_proposal_dir(p['repo']) / f\"{p['id']}.json\", vault._seal(body, f\"codebase/{p['repo']}/proposal/{p['id']}\"))"
+        },
+        {
+          "line": 144,
+          "function": "propose",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_proposal_dir(name) / f'{pid}.bundle', vault._seal(bundle, f'codebase/{name}/proposal-bundle/{pid}'))"
+        },
+        {
+          "line": 188,
+          "function": "_fetch_proposal",
+          "kind": "write_bytes",
+          "expression": "b.write_bytes(vault._unseal(raw, f\"codebase/{p['repo']}/proposal-bundle/{p['id']}\"))"
+        },
+        {
+          "line": 200,
+          "function": "merge",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(vault._bundle_path(p['repo']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/cli/_code_groups.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-core/maverick/cli/_code_groups.py",
+      "purpose": "maverick code CLI: renders the codebase kernel; its only direct write is the operator-requested plaintext export.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": []
     }
   ]
 }

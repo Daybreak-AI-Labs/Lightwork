@@ -7443,6 +7443,7 @@ def _soc2_posture_ready(evidence) -> bool:
 from . import (  # noqa: E402,F401
     _a2a_groups,
     _agent_control_plane_groups,
+    _code_groups,
     _codec_groups,
     _compliance_groups,
     _connector_groups,

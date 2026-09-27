@@ -2004,6 +2004,21 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_codebase() -> dict:
+    """Return the ``[codebase]`` section (:mod:`maverick.codebase`).
+
+    ``enable`` turns on the code vault and feature swarms (OFF by default: it
+    stores a company's source). ``default_protect`` is the information-flow
+    mode a newly registered repository enforces on every run over it:
+    ``block`` (default), ``approve`` or ``audit``."""
+    cfg = load_config().get("codebase", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    protect = str(cfg.get("default_protect", "block")).strip().lower()
+    return {"enable": _strict_config_bool(cfg, "enable", False),
+            "default_protect": protect if protect in ("audit", "approve", "block") else "block"}
+
+
 def get_ifc() -> dict:
     """Return the ``[ifc]`` section: runtime information-flow control (:mod:`maverick.ifc`).
 

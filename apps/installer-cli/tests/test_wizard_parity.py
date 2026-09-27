@@ -1308,3 +1308,11 @@ def test_write_config_emits_ifc_mode_only_when_changed(tmp_path: Path, monkeypat
     assert parsed["ifc"] == {"mode": "block"}
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
     assert "ifc" not in parsed
+
+
+def test_write_config_emits_codebase_when_enabled(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "codebase_enable": True, "codebase_protect": "approve"})
+    assert parsed["codebase"] == {"enable": True, "default_protect": "approve"}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "codebase" not in parsed

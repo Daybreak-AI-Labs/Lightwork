@@ -130,6 +130,7 @@ nav:
       - Agent threat hunting: threat-hunting.md
       - Adaptive immunity: immune.md
       - Information-flow control: ifc.md
+      - Code vault: codebase.md
   - Enterprise:
       - Editions: enterprise/editions.md
       - Security & compliance overview: enterprise/security-overview.md
