@@ -43,7 +43,7 @@ def test_page_renders_worklist_stats_and_catalog():
     html = resp.text
     # Worklist rows with the risk pair and review triggers.
     assert "Acme CRM" in html and "Globex HRIS" in html
-    assert 'class="pw-review-btn"' in html
+    assert 'class="btn btn--primary pw-review-btn"' in html
     # The shared pop-out is on the page.
     assert 'id="arv-dialog"' in html
     # The catalog lists the PRIVACY frameworks — and only those (the finance
@@ -54,7 +54,7 @@ def test_page_renders_worklist_stats_and_catalog():
     assert "SOX Control Assessment" not in html
     assert "Fraud Risk Assessment" not in html
     # Follow-up state surfaces as awaiting answers.
-    assert "awaiting answers" in html
+    assert "Awaiting answers" in html
 
 
 def test_page_empty_state():
@@ -171,8 +171,8 @@ def test_decide_endpoint_and_review_due_surfacing(monkeypatch):
                              "expected_revision": resp.json()["revision"]}).status_code == 422
 
     html = client.get("/privacy").text
-    assert ">approved</span>" in html
-    assert "re-review in" in html
+    assert ">Approved</span>" in html
+    assert "Re-review in" in html
     assert "Due for re-review (0)" in html
 
     # The cadence elapses: the record surfaces as due.
@@ -271,3 +271,16 @@ def test_program_report_page_and_api():
         assert jargon not in html, jargon
     # The workspace links to it.
     assert 'href="/privacy/report"' in client.get("/privacy").text
+
+
+def test_worklist_and_catalog_read_plainly():
+    from test_support.plain_language import developer_terms
+
+    _seed("Acme CRM", risky=True)
+    html = client.get("/privacy").text
+    worklist = html.split('<div class="section-head"><h2>Worklist</h2></div>', 1)[1].split("<dialog", 1)[0]
+    assert developer_terms("<main>" + worklist + "</main>") == []
+    assert "Questionnaire" in worklist and "Risk before → after safeguards" in worklist
+    assert "window.prompt" not in html and "window.alert" not in html
+    assert "/api/v1/assess/reviewers" in html
+    assert "Type (slug)" not in html and "Publish release" not in html
