@@ -19,7 +19,12 @@ _STOP_ERRORS = CONTROL_ERRORS + (asyncio.CancelledError, KeyboardInterrupt, Syst
 MAX_RESULT_BYTES = 16 * 1024 * 1024
 COPY_CHARS = 64 * 1024
 MAX_WORKERS = 32
+# A named tenant may hold at most this many workers, so a tenant whose tools
+# hang (a worker is only returned when its thread exits) cannot refuse every
+# other tenant's tools. The default single-tenant deployment keeps all of them.
+MAX_WORKERS_PER_TENANT = 24
 _workers: set = set()
+_worker_tenant: dict = {}
 _workers_lock = threading.Lock()
 _cleanup_tasks: set = set()
 _invocations: set = set()
@@ -123,22 +128,34 @@ def pending_tool_invocations() -> int:
 async def _owned_thread(fn, stop: threading.Event):
     started = threading.Event()
     handle = object()
+    try:
+        from .paths import current_tenant_id
+        tenant = current_tenant_id() or ""
+    except Exception:  # noqa: BLE001 -- unknown tenant: count it on its own
+        tenant = "?"
     with _workers_lock:
         if len(_workers) >= MAX_WORKERS:
             raise ToolWorkerCapacity("tool worker capacity exhausted; no tool was dispatched")
+        if tenant and sum(1 for t in _worker_tenant.values() if t == tenant) >= MAX_WORKERS_PER_TENANT:
+            raise ToolWorkerCapacity("this tenant's tool worker share is exhausted; no tool was dispatched")
         _workers.add(handle)
+        _worker_tenant[handle] = tenant
+
+    def release():
+        _workers.discard(handle)
+        _worker_tenant.pop(handle, None)
 
     def execute():
         with _workers_lock:
             if stop.is_set():
-                _workers.discard(handle)
+                release()
                 return None
             started.set()
         try:
             return fn()
         finally:
             with _workers_lock:
-                _workers.discard(handle)
+                release()
 
     task = asyncio.create_task(asyncio.to_thread(execute))
 
@@ -151,7 +168,7 @@ async def _owned_thread(fn, stop: threading.Event):
             pass
         with _workers_lock:
             if not started.is_set():
-                _workers.discard(handle)
+                release()
 
     task.add_done_callback(observe)
     try:

@@ -411,3 +411,41 @@ async def test_shutdown_joins_stalled_capacity_rejection_and_active_owner(monkey
             finally:
                 writer.close()
                 await writer.wait_closed()
+
+
+@pytest.mark.parametrize("target", ["//evil/v1/messages", "//../v1/messages", "/v1/../v1/messages",
+                                    "/v1/%2e%2e/messages", "/v1\\messages"])
+def test_only_origin_form_paths_reach_an_allowed_route(target):
+    from maverick.model_proxy import route_allowed
+    config = ProxyConfig(upstream="https://fixture.invalid/tenant-a/api", api_key="k",
+                         client_token="c")  # pragma: allowlist secret
+    assert route_allowed(config, "POST", "/v1/messages")
+    assert not route_allowed(config, "POST", target)
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_half_closes_still_gets_its_response():
+    stream = Stream(chunks=(b"data: whole\n\n",))
+    stream.release.set()
+
+    async def slow(request):
+        await asyncio.sleep(0.3)             # the client's EOF arrives first
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, stream=stream)
+
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(slow))
+    proxy = await ProxyServer(ProxyConfig(
+        upstream="https://fixture.invalid", api_key="fixture-upstream-key",  # pragma: allowlist secret
+        client_token="fixture-client", listen_port=0, total_seconds=3), client=upstream).start()
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", proxy.address[1])
+        body = b'{"model":"x"}'
+        writer.write(b"POST /v1/messages HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer fixture-client\r\n"
+                     b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+        await writer.drain()
+        writer.write_eof()                                   # done sending; still reading
+        response = await asyncio.wait_for(reader.read(), 5)
+        writer.close()
+    finally:
+        await proxy.aclose()
+        await upstream.aclose()
+    assert b"200" in response.split(b"\r\n", 1)[0] and b"data: whole" in response

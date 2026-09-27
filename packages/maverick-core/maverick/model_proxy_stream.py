@@ -164,7 +164,10 @@ class ProxyServer:
             connection.receive_data(data)
 
     async def _admit(self, connection, reader, writer):
-        request = await asyncio.wait_for(self._event(connection, reader), min(30, self.config.total_seconds))
+        # An unauthenticated socket holds a slot only until its headers are
+        # due: 10 s, not 30, bounds how long idle sockets can crowd out clients.
+        request = await asyncio.wait_for(self._event(connection, reader),
+                                         min(10, self.config.total_seconds))
         if not isinstance(request, h11.Request):
             raise ProxyHTTPError(400, b"invalid proxy request")
         headers = {key.decode("ascii"): value.decode("latin-1") for key, value in request.headers}
@@ -223,9 +226,20 @@ class ProxyServer:
         try:
             done, _ = await asyncio.wait((relay, disconnected), return_when=asyncio.FIRST_COMPLETED)
             if disconnected in done:
-                # EOF or an unsupported pipelined byte ends this owner. Await
-                # cancellation cleanup before releasing its upstream/pool slot.
-                return
+                try:
+                    early = disconnected.result()
+                except OSError:
+                    early = None  # reset: the client is gone
+                if early != b"" or state["started"]:
+                    # A reset, a pipelined byte, or EOF once the response is
+                    # streaming ends this owner (a streaming client that left
+                    # must not keep a paid upstream stream running). Await
+                    # cancellation before releasing its slot.
+                    return
+                # EOF before any response is a half-close: HTTP lets a client
+                # stop sending once its request is complete and still read the
+                # response. A client that is really gone surfaces as a write
+                # error when the response starts.
             await relay
         finally:
             await _cancel_join(relay, disconnected)
