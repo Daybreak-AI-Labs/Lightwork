@@ -4000,7 +4000,7 @@ async def consumer_trust_center_authority_page(request: Request) -> HTMLResponse
 
 
 @app.get("/data-use", response_class=HTMLResponse)
-async def data_use_governance_page(request: Request) -> HTMLResponse:
+def data_use_governance_page(request: Request) -> HTMLResponse:
     """Provider-neutral data-use policy authority and compiler workspace."""
     require_permission(request, "operate")
     from collections.abc import Mapping
@@ -5776,7 +5776,7 @@ def replay_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/trust", response_class=HTMLResponse)
-async def trust_page(request: Request) -> HTMLResponse:
+def trust_page(request: Request) -> HTMLResponse:
     """Agent Trust Plane: the cross-agent permission graph -- every external
     agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
     from .control_plane import _discover_tools, trust_overview

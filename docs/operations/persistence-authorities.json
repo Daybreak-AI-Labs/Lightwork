@@ -181,7 +181,7 @@
     "a2a": 4,
     "preferences": 3,
     "learning": 54,
-    "sqlite_domain": 78,
+    "sqlite_domain": 79,
     "configuration": 57,
     "read_projection": 15,
     "coordinator": 1,
@@ -191,7 +191,7 @@
     "execution": 21,
     "recovery": 9,
     "derived": 14,
-    "composition": 54,
+    "composition": 55,
     "external": 18,
     "key_custody": 2,
     "storage_primitive": 8,
@@ -23681,6 +23681,44 @@
           "function": "_save",
           "kind": "atomic_write_text",
           "expression": "atomic_write_text(path, json.dumps(document, sort_keys=True, allow_nan=False))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/audit_actions_api.py",
+      "contract": "composition",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/audit_actions_api.py",
+      "purpose": "dashboard audit actions: check, download, forward, seal and key rotation over the kernel audit store",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 209,
+          "function": "_run",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/consent_scan_review_requests.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/consent_scan_review_requests.py",
+      "purpose": "pending two-person tracker reviews for the consent scan inventory (request, status, proposer fingerprint)",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 69,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)"
         }
       ]
     }

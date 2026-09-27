@@ -23,6 +23,10 @@ ASSETS = (
     "lightwork-privacy-regulatory-intelligence.js",
     "lightwork-privacy-rights-consumer-delivery.js",
     "lightwork-privacy-rights-orchestration.js",
+    "lightwork-settings-all.js",
+)
+STYLES = (
+    "lightwork-settings-all.css",
 )
 
 
@@ -34,5 +38,15 @@ def _route(name: str):
     return serve
 
 
+def _style_route(name: str):
+    async def serve() -> FileResponse:
+        return FileResponse(_STATIC / name, media_type="text/css; charset=utf-8",
+                            headers={"Cache-Control": "public, max-age=300"})
+    serve.__name__ = "asset_" + name.replace("-", "_").replace(".", "_")
+    return serve
+
+
 for _name in ASSETS:
     router.add_api_route("/static/" + _name, _route(_name), methods=["GET"], include_in_schema=False)
+for _name in STYLES:
+    router.add_api_route("/static/" + _name, _style_route(_name), methods=["GET"], include_in_schema=False)

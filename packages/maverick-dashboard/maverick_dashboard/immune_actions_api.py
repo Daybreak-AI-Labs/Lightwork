@@ -223,7 +223,7 @@ async def record_drill(request: Request, body: DrillIn) -> dict:
     return {"recorded": True}
 
 @router.post("/immune/twin/{goal_id}/replay", status_code=202)
-async def replay(request: Request, goal_id: int, bg: BackgroundTasks) -> dict:
+def replay(request: Request, goal_id: int, bg: BackgroundTasks) -> dict:
     require_permission(request, "admin")
     from maverick.immune import twin
     if not twin.recording_path(goal_id).exists():
