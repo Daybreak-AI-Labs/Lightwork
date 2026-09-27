@@ -160,7 +160,8 @@ test("clause save holds concurrent edits, prevents double-submit and retains edi
   assert.equal(field.value, "Reviewed custom clause"); assert.equal(field.disabled, false);
   assert.equal(ui.nodes["pw-playbook-save"].disabled, false);
   assert.match(ui.nodes["pw-playbook-path"].textContent, /Your edits are still here/);
-  assert.match(ui.nodes["pw-playbook-err"].textContent, /403/);
+  assert.match(ui.nodes["pw-playbook-err"].textContent, /permission/);
+  assert.doesNotMatch(ui.nodes["pw-playbook-err"].textContent, /403|HTTP/);
 });
 
 function governanceUI({get, post}) {

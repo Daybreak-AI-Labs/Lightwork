@@ -210,8 +210,8 @@ def test_privacy_page_renders_the_estate_tabs():
     assert page.status_code == 200
     assert "Privacy estate" in page.text
     assert "Acme Analytics" in page.text
-    assert "Census SharePoint sites" in page.text
-    assert "Record consent event" in page.text
+    assert "List SharePoint sites" in page.text
+    assert "Record their choice" in page.text
 
 
 def test_privacy_page_explains_what_is_off(tmp_path):
@@ -360,7 +360,7 @@ def test_privacy_page_renders_contracts_notices_and_scan():
     assert "renewing within 30 days" in page.text
     assert "Privacy notices" in page.text
     assert "2026-01" in page.text
-    assert "Site scan" in page.text
+    assert "Check a web page" in page.text
     assert 'id="pe-scan-go"' in page.text
 
 

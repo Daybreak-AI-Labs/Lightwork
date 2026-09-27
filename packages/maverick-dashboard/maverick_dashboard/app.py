@@ -1168,6 +1168,12 @@ app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
 app.include_router(create_cortex_page_router(templates))
 app.include_router(create_autonomous_compliance_page_router(templates))
+from .compliance_controls_api import router as _compliance_controls_router  # noqa: E402
+
+app.include_router(_compliance_controls_router)
+from .privacy_actions_api import router as _privacy_actions_router  # noqa: E402
+
+app.include_router(_privacy_actions_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -3629,6 +3635,8 @@ def _privacy_page_data() -> tuple[dict, dict]:
         estate["consent_posture"] = consent_registry.consent_posture()
         try:
             estate["notices"] = consent_registry.list_notices()[:20]
+            for notice in estate["notices"]:
+                notice["published_date"] = _date(notice.get("published_at"))
             estate["notice_coverage"] = consent_registry.notice_coverage()
         except Exception:
             pass
@@ -3708,7 +3716,8 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
-         "fulfillment_enabled": fulfillment_enabled})
+         "fulfillment_enabled": fulfillment_enabled,
+         "can_admin": has_permission(request, "admin")})
 
 
 @app.get("/consent", response_class=HTMLResponse)
@@ -3952,10 +3961,10 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
     from .auth import has_global_permission
 
     if current_tenant_id_strict() is None:
-        raise HTTPException(
-            status_code=409,
-            detail="select an active tenant before using privacy data discovery",
-        )
+        from fastapi.responses import RedirectResponse
+
+        # Choose a workspace first, then come straight back here.
+        return RedirectResponse("/workspace/tenant?next=/privacy/data-discovery", status_code=303)
     if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
         raise HTTPException(
             status_code=404,
@@ -3998,7 +4007,10 @@ async def privacy_regulatory_intelligence_page(request: Request) -> HTMLResponse
     return templates.TemplateResponse(
         request,
         "privacy_regulatory_intelligence.html",
-        {"privacy_regulatory_intelligence_enabled": (privacy_regulatory_intelligence.enabled())},
+        {
+            "privacy_regulatory_intelligence_enabled": (privacy_regulatory_intelligence.enabled()),
+            "can_admin": has_global_permission(request, "admin"),
+        },
     )
 
 
@@ -4014,7 +4026,13 @@ async def privacy_rights_orchestration_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "privacy_rights_orchestration.html",
-        {"privacy_rights_orchestration_enabled": (privacy_rights_orchestration_enabled_for_page())},
+        {
+            "privacy_rights_orchestration_enabled": (
+                privacy_rights_orchestration_enabled_for_page()
+            ),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -4033,7 +4051,9 @@ async def privacy_rights_consumer_delivery_page(request: Request) -> HTMLRespons
         {
             "privacy_rights_consumer_delivery_enabled": (
                 privacy_rights_consumer_delivery_enabled_for_page()
-            )
+            ),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
         },
     )
 
@@ -4050,7 +4070,11 @@ async def privacy_notice_governance_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "privacy_notice_governance.html",
-        {"privacy_notice_governance_enabled": (privacy_notice_governance_enabled_for_page())},
+        {
+            "privacy_notice_governance_enabled": (privacy_notice_governance_enabled_for_page()),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -6173,7 +6197,10 @@ def _compliance_view(framework: str) -> dict:
     if framework != "all":
         checks = [c for c in checks if c.framework == framework]
     # Group by framework bucket ("eu"/"us") for labelled tables on the page.
-    labels = {"eu": "EU AI Act / GDPR", "us": "NIST AI RMF + US state/sector law"}
+    labels = {
+        "eu": "European Union (AI Act and GDPR)",
+        "us": "United States (federal and state rules)",
+    }
     groups: dict[str, dict] = {}
     for c in checks:
         bucket = groups.setdefault(
@@ -6203,6 +6230,13 @@ async def compliance_page(request: Request) -> HTMLResponse:
     state so a missing core install never 500s the console.
     """
     view = _compliance_view(request.query_params.get("framework") or "all")
+    from .compliance_controls_api import RETENTION_FIELDS, guide_for
+
+    view["guide_for"] = guide_for
+    view["retention_fields"] = RETENTION_FIELDS
+    view["can_admin"] = has_permission(request, "admin")
+    view["can_operate"] = has_permission(request, "operate")
+    view["can_global_admin"] = has_global_permission(request, "admin")
     return templates.TemplateResponse(request, "compliance.html", view)
 
 
@@ -6230,7 +6264,11 @@ async def compliance_scoping_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "compliance_scoping.html",
-        {"compliance_scoping_enabled": compliance_scoping_enabled_for_page()},
+        {
+            "compliance_scoping_enabled": compliance_scoping_enabled_for_page(),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -6246,7 +6284,11 @@ async def compliance_scope_actions_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "compliance_scope_actions.html",
-        {"compliance_scope_actions_enabled": (compliance_scope_actions_enabled_for_page())},
+        {
+            "compliance_scope_actions_enabled": (compliance_scope_actions_enabled_for_page()),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -10429,6 +10471,17 @@ async def privacy_data_discovery_client() -> FileResponse:
             "Cache-Control": "no-store, private, max-age=0",
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@app.get("/static/lightwork-record-workflows.js")
+async def record_workflows_client() -> FileResponse:
+    """Shared record-list helpers for the privacy and compliance pages."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-record-workflows.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
     )
 
 

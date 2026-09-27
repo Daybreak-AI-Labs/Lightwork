@@ -111,9 +111,9 @@ def test_tenant_policy_and_notice_publication_are_confirmed_and_retryable():
     assert "'HTTP '+response.status+'. Try again.'" in data_use
 
     assert "if (noticeBtn.dataset.inFlight === 'true') return;" in privacy
-    assert "Publish privacy notice version “' + version + '” for this tenant?" in privacy
+    assert "Publish privacy notice version “' + version + '”? It cannot be changed afterwards" in privacy
     assert "noticeBtn.setAttribute('aria-busy', 'true')" in privacy
-    assert "Could not reach the server — check your connection and try again." in privacy
+    assert "errText(e, 'publish the notice')" in privacy
     assert "delete noticeBtn.dataset.inFlight" in privacy
 
 

@@ -139,7 +139,8 @@ def test_privacy_decision_network_failure_restores_the_draft_control():
     source = (TEMPLATES / "privacy.html").read_text(encoding="utf-8")
     assert "transient rejection never destroys" in source
     assert "btn.disabled = false" in source
-    assert "Could not record the decision — check your connection" in source
+    assert "default: decisionDrafts[btn.dataset.id]" in source
+    assert "your reason is kept for the next try" in source
 
 
 def test_repeated_department_actions_name_their_target():

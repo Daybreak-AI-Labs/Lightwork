@@ -230,97 +230,97 @@
 
 <div class="pb-head">
   <h1 class="page-title">Privacy command center</h1>
-  <span class="pb-live"><span class="dot" aria-hidden="true"></span>LIVE</span>
+  <span class="pb-live"><span class="dot" aria-hidden="true"></span>Live</span>
   <span class="pb-stamp" id="pb-stamp" role="status" aria-live="off">loading…</span>
   <div class="pb-controls">
     <span id="pb-filterchips"></span>
     <div class="pb-slicer" role="group" aria-label="Time range">
-      <button type="button" data-range="30">30d</button>
-      <button type="button" data-range="90">90d</button>
-      <button type="button" data-range="365">12m</button>
-      <button type="button" data-range="0" class="on">All</button>
+      <button type="button" data-range="30">30 days</button>
+      <button type="button" data-range="90">90 days</button>
+      <button type="button" data-range="365">12 months</button>
+      <button type="button" data-range="0" class="on">All time</button>
     </div>
-    <a class="btn" href="/privacy">Workspace</a>
-    <a class="btn" href="/privacy/report">Board pack</a>
-    <button class="btn" id="pb-present" type="button">Present</button>
+    <a class="btn btn--ghost" href="/privacy">Privacy workspace</a>
+    <a class="btn btn--ghost" href="/privacy/report">Printable report</a>
+    <button class="btn btn--ghost" id="pb-present" type="button">Full screen</button>
   </div>
 </div>
 <p class="page-subtitle">The whole privacy program on one live screen — every number
-  drawn from the operating record, not a slide. Click any risk level or framework
-  to cross-filter the board.</p>
+  counted from your own records. Click a risk level or questionnaire
+  to show only those items.</p>
 
 <div class="pb-kpis" id="pb-kpis"></div>
 
 <div class="pb-grid">
   <section class="pb-card" aria-labelledby="pb-t-mix">
-    <h2 id="pb-t-mix">Residual risk mix</h2>
-    <p class="pb-sub">Where the program's risk sits after controls — click a level to cross-filter.</p>
+    <h2 id="pb-t-mix">Risk after fixes</h2>
+    <p class="pb-sub">How much risk is left once fixes are in place. Click a level to show only those items.</p>
     <div class="pb-donut-wrap">
       <svg id="pb-donut" viewBox="0 0 176 176" width="176" height="176"
-           role="img" aria-label="Residual risk distribution"></svg>
+           role="img" aria-label="Risk after fixes"></svg>
       <div class="pb-legend" id="pb-donut-legend" role="group"
-           aria-label="Filter by residual risk"></div>
+           aria-label="Show only one risk level"></div>
     </div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-burn">
-    <h2 id="pb-t-burn">Risk burn-down</h2>
-    <p class="pb-sub">Inherent exposure (pale) → residual after controls (solid): the risk the program removed.</p>
+    <h2 id="pb-t-burn">Risk removed</h2>
+    <p class="pb-sub">Risk before fixes (pale) and after fixes (solid).</p>
     <div id="pb-burn"></div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-posture">
     <h2 id="pb-t-posture">Program posture</h2>
-    <p class="pb-sub">Live health ratios out of the registers — never a synthetic score.</p>
+    <p class="pb-sub">Health measures counted from your records.</p>
     <div id="pb-posture"></div>
   </section>
 
   <section class="pb-card pb-span8" aria-labelledby="pb-t-flow">
-    <h2 id="pb-t-flow">Assessment throughput — 12 months</h2>
-    <p class="pb-sub">Opened vs decided per month. A widening gap is a backlog forming.</p>
+    <h2 id="pb-t-flow">Assessments started and finished — last 12 months</h2>
+    <p class="pb-sub">Started and decided each month. A growing gap means work is piling up.</p>
     <svg id="pb-flow" viewBox="0 0 720 230" role="img"
          aria-label="Assessments opened and decided per month"></svg>
     <div class="pb-flow-legend" id="pb-flow-legend"></div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-types">
-    <h2 id="pb-t-types">By framework</h2>
-    <p class="pb-sub">Volume per assessment framework — click to cross-filter.</p>
+    <h2 id="pb-t-types">By questionnaire</h2>
+    <p class="pb-sub">How many assessments use each questionnaire. Click one to show only those.</p>
     <div class="pb-bars" id="pb-types" role="group"
-         aria-label="Filter by framework"></div>
+         aria-label="Show only one questionnaire"></div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-dsar">
-    <h2 id="pb-t-dsar">DSAR SLA runway</h2>
-    <p class="pb-sub">Open subject requests by time left on the statutory clock, split by kind.</p>
+    <h2 id="pb-t-dsar">Data-subject requests: time left</h2>
+    <p class="pb-sub">Open requests from people about their data, by time left before the legal deadline.</p>
     <div class="pb-bars" id="pb-dsar"></div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-transfers">
     <h2 id="pb-t-transfers">Cross-border transfers</h2>
-    <p class="pb-sub">Art. 30 register + TIAs — Chapter V safeguard coverage.</p>
+    <p class="pb-sub">Data sent to other countries, and whether a legal safeguard (such as standard contract clauses) is on file.</p>
     <div id="pb-transfers"></div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-ai">
     <h2 id="pb-t-ai">AI systems &amp; registers</h2>
-    <p class="pb-sub">The AI registry against the EU AI Act's tiers, and the record planes behind the board.</p>
+    <p class="pb-sub">Your AI systems by EU AI Act risk level, and how many records sit behind this dashboard.</p>
     <div class="pb-bars" id="pb-ai"></div>
     <div class="pb-registers" id="pb-registers"></div>
   </section>
 
   <section class="pb-card" aria-labelledby="pb-t-learn">
-    <h2 id="pb-t-learn">Learning — first-pass acceptance</h2>
-    <p class="pb-sub">Approved with no follow-ups = the reviewer accepted the agent's draft as-is. The trend is the proof the agent is getting better.</p>
+    <h2 id="pb-t-learn">Drafts accepted first time</h2>
+    <p class="pb-sub">Assessments approved without follow-up questions. A rising line means the AI's drafts are getting better.</p>
     <div id="pb-learning"></div>
   </section>
 
   <section class="pb-card pb-span8" aria-labelledby="pb-t-roi">
-    <h2 id="pb-t-roi">Question ROI — evidence to prune</h2>
-    <p class="pb-sub">Per-question evidence across every saved assessment: which questions change ratings, which only inform, and which have never fired.</p>
+    <h2 id="pb-t-roi">Which questions matter</h2>
+    <p class="pb-sub">For each question: does it change risk ratings, only add information, or never flag anything? Questions that never flag anything are candidates to remove.</p>
     <div style="margin-bottom: var(--space-2);">
-      <label class="muted" style="font-size: var(--text-sm);">Framework
-        <select id="pb-roi-type" class="ctl" style="margin-inline-start: 8px;"></select>
+      <label class="muted" style="font-size: var(--text-sm);">Questionnaire
+        <select id="pb-roi-type" class="select" style="margin-inline-start: 8px;"></select>
       </label>
       <span class="muted" id="pb-roi-summary" style="font-size: var(--text-sm); margin-inline-start: 12px;"></span>
     </div>
@@ -335,6 +335,7 @@
 </div>
 <div id="pb-tip" hidden></div>
 
+{% include "_assessment_review.html" %}
 <script>
 (function () {
   'use strict';
@@ -361,6 +362,8 @@
   }
   function fmt(n) { return (n || 0).toLocaleString(); }
   function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+  function human(v) { return window.mvHuman ? window.mvHuman(v) : cap(String(v || '').replace(/_/g, ' ')); }
+  var roiAll = false;
 
   // ---- tooltip ------------------------------------------------------------
   var tip = $('pb-tip');
@@ -393,7 +396,7 @@
     var box = $('pb-filterchips');
     box.textContent = '';
     [['residual', F.residual && (cap(F.residual) + ' residual')],
-     ['type', F.type]].forEach(function (pair) {
+     ['type', F.type && human(F.type)]].forEach(function (pair) {
       if (!pair[1]) return;
       var chip = el('span', 'pb-chip', pair[1] + ' ');
       var x = el('button', '', '✕');
@@ -784,8 +787,8 @@
       guide.setAttribute('x2', X(i));
       guide.setAttribute('visibility', 'visible');
       showTip(evt, [series[i].key,
-                    'opened: ' + series[i].opened,
-                    'decided: ' + series[i].decided]);
+                    'Started: ' + series[i].opened,
+                    'Decided: ' + series[i].decided]);
     });
     hover.addEventListener('mouseleave', function () {
       guide.setAttribute('visibility', 'hidden');
@@ -839,7 +842,7 @@
       var r = by[t];
       var b = el('button', 'row' + (F.type === t ? ' on' : ''));
       b.type = 'button';
-      b.appendChild(el('span', 'name', t.replace(/_/g, ' ')));
+      b.appendChild(el('span', 'name', human(t)));
       var track = el('div', 'track');
       var segSafe = el('div', 'seg');
       segSafe.style.background = 'var(--brand)';
@@ -859,8 +862,10 @@
 
   // ---- DSAR runway --------------------------------------------------------
   var BANDS = ['overdue', 'd0_7', 'd8_14', 'd15_30', 'd30_plus'];
-  var BAND_LABEL = { overdue: 'overdue', d0_7: '≤7d', d8_14: '8–14d',
-                     d15_30: '15–30d', d30_plus: '30d+' };
+  var KIND_LABEL = { access: 'Copy of data', portability: 'Move data', erasure: 'Delete data',
+                     rectification: 'Correct data', objection: 'Stop using data', restriction: 'Limit use' };
+  var BAND_LABEL = { overdue: 'overdue', d0_7: '7 days or less', d8_14: '8 to 14 days',
+                     d15_30: '15 to 30 days', d30_plus: 'more than 30 days' };
   var BAND_COLOR = { overdue: 'var(--danger)', d0_7: 'var(--warn)',
                      d8_14: 'var(--info)', d15_30: 'var(--brand)',
                      d30_plus: 'var(--muted)' };
@@ -872,7 +877,7 @@
       box.appendChild(el('p', 'pb-empty',
         DATA.records_enabled
           ? 'No open subject requests — the queue is clear.'
-          : 'Privacy ops registers are disabled ([privacy_ops]).'));
+          : 'Privacy records are turned off. An administrator can turn them on in the Privacy workspace.'));
       return;
     }
     var kinds = Object.keys(d.by_kind).sort(function (a, b) {
@@ -884,7 +889,7 @@
     kinds.forEach(function (k) {
       var kb = d.by_kind[k];
       var row = el('div', 'row');
-      row.appendChild(el('span', 'name', k));
+      row.appendChild(el('span', 'name', KIND_LABEL[k] || human(k)));
       var track = el('div', 'track');
       BANDS.forEach(function (band) {
         if (!kb[band]) return;
@@ -955,6 +960,7 @@
 
   // ---- AI & registers -----------------------------------------------------
   var TIERS = ['prohibited', 'high', 'limited', 'minimal'];
+  var TIER_LABEL = { prohibited: 'Banned', high: 'High risk', limited: 'Limited risk', minimal: 'Minimal risk' };
   var TIER_COLOR = { prohibited: 'var(--danger)', high: 'var(--warn)',
                      limited: 'var(--info)', minimal: 'var(--accent)' };
   function renderAi() {
@@ -973,7 +979,7 @@
       }).concat([1]));
       TIERS.forEach(function (t) {
         var row = el('div', 'row');
-        row.appendChild(el('span', 'name', t));
+        row.appendChild(el('span', 'name', TIER_LABEL[t]));
         var track = el('div', 'track');
         var seg = el('div', 'seg');
         seg.style.background = TIER_COLOR[t];
@@ -985,9 +991,9 @@
       });
     }
     var r = DATA.registers || {};
-    [['RoPA entries', r.ropa], ['DPA reviews', r.dpa],
-     ['AI systems', r.ai], ['DSARs', r.dsar],
-     ['Incidents', (DATA.incidents || {}).total]].forEach(function (pair) {
+    [['Processing activities', r.ropa], ['Vendor agreements', r.dpa],
+     ['AI systems', r.ai], ['Data requests', r.dsar],
+     ['Breaches', (DATA.incidents || {}).total]].forEach(function (pair) {
       reg.appendChild(el('span', 'pill',
         pair[0] + ' · ' + fmt(pair[1] || 0)));
     });
@@ -997,7 +1003,7 @@
   function badge(level) {
     var cls = level === 'high' ? 'blocked' : level === 'medium' ? 'warn'
       : level === 'low' || level === 'minimal' ? 'done' : 'info';
-    return el('span', 'badge ' + cls, level || '?');
+    return el('span', 'badge ' + cls, level ? human(level) : 'Unknown');
   }
   function renderDrill() {
     var box = $('pb-drill');
@@ -1014,8 +1020,8 @@
     var table = el('table');
     var thead = el('thead');
     var hr = el('tr');
-    ['subject', 'framework', 'status', 'risk (inherent → residual)',
-     'opened', 'flags'].forEach(function (h) {
+    ['Subject', 'Questionnaire', 'Status', 'Risk before → after fixes',
+     'Opened', 'Notes'].forEach(function (h) {
       var th = el('th', '', h);
       th.scope = 'col';
       hr.appendChild(th);
@@ -1025,13 +1031,22 @@
     var tbody = el('tbody');
     rs.slice(0, 12).forEach(function (s) {
       var tr = el('tr');
-      tr.appendChild(el('td', '', s.subject || '?'));
-      tr.appendChild(el('td', '', (s.type || '?').replace(/_/g, ' ')));
+      var subj = el('td');
+      if (window.mvAssessmentReview && s.id) {
+        var open = el('button', 'btn btn--ghost', s.subject || 'Untitled');
+        open.type = 'button';
+        open.addEventListener('click', function () { window.mvAssessmentReview.open(s.id); });
+        subj.appendChild(open);
+      } else {
+        subj.textContent = s.subject || 'Untitled';
+      }
+      tr.appendChild(subj);
+      tr.appendChild(el('td', '', human(s.type || 'unknown')));
       var st = el('td');
       st.appendChild(el('span', 'badge ' +
         (s.status === 'approved' ? 'done'
           : s.status === 'rejected' ? 'blocked' : 'info'),
-        (s.status || '').replace(/_/g, ' ')));
+        human(s.status || 'unknown')));
       tr.appendChild(st);
       var risk = el('td');
       var pair = el('span', 'pb-risk-pair');
@@ -1041,11 +1056,11 @@
       risk.appendChild(pair);
       tr.appendChild(risk);
       tr.appendChild(el('td', 'muted-sm', s.created_at
-        ? new Date(s.created_at * 1000).toISOString().slice(0, 10) : '—'));
+        ? new Date(s.created_at * 1000).toLocaleDateString() : '—'));
       var flags = [];
-      if (s.review_due) flags.push(s.review_due_reason || 'review due');
-      if (s.risk_accepted) flags.push('risk accepted');
-      if (s.open_followups) flags.push(s.open_followups + ' follow-ups open');
+      if (s.review_due) flags.push(s.review_due_reason ? 'Review due: ' + s.review_due_reason : 'Review due');
+      if (s.risk_accepted) flags.push('Risk accepted');
+      if (s.open_followups) flags.push(s.open_followups + ' follow-up question(s) open');
       tr.appendChild(el('td', 'muted-sm', flags.join(' · ') || '—'));
       tbody.appendChild(tr);
     });
@@ -1110,18 +1125,20 @@
       fmt(L.decided) + ' decided · ' + fmt(L.qualified) +
       ' approved after follow-ups · ' + fmt(L.rejected) + ' rejected · ' +
       (L.median_days_to_decision == null ? '—'
-        : L.median_days_to_decision + 'd') + ' median to decision'));
+        : L.median_days_to_decision + ' days') + ' typical time to a decision'));
   }
 
   // ---- question ROI -------------------------------------------------------
   var ROI_VERDICT_CLS = { 'load-bearing': 'done', informative: 'info',
                           inert: 'blocked', unproven: 'warn' };
+  var ROI_VERDICT_LABEL = { 'load-bearing': 'Changes ratings', informative: 'Adds information',
+                            inert: 'Never flags anything', unproven: 'Not enough data yet' };
   function renderRoiTable(d) {
     var box = $('pb-roi');
     box.textContent = '';
     $('pb-roi-summary').textContent = fmt(d.assessed) + ' assessed · ' +
-      d.load_bearing + ' load-bearing · ' + d.inert +
-      ' inert (prune candidates)';
+      d.load_bearing + ' change ratings · ' + d.inert +
+      ' never flag anything (could be removed)';
     if (!d.assessed) {
       box.appendChild(el('p', 'pb-empty',
         'No saved assessments of this framework yet.'));
@@ -1129,7 +1146,7 @@
     }
     var table = el('table');
     var hr = el('tr');
-    ['question', 'section', 'asked', 'fired', 'moved rating', 'verdict']
+    ['Question', 'Section', 'Asked', 'Flagged a risk', 'Changed a rating', 'Verdict']
       .forEach(function (h) {
         var th = el('th', '', h);
         th.scope = 'col';
@@ -1139,7 +1156,8 @@
     thead.appendChild(hr);
     table.appendChild(thead);
     var tbody = el('tbody');
-    d.questions.slice(0, 14).forEach(function (q) {
+    var roiShown = roiAll ? d.questions.length : 14;
+    d.questions.slice(0, roiShown).forEach(function (q) {
       var tr = el('tr');
       var qt = el('td', '', q.text);
       qt.style.maxWidth = '26rem';
@@ -1155,36 +1173,42 @@
       tr.appendChild(el('td', '', fmt(q.rating_impact)));
       var vd = el('td');
       vd.appendChild(el('span',
-        'badge ' + (ROI_VERDICT_CLS[q.verdict] || 'info'), q.verdict));
+        'badge ' + (ROI_VERDICT_CLS[q.verdict] || 'info'), ROI_VERDICT_LABEL[q.verdict] || human(q.verdict)));
       tr.appendChild(vd);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     box.appendChild(table);
-    if (d.questions.length > 14) {
-      box.appendChild(el('p', 'pb-sub',
-        (d.questions.length - 14) + ' more question(s) in the API payload.'));
+    if (d.questions.length > roiShown) {
+      var all = el('button', 'btn btn--ghost', 'Show all ' + d.questions.length + ' questions');
+      all.type = 'button';
+      all.addEventListener('click', function () { roiAll = true; renderRoiTable(d); });
+      box.appendChild(all);
     }
   }
   function loadRoi(type) {
     fetch('/api/v1/assess/question-roi?type=' + encodeURIComponent(type))
-      .then(function (r) { return r.json(); })
-      .then(renderRoiTable)
-      .catch(function () {
+      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+      .then(function (d) { roiAll = false; renderRoiTable(d); })
+      .catch(function (e) {
         $('pb-roi').textContent = '';
         $('pb-roi').appendChild(el('p', 'pb-empty',
-          'Could not load question ROI.'));
+          window.mvErrorText ? window.mvErrorText(e, 'load the question results') : 'Could not load the question results.'));
       });
   }
   var roiInit = false;
   function renderRoi() {
     var sel = $('pb-roi-type');
     var types = (DATA.by_type || []).map(function (r) { return r.type; });
-    if (!types.length) types = ['pia'];
+    if (!types.length) {
+      $('pb-roi').textContent = '';
+      $('pb-roi').appendChild(el('p', 'pb-empty', 'No assessments yet. Start one in the Privacy workspace.'));
+      return;
+    }
     if (!roiInit) {
       roiInit = true;
       types.forEach(function (t) {
-        var o = el('option', '', t.replace(/_/g, ' '));
+        var o = el('option', '', human(t));
         o.value = t;
         sel.appendChild(o);
       });
@@ -1211,20 +1235,21 @@
     renderDrill();
   }
   function stamp() {
-    $('pb-stamp').textContent = 'refreshed ' +
-      new Date().toLocaleTimeString() + ' · auto-refreshes every 60s';
+    $('pb-stamp').textContent = 'Updated ' +
+      new Date().toLocaleTimeString() + ' · updates every minute';
   }
   function load() {
     fetch(API).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw r;
       return r.json();
     }).then(function (d) {
       DATA = d;
       stamp();
       renderAll();
     }).catch(function (e) {
-      $('pb-stamp').textContent = 'could not load the board (' +
-        e.message + ') — retrying in 60s';
+      $('pb-stamp').textContent = (window.mvErrorText
+        ? window.mvErrorText(e, 'load the dashboard')
+        : 'Could not load the dashboard.') + ' Trying again in a minute.';
     });
   }
 

@@ -146,3 +146,13 @@ def test_page_rejects_unknown_query_and_requires_a_template_authority(
 
 def test_template_passes_the_static_a11y_audit() -> None:
     assert audit_file(TEMPLATE) == []
+
+
+def test_cards_describe_each_module_in_plain_words(client: TestClient) -> None:
+    body = client.get(page.PAGE_PATH).text
+    for suite in catalog.suites():
+        for module in suite.modules:
+            assert module.path in page.MODULE_SUMMARIES, module.path
+    assert 'class="acm-card__path">/' not in body
+    for word in ("Status vocabulary", "compliance catalog", "configuration-ready"):
+        assert word not in body

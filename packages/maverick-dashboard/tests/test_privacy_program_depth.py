@@ -219,7 +219,7 @@ def test_privacy_page_renders_program_depth_ui():
     assert 'id="pv-dsar-heat"' in html
     assert "/privacy/dsar/aging" in html
     assert "/privacy/transfer-map" in html
-    assert "Bulk vendor import" in html
+    assert "Queue assessments for many vendors" in html
     assert "/api/v1/assess/bulk-import" in html
 
 

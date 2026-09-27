@@ -1278,6 +1278,37 @@ class PrivacyRegulatoryIntelligenceStore:
             for row in rows
         )
 
+    def list_records(self, tenant_id: str) -> dict[str, tuple]:
+        """Read-only listing of the latest version of each document, saved
+        trackers and evidence reports for one tenant (integrity-checked)."""
+
+        tenant = _tenant(tenant_id)
+        with self._connect() as connection:
+            document_ids = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT DISTINCT document_id FROM documents WHERE tenant_id=? "
+                    "ORDER BY document_id LIMIT ?",
+                    (tenant, _MAX_LIST),
+                ).fetchall()
+            ]
+            subscriptions = tuple(
+                self._subscription_from(self._row_payload(row, "subscription"), row["integrity_sha256"])
+                for row in connection.execute(
+                    "SELECT * FROM subscriptions WHERE tenant_id=? ORDER BY subscription_id LIMIT ?",
+                    (tenant, _MAX_LIST),
+                ).fetchall()
+            )
+            reports = tuple(
+                self._report_from(self._row_payload(row, "report"), row["integrity_sha256"])
+                for row in connection.execute(
+                    "SELECT * FROM reports WHERE tenant_id=? ORDER BY rowid DESC LIMIT ?",
+                    (tenant, _MAX_LIST),
+                ).fetchall()
+            )
+        documents = tuple(self.get_document(tenant, document_id) for document_id in document_ids)
+        return {"documents": documents, "subscriptions": subscriptions, "reports": reports}
+
     def ingest_document(
         self,
         tenant_id: str,

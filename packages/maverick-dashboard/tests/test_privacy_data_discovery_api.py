@@ -1031,3 +1031,33 @@ def test_unstructured_unsupported_format_is_reported_not_claimed_complete(
     assert "unsupported_media_type" in completed["report"]["error_codes"]
     assert completed["report"]["completeness"] == "bounded_partial"
     assert completed["report"]["absence_is_proven"] is False
+
+
+def test_review_queue_lists_pending_proposals_across_findings(environment) -> None:
+    client, _database, rows, _documents, _callbacks, _clock, _config, _app = environment
+    assert _ok(client.get(f"{API}/reviews?status=pending"))["items"] == []
+    _enroll(client)
+    report = _run_manual(
+        client,
+        rows,
+        operation="queue-scan",
+        values=[discovery.StructuredRecord("row-1", {"email": "queue@example.com"})],
+    )["report"]
+    finding = _ok(client.get(f"{API}/reports/{report['report_id']}/findings"))["items"][0]
+    proposal = _ok(
+        client.post(
+            f"{API}/findings/{finding['finding_id']}/reviews",
+            json={
+                "decision": "confirmed",
+                "effective_category": finding["category"],
+                "freshness_seconds": 300,
+                "expected_finding_revision": finding["revision"],
+                "idempotency_key": "queue-review-v1",
+            },
+        )
+    )
+    queue = _ok(client.get(f"{API}/reviews?status=pending"))["items"]
+    assert [row["review_id"] for row in queue] == [proposal["review_id"]]
+    assert queue[0]["integrity_sha256"] == proposal["integrity_sha256"]
+    assert _ok(client.get(f"{API}/reviews?status=approved"))["items"] == []
+    assert client.get(f"{API}/reviews?status=bogus").status_code == 422

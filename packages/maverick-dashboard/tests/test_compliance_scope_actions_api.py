@@ -762,3 +762,29 @@ def test_all_core_operations_are_mounted_and_adapter_has_no_network_client(envir
         assert f"store.{method}" in source or f'"{method}"' in source
     for primitive in ("requests.", "httpx.", "urllib.request", "socket."):
         assert primitive not in source
+
+
+def test_records_list_catalogs_plans_and_reports_per_workspace(environment) -> None:
+    client, _database, state, _applier = environment
+    empty = client.get(f"{API}/records")
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["plans"] == [] and empty.json()["can_create_tasks"] is True
+    _publish_catalog(client)
+    _create_plan(client)
+    approved = _approve_plan(client)
+    listed = client.get(f"{API}/records").json()
+    assert [c["status"] for c in listed["catalogs"]] == ["published"]
+    plan = listed["plans"][0]
+    assert plan["plan_id"] == "plan-a" and plan["approved"] is True
+    assert plan["revision"] == approved["revision"] and plan["controls"] >= 1
+    assert ("tenant", "view") in state["permission_calls"]
+    report = client.post(
+        f"{API}/plans/plan-a/report",
+        headers={"X-Test-Subject": "scope-planner"},
+        json={"idempotency_key": "report-1"},
+    )
+    assert report.status_code == 200, report.text
+    assert report.json()["signing_key_ref"] == api.DEFAULT_REPORT_SIGNING_KEY_REF
+    assert client.get(f"{API}/records").json()["reports"][0]["plan_id"] == "plan-a"
+    state["tenant"] = "tenant-b"
+    assert client.get(f"{API}/records").json()["plans"] == []

@@ -65,11 +65,11 @@ def test_compliance_page_renders_framework_rows(monkeypatch, tmp_path):
     assert "Consumer notice of AI" in body
     assert "Colorado AI Act" in body
     # Framework group labels are shown.
-    assert "EU AI Act / GDPR" in body
-    assert "US state/sector" in body
-    # Statuses surface (active + the action-needed control).
-    assert "active" in body
-    assert "action needed" in body
+    assert "European Union (AI Act and GDPR)" in body
+    assert "United States (federal and state rules)" in body
+    # Statuses surface in plain words (on + the control that needs action).
+    assert ">On<" in body
+    assert "Needs action" in body
 
 
 def test_compliance_page_filter_changes_output(monkeypatch, tmp_path):
@@ -101,7 +101,7 @@ def test_compliance_page_empty_state_when_core_unavailable(monkeypatch, tmp_path
     r = _client().get("/compliance")
     # Fail-soft: empty state, never a 500.
     assert r.status_code == 200
-    assert "No compliance controls to report" in r.text
+    assert "Nothing to report for this filter" in r.text
 
 
 def test_compliance_nav_link_present(monkeypatch, tmp_path):

@@ -172,6 +172,15 @@ class ExportScopeIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class ReportIn(_StrictModel):
+    idempotency_key: IdempotencyKey
+
+
+#: Signing key the dashboard's "Create report" button uses, so no person is
+#: ever asked for a key reference. The key itself stays in the environment.
+DEFAULT_REPORT_SIGNING_KEY_REF = "env:MAVERICK_COMPLIANCE_SCOPE_SIGNING_KEY"
+
+
 class PurgeIn(_StrictModel):
     cutoff: float | int = Field(gt=0, lt=100_000_000_000.0)
     idempotency_key: IdempotencyKey
@@ -344,6 +353,93 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
             "signing_input_is_reference_only": True,
             "status_request_external_network_io": False,
         }
+
+    @router.get("/records")
+    async def records(
+        request: Request,
+        limit: int = Query(default=200, ge=1, le=1_000),
+    ) -> dict[str, Any]:
+        """Every questionnaire, assessment, scope and report in this
+        workspace, newest first, for the page's record lists."""
+
+        require_permission(request, "view")
+        scoping, tenant, store = authority(request)
+        listed = await call(scoping, store.list_records, tenant, limit=limit)
+        return {
+            "questionnaires": [
+                {
+                    "questionnaire_id": q.questionnaire_id,
+                    "version": q.version,
+                    "status": q.status,
+                    "revision": q.revision,
+                    "questions": len(q.questions),
+                    "rules": len(q.rules),
+                    "created_at": q.created_at,
+                }
+                for q in listed["questionnaires"]
+            ],
+            "assessments": [
+                {
+                    "assessment_id": a.assessment_id,
+                    "questionnaire_id": a.questionnaire_id,
+                    "questionnaire_version": a.questionnaire_version,
+                    "status": a.status,
+                    "answered": len(a.answers),
+                    "revision": a.revision,
+                    "retained_until": a.retained_until,
+                    "created_at": a.created_at,
+                }
+                for a in listed["assessments"]
+            ],
+            "scopes": [
+                {
+                    "scope_id": sc.scope_id,
+                    "assessment_id": sc.assessment_id,
+                    "status": sc.status,
+                    "frameworks": list(sc.applicable_frameworks),
+                    "controls": len(sc.control_applicability),
+                    "overlaps": len(sc.overlaps),
+                    "approved": bool(sc.approved_by),
+                    "finalized": bool(sc.finalized_by),
+                    "revision": sc.revision,
+                    "retained_until": sc.retained_until,
+                    "created_at": sc.created_at,
+                }
+                for sc in listed["scopes"]
+            ],
+            "reports": [
+                {
+                    "export_id": e.export_id,
+                    "scope_id": e.scope_id,
+                    "created_at": e.created_at,
+                }
+                for e in listed["exports"]
+            ],
+        }
+
+    @router.post("/scopes/{scope_id}/report")
+    async def create_report(request: Request, scope_id: ObjectPath, body: ReportIn):
+        """Create a signed report for a finalized scope with the deployment's
+        signing key (the page never asks for a key reference)."""
+
+        require_permission(request, "operate")
+        scoping, tenant, store = authority(request)
+        scope = await call(scoping, store.get_scope, tenant, scope_id)
+        export_id = "report-" + hashlib.sha256(
+            f"{scope_id}:{body.idempotency_key}".encode()
+        ).hexdigest()[:24]
+        return _jsonable(
+            await call(
+                scoping,
+                store.export_scope,
+                tenant,
+                scope_id,
+                export_id,
+                signing_key_ref=DEFAULT_REPORT_SIGNING_KEY_REF,
+                retained_until=scope.retained_until,
+                idempotency_key=body.idempotency_key,
+            )
+        )
 
     @router.put("/questionnaires/{questionnaire_id}/versions")
     async def create_questionnaire(
@@ -581,6 +677,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
 router = create_compliance_scoping_router()
 
 __all__ = [
+    "DEFAULT_REPORT_SIGNING_KEY_REF",
     "ComplianceScopingDependencies",
     "compliance_scoping_enabled_for_page",
     "create_compliance_scoping_router",

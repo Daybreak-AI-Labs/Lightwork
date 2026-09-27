@@ -349,6 +349,57 @@ def create_privacy_intelligence_router(  # noqa: C901 - explicit route assembly
             "smtp_sender_configured": mailer.configured(),
         }
 
+    @router.get("/records")
+    async def records(request: Request) -> dict[str, Any]:
+        """Latest document versions, saved trackers and evidence reports for
+        the page lists (no document text, no delivery lease tokens)."""
+
+        require_permission(request, "view")
+        ops, tenant, store = authority(request)
+        listed = await call(ops, store.list_records, tenant)
+        return {
+            "documents": [
+                {
+                    "document_id": d.document_id,
+                    "version": d.version,
+                    "source_id": d.source_id,
+                    "title": d.title,
+                    "jurisdiction": d.jurisdiction,
+                    "authority": d.authority,
+                    "document_type": d.document_type,
+                    "language": d.language,
+                    "publication_date": d.publication_date,
+                    "effective_date": d.effective_date,
+                    "ingested_at": d.ingested_at,
+                }
+                for d in listed["documents"]
+            ],
+            "trackers": [
+                {
+                    "subscription_id": q.subscription_id,
+                    "query": q.query,
+                    "jurisdictions": list(q.jurisdictions),
+                    "destination_ref": q.destination_ref,
+                    "cadence_seconds": q.cadence_seconds,
+                    "next_run_at": q.next_run_at,
+                    "state": q.state,
+                    "revision": q.revision,
+                }
+                for q in listed["subscriptions"]
+            ],
+            "reports": [
+                {
+                    "report_id": r.report_id,
+                    "query": r.query,
+                    "jurisdictions": list(r.jurisdictions),
+                    "status": r.status,
+                    "evidence": len(r.evidence),
+                    "created_at": r.created_at,
+                }
+                for r in listed["reports"]
+            ],
+        }
+
     @router.put("/sources/{source_id}")
     async def enroll_source(
         request: Request,

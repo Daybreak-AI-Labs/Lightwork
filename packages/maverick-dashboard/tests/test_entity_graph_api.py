@@ -111,4 +111,4 @@ def test_privacy_page_renders_the_lineage_tab():
     assert page.status_code == 200
     assert "Lineage" in page.text
     assert "Why was it approved?" in page.text
-    assert "What relied on it?" in page.text
+    assert "Show what depends on it" in page.text

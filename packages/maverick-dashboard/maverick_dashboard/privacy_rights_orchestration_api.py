@@ -515,6 +515,25 @@ def create_privacy_rights_orchestration_router(  # noqa: C901, PLR0915
         ops, tenant, store = authority(request)
         return _jsonable(await call(ops, store.open_case, tenant, case_id, **body.model_dump()))
 
+    @router.get("/cases")
+    async def list_cases(request: Request, limit: int = Query(default=200, ge=1, le=1_000)):
+        """Rights requests in this workspace, newest first (no raw references)."""
+
+        require_permission(request, "view")
+        ops, tenant, store = authority(request)
+        items = await call(ops, store.list_cases, tenant, limit=limit)
+        return {"items": _jsonable(items), "count": len(items)}
+
+    @router.get("/cases/{case_id}/work")
+    async def case_work(request: Request, case_id: ObjectPath):
+        """One request's source tasks, evidence, completeness checks,
+        response packages and exports."""
+
+        require_permission(request, "view")
+        ops, tenant, store = authority(request)
+        work = await call(ops, store.case_work, tenant, case_id)
+        return {key: _jsonable(value) for key, value in work.items()}
+
     @router.get("/cases/{case_id}")
     async def get_case(request: Request, case_id: ObjectPath):
         require_permission(request, "view")

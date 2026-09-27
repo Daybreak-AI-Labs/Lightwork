@@ -18,35 +18,31 @@ test('discovery uses sealed connection references and explicitly rebinds a rotat
   await fits(page);await page.getByRole('button',{name:'Save connection',exact:true}).click();
   await expect(page.locator('#cx-list')).toContainText('browser-managed');await expect(page.locator('#cx-token')).toHaveValue('');
   expect(credentialDrafts).toBe(0);await page.goto('/privacy/data-discovery');
-  await page.locator('#pdd-load-setup').click();await expect(page.locator('#pdd-status')).toContainText('Setup choices loaded');
-  const key=page.locator('#pdd-key-form');await key.locator('[name="name"]').fill('browser-inventory');
-  await key.getByRole('button',{name:'Create or rotate evidence key'}).click();
-  await expect(page.locator('#pdd-status')).toContainText('Evidence key saved securely');
-  const source=page.locator('#pdd-source');await source.locator('[name="source_id"]').fill('browser-cmdb');
-  await source.locator('[name="provider"]').selectOption('servicenow_cmdb');
-  const reference=await page.locator('#pdd-connection option').filter({hasText:'browser-managed'}).getAttribute('value');
-  await page.locator('#pdd-connection').selectOption(reference);
-  await expect(source.locator('[name="origin"]')).toHaveValue('https://data.example.com');
-  await source.locator('[name="resource_ref"]').fill('cmdb_ci');await page.locator('#pdd-evidence-key').selectOption({index:1});
-  await source.getByRole('button',{name:'Save source settings'}).click();
-  await expect(source.locator('[name="expected_revision"]')).toHaveValue('1');
+  const confirm=async()=>{await expect(page.locator('#mv-confirm')).toBeVisible();await page.locator('#mv-confirm-ok').click();};
+  const saveSource=async()=>{
+    await page.locator('#pdd-new-source').click();await expect(page.locator('#pdd-source-panel')).toBeVisible();
+    await page.locator('#pdd-name').fill('browser-cmdb');await page.locator('#pdd-provider').selectOption('servicenow_cmdb');
+    const reference=await page.locator('#pdd-connection option').filter({hasText:'browser-managed'}).getAttribute('value');
+    await page.locator('#pdd-connection').selectOption(reference);await page.locator('#pdd-resource').fill('cmdb_ci');
+    await page.getByRole('button',{name:'Save source',exact:true}).click();
+    await expect(page.locator('#pdd-status')).toContainText('Data source saved');
+  };
+  await saveSource();
   const before=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
+  expect(before.revision).toBe(1);expect(before.credential_env).not.toContain('synthetic-browser-only-credential');
+  const row=page.locator('#pdd-sources tr').filter({hasText:/browser.cmdb/i});
   const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/v1/privacy/data-discovery/sources/browser-cmdb/test-access');
-  await page.locator('#pdd-test-source').click();expect((await response).status()).toBe(200);
-  // Assert the exact payload consumed by the app. Chromium can discard its
-  // inspector-side response body even after the bounded reader renders it.
-  await expect(page.locator('#pdd-status')).toContainText('Saved source access checked');
-  const access=JSON.parse(await page.locator('#pdd-result').textContent());
-  expect(access.access).toBe('readable');expect(access.raw_data_returned).toBe(false);expect(access.report_created).toBe(false);
-  expect(JSON.stringify(access)).not.toContain('never-return-this-value');
-  await page.locator('#pdd-key-picker').selectOption({index:1});await key.getByRole('button',{name:'Create or rotate evidence key'}).click();
-  await expect(page.locator('#pdd-status')).toContainText('existing sources were not changed');
+  await row.getByRole('button',{name:'Test access'}).click();await confirm();expect((await response).status()).toBe(200);
+  await expect(page.locator('#pdd-status')).toContainText('can read this source');
+  await expect(page.locator('#pdd-root')).not.toContainText('never-return-this-value');
+  await page.locator('#pdd-rotate-key').click();await confirm();
+  await expect(page.locator('#pdd-status')).toContainText('Existing sources were not changed');
   const unchanged=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
   expect(unchanged.evidence_key_env).toBe(before.evidence_key_env);expect(unchanged.revision).toBe(1);
-  await page.locator('#pdd-evidence-key').selectOption({index:1});await source.getByRole('button',{name:'Save source settings'}).click();
-  await expect(source.locator('[name="expected_revision"]')).toHaveValue('2');
-  const rebound=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();expect(rebound.evidence_key_env).not.toBe(before.evidence_key_env);
-  await source.scrollIntoViewIfNeeded();await info.attach('connected-source',{body:await page.screenshot(),contentType:'image/png'});
+  await saveSource();
+  const rebound=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
+  expect(rebound.revision).toBe(2);expect(rebound.evidence_key_env).not.toBe(before.evidence_key_env);
+  await page.locator('#pdd-sources').scrollIntoViewIfNeeded();await info.attach('connected-source',{body:await page.screenshot(),contentType:'image/png'});
   await fits(page);
 });
 

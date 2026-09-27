@@ -1674,6 +1674,20 @@ async def list_reviews(
     return _items(rows, limit)
 
 
+@router.get("/reviews")
+async def list_all_reviews(
+    request: Request,
+    status: Literal["pending", "approved"] | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1_999),
+) -> dict[str, Any]:
+    """Review proposals across every finding, newest first (approval queue)."""
+
+    require_permission(request, "view")
+    ops, tenant, store = _authority(request)
+    rows = await _call(ops, store.list_all_reviews, tenant, status=status, limit=limit + 1)
+    return _items(rows, limit)
+
+
 @router.post("/reviews/{review_id}/approve")
 async def approve_review(
     request: Request,

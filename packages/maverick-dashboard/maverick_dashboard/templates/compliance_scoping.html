@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Compliance Scoping - Lightwork{% endblock %}
+{% block title %}Compliance Scoping · Lightwork{% endblock %}
 {% block content %}
 <style>
   .cs-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -15,24 +15,65 @@
   @media (max-width:900px) { .cs-grid { grid-template-columns:1fr; } }
 </style>
 
-<h1>Technology Risk &amp; Compliance Scoping</h1>
-<p>Answer scoping questions, identify applicable controls, assign responsibilities, and compare overlapping requirements. Export the results for review.</p>
-<div class="cs-warning">
-  <strong>No licensed framework text, legal advice, external discovery,
-    certification, network I/O, provider writes, or live acceptance.</strong>
-  Questions and controls are opaque references only. Evidence is represented by
-  a SHA-256 digest plus an <code>evidence:</code> reference. Export signing accepts
-  only an <code>env:</code>, <code>vault:</code>, or <code>secret:</code> key reference,
-  never a secret value.
-</div>
+{% from "_hero.html" import hero %}
+{{ hero('Compliance', 'Find which controls apply',
+             subtitle='A short questionnaire that works out your compliance scope',
+             lede='Answer a questionnaire about your organization, and Lightwork works out which
+                   frameworks and controls apply, who owns them and where requirements overlap.
+                   This is guidance, not legal advice.') }}
+<details class="panel">
+  <summary>About this page&rsquo;s safeguards</summary>
+  <ul>
+    <li>Lightwork does not include licensed framework text, give legal advice, certify you, or contact outside services from this page.</li>
+    <li>Evidence is recorded as a fingerprint of the file you upload, not the file itself.</li>
+    <li>A scope needs approval from a second person before it is final, and reports are signed so later changes can be detected.</li>
+  </ul>
+</details>
 
 {% from "_module_gate.html" import module_gate %}
 {% if not compliance_scoping_enabled %}
 {{ module_gate('tech_risk_compliance.scoping', 'Compliance scoping',
-               detail='Closed questionnaires, deterministic scope computation,
-                       and signed local exports stay off until your compliance
-                       owner approves this workbench.') }}
+               detail='Answer a questionnaire to find out which frameworks and controls apply to you.',
+               can_activate=can_admin) }}
 {% else %}
+<div id="cs-app" data-can-admin="{{ 'true' if can_admin else 'false' }}" data-can-audit="{{ 'true' if can_audit else 'false' }}">
+  <p id="cs-status" class="muted" role="status" aria-live="polite">Loading your records…</p>
+
+  <div class="section-head"><h2>Assessments</h2>
+    <button type="button" class="btn btn--primary" id="cs-new-assessment">Start an assessment</button></div>
+  <div class="panel" id="cs-assessments"><p class="muted">Loading…</p></div>
+
+  <section class="panel" id="cs-answer" hidden aria-labelledby="cs-answer-title">
+    <h2 id="cs-answer-title">Answer the questions</h2>
+    <p class="muted">Choose an answer for each question and attach the document that supports it. Each answer is saved as you go.</p>
+    <form id="cs-answer-form"></form>
+    <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.75rem;">
+      <button type="button" class="btn btn--primary" id="cs-answer-save">Save answers</button>
+      <button type="button" class="btn btn--ghost" id="cs-answer-close">Close</button>
+    </div>
+  </section>
+
+  <div class="section-head"><h2>Scopes</h2></div>
+  <div class="panel" id="cs-scopes"><p class="muted">Loading…</p></div>
+  <section class="panel" id="cs-scope-detail" hidden aria-live="polite"></section>
+
+  <div class="section-head"><h2>Reports</h2></div>
+  <div class="panel" id="cs-reports"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>Questionnaires</h2>
+    <button type="button" class="btn btn--ghost" id="cs-add-questionnaire">Add a questionnaire from a file</button></div>
+  <div class="panel" id="cs-questionnaires"><p class="muted">Loading…</p></div>
+
+  {% if can_audit or can_admin %}
+  <div class="panel" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+    {% if can_audit %}<button type="button" class="btn btn--ghost" id="cs-integrity">Check records are intact</button>{% endif %}
+    {% if can_admin %}<button type="button" class="btn btn--ghost" id="cs-purge">Delete expired records</button>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<details class="panel" id="cs-technical">
+<summary>Technical details: advanced operations</summary>
 <p><button class="btn" id="cs-load-status" type="button">Check availability</button></p>
 <div class="cs-grid">
   <section class="panel cs-stack">
@@ -169,5 +210,8 @@
   updateConfirmation();
 }());
 </script>
+</details>
+<script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-compliance-scoping.js" defer></script>
 {% endif %}
 {% endblock %}

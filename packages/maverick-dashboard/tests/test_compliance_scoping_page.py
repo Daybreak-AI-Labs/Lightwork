@@ -32,7 +32,7 @@ def page_client() -> TestClient:
         return templates.TemplateResponse(
             request,
             "compliance_scoping.html",
-            {"compliance_scoping_enabled": enabled},
+            {"compliance_scoping_enabled": enabled, "can_admin": True, "can_audit": True},
         )
 
     return TestClient(app, headers={"Origin": "http://testserver"})
@@ -42,10 +42,20 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     response = page_client.get("/compliance/scoping")
     assert response.status_code == 200
     page = response.text
-    assert "Technology Risk &amp; Compliance Scoping" in page
-    assert "No licensed framework text, legal advice, external discovery" in page
-    assert "never a secret value" in page
+    assert "Find which controls apply" in page
+    assert "About this page&rsquo;s safeguards" in page
+    assert "does not include licensed framework text" in page
     assert "/api/v1/compliance/scoping" in page
+    # The everyday workflow: record lists with buttons, no typed references.
+    for element in ('id="cs-assessments"', 'id="cs-scopes"', 'id="cs-reports"',
+                    'id="cs-questionnaires"', 'id="cs-new-assessment"',
+                    "lightwork-compliance-scoping.js"):
+        assert element in page
+    # The raw operation console survives only inside collapsed technical details.
+    before, technical = page.split('<summary>Technical details: advanced operations</summary>', 1)
+    for jargon in ("JSON", "Tenant", "SHA-256", "revision", "env:", "Operation"):
+        assert jargon not in before.split("<main", 1)[-1], jargon
+    assert 'id="cs-operation"' in technical
     for operation in (
         "questionnaire-create",
         "questionnaire-get",

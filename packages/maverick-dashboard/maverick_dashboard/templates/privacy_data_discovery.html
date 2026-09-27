@@ -1,223 +1,117 @@
 {% extends "base.html" %}
-{% block title %}Privacy Data Discovery · Lightwork{% endblock %}
+{% block title %}Find Personal Data · Lightwork{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="/static/lightwork-privacy-data-discovery.css">
 {% endblock %}
 {% block content %}
-<fieldset class="pdd-shell feature-gated-workbench" id="pdd-root"
-          data-api-base="{{ privacy_data_discovery_api_base }}"
-          data-copilot-page="{{ privacy_data_discovery_page_path }}"
-          data-feature-enabled="{{ 'true' if privacy_data_discovery_enabled else 'false' }}"
-          data-can-operate="{{ 'true' if privacy_data_discovery_can_operate else 'false' }}"
-          data-can-audit="{{ 'true' if privacy_data_discovery_can_audit else 'false' }}"
-          data-can-admin="{{ 'true' if privacy_data_discovery_can_admin else 'false' }}"
-          {% if not privacy_data_discovery_enabled %}disabled aria-disabled="true"{% endif %}>
-  <legend class="sr-only">Privacy data discovery workbench</legend>
-  <header class="pdd-hero">
-    <div>
-      <div class="pdd-kicker">Privacy inventory and review</div>
-      <h1>Privacy Data Discovery</h1>
-      <p class="muted">Schedule scans of supported sources, review findings, and add approved classifications to the data map. A separate person must approve each current finding before delivery.</p>
-    </div>
-    <a class="btn" href="/overview">Back to Overview</a>
-  </header>
+<div class="pdd-shell" id="pdd-root"
+     data-api-base="{{ privacy_data_discovery_api_base }}"
+     data-copilot-page="{{ privacy_data_discovery_page_path }}"
+     data-feature-enabled="{{ 'true' if privacy_data_discovery_enabled else 'false' }}"
+     data-can-operate="{{ 'true' if privacy_data_discovery_can_operate else 'false' }}"
+     data-can-audit="{{ 'true' if privacy_data_discovery_can_audit else 'false' }}"
+     data-can-admin="{{ 'true' if privacy_data_discovery_can_admin else 'false' }}">
+  {% from "_hero.html" import hero %}
+  {{ hero('Privacy', 'Find personal data',
+          subtitle='Scan your storage and systems for personal data',
+          lede='Connect a storage service or system, scan it, and check what was found. A second
+                person approves each finding before it is added to your data map.') }}
+  <p><a class="btn btn--ghost" href="/privacy">Back to Privacy</a></p>
+
+  <details class="panel">
+    <summary>About this page&rsquo;s safeguards</summary>
+    <ul class="pdd-list">
+      <li>Lightwork can scan Amazon S3, Azure Blob Storage, Google Cloud Storage, Snowflake, ServiceNow and Microsoft Entra.</li>
+      <li>A scan only covers the source and limits you set. Finding nothing does not prove there is no personal data.</li>
+      <li>Text, web pages, spreadsheets saved as text and similar files are read. PDFs, Office files, images, archives, audio and video are listed as not read, never treated as checked.</li>
+      <li>Lightwork keeps only fingerprints and counts of what it finds, never the personal data itself.</li>
+      <li>Approved findings only update Lightwork&rsquo;s own data map. Nothing is changed in the scanned systems.</li>
+    </ul>
+  </details>
 
   {% from "_module_gate.html" import module_gate %}
   {% if not privacy_data_discovery_enabled %}
-  {{ module_gate('privacy_automation.data_discovery', 'Privacy data discovery',
-                 detail='Bounded provider scans, digest-only findings, and
-                         four-eyes remediation delivery all stay safely off
-                         until it is on -- review your scan scope and enrolled
-                         sources with your privacy owner first.',
-                 status=acm_module_status) }}
+  {{ module_gate('privacy_automation.data_discovery', 'Finding personal data',
+                 detail='Scan your storage and systems for personal data and add approved findings to your data map.',
+                 status=acm_module_status, can_activate=privacy_data_discovery_can_admin) }}
+  {% else %}
+  <p id="pdd-ready" class="muted" role="status" aria-live="polite">Checking whether scanning is set up…</p>
+  <p id="pdd-status" class="muted" role="status" aria-live="polite"></p>
+
+  <div class="section-head"><h2>Data sources</h2>
+    {% if privacy_data_discovery_can_admin %}<button type="button" class="btn btn--primary" id="pdd-new-source">Add a data source</button>{% endif %}</div>
+  <div class="panel" id="pdd-sources"><p class="muted">Loading…</p></div>
+
+  {% if privacy_data_discovery_can_admin %}
+  <section class="panel" id="pdd-source-panel" hidden aria-labelledby="pdd-source-title">
+    <h2 id="pdd-source-title">Add a data source</h2>
+    <p class="muted pdd-top">Choose where the data lives and the saved connection Lightwork should use. <a href="/connections">Manage connections</a></p>
+    <form id="pdd-source-form" autocomplete="off">
+      <div class="pdd-fields">
+        <label for="pdd-name">Name for this source
+          <input id="pdd-name" class="input" maxlength="80" required placeholder="For example: Customer files">
+        </label>
+        <label for="pdd-provider">Where the data lives
+          <select id="pdd-provider" class="select" required><option value="">Loading…</option></select>
+        </label>
+        <label for="pdd-connection">Saved connection
+          <select id="pdd-connection" class="select" required><option value="">Choose where the data lives first</option></select>
+        </label>
+        <label for="pdd-resource"><span id="pdd-resource-label">Which bucket, table or folder</span>
+          <input id="pdd-resource" class="input" maxlength="128" required>
+        </label>
+      </div>
+      <p id="pdd-resource-help" class="muted"></p>
+      <div class="pdd-actions">
+        <button type="submit" class="btn btn--primary">Save source</button>
+        <button type="button" class="btn btn--ghost" id="pdd-source-cancel">Cancel</button>
+      </div>
+    </form>
+  </section>
   {% endif %}
 
-  <div class="pdd-banner">
-    <strong>Acceptance and completeness boundary.</strong>
-    Six stock adapter contracts now ship for AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB and Microsoft Entra assets. A configured adapter is not evidence of live provider/customer acceptance. A completed report covers only the exact enrolled source and declared scan bounds; it never proves that personal data is absent.
-    <ul class="pdd-bounds">
-      <li><strong>Unsupported formats:</strong> unstructured discovery currently accepts JSON, JSON-LD, XML, CSV, HTML, and plain text. PDF, Office, images, archives, audio, and video are reported as unsupported rather than silently treated as complete.</li>
-      <li><strong>Timing limit:</strong> scans check their deadline between items. A provider request already in progress may take longer than that deadline.</li>
-      <li><strong>Where changes go:</strong> approved classifications are queued for the configured Lightwork data map. Changes to external providers remain disabled until separately authorized.</li>
-      <li><strong>Automatic retries:</strong> these remain off until enabled for this installation and workspace. They update only the configured Lightwork data map; they do not scan providers or prove complete coverage.</li>
-    </ul>
+  <div class="section-head"><h2>Scans</h2>
+    {% if privacy_data_discovery_can_operate %}<button type="button" class="btn btn--ghost" id="pdd-enqueue-due">Queue scheduled scans that are due</button>{% endif %}</div>
+  <div class="panel" id="pdd-jobs"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>Scan reports</h2></div>
+  <div class="panel" id="pdd-reports"><p class="muted">Loading…</p></div>
+
+  <section class="panel" id="pdd-findings-panel" hidden aria-labelledby="pdd-findings-title">
+    <h2 id="pdd-findings-title">What was found</h2>
+    <p id="pdd-findings-summary" class="muted"></p>
+    <div id="pdd-findings"></div>
+    <div id="pdd-diff"></div>
+  </section>
+
+  <div class="section-head"><h2>Waiting for approval</h2></div>
+  <p class="muted">A different person must approve each checked finding before it is added to your data map.</p>
+  <div class="panel" id="pdd-reviews"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>What your data map shows</h2></div>
+  <div class="panel" id="pdd-inventory"><p class="muted">Loading…</p></div>
+
+  {% if privacy_data_discovery_can_admin %}
+  <div class="section-head"><h2>Data map updates</h2>
+    <button type="button" class="btn btn--ghost" id="pdd-process">Process waiting updates</button></div>
+  <div class="panel" id="pdd-work"><p class="muted">Loading…</p></div>
+  {% endif %}
+
+  <div class="panel pdd-actions">
+    {% if privacy_data_discovery_can_audit %}
+    <button type="button" class="btn btn--ghost" id="pdd-verify">Check the activity history is intact</button>
+    <button type="button" class="btn btn--ghost" id="pdd-audit">Download the activity history</button>
+    {% endif %}
+    {% if privacy_data_discovery_can_admin %}
+    <button type="button" class="btn btn--ghost" id="pdd-maintenance">Tidy up old data map updates</button>
+    <button type="button" class="btn btn--ghost" id="pdd-rotate-key">Replace the protection key</button>
+    <button type="button" class="btn btn--ghost" id="pdd-purge">Delete expired reports</button>
+    {% endif %}
   </div>
-
-  <div id="pdd-status" class="pdd-status muted" role="status" aria-live="polite"></div>
-  <div class="pdd-grid">
-    <div>
-      <section class="pdd-card">
-        <h2>1. Connect an approved source</h2>
-        <p>Choose an enabled provider and a saved connection. <a href="/connections">Manage connections</a> to save credentials securely; use the provider identifier shown here as the connection type. No secret values belong in the source form.</p>
-        <button class="btn" id="pdd-load-setup" type="button" data-requires="admin">Refresh connections and keys</button>
-        <label>Open a saved source<select class="input" id="pdd-source-picker"><option value="">New source</option></select></label>
-        <form id="pdd-source" class="pdd-form">
-          <label>Source ID<input class="input" name="source_id" required maxlength="128" value="customers"></label>
-          <label>Kind<select class="input" name="kind"><option value="structured">Structured rows</option><option value="unstructured">Unstructured documents</option></select></label>
-          <label>Enabled provider<select class="input" name="provider" required><option value="">Load setup choices</option></select></label>
-          <label>Exact public HTTPS origin<input class="input" name="origin" required maxlength="2048" placeholder="https://data.example.com"></label>
-          <label>Source resource reference<input class="input" name="resource_ref" required maxlength="128"></label>
-          <p id="pdd-resource-help" class="pdd-note"></p>
-          <label>Saved connection<select class="input" id="pdd-connection"><option value="">Choose a connection</option></select></label>
-          <label>Evidence key<select class="input" id="pdd-evidence-key"><option value="">Choose or create a key below</option></select></label>
-          <details class="wide"><summary>Advanced: deployment-managed or saved references</summary>
-            <label>Credential reference<input class="input" name="credential_env" required maxlength="128"></label>
-            <label>Evidence-key reference<input class="input" name="evidence_key_env" required maxlength="128"></label>
-            <p>Existing deployment-managed environment names remain supported. Saved references include an exact version; changing provider, connection or key requires saving this source again.</p>
-          </details>
-          <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Save source settings</button><button class="btn" id="pdd-test-source" type="button" data-requires="admin">Test saved source access</button><button class="btn" id="pdd-list-sources" type="button">List sources</button></div>
-        </form>
-        <h3>Evidence keys</h3>
-        <p>Lightwork generates and seals these keys in this workspace. Rotation pauses scans using the previous version until you explicitly update their source settings. Reports from different key generations cannot be compared as data changes.</p>
-        <form id="pdd-key-form" class="pdd-form">
-          <label>Key to manage<select class="input" id="pdd-key-picker"><option value="">Create a new key</option></select></label>
-          <label>Key name<input class="input" name="name" required pattern="[a-z0-9][a-z0-9_\-]{0,63}" maxlength="64" placeholder="privacy-inventory"></label>
-          <input name="expected_revision" type="hidden" value="0">
-          <details><summary>Request details</summary><label hidden>Request reference<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label></details>
-          <button class="btn" type="submit" data-requires="admin">Create or rotate evidence key</button>
-        </form>
-      </section>
-
-      <section class="pdd-card pdd-danger">
-        <h2>2. Suspend, reactivate, or revoke source</h2>
-        <form id="pdd-source-state" class="pdd-form">
-          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
-          <label>State<select class="input" name="state"><option value="suspended">suspended</option><option value="active">active</option><option value="revoked">revoked</option></select></label>
-          <label>Current version<input class="input" name="expected_revision" type="number" min="1" required></label>
-          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Apply source state</button></div>
-        </form>
-      </section>
-
-      <section class="pdd-card">
-        <h2>3. Schedule</h2>
-        <form id="pdd-schedule" class="pdd-form">
-          <label>Schedule ID<input class="input" name="schedule_id" required maxlength="128"></label>
-          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
-          <label>Interval seconds<input class="input" name="interval_seconds" type="number" min="1" max="31536000" value="86400" required></label>
-          <label>Next run timestamp (optional)<input class="input" name="next_run_at" type="number" step="0.001" min="1"></label>
-          <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="3" required></label>
-          <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="1" max="315360000" value="7776000" required></label>
-          <label>Active<select class="input" name="active"><option value="true">true</option><option value="false">false</option></select></label>
-          <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="wide">Scan limits JSON<textarea class="input" name="limits" rows="5" required data-guided-endpoint="/api/v1/privacy/data-discovery/schedules/{schedule_id}" data-guided-method="put" data-guided-property="limits" data-guided-title="Scan limits">{"max_records":10000,"max_files":1000,"max_bytes":67108864,"max_seconds":300.0,"max_findings":10000,"max_fields_per_record":256,"max_record_bytes":262144,"max_document_bytes":4194304}</textarea></label>
-          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Create or update schedule</button><button class="btn" id="pdd-list-schedules" type="button">List schedules</button><button class="btn" id="pdd-enqueue-due" type="button" data-requires="operate">Enqueue due schedules</button></div>
-        </form>
-      </section>
-
-      <section class="pdd-card">
-        <h2>4. Create or claim a scan job</h2>
-        <form id="pdd-manual" class="pdd-form">
-          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
-          <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="3" required></label>
-          <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="1" max="315360000" value="7776000" required></label>
-          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <label class="wide">Scan limits JSON<textarea class="input" name="limits" rows="5" required data-guided-endpoint="/api/v1/privacy/data-discovery/sources/{source_id}/jobs" data-guided-property="limits" data-guided-title="Scan limits">{"max_records":10000,"max_files":1000,"max_bytes":67108864,"max_seconds":300.0,"max_findings":10000,"max_fields_per_record":256,"max_record_bytes":262144,"max_document_bytes":4194304}</textarea></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="operate">Enqueue manual scan</button><button class="btn" id="pdd-claim" type="button" data-requires="operate">Claim up to 10 jobs</button><button class="btn" id="pdd-list-jobs" type="button">List jobs</button></div>
-        </form>
-      </section>
-
-      <section class="pdd-card pdd-danger">
-        <h2>5. Run or retry a scan</h2>
-        <form id="pdd-job" class="pdd-form">
-          <label>Job ID<input class="input" name="job_id" required maxlength="128"></label>
-          <label>Failure code<select class="input" name="error_code"><option value="adapter_error">adapter_error</option><option value="credential_unavailable">credential_unavailable</option><option value="provider_contract_invalid">provider_contract_invalid</option><option value="operator_cancelled">operator_cancelled</option></select></label>
-          <label>Backoff seconds<input class="input" name="base_backoff_seconds" type="number" min="0.1" max="3600" step="0.1" value="5.0"></label>
-          <label>Current job version<input class="input" name="expected_revision" type="number" min="1"></label>
-          <label class="wide" hidden>Retry request reference<input data-auto-reference class="input" name="idempotency_key" maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" value="execute" data-requires="admin">Run scan (contacts source)</button><button class="btn" type="submit" value="fail" data-requires="operate">Record failure</button><button class="btn" type="submit" value="replay" data-requires="admin">Retry failed job</button></div>
-        </form>
-      </section>
-    </div>
-
-    <div>
-      <section class="pdd-card">
-        <h2>6. Inventory, reports, findings, and diff</h2>
-        <form id="pdd-read" class="pdd-form">
-          <label>Source ID (optional)<input class="input" name="source_id" maxlength="128"></label>
-          <label>Report ID<input class="input" name="report_id" maxlength="128"></label>
-          <label>Base report ID<input class="input" name="base_report_id" maxlength="128"></label>
-          <label>Target report ID<input class="input" name="target_report_id" maxlength="128"></label>
-          <div class="pdd-actions"><button class="btn" type="submit" value="inventory">Load inventory</button><button class="btn" type="submit" value="reports">List reports</button><button class="btn" type="submit" value="report">Get report</button><button class="btn" type="submit" value="findings">List findings</button><button class="btn" type="submit" value="diff">Compare reports</button></div>
-        </form>
-        <p class="pdd-note">Inventory and diffs contain only classifications, counts, and keyed digests. “No findings” is never represented as proof of absence.</p>
-      </section>
-
-      <section class="pdd-card">
-        <h2>7. Submit a finding for review</h2>
-        <form id="pdd-propose" class="pdd-form">
-          <label>Finding ID<input class="input" name="finding_id" required maxlength="128"></label>
-          <label>Decision<select class="input" name="decision"><option value="confirmed">confirmed</option><option value="reclassified">reclassified</option><option value="false_positive">false_positive</option></select></label>
-          <label>Effective category<select class="input" name="effective_category"><option value="">None (false positive only)</option><option>authentication_secret</option><option>biometric_identifier</option><option>date_of_birth</option><option>email_address</option><option>financial_account</option><option>government_identifier</option><option>health_information</option><option>ip_address</option><option>payment_card</option><option>person_name</option><option>phone_number</option><option>physical_address</option><option>precise_location</option><option>unknown_personal_data</option></select></label>
-          <label>Freshness seconds<input class="input" name="freshness_seconds" type="number" min="1" max="31536000" value="3600" required></label>
-          <label>Finding version<input class="input" name="expected_finding_revision" type="number" min="1" required></label>
-          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Propose classification review</button></div>
-        </form>
-        <p class="pdd-note">The proposal records who prepared it and which finding it uses. Submitting a proposal does not change the data map.</p>
-      </section>
-
-      <section class="pdd-card pdd-danger">
-        <h2>8. Independent approval</h2>
-        <form id="pdd-approve" class="pdd-form">
-          <label>Review ID<input class="input" name="review_id" required maxlength="128"></label>
-          <label>Expected version<input class="input" name="expected_version" type="number" min="1" required></label>
-          <label class="wide">Exact review integrity SHA-256<input class="input" name="expected_integrity_sha256" pattern="[0-9a-f]{64}" required></label>
-          <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Approve as second authenticated reviewer</button></div>
-        </form>
-        <p class="pdd-note">The approver must be a different signed-in person. Only approval of a current finding can update the configured data map or processing-activities record.</p>
-      </section>
-
-      <section class="pdd-card">
-        <h2>9. Deliver, reconcile, and maintain the governed data map</h2>
-        <div class="pdd-banner" role="status">
-          <strong>Automatic update status.</strong> Availability shows whether updates are enabled and running for this workspace, including interrupted work awaiting recovery. Checking status does not start a scan or contact a provider.
-        </div>
-        <form id="pdd-remediation-list" class="pdd-form">
-          <label>Work state<select class="input" name="state"><option value="ambiguous">ambiguous</option><option value="">all states</option><option value="queued">queued</option><option value="leased">leased</option><option value="applied">applied</option><option value="no_change">no_change</option><option value="dead_letter">dead_letter</option><option value="cancelled">cancelled</option></select></label>
-          <label>List limit<input class="input" name="limit" type="number" min="1" max="100" value="25" required></label>
-          <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Review queued updates</button></div>
-        </form>
-        <form id="pdd-remediation-worker" class="pdd-form">
-          <label>Worker batch limit<input class="input" name="limit" type="number" min="1" max="100" value="10" required></label>
-          <label>Lease seconds<input class="input" name="lease_seconds" type="number" min="1" max="3600" value="60" required></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Process queued updates</button></div>
-        </form>
-        <form id="pdd-remediation-reconcile" class="pdd-form">
-          <label>Ambiguous work ID<input class="input" name="work_id" maxlength="128" required></label>
-          <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-          <label>Absent backoff seconds<input class="input" name="absent_backoff_seconds" type="number" min="0" max="86400" value="0" required></label>
-          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
-          <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Check an uncertain update</button></div>
-        </form>
-        <form id="pdd-remediation-maintenance" class="pdd-form">
-          <label>Target purge limit<input class="input" name="target_limit" type="number" min="1" max="1000" value="500" required></label>
-          <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
-          <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Purge expired outbox/data-map records and verify integrity</button></div>
-        </form>
-        <p class="pdd-note">Lightwork records the user and workspace responsible for each update. These actions use fingerprints and enforce processing limits; they do not write to external providers or establish successful use with a live provider.</p>
-      </section>
-
-      <section class="pdd-card">
-        <h2>10. Audit, posture, and retention</h2>
-        <form id="pdd-retention" class="pdd-form">
-          <label class="wide" hidden>Retention idempotency key<input data-auto-reference class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn" type="submit" data-requires="admin">Purge expired reports</button><button class="btn" id="pdd-audit" type="button" data-requires="audit">Load audit</button><button class="btn" id="pdd-verify" type="button" data-requires="audit">Verify audit chain</button><button class="btn" id="pdd-posture" type="button">Privacy posture</button><button class="btn" id="pdd-runtime" type="button">Availability</button></div>
-        </form>
-      </section>
-
-      <section class="pdd-card">
-        <h2>Operator result</h2>
-        <pre id="pdd-result" class="pdd-result">No operation run.</pre>
-      </section>
-    </div>
-  </div>
-</fieldset>
+  {% endif %}
+</div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-record-workflows.js" defer></script>
 <script src="/static/lightwork-privacy-data-discovery.js" defer></script>
 {% endblock %}

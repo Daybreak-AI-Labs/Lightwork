@@ -83,11 +83,10 @@ test("browser client uses safe DOM sinks and same-origin credentials", () => {
     "utf8",
   );
   assert.match(source, /credentials: "same-origin"/);
-  assert.match(source, /result\.textContent/);
-  assert.match(source, /data-requires/);
-  assert.match(source, /pdd-remediation-list/);
+  assert.match(source, /statusEl\.textContent = text/);
+  assert.match(source, /pdd-work/);
   assert.match(source, /\/remediation\/work/);
-  assert.match(source, /requirePermission\("audit"\)/);
+  assert.match(source, /can\.audit|canAudit/);
   assert.match(source, /clientBound/);
   assert.doesNotMatch(source, /\.innerHTML\s*=/);
   assert.doesNotMatch(source, /eval\s*\(/);

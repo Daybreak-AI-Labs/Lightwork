@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Privacy Rights Orchestration - Lightwork{% endblock %}
+{% block title %}Privacy Requests · Lightwork{% endblock %}
 {% block content %}
 <style>
   .pro-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -15,23 +15,63 @@
   @media (max-width:900px) { .pro-grid { grid-template-columns:1fr; } }
 </style>
 
-<h1>Privacy Rights Orchestration</h1>
-<p>Coordinate privacy-rights requests from intake through evidence collection, response preparation, and closure. Keep missing evidence and incomplete source work visible.</p>
-<div class="pro-warning">
-  <strong>Provider execution stays closed until the tenant source manifest,
-    deployment subject authority, credential references, and encrypted retrieval
-    custody are ready.</strong>
-  Supported integrations include Microsoft Graph, Google Workspace, Salesforce, and ServiceNow for discovery, retrieval, deletion, and verification. Original subject and external-request references are protected and are not returned here. This workflow does not verify a requester's identity, deliver a response, prove complete coverage, or establish successful operation with live providers or customers.
-</div>
+{% from "_hero.html" import hero %}
+{{ hero('Privacy', 'Privacy requests',
+        subtitle='From the request arriving to closing it',
+        lede='Handle requests from people who want to see, move, correct or delete their data.
+              Open a request, confirm who they are, search your connected systems, record what
+              you found and close it once a second person has approved.') }}
+<details class="panel">
+  <summary>About this page&rsquo;s safeguards</summary>
+  <ul>
+    <li>The person&rsquo;s email or ID and your ticket number are stored only in a protected, non-reversible form. They are never shown again.</li>
+    <li>Deleting data in another system needs approval from a second administrator first.</li>
+    <li>Closing a request needs approval from someone other than the person who opened it.</li>
+    <li>Connected systems (Microsoft 365, Google Workspace, Salesforce, ServiceNow) are only contacted once your administrator has set them up.</li>
+  </ul>
+</details>
 
 {% from "_module_gate.html" import module_gate %}
 {% if not privacy_rights_orchestration_enabled %}
-{{ module_gate('privacy_automation.rights_orchestration', 'Privacy-rights orchestration',
-               detail='Rights-request casework, source runtimes, evidence
-                       manifests, and response packages all stay safely off
-                       until it is on -- have your privacy owner review the
-                       workflow first.') }}
+{{ module_gate('privacy_automation.rights_orchestration', 'Privacy request handling',
+               detail='Track requests from people about their data, from arrival to closing, with approvals for deletions and closure.',
+               can_activate=can_admin) }}
 {% else %}
+<div id="pro-app" data-can-admin="{{ 'true' if can_admin else 'false' }}" data-can-audit="{{ 'true' if can_audit else 'false' }}">
+  <p id="pro-status" class="muted" role="status" aria-live="polite">Loading requests…</p>
+
+  <div class="section-head"><h2>Requests</h2>
+    <button type="button" class="btn btn--primary" id="pro-new-case">New request</button></div>
+  <div class="panel" id="pro-cases"><p class="muted">Loading…</p></div>
+
+  <section class="panel" id="pro-case" hidden aria-labelledby="pro-case-title">
+    <h2 id="pro-case-title">Request</h2>
+    <div id="pro-case-summary"></div>
+    <div id="pro-case-steps" style="display:flex; gap:.5rem; flex-wrap:wrap; margin:.75rem 0;"></div>
+    <h3>Work in each system</h3>
+    <div id="pro-case-tasks"></div>
+    <h3>Completeness checks</h3>
+    <div id="pro-case-manifests"></div>
+  </section>
+
+  <div class="section-head"><h2>Connected systems</h2>
+    {% if can_admin %}<button type="button" class="btn btn--ghost" id="pro-add-source">Add a system</button>{% endif %}</div>
+  <div class="panel" id="pro-sources"><p class="muted">Loading…</p></div>
+
+  {% if can_admin or can_audit %}
+  <div class="panel" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+    {% if can_admin %}
+    <button type="button" class="btn btn--ghost" id="pro-run">Run waiting system work now</button>
+    <button type="button" class="btn btn--ghost" id="pro-reconcile">Re-check uncertain deletions</button>
+    <button type="button" class="btn btn--ghost" id="pro-purge">Delete expired records</button>
+    {% endif %}
+    {% if can_audit %}<button type="button" class="btn btn--ghost" id="pro-integrity">Check records are intact</button>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<details class="panel" id="pro-technical">
+<summary>Technical details: advanced operations</summary>
 <p><button class="btn" id="pro-load-status" type="button">Check availability</button></p>
 <div class="pro-grid">
   <section class="panel pro-stack">
@@ -171,5 +211,8 @@
   updateConfirmation();
 }());
 </script>
+</details>
+<script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-privacy-rights-orchestration.js" defer></script>
 {% endif %}
 {% endblock %}
