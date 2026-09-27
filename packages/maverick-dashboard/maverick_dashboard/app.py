@@ -1045,6 +1045,7 @@ from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
@@ -1060,6 +1061,7 @@ app.include_router(support_router)
 app.include_router(system_checks_router)
 app.include_router(channel_check_router)
 app.include_router(page_assets_router)
+app.include_router(mcp_presets_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
@@ -6464,14 +6466,15 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
             detail="MCP inventory is unavailable",
         ) from exc
     saved_msg = {
-        "add": "MCP server added.",
-        "remove": "MCP server removed.",
-        "test": "MCP readiness check finished.",
+        "add": "Tool server added. Press Test to check that it works.",
+        "remove": "Tool server removed.",
+        "test": "Test finished. The result is shown next to the server.",
     }.get(saved, "")
+    from .mcp_presets import PRESETS as _MCP_PRESETS
     return templates.TemplateResponse(
         request,
         "mcp.html",
-        {"servers": rows, "saved": saved_msg},
+        {"servers": rows, "saved": saved_msg, "presets": _MCP_PRESETS},
     )
 
 

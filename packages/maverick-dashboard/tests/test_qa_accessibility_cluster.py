@@ -59,7 +59,7 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
                 'aria-label="Reset {{ p.name }} plugin"',
             ),
         ),
-        ("mcp.html", ('aria-label="Remove {{ s.name }} MCP server"',)),
+        ("mcp.html", ('aria-label="Test {{ label }}"', 'aria-label="Remove {{ label }}"')),
         (
             "trust.html",
             (
