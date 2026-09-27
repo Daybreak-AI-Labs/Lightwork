@@ -164,3 +164,18 @@ def test_strict_mode_is_refused_until_sign_in_exists(monkeypatch):
     r = client.post("/api/v1/compliance/switches/strict_mode")
     assert r.status_code == 409 and "sign-in" in r.json()["detail"]
     assert "enterprise" not in settings_store.load_overlay()
+
+
+def test_fingerprint_is_computed_on_the_server_and_needs_operate(monkeypatch):
+    import hashlib
+
+    data = b"evidence document bytes"
+    r = client.post("/api/v1/compliance/fingerprint", content=data,
+                    headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 200
+    assert r.json() == {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    assert client.post("/api/v1/compliance/fingerprint", content=b"",
+                       headers={"Content-Type": "application/octet-stream"}).status_code == 422
+    _as_viewer(monkeypatch)
+    assert client.post("/api/v1/compliance/fingerprint", content=data,
+                       headers={"Content-Type": "application/octet-stream"}).status_code == 403

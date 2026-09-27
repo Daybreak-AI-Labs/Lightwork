@@ -6226,7 +6226,11 @@ async def compliance_scoping_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "compliance_scoping.html",
-        {"compliance_scoping_enabled": compliance_scoping_enabled_for_page()},
+        {
+            "compliance_scoping_enabled": compliance_scoping_enabled_for_page(),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 

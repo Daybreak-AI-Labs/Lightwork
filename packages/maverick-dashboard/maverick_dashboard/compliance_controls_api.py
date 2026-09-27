@@ -536,6 +536,33 @@ async def erase_person(request: Request, person: PersonIn) -> dict:
         raise HTTPException(status_code=503, detail="The erasure could not be completed.") from exc
 
 
+# ---- Fingerprints -------------------------------------------------------
+
+_FINGERPRINT_MAX_BYTES = 50 * 1024 * 1024
+
+
+@router.post("/fingerprint")
+async def fingerprint(request: Request) -> dict:
+    """SHA-256 of an uploaded file, so evidence pages never ask a person to
+    type a fingerprint. The bytes are hashed while streaming and never kept."""
+    require_permission(request, "operate")
+    import hashlib
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > _FINGERPRINT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="That file is too large.")
+    digest = hashlib.sha256()
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > _FINGERPRINT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="That file is too large.")
+        digest.update(chunk)
+    if not size:
+        raise HTTPException(status_code=422, detail="The file is empty.")
+    return {"sha256": digest.hexdigest(), "size": size}
+
+
 # ---- Downloads and self-checks ----------------------------------------
 
 

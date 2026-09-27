@@ -2061,6 +2061,47 @@ class ComplianceScopingStore:
             )
             return {"exports": exports, "assessments": assessments}
 
+    def list_records(self, tenant_id: str, *, limit: int = 200) -> dict[str, tuple]:
+        """Read-only, newest-first listing of every record kind for one tenant.
+
+        Each row is loaded through the same integrity-checked readers as the
+        single-record getters. Export signatures are not re-verified here (the
+        single export getter does that); listings only surface identity.
+        """
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, _MAX_LIST)
+        self._actor()
+        with self._connect() as connection:
+            questionnaires = tuple(
+                self._get_questionnaire(connection, tenant, row[0], int(row[1]))
+                for row in connection.execute(
+                    "SELECT questionnaire_id, version FROM scope_questionnaires "
+                    "WHERE tenant_id=? ORDER BY questionnaire_id, version DESC LIMIT ?",
+                    (tenant, bounded),
+                ).fetchall()
+            )
+
+            def load(table: str, column: str, label: str, parse) -> tuple:
+                ids = connection.execute(
+                    f"SELECT {column} FROM {table} WHERE tenant_id=? "  # noqa: S608
+                    f"ORDER BY rowid DESC LIMIT ?",
+                    (tenant, bounded),
+                ).fetchall()
+                return tuple(
+                    parse(*self._get(connection, table, tenant, column, row[0], label))
+                    for row in ids
+                )
+
+            return {
+                "questionnaires": questionnaires,
+                "assessments": load(
+                    "scope_assessments", "assessment_id", "assessment", self._assessment
+                ),
+                "scopes": load("scope_results", "scope_id", "scope result", self._scope),
+                "exports": load("scope_exports", "export_id", "scope export", self._export),
+            }
+
     def verify_integrity(self, tenant_id: str) -> IntegrityVerification:
         tenant = _tenant(tenant_id)
         self._actor()
