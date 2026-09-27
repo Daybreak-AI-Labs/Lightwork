@@ -62,8 +62,8 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     r = client.get("/approvals")
     assert r.status_code == 200
     text = r.text
-    assert "approval queue" in text.lower()
-    assert "rm-rf" in text
+    assert "requests waiting for your decision" in text.lower()
+    assert "Rm rf" in text
     assert "/tmp/build" in text
     assert f'data-id="{aid}"' in text
     assert 'href="/approvals"' in text  # nav link present
@@ -72,11 +72,13 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     # The browser must not remove either row and imply the action is effective.
     assert "r.status === 202" in text
     assert "X-Lightwork-Approval-State" in text
-    assert "decision recorded but not yet in effect" in text
-    assert "This older request has no exact-operation review" in text
+    assert "saved but not in effect yet" in text
+    assert "This older request is missing the details needed to approve it safely" in text
     assert 'data-action="approve" disabled' in text
     assert 'data-action="deny">Reject</button>' in text
-    assert 'data-action="revise">Request revision</button>' in text
+    assert 'data-action="revise">Send back for changes</button>' in text
+    assert "window.prompt" not in text
+    assert "'Failed: '" not in text and "String(e)" not in text
     assert "const originalDisabled" in text
     assert "restoreDisabledStates()" in text
     assert "b.disabled = originalDisabled[index]" in text
@@ -303,9 +305,9 @@ def test_structured_card_is_visible_escaped_and_requires_exact_binding(
 
     page = client.get("/approvals")
     assert page.status_code == 200
-    assert "Known effects" in page.text
-    assert "Unresolved assumptions" in page.text
-    assert "prediction does not grant authority" in page.text
+    assert "What happens next" in page.text
+    assert "Open questions" in page.text
+    assert "the decision is yours" in page.text
     assert "&lt;script&gt;target&lt;/script&gt;" in page.text
     assert "never-render-this" not in page.text
 
@@ -373,7 +375,7 @@ def test_explicit_assessment_provenance_enables_review_without_removing_card_mar
 
     assert page.status_code == 200
     assert f'data-assessment-id="{assessment_id}"' in page.text
-    assert "assessment · human review" in page.text
+    assert "Assessment review" in page.text
 
 
 def test_expired_structured_card_never_mutates_approval(monkeypatch, tmp_path):
@@ -453,3 +455,33 @@ def test_view_only_submission_stays_pending_when_denial_audit_is_unavailable(
     assert response.status_code == 503
     assert "audit receipt is unavailable" in response.json()["detail"]
     assert world.get_approval(approval_id).status == "pending"
+
+
+def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, tmp_path):
+    from maverick.approval_cards import encode_approval_detail
+
+    from test_support.plain_language import developer_terms
+
+    _isolate(monkeypatch, tmp_path)
+    card = _structured_card(action="send_email", target_label="Customer settings")
+    _world(tmp_path).create_approval(
+        "send_email", risk="high", detail=encode_approval_detail(card),
+    )
+    text = _client().get("/approvals").text
+    assert "Send email" in text
+    assert "This is Lightwork's suggestion — the decision is yours." in text
+    assert "Up to $0.25" in text
+    assert "Technical details (for auditors)" in text
+    assert 'data-action="approve">Approve</button>' in text or '>Approve</button>' in text
+    # Fingerprints only appear inside the collapsed auditor section.
+    before_tech = text.split("Technical details (for auditors)")[0]
+    assert card["target"]["sha256"] not in before_tech
+    # The sample card's workspace is literally named "tenant-a".
+    assert developer_terms(text.replace("tenant-a", "workspace-a")) == []
+
+
+def test_empty_queue_offers_past_decisions(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    text = _client().get("/approvals").text
+    assert "Nothing needs your decision right now." in text
+    assert 'href="/audit">See past decisions</a>' in text

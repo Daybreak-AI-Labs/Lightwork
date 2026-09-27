@@ -7184,16 +7184,16 @@ def _approval_source(provenance: str | None) -> str | None:
     trusted ``provenance`` field may drive source labels in the decision UI.
     """
     if provenance == "governance":
-        return "governance · Art 14"
+        return "Required human oversight (EU AI Act)"
     if provenance == "external_agents":
-        return "external agent · BYOA gateway"
+        return "Outside agent"
     if provenance == "harness_refine":
         # The agent is asking to change its OWN operating instructions.
         # An approver must be able to see that at a glance, not read it as
         # an ordinary task approval.
-        return "self-refinement · changes the agent's instructions"
+        return "Agent wants to change its own instructions"
     if provenance == "assessment":
-        return "assessment · human review"
+        return "Assessment review"
     return None
 
 
