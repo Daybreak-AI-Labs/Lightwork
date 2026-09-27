@@ -4,70 +4,47 @@
   {% from "_hero.html" import hero, state %}
   {% set suspended_count = rows | selectattr('suspended') | list | length %}
   {% call hero('Administration', 'Workspace overview',
-               subtitle='Per-workspace summary',
-               lede='A per-workspace summary: goals by status, today\'s spend,
-                     and how close each workspace is to its daily spend limit.
-                     The full roster — and where new workspaces are created —
-                     lives on <a href="/tenants">Workspaces</a>.') %}
+               subtitle='Summary for each workspace',
+               lede='Tasks by status, today\'s spending, and how close each
+                     workspace is to its daily limit. Create and change
+                     workspaces on <a href="/tenants">Workspaces</a>.') %}
     {{ state('Current state',
-             rows | length ~ ' workspace' ~ ('' if rows | length == 1 else 's') ~ ' reporting',
-             badge=(suspended_count ~ ' suspended') if suspended_count
-                   else ('all active' if rows else 'single workspace'),
+             rows | length ~ ' workspace' ~ ('' if rows | length == 1 else 's'),
+             badge=(suspended_count ~ ' paused') if suspended_count
+                   else ('All active' if rows else 'Single workspace'),
              badge_class='warn' if suspended_count else ('ok' if rows else 'idle'),
-             copy='Spend today across workspaces: $'
+             copy='Spent today across all workspaces: $'
                   ~ ('%.2f' % (rows | sum(attribute='spend_today'))) ~ '.
-                  One budget per workspace — no workspace can spend
-                  another\'s.') }}
+                  Each workspace has its own budget.') }}
   {% endcall %}
 
-  <div class="section-head"><h2>Why create a workspace?</h2></div>
-  <div class="panel">
-    <p class="muted" style="margin: 0;">
-      A workspace walls off one client or team: its own records and run
-      history, its own uploaded knowledge and customized agents, its own
-      daily spend limit and usage ledger, and its own per-workspace roles.
-      Evidence never mixes between clients, one workspace can never spend
-      another's budget, and any one of them can be suspended without
-      touching the rest. Create and manage workspaces on
-      <a href="/tenants">Tenants</a>.
-    </p>
-  </div>
-
-  {% if not is_admin %}
+  {% if not rows %}
     <div class="panel">
-      <p class="muted">Administrator access is required to see all workspaces.
-      You're seeing only your own workspace because that is what your account
-      has access to.</p>
-    </div>
-  {% elif not rows %}
-    <div class="panel">
-      <p class="muted" style="margin: 0;">No workspaces yet. Single-workspace
-      deployments run without a registry — create your first workspace on
-      <a href="/tenants">Workspaces</a> when you take on a second client or
-      team.</p>
+      <p class="muted tov-empty">No workspaces yet. You're using a single workspace,
+        which is fine for one team. Add one when you take on a second client or team.</p>
+      <p><a class="btn btn--primary" href="/tenants">Create a workspace</a></p>
     </div>
   {% else %}
-    <div class="section-head"><h2>Per-workspace summary</h2></div>
+    <div class="section-head"><h2>Each workspace</h2></div>
     <div class="panel">
       <table>
         <thead>
           <tr>
             <th scope="col">Workspace</th><th scope="col">Status</th>
-            <th scope="col">Plan</th><th scope="col">Goals</th>
-            <th scope="col">By status</th>
-            <th scope="col">Spend today</th><th scope="col">Daily limit</th>
+            <th scope="col">Plan</th><th scope="col">Tasks</th>
+            <th scope="col">By Status</th>
+            <th scope="col">Spent Today</th><th scope="col">Daily Limit</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
+            {% set name = r.display_name or (r.id | humanize) %}
             <tr>
-              <td>{% if r.display_name %}{{ r.display_name }} <span class="muted">{{ r.id }}</span>{% else %}{{ r.id }}{% endif %}</td>
+              <td>{{ name }}</td>
               <td>
-                {% if r.suspended %}
-                  <span class="badge blocked">Suspended</span>
-                {% else %}
-                  <span class="badge active">Active</span>
-                {% endif %}
+                {% if r.suspended %}<span class="badge blocked">Paused</span>
+                {% else %}<span class="badge active">Active</span>{% endif %}
               </td>
               <td>{{ r.plan | capitalize }}</td>
               <td>{{ r.total_goals }}</td>
@@ -77,17 +54,20 @@
                     <span class="badge {{ status }}">{{ status | humanize }} {{ n }}</span>
                   {% endfor %}
                 {% else %}
-                  <span class="muted">no runs yet</span>
+                  <span class="muted">No tasks yet</span>
                 {% endif %}
               </td>
               <td>${{ '%.2f' % r.spend_today }}</td>
               <td class="muted">
-                {% if r.max_daily_dollars %}${{ '%g' % r.max_daily_dollars }}/day{% else %}unlimited{% endif %}
+                {% if r.max_daily_dollars %}${{ '%g' % r.max_daily_dollars }}/day{% else %}No limit{% endif %}
               </td>
+              <td><a class="btn btn--ghost" href="/tenants" aria-label="Change {{ name }}">Change</a>
+                <a class="btn btn--ghost" href="/tenants/{{ r.id | urlencode }}/features" aria-label="Features for {{ name }}">Features</a></td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   {% endif %}
+  <style>.tov-empty { margin: 0 0 var(--space-3); }</style>
 {% endblock %}

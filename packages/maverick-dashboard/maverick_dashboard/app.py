@@ -3321,11 +3321,11 @@ def _feature_label(feature: str) -> str:
         from maverick.departments import department_title
         return department_title(feature.split(":", 1)[1]) + " department"
     return {
-        "core": "Core",
-        "channels": "Channels",
-        "audit_export": "Audit export",
-        "grpc": "gRPC API",
-    }.get(feature, feature)
+        "core": "Core features",
+        "channels": "Chat apps (Slack, Teams, email and more)",
+        "audit_export": "Download the activity history",
+        "grpc": "Connections for other software (advanced)",
+    }.get(feature, feature.replace("_", " ").capitalize())
 
 
 @app.get("/tenants/{tenant_id}/features", response_class=HTMLResponse)

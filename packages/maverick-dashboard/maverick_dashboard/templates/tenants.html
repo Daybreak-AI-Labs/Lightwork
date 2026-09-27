@@ -4,181 +4,119 @@
   {% from "_hero.html" import hero, state %}
   {% set active_tenants = tenants | selectattr('status', 'equalto', 'active') | list | length %}
   {% call hero('Administration', 'Workspaces',
-               subtitle='Isolated client workspaces',
-               lede='Each workspace is isolated, with its own records and daily
-                     spend limit. This roster shows every workspace on this
-                     deployment — status, plan, and spend limit. The
-                     per-workspace summary lives on
+               subtitle='Separate spaces for each client or team',
+               lede='Each workspace keeps its own records, documents and daily
+                     spending limit. For a summary of each workspace, open
                      <a href="/tenants/overview">Workspace overview</a>.') %}
     {{ state('Current state',
              tenants | length ~ ' workspace' ~ ('' if tenants | length == 1 else 's') ~ ' set up',
-             badge=(active_tenants ~ ' active') if tenants else 'single workspace',
+             badge=(active_tenants ~ ' active') if tenants else 'Single workspace',
              badge_class='ok' if active_tenants else 'idle',
-             copy='One client per workspace: separate records, knowledge,
-                   budget, and access — any one can be suspended without
-                   touching the rest.') }}
+             copy='One client per workspace: separate records, documents,
+                   budget and access. You can pause one without touching the rest.') }}
   {% endcall %}
 
-  <div class="section-head"><h2>Why create a workspace?</h2></div>
-  <div class="panel">
-    <p class="muted" style="margin-top: 0;">
-      A workspace walls off one client or team. Everything it produces lives
-      in its own home — so one client's evidence can never mix with
-      another's:
-    </p>
-    <ul class="muted" style="margin: 0 0 var(--space-2);">
-      <li><strong>Its own records</strong> — a separate operating record and
-        run history; work done for one workspace is invisible to the rest.</li>
-      <li><strong>Its own knowledge</strong> — uploaded documents and
-        customized agents stay inside the workspace that owns them.</li>
-      <li><strong>Its own budget</strong> — a daily spend limit and usage
-        ledger per workspace, so one client can never burn another's
-        budget (and usage rolls up cleanly for billing).</li>
-      <li><strong>Its own access</strong> — people can hold a different role
-        per workspace, and a workspace can be suspended without touching
-        the others.</li>
-    </ul>
-    <p class="muted" style="margin: 0;">
-      One client per workspace is the rule of thumb: separate books, separate
-      evidence, one roster to run it all from.
-    </p>
-  </div>
-
-  {% if is_admin %}
   <div class="section-head"><h2>Create a workspace</h2></div>
   <div class="panel">
-    <form id="tenant-add" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3); align-items: end;">
-      <label>Workspace ID <span class="muted">(letters, numbers, dashes)</span>
-        <input class="input" name="id" required maxlength="128" placeholder="acme-finance">
+    <form id="tenant-add" class="tenants-form">
+      <label class="tenants-field">Workspace name
+        <input class="input" name="display_name" required maxlength="200" placeholder="e.g. Acme Finance" autocomplete="off">
       </label>
-      <label>Display name
-        <input class="input" name="display_name" maxlength="200" placeholder="Acme Finance">
-      </label>
-      <label>Plan
+      <label class="tenants-field">Plan
         <select class="select" name="plan">
           <option value="free" selected>Free</option>
           <option value="pro">Pro</option>
           <option value="enterprise">Enterprise</option>
         </select>
       </label>
-      <label>Daily spending limit in dollars (leave at 0 for no limit)
-        <input class="input" name="max_daily_dollars" type="number" min="0"
-               step="0.01" value="0" required>
-      </label>
+      <fieldset class="tenants-limit">
+        <legend>Daily spending limit</legend>
+        <label><input type="checkbox" name="no_limit" checked data-limit-toggle> No daily limit</label>
+        <label class="tenants-field">Limit in US dollars per day
+          <input class="input" name="max_daily_dollars" type="number" min="0.01" step="0.01" disabled data-limit-amount>
+        </label>
+      </fieldset>
       <div><button type="submit" class="btn btn--primary">Create workspace</button></div>
     </form>
-    <p id="tenant-add-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;"></p>
+    <p id="tenant-add-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+    <details class="tenants-why">
+      <summary>Why use workspaces?</summary>
+      <ul class="muted">
+        <li><strong>Its own records.</strong> Work done for one workspace can't be seen from the others.</li>
+        <li><strong>Its own documents.</strong> Uploaded files and customized agents stay in the workspace that owns them.</li>
+        <li><strong>Its own budget.</strong> A daily spending limit and usage records for each workspace, so costs roll up cleanly for billing.</li>
+        <li><strong>Its own access.</strong> People can have a different role in each workspace.</li>
+      </ul>
+    </details>
   </div>
-  <script>
-  (function () {
-    var form = document.getElementById('tenant-add');
-    var msg = document.getElementById('tenant-add-msg');
-    if (!form) return;
-    form.addEventListener('submit', async function (ev) {
-      ev.preventDefault();
-      var f = new FormData(form);
-      msg.textContent = 'Creating\u2026';
-      try {
-        var r = await fetch('/api/v1/admin/tenants', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: String(f.get('id') || '').trim(),
-            display_name: String(f.get('display_name') || '').trim(),
-            plan: String(f.get('plan') || 'free'),
-            max_daily_dollars: Number(f.get('max_daily_dollars') || 0),
-          }),
-        });
-        if (!r.ok) {
-          var j = await r.json().catch(function () { return {}; });
-          msg.textContent = j.detail || ('That did not work (error ' + r.status + ').');
-          return;
-        }
-        msg.textContent = 'Workspace created.';
-        setTimeout(function () { window.location.reload(); }, 350);
-      } catch (e) { msg.textContent = 'Connection lost \u2014 is the dashboard still running?'; }
-    });
-  })();
-  </script>
-  {% endif %}
 
-  {% if not is_admin %}
+  {% if not tenants %}
     <div class="panel">
-      <p class="muted">Administrator access is required to see all workspaces.
-      You're seeing only your own workspace because that is what your account
-      has access to.</p>
-    </div>
-  {% elif not tenants %}
-    <div class="panel">
-      <p class="muted" style="margin: 0;">No workspaces yet. Single-workspace
-      deployments run without a registry — create your first workspace above
-      when you take on a second client or team.</p>
+      <p class="muted tenants-empty">No workspaces yet. You're using a single workspace, which is
+        fine for one team. Create one above when you add a second client or team.</p>
     </div>
   {% else %}
-    <div class="section-head"><h2>Workspace roster</h2></div>
+    <div class="section-head"><h2>Your workspaces</h2></div>
     <div class="panel">
       <table>
         <thead>
           <tr>
             <th scope="col">Workspace</th><th scope="col">Status</th>
-            <th scope="col">Plan</th><th scope="col">Daily limit</th>
-            <th scope="col">Features</th>
+            <th scope="col">Plan</th><th scope="col">Daily Limit</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for t in tenants %}
-            <tr>
-              <td>{% if t.display_name %}{{ t.display_name }} <span class="muted">{{ t.id }}</span>{% else %}{{ t.id }}{% endif %}</td>
+            {% set name = t.display_name or (t.id | humanize) %}
+            <tr data-tenant-row="{{ t.id }}" data-tenant-name="{{ name }}">
+              <td>{{ name }}</td>
+              <td><span class="badge {{ 'active' if t.status == 'active' else 'blocked' }}">{{ 'Active' if t.status == 'active' else ('Paused' if t.status == 'suspended' else t.status | humanize) }}</span></td>
               <td>
-                {% if t.status == 'active' %}
-                  <span style="color: var(--accent);">Active</span>
-                {% else %}
-                  <span style="color: var(--warn);">{{ t.status | humanize }}</span>
-                {% endif %}
+                <label class="sr-only" for="plan-{{ loop.index }}">Plan for {{ name }}</label>
+                <select class="select" id="plan-{{ loop.index }}" data-tenant-plan="{{ t.id }}" data-current="{{ t.plan }}">
+                  {% for p in ('free', 'pro', 'enterprise') %}<option value="{{ p }}"{% if t.plan == p %} selected{% endif %}>{{ p | capitalize }}</option>{% endfor %}
+                </select>
               </td>
-              <td>{{ t.plan | capitalize }}</td>
               <td>
-                <form class="tenant-quota" data-tenant="{{ t.id }}" style="display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center;">
-                  <input class="input" name="max_daily_dollars" type="number" min="0" step="0.01"
-                         value="{{ '%g' % (t.max_daily_dollars or 0) }}" style="width: 7rem;"
-                         aria-label="Daily spend limit for {{ t.display_name or t.id }} in dollars per day; 0 means unlimited">
-                  <button type="submit" class="btn" aria-label="Save daily spend limit for {{ t.display_name or t.id }}">Save</button>
-                  <span class="muted">{% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}unlimited{% endif %}</span>
+                <form class="tenant-quota" data-tenant="{{ t.id }}">
+                  <label><input type="checkbox" name="no_limit" data-limit-toggle{% if not t.max_daily_dollars %} checked{% endif %}
+                                aria-label="No daily limit for {{ name }}"> No limit</label>
+                  <input class="input tenants-amount" name="max_daily_dollars" type="number" min="0.01" step="0.01" data-limit-amount
+                         value="{{ '%g' % t.max_daily_dollars if t.max_daily_dollars else '' }}"
+                         aria-label="Daily limit for {{ name }} in US dollars"{% if not t.max_daily_dollars %} disabled{% endif %}>
+                  <button type="submit" class="btn" aria-label="Save daily limit for {{ name }}">Save</button>
+                  <span class="muted">{% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}No limit{% endif %}</span>
                 </form>
               </td>
-              <td><a href="/tenants/{{ t.id | urlencode }}/features">Manage features</a></td>
+              <td class="tenants-actions">
+                <a class="btn btn--ghost" href="/tenants/{{ t.id | urlencode }}/features" aria-label="Manage features for {{ name }}">Features</a>
+                {% if t.status == 'active' %}
+                <button type="button" class="btn" data-tenant-action="suspend" aria-label="Pause {{ name }}">Pause</button>
+                {% else %}
+                <button type="button" class="btn" data-tenant-action="resume" aria-label="Resume {{ name }}">Resume</button>
+                {% endif %}
+                <button type="button" class="btn btn--danger" data-tenant-action="delete" aria-label="Remove {{ name }}">Remove</button>
+              </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
-      <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">Daily limit is the most a workspace's runs may spend together in one UTC day; each run reserves its own budget against it when it starts. Enter 0 for no daily limit.</p>
-      <p id="tenant-quota-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;"></p>
+      <p class="muted tenants-msg">The daily limit is the most a workspace's tasks may spend together each day (midnight to midnight UTC).</p>
+      <p id="tenant-quota-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
     </div>
-    <script>
-    (function () {
-      var msg = document.getElementById('tenant-quota-msg');
-      document.querySelectorAll('form.tenant-quota').forEach(function (form) {
-        form.addEventListener('submit', async function (ev) {
-          ev.preventDefault();
-          var id = form.getAttribute('data-tenant');
-          var value = Number(new FormData(form).get('max_daily_dollars'));
-          if (!isFinite(value) || value < 0) { msg.textContent = 'Enter 0 for no daily limit or a positive dollar amount.'; return; }
-          msg.textContent = 'Saving\u2026';
-          try {
-            var r = await fetch('/api/v1/admin/tenants/' + encodeURIComponent(id) + '/quota', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ max_daily_dollars: value }),
-            });
-            if (!r.ok) {
-              var j = await r.json().catch(function () { return {}; });
-              msg.textContent = j.detail || ('That did not work (error ' + r.status + ').');
-              return;
-            }
-            msg.textContent = 'Daily limit for ' + id + ' is now ' + (value ? '$' + value + '/day' : 'unlimited') + '.';
-            setTimeout(function () { window.location.reload(); }, 350);
-          } catch (e) { msg.textContent = 'Connection lost \u2014 is the dashboard still running?'; }
-        });
-      });
-    })();
-    </script>
   {% endif %}
+  <style>
+    .tenants-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: var(--space-3); align-items: end; }
+    .tenants-field { display: flex; flex-direction: column; gap: var(--space-1); }
+    .tenants-limit { border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
+    .tenants-limit legend { margin-bottom: var(--space-1); }
+    .tenants-msg { font-size: var(--text-sm); margin: var(--space-2) 0 0; }
+    .tenants-why { margin-top: var(--space-3); }
+    .tenants-empty { margin: 0; }
+    .tenant-quota { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+    .tenants-amount { width: 7rem; }
+    .tenants-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  </style>
+  <script src="/static/lightwork-tenants.js" defer></script>
 {% endblock %}

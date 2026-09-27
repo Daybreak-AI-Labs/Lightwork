@@ -28,9 +28,9 @@ def test_empty_state(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/tenants").text
     assert "No workspaces yet" in text
-    assert "leave at 0 for no limit" in text
+    assert "No daily limit" in text
     assert 'name="max_daily_dollars"' in text
-    assert 'value="0"' in text
+    assert 'name="display_name" required' in text and 'name="id"' not in text
 
 
 def test_lists_provisioned_tenants(monkeypatch, tmp_path):
@@ -44,7 +44,7 @@ def test_lists_provisioned_tenants(monkeypatch, tmp_path):
     assert "acme" in text and "enterprise" in text and "Acme Inc" in text
     assert "$100/day" in text
     # beta is suspended.
-    assert "beta" in text and "suspended" in text
+    assert "Beta" in text and "Paused" in text
 
 
 def test_roster_lets_an_admin_change_each_daily_limit_in_place(monkeypatch, tmp_path):
@@ -56,7 +56,9 @@ def test_roster_lets_an_admin_change_each_daily_limit_in_place(monkeypatch, tmp_
     tr.create_tenant("free", max_daily_dollars=0)
     text = _client().get("/tenants").text
     assert 'class="tenant-quota" data-tenant="acme"' in text
-    assert 'name="max_daily_dollars" type="number" min="0" step="0.01"\n                         value="100"' in text
-    assert 'class="tenant-quota" data-tenant="free"' in text and "unlimited" in text
-    assert "/api/v1/admin/tenants/' + encodeURIComponent(id) + '/quota" in text
-    assert "Enter 0 for no daily limit" in text
+    assert 'value="100"' in text
+    assert 'class="tenant-quota" data-tenant="free"' in text and "No limit" in text
+    # The editor posts to the existing quota API (script served as a static file).
+    from pathlib import Path
+    script = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-tenants.js").read_text()
+    assert "'/quota', 'POST'" in script and "No limit" in script
