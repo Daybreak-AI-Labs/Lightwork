@@ -1,44 +1,134 @@
 {% extends "base.html" %}
+{% from "_hero.html" import hero, state %}
 {% block title %}Trust Receipts - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .rcp-shell{--rcp-glass:color-mix(in srgb,var(--panel) 66%,transparent);--rcp-soft:color-mix(in srgb,var(--panel) 45%,transparent);--rcp-edge:color-mix(in srgb,var(--text) 14%,transparent);display:grid;gap:var(--space-5);isolation:isolate;position:relative}
-  .rcp-shell::before{background:radial-gradient(circle at 10% 8%,color-mix(in srgb,#8b5cf6 16%,transparent),transparent 30rem),radial-gradient(circle at 88% 18%,color-mix(in srgb,#22d3ee 15%,transparent),transparent 32rem),radial-gradient(circle at 50% 94%,color-mix(in srgb,#34d399 11%,transparent),transparent 28rem);content:"";inset:0;pointer-events:none;position:fixed;z-index:-1}
-  .rcp-glass{background:var(--rcp-glass);border:1px solid var(--rcp-edge);box-shadow:0 18px 52px color-mix(in srgb,#000 22%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 13%,transparent);-webkit-backdrop-filter:blur(26px) saturate(155%);backdrop-filter:blur(26px) saturate(155%)}
-  .rcp-hero{align-items:center;border-radius:1.65rem;display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr) minmax(17rem,25rem);overflow:hidden;padding:clamp(1.4rem,3vw,2.8rem)}
-  .rcp-kicker{color:var(--accent);font-size:.73rem;font-weight:850;letter-spacing:.13em;margin:0 0 .5rem;text-transform:uppercase}.rcp-title{font-size:clamp(2.2rem,6vw,4.7rem);letter-spacing:-.055em;line-height:.95;margin:0;max-width:13ch}.rcp-lede{color:var(--text-muted);line-height:1.65;margin:1rem 0 0;max-width:72ch}
-  .rcp-health{background:var(--rcp-soft);border-radius:1.2rem;display:grid;gap:.8rem;padding:1.1rem}.rcp-row,.rcp-actions,.rcp-card-head{align-items:center;display:flex;flex-wrap:wrap;gap:.7rem;justify-content:space-between}.rcp-mark{align-items:center;background:var(--rcp-soft);border:1px solid var(--rcp-edge);border-radius:999px;display:inline-flex;font-size:.72rem;font-weight:850;gap:.42rem;padding:.34rem .68rem;text-transform:uppercase}.rcp-mark::before{background:currentColor;border-radius:50%;content:"";height:.55rem;width:.55rem}.rcp-mark[data-state=ready]{color:var(--success,#45c786)}.rcp-mark[data-state=partial]{color:var(--warn)}.rcp-mark[data-state=failed]{color:var(--danger,#f06b75)}
-  .rcp-boundary{border-left:.3rem solid var(--accent);border-radius:1.15rem;padding:1.1rem 1.35rem}.rcp-boundary h2,.rcp-card h2{margin:0 0 .55rem}.rcp-boundary p,.rcp-help{color:var(--text-muted);line-height:1.55;margin:.35rem 0}.rcp-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;word-break:break-all}
-  .rcp-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(12,minmax(0,1fr))}.rcp-card{border-radius:1.2rem;grid-column:span 6;min-width:0;padding:clamp(1rem,2vw,1.45rem)}.rcp-card--wide{grid-column:1/-1}
-  .rcp-metrics{display:grid;gap:.7rem;grid-template-columns:repeat(3,minmax(0,1fr))}.rcp-metric{background:var(--rcp-soft);border:1px solid var(--rcp-edge);border-radius:1rem;padding:.9rem}.rcp-metric strong{display:block;font-size:1.05rem;word-break:break-all}.rcp-metric span{color:var(--text-muted);font-size:.75rem}
-  .rcp-form{display:grid;gap:.85rem}.rcp-fields{display:grid;gap:.75rem;grid-template-columns:repeat(2,minmax(0,1fr))}.rcp-form label{color:var(--text-muted);display:grid;font-size:.82rem;font-weight:700;gap:.35rem}.rcp-form label.rcp-inline{align-items:center;display:flex;gap:.5rem}.rcp-form :where(.input,.select,textarea){background:color-mix(in srgb,var(--bg) 55%,transparent);border:1px solid var(--rcp-edge);border-radius:.6rem;color:var(--text);min-width:0;padding:.5rem .6rem;width:100%}.rcp-form textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.75rem;min-height:9rem;resize:vertical}
-  .rcp-output{background:color-mix(in srgb,#020617 77%,transparent);border:1px solid var(--rcp-edge);border-radius:1rem;color:#dbeafe;max-height:32rem;min-height:9rem;overflow:auto;padding:1rem;white-space:pre-wrap;word-break:break-word}
-  .rcp-table{border-collapse:collapse;font-size:.78rem;width:100%}.rcp-table th,.rcp-table td{border-bottom:1px solid var(--rcp-edge);padding:.5rem;text-align:left;vertical-align:top}.rcp-table td{color:var(--text-muted);word-break:break-all}.rcp-table-wrap{max-height:26rem;overflow:auto}
-  .rcp-depths{display:grid;gap:.45rem;grid-template-columns:repeat(3,minmax(0,1fr));list-style:none;margin:.7rem 0 0;padding:0}.rcp-depths li{background:var(--rcp-soft);border:1px solid var(--rcp-edge);border-radius:.8rem;padding:.65rem}.rcp-depths strong{display:block;text-transform:uppercase}
-  .rcp-verdict{font-size:1.5rem;font-weight:900;letter-spacing:-.02em;margin:0}.rcp-verdict[data-ok=true]{color:var(--success,#45c786)}.rcp-verdict[data-ok=false]{color:var(--danger,#f06b75)}.rcp-claims{list-style:none;margin:.6rem 0 0;padding:0}.rcp-claims li{border-bottom:1px solid var(--rcp-edge);padding:.35rem 0}.rcp-claims [data-status=HOLDS]{color:var(--success,#45c786)}.rcp-claims [data-status=FAILS]{color:var(--danger,#f06b75)}.rcp-claims [data-status=INDETERMINATE],.rcp-claims [data-status=NOT_APPLICABLE]{color:var(--warn)}
-  @media(max-width:900px){.rcp-hero{grid-template-columns:1fr}.rcp-card{grid-column:1/-1}.rcp-metrics,.rcp-depths{grid-template-columns:1fr 1fr}}
-  @media(max-width:560px){.rcp-fields,.rcp-metrics,.rcp-depths{grid-template-columns:1fr}}
+  .rcp-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(auto-fit,minmax(min(100%,24rem),1fr))}
+  .rcp-row,.rcp-actions{align-items:center;display:flex;flex-wrap:wrap;gap:.6rem}
+  .rcp-fields{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))}
+  .rcp-form{display:grid;gap:.85rem}
+  .rcp-form label{display:grid;gap:.35rem}
+  .rcp-form label.rcp-inline{align-items:center;display:flex;gap:.5rem}
+  .rcp-key{font-family:var(--font-mono,ui-monospace,monospace);font-size:.78rem;overflow-wrap:anywhere}
+  .rcp-table-wrap{max-height:28rem;overflow:auto}
+  .rcp-levels{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr));list-style:none;margin:.6rem 0 0;padding:0}
+  .rcp-levels li{border:1px solid var(--border);border-radius:var(--radius-sm);padding:.6rem}
+  .rcp-verdict{font-size:1.3rem;font-weight:800;margin:0}.rcp-verdict[data-ok=true]{color:var(--success)}.rcp-verdict[data-ok=false]{color:var(--danger)}
+  .rcp-claims{list-style:none;margin:.6rem 0 0;padding:0}
+  .rcp-claims li{border-bottom:1px solid var(--border);padding:.35rem 0}
+  .rcp-report{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.75rem}
 </style>
 {% endblock %}
 {% block content %}
-<div class="rcp-shell" id="rcp-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
-  <section class="rcp-hero rcp-glass" aria-labelledby="rcp-title">
-    <div><p class="rcp-kicker">Bearer-verifiable evidence</p><h1 class="rcp-title" id="rcp-title">Trust receipts</h1><p class="rcp-lede">A receipt is a portable, signed artifact for one audited decision — the row, the chain that follows it, and the commitment that fixed it — that an auditor, a regulator, or your customer's customer verifies offline with a public key obtained out of band. Mint one here, hand out the standalone verifier, or check a receipt someone sent you.</p></div>
-    <div class="rcp-health"><div class="rcp-row"><span class="rcp-mark" data-state="partial" id="rcp-state">Checking</span><button class="btn" id="rcp-refresh" type="button">Refresh</button></div><strong id="rcp-health-title">Resolving signing state</strong><span class="rcp-help" id="rcp-health-detail">Receipts are always signed; without audit signing there is nothing to cite.</span><div class="rcp-metrics"><div class="rcp-metric"><strong id="rcp-key-id">—</strong><span>Issuer key id</span></div><div class="rcp-metric"><strong id="rcp-custody">—</strong><span>Key custody</span></div><div class="rcp-metric"><strong id="rcp-days">—</strong><span>Audit days on disk</span></div></div></div>
+<div id="rcp-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
+  {% call hero('Audit', 'Trust Receipts',
+               lede='A trust receipt is a file that proves a decision in your activity record has not been changed. Create one for any decision, send it to an auditor, or check one someone sent you.',
+               title_id='rcp-title') %}
+    <div class="hero-statebox" aria-live="polite">
+      <div class="hero-statebox__label">Signing</div>
+      <div class="hero-statebox__row"><strong id="rcp-health-title">Checking…</strong><span class="badge idle" id="rcp-state">Checking</span></div>
+      <p class="hero-statebox__copy" id="rcp-health-detail">Receipts can only be created for signed activity.</p>
+    </div>
+  {% endcall %}
+
+  <section class="panel" aria-labelledby="rcp-signing-title">
+    <div class="rcp-row" style="justify-content:space-between"><h2 id="rcp-signing-title" style="margin:0">Signing</h2><button class="btn btn--ghost" id="rcp-refresh" type="button">Refresh</button></div>
+    <div class="grid" style="margin-top:var(--space-3)">
+      <div class="stat"><div class="num" id="rcp-key-id">—</div><div class="label">Signing key</div></div>
+      <div class="stat"><div class="num" id="rcp-custody">—</div><div class="label">Where the key is stored</div></div>
+      <div class="stat"><div class="num" id="rcp-days">—</div><div class="label">Days of activity history</div></div>
+    </div>
+    <p id="rcp-signing-action" hidden><button class="btn btn--primary" id="rcp-turn-on-signing" type="button">Turn on signed activity record</button></p>
+    <p class="muted" id="rcp-signing-msg" role="status" aria-live="polite"></p>
   </section>
 
-  <section class="rcp-boundary rcp-glass"><h2>What a receipt proves</h2><p>Three depths that are not synonyms. A verifier recomputes the claim from the row, so a stated claim that drifts from the row fails however validly it was re-signed. A co-located key reads as <em>integrity</em> (against accidental or non-privileged edits), an off-host key as <em>tamper-evidence</em>.</p><ul class="rcp-depths"><li><strong>signed</strong>a genuine row, signed by the issuer's key</li><li><strong>chained</strong>provably linked to a tip the issuer committed</li><li><strong>anchored</strong>that commitment matched a digest the verifier brought from outside the receipt</li></ul><p class="rcp-help">Publish the issuer key out of band: <span class="rcp-key" id="rcp-pubkey">—</span></p></section>
+  <section class="panel" aria-labelledby="rcp-proves-title">
+    <h2 id="rcp-proves-title" style="margin-top:0">What a Receipt Proves</h2>
+    <ul class="rcp-levels">
+      <li><strong>Genuine</strong><br>The decision was recorded by this Lightwork installation.</li>
+      <li><strong>Nothing removed after it</strong><br>The activity after the decision is included and unchanged.</li>
+      <li><strong>Matches a published checkpoint</strong><br>It agrees with a checkpoint published separately.</li>
+    </ul>
+    <h3>Share Our Key</h3>
+    <p class="muted">People who check your receipts need this key. Send it separately from the receipt, for example by email.</p>
+    <div class="rcp-actions">
+      <button class="btn" type="button" id="rcp-copy-key">Copy key</button>
+      <button class="btn btn--ghost" type="button" id="rcp-download-key">Download key</button>
+    </div>
+    <details><summary>Show the key</summary><p class="rcp-key" id="rcp-pubkey">—</p></details>
+  </section>
+
+  <section class="panel" aria-labelledby="rcp-create-title">
+    <h2 id="rcp-create-title" style="margin-top:0">Create a Receipt</h2>
+    <form class="rcp-form" id="rcp-rows-form" autocomplete="off">
+      <div class="rcp-fields">
+        <label for="rcp-day">Day<select class="select" name="day" id="rcp-day"><option value="">Loading…</option></select></label>
+        <label for="rcp-kind">Decision type<select class="select" name="kind" id="rcp-kind"><option value="">All decisions</option></select></label>
+      </div>
+      <label class="rcp-inline"><input type="checkbox" id="rcp-suffix" checked> Also prove nothing was changed after this decision</label>
+      <label class="rcp-inline"><input type="checkbox" id="rcp-anchor"> Publish a checkpoint so others can confirm it</label>
+    </form>
+    <p class="muted" id="rcp-rows-note" role="status" aria-live="polite">Choose a day to see its decisions.</p>
+    <div class="rcp-table-wrap"><table><thead><tr><th scope="col">Time</th><th scope="col">Decision</th><th scope="col">Agent</th><th scope="col">Outcome</th><th scope="col">Receipt</th></tr></thead><tbody id="rcp-rows"><tr><td colspan="5">Choose a day to see its decisions.</td></tr></tbody></table></div>
+    <p class="muted" id="rcp-mint-msg" role="status" aria-live="polite"></p>
+  </section>
 
   <div class="rcp-grid">
-    <section class="rcp-card rcp-card--wide rcp-glass"><div class="rcp-card-head"><div><p class="rcp-kicker">Mint</p><h2>Pick the decision</h2></div><form class="rcp-form" id="rcp-rows-form" autocomplete="off"><div class="rcp-fields"><label>Audit day<select class="select" name="day" id="rcp-day"><option value="">Loading…</option></select></label><label>Kind (optional)<input class="input" name="kind" maxlength="64" placeholder="governance_denied"></label></div><button class="btn" type="submit">Load rows</button></form></div><div class="rcp-actions"><label class="rcp-inline"><input type="checkbox" id="rcp-suffix" checked> Include the rows after it (chained depth)</label><label class="rcp-inline"><input type="checkbox" id="rcp-anchor"> Publish a checkpoint and anchor it</label><span class="rcp-help" id="rcp-rows-note">No rows loaded.</span></div><div class="rcp-table-wrap"><table class="rcp-table"><thead><tr><th scope="col">#</th><th scope="col">When</th><th scope="col">Kind</th><th scope="col">Agent</th><th scope="col">Claim</th><th scope="col">Row hash</th><th scope="col">Receipt</th></tr></thead><tbody id="rcp-rows"><tr><td colspan="7">Pick a day and load its rows.</td></tr></tbody></table></div></section>
+    <section class="panel" aria-labelledby="rcp-check-title">
+      <h2 id="rcp-check-title" style="margin-top:0">Check a Receipt</h2>
+      <form class="rcp-form" id="rcp-verify-form" autocomplete="off">
+        <label for="rcp-file">Receipt file<input type="file" id="rcp-file" accept="application/json,.json"></label>
+        <details><summary>More options</summary>
+          <label class="rcp-inline"><input type="checkbox" name="use_local_keys" id="rcp-local-keys" checked> Trust keys from this Lightwork installation</label>
+          <div class="rcp-fields">
+            <label for="rcp-extra-key">Sender's key (if they gave you one)<input class="input" id="rcp-extra-key" name="key" maxlength="64" placeholder="Paste the key"></label>
+            <label for="rcp-anchor-digest">Checkpoint code (if provided)<input class="input" id="rcp-anchor-digest" name="anchor_digest" maxlength="64" placeholder="Paste the code"></label>
+          </div>
+          <p><button class="btn btn--ghost" type="button" id="rcp-key-file">Load the sender's key from a file</button></p>
+        </details>
+        <button class="btn btn--primary" type="submit">Check receipt</button>
+      </form>
+      <div id="rcp-verdict-box" hidden role="status" aria-live="polite">
+        <p class="rcp-verdict" id="rcp-verdict">—</p>
+        <p class="muted" id="rcp-verdict-detail"></p>
+        <ul class="rcp-claims" id="rcp-claims"></ul>
+        <details><summary>Technical details</summary><pre class="rcp-report" id="rcp-report"></pre></details>
+      </div>
+    </section>
 
-    <section class="rcp-card rcp-glass"><p class="rcp-kicker">Verify</p><h2>Check a receipt</h2><form class="rcp-form" id="rcp-verify-form" autocomplete="off"><label>Receipt JSON<textarea name="receipt" id="rcp-receipt" spellcheck="false" placeholder='{"kind": "maverick-trust-receipt", ...}'></textarea></label><label>Or pick the file<input type="file" id="rcp-file" accept="application/json,.json"></label><div class="rcp-fields"><label>Extra trusted key (hex, out of band)<input class="input" name="key" maxlength="64" pattern="[0-9a-f]{64}"></label><label>Published checkpoint digest (sha256)<input class="input" name="anchor_digest" maxlength="64" pattern="[0-9a-f]{64}"></label></div><label class="rcp-inline"><input type="checkbox" name="use_local_keys" id="rcp-local-keys" checked> Trust this deployment's own audit keys</label><button class="btn btn--primary" type="submit">Verify</button></form><div id="rcp-verdict-box" hidden><p class="rcp-verdict" id="rcp-verdict" data-ok="false">—</p><p class="rcp-help" id="rcp-verdict-detail"></p><ul class="rcp-claims" id="rcp-claims"></ul></div></section>
-
-    <section class="rcp-card rcp-glass"><p class="rcp-kicker">Independent verification</p><h2>Share a receipt</h2><p class="rcp-help">Use “Check a receipt” to verify a file here. Recipients who need to verify outside Lightwork can download a separate verifier. Share the trusted issuer key through an independent channel.</p><details hidden><summary>Technical details: optional offline verifier</summary><p><button class="btn" id="rcp-download-verifier" type="button">Download verifier</button></p><p class="rcp-help">Verifier fingerprint (SHA-256): <span class="rcp-key" id="rcp-verifier-sha">—</span></p><pre class="rcp-output" id="rcp-cli">python trust_receipt_verify.py receipt.json --key &lt;issuer-pubkey-hex&gt; [--anchor-digest &lt;sha256&gt;]</pre></details></section>
-
-    <section class="rcp-card rcp-card--wide rcp-glass"><div class="rcp-card-head"><div><p class="rcp-kicker">Governed output</p><h2>Last operation</h2></div><span class="rcp-help" id="rcp-operation-state" role="status" aria-live="polite">No operation has run.</span></div><pre class="rcp-output" id="rcp-output" tabindex="0"></pre></section>
+    <section class="panel" aria-labelledby="rcp-proof-title">
+      <h2 id="rcp-proof-title" style="margin-top:0">Proof of How Lightwork Behaved</h2>
+      <p class="muted">A signed proof file shows an outside party that agents stayed within your rules, that learning never gave itself more power, and that the activity record is complete.</p>
+      <form class="rcp-form" id="rcp-proof-form" autocomplete="off">
+        <label for="rcp-proof-since">Include learning changes from (optional)<input class="input" type="date" id="rcp-proof-since"></label>
+        <button class="btn btn--primary" type="submit">Download signed proof</button>
+      </form>
+      <h3>Check a Proof File</h3>
+      <form class="rcp-form" id="rcp-proof-verify-form" autocomplete="off">
+        <label for="rcp-proof-file">Proof file<input type="file" id="rcp-proof-file" accept="application/json,.json"></label>
+        <label for="rcp-proof-key">Sender's key (leave empty for this installation's own proof)<input class="input" id="rcp-proof-key" maxlength="64" placeholder="Paste the key"></label>
+        <button class="btn" type="submit">Check proof</button>
+      </form>
+      <div id="rcp-proof-box" hidden role="status" aria-live="polite">
+        <p class="rcp-verdict" id="rcp-proof-verdict">—</p>
+        <p class="muted" id="rcp-proof-detail"></p>
+        <ul class="rcp-claims" id="rcp-proof-claims"></ul>
+        <details><summary>Technical details</summary><pre class="rcp-report" id="rcp-proof-report"></pre></details>
+      </div>
+      <p class="muted" id="rcp-proof-msg" role="status" aria-live="polite"></p>
+    </section>
   </div>
-  <noscript><p class="rcp-boundary rcp-glass">JavaScript is required for this API-backed console.</p></noscript>
+
+  <details class="panel">
+    <summary>For your auditor's IT team</summary>
+    <p class="muted">Auditors who want to check files without Lightwork can use these small checking programs. Send our key to them separately.</p>
+    <div class="rcp-actions">
+      <button class="btn" id="rcp-download-verifier" type="button">Download receipt checker</button>
+      <button class="btn" id="rcp-download-proof-verifier" type="button">Download proof checker</button>
+    </div>
+    <p class="muted">Checker fingerprint: <span class="rcp-key" id="rcp-verifier-sha">—</span></p>
+  </details>
+  <noscript><p class="panel">Turn on JavaScript to use this page.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-trust-receipts.js" defer></script>{% endblock %}

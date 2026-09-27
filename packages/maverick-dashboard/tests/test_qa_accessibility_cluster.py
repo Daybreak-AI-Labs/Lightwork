@@ -64,9 +64,11 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "trust.html",
             (
-                'aria-label="Restore {{ a.id }} external agent"',
-                'aria-label="Revoke {{ a.id }} external agent"',
-                'aria-label="Remove {{ a.id }} external agent"',
+                'aria-label="Unblock {{ label }}"',
+                'aria-label="Block {{ label }}"',
+                'aria-label="Remove {{ label }}"',
+                'aria-label="Check access for {{ label }}"',
+                'aria-label="Edit {{ label }}"',
             ),
         ),
         (

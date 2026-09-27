@@ -412,6 +412,30 @@ async def _call(ops: Any, function: Callable[..., Any], *args: Any, **kwargs: An
         ) from exc
 
 
+def _sharing(request: Request, ops: Any) -> dict[str, Any]:
+    portal = None
+    resolver = getattr(request.app.state, "third_party_collaboration_current_portal_ref", None)
+    if callable(resolver):
+        try:
+            portal = f"/api/v1/external/third-party-collaboration/{resolver()}/portal"
+        except Exception:
+            portal = None
+    try:
+        policy = ops.load_policy()
+        limits = {
+            "invitation_seconds": int(policy.invitation_ttl_seconds),
+            "retention_seconds": int(policy.retention_seconds),
+            "max_artifacts": int(policy.max_artifacts),
+            "max_artifact_bytes": int(policy.max_artifact_bytes),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="third-party collaboration authority unavailable",
+        ) from exc
+    return {"portal_path": portal, "limits": limits}
+
+
 def create_third_party_collaboration_router(
     dependencies: ThirdPartyCollaborationDependencies | None = None,
 ) -> APIRouter:
@@ -494,6 +518,14 @@ def create_third_party_collaboration_router(
             "upload_bytes_implemented": False,
             "vendor_identity_independently_verified": False,
         }
+
+    @router.get("/sharing")
+    async def sharing(request: Request) -> dict[str, Any]:
+        """Where vendors answer, and the limits an invitation must fit in, so
+        the invite form offers only choices the portal will accept."""
+        require_permission(request, "admin")
+        ops, _tenant, _store = authority(request)
+        return _sharing(request, ops)
 
     @router.get("/invitations")
     async def list_invitations(

@@ -86,10 +86,18 @@ def test_unmanaged_agent_actions_explain_the_config_file():
 def test_trust_page_has_register_form_and_row_actions():
     _register()
     page = client.get("/trust").text
-    assert "Register an external agent" in page
+    assert "Add an Outside Agent" in page
     assert 'id="trust-add"' in page
     assert "data-trust-revoke" in page
     assert "data-trust-remove" in page
+    assert "data-tr-edit" in page and "data-tr-check" in page
+    # Tools and data areas are chosen, not typed; no raw key hint or config talk.
+    assert 'name="allow_tools" value="research"' in page
+    assert "comma-separated" not in page and "config file" not in page
+    assert "Turn on blocking" in page and "Copy our key" in page
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(page) == []
 
 
 def test_mutations_are_csrf_gated():
@@ -97,3 +105,84 @@ def test_mutations_are_csrf_gated():
     bare = TestClient(app)
     assert bare.post("/api/v1/trust/agents",
                      json={"id": "x"}).status_code == 403
+
+
+def test_edit_keeps_connection_tokens_and_block_state(tmp_path):
+    import json
+
+    from maverick import agent_trust
+
+    assert _register().status_code == 201
+    entries = json.loads((tmp_path / "agent_trust.json").read_text())
+    entries[0]["a2a_token"] = "kept-token-value"  # pragma: allowlist secret
+    entries[0]["revoked"] = True
+    (tmp_path / "agent_trust.json").write_text(json.dumps(entries))
+    r = client.put("/api/v1/trust/agents/partner-copilot", json={
+        "direction": "both", "allow_tools": ["research", "read_file"], "deny_tools": ["shell"],
+        "max_risk": "medium", "max_dollars": 5.0, "max_wall_seconds": 600, "data_scopes": []})
+    assert r.status_code == 200, r.text
+    saved = json.loads((tmp_path / "agent_trust.json").read_text())[0]
+    assert saved["a2a_token"] == "kept-token-value"  # pragma: allowlist secret
+    assert saved["revoked"] is True
+    agent = agent_trust._agent_from_entry(saved)
+    assert agent.direction == "both" and agent.max_risk == "medium"
+    assert "shell" in agent.deny_tools and agent.max_wall_seconds == 600
+
+
+def test_edit_refuses_installation_defined_agents():
+    r = client.put("/api/v1/trust/agents/config-only", json={"direction": "both"})
+    assert r.status_code == 404
+    assert "installation" in r.json()["detail"]
+
+
+def test_check_access_replays_the_decision_in_plain_words():
+    assert _register(max_risk="medium").status_code == 201
+    ok = client.post("/api/v1/trust/agents/partner-copilot/check",
+                     json={"direction": "inbound", "tools": ["research"], "risk": "low"})
+    assert ok.status_code == 200 and ok.json()["allowed"] is True
+    denied = client.post("/api/v1/trust/agents/partner-copilot/check",
+                         json={"direction": "outbound"})
+    assert denied.json() == {"allowed": False,
+                             "reason": "This agent is not allowed to connect in that direction."}
+    unknown = client.post("/api/v1/trust/agents/nobody/check", json={})
+    assert unknown.json()["allowed"] is False
+
+
+def test_enforcement_switch_writes_the_setting(tmp_path, monkeypatch):
+    from maverick import agent_trust, config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_AGENT_TRUST", raising=False)
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    config.reset_config_cache()
+    assert agent_trust.agent_trust_enforced() is False
+    assert client.post("/api/v1/trust/enforcement", json={"enforced": True}).status_code == 200
+    config.reset_config_cache()
+    assert agent_trust.agent_trust_enforced() is True
+    assert client.post("/api/v1/trust/enforcement", json={"enforced": False}).status_code == 200
+    config.reset_config_cache()
+    assert agent_trust.agent_trust_enforced() is False
+    monkeypatch.setenv("MAVERICK_AGENT_TRUST", "1")
+    assert client.post("/api/v1/trust/enforcement", json={"enforced": False}).status_code == 409
+    config.reset_config_cache()
+
+
+def test_enforcement_switch_needs_an_administrator(monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import trust_page_api
+
+    def deny(request, permission):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    monkeypatch.setattr(trust_page_api, "require_global_permission", deny)
+    assert client.post("/api/v1/trust/enforcement", json={"enforced": True}).status_code == 403
+
+
+def test_public_key_is_offered(monkeypatch):
+    from maverick import agent_trust
+
+    monkeypatch.setattr(agent_trust, "local_pubkey", lambda: "ab" * 32)
+    assert client.get("/api/v1/trust/pubkey").json() == {"key": "ab" * 32}
+    monkeypatch.setattr(agent_trust, "local_pubkey", lambda: None)
+    assert client.get("/api/v1/trust/pubkey").status_code == 503

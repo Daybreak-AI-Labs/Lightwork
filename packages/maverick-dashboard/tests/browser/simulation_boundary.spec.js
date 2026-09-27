@@ -41,15 +41,15 @@ test('simulation stays visibly separate from a live business outcome on phone an
   await page.screenshot({path:phone,fullPage:true});
   await info.attach('simulation-boundary-320',{path:phone,contentType:'image/png'});
 
-  const surface=page.getByLabel('Surface');
+  const surface=page.getByLabel('Where the action happens');
   await surface.focus();
   await expect(surface).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.getByLabel('Action')).toBeFocused();
+  await expect(page.getByLabel('What the agent does')).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.getByLabel('Target')).toBeFocused();
+  await expect(page.getByLabel(/What it acts on/)).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('button',{name:'Simulate',exact:true})).toBeFocused();
+  await expect(page.getByRole('button',{name:'Test this action',exact:true})).toBeFocused();
 
   await page.setViewportSize({width:1280,height:900});
   await expect(boundary).toBeVisible();
@@ -73,17 +73,16 @@ test('simulation stays visibly separate from a live business outcome on phone an
   });
   expect(researchPayload.source_ref).toMatch(/^simulator:sim-/);
 
-  await page.getByLabel('Research component').selectOption('feature-prefix');
-  await page.getByRole('button',{name:'Approve and run synthetic study'}).click();
+  await page.getByText('Run a practice study (sample data only)').click();
+  await page.getByLabel('Study type').selectOption('feature-prefix');
+  await page.getByRole('button',{name:'Approve and run practice study'}).click();
   await expect(page).toHaveURL(/\/simulate\/research$/);
   const researchBoundary=page.getByTestId('research-simulation-boundary');
   await expect(researchBoundary).toContainText('Simulation only');
-  await expect(researchBoundary).toContainText('Research study completed');
-  await expect(researchBoundary).toContainText('Built-in synthetic software world');
-  await expect(researchBoundary).toContainText(/feature-prefix backoff baseline/i);
-  await expect(researchBoundary).toContainText('Component process');
-  await expect(researchBoundary).toContainText('Isolated');
-  await expect(researchBoundary).toContainText('user:browser-reviewer');
+  await expect(researchBoundary).toContainText('Practice study finished');
+  await expect(researchBoundary).toContainText('Built-in made-up software world');
+  await expect(researchBoundary).toContainText('Kept separate');
+  await expect(researchBoundary).toContainText('Approved by');
   await expect(researchBoundary).toContainText('Not eligible for acceptance');
   await expect(page.getByRole('button',{name:/accept.*business outcome/i})).toHaveCount(0);
   await fits(page);

@@ -98,7 +98,7 @@ def _local_keys() -> dict[str, str]:
         return dict(trusted_audit_public_keys())
     except ValueError as exc:
         raise HTTPException(status_code=503,
-                            detail=f"audit key registry is unavailable: {exc}") from exc
+                            detail="The list of trusted signing keys could not be read.") from exc
 
 
 def _days() -> list[str]:
@@ -226,6 +226,57 @@ def _verify(body: VerifyIn) -> dict:
     }
 
 
+class AttestationIn(_StrictModel):
+    #: Optional first day of the learning window the proof covers.
+    since_day: Day | None = None
+
+
+class AttestationVerifyIn(_StrictModel):
+    #: The bundle document verbatim, as text (see VerifyIn.receipt).
+    bundle: Annotated[str, StringConstraints(strict=True, min_length=2,
+                                             max_length=_MAX_RECEIPT_BYTES)]
+    key: Sha256 | None = None
+    #: Trust this installation's own publishing key, and check the bundle's
+    #: history against this installation's own records.
+    use_own_key: bool = True
+
+
+def _attest(body: AttestationIn) -> bytes:
+    """``maverick attest export``: a signed proof of past behaviour."""
+    import calendar
+    import time as _time
+
+    from maverick.attestation import export
+
+    since = None
+    if body.since_day:
+        since = float(calendar.timegm(_time.strptime(_safe_day(body.since_day), "%Y-%m-%d")))
+    with tempfile.TemporaryDirectory(prefix="attestation-") as tmp:
+        out = export(Path(tmp) / "attestation.json", audit_dir=_audit_root(), since=since)
+        return out.read_bytes()
+
+
+def _attest_verify(body: AttestationVerifyIn) -> dict:
+    """``maverick attest verify``: fails closed without a trusted key."""
+    from maverick.attestation_verify import format_report, verify
+
+    try:
+        bundle = json.loads(body.bundle)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="That file is not a Lightwork proof file.") from exc
+    key = body.key
+    evidence = None
+    if not key and body.use_own_key:
+        from maverick.attestation import publisher_key
+
+        _key_id, key = publisher_key()
+        evidence = _audit_root()
+    if not key:
+        raise HTTPException(status_code=422, detail="Choose whose key to trust.")
+    result = verify(bundle, trusted_key_hex=key, evidence_root=evidence)
+    return {**result.to_dict(), "report": format_report(result)}
+
+
 async def _call(function, *args, **kwargs):
     try:
         return await run_in_threadpool(function, *args, **kwargs)
@@ -236,7 +287,7 @@ async def _call(function, *args, **kwargs):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, RuntimeError) as exc:
-        raise HTTPException(status_code=503, detail=f"trust receipts unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail="Trust receipts are not available right now.") from exc
 
 
 def create_trust_receipts_router() -> APIRouter:
@@ -288,6 +339,40 @@ def create_trust_receipts_router() -> APIRouter:
     async def verify_receipt(request: Request, body: VerifyIn):
         require_permission(request, "audit")
         return await _call(_verify, body)
+
+    @router.post("/attestation")
+    async def attestation(request: Request, body: AttestationIn):
+        require_permission(request, "audit")
+        payload = await _call(_attest, body)
+        return Response(
+            content=payload, media_type="application/json",
+            headers={
+                "Content-Disposition": 'attachment; filename="lightwork-proof.json"',
+                "Cache-Control": "no-store, private, max-age=0",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @router.post("/attestation/verify")
+    async def attestation_verify(request: Request, body: AttestationVerifyIn):
+        require_permission(request, "audit")
+        return await _call(_attest_verify, body)
+
+    @router.get("/attestation/verifier")
+    async def attestation_verifier(request: Request):
+        require_permission(request, "audit")
+        from maverick.attestation import verifier_source
+
+        text, digest = await _call(verifier_source)
+        return Response(
+            content=text, media_type="text/x-python; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="attestation_verify.py"',
+                "X-Verifier-SHA256": digest,
+                "Cache-Control": "no-store, private, max-age=0",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     return router
 

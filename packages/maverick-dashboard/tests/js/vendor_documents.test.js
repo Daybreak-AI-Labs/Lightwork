@@ -21,6 +21,7 @@ async function fixture(records, intercept=()=>undefined) {
   const {window} = dom, calls=[];
   const el = id => window.document.getElementById(`vo-${id}`);
   window.fetch = async (url, opts={}) => {
+    if (String(url).includes('/api/v1/choices/people')) return response({people:[]});
     const call={url:new URL(url,window.location),...opts}; calls.push(call);
     const intercepted = await intercept(call, records);
     if (intercepted !== undefined) return intercepted;

@@ -61,7 +61,7 @@ def _require_enabled() -> None:
     if not shoring.enabled():
         raise HTTPException(
             status_code=404,
-            detail="autonomous shoring is disabled ([shoring] enable = true)")
+            detail="This feature is turned off.")
 
 
 def _book() -> dict:
@@ -75,7 +75,7 @@ def _sla(key: str) -> dict:
 
     fn = next((f for f in shoring.load(strict=True) if f.key == key), None)
     if fn is None:
-        raise HTTPException(status_code=404, detail=f"no shored function {key!r}")
+        raise HTTPException(status_code=404, detail="That business area is not in the book of work.")
     return {"schema": SLA_SCHEMA, "function": shoring.function_status(fn, _world())}
 
 
@@ -95,7 +95,7 @@ def _remove(key: str) -> dict:
     from maverick import shoring
 
     if not shoring.remove(key):
-        raise HTTPException(status_code=404, detail=f"no shored function {key!r}")
+        raise HTTPException(status_code=404, detail="That business area is not in the book of work.")
     return {"removed": key}
 
 
@@ -108,7 +108,7 @@ async def _call(function, *args):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (OSError, RuntimeError) as exc:
         raise HTTPException(status_code=503,
-                            detail=f"shoring store unavailable: {exc}") from exc
+                            detail="The book of work is not available right now.") from exc
 
 
 def create_shoring_router() -> APIRouter:
@@ -133,6 +133,23 @@ def create_shoring_router() -> APIRouter:
         require_permission(request, "operate")
         _require_enabled()
         return await _call(_upsert, body)
+
+    @router.post("/turn-on")
+    async def turn_on(request: Request):
+        """Turn the shoring pages back on from the app (administrators)."""
+        from maverick import config, shoring
+
+        from . import settings_store
+        from .auth import require_global_permission
+
+        require_global_permission(request, "admin")
+        await run_in_threadpool(settings_store.set_section_enable, "shoring", True)
+        config.reset_config_cache()
+        if not shoring.enabled():
+            raise HTTPException(
+                status_code=409,
+                detail="This setting is controlled by your installation and cannot be changed here.")
+        return {"enabled": True}
 
     @router.delete("/function/{key}")
     async def delete_function(request: Request, key: Key):

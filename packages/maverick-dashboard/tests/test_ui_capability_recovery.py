@@ -71,10 +71,10 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "Permanently delete \" + count + \" finished jobs" in bulk
 
     assert "var destructiveInFlight = false" in reports
-    assert "Another report mutation is already running" in reports
+    assert "Another report change is already running" in reports
     assert "destructiveInFlight = false" in reports
     assert "delete root.dataset.destructiveInFlight" in reports
-    assert "Revoke executive report “" in reports
+    assert "Withdraw the report “" in reports
     assert "Permanently purge up to " in reports
 
     # The focused opener must remain enabled until the shared confirmation

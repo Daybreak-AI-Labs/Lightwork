@@ -1353,6 +1353,11 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert "What this request delivers" in response.text
     assert "Cancel local work" in response.text
     assert "any Jira ticket already created remains" in response.text
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(response.text) == []
+    for gone in ("file IDs", "SHA-256", "JSON export", "No OCR", "MiB"):
+        assert gone not in response.text
     assert "no-store" in response.headers["cache-control"]
     asset = client.get("/static/lightwork-vendor-onboarding.js")
     assert asset.status_code == 200

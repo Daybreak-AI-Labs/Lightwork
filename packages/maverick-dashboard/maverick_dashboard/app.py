@@ -1190,6 +1190,18 @@ app.include_router(_compliance_controls_router)
 from .privacy_actions_api import router as _privacy_actions_router  # noqa: E402
 
 app.include_router(_privacy_actions_router)
+from .ui_choices_api import router as _ui_choices_router  # noqa: E402
+
+app.include_router(_ui_choices_router)
+from .trust_page_api import router as _trust_page_router  # noqa: E402
+
+app.include_router(_trust_page_router)
+from .third_party_page_assets import router as _third_party_page_assets  # noqa: E402
+
+app.include_router(_third_party_page_assets)
+from .trc_setup_api import router as _trc_setup_router  # noqa: E402
+
+app.include_router(_trc_setup_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -3213,8 +3225,14 @@ async def workflow_readiness_page(request: Request) -> HTMLResponse:
     from .workflow_readiness import for_request
 
     require_permission(request, "view")
-    if config.config_source_errors(include_tenant=True) or config.get_features().get("workflow_readiness") is not True:
-        raise HTTPException(403, "Workflow readiness is disabled in Settings or configuration is unavailable.")
+    unavailable = bool(config.config_source_errors(include_tenant=True))
+    if unavailable or config.get_features().get("workflow_readiness") is not True:
+        # Friendly turned-off page (still 403) instead of a bare error.
+        return templates.TemplateResponse(
+            request, "workflow_readiness.html",
+            {"capabilities": [], "disabled": True, "unavailable": unavailable,
+             "can_turn_on": has_permission(request, "admin")},
+            status_code=403, headers={"Cache-Control": "private, no-store"})
     return templates.TemplateResponse(request, "workflow_readiness.html", {"capabilities": for_request(request)},
                                       headers={"Cache-Control": "private, no-store"})
 
@@ -3708,10 +3726,10 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     from maverick import vendor_management
     if not vendor_management.enabled():
         raise HTTPException(status_code=403,
-                            detail="vendor_management is not enabled")
+                            detail="Vendor management is turned off. An administrator can turn it on from the Privacy workspace.")
     record = vendor_management.get_vendor(vendor_id[:64])
     if record is None:
-        raise HTTPException(status_code=404, detail="no such vendor")
+        raise HTTPException(status_code=404, detail="That vendor could not be found.")
     record["registered_at_date"] = _date(record.get("registered_at"))
     now = _time.time()
     for c in record.get("contracts") or []:
@@ -3722,8 +3740,30 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
         q["requested_at_date"] = _date(q.get("requested_at"))
     for n in record.get("monitoring_notes") or []:
         n["recorded_at_date"] = _date(n.get("recorded_at"))
+    # Choices for the page's buttons: questionnaire templates and saved
+    # assessments a person can link, so nothing is typed as an ID.
+    from maverick.assessment import list_saved, list_templates
+
+    try:
+        questionnaire_types = [{"value": t.type, "label": t.title} for t in list_templates()]
+    except Exception:
+        questionnaire_types = []
+    try:
+        assessments = [
+            {"value": s["id"], "label": f"{s.get('subject') or 'Assessment'} · {_idfmt.humanize(s.get('type'))} · {_date(s.get('created_at'))}"}
+            for s in list_saved()[:200]
+        ]
+    except Exception:
+        assessments = []
+    titles = {t["value"]: t["label"] for t in questionnaire_types}
+    for q in record.get("questionnaires") or []:
+        q["title"] = titles.get(q.get("assessment_type")) or _idfmt.humanize(q.get("assessment_type"))
+    labels = {a["value"]: a["label"] for a in assessments}
+    for link in record.get("links") or []:
+        link["label"] = labels.get(link.get("reference")) or link.get("reference")
     return templates.TemplateResponse(
-        request, "vendor_detail.html", {"vendor": record})
+        request, "vendor_detail.html",
+        {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments})
 
 
 @app.get("/privacy/dsar/{request_id}", response_class=HTMLResponse)
@@ -4188,7 +4228,11 @@ async def third_party_intelligence_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_intelligence.html",
-        {"third_party_intelligence_enabled": (third_party_intelligence_enabled_for_page())},
+        {
+            "third_party_intelligence_enabled": (third_party_intelligence_enabled_for_page()),
+            "intelligence_can_admin": has_global_permission(request, "admin"),
+            "intelligence_can_audit": has_permission(request, "audit"),
+        },
     )
 
 
@@ -4226,7 +4270,11 @@ async def third_party_lifecycle_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_lifecycle.html",
-        {"third_party_lifecycle_enabled": (third_party_lifecycle_enabled_for_page())},
+        {
+            "third_party_lifecycle_enabled": (third_party_lifecycle_enabled_for_page()),
+            "lifecycle_can_admin": has_global_permission(request, "admin"),
+            "lifecycle_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -4242,7 +4290,11 @@ async def third_party_collaboration_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_collaboration.html",
-        {"third_party_collaboration_enabled": (third_party_collaboration_enabled_for_page())},
+        {
+            "third_party_collaboration_enabled": (third_party_collaboration_enabled_for_page()),
+            "collaboration_can_admin": has_permission(request, "admin"),
+            "collaboration_can_audit": has_permission(request, "audit"),
+        },
     )
 
 
@@ -5633,9 +5685,24 @@ def replay_page(request: Request) -> HTMLResponse:
 async def trust_page(request: Request) -> HTMLResponse:
     """Agent Trust Plane: the cross-agent permission graph -- every external
     agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
-    from .control_plane import trust_overview
+    from .control_plane import _discover_tools, trust_overview
+    from .trust_page_api import managed_ids
+    from .ui_choices_api import work_area_choices
 
-    return templates.TemplateResponse(request, "trust.html", trust_overview())
+    context = trust_overview()
+    managed = managed_ids()
+    for agent in context.get("agents", []):
+        agent["managed"] = agent["id"] in managed
+    tools = sorted({t["name"] for t in (_discover_tools().get("entries") or [])}
+                   | {name for a in context.get("agents", []) for name in a["allow_tools"] + a["deny_tools"]
+                      if name != "*"})
+    context.update({
+        "tool_choices": [[name, _idfmt.humanize(name)] for name in tools],
+        "area_choices": work_area_choices(
+            _world(), [s for a in context.get("agents", []) for s in a["data_scopes"]]),
+        "can_admin": has_permission(request, "admin"),
+    })
+    return templates.TemplateResponse(request, "trust.html", context)
 
 
 @app.get("/external-agents", response_class=HTMLResponse)
@@ -5694,6 +5761,7 @@ async def discovery_page(request: Request) -> HTMLResponse:
 @app.get("/simulate", response_class=HTMLResponse)
 async def simulate_page(request: Request) -> HTMLResponse:
     """Dry-run a proposed action: its risk + whether it would be gated, no run."""
+    from . import simulate_choices
     from .control_plane import simulate_action
 
     surface = request.query_params.get("surface") or ""
@@ -5708,6 +5776,9 @@ async def simulate_page(request: Request) -> HTMLResponse:
             "action": action,
             "target": target,
             "result": result,
+            "plain": simulate_choices.explain(result),
+            "surfaces": simulate_choices.SURFACES,
+            "action_groups": simulate_choices.action_groups(),
             "research_component": "tabular",
             "research_result": None,
             "research_error": None,
@@ -5738,13 +5809,19 @@ async def simulate_research_page(
         )
     except HTTPException as exc:
         status_code = exc.status_code
-        research_error = str(exc.detail)
-    except ValueError as exc:
+        research_error = (
+            "Sign in with your own named account to run a practice study."
+            if exc.status_code in (401, 403)
+            else "The practice study could not start. Please try again."
+        )
+    except ValueError:
         status_code = 400
-        research_error = str(exc)
+        research_error = "Choose a study type from the list and try again."
     except ResearchSimulationError:
         status_code = 503
-        research_error = "The isolated research simulator is unavailable."
+        research_error = "Practice studies are not available right now."
+    from . import simulate_choices
+
     return templates.TemplateResponse(
         request,
         "simulate.html",
@@ -5753,6 +5830,9 @@ async def simulate_research_page(
             "action": "",
             "target": "",
             "result": None,
+            "plain": None,
+            "surfaces": simulate_choices.SURFACES,
+            "action_groups": simulate_choices.action_groups(),
             "research_component": component,
             "research_result": research_result,
             "research_error": research_error,
@@ -6410,6 +6490,8 @@ async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
                 trc_continuous_evidence_enabled_for_page()
             ),
             "acm_module_status": module_status("/compliance/continuous-evidence"),
+            "trc_can_admin": has_global_permission(request, "admin"),
+            "trc_can_audit": has_global_permission(request, "audit"),
         },
     )
 

@@ -75,11 +75,14 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
     ):
         assert directive in csp
     assert "style-src 'self' 'nonce-" in csp
-    assert "Contracts and engagements" in response.text
+    assert "Contracts and Engagements" in response.text
     assert 'id="tpc-operations" disabled' in response.text
-    assert "store-free status before enabling any lifecycle control" in response.text
-    assert "Vendor metadata displayed later is server-resolved" in response.text
-    assert "Backup destinations remain server-configured" in response.text
+    assert "Checking that contracts are available" in response.text
+    assert "Record the key facts here, not the full contract text." in response.text
+    assert 'src="/static/lightwork-record-workflows.js"' in response.text
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(response.text) == []
     assert 'data-api-base="/api/v1/third-party/contracts"' in response.text
     assert 'data-copilot-page="/third-party/contracts"' in response.text
     assert 'src="/static/lightwork-copilot.js"' in response.text
@@ -128,117 +131,48 @@ def test_page_renders_exact_permission_controls(
         for _tag, attrs in parser.tags
         if isinstance(attrs.get("id"), str)
     }
-    assert ("disabled" not in by_id["tpc-create-controls"]) is operate
-    assert ("disabled" not in by_id["tpc-update-controls"]) is operate
-    assert ("disabled" not in by_id["tpc-archive-controls"]) is operate
+    shell = by_id["third-party-contracts-shell"]
+    assert (shell["data-can-operate"] == "true") is operate
+    assert (shell["data-can-audit"] == "true") is audit
+    assert (shell["data-can-admin"] == "true") is admin
+    assert ("disabled" not in by_id["tpc-new"]) is operate
     assert ("disabled" not in by_id["tpc-verify-integrity"]) is audit
     assert ("disabled" not in by_id["tpc-retention-due"]) is audit
-    assert ("disabled" not in by_id["tpc-load-tombstone"]) is audit
-    assert ("disabled" not in by_id["tpc-delete-controls"]) is admin
-    assert ("disabled" not in by_id["tpc-purge-controls"]) is admin
+    assert ("disabled" not in by_id["tpc-purge"]) is admin
     assert ("disabled" not in by_id["tpc-recovery-preflight"]) is admin
 
 
-def test_page_collects_only_closed_lifecycle_fields(client: TestClient) -> None:
+def test_page_collects_only_closed_fields_through_selectors(client: TestClient) -> None:
+    text = client.get(ROUTE).text
     parser = _Markup()
-    parser.feed(client.get(ROUTE).text)
+    parser.feed(text)
     forms = [attrs for tag, attrs in parser.tags if tag == "form"]
-    names = {
-        value
+    controls = {
+        attrs.get("name"): tag
         for tag, attrs in parser.tags
-        if tag in {"input", "select", "textarea"}
-        if isinstance((value := attrs.get("name")), str)
+        if tag in {"input", "select", "textarea"} and isinstance(attrs.get("name"), str)
     }
     assert forms and all("action" not in form for form in forms)
-    for required in (
-        "record_kind",
-        "record_id",
-        "vendor_id",
-        "vendor_revision",
-        "title_ref",
-        "owner_ref",
-        "agreement_type",
-        "agreement_ref",
-        "engagement_type",
-        "service_category_ref",
-        "field_schema_json",
-        "field_values_json",
-        "formulas_json",
-        "expected_revision",
-        "idempotency_key",
-    ):
-        assert required in names
+    # Vendors, people and related contracts are chosen from lists.
+    for selector in ("vendor_id", "owner_ref", "business_owner_ref", "parent_contract_id",
+                     "agreement_type", "engagement_type", "service_category", "governing_law"):
+        assert controls[selector] == "select", selector
+    for typed in ("vendor_revision", "title_ref", "agreement_ref", "field_schema_json",
+                  "field_values_json", "formulas_json", "lifecycle_json", "idempotency_key",
+                  "linked_contract_ids", "update_status"):
+        assert typed not in controls
+    assert controls["record_id"] == "input" and controls["expected_revision"] == "input"
+    assert 'name="record_id" value=""' in text and 'type="hidden" name="record_id"' in text
+    assert "<textarea" not in text
     for forbidden in (
-        "tenant_id",
-        "actor_ref",
-        "principal_ref",
-        "created_by_ref",
-        "vendor_type",
-        "vendor_criticality",
-        "vendor_authority_sha256",
-        "issuer_ref",
-        "revoked",
-        "retained_until",
-        "storage_path",
-        "recovery_path",
-        "provider",
-        "adapter",
+        "tenant_id", "actor_ref", "principal_ref", "created_by_ref", "vendor_type",
+        "vendor_criticality", "vendor_authority_sha256", "issuer_ref", "revoked",
+        "retained_until", "storage_path", "recovery_path", "provider", "adapter",
     ):
-        assert forbidden not in names
-
-
-def test_update_json_controls_have_visible_names_and_explicit_toggle_relationships(
-    client: TestClient,
-) -> None:
-    response = client.get(ROUTE)
-    parser = _Markup()
-    parser.feed(response.text)
-    by_name = {
-        attrs["name"]: attrs
-        for _tag, attrs in parser.tags
-        if isinstance(attrs.get("name"), str)
-    }
-    by_id = {
-        attrs["id"]: (tag, attrs)
-        for tag, attrs in parser.tags
-        if isinstance(attrs.get("id"), str)
-    }
-    relationships = (
-        (
-            "include_lifecycle",
-            "lifecycle_json",
-            "tpc-update-lifecycle-json",
-            "tpc-update-lifecycle-json-label",
-            "Replace complete lifecycle JSON",
-        ),
-        (
-            "include_field_schema",
-            "update_field_schema_json",
-            "tpc-update-field-schema-json",
-            "tpc-update-field-schema-json-label",
-            "Replace custom field schema",
-        ),
-        (
-            "include_field_values",
-            "update_field_values_json",
-            "tpc-update-field-values-json",
-            "tpc-update-field-values-json-label",
-            "Replace custom field values",
-        ),
-        (
-            "include_formulas",
-            "update_formulas_json",
-            "tpc-update-formulas-json",
-            "tpc-update-formulas-json-label",
-            "Replace safe formula definitions",
-        ),
-    )
-    for toggle_name, textarea_name, textarea_id, label_id, visible_label in relationships:
-        assert by_name[toggle_name]["aria-controls"] == textarea_id
-        assert by_name[textarea_name]["id"] == textarea_id
-        assert by_name[textarea_name]["aria-labelledby"] == label_id
-        assert by_id[label_id][0] == "span"
-        assert f'id="{label_id}">{visible_label}</span>' in response.text
+        assert forbidden not in controls
+    for label in ("Add a custom field", "Add a calculation", "Show contracts due for deletion",
+                  "Delete expired contracts"):
+        assert label in text
 
 
 def test_page_rejects_query_material_and_requires_tenant(
@@ -285,25 +219,17 @@ def test_custom_theme_uses_same_csp_nonce(monkeypatch: pytest.MonkeyPatch) -> No
     assert f"'nonce-{nonces[0]}'" in response.headers["content-security-policy"]
 
 
-def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
+def test_client_is_bounded_accessible_and_injection_safe() -> None:
     template = (PACKAGE / "templates" / "third_party_contracts.html").read_text(
         encoding="utf-8"
     )
     source = (
         PACKAGE / "static" / "lightwork-third-party-contracts.js"
     ).read_text(encoding="utf-8")
-    for required in (
-        "backdrop-filter: blur(24px)",
-        "color-mix(",
-        ":focus-visible",
-        "prefers-reduced-motion",
-        "forced-colors",
-        'aria-live="polite"',
-        "data-copilot-page",
-    ):
+    for required in (":focus-visible", 'aria-live="polite"', "data-copilot-page"):
         assert required in template
     for required in (
-        "MAX_RESPONSE_BYTES = 64 * 1024",
+        "MAX_RESPONSE_BYTES = 2 * 1024 * 1024",
         'headers.get("Content-Length")',
         "response.body.getReader()",
         "reader.cancel()",
@@ -312,16 +238,13 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         'cache: "no-store"',
         'redirect: "error"',
         'referrerPolicy: "no-referrer"',
-        "element.textContent",
         "operations.disabled = true",
         "operations.disabled = false",
         'request("/operations/integrity")',
-        'request("/operations/retention-due?limit="',
+        'request("/operations/retention-due?limit=',
         'request("/operations/purge-expired"',
-        "browser_supplied_recovery_path_accepted: false",
-        "validateFieldSchema",
-        "validateFormulas",
-        "exactKeys",
+        "R.confirm(",
+        "R.newKey()",
     ):
         assert required in source
     for forbidden in (
@@ -334,6 +257,7 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         "document.cookie",
         "eval(",
         "response.json()",
+        "window.confirm",
     ):
         assert forbidden not in source
 

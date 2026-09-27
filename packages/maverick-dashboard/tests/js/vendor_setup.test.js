@@ -6,7 +6,7 @@ const readiness={state:'setup_required',configuration_complete:false,actions:[{i
 const initial={context:'a'.repeat(64),configuration:'b'.repeat(64),revision:0,binding:{resource_owner:''},owner_locked:false,owner_source:'initial',eligible_owners:['user:other','user:owner'],principal:'user:owner',modules_enabled:true,connections:[{name:'jira',connector:'jira',revision:'j1',has_token:true},{name:'drive',connector:'gdrive',revision:'d1',has_token:true}],readiness};
 async function fixture(intercept=()=>initial){
   const dom=new JSDOM(markup,{url:'https://app.example/vendor-onboarding',runScripts:'outside-only'}),calls=[],w=dom.window;
-  w.fetch=async(url,options)=>{calls.push({url,options});const value=await intercept(url,options);return value instanceof Response?value:new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});};
+  w.fetch=async(url,options)=>{if(String(url).includes('/api/v1/choices/people'))return new Response(JSON.stringify({people:[{value:'user:other',label:'Olive Other'}]}),{headers:{'Content-Type':'application/json'}});calls.push({url,options});const value=await intercept(url,options);return value instanceof Response?value:new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});};
   w.eval(fs.readFileSync(path.join(folder,'static/lightwork-vendor-setup.js'),'utf8'));
   async function settle(){for(let i=0;i<8;i++)await new Promise(r=>setImmediate(r));}
   const el=id=>w.document.getElementById('vs-'+id);
@@ -109,7 +109,7 @@ test('failed refresh clears credentials and changed account cannot retain prior 
 
 test('fresh owner choice is explicit and changes require a fresh confirmation',async t=>{
   const ui=await fixture();t.after(()=>ui.w.close());assert.equal(ui.el('resource-owner').value,'');
-  assert.equal(ui.el('resource-owner').options[1].textContent,'other');assert.equal(ui.el('resource-owner').options[1].value,'user:other');
+  assert.equal(ui.el('resource-owner').options[1].textContent,'Olive Other');assert.equal(ui.el('resource-owner').options[1].value,'user:other');
   ui.el('ticket').value='jira';ui.el('confirm').checked=true;ui.el('confirm').dispatchEvent(new ui.w.Event('change',{bubbles:true}));
   assert.equal(ui.el('save').disabled,true);ui.el('save').click();assert.equal(ui.calls.length,1);
   ui.el('resource-owner').value='user:other';ui.el('resource-owner').dispatchEvent(new ui.w.Event('change',{bubbles:true}));

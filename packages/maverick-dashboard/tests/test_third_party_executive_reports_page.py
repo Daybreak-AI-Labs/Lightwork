@@ -56,7 +56,8 @@ def test_page_is_store_free_private_csp_closed_and_copilot_enabled(monkeypatch) 
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
-    assert "Executive reports with evidence underneath" in response.text
+    assert "Executive Vendor Reports" in response.text
+    assert 'src="/static/lightwork-record-workflows.js"' in response.text
     assert 'data-api-base="/api/v1/third-party/executive-reports"' in response.text
     assert 'data-copilot-page="/third-party/executive-reports"' in response.text
     assert 'src="/static/lightwork-third-party-executive-reports.js"' in response.text
@@ -80,19 +81,24 @@ def test_page_never_collects_server_derived_authorities_or_executable_branding(
         if isinstance((value := attrs.get("name")), str)
     }
     for required in (
-        "selectors_json",
         "organization_name",
         "report_title",
+        "footer_text",
         "primary_color",
         "accent_color",
         "text_color",
+        "report",
+        "reason_code",
+    ):
+        assert required in names
+    for forbidden in (
+        "selectors_json",
+        "report_id",
         "brand_asset_metadata_ref",
         "brand_asset_metadata_sha256",
         "expected_control_revision",
         "idempotency_key",
-    ):
-        assert required in names
-    for forbidden in (
+        "limit",
         "tenant_id",
         "principal_ref",
         "actor_ref",
@@ -154,7 +160,16 @@ def test_static_bearer_page_exposes_operator_controls_only(monkeypatch) -> None:
     assert "disabled" in by_id["tper-revoke-controls"]
     assert "disabled" in by_id["tper-purge-controls"]
     assert "disabled" in by_id["tper-integrity"]
-    assert "no logo bytes are resolved, fetched or embedded" in response.text
+    assert "Reports are plain text and your chosen colors only" in response.text
+
+
+def test_page_speaks_plainly(monkeypatch) -> None:
+    from test_support.plain_language import developer_terms
+
+    response = client(monkeypatch).get("/third-party/executive-reports")
+    assert developer_terms(response.text) == []
+    for gone in ("TPM-18", "Evidence boundary", "SHA-256", "source_kind", "JSON"):
+        assert gone not in response.text
 
 
 def test_liquid_glass_and_static_client_are_bounded_and_injection_safe() -> None:
@@ -165,8 +180,6 @@ def test_liquid_glass_and_static_client_are_bounded_and_injection_safe() -> None
         PACKAGE / "static" / "lightwork-third-party-executive-reports.js"
     ).read_text(encoding="utf-8")
     for required in (
-        "backdrop-filter: blur(24px)",
-        "color-mix(",
         ":focus-visible",
         "prefers-reduced-motion",
         "forced-colors",
@@ -186,6 +199,8 @@ def test_liquid_glass_and_static_client_are_bounded_and_injection_safe() -> None
         "textContent",
     ):
         assert required in source
+    assert "window.confirm" not in source
+    assert "R.newKey()" in source
     assert "innerHTML" not in source
     assert "eval(" not in source
     assert "document.write" not in source

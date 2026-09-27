@@ -287,6 +287,16 @@ def test_simulate_api_and_page():
     assert "No live action ran" in p.text
     assert "cannot be accepted as a live business outcome" in p.text
     assert "Not eligible for acceptance" in p.text
+    # Choices come from selectors; the answer is worded for a person.
+    assert 'id="sim-action"' in p.text and "Click something" in p.text
+    assert "Where the action happens" in p.text
+    assert "REQUIRES APPROVAL" not in p.text and "consent mode" not in p.text.lower()
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(p.text) == []
+    bad = client.get("/simulate", params={"surface": "rocket", "action": "launch"})
+    assert "Choose where the action happens" in bad.text
+    assert "unknown surface" not in bad.text
 
 
 def test_actual_research_simulation_requires_named_human_and_renders(monkeypatch):
@@ -303,8 +313,8 @@ def test_actual_research_simulation_requires_named_human_and_renders(monkeypatch
         data={"component": "tabular"},
     )
     assert unauthenticated_page.status_code == 401
-    assert "verified named-human session is required" in unauthenticated_page.text
-    assert "No simulated or live action was completed" in unauthenticated_page.text
+    assert "Sign in with your own named account" in unauthenticated_page.text
+    assert "No practice or live action was completed" in unauthenticated_page.text
 
     identity = AuthenticatedHumanIdentityV1(
         "user:dashboard-simulation-reviewer",
@@ -340,12 +350,13 @@ def test_actual_research_simulation_requires_named_human_and_renders(monkeypatch
     )
     assert page.status_code == 200
     assert 'data-testid="research-simulation-boundary"' in page.text
-    assert "Research study completed" in page.text
-    assert "Built-in synthetic software world" in page.text
-    assert "Component process" in page.text and "Isolated" in page.text
-    assert "named-human approval required" in page.text
+    assert "Practice study finished" in page.text
+    assert "Built-in made-up software world" in page.text
+    assert "Kept separate" in page.text
+    assert "a named person must approve" in page.text
     assert "Not eligible for acceptance" in page.text
-    assert "Approve and run synthetic study" in page.text
+    assert "Approve and run practice study" in page.text
+    assert "dashboard-synthetic-research-v1" not in page.text
     assert "accept business outcome" not in page.text.lower()
 
 
