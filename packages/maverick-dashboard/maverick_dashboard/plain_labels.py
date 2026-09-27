@@ -175,6 +175,40 @@ def agent_role_help(role: object) -> str:
     return AGENT_ROLES.get(str(role or ""), ("", ""))[1]
 
 
+# Chat-app setup fields: (label, help, advanced). Advanced fields sit in a
+# collapsed "Advanced settings" section with sensible defaults.
+CHANNEL_FIELDS = {
+    ("telegram", "bot_token"): ("Bot token", "From BotFather in Telegram after you create a bot.", False),
+    ("discord", "bot_token"): ("Bot token", "From the Discord Developer Portal, under your app's Bot page.", False),
+    ("slack", "app_token"): ("App token (starts with xapp-)", "From your Slack app's Basic Information page, under App-Level Tokens.", False),
+    ("slack", "bot_token"): ("Bot token (starts with xoxb-)", "From your Slack app's OAuth & Permissions page.", False),
+    ("whatsapp_cloud", "access_token"): ("Access token", "From Meta for Developers, WhatsApp > API Setup.", False),
+    ("whatsapp_cloud", "phone_number_id"): ("Phone number ID", "Shown next to your WhatsApp business number on the same API Setup page.", False),
+    ("whatsapp_cloud", "verify_token"): ("Verification word", "Any word you choose. Enter the same word in Meta's webhook settings.", False),
+    ("whatsapp_cloud", "app_secret"): ("App secret", "From Meta for Developers, App settings > Basic.", False),
+    ("whatsapp_cloud", "port"): ("Listening port", "Only change this if your IT team asks you to.", True),
+    ("sms", "account_sid"): ("Account SID", "From your Twilio Console home page.", False),
+    ("sms", "auth_token"): ("Auth token", "From your Twilio Console home page, next to the Account SID.", False),
+    ("sms", "from_number"): ("Sending phone number", "Your Twilio number, with country code, like +15551234567.", False),
+    ("sms", "port"): ("Listening port", "Only change this if your IT team asks you to.", True),
+    ("email", "imap_host"): ("Incoming mail server", "For example imap.gmail.com. Choosing your email provider above fills this in.", False),
+    ("email", "imap_user"): ("Incoming mail username", "Usually the full email address.", False),
+    ("email", "imap_password"): ("Incoming mail password", "Many providers need an app password rather than your normal password.", False),
+    ("email", "smtp_host"): ("Outgoing mail server", "For example smtp.gmail.com.", False),
+    ("email", "smtp_user"): ("Outgoing mail username", "Usually the full email address.", False),
+    ("email", "smtp_password"): ("Outgoing mail password", "Often the same app password as incoming mail.", False),
+    ("email", "smtp_port"): ("Outgoing mail port", "Usually 465. Some providers, such as Outlook, use 587.", True),
+}
+
+CHANNEL_HELP_LINKS = {
+    "telegram": "https://core.telegram.org/bots#how-do-i-create-a-bot",
+    "discord": "https://discord.com/developers/applications",
+    "slack": "https://api.slack.com/apps",
+    "whatsapp_cloud": "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
+    "sms": "https://console.twilio.com",
+}
+
+
 # "Where do I get a key?" links, by provider.
 PROVIDER_KEY_HELP = {
     "anthropic": "https://console.anthropic.com/settings/keys",

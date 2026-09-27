@@ -1044,6 +1044,7 @@ app.include_router(project_reviews_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+from .channel_check_api import router as channel_check_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1056,6 +1057,7 @@ app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
 app.include_router(system_checks_router)
+app.include_router(channel_check_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
@@ -7424,15 +7426,32 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
             status_code=503,
             detail="channel inventory is unavailable",
         ) from exc
-    saved_msg = {"save": "Channel updated.", "clear": "Channel reset."}.get(saved, "")
+    saved_msg = {
+        "save": "Chat app saved.",
+        "clear": "Saved settings removed.",
+        "tested": "Connection test passed.",
+        "test_failed": "The connection test failed. Check the details and try again.",
+        "sent": "Test message sent. Check that it arrived.",
+        "send_failed": "The test message could not be sent. Check the details and try again.",
+    }.get(saved, "")
+    from . import plain_labels
+    for channel in managed:
+        for field in channel["fields"]:
+            label, help_text, advanced = plain_labels.CHANNEL_FIELDS.get(
+                (channel["name"], field["key"]), (field["label"], "", False))
+            field.update(label=label, help=help_text, advanced=advanced)
+        channel["help_link"] = plain_labels.CHANNEL_HELP_LINKS.get(channel["name"], "")
+    managed_names = {channel["name"] for channel in managed}
     return templates.TemplateResponse(
         request,
         "channels.html",
         {
             "channels": channels,
-            "channel_inventory": channel_inventory,
+            "channel_inventory": [row for row in channel_inventory if row["name"] not in managed_names],
             "managed": managed,
             "saved": saved_msg,
+            "saved_failed": saved in {"test_failed", "send_failed"},
+            "sendable": ["email", "sms", "slack"],
         },
     )
 
