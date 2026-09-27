@@ -6,7 +6,7 @@
 {% block content %}
 {% set cp_on = consent_preferences_enabled %}
 {% set cp_admin = consent_can_admin if consent_can_admin is defined else true %}
-<div class="governance-workbench" id="cp-root" data-can-admin="{{ 'true' if cp_admin else 'false' }}">
+<div class="governance-workbench" id="cp-root" data-can-admin="{{ 'true' if cp_admin else 'false' }}" data-feature-enabled="{{ 'true' if cp_on else 'false' }}">
   {{ hero('Consent management', 'Consent & Preferences',
           lede='Set the consent policies people agree to, record and check each person’s choices, and control which trackers may run.') }}
   {% include "_consent_nav.html" %}
@@ -304,7 +304,8 @@
       var list=$("cp-vendor-suggestions");list.replaceChildren();vendors().forEach(function(v){if(v.value==="all")return;var o=document.createElement("option");o.value=CW.human(v.value);list.appendChild(o);});
     }
     async function loadNotices(){
-      try{var data=await fetch(API+"/notices",{cache:"no-store"});if(!data.ok)return;var body=await data.json();state.notices=Array.isArray(body.notices)?body.notices:[];}
+      // The notice register is optional; without it the document picker remains.
+      try{var body=await call("/notices");state.notices=Array.isArray(body.notices)?body.notices:[];}
       catch(_error){state.notices=[];}
       CW.fill($("cp-notice-select"),state.notices.filter(function(n){return /^[0-9a-f]{64}$/.test(n.text_sha256||"");}).map(function(n){return {value:n.text_sha256,label:"Version "+n.version+(n.published_at?" · published "+CW.when(n.published_at):"")};}),state.notices.length?"Choose a published privacy notice":"No published notices yet. Choose the document below instead.");
     }
@@ -488,6 +489,7 @@
       }catch(error){out.replaceChildren();CW.fail(out,error,"show consent trends");}
     });
 
+    if(root.dataset.featureEnabled==="false"){["cp-policy-table","cp-profile-table","cp-tracker-table"].forEach(function(id){$(id).replaceChildren(CW.el("p","muted","Turn this feature on to use it."));});return;}
     loadNotices();refresh();
   }
 })();

@@ -1227,6 +1227,28 @@ class ConsentExperimentAuthority:
             row, definition = self._load_experiment(connection, tenant, experiment, key)
             return self._project(row, definition)
 
+    def list_experiments(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
+        """List one tenant's integrity-checked experiments, newest first."""
+
+        self._require_enabled()
+        tenant = _tenant_id(tenant_id)
+        bounded = _integer(limit, "limit", 1, 500)
+        key = self._key(tenant, "integrity")
+        with self._connect() as connection:
+            ids = [
+                str(row["experiment_id"])
+                for row in connection.execute(
+                    "SELECT experiment_id FROM consent_experiments WHERE tenant = ? "
+                    "ORDER BY created_at DESC, experiment_id LIMIT ?",
+                    (tenant, bounded + 1),
+                ).fetchall()
+            ]
+            items = []
+            for experiment in ids[:bounded]:
+                row, definition = self._load_experiment(connection, tenant, experiment, key)
+                items.append(self._project(row, definition))
+        return {"items": items, "truncated": len(ids) > bounded}
+
     def _transition(
         self,
         tenant_id: str,

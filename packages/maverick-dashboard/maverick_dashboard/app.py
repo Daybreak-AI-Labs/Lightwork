@@ -3767,7 +3767,11 @@ async def consent_experiments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_experiments.html",
-        {"consent_experiments_enabled": experiments_enabled_for_page()},
+        {
+            "consent_experiments_enabled": experiments_enabled_for_page(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 

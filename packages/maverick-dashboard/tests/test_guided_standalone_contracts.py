@@ -32,7 +32,7 @@ def test_standalone_fields_resolve_the_existing_api_request_schemas():
 
     templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
     bindings = []
-    for name in ("privacy_data_discovery.html", "consent_experiments.html"):
+    for name in ("privacy_data_discovery.html",):
         inputs = GuidedInputs((templates / name).read_text(encoding="utf-8")).inputs
         assert len(inputs) == 2
         for field in inputs:
@@ -57,7 +57,15 @@ def test_standalone_fields_resolve_the_existing_api_request_schemas():
                 assert "equal_choice_evidence_sha256" in resolve(child["items"])["required"]
             else:
                 assert any(option.get("type") == "null" for option in child["anyOf"])
-    assert bindings == ["limits", "limits", "variants", "audience"]
+    assert bindings == ["limits", "limits"]
+    # The experiments page builds its own guided form; its request contract
+    # keeps requiring reviewed evidence for every variant.
+    variants = resolve(
+        resolve(document["paths"]["/api/v1/consent/experiments"]["post"]["requestBody"]["content"]
+                ["application/json"]["schema"])["properties"]["variants"]
+    )
+    assert variants["minItems"] == 2 and variants["maxItems"] == 10
+    assert "equal_choice_evidence_sha256" in resolve(variants["items"])["required"]
 
 
 def test_each_publishing_resource_kind_binds_its_own_closed_request_contract():

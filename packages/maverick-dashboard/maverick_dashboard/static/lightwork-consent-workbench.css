@@ -28,3 +28,9 @@
   .cw-form, .cw-row { grid-template-columns: minmax(0, 1fr); }
   .cw-form .cw-wide { grid-column: auto; }
 }
+fieldset.cw-form { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+.governance-workbench .section-head { flex-wrap: wrap; align-items: center; }
+@media (max-width: 720px) {
+  .cw-nav { gap: var(--space-2); }
+  .cw-nav .btn { padding-block: .3rem; font-size: var(--text-sm); }
+}

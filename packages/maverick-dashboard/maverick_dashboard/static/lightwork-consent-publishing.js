@@ -590,6 +590,7 @@
       }
     });
 
+    if ($("cpp-root").dataset.featureEnabled === "false") { ["cpp-property-table", "cpp-resource-table"].forEach(function (id) { $(id).replaceChildren(CW.el("p", "muted", "Turn this feature on to use it.")); }); return; }
     loadProperties().catch(function (error) { $("cpp-property-table").replaceChildren(); CW.fail(status, error, "load your websites and apps"); });
     renderKind();
   }

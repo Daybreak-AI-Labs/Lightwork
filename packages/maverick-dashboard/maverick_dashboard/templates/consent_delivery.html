@@ -416,6 +416,7 @@
       });
     }
 
+    if (root.dataset.featureEnabled === "false") { ["cd-destination-table", "cd-dead-table", "cd-history-table"].forEach(function (id) { $(id).replaceChildren(CW.el("p", "muted", "Turn this feature on to use it.")); }); return; }
     async function refresh() { await loadDestinations(); await Promise.all([loadCounts(), loadDead(), loadHistory(false)]); }
     refresh();
   }
