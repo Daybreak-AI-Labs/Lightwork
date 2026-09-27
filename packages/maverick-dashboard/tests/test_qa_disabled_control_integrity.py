@@ -42,6 +42,9 @@ class _ControlMarkup(HTMLParser):
 
 def _render(template_name: str, **context: Any) -> _ControlMarkup:
     templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    from maverick_dashboard.app import templates as app_templates
+
+    templates.env.filters.update(app_templates.env.filters)
     templates.env.globals.update(
         theme="dark",
         font="default",

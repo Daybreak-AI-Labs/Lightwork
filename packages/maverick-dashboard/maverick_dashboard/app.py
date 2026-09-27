@@ -5647,7 +5647,10 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
         detail = xa.agent_detail(agent_id)
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    return templates.TemplateResponse(request, "external_agent_detail.html", {"a": detail})
+    can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
+    return templates.TemplateResponse(
+        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage}
+    )
 
 
 @app.get("/discovery", response_class=HTMLResponse)

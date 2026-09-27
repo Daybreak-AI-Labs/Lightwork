@@ -207,7 +207,7 @@ def test_gateway_404s_while_disabled(monkeypatch):
     page = client.get("/external-agents")
     assert page.status_code == 200
     assert 'href="/api/v1/external/openapi.json"' not in page.text
-    assert "gateway description is unavailable while the gateway is off" in page.text
+    assert "The connection file is available once the connection is open" in page.text
 
 
 def test_openapi_artifact_describes_every_gateway_operation():
@@ -734,7 +734,7 @@ def test_memory_routes_over_http(monkeypatch):
 def test_console_page_renders_roster_and_forms():
     _enroll()
     page = client.get("/external-agents").text
-    assert "Enroll an external agent" in page
+    assert "Add an outside agent" in page
     assert 'id="xa-add"' in page
     assert "data-xa-mint" in page
     assert "Salesforce Agentforce" in page
@@ -1336,3 +1336,19 @@ def test_require_signed_covers_hmac_only_agents(tmp_path):
                   headers={"Authorization": f"Bearer {token}"},
                   json={"tool": "crm_update", "risk": "low"})
     assert r.status_code == 401
+
+
+def test_outside_agent_pages_read_plainly_and_offer_actions():
+    from test_support.plain_language import developer_terms
+
+    _enroll()
+    roster = client.get("/external-agents").text
+    detail = client.get("/external-agents/sf-quotebot").text
+    for page in (roster, detail):
+        assert developer_terms(page) == []
+        assert "docs/external-agents.md" not in page and "Mint credential" not in page
+    # The agent's own page carries the actions the roster offers.
+    for attr in ('data-xa-mint="sf-quotebot"', 'data-xa-revoke="sf-quotebot"', 'data-xa-remove="sf-quotebot"'):
+        assert attr in detail
+    assert "Create access key" in detail and "Block all access" in detail
+    assert 'id="xa-owner"' in roster and 'id="xa-tools-add"' in roster
