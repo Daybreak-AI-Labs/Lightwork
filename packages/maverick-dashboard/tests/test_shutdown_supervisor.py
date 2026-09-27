@@ -439,3 +439,17 @@ def test_automation_partial_thread_start_retains_and_signals_owned_workers(monke
     assert not queue.start()  # still owned, though startup failed
     queue.stop(timeout=0)
     assert queue._worker is None and queue._worker_threads == []
+
+
+def test_live_requests_report_draining_not_stopped():
+    """Regression: with a live HTTP request the pools stay open and the lease
+    stays held, so the supervisor must not report "stopped"."""
+    supervisor = ShutdownSupervisor(1)
+    supervisor.release_control_plane = True
+    supervisor.requests_quiescent = lambda: False
+    supervisor.register_final_resource("pool", lambda **_kw: pytest.fail("pool still owned"), lambda: False)
+    asyncio.run(supervisor.stop())
+    assert supervisor.phase == "draining"
+    assert supervisor.release_control_plane  # lease not released
+    with pytest.raises(RuntimeError, match="still stopping"):
+        supervisor.assert_restart_allowed()

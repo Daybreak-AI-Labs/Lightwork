@@ -24,10 +24,13 @@ def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
 
     def _watching_open(path, flags, mode=0o777):
         fd = real_open(path, flags, mode)
-        try:
-            observed_modes.append(stat.S_IMODE(os.stat(path).st_mode))
-        except OSError:
-            pass
+        # Only files this write CREATES must be private from their first
+        # instant; opening an existing directory to fsync it is not creation.
+        if flags & os.O_CREAT:
+            try:
+                observed_modes.append(stat.S_IMODE(os.stat(path).st_mode))
+            except OSError:
+                pass
         return fd
 
     with patch("maverick_installer.wizard.os.open", side_effect=_watching_open):

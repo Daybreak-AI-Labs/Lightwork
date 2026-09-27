@@ -1257,3 +1257,19 @@ def test_write_config_emits_adapter_rung(tmp_path: Path, monkeypatch):
 def test_write_config_omits_adapter_rung_when_off(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
     assert "adapter_rung" not in parsed
+
+
+def test_write_config_emits_chat_and_limit_knobs(tmp_path: Path, monkeypatch):
+    # Knobs added with chat streaming and bounded connectors/SQL: the wizard is
+    # what makes them reachable (rule 6); defaults are omitted, changes written.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "stream_answers": False, "verify_chat_answers": True,
+        "risk_proportional_verify": True,
+        "query_timeout_seconds": 60, "connector_max_attempts": 2})
+    assert parsed["chat"]["stream_answers"] is False
+    assert parsed["verification"] == {"risk_proportional": True, "verify_chat_answers": True}
+    assert parsed["query_limits"]["timeout_seconds"] == 60
+    assert parsed["connector_limits"]["max_attempts"] == 2
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "stream_answers": True, "query_timeout_seconds": 30, "connector_max_attempts": 3})
+    assert not {"chat", "query_limits", "connector_limits"} & parsed.keys()

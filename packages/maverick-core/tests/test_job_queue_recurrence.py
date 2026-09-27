@@ -340,3 +340,27 @@ def test_worker_does_not_dispatch_after_lease_is_reclaimed(tmp_path, monkeypatch
     assert executed == []
     assert q.get(jid).status == "pending"
     assert len(q.list()) == 1
+
+
+def test_operator_cli_reconciles_a_parked_schedule(tmp_path, monkeypatch):
+    """The recovery API had no operator surface: a parked schedule stayed
+    stopped until someone wrote Python. `maverick queue reconcile` is it."""
+    from click.testing import CliRunner
+    from maverick import job_queue
+    from maverick.cli import main
+
+    path = tmp_path / "jobs.db"
+    _legacy(path, [({"__cron__": CRON}, 1, "running")])
+    real = job_queue.JobQueue
+    monkeypatch.setattr(job_queue, "JobQueue", lambda *a, **k: real(path))
+    runner = CliRunner()
+    listed = runner.invoke(main, ["queue", "failed"])
+    assert "maverick queue reconcile" in listed.output
+    refused = runner.invoke(main, ["queue", "reconcile", "1", "--expected-attempts", "1", "--rearm"])
+    assert refused.exit_code != 0 and "--yes" in refused.output
+    stale = runner.invoke(main, ["queue", "reconcile", "1", "--expected-attempts", "9", "--rearm", "--yes"])
+    assert stale.exit_code != 0 and "changed" in stale.output
+    done = runner.invoke(main, ["queue", "reconcile", "1", "--expected-attempts", "1", "--rearm", "--yes"])
+    assert done.exit_code == 0, done.output
+    assert not real(path).get(1).recurrence_reconcile_required
+    assert len(real(path).list(status="pending")) == 1

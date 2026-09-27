@@ -5056,6 +5056,21 @@ def pick_advanced() -> dict[str, Any]:
                 default=0,
             ),
         )
+    # Chat answers (maverick.agent): a live, redacted, Shield-scanned preview,
+    # and whether plain prose replies also wait on the self-verifier.
+    advanced["stream_answers"] = _q_confirm(
+        "  Stream chat answers as they are written (redacted and Shield-scanned)?",
+        default=True,
+    )
+    advanced["verify_chat_answers"] = _q_confirm(
+        "  Also self-verify plain chat replies (one extra model call each)?",
+        default=False,
+    )
+    # Resource ceilings for the SQL tools and read-only REST connector retries.
+    advanced["query_timeout_seconds"] = min(300, max(1, _safe_int(
+        _q_text("  SQL tool query timeout in seconds (1-300)", default="30"), default=30)))
+    advanced["connector_max_attempts"] = min(5, max(1, _safe_int(
+        _q_text("  REST connector read attempts (1-5)", default="3"), default=3)))
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
     # `maverick tax prepare` / `maverick tax update`.
@@ -7345,10 +7360,26 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("verify_ensemble = true")
         if advanced.get("energy_aware"):
             lines.append("energy_aware = true")
-    if advanced.get("risk_proportional_verify"):
+    if advanced.get("risk_proportional_verify") or advanced.get("verify_chat_answers"):
         lines.append("")
         lines.append("[verification]")
-        lines.append("risk_proportional = true")
+        if advanced.get("risk_proportional_verify"):
+            lines.append("risk_proportional = true")
+        if advanced.get("verify_chat_answers"):
+            lines.append("verify_chat_answers = true")
+    # Chat previews are on by default in the kernel: write only a deliberate "no".
+    if advanced.get("stream_answers") is False:
+        lines.append("")
+        lines.append("[chat]")
+        lines.append("stream_answers = false")
+    if advanced.get("query_timeout_seconds", 30) != 30:
+        lines.append("")
+        lines.append("[query_limits]")
+        lines.append(f"timeout_seconds = {int(advanced['query_timeout_seconds'])}")
+    if advanced.get("connector_max_attempts", 3) != 3:
+        lines.append("")
+        lines.append("[connector_limits]")
+        lines.append(f"max_attempts = {int(advanced['connector_max_attempts'])}")
     if advanced.get("autonomy_gate") or advanced.get("headless_assume"):
         lines.append("")
         lines.append("[autonomy]")

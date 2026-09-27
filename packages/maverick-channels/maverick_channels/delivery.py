@@ -411,6 +411,26 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
     return await asyncio.to_thread(journal.get, row["id"])
 
 
+async def _recover_row(channel, row, *, account, authorize, send, prepare, journal, idempotent):
+    """Re-drive one journal row; None when current policy no longer authorizes it."""
+    values = {key: value for key, value in row["message"].items() if key != "attachments"}
+    incoming = IncomingMessage(**values)
+    if not authorize(incoming):
+        return None
+
+    async def send_saved(reply):
+        return await send(incoming, reply, row["route"])
+
+    async def prepare_saved(message):
+        return await prepare(message, row["route"])
+
+    return await process_message(
+        channel, incoming, external_id=row["external_id"], account=account,
+        authorize=lambda: authorize(incoming), send=send_saved,
+        prepare=prepare_saved if prepare else None, receipt=row, journal=journal,
+        idempotent=idempotent)
+
+
 async def recover_messages(channel, *, account, authorize, send, prepare=None, limit=16,
                            journal=None, idempotent=False):
     """Recover one fair window with adapter-owned routing and current policy.
@@ -422,20 +442,23 @@ async def recover_messages(channel, *, account, authorize, send, prepare=None, l
     rows, checkpoint = await asyncio.to_thread(journal.recovery_window, channel=channel.name, account=account, limit=limit)
     outcomes = []
     for row in rows:
-        values = {key: value for key, value in row["message"].items() if key != "attachments"}
-        incoming = IncomingMessage(**values)
-        if not authorize(incoming):
-            continue
-
-        async def send_saved(reply, incoming=incoming, route=row["route"]):
-            return await send(incoming, reply, route)
-
-        async def prepare_saved(message, route=row["route"]):
-            return await prepare(message, route)
-
-        outcomes.append(await process_message(channel, incoming, external_id=row["external_id"], account=account,
-                        authorize=lambda incoming=incoming: authorize(incoming), send=send_saved,
-                        prepare=prepare_saved if prepare else None, receipt=row, journal=journal, idempotent=idempotent))
+        try:
+            outcome = await _recover_row(channel, row, account=account, authorize=authorize,
+                                         send=send, prepare=prepare, journal=journal,
+                                         idempotent=idempotent)
+        except Exception as exc:
+            # One unrecoverable row (a malformed record, a missing blob, an
+            # unknown outcome) must not pin the cursor: that would starve every
+            # later row in the window on every pass. The row keeps its own
+            # state; the window still advances.
+            logging.getLogger(__name__).warning(
+                "delivery recovery: %s row %s deferred: %s",
+                channel.name, row.get("external_id"), exc)
+            outcome = exc
+        if outcome is not None:
+            outcomes.append(outcome)
+    # Reached only when the whole window was attempted; a cancellation leaves
+    # the cursor where it was so unattempted rows are revisited.
     await asyncio.to_thread(journal.finish_recovery_window, checkpoint)
     return outcomes
 

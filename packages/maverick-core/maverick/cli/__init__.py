@@ -4642,8 +4642,40 @@ def queue_failed(limit: int) -> None:
         return
     for j in jobs:
         err = (getattr(j, "last_error", "") or "").strip().replace("\n", " ")[:160]
+        parked = "  <- recurring: `maverick queue reconcile`" if getattr(
+            j, "recurrence_reconcile_required", False) else ""
         click.echo(f"  [{j.id}] kind={j.kind} attempts={getattr(j, 'attempts', '?')} "
-                   f"error={err!r}")
+                   f"error={err!r}{parked}")
+
+
+@queue.command("reconcile")
+@click.argument("job_id", type=int)
+@click.option("--expected-attempts", type=int, required=True,
+              help="The attempt count you inspected (`maverick queue failed`); "
+                   "refused if the job changed since.")
+@click.option("--rearm", is_flag=True, help="Authorize ONE future occurrence.")
+@click.option("--successor", "successor_id", type=int, default=None,
+              help="Link a reviewed, compatible successor job instead.")
+@click.option("--yes", is_flag=True, help="Confirm (required).")
+def queue_reconcile(job_id: int, expected_attempts: int, rearm: bool,
+                    successor_id: int | None, yes: bool) -> None:
+    """Resume a recurring schedule parked for reconciliation.
+
+    A legacy recurring job whose last run cannot be proven to have finished is
+    parked as failed (recurrence_reconcile_required) so its business work is
+    never replayed blind. After inspecting it, either --rearm one future
+    occurrence or link a --successor. The ambiguous run itself stays failed.
+    """
+    from ..job_queue import JobQueue
+    if not yes:
+        raise click.UsageError("reconciliation is an operator decision; pass --yes")
+    try:
+        next_id = JobQueue().reconcile_recurrence(
+            job_id, expected_attempts=expected_attempts, successor_id=successor_id,
+            rearm=rearm, confirm=True)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"job {job_id} reconciled; schedule continues as job {next_id}")
 
 
 @main.group()

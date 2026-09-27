@@ -201,15 +201,58 @@ class _Recorder:
         return True
 
 
-def test_preview_holds_back_a_tail_until_finish():
+def test_preview_holds_back_a_tail_and_partial_tokens_until_finish():
     world = _Recorder()
     stream = _PartialAnswerStream(world, 1)
-    stream("A" * 100)
-    assert world.writes == ["A" * 4]                           # 96 held back
-    stream("B" * 10)
-    assert world.writes[-1] == "A" * 14
+    stream("word " * 30)                                       # 150 chars
+    shown = world.writes[-1]
+    assert shown == ("word " * 10).rstrip()                    # whole words, 96 held back
     stream.finish()
-    assert world.writes[-1] == "A" * 100 + "B" * 10
+    assert world.writes[-1] == ("word " * 30).rstrip() + " "
+
+
+def test_an_unbroken_token_is_never_shown_half_written():
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1)
+    stream("A" * 300)
+    assert world.writes == []                                  # still one token
+    stream.finish()
+    assert world.writes[-1] == "A" * 300
+
+
+def test_a_secret_is_never_shown_before_it_can_be_redacted():
+    """Regression: truncating before redacting leaked secret prefixes that
+    the redactor cannot recognise (AKIA... one char short, a DSN before '@')."""
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1)
+    text = ("Use this key AKIAIOSFODNN7EXAMPLE and the DSN "
+            "postgres://admin:hunter2secretpw@db.internal/prod for the job. ")
+    for i in range(len(text)):
+        stream(text[i])
+        stream._last_flush = float("-inf")                     # flush every delta
+    stream(" filler" * 30)
+    stream._last_flush = float("-inf")
+    stream.finish()
+    for shown in world.writes:
+        assert "AKIAIOSFODNN7" not in shown and "hunter2" not in shown
+
+
+def test_a_shield_block_withdraws_the_preview():
+    class _Shield:
+        def __init__(self):
+            self.calls = 0
+        def scan_output(self, text):
+            self.calls += 1
+            return SimpleNamespace(allowed="forbidden" not in text)
+
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1, _Shield())
+    stream("safe words " * 20)
+    assert world.writes and "safe" in world.writes[-1]
+    stream._last_flush = float("-inf")
+    stream(" forbidden content " + "x " * 60)
+    stream.finish()
+    assert world.writes[-1] == "" and stream._failed is True
 
 
 def test_preview_is_throttled(monkeypatch):
@@ -217,10 +260,10 @@ def test_preview_is_throttled(monkeypatch):
     world = _Recorder()
     stream = _PartialAnswerStream(world, 1)
     for _ in range(20):
-        stream("x" * 50)
+        stream("x " * 25)
     assert len(world.writes) == 1                              # first flush only
     stream.finish()
-    assert world.writes[-1] == "x" * 1000
+    assert world.writes[-1] == "x " * 500
 
 
 def test_preview_strips_the_final_marker_once_it_arrives():
@@ -340,3 +383,16 @@ async def test_llm_forwards_on_delta_only_to_anthropic(monkeypatch):
     assert clients["anthropic"].kwargs.get("on_delta") is cb
     await llm.complete_async("s", [{"role": "user", "content": "hi"}], model="openai:gpt-5", on_delta=cb)
     assert "on_delta" not in clients["openai"].kwargs
+
+
+def test_failover_attempt_starts_a_fresh_preview():
+    """Regression: failover reused one callback, so a failed attempt's partial
+    text was concatenated with the next model's answer."""
+    from maverick.llm import _attempt_delta
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1)
+    _attempt_delta(stream)("the first model began " * 3)
+    _attempt_delta(stream)("second model answer ")          # failover: new attempt
+    stream.finish()
+    assert world.writes[-1] == "second model answer "
+    assert _attempt_delta(None) is None and _attempt_delta(print) is print

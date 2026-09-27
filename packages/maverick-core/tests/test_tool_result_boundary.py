@@ -429,3 +429,17 @@ async def test_programmatic_aggregate_quota_never_runs_partial_script(monkeypatc
     ]})
     assert result.startswith("INDETERMINATE:") and "combined" in result
     assert len(rows) == 2 and all(row[1]["disposition"] == "completed" for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_full_artifact_quota_degrades_to_preview_not_unknown(monkeypatch):
+    """Regression: once a tenant held MAX_TENANT_FILES live artifacts, every
+    later large result became INDETERMINATE for up to seven days. The tool ran;
+    only retention failed -- deliver the screened preview and say so."""
+    monkeypatch.setattr(artifacts, "MAX_TENANT_FILES", 0)
+    agent, run, rows, _seen = agent_boundary(monkeypatch, lambda _a: "row\n" * 2000,
+                                             shield=SimpleNamespace(scan_output=lambda v: SimpleNamespace(allowed=True)))
+    output = await run()
+    assert rows[-1][1]["disposition"] == "completed"
+    assert "INDETERMINATE" not in output and "artifact_id=" not in output
+    assert "Complete result NOT retained" in output and "quota" in output

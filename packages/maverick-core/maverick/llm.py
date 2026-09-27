@@ -1168,6 +1168,16 @@ def _stream_kwargs(provider: str, on_delta) -> dict[str, Any]:
     return {}
 
 
+def _attempt_delta(on_delta):
+    """The delta callback for one failover attempt: a callback that keeps a
+    buffer (``reset``) starts empty, so a failed attempt's partial text is
+    never concatenated with the next model's answer."""
+    reset = getattr(on_delta, "reset", None)
+    if callable(reset):
+        reset()
+    return on_delta
+
+
 def _hedge_ms_for(on_delta) -> float | None:
     """A hedged backup would stream a second copy of the answer into the same
     callback, so a streaming call is never hedged."""
@@ -1842,7 +1852,7 @@ class LLM:
                     (m, (lambda m=m: self.complete(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, on_delta=on_delta, effort=effort,
+                        model=m, on_delta=_attempt_delta(on_delta), effort=effort,
                         tool_choice=tool_choice, _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
@@ -2030,7 +2040,7 @@ class LLM:
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, effort=effort, tool_choice=tool_choice,
-                        on_delta=on_delta, _no_failover=True,
+                        on_delta=_attempt_delta(on_delta), _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)

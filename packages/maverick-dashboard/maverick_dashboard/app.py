@@ -51,6 +51,7 @@ from fastapi.templating import Jinja2Templates
 from maverick import a2a
 from maverick.flow.payloads import FlowPayloadError
 from maverick.oidc import VerifiedPrincipal
+from maverick.runner import TaskLimitConfigError
 from maverick.runtime_overrides import RuntimeOverridesSecurityError
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -865,7 +866,7 @@ from .ai_governance_loop_composition import (  # noqa: E402
 @app.middleware("http")
 async def _shutdown_admission(request: Request, call_next):
     supervisor = getattr(request.app.state, "lifecycle_supervisor", None)
-    if (supervisor is not None and supervisor.phase in {"stopping", "degraded"}
+    if (supervisor is not None and supervisor.phase in {"stopping", "draining", "degraded"}
             and request.url.path != "/livez"):
         return JSONResponse({"detail": "dashboard is shutting down"}, status_code=503,
                             headers={"Retry-After": "5"})
@@ -2300,6 +2301,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"
     return JSONResponse({"detail": errors}, status_code=422)
+
+
+@app.exception_handler(TaskLimitConfigError)
+async def task_limit_config_handler(request: Request, exc: TaskLimitConfigError):
+    """Malformed task-limit configuration is an operator fix, not a server
+    crash: refuse new work with the reason instead of an opaque 500."""
+    return JSONResponse(
+        {"detail": f"task limit configuration is invalid ({exc}); fix [budget] "
+                   "in config.toml or MAVERICK_BUDGET_DOLLARS"},
+        status_code=503)
 
 
 @app.exception_handler(OverflowError)

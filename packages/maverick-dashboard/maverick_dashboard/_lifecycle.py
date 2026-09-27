@@ -150,8 +150,12 @@ class ShutdownSupervisor:
                 if self.resource_task is None:
                     self.resource_task = asyncio.create_task(run_in_threadpool(self.close_final_resources))
                 await asyncio.wait_for(asyncio.shield(self.resource_task), max(0.0, self.deadline - self.clock()))
-            if not self.missed and not self.errors:
+            if not self.missed and not self.errors and not self.restart_requires_process_exit:
                 self.phase = "stopped"
+            elif not self.missed and not self.errors:
+                # Schedulers stopped, but a live HTTP request may still write:
+                # pools stay open and the lease stays held until process exit.
+                self.phase = "draining"
             # CLI request draining precedes lifespan shutdown. Do not release
             # the data-root lease merely because scheduler cleanup finished
             # while an existing HTTP request could still be writing.

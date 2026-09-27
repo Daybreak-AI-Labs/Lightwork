@@ -176,6 +176,21 @@ DEFAULT_MAX_WALL_SECONDS = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
 DEFAULT_MAX_DEPTH = env_int("MAVERICK_DEFAULT_MAX_DEPTH", 3)
 
 
+class TaskLimitConfigError(ValueError):
+    """The deployment's task-limit configuration is malformed (operator fix)."""
+
+
+def _resolved_cap(field: str, default: float | None) -> float | None:
+    from .budget import resolve_budget_caps
+
+    try:
+        return resolve_budget_caps(defaults={field: default}).get(field)
+    except TaskLimitConfigError:
+        raise
+    except ValueError as exc:
+        raise TaskLimitConfigError(str(exc)) from exc
+
+
 def configured_max_dollars() -> float | None:
     """The deployment's per-goal spend ceiling, in USD.
 
@@ -187,18 +202,11 @@ def configured_max_dollars() -> float | None:
     fallback for a deployment that configured nothing, so using it as the
     ceiling rejected the very cap the operator had set.
     """
-    from .budget import resolve_budget_caps
-
-    caps = resolve_budget_caps(defaults={"max_dollars": DEFAULT_MAX_DOLLARS})
-    return caps.get("max_dollars")
+    return _resolved_cap("max_dollars", DEFAULT_MAX_DOLLARS)
 
 
 def configured_max_wall_seconds() -> float | None:
-    from .budget import resolve_budget_caps
-
-    return resolve_budget_caps(defaults={
-        "max_wall_seconds": DEFAULT_MAX_WALL_SECONDS,
-    }).get("max_wall_seconds")
+    return _resolved_cap("max_wall_seconds", DEFAULT_MAX_WALL_SECONDS)
 
 
 def clamp_task_limit(requested: float | None, configured: float | None) -> float | None:

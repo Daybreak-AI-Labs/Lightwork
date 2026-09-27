@@ -525,8 +525,8 @@ def test_recovered_telegram_download_retries_before_execution_claim(isolated):
         adapter._app = SimpleNamespace(bot=SimpleNamespace(get_file=get_file))
         kwargs = dict(account="account", authorize=lambda _: True, send=send,
                       prepare=adapter._prepare_saved, journal=delivery.DeliveryJournal())
-        with pytest.raises(TimeoutError):
-            await delivery.recover_messages(adapter, **kwargs)
+        (outcome,) = await delivery.recover_messages(adapter, **kwargs)
+        assert isinstance(outcome, TimeoutError)  # deferred, not raised: the window still advances
         row = isolated.get(receipt["id"])
         assert row["execution"] == "received" and row["delivery"] == "not_ready"
         assert handled == [] and sent == []
@@ -536,3 +536,37 @@ def test_recovered_telegram_download_retries_before_execution_claim(isolated):
     asyncio.run(run())
     assert len(attempts) == 2 and len(handled) == 1 and sent == ["done"]
     assert handled[0] == [{"filename": "report.txt", "mime": "text/plain", "data": b"report"}]
+
+
+def test_one_failing_row_does_not_starve_the_rest_of_the_window(isolated):
+    """Regression: an exception on one recovered row skipped
+    finish_recovery_window, so every later row in the window starved."""
+    first = IncomingMessage(user_id="1", sender_id="1", text="broken", channel="telegram", message_id="1")
+    second = IncomingMessage(user_id="2", sender_id="2", text="fine", channel="telegram", message_id="2")
+    isolated.admit(first, external_id="1", account="acct", route={})
+    isolated.admit(second, external_id="2", account="acct", route={})
+    handled, sent = [], []
+
+    async def handler(incoming):
+        handled.append(incoming.text)
+        return "ok"
+
+    async def prepare(message, route):
+        if message.text == "broken":
+            raise RuntimeError("blob missing")
+        return message
+
+    async def send(incoming, reply, route):
+        sent.append(incoming.text)
+        return "receipt"
+
+    class _Adapter:
+        name = "telegram"
+
+    adapter = _Adapter()
+    adapter.handler = handler
+    outcomes = asyncio.run(delivery.recover_messages(
+        adapter, account="acct", authorize=lambda _m: True, send=send, prepare=prepare,
+        journal=delivery.DeliveryJournal()))
+    assert any(isinstance(o, RuntimeError) for o in outcomes)
+    assert handled == ["fine"] and sent == ["fine"]

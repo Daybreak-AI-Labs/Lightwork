@@ -1457,20 +1457,25 @@ class _PartialAnswerStream:
     model is still writing it, so the chat page shows text within a second
     instead of after the whole turn (and its verification) completes.
 
-    Writes at most once per ``MIN_INTERVAL`` seconds, holds back a
-    ``HOLDBACK``-character tail so a credential split across two deltas is
-    redacted whole, and stops growing at ``MAX_CHARS``. The orchestrator's
-    final write replaces the preview. Fails closed: a redaction or write
-    error ends the preview, never the turn.
+    Writes at most once per ``MIN_INTERVAL`` seconds and stops growing at
+    ``MAX_CHARS``. Each flush redacts the *whole* text received so far, then
+    shows only complete whitespace-delimited tokens that end at least
+    ``HOLDBACK`` characters before the tail: a credential is one token, so a
+    half-written one is never displayed, and a complete one is redacted whole.
+    Every flush also passes the Shield output scan; a block withdraws the
+    preview for the rest of the turn. The orchestrator's final write replaces
+    the preview. Fails closed: a redaction, scan or write error ends the
+    preview, never the turn.
     """
 
     MIN_INTERVAL = 0.35
     HOLDBACK = 96
     MAX_CHARS = 60_000
 
-    def __init__(self, world: Any, goal_id: int) -> None:
+    def __init__(self, world: Any, goal_id: int, shield: Any = None) -> None:
         self._world = world
         self._goal_id = goal_id
+        self._shield = shield
         self._text = ""
         self._shown = ""
         self._last_flush = float("-inf")  # the first flush is never throttled
@@ -1487,6 +1492,11 @@ class _PartialAnswerStream:
         if now - self._last_flush >= self.MIN_INTERVAL:
             self._flush(now, holdback=self.HOLDBACK)
 
+    def reset(self) -> None:
+        """A new model attempt (provider failover) starts a fresh answer; the
+        next flush replaces what the page shows."""
+        self._text = ""
+
     def finish(self) -> None:
         """Flush everything received (no holdback) once the turn has ended."""
         self._flush(time.monotonic(), holdback=0)
@@ -1494,17 +1504,28 @@ class _PartialAnswerStream:
     def _flush(self, now: float, *, holdback: int) -> None:
         if self._failed:
             return
-        visible = self._text[: len(self._text) - holdback] if holdback else self._text
-        visible = _strip_final_marker(visible)
-        # A marker cut mid-word ("FI", "FINAL") is not an answer yet.
-        if not visible.strip() or visible == self._shown or "FINAL:".startswith(visible.strip()):
-            return
         try:
             from .safety.secret_detector import redact
-            visible, _ = redact(visible)
+            visible, _ = redact(_strip_final_marker(self._text))
         except Exception:
             self._failed = True  # never show an unredacted preview
             return
+        if holdback:
+            # Only whole tokens that ended before the held-back tail.
+            cut = max(visible.rfind(c, 0, max(0, len(visible) - holdback)) for c in " \n\t")
+            visible = visible[:cut] if cut > 0 else ""
+        # A marker cut mid-word ("FI", "FINAL") is not an answer yet.
+        if not visible.strip() or visible == self._shown or "FINAL:".startswith(visible.strip()):
+            return
+        if self._shield is not None:
+            try:
+                blocked = not self._shield.scan_output(visible).allowed
+            except Exception:
+                blocked = True
+            if blocked:
+                self._failed = True
+                self._withdraw()
+                return
         try:
             self._world.set_goal_partial_result(self._goal_id, visible)
         except Exception:
@@ -1514,6 +1535,15 @@ class _PartialAnswerStream:
         self._shown = visible
         self._last_flush = now
         self.writes += 1
+
+    def _withdraw(self) -> None:
+        """Remove an already-shown preview (a later flush was blocked)."""
+        if self._shown:
+            try:
+                self._world.set_goal_partial_result(self._goal_id, "")
+            except Exception:
+                log.debug("answer preview withdraw failed for goal #%s",
+                          self._goal_id, exc_info=True)
 
 
 class Agent:
@@ -2912,6 +2942,37 @@ class Agent:
             **payload,
         )
 
+    def _retain_large_result(self, output: str, *, limit: int, tool: str) -> str:
+        """Cap an over-limit screened result for the model, retaining the
+        complete value as a private artifact the agent can page through.
+
+        The tool DID run; if retention fails (e.g. the tenant's artifact quota
+        is full) the screened preview is delivered with a plain statement of
+        what is missing, never turned into an unknown outcome.
+        """
+        from .tool_result_artifacts import ToolArtifactError, publish
+
+        try:
+            ref = publish(output, goal_id=self.ctx.goal_id,
+                          principal=self.tools._principal, tool=tool)
+        except ToolArtifactError as exc:
+            return _cap_tool_output(output, limit=limit) + (
+                f"\n[Complete result NOT retained ({exc}). Only this preview is "
+                "available: do not treat the omitted part as known, and do not "
+                "repeat the original action to recover it.]"
+            )
+        # Keep the existing preview/error-prefix contract. The reference binds
+        # immutable full data; a preview is never executable data.
+        reader_allowed = self.tools._acl_allows("read_tool_result")
+        return _cap_tool_output(output, limit=limit) + (
+            "\n[Complete screened result retained: artifact_id="
+            f"{ref['artifact_id']}; bytes={ref['bytes']}; "
+            f"expires_at={ref['expires_at']}. "
+            + ("Read with read_tool_result using offset/next_offset."
+               if reader_allowed else "Artifact reading is denied by the current tool ACL.")
+            + " Do not repeat the original action to recover omitted data.]"
+        )
+
     async def _run_dispatched_tool(
         self,
         name: str,
@@ -3053,22 +3114,7 @@ class Agent:
             complete_output = output
             limit = _tool_result_limit(self.model)
             if not needs_complete_output() and len(output) > limit:
-                from .tool_result_artifacts import publish
-
-                ref = publish(output, goal_id=self.ctx.goal_id,
-                              principal=self.tools._principal, tool=safe_name)
-                # Keep the existing preview/error-prefix contract. The reference
-                # binds immutable full data; a preview is never executable data.
-                output = _cap_tool_output(output, limit=limit)
-                reader_allowed = self.tools._acl_allows("read_tool_result")
-                output += (
-                    "\n[Complete screened result retained: artifact_id="
-                    f"{ref['artifact_id']}; bytes={ref['bytes']}; "
-                    f"expires_at={ref['expires_at']}. "
-                    + ("Read with read_tool_result using offset/next_offset."
-                       if reader_allowed else "Artifact reading is denied by the current tool ACL.")
-                    + " Do not repeat the original action to recover omitted data.]"
-                )
+                output = self._retain_large_result(output, limit=limit, tool=safe_name)
             nonce = _secrets.token_hex(8)
             framed = (
                 f"<tool_output tool={safe_name!r} id={nonce}>\n"
@@ -3770,7 +3816,7 @@ class Agent:
                 return None
         except Exception:
             return None
-        return _PartialAnswerStream(world, goal_id)
+        return _PartialAnswerStream(world, goal_id, getattr(ctx, "shield", None))
 
     def _conversational_answer_skips_verification(
         self, final: str | None, *, coding: bool, tool_calls: int,
