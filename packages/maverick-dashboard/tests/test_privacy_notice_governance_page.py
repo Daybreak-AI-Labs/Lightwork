@@ -32,7 +32,7 @@ def page_client() -> TestClient:
         return templates.TemplateResponse(
             request,
             "privacy_notice_governance.html",
-            {"privacy_notice_governance_enabled": enabled},
+            {"privacy_notice_governance_enabled": enabled, "can_admin": True, "can_audit": True},
         )
 
     return TestClient(app, headers={"Origin": "http://testserver"})
@@ -42,12 +42,19 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     response = page_client.get("/privacy/notices")
     assert response.status_code == 200
     page = response.text
-    assert "Privacy Notice Governance" in page
-    assert "No raw notice content, personal data, secret values, direct external" in page
-    assert "automatically publish" in page
-    assert "exact-tenant Consent Publishing store" in page
-    assert "external delivery" in page
+    assert "Privacy notices" in page
+    assert "About this page&rsquo;s safeguards" in page
+    assert "only update Lightwork&rsquo;s own consent publishing records" in page
     assert "/api/v1/privacy/notices" in page
+    for element in ('id="png-releases"', 'id="png-new-version"', 'id="png-release-form"',
+                    'id="png-policies"', 'id="png-proposals"', 'id="png-effective"',
+                    'type="date"', 'type="file"', 'name="jurisdiction"',
+                    "lightwork-privacy-notice-governance.js"):
+        assert element in page
+    before, technical = page.split("<summary>Technical details: advanced operations</summary>", 1)
+    for jargon in ("JSON", "Tenant", "SHA-256", "digest", "lease token", "Operation", "revision"):
+        assert jargon not in before.split("<main", 1)[-1], jargon
+    assert 'id="png-operation"' in technical
     assert 'data-copilot-page="/privacy/notice-governance"' in page
     assert "Publication updates in Lightwork" in page
     assert "/publication-runtime/status" in page
@@ -86,7 +93,7 @@ def test_page_fails_closed_and_template_uses_safe_dom(page_client) -> None:
     disabled = page_client.get("/privacy/notices", params={"enabled": False})
     assert disabled.status_code == 200
     assert 'data-module-gate="privacy_automation.notice_governance"' in disabled.text
-    assert "Privacy notice governance is turned off." in disabled.text
+    assert "Privacy notice approval is turned off." in disabled.text
     assert "[privacy_automation.notice_governance] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]

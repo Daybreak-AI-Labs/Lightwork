@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Privacy Notice Governance - Lightwork{% endblock %}
+{% block title %}Privacy Notices · Lightwork{% endblock %}
 {% block content %}
 <style>
   .png-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -14,34 +14,161 @@
   .png-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
   .png-runtime { margin:var(--space-4) 0; display:grid; gap:var(--space-3); }
   .png-runtime__actions { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+  .png-fields { display:grid; gap:.75rem; grid-template-columns:repeat(auto-fill, minmax(15rem, 1fr)); align-items:end; }
+  .png-fields label { display:flex; flex-direction:column; gap:.25rem; }
+  .png-choices { display:flex; flex-wrap:wrap; gap:.4rem 1rem; margin:.75rem 0; border:1px solid var(--border); border-radius:8px; padding:.5rem .75rem; }
   .png-runtime__output { max-height:24rem; overflow:auto; white-space:pre-wrap;
                          word-break:break-word; }
   @media (max-width:900px) { .png-grid { grid-template-columns:1fr; } }
 </style>
 
 <div class="png-shell" data-copilot-page="/privacy/notice-governance">
-<h1>Privacy Notice Governance</h1>
-<p>Review privacy-notice versions, request independent approval, and manage publication schedules, withdrawals, and rollback. This page tracks notice references rather than storing notice text.</p>
-<div class="png-warning">
-  <strong>No raw notice content, personal data, secret values, direct external
-    network I/O, unconfigured provider writes, automatic legal-applicability
-    decisions, SDK deployment, external site or tag-manager mutation, or live
-    acceptance.</strong>
-  The production composition and bounded scheduler can automatically publish
-  only into Lightwork's exact-tenant Consent Publishing store; external delivery
-  remains adapter-owned and fails closed when that authority is unavailable.
-  Policy, content, and configuration are represented only by SHA-256 digests.
-  Consent publications, citations, acknowledgements, and signing keys are
-  bounded opaque references, never their underlying values.
-</div>
-
+{% set jurisdictions = [
+  ('eu', 'European Union'), ('uk', 'United Kingdom'), ('us', 'United States (all states)'),
+  ('us-ca', 'California'), ('us-va', 'Virginia'), ('us-co', 'Colorado'), ('us-ct', 'Connecticut'),
+  ('us-tx', 'Texas'), ('ca', 'Canada'), ('br', 'Brazil'), ('au', 'Australia'), ('jp', 'Japan'),
+  ('in', 'India'), ('global', 'Everywhere else'),
+] %}
+{% set languages = [
+  ('en', 'English'), ('en-US', 'English (United States)'), ('en-GB', 'English (United Kingdom)'),
+  ('fr', 'French'), ('de', 'German'), ('es', 'Spanish'), ('it', 'Italian'), ('pt-BR', 'Portuguese (Brazil)'),
+  ('nl', 'Dutch'), ('ja', 'Japanese'),
+] %}
+{% from "_hero.html" import hero %}
+{{ hero('Privacy', 'Privacy notices',
+        subtitle='Approve and publish new versions of your privacy notices',
+        lede='Lightwork tracks which version of each privacy notice is approved and live. It records a
+              fingerprint of your notice files rather than their text, and it does not change your
+              website by itself.') }}
+<details class="panel">
+  <summary>About this page&rsquo;s safeguards</summary>
+  <ul>
+    <li>Each new version needs approval from the roles your approval rule names, and the author cannot approve their own version.</li>
+    <li>Publishing, withdrawing and rolling back only update Lightwork&rsquo;s own consent publishing records. Your website, app or tag manager is only changed by a connection your administrator sets up.</li>
+    <li>Notice text, personal data and keys are never stored here; only fingerprints of the files you choose.</li>
+  </ul>
+</details>
 {% from "_module_gate.html" import module_gate %}
 {% if not privacy_notice_governance_enabled %}
-{{ module_gate('privacy_automation.notice_governance', 'Privacy notice governance',
-               detail='Notice drafting, review, versioned releases, and signed
-                       exports all stay safely off until it is on -- have your
-                       privacy owner review the approval workflow first.') }}
+{{ module_gate('privacy_automation.notice_governance', 'Privacy notice approval',
+               detail='Track which version of each privacy notice is approved and live, with approvals, scheduling, withdrawal and rollback.',
+               can_activate=can_admin) }}
 {% else %}
+<div id="png-app" data-can-admin="{{ 'true' if can_admin else 'false' }}" data-can-audit="{{ 'true' if can_audit else 'false' }}">
+  <p id="png-status" class="muted" role="status" aria-live="polite">Loading your notices…</p>
+
+  <section class="panel" aria-labelledby="png-sched-title">
+    <h2 id="png-sched-title">Scheduled publishing</h2>
+    <p id="png-sched" class="muted">Checking…</p>
+    {% if can_admin %}<button type="button" class="btn btn--ghost" id="png-run-once">Publish scheduled updates now</button>{% endif %}
+  </section>
+
+  <div class="section-head"><h2>Notice versions</h2>
+    <button type="button" class="btn btn--primary" id="png-new-version">New notice version</button></div>
+  <div class="panel" id="png-releases"><p class="muted">Loading…</p></div>
+
+  <section class="panel" id="png-release-panel" hidden aria-labelledby="png-release-title">
+    <h2 id="png-release-title">New notice version</h2>
+    <form id="png-release-form" autocomplete="off">
+      <div class="png-fields">
+        <label for="png-notice">Notice
+          <select id="png-notice" class="select"><option value="">A new notice</option></select>
+        </label>
+        <label for="png-notice-name">Name of the new notice
+          <input id="png-notice-name" class="input" maxlength="80" placeholder="For example: Website privacy notice">
+        </label>
+        <label for="png-property">Website or app it appears on
+          <input id="png-property" class="input" maxlength="80" required placeholder="For example: Main website">
+        </label>
+        <label for="png-policy">Approval rule
+          <select id="png-policy" class="select" required></select>
+        </label>
+        <label for="png-publication">Consent banner release it goes with
+          <input id="png-publication" class="input" maxlength="80" required placeholder="For example: Spring 2026 banner">
+        </label>
+        <label for="png-from">Takes effect on
+          <input id="png-from" type="date" class="input" required>
+        </label>
+        <label for="png-until">Stops applying on
+          <input id="png-until" type="date" class="input" required>
+        </label>
+        <label for="png-keep">Keep the record until
+          <input id="png-keep" type="date" class="input" required>
+        </label>
+      </div>
+      <fieldset class="png-choices"><legend>Where it applies</legend>
+        {% for code, name in jurisdictions %}
+        <label><input type="checkbox" name="jurisdiction" value="{{ code }}"> {{ name }}</label>
+        {% endfor %}
+      </fieldset>
+      <fieldset class="png-choices"><legend>Languages</legend>
+        {% for code, name in languages %}
+        <label><input type="checkbox" name="locale" value="{{ code }}"> {{ name }}</label>
+        {% endfor %}
+      </fieldset>
+      <div class="png-fields">
+        <label for="png-file-content">The notice text file
+          <input id="png-file-content" type="file" class="input" required>
+        </label>
+        <label for="png-file-policy">The approved privacy policy document
+          <input id="png-file-policy" type="file" class="input" required>
+        </label>
+        <label for="png-file-config">The consent settings file
+          <input id="png-file-config" type="file" class="input" required>
+        </label>
+      </div>
+      <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.75rem;">
+        <button type="submit" class="btn btn--primary">Save version</button>
+        <button type="button" class="btn btn--ghost" id="png-release-cancel">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="section-head"><h2>Which version is live?</h2></div>
+  <div class="panel">
+    <form id="png-effective" class="png-fields" autocomplete="off">
+      <label for="png-eff-property">Website or app
+        <select id="png-eff-property" class="select"></select>
+      </label>
+      <label for="png-eff-jur">Where
+        <select id="png-eff-jur" class="select">
+          {% for code, name in jurisdictions %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label for="png-eff-lang">Language
+        <select id="png-eff-lang" class="select">
+          {% for code, name in languages %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label for="png-eff-at">On
+        <input id="png-eff-at" type="datetime-local" class="input">
+      </label>
+      <div><button type="submit" class="btn btn--ghost">Check</button></div>
+    </form>
+    <p id="png-eff-result" role="status" aria-live="polite"></p>
+  </div>
+
+  <div class="section-head"><h2>Suggested updates</h2></div>
+  <p class="muted">Changes suggested because a privacy law changed. A second person reviews each one.</p>
+  <div class="panel" id="png-proposals"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>Approval rules</h2>
+    {% if can_admin %}<button type="button" class="btn btn--ghost" id="png-new-policy">Add an approval rule</button>{% endif %}</div>
+  <div class="panel" id="png-policies"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>Signed records</h2></div>
+  <div class="panel" id="png-records"><p class="muted">Loading…</p></div>
+
+  {% if can_admin or can_audit %}
+  <div class="panel" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+    {% if can_admin %}<button type="button" class="btn btn--ghost" id="png-purge">Delete expired records</button>{% endif %}
+    {% if can_audit %}<button type="button" class="btn btn--ghost" id="png-integrity">Check records are intact</button>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<details class="panel" id="png-technical">
+<summary>Technical details: advanced operations</summary>
 <p><button class="btn" id="png-load-status" type="button">Check availability</button></p>
 <section class="panel png-runtime" aria-labelledby="png-runtime-title">
   <div>
@@ -231,6 +358,9 @@
   updateConfirmation();
 }());
 </script>
+</details>
+<script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-privacy-notice-governance.js" defer></script>
 {% endif %}
 </div>
 {% endblock %}

@@ -209,6 +209,16 @@ class ExportNoticeIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class NoticeRecordIn(_StrictModel):
+    retained_until: float | int = Field(gt=0, lt=100_000_000_000.0)
+    idempotency_key: IdempotencyKey
+
+
+#: Signing key the page's "Download signed record" button uses; nobody types
+#: a key reference. The key itself stays in the environment.
+DEFAULT_NOTICE_SIGNING_KEY_REF = "env:MAVERICK_PRIVACY_NOTICE_SIGNING_KEY"
+
+
 class PurgeIn(_StrictModel):
     cutoff: float | int = Field(gt=0, lt=100_000_000_000.0)
     idempotency_key: IdempotencyKey
@@ -536,6 +546,103 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
             "sdk_deployment": False,
             "live_acceptance_verified": False,
         }
+
+    @router.get("/records")
+    async def records(request: Request) -> dict[str, Any]:
+        """Approval rules, notice versions, approvals, update proposals,
+        signed records and the publication queue size, for the page lists."""
+
+        require_permission(request, "view")
+        notice, tenant, store = authority(request)
+        listed = await call(notice, store.list_records, tenant)
+        return {
+            "policies": [
+                {
+                    "policy_id": p.policy_id,
+                    "required_roles": list(p.required_roles),
+                    "quorum": p.quorum,
+                    "approval_ttl_seconds": p.approval_ttl_seconds,
+                    "revision": p.revision,
+                }
+                for p in listed["policies"]
+            ],
+            "releases": [
+                {
+                    "notice_id": r.notice_id,
+                    "version": r.version,
+                    "property_id": r.property_id,
+                    "jurisdictions": list(r.jurisdictions),
+                    "locales": list(r.locales),
+                    "approval_policy_id": r.approval_policy_id,
+                    "required_roles": list(r.required_roles),
+                    "quorum": r.quorum,
+                    "state": r.state,
+                    "activate_at": r.activate_at,
+                    "effective_from": r.effective_from,
+                    "effective_until": r.effective_until,
+                    "retained_until": r.retained_until,
+                    "release_sha256": r.definition_sha256,
+                    "revision": r.state_revision,
+                    "created_at": r.created_at,
+                }
+                for r in listed["releases"]
+            ],
+            "approvals": [
+                {
+                    "notice_id": a.notice_id,
+                    "version": a.release_version,
+                    "role": a.role,
+                    "expires_at": a.expires_at,
+                    "revoked": a.revoked_at is not None,
+                    "revision": a.revision,
+                }
+                for a in listed["approvals"]
+            ],
+            "proposals": [
+                {
+                    "proposal_id": p.proposal_id,
+                    "notice_id": p.notice_id,
+                    "base_version": p.base_version,
+                    "status": p.status,
+                    "reason_codes": list(p.reason_codes),
+                    "citations": len(p.regulatory_citations),
+                    "revision": p.revision,
+                    "created_at": p.created_at,
+                }
+                for p in listed["proposals"]
+            ],
+            "records": [
+                {"export_id": e.export_id, "notice_id": e.notice_id, "created_at": e.created_at}
+                for e in listed["exports"]
+            ],
+            "queue": dict(listed["queue"]),
+        }
+
+    @router.post("/releases/{notice_id}/record")
+    async def create_notice_record(
+        request: Request,
+        notice_id: ObjectPath,
+        body: NoticeRecordIn,
+    ):
+        """Signed metadata record for one notice with the deployment key."""
+
+        require_permission(request, "operate")
+        notice, tenant, store = authority(request)
+        export_id = "record-" + hashlib.sha256(
+            f"{notice_id}:{body.idempotency_key}".encode()
+        ).hexdigest()[:24]
+        return _without_lease(
+            await call(
+                notice,
+                store.export_notice,
+                tenant,
+                notice_id,
+                export_id,
+                signing_key_ref=DEFAULT_NOTICE_SIGNING_KEY_REF,
+                retained_until=body.retained_until,
+                idempotency_key=body.idempotency_key,
+            )
+        )
 
     @router.put("/approval-policies/{policy_id}")
     async def set_approval_policy(
@@ -894,6 +1001,7 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
 router = create_privacy_notice_governance_router()
 
 __all__ = [
+    "DEFAULT_NOTICE_SIGNING_KEY_REF",
     "PrivacyNoticeGovernanceDependencies",
     "create_privacy_notice_governance_router",
     "privacy_notice_governance_enabled_for_page",

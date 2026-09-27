@@ -685,3 +685,26 @@ def test_all_core_operations_are_mounted_and_adapter_has_no_network_client(
         assert f"store.{method}" in source
     for primitive in ("requests.", "httpx.", "urllib.request", "socket."):
         assert primitive not in source
+
+
+def test_records_list_rules_versions_and_approvals_per_workspace(environment) -> None:
+    client = environment[0] if isinstance(environment, tuple) else environment
+    empty = client.get(f"{API}/records")
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["releases"] == [] and empty.json()["queue"] == {}
+    _create_policy(client)
+    created = _create_release(client)
+    listed = client.get(f"{API}/records").json()
+    assert [p["policy_id"] for p in listed["policies"]] == ["notice-policy"]
+    release = listed["releases"][0]
+    assert release["notice_id"] == "privacy-main" and release["state"] == "draft"
+    assert release["release_sha256"] == created["definition_sha256"]
+    assert release["revision"] == created["state_revision"]
+    assert "lease_token" not in client.get(f"{API}/records").text
+    record = client.post(
+        f"{API}/releases/privacy-main/record",
+        json={"retained_until": NOW + 100, "idempotency_key": "record-1"},
+    )
+    assert record.status_code == 200, record.text
+    assert record.json()["signing_key_ref"] == api.DEFAULT_NOTICE_SIGNING_KEY_REF
+    assert client.get(f"{API}/records").json()["records"][0]["notice_id"] == "privacy-main"

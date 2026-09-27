@@ -4044,7 +4044,11 @@ async def privacy_notice_governance_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "privacy_notice_governance.html",
-        {"privacy_notice_governance_enabled": (privacy_notice_governance_enabled_for_page())},
+        {
+            "privacy_notice_governance_enabled": (privacy_notice_governance_enabled_for_page()),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
