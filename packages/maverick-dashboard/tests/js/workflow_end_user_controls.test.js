@@ -291,6 +291,6 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
   assert.match(now.textContent, /issue|attention/i);
   status.textContent = "failed";
   observers.get(status)();
-  assert.equal(meta.textContent, "failed");
+  assert.equal(meta.textContent, "Failed");  // shown as a plain word
   assert.equal(spin.style.display, "none");
 });
