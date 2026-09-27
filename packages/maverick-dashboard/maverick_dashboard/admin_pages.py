@@ -438,7 +438,7 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
 
 @router.post("/settings/providers/test")
 async def settings_test_provider(
-    request: Request, provider: str = Form(...)
+    request: Request, provider: str = Form(...), next: str = Form("")
 ) -> RedirectResponse:
     """Run a bounded live provider probe and bind its receipt to this config."""
     _app()._require_same_origin(request)
@@ -456,6 +456,8 @@ async def settings_test_provider(
         raise HTTPException(status_code=409, detail="provider is not configured")
     await run_in_threadpool(test_provider, name)
     await run_in_threadpool(_refresh_models_quietly, name)
+    if next == "providers":  # the Providers page's own Test connection button
+        return RedirectResponse("/providers?tested=1", status_code=303)
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 

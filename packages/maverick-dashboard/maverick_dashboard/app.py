@@ -5348,10 +5348,13 @@ async def providers_page(request: Request) -> HTMLResponse:
             status_code=503,
             detail="provider inventory is unavailable",
         ) from exc
+    from .auth import has_global_permission
     return templates.TemplateResponse(
         request,
         "providers.html",
-        {"inventory": inventory, "rows": _health().snapshot()},
+        {"inventory": inventory, "rows": _health().snapshot(),
+         "is_admin": has_global_permission(request, "admin"),
+         "tested": request.query_params.get("tested") == "1"},
     )
 
 
