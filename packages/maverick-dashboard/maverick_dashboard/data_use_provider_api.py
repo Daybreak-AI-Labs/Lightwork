@@ -363,6 +363,65 @@ async def provider_status(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/row-filters")
+async def row_filter_choices(request: Request) -> dict[str, Any]:
+    """Row filters used by the workspace's rules, keyed as the adapters key them.
+
+    Read-only: the page offers these as the rows of the row-filter mapping
+    table, so nobody has to type a filter fingerprint.
+    """
+
+    require_permission(request, "operate")
+    from maverick import data_use_policy_compiler as compiler
+    from maverick import data_use_provider_adapters as adapters
+
+    from .data_use_governance_api import _authority, _call
+
+    ops, tenant, store = _authority()
+    versions = await _call(ops, store.list_records, tenant, "policy_version", limit=500)
+    fields = await _call(ops, store.list_records, tenant, "field", limit=500)
+    types: dict[str, dict[str, str]] = {}
+    for field in fields:
+        types.setdefault(str(field.get("asset_id")), {})[str(field.get("field_id"))] = str(
+            field.get("data_type")
+        )
+    items: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for version in versions:
+        document = version.get("document") if isinstance(version, Mapping) else None
+        if not isinstance(document, Mapping):
+            continue
+        scope = document.get("scope") if isinstance(document.get("scope"), Mapping) else {}
+        assets = list(scope.get("asset_ids") or []) or sorted(types)
+        for control in document.get("controls") or []:
+            if not isinstance(control, Mapping) or control.get("effect") != "row_filter":
+                continue
+            for asset_id in assets:
+                try:
+                    ast = compiler.normalize_row_filter_ast(
+                        control.get("row_filter"), types.get(str(asset_id), {})
+                    )
+                except Exception:
+                    # A filter naming fields the data set does not have can
+                    # never be applied to it; it is not offered.
+                    continue
+                digest = adapters._sha256(ast)
+                if (str(asset_id), digest) in seen:
+                    continue
+                seen.add((str(asset_id), digest))
+                items.append(
+                    {
+                        "row_filter_sha256": digest,
+                        "asset_id": str(asset_id),
+                        "policy_id": version.get("policy_id"),
+                        "policy_version": version.get("version"),
+                        "control_id": control.get("control_id"),
+                        "row_filter": ast,
+                    }
+                )
+    return {"items": items}
+
+
 @router.get("/{provider_id}/bindings")
 async def list_bindings(
     request: Request,

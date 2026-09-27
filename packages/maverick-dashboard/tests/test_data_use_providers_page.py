@@ -40,14 +40,25 @@ def isolated_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_native_provider_page_explains_disabled_and_external_boundaries() -> None:
+    from test_support.plain_language import developer_terms
+
     response = client.get("/data-use/providers")
     assert response.status_code == 200
     page = response.text
-    assert "Native enforcement disabled" in page
-    assert "not been accepted against a live customer" in page
-    assert "does not restore arbitrary prior native state" in page
-    assert "no secret is submitted here" in page
-    assert "These controls do not accept custom SQL" in page
+    assert "Snowflake and Databricks" in page
+    assert 'data-module-gate="data_use_governance.enforcement"' in page
+    assert 'data-module-gate="data_use_governance.snowflake"' in page
+    assert 'data-module-gate="data_use_governance.databricks"' in page
+    assert "not to how it was before Lightwork" in page
+    assert "never typed here" in page
+    assert "nobody can type database commands here" in page
+    # Mapping tables and confirmations instead of typed documents and codes.
+    assert 'id="dup-field-map"' in page and 'id="dup-mask-map"' in page and 'id="dup-row-map"' in page
+    for typed in ("Field map JSON", "mask bindings JSON", "SHA-256", "Binding ID", "Decision ID",
+                  "Current version"):
+        assert typed not in page
+    assert page.count("CW.confirm(") >= 2
+    assert developer_terms(page) == []
 
 
 def test_native_provider_page_reflects_exact_direct_provider_gate(
@@ -70,6 +81,7 @@ def test_native_provider_page_reflects_exact_direct_provider_gate(
     )
     config.reset_config_cache()
     page = client.get("/data-use/providers").text
-    assert "Native enforcement disabled" not in page
-    assert "Snowflake (disabled)" not in page
-    assert "Databricks (disabled)" in page
+    assert 'data-module-gate="data_use_governance.enforcement"' not in page
+    assert 'data-module-gate="data_use_governance.snowflake"' not in page
+    assert 'data-module-gate="data_use_governance.databricks"' in page
+    assert 'data-snowflake="true"' in page and 'data-databricks="false"' in page

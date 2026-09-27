@@ -3946,6 +3946,7 @@ async def data_use_providers_page(request: Request) -> HTMLResponse:
             ),
             "data_use_snowflake_enabled": provider_enabled("snowflake"),
             "data_use_databricks_enabled": provider_enabled("databricks"),
+            "data_use_can_admin": has_global_permission(request, "admin"),
         },
     )
 
