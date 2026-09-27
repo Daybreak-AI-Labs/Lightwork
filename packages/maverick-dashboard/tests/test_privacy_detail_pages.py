@@ -104,7 +104,8 @@ def test_dsar_detail_shows_fulfillment_trail_without_tokens():
     assert page.status_code == 200
     body = page.text
     assert "alice@example.com" in body
-    assert "document_check" in body and "carol" in body
+    assert "Checked an ID document" in body and "carol" in body
+    assert "document_check" not in body
     assert "0/3" in body                      # reads used against the cap
     assert token not in body                  # the link token never renders
 
@@ -122,3 +123,50 @@ def test_dsar_detail_404_and_disabled_fulfillment_note(tmp_path):
     assert page.status_code == 200
     assert 'data-module-gate="dsar_fulfillment"' in page.text
     assert "[dsar_fulfillment]" not in page.text
+
+
+def test_dsar_detail_offers_a_button_for_every_step():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("dana@example.com", "erasure", opened_by="ops")
+    body = client.get(f"/privacy/dsar/{request['id']}").text
+    assert 'id="dsar-start"' in body            # no fulfilment yet -> start button
+    assert 'id="dsar-worksheet"' in body and 'id="dsar-close"' in body
+    assert 'id="dsar-erase"' in body            # erasure request + admin
+    assert "Delete their data: request from dana@example.com" in body
+    for word in ("minted", "token", "subject ", "operator", "SHA", "awaiting_erasure"):
+        assert word not in body.split('<main', 1)[-1].split("</main>", 1)[0], word
+
+    from maverick import dsar_fulfillment as df
+
+    record = df.open_fulfillment(request["id"], actor="ops")
+    body = client.get(f"/privacy/dsar/{request['id']}").text
+    assert 'id="dsar-identity"' in body and 'id="dsar-source"' in body
+    assert f'data-revision="{record["revision"]}"' in body
+    assert 'id="dsar-link"' not in body         # identity not confirmed yet
+
+
+def test_microsoft365_collection_needs_operate_and_plain_errors(monkeypatch):
+    from maverick import dsar_fulfillment as df
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("erin@example.com", "access", opened_by="ops")
+    record = df.open_fulfillment(request["id"], actor="ops")
+    url = f"/api/v1/privacy/dsar/{request['id']}/collect-microsoft365"
+    monkeypatch.delenv("MAVERICK_GRAPH_TOKEN", raising=False)
+    r = client.post(url, json={"revision": record["revision"]})
+    assert r.status_code == 503 and r.json()["detail"] == "Microsoft 365 is not connected."
+
+    def fake(req, *, actor, expected_revision):
+        return {"probes": [{"source": "graph:outlook_mail", "collected": True, "items": 3, "more": False}]}
+
+    monkeypatch.setattr(df, "collect_graph_sources", fake)
+    r = client.post(url, json={"revision": record["revision"]})
+    assert r.status_code == 200 and "Outlook mailbox: 3 item(s)" in r.json()["message"]
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:v", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:v")
+    assert client.post(url, json={"revision": record["revision"]}).status_code == 403

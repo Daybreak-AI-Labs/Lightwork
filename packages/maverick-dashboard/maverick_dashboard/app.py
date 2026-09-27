@@ -1171,6 +1171,9 @@ app.include_router(create_autonomous_compliance_page_router(templates))
 from .compliance_controls_api import router as _compliance_controls_router  # noqa: E402
 
 app.include_router(_compliance_controls_router)
+from .privacy_actions_api import router as _privacy_actions_router  # noqa: E402
+
+app.include_router(_privacy_actions_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -3711,7 +3714,8 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
-         "fulfillment_enabled": fulfillment_enabled})
+         "fulfillment_enabled": fulfillment_enabled,
+         "can_admin": has_permission(request, "admin")})
 
 
 @app.get("/consent", response_class=HTMLResponse)
