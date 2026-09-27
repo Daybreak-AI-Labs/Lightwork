@@ -11009,6 +11009,7 @@ def automations_page(request: Request) -> HTMLResponse:
             "schedule_count": schedule_count,
             "trigger_count": trigger_count,
             "event_trigger_count": event_trigger_count,
+            "can_admin": has_permission(request, "admin"),
         },
     )
 

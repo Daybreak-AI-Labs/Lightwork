@@ -256,7 +256,7 @@ def test_history_is_owner_scoped(monkeypatch, tmp_path):
 def test_automations_page_shows_event_section_when_enabled(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/automations").text
-    assert "Event triggers" in t and 'id="auto-event-form"' in t
+    assert "Starts when new items arrive" in t and 'id="auto-event-form"' in t
 
 
 def test_automations_page_hides_event_section_when_disabled(monkeypatch, tmp_path):

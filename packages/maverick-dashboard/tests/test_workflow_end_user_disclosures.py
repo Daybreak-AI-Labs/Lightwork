@@ -87,11 +87,13 @@ def test_automation_advanced_forms_contain_their_own_submit_and_preserve_visible
     assert not page.within("oauth-get-url", "oauth-advanced-setup")
     assert not page.within("oauth-msg", "oauth-advanced-setup")
     page.closed("auto-event-config-advanced")
-    assert page.within("auto-event-config", "auto-event-config-advanced")
+    assert page.within("auto-event-more", "auto-event-config-advanced")
+    assert page.within("auto-event-extra-add", "auto-event-config-advanced")
     assert not page.within("auto-event-fields", "auto-event-config-advanced")
     assert page.ids["auto-event-template"]["tag"] == "select"
-    page.closed("auto-import-json-advanced")
-    assert not page.within("auto-import-file", "auto-import-json-advanced")
+    assert page.ids["auto-event-interval"]["tag"] == "select"
+    # No raw settings or definitions boxes remain.
+    assert "auto-event-config" not in page.ids and "auto-import-defs" not in page.ids
 
 
 def test_playbook_permissions_have_visible_selections_with_optional_exact_identifiers(client):

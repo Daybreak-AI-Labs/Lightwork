@@ -71,9 +71,9 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
 def test_automation_run_queue_requires_a_json_response_before_success() -> None:
     source = (TEMPLATES / "automations.html").read_text(encoding="utf-8")
     parse = source.index("try { j = await r.json(); }")
-    success = source.index("if (r.ok) { flowsMsg.textContent = 'Run queued.'; }", parse)
+    success = source.index("if (r.ok && j) { flowsMsg.textContent = 'Run started.", parse)
     assert parse < success
-    assert "Could not start run: invalid server response." in source[parse:success]
+    assert "The run could not be confirmed." in source[parse:success]
 
 
 def test_agent_department_deploy_does_not_turn_invalid_json_into_success() -> None:

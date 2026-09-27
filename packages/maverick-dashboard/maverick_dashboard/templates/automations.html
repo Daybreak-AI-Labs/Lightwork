@@ -18,6 +18,8 @@
   .auto__run--failed, .auto__run--error { color: var(--danger); font-weight: var(--font-semibold); }
   .auto__runs-fail { color: var(--danger); font-weight: var(--font-semibold); }
   .auto__run:hover { border-bottom-style: solid; }
+  .auto__extra { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; }
+  .auto__extra-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--space-2); align-items: end; }
   .auto__warn { color: var(--text); background: var(--surface-2); border: 1px solid var(--border-strong); border-left: 3px solid var(--ring); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--text-sm); margin-bottom: var(--space-3); }
 </style>
 
@@ -32,12 +34,12 @@
                    <a href="/workflow-builder">Workflow Builder</a>.') %}
   {{ state('Current state',
            automation_total ~ ' automation' ~ ('' if automation_total == 1 else 's') ~ ' configured',
-           badge=(channels_on ~ ' of 3 channels on') if channels_on else 'all channels off',
+           badge=(channels_on ~ ' of 3 ways to start are on') if channels_on else 'All turned off',
            badge_class='ok' if channels_on else 'warn',
            copy=schedule_count ~ ' schedule' ~ ('' if schedule_count == 1 else 's') ~ ' · '
-                ~ trigger_count ~ ' webhook trigger' ~ ('' if trigger_count == 1 else 's') ~ ' · '
-                ~ event_trigger_count ~ ' event trigger' ~ ('' if event_trigger_count == 1 else 's') ~ '.
-                Schedules run while Lightwork’s background service is running.') }}
+                ~ trigger_count ~ ' start' ~ ('' if trigger_count == 1 else 's') ~ ' from other services · '
+                ~ event_trigger_count ~ ' start' ~ ('' if event_trigger_count == 1 else 's') ~ ' from new items.
+                Schedules run while Lightwork is running.') }}
 {% endcall %}
 
 <div class="auto">
@@ -65,7 +67,7 @@
     </div>
     <p class="auto__hint">Start a workflow the moment another system calls in — a form submission, a new ticket, a payment event.</p>
     <div class="auto__warn" id="auto-trig-nosecret" hidden>Incoming requests are not ready yet. Ask your administrator to finish connecting and securing this service.</div>
-    <ul class="auto__list" id="auto-trig-list" aria-label="Webhook triggers"></ul>
+    <ul class="auto__list" id="auto-trig-list" aria-label="Starts from connected services"></ul>
     <div class="mv-empty" id="auto-trig-empty" hidden>
       <p class="mv-empty__title">No triggers yet</p>
       <p class="mv-empty__body">Connect a saved workflow to another service from the builder.</p>
@@ -81,9 +83,9 @@
       <span class="muted" id="auto-event-count"></span>
     </div>
     <p class="auto__hint">Lightwork checks connected sources for new items and starts the matching workflow. Each new item supplies the information the workflow needs.</p>
-    <ul class="auto__list" id="auto-event-list" aria-label="Event triggers"></ul>
+    <ul class="auto__list" id="auto-event-list" aria-label="Starts when new items arrive"></ul>
     <div class="mv-empty" id="auto-event-empty" hidden>
-      <p class="mv-empty__title">No event triggers yet</p>
+      <p class="mv-empty__title">Nothing watches for new items yet</p>
       <p class="mv-empty__body">Choose a saved workflow and a source below to get started.</p>
     </div>
     <button class="btn btn--ghost" type="button" id="auto-event-poll">Check now</button>
@@ -111,20 +113,26 @@
       <div id="auto-event-fields" class="auto__fields"></div>
       <p class="auto__hint" id="auto-event-formurl" hidden></p>
       <details id="auto-event-config-advanced">
-        <summary>Advanced connection settings</summary>
-        <div class="field">
-          <label for="auto-event-config">Source settings (JSON)</label>
-          <textarea id="auto-event-config" rows="4" spellcheck="false">{}</textarea>
-          <p class="auto__hint">Guided fields and this editor stay in sync. Additional settings are preserved.</p>
-        </div>
+        <summary>More settings</summary>
+        <div id="auto-event-more" class="auto__fields"></div>
+        <div id="auto-event-extra" class="auto__extra"></div>
+        <button class="btn btn--ghost" type="button" id="auto-event-extra-add">Add a setting</button>
+        <p class="auto__hint">Only needed when your administrator gives you an extra setting for this source.</p>
       </details>
       <div class="field">
         <label for="auto-event-name">Trigger name (optional)</label>
         <input type="text" id="auto-event-name" maxlength="48" placeholder="Defaults to the workflow name" autocomplete="off" />
       </div>
       <div class="field">
-        <label for="auto-event-interval">Check every (seconds, optional)</label>
-        <input type="number" id="auto-event-interval" min="60" max="86400" step="60" placeholder="300 (default; min 60)" autocomplete="off" />
+        <label for="auto-event-interval">How often to check</label>
+        <select id="auto-event-interval">
+          <option value="">Every 5 minutes (recommended)</option>
+          <option value="60">Every minute</option>
+          <option value="900">Every 15 minutes</option>
+          <option value="3600">Every hour</option>
+          <option value="21600">Every 6 hours</option>
+          <option value="86400">Once a day</option>
+        </select>
       </div>
       <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
         <button class="btn btn--primary" type="submit">Create automation</button>
@@ -142,19 +150,19 @@
       </div>
       <p class="auto__hint">You’ll visit the provider to approve access, then return here to finish automatically.</p>
       <p class="auto__hint" id="oauth-msg" role="status" aria-live="polite"></p>
-      <details id="oauth-advanced-setup" style="margin-top: var(--space-3);">
-      <summary>Advanced account connection settings</summary>
-      <p class="auto__hint">Your administrator must register this return address with the provider and configure the app credentials. Access renews automatically when the service supports it. A custom return address uses the manual finish option below.</p>
+      <details id="oauth-advanced-setup" style="margin-top: var(--space-3);"{% if not can_admin %} hidden{% endif %}>
+      <summary>Different return address (administrators only)</summary>
+      <p class="auto__hint">Only change this if your organization reaches Lightwork through a different web address. That address must be registered with the provider first.</p>
       <div class="field" style="margin-top: var(--space-3);">
-        <label for="oauth-redirect">Registered return address</label>
-        <input type="url" id="oauth-redirect" autocomplete="off" spellcheck="false" />
+        <label for="oauth-redirect">Return address</label>
+        <input type="url" id="oauth-redirect" class="input" autocomplete="off" spellcheck="false" />
       </div>
       <div id="oauth-finish" style="margin-top: var(--space-3);" hidden>
-        <p class="auto__hint">For a custom return address, approve access, then paste the returned authorization code here.</p>
-        <a id="oauth-open" class="btn btn--ghost" href="#" rel="noreferrer">Open consent page</a>
+        <p class="auto__hint">Approve access on the provider's page. It shows a one-time code when it finishes; copy it here.</p>
+        <a id="oauth-open" class="btn btn--ghost" href="#" rel="noreferrer">Open the provider's approval page</a>
         <div class="field" style="margin-top: var(--space-2);">
-          <label for="oauth-code">Authorization code</label>
-          <input type="text" id="oauth-code" autocomplete="off" spellcheck="false" />
+          <label for="oauth-code">One-time code from the provider</label>
+          <input type="text" id="oauth-code" class="input" autocomplete="off" spellcheck="false" />
         </div>
         <button class="btn btn--primary" type="button" id="oauth-exchange">Finish connecting</button>
       </div>
@@ -191,7 +199,7 @@
     </div>
     <p class="auto__hint">Bring supported automations from n8n, Make, Workato, Power Automate, or UiPath into Lightwork. Review the import report before running them.</p>
     <details id="auto-import-advanced">
-    <summary>Import settings and definitions</summary>
+    <summary>Start an import</summary>
     <form id="auto-import-form">
       <div class="field">
         <label for="auto-import-source">Platform</label>
@@ -199,17 +207,10 @@
         <p class="auto__hint" id="auto-import-mode-hint" hidden></p>
       </div>
       <div class="field">
-        <label for="auto-import-file">Upload an exported automation file (optional)</label>
+        <label for="auto-import-file">Export file from the other platform (optional)</label>
         <input type="file" id="auto-import-file" accept=".json,application/json">
-        <p class="auto__hint" id="auto-import-file-msg" role="status" aria-live="polite">Choose the JSON export from your other platform, or leave it empty to fetch from an existing connection.</p>
+        <p class="auto__hint" id="auto-import-file-msg" role="status" aria-live="polite">Use the platform's “Export” or “Download” option and choose that file here. Leave it empty to bring automations in from an account you already connected.</p>
       </div>
-      <details id="auto-import-json-advanced">
-      <summary>Advanced: paste or edit exported definitions</summary>
-      <div class="field">
-        <label for="auto-import-defs">Exported definitions (JSON)</label>
-        <textarea id="auto-import-defs" name="definitions" rows="6" spellcheck="false" placeholder='[ { "id": "1", "name": "...", "nodes": [...] } ]'></textarea>
-      </div>
-      </details>
       <div class="field">
         <label><input type="checkbox" id="auto-import-webhooks"> Allow connected services to start imported automations</label>
       </div>
@@ -231,8 +232,13 @@
 
   {% if not scheduling_enabled and not triggers_enabled and not import_enabled %}
   <div class="mv-empty">
-    <p class="mv-empty__title">Automations are disabled</p>
-    <p class="mv-empty__body">Ask your administrator to turn on scheduling or triggers to use this page.</p>
+    <p class="mv-empty__title">Automations are turned off</p>
+    {% if can_admin %}
+    <p class="mv-empty__body">Turn on schedules or starts from other services in Settings to use this page.</p>
+    <a class="btn btn--primary" href="/settings#settings-features">Turn on automations</a>
+    {% else %}
+    <p class="mv-empty__body">An administrator can turn on schedules and starts from other services in Settings.</p>
+    {% endif %}
   </div>
   {% endif %}
 </div>
@@ -240,18 +246,46 @@
 <script>
 (function () {
   var fmtWhen = window.mvWhen, el = window.mvEl;   // shared primitives (base.html)
+  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function clock(h, m) {
+    var hour = Number(h), min = ('0' + m).slice(-2);
+    var suffix = hour < 12 ? 'am' : 'pm', h12 = hour % 12 || 12;
+    return h12 + (min === '00' ? '' : ':' + min) + ' ' + suffix;
+  }
+  function ordinal(n) {
+    n = Number(n); var s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+  // A saved timetable ("0 9 * * 1-5") in words ("Weekdays at 9 am").
   function cronText(cron) {
-    var map = { '* * *': 'every day', '* * 1-5': 'on weekdays', '* * 1': 'every Monday' };
-    var m = /^(\d+)\s+(\d+)\s+(.+)$/.exec(cron || '');
-    if (!m) return cron || '';
-    var when = map[m[3]];
-    if (!when) return cron;
-    return when + ' at ' + ('0' + m[2]).slice(-2) + ':' + ('0' + m[1]).slice(-2);
+    var f = String(cron || '').trim().split(/\s+/);
+    if (f.length !== 5) return 'On a custom timetable';
+    var min = f[0], hour = f[1], dom = f[2], mon = f[3], dow = f[4];
+    if (/^\*\/\d+$/.test(min) && hour === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every ' + min.slice(2) + ' minutes';
+    if (/^\d+$/.test(min) && hour === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every hour at ' + ('0' + min).slice(-2) + ' minutes past';
+    if (/^\d+$/.test(min) && /^\*\/\d+$/.test(hour) && dom === '*' && mon === '*' && dow === '*') return 'Every ' + hour.slice(2) + ' hours';
+    if (!/^\d+$/.test(min) || !/^\d+$/.test(hour) || mon !== '*') return 'On a custom timetable';
+    var at = ' at ' + clock(hour, min);
+    if (dom === '*' && dow === '*') return 'Every day' + at;
+    if (dom === '*' && dow === '1-5') return 'Weekdays' + at;
+    if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) {
+      return 'Every ' + dow.split(',').map(function (d) { return DAYS[Number(d) % 7]; }).join(', ') + at;
+    }
+    if (/^\d+$/.test(dom) && dow === '*') return 'Monthly on the ' + ordinal(dom) + at;
+    return 'On a custom timetable';
   }
   function delBtn(label, onClick) {
-    var b = el('button', 'btn btn--icon', '✕'); b.type = 'button';
-    b.setAttribute('aria-label', label); b.title = 'Delete';
+    var b = el('button', 'btn btn--ghost btn--danger', 'Delete'); b.type = 'button';
+    b.setAttribute('aria-label', label);
     b.addEventListener('click', onClick); return b;
+  }
+  function plainError(failure, what) {
+    return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+  }
+  function runLabel(r) {
+    var when = r.created_at ? new Date(r.created_at * 1000) : null;
+    var day = when && !isNaN(when) ? when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'Run';
+    return day + (isFail(r.status) ? ' (failed)' : '');
   }
 
   var schedList = document.getElementById('auto-sched-list');
@@ -268,8 +302,8 @@
     items.forEach(function (s) {
       var li = el('li', 'mv-row');
       var main = el('div', 'mv-row__main');
-      main.appendChild(el('div', 'mv-row__title', s.title || '(goal)'));
-      main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + ' · next ' + fmtWhen(s.next_run)));
+      main.appendChild(el('div', 'mv-row__title', s.title || 'Untitled task'));
+      main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
       if (s.schedule_id) { var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('schedule', s.schedule_id, runs); }
       li.appendChild(main);
       li.appendChild(delBtn('Delete schedule ' + (s.title || s.id), function () { delSchedule(s.id); }));
@@ -285,8 +319,8 @@
     try {
       var r = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
       if (r.ok) { mvToast('Schedule deleted'); loadSchedules(); refocus('auto-sched-h'); }
-      else { mvToast('Could not delete schedule', { error: true }); }
-    } catch (e) { mvToast('Could not delete schedule', { error: true }); }
+      else { mvFail(r, 'delete the schedule'); }
+    } catch (e) { mvFail(e, 'delete the schedule'); }
   }
 
   var trigList = document.getElementById('auto-trig-list');
@@ -300,7 +334,7 @@
     var items = data.triggers || [];
     if (trigNoSecret) trigNoSecret.hidden = !!data.secret_configured || items.length === 0;
     trigList.textContent = '';
-    if (trigCount) trigCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
+    if (trigCount) trigCount.textContent = items.length ? (items.length + (items.length === 1 ? ' start' : ' starts')) : '';
     if (trigEmpty) trigEmpty.hidden = items.length > 0;
     var base = window.location.origin + (data.webhook_url || '/webhook/run');
     items.forEach(function (t) {
@@ -309,10 +343,18 @@
       main.appendChild(el('div', 'mv-row__title', t.name));
       var pcount = t.params ? Object.keys(t.params).length : 0;
       var sub = el('div', 'mv-row__sub');
-      sub.appendChild(document.createTextNode((t.template || '') + (pcount ? (' · ' + pcount + ' saved input' + (pcount === 1 ? '' : 's')) : '')));
+      sub.appendChild(document.createTextNode('Runs ' + (t.template_title || mvHuman(t.template || '') || 'a saved workflow') + (pcount ? (' · ' + pcount + ' saved answer' + (pcount === 1 ? '' : 's')) : '')));
       main.appendChild(sub);
-      var integration = el('details'); integration.appendChild(el('summary', '', 'Advanced integration details'));
-      integration.appendChild(el('div', 'auto__url', 'POST ' + base + ' {"trigger":"' + t.name + '"}')); main.appendChild(integration);
+      var integration = el('details'); integration.appendChild(el('summary', '', 'Connect another app'));
+      integration.appendChild(el('p', 'auto__hint', 'In the other app, add a step that sends a web request to this address and names this start “' + t.name + '”. Your administrator can help with the security key.'));
+      var linkRow = el('div', 'mv-row__actions');
+      linkRow.appendChild(el('span', 'auto__url', base));
+      var copyLink = el('button', 'btn btn--ghost', 'Copy address'); copyLink.type = 'button';
+      copyLink.addEventListener('click', function () { mvCopy(base); });
+      var copyName = el('button', 'btn btn--ghost', 'Copy start name'); copyName.type = 'button';
+      copyName.addEventListener('click', function () { mvCopy(t.name); });
+      linkRow.appendChild(copyLink); linkRow.appendChild(copyName);
+      integration.appendChild(linkRow); main.appendChild(integration);
       var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('trigger', t.name, runs);
       li.appendChild(main);
       li.appendChild(delBtn('Delete trigger ' + t.name, function () { delTrigger(t.name); }));
@@ -320,12 +362,12 @@
     });
   }
   async function delTrigger(name) {
-    if (!(await mvConfirm('Delete trigger “' + name + '”? Its webhook URL will stop working.'))) return;
+    if (!(await mvConfirm('Delete “' + name + '”? Other apps will no longer be able to start this workflow.', { okText: 'Delete' }))) return;
     try {
       var r = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (r.ok) { mvToast('Trigger deleted'); loadTriggers(); refocus('auto-trig-h'); }
-      else { mvToast('Could not delete trigger', { error: true }); }
-    } catch (e) { mvToast('Could not delete trigger', { error: true }); }
+      if (r.ok) { mvToast('Deleted'); loadTriggers(); refocus('auto-trig-h'); }
+      else { mvFail(r, 'delete it'); }
+    } catch (e) { mvFail(e, 'delete it'); }
   }
 
   // Run history (provenance): "N runs · ✓X · ✗Y · #ids" with drill-down links.
@@ -355,16 +397,16 @@
       into.appendChild(el('span', 'auto__runs-fail', '✗ ' + failed));   // fail count in --danger
     }
     into.appendChild(document.createTextNode(' · '));
-    // Recent runs as drill-down links to each goal's trajectory ("what it did").
+    // Recent runs as drill-down links to each task's step-by-step history.
     runs.slice(0, 5).forEach(function (r, i) {
-      if (i) into.appendChild(document.createTextNode(' '));
+      if (i) into.appendChild(document.createTextNode(', '));
       var a = document.createElement('a');
       a.href = '/goals/' + encodeURIComponent(r.goal_id) + '/trajectory';
       a.className = 'auto__run auto__run--' + (r.status || 'pending');
       // Non-color cue so failed runs are distinguishable without relying on hue.
-      a.textContent = (isFail(r.status) ? '✗#' : '#') + r.goal_id;
-      a.setAttribute('aria-label', 'Run #' + r.goal_id + ' — ' + (r.status || 'pending') + ' — ' + fmtWhen(r.created_at));
-      a.title = (r.title || '') + ' · ' + (r.status || '') + ' · ' + fmtWhen(r.created_at);
+      a.textContent = runLabel(r);
+      a.setAttribute('aria-label', (r.title || 'Run') + ' — ' + mvHuman(r.status || 'pending') + ' — ' + fmtWhen(r.created_at));
+      a.title = (r.title || '') + ' · ' + mvHuman(r.status || '') + ' · ' + fmtWhen(r.created_at);
       into.appendChild(a);
     });
   }
@@ -375,32 +417,42 @@
     var sourceSel = document.getElementById('auto-import-source');
     var modeHint = document.getElementById('auto-import-mode-hint');
     var sourceModes = {};
+    var PLATFORM_NAMES = { n8n: 'n8n', make: 'Make', workato: 'Workato', power_automate: 'Power Automate', uipath: 'UiPath', zapier: 'Zapier' };
     var importBusy = false, importFileGeneration = 0, importFileLoading = false, importFileError = false;
+    var importDefinitions = null;   // parsed from the chosen export file
     var importFile = document.getElementById('auto-import-file');
-    var importDefs = document.getElementById('auto-import-defs');
     var importFileMsg = document.getElementById('auto-import-file-msg');
-    importDefs.addEventListener('input', function () { importFileGeneration++; importFileLoading = false; importFileError = false; importFile.value = ''; importFileMsg.textContent = 'Using the definitions in the advanced editor.'; });
+    function validDefinitions(parsed) {
+      return !!parsed && typeof parsed === 'object' && !(Array.isArray(parsed) && parsed.some(function (item) { return !item || typeof item !== 'object' || Array.isArray(item); }));
+    }
     importFile.addEventListener('change', async function () {
       var generation = ++importFileGeneration, file = importFile.files[0];
       importFileLoading = !!file; importFileError = false;
-      if (!file) { importFileMsg.textContent = 'No file selected. Existing definitions are unchanged.'; return; }
-      importFileMsg.textContent = 'Reading export…';
+      if (!file) { importDefinitions = null; importFileMsg.textContent = 'No file chosen. Lightwork will use your connected account instead.'; return; }
+      importFileMsg.textContent = 'Reading the file…';
       try {
-        if (file.size > 5 * 1024 * 1024) throw new Error('Choose an export smaller than 5 MB.');
-        var text = await file.text(), parsed = JSON.parse(text);
-        if (!parsed || typeof parsed !== 'object' || (Array.isArray(parsed) && parsed.some(function (item) { return !item || typeof item !== 'object' || Array.isArray(item); }))) throw new Error('The export must contain an automation object or a list of automation objects.');
+        if (file.size > 5 * 1024 * 1024) throw new Error('large');
+        var parsed = JSON.parse(await file.text());
+        if (!validDefinitions(parsed)) throw new Error('shape');
         if (generation !== importFileGeneration) return;
-        importDefs.value = text; importFileMsg.textContent = 'Ready to import ' + file.name + '. Review the options below before importing.';
-      } catch (e) { if (generation === importFileGeneration) { importFileError = true; importFileMsg.textContent = 'Could not read this export. Choose a valid JSON export or use the advanced editor.'; } }
+        importDefinitions = Array.isArray(parsed) ? parsed : [parsed];
+        importFileMsg.textContent = 'Ready to import ' + file.name + ' (' + importDefinitions.length + ' automation' + (importDefinitions.length === 1 ? '' : 's') + '). Review the options below, then choose Import.';
+      } catch (e) {
+        if (generation === importFileGeneration) {
+          importFileError = true;
+          importFileMsg.textContent = e && e.message === 'large'
+            ? 'That file is larger than 5 MB. Export fewer automations at a time.'
+            : 'This file is not an automation export Lightwork can read. Export it again from the other platform and choose the new file.';
+        }
+      }
       finally { if (generation === importFileGeneration) importFileLoading = false; }
     });
     function updateModeHint() {
       if (!modeHint) return;
       var mode = sourceModes[sourceSel.value];
       if (mode === 'connect-and-trigger') {
-        modeHint.textContent = 'This platform doesn’t expose its automation definitions, '
-          + 'so there’s nothing to fetch. Upload the automation’s export, or have '
-          + 'it call an inbound webhook trigger instead — importing with a blank box will report that.';
+        modeHint.textContent = 'Lightwork can’t read automations directly from this platform. Choose its export file above, '
+          + 'or have the automation there start a Lightwork workflow instead (see “Starts from connected services”).';
         modeHint.hidden = false;
       } else {
         modeHint.hidden = true;
@@ -414,7 +466,7 @@
         sourceModes[s.source] = s.mode;
         var opt = document.createElement('option');
         opt.value = s.source;
-        opt.textContent = s.source.replace(/_/g, ' ');
+        opt.textContent = PLATFORM_NAMES[s.source] || mvHuman(s.source);
         sourceSel.appendChild(opt);
       });
       updateModeHint();
@@ -424,7 +476,7 @@
       if (importBusy) return;
       var results = document.getElementById('auto-import-results');
       results.textContent = '';
-      if (importFileLoading || importFileError) { results.appendChild(el('li', 'auto__warn', importFileLoading ? 'Wait for the export to finish loading.' : 'Choose a valid export before importing.')); return; }
+      if (importFileLoading || importFileError) { results.appendChild(el('li', 'auto__warn', importFileLoading ? 'Wait for the file to finish loading.' : 'Choose a valid export file before importing.')); return; }
       var body = {
         source: sourceSel.value,
         dry_run: document.getElementById('auto-import-dry').checked,
@@ -432,20 +484,7 @@
         activate_schedules: document.getElementById('auto-import-schedules').checked,
         as_flows: document.getElementById('auto-import-flows').checked,
       };
-      var raw = document.getElementById('auto-import-defs').value.trim();
-      if (raw) {
-        var parsed;
-        try { parsed = JSON.parse(raw); } catch (e) {
-          results.appendChild(el('li', 'auto__warn', 'Definitions are not valid JSON.'));
-          document.getElementById('auto-import-json-advanced').open = true; importDefs.focus();
-          return;
-        }
-        if (!parsed || typeof parsed !== 'object' || (Array.isArray(parsed) && parsed.some(function (item) { return !item || typeof item !== 'object' || Array.isArray(item); }))) {
-          results.appendChild(el('li', 'auto__warn', 'Use an automation object or a list of automation objects.'));
-          document.getElementById('auto-import-json-advanced').open = true; importDefs.focus(); return;
-        }
-        body.definitions = Array.isArray(parsed) ? parsed : [parsed];
-      }
+      if (importDefinitions) body.definitions = importDefinitions;
       importBusy = true;
       var submit = importForm.querySelector('button[type="submit"]'); submit.disabled = true;
       try {
@@ -454,54 +493,55 @@
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
-        var err = await resp.json().catch(function () { return {}; });
-        results.appendChild(el('li', 'auto__warn', 'Import failed: ' + (err.detail || resp.status)));
+        results.appendChild(el('li', 'auto__warn', plainError(resp, 'import these automations')));
         return;
       }
       var out = await resp.json();
-      if (!out || !Array.isArray(out.imported)) throw new Error('Import could not be confirmed. Review the automation list before trying again.');
+      if (!out || !Array.isArray(out.imported)) throw new Error('unconfirmed');
       (out.imported || []).forEach(function (it) {
         var li = el('li', '');
-        var verb = out.dry_run ? 'would import' : (it.created ? 'imported' : 'skipped');
-        li.appendChild(document.createTextNode(it.name + ' — ' + verb + ' as template ‘' + it.template + '’ (trigger: ' + it.trigger + ')'));
-        if (it.webhook_trigger) li.appendChild(document.createTextNode(' · webhook trigger wired'));
-        if (it.schedule) li.appendChild(document.createTextNode(' · schedule ' + (out.dry_run ? 'recoverable' : 'armed')));
-        // Surface the importer's own diagnostics (e.g. "schedule recovered — tick
-        // Activate to arm it", "event trigger has no Lightwork equivalent"): these
-        // explain why an import that looks done won't actually run on its own.
+        var verb = out.dry_run ? 'would be imported' : (it.created ? 'imported' : 'skipped (already here)');
+        li.appendChild(el('strong', '', it.name));
+        li.appendChild(document.createTextNode(' — ' + verb + ' as the workflow “' + (it.template_title || mvHuman(it.template)) + '”'));
+        if (it.webhook_trigger) li.appendChild(document.createTextNode(' · other apps can start it'));
+        if (it.schedule) li.appendChild(document.createTextNode(out.dry_run ? ' · its schedule can be brought over' : ' · its schedule is on'));
+        // The importer's own notes explain why an import that looks done won't
+        // actually run on its own (for example, a schedule left off).
         (it.notes || []).forEach(function (n) {
-          var note = el('div', 'auto__runs'); note.textContent = '↳ ' + n; li.appendChild(note);
+          var note = el('div', 'auto__runs'); note.textContent = n; li.appendChild(note);
         });
         if (it.tools && it.tools.length) {
-          var tools = el('div', 'auto__runs'); tools.textContent = 'tools: ' + it.tools.join(', '); li.appendChild(tools);
+          var tools = el('div', 'auto__runs'); tools.textContent = 'Uses: ' + it.tools.map(mvHuman).join(', '); li.appendChild(tools);
         }
         if (it.flow) {
           var fl = el('div', 'auto__runs');
           var fa = document.createElement('a');
           fa.href = '/flows/designer/' + encodeURIComponent(it.flow);
-          fa.textContent = 'flow ‘' + it.flow + '’' + (out.dry_run ? ' (preview)' : ' — open in designer');
-          fl.appendChild(document.createTextNode('↳ '));
+          fa.textContent = out.dry_run ? 'Visual flow (preview)' : 'Open the visual flow';
           fl.appendChild(fa); li.appendChild(fl);
           var kept = (it.fidelity || []).filter(function (r) { return r.fidelity === 'preserved'; }).length;
           var approx = (it.fidelity || []).length - kept;
           var sum = el('div', 'auto__runs');
-          sum.textContent = '↳ migration fidelity: ' + kept + ' step' + (kept === 1 ? '' : 's')
-            + ' preserved structurally' + (approx ? (', ' + approx + ' approximated as agent steps (they still run)') : '');
+          sum.textContent = kept + ' step' + (kept === 1 ? '' : 's') + ' carried over exactly'
+            + (approx ? (', ' + approx + ' turned into AI steps (they still run)') : '') + '.';
           li.appendChild(sum);
           (it.fidelity || []).filter(function (r) { return r.fidelity !== 'preserved'; }).forEach(function (r) {
-            var d = el('div', 'auto__runs'); d.textContent = '   · ' + r.step + ': ' + r.note; li.appendChild(d);
+            var d = el('div', 'auto__runs'); d.textContent = mvHuman(r.step) + ': ' + r.note; li.appendChild(d);
           });
         }
         results.appendChild(li);
       });
       if (out.skipped) {
         results.appendChild(el('li', 'auto__warn',
-          out.skipped + ' definition' + (out.skipped === 1 ? '' : 's')
-          + ' could not be read and ' + (out.skipped === 1 ? 'was' : 'were')
-          + ' skipped (malformed or an unsupported shape).'));
+          out.skipped + ' automation' + (out.skipped === 1 ? '' : 's')
+          + ' in the file could not be read and ' + (out.skipped === 1 ? 'was' : 'were') + ' skipped.'));
       }
       if (!out.dry_run) { loadSchedules(); loadTriggers(); }
-      } catch (e) { results.appendChild(el('li', 'auto__warn', e.message || 'Import failed. Check your connection and try again.')); }
+      } catch (e) {
+        results.appendChild(el('li', 'auto__warn', e && e.message === 'unconfirmed'
+          ? 'The import could not be confirmed. Check your automations list before trying again.'
+          : plainError(e, 'import these automations')));
+      }
       finally { importBusy = false; submit.disabled = false; }
     });
   }
@@ -514,67 +554,90 @@
     var evCount = document.getElementById('auto-event-count');
     var evSource = document.getElementById('auto-event-source');
     var evMsg = document.getElementById('auto-event-msg');
-    var evCfg = document.getElementById('auto-event-config');
     var evFields = document.getElementById('auto-event-fields');
+    var evMore = document.getElementById('auto-event-more');
+    var evExtra = document.getElementById('auto-event-extra');
     var evAdvanced = document.getElementById('auto-event-config-advanced');
     var evTarget = document.getElementById('auto-event-template');
     var evTargetKind = document.getElementById('auto-event-target-kind');
     var sourceDrafts = Object.create(null), currentSource = '', sourceControls = [];
     var targetCatalog = { template: [], flow: [] }, targetErrors = {}, creatingEvent = false;
     // Keys are the existing source contract; labels are for people setting up work.
+    // [key, label, kind, required, default, tucked under "More settings"]
     var SOURCE_FIELDS = {
-      http_json: [['url', 'Feed address', 'url', true], ['items_path', 'Where the list appears in the response', 'text'], ['id_field', 'Unique item field', 'text', false, 'id']],
+      http_json: [['url', 'Feed address', 'url', true], ['items_path', 'Where the list of items is in the feed (if not at the top)', 'text', false, undefined, true], ['id_field', 'Field that tells items apart', 'text', false, 'id', true]],
       rss: [['url', 'RSS or Atom feed address', 'url', true]],
-      oauth_http_json: [['provider', 'Connected account', 'provider', true], ['url', 'Feed address', 'url', true], ['items_path', 'Where the list appears in the response', 'text'], ['id_field', 'Unique item field', 'text', false, 'id']],
-      github_issues: [['owner', 'GitHub organization or owner', 'text', true], ['repo', 'Repository name', 'text', true], ['state', 'Issue status', ['open', 'closed', 'all'], false, 'open'], ['provider', 'Connected account (optional for public repositories)', 'provider']],
-      imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Administrator-provided password reference', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX'], ['port', 'Port', 'number', false, 993], ['use_ssl', 'Use an encrypted connection', 'checkbox', false, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
-      file_dir: [['path', 'Folder inside the approved incoming-files area', 'text', true], ['glob', 'File pattern', 'text', false, '*'], ['recursive', 'Include subfolders', 'checkbox', false, false]],
-      form: [['token', 'Form address name', 'text', true]]
+      oauth_http_json: [['provider', 'Connected account', 'provider', true], ['url', 'Feed address', 'url', true], ['items_path', 'Where the list of items is in the feed (if not at the top)', 'text', false, undefined, true], ['id_field', 'Field that tells items apart', 'text', false, 'id', true]],
+      github_issues: [['owner', 'GitHub organization or owner', 'text', true], ['repo', 'Repository name', 'text', true], ['state', 'Which issues', [['open', 'Open issues'], ['closed', 'Closed issues'], ['all', 'All issues']], false, 'open'], ['provider', 'Connected account (optional for public repositories)', 'provider']],
+      imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Password name from your administrator', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX', true], ['port', 'Server port', 'number', false, 993, true], ['use_ssl', 'Use an encrypted connection', 'checkbox', false, true, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
+      file_dir: [['path', 'Folder inside the approved incoming-files area', 'text', true], ['glob', 'Which files (for example *.pdf)', 'text', false, '*', true], ['recursive', 'Include subfolders', 'checkbox', false, false]],
+      form: [['token', 'Form link name (optional — made from the automation name)', 'text', false, undefined, true]]
     };
     var SOURCE_LABELS = { http_json: 'Web feed', rss: 'RSS or Atom feed', oauth_http_json: 'Connected account feed', github_issues: 'GitHub issues', imap_email: 'Email inbox', file_dir: 'Incoming files', form: 'Form submissions' };
     var SOURCE_HINTS = {
-      http_json: 'Use a feed that returns a list of items. For a list inside a response, enter its field name, such as data.items.',
-      oauth_http_json: 'Choose an account connected below. Lightwork uses its saved authorization; do not paste an access token.',
+      http_json: 'Use a feed that returns a list of items.',
+      oauth_http_json: 'Choose an account connected below. Lightwork uses its saved approval; never paste a password or access key.',
       github_issues: 'Watch new issues in a repository. Connect GitHub below for private repositories.',
-      imap_email: 'A deployment administrator must supply the server password reference. Passwords are never stored in automation settings.',
-      file_dir: 'This folder is on the Lightwork server, inside your organization’s approved incoming-files area. Deployment administrator access is required.',
-      form: 'Choose a unique address name. Share the generated form link after creating this automation.'
+      imap_email: 'Your administrator gives you the password name. Passwords are never stored in automation settings.',
+      file_dir: 'This folder is on the Lightwork server, inside your organization’s approved incoming-files area. An administrator must set this up.',
+      form: 'Lightwork makes a form people can fill in. Share its link after you create this automation.'
     };
     var connectedProviders = [];
+    function knownKeys() { return (SOURCE_FIELDS[currentSource] || []).map(function (f) { return f[0]; }); }
     function readSourceConfig() {
-      var cfg;
-      try { cfg = JSON.parse(evCfg.value || '{}'); }
-      catch (e) { throw new Error('Check the JSON in Advanced connection settings.'); }
-      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('Advanced connection settings must be a JSON object.');
+      var cfg = Object.assign({}, sourceDrafts[currentSource] || {});
+      // Extra settings typed as name/value rows (for sources without guided fields).
+      if (evExtra) Array.prototype.forEach.call(evExtra.children || [], function (row) {
+        var k = row._key && row._key.value.trim(), v = row._val && row._val.value.trim();
+        if (k && v) cfg[k] = /^(true|false)$/.test(v) ? v === 'true' : (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v);
+      });
       return cfg;
+    }
+    function slugify(text) {
+      return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
     }
     function showFormUrl() {
       var hint = document.getElementById('auto-event-formurl');
       hint.hidden = evSource.value !== 'form'; hint.textContent = '';
       if (hint.hidden) return;
-      var cfg; try { cfg = readSourceConfig(); } catch (e) { return; }
-      if (!cfg.token) return;
+      var cfg = readSourceConfig();
+      if (!cfg.token) { hint.textContent = 'The form link is created when you save this automation.'; return; }
       var link = el('a', '', 'Open submission form');
       link.href = '/form/' + encodeURIComponent(String(cfg.token));
       hint.appendChild(link);
       hint.appendChild(document.createTextNode(' — available after this automation is created.'));
     }
+    function addExtraRow(key, value) {
+      var row = el('div', 'auto__extra-row'), n = (evExtra.children || []).length;
+      var kf = el('div', 'field'), vf = el('div', 'field');
+      var kl = el('label', '', 'Setting'), vl = el('label', '', 'Value');
+      var ki = document.createElement('input'), vi = document.createElement('input');
+      ki.type = 'text'; vi.type = 'text'; ki.className = vi.className = 'input';
+      ki.id = 'auto-extra-key-' + n; vi.id = 'auto-extra-val-' + n; kl.htmlFor = ki.id; vl.htmlFor = vi.id;
+      ki.value = key || ''; vi.value = value === undefined ? '' : String(value);
+      kf.appendChild(kl); kf.appendChild(ki); vf.appendChild(vl); vf.appendChild(vi);
+      var rm = el('button', 'btn btn--ghost', 'Remove'); rm.type = 'button';
+      rm.addEventListener('click', function () { if (row.remove) row.remove(); });
+      row._key = ki; row._val = vi;
+      row.appendChild(kf); row.appendChild(vf); row.appendChild(rm); evExtra.appendChild(row);
+      return row;
+    }
     function fillSourceFields() {
-      evFields.textContent = ''; sourceControls = [];
-      var cfg;
-      try { cfg = readSourceConfig(); }
-      catch (e) { evMsg.textContent = e.message; return; }
+      evFields.textContent = ''; if (evMore) evMore.textContent = ''; if (evExtra) evExtra.textContent = '';
+      sourceControls = [];
+      var cfg = sourceDrafts[currentSource] || (sourceDrafts[currentSource] = {});
       (SOURCE_FIELDS[evSource.value] || []).forEach(function (field) {
         var key = field[0], kind = field[2], choices = Array.isArray(kind) ? kind : null;
         var wrapper = el('div', 'field'), label = el('label', '', field[1]);
         var input = document.createElement(choices || kind === 'provider' ? 'select' : 'input');
         input.id = 'auto-source-' + key; label.htmlFor = input.id;
-        if (choices) choices.forEach(function (value) { var option = el('option', '', value); option.value = value; input.appendChild(option); });
+        input.className = choices || kind === 'provider' ? 'select' : (kind === 'checkbox' ? '' : 'input');
+        if (choices) choices.forEach(function (choice) { var option = el('option', '', choice[1]); option.value = choice[0]; input.appendChild(option); });
         else if (kind === 'provider') {
           var empty = el('option', '', field[3] ? 'Choose a connected account' : 'Use public or administrator-configured access'); empty.value = ''; input.appendChild(empty);
           connectedProviders.forEach(function (provider) { var option = el('option', '', provider.label); option.value = provider.name; input.appendChild(option); });
           if (cfg[key] && !connectedProviders.some(function (p) { return p.name === cfg[key]; })) {
-            var missing = el('option', '', String(cfg[key]) + ' — not connected'); missing.value = cfg[key]; input.appendChild(missing);
+            var missing = el('option', '', mvHuman(cfg[key]) + ' — not connected'); missing.value = cfg[key]; input.appendChild(missing);
           }
         } else input.type = kind;
         var value = Object.prototype.hasOwnProperty.call(cfg, key) ? cfg[key] : field[4];
@@ -583,34 +646,42 @@
         if (kind === 'number') { input.min = '1'; input.max = '65535'; input.step = '1'; }
         input.required = !!field[3];
         input.addEventListener('input', function () {
-          var next; try { next = readSourceConfig(); } catch (e) { evMsg.textContent = e.message; evAdvanced.open = true; evCfg.focus(); return; }
+          var next = sourceDrafts[currentSource] || (sourceDrafts[currentSource] = {});
           if (kind === 'checkbox') next[key] = input.checked;
           else if (!input.value.trim()) delete next[key];
           else next[key] = kind === 'number' ? Number(input.value) : input.value.trim();
-          evCfg.value = JSON.stringify(next, null, 2); sourceDrafts[currentSource] = evCfg.value; showFormUrl();
+          showFormUrl();
         });
-        wrapper.appendChild(label); wrapper.appendChild(input); evFields.appendChild(wrapper);
+        if (kind === 'checkbox') { wrapper.appendChild(input); wrapper.appendChild(label); }
+        else { wrapper.appendChild(label); wrapper.appendChild(input); }
+        (field[5] && evMore ? evMore : evFields).appendChild(wrapper);
         sourceControls.push(input);
+      });
+      // Settings saved earlier that have no guided field stay editable as rows.
+      var known = knownKeys();
+      Object.keys(cfg).forEach(function (key) {
+        if (known.indexOf(key) === -1 && (typeof cfg[key] !== 'object' || cfg[key] === null)) addExtraRow(key, cfg[key]);
       });
       showFormUrl();
     }
     function changeSource() {
-      if (currentSource) sourceDrafts[currentSource] = evCfg.value;
+      if (currentSource) sourceDrafts[currentSource] = readSourceConfig();
       currentSource = evSource.value;
-      evCfg.value = sourceDrafts[currentSource] || '{}';
       document.getElementById('auto-event-source-hint').textContent = SOURCE_HINTS[currentSource] || '';
       evAdvanced.open = !SOURCE_FIELDS[currentSource];
       fillSourceFields();
     }
     evSource.addEventListener('change', changeSource);
-    evCfg.addEventListener('input', function () { sourceDrafts[currentSource] = evCfg.value; fillSourceFields(); });
+    var extraAdd = document.getElementById('auto-event-extra-add');
+    if (extraAdd) extraAdd.addEventListener('click', function () { var row = addExtraRow('', ''); if (row._key.focus) row._key.focus(); });
     function renderTargetParams() {
       var container = document.getElementById('auto-event-params'); container.textContent = '';
       var target = targetCatalog[evTargetKind.value].find(function (item) { return item.name === evTarget.value; });
       (target && target.params || []).forEach(function (name, index) {
         var field = el('div', 'field'), input = document.createElement('input');
         input.type = 'text'; input.id = 'auto-event-param-' + index; input.dataset.param = name;
-        var label = el('label', '', String(name).replace(/_/g, ' ') + ' (fallback when an item does not supply it)'); label.htmlFor = input.id;
+        input.className = 'input';
+        var label = el('label', '', mvHuman(name) + ' (used when a new item doesn’t include it)'); label.htmlFor = input.id;
         field.appendChild(label); field.appendChild(input); container.appendChild(field);
       });
     }
@@ -646,7 +717,7 @@
       try { data = await (await fetch('/api/v1/event-triggers')).json(); } catch (e) { return; }
       if (evSource && !evSource.children.length) {
         (data.sources || []).forEach(function (s) {
-          var o = document.createElement('option'); o.value = s; o.textContent = SOURCE_LABELS[s] || s.replace(/_/g, ' '); evSource.appendChild(o);
+          var o = document.createElement('option'); o.value = s; o.textContent = SOURCE_LABELS[s] || mvHuman(s); evSource.appendChild(o);
         });
         changeSource();
       }
@@ -667,23 +738,29 @@
         outByName = o.outcomes || {};
       } catch (e) { /* outcomes are best-effort */ }
       evList.textContent = '';
-      if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
+      if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' automation' : ' automations')) : '';
       if (evEmpty) evEmpty.hidden = items.length > 0;
       items.forEach(function (t) {
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
         main.appendChild(el('div', 'mv-row__title', t.name));
-        main.appendChild(el('div', 'mv-row__sub', (SOURCE_LABELS[t.source] || t.source.replace(/_/g, ' ')) + ' · ' + (t.template || t.flow)
-          + ' · every ' + (t.interval_seconds ? t.interval_seconds + 's' : '5m')
-          + (t.cursor ? '' : ' · awaiting first check')));
-        if (t.cursor) { var details = el('details'); details.appendChild(el('summary', '', 'Technical details')); details.appendChild(el('div', 'auto__url', 'Last processed position: ' + t.cursor)); main.appendChild(details); }
+        main.appendChild(el('div', 'mv-row__sub', (SOURCE_LABELS[t.source] || mvHuman(t.source)) + ' · runs ' + mvHuman(t.template || t.flow)
+          + ' · ' + everyText(t.interval_seconds)
+          + (t.cursor ? '' : ' · not checked yet')));
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
         var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
         var outc = el('div', 'auto__runs'); main.appendChild(outc); renderEventOutcomes(outByName[t.name] || {}, outc);
         li.appendChild(main);
-        li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
+        li.appendChild(delBtn('Delete ' + t.name, function () { delEventTrigger(t.name); }));
         evList.appendChild(li);
       });
+    }
+    function everyText(seconds) {
+      seconds = Number(seconds) || 300;
+      if (seconds % 86400 === 0) return seconds === 86400 ? 'checks once a day' : 'checks every ' + (seconds / 86400) + ' days';
+      if (seconds % 3600 === 0) return seconds === 3600 ? 'checks every hour' : 'checks every ' + (seconds / 3600) + ' hours';
+      if (seconds % 60 === 0) return seconds === 60 ? 'checks every minute' : 'checks every ' + (seconds / 60) + ' minutes';
+      return 'checks every ' + seconds + ' seconds';
     }
     function renderEventHistory(rows, into) {
       // Fires + no-goal outcomes (poll errors, missing template, skipped events)
@@ -692,8 +769,8 @@
       var fires = rows.filter(function (r) { return r.kind === 'fired'; }).length;
       var err = rows.find(function (r) { return r.kind !== 'fired'; });
       var bits = [];
-      if (fires) bits.push('fired ' + fires + '×');
-      if (err) bits.push('⚠ ' + (err.note || err.kind));
+      if (fires) bits.push('started ' + fires + (fires === 1 ? ' time' : ' times'));
+      if (err) { bits.push('⚠ The last check had a problem: ' + mvHuman(err.kind || 'unknown')); if (err.note) into.title = err.note; }
       if (bits.length) into.textContent = bits.join(' · ');
     }
     function renderEventOutcomes(counts, into) {
@@ -709,22 +786,23 @@
       into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
-      if (!(await mvConfirm('Delete event trigger “' + name + '”? It will stop polling.'))) return;
+      if (!(await mvConfirm('Delete “' + name + '”? Lightwork will stop checking for new items.', { okText: 'Delete' }))) return;
       try {
         var r = await fetch('/api/v1/event-triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (r.ok) { mvToast('Event trigger deleted'); loadEventTriggers(); }
-        else { mvToast('Could not delete', { error: true }); }
-      } catch (e) { mvToast('Could not delete', { error: true }); }
+        if (r.ok) { mvToast('Deleted'); loadEventTriggers(); }
+        else { mvFail(r, 'delete it'); }
+      } catch (e) { mvFail(e, 'delete it'); }
     }
     evForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();
       if (creatingEvent) return;
       evMsg.textContent = '';
-      var config;
-      try { config = readSourceConfig(); }
-      catch (e) { evMsg.textContent = e.message; evAdvanced.open = true; evCfg.focus(); return; }
+      var config = readSourceConfig();
       if (!evForm.reportValidity()) return;
-      var intervalRaw = document.getElementById('auto-event-interval').value.trim();
+      if (evSource.value === 'form' && !config.token) {
+        config.token = slugify(document.getElementById('auto-event-name').value || (evTarget.options && evTarget.options[evTarget.selectedIndex] ? evTarget.options[evTarget.selectedIndex].textContent : '') || evTarget.value) || ('form-' + Date.now().toString(36));
+      }
+      var intervalRaw = String(document.getElementById('auto-event-interval').value || '').trim();
       var body = {
         source: evSource.value, config: config,
         name: document.getElementById('auto-event-name').value.trim() || null,
@@ -742,12 +820,13 @@
         var resp = await fetch('/api/v1/event-triggers', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
         });
-        var data = await resp.json();
-        if (!resp.ok || !data || typeof data.name !== 'string') throw new Error(data && typeof data.detail === 'string' ? data.detail : 'The automation could not be confirmed. Refresh the list before trying again.');
-        evMsg.textContent = 'Created “' + data.name + '”. Lightwork checks for new items while its background service runs. You can also choose Check now.';
+        var data = await resp.json().catch(function () { return null; });
+        if (!resp.ok) { evMsg.textContent = plainError(resp, 'create the automation'); return; }
+        if (!data || typeof data.name !== 'string') throw new Error('The automation could not be confirmed. Refresh the list before trying again.');
+        evMsg.textContent = 'Created “' + data.name + '”. Lightwork checks for new items while it is running. You can also choose Check now.';
         evForm.reset(); sourceDrafts = Object.create(null); currentSource = ''; changeSource(); renderTargetChoices();
         loadEventTriggers();
-      } catch (e) { evMsg.textContent = e.message || 'Could not create the automation. Check your connection and try again.'; }
+      } catch (e) { evMsg.textContent = (e && /confirmed/.test(e.message || '')) ? e.message : plainError(e, 'create the automation'); }
       finally { creatingEvent = false; submit.disabled = false; }
     });
     document.getElementById('auto-event-poll').addEventListener('click', async function () {
@@ -755,12 +834,13 @@
       this.disabled = true; evMsg.textContent = 'Checking for new items…';
       try {
         var response = await fetch('/api/v1/event-triggers/poll', { method: 'POST' });
-        var out = await response.json();
-        if (!response.ok || !out || !Array.isArray(out.triggers) || typeof out.polled !== 'number') throw new Error(out && typeof out.detail === 'string' ? out.detail : 'The check could not be confirmed.');
+        if (!response.ok) { evMsg.textContent = plainError(response, 'check for new items'); return; }
+        var out = await response.json().catch(function () { return null; });
+        if (!out || !Array.isArray(out.triggers) || typeof out.polled !== 'number') { evMsg.textContent = 'The check could not be confirmed. Try again.'; return; }
         var fired = out.triggers.reduce(function (a, t) { return a + (t.fired || []).length + (t.fired_flows || []).length; }, 0);
-        evMsg.textContent = 'Checked ' + out.polled + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
+        evMsg.textContent = 'Checked ' + out.polled + ' source' + (out.polled === 1 ? '' : 's') + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
         loadEventTriggers();
-      } catch (e) { evMsg.textContent = e.message || 'Check failed. Try again when your connection is restored.'; }
+      } catch (e) { evMsg.textContent = plainError(e, 'check for new items'); }
       finally { this.disabled = false; }
     });
     loadEventTriggers();
@@ -850,7 +930,7 @@
         var st = status[p.name] || {};
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
-        var title = p.label + (st.expired ? ' · authorization expired' : ' · connected');
+        var title = p.label + (st.expired ? ' · needs reconnecting' : ' · connected');
         main.appendChild(el('div', 'mv-row__title', title));
         var sub = 'Account access saved';
         if (st.expires_at) sub += ' · expires ' + fmtWhen(st.expires_at);
@@ -860,34 +940,49 @@
         var actions = el('div', 'mv-row__actions');
         var testBtn = el('button', 'btn btn--ghost', 'Test'); testBtn.type = 'button';
         testBtn.setAttribute('aria-label', 'Test ' + p.label + ' connection');
-        testBtn.addEventListener('click', function () { testConn(p.name, testBtn); });
+        testBtn.addEventListener('click', function () { testConn(p.name, p.label, testBtn); });
         actions.appendChild(testBtn);
-        actions.appendChild(delBtn('Disconnect ' + p.label, function () { disconnect(p.name); }));
+        if (st.expired) {
+          var again = el('button', 'btn btn--primary', 'Reconnect'); again.type = 'button';
+          again.addEventListener('click', function () { reconnect(p.name); });
+          actions.appendChild(again);
+        }
+        var off = el('button', 'btn btn--ghost btn--danger', 'Disconnect'); off.type = 'button';
+        off.setAttribute('aria-label', 'Disconnect ' + p.label);
+        off.addEventListener('click', function () { disconnect(p.name, p.label); });
+        actions.appendChild(off);
         li.appendChild(actions);
         oList.appendChild(li);
       });
     }
-    async function testConn(name, btn) {
+    function reconnect(name) {
+      if (oProv) oProv.value = name;
+      var go = document.getElementById('oauth-get-url');
+      if (go && go.click) go.click();
+    }
+    async function testConn(name, label, btn) {
       if (btn) { btn.disabled = true; }
       try {
         var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name) + '/test', { method: 'POST' });
         var body = {};
         try { body = await r.json(); } catch (e) { body = {}; }
-        if (r.ok && body.ok) { mvToast(name + ' connection is healthy'); loadOAuth(); }
-        else {
-          var why = body.error || (body.detail || 'token could not be refreshed');
-          mvToast(name + ' connection failed: ' + why, { error: true });
-        }
-      } catch (e) { mvToast('Could not test ' + name, { error: true }); }
+        if (r.ok && body.ok) { mvToast(label + ' is connected and working'); loadOAuth(); }
+        else if (r.ok || r.status === 401) {
+          oMsg.textContent = label + ' needs to be reconnected.';
+          var again = el('button', 'btn btn--primary', 'Reconnect ' + label); again.type = 'button';
+          again.addEventListener('click', function () { reconnect(name); });
+          oMsg.appendChild(document.createTextNode(' ')); oMsg.appendChild(again);
+        } else { mvFail(r, 'test ' + label); }
+      } catch (e) { mvFail(e, 'test ' + label); }
       finally { if (btn) { btn.disabled = false; } }
     }
-    async function disconnect(name) {
-      if (!(await mvConfirm('Disconnect ' + name + '? Triggers using it will stop authenticating.'))) return;
+    async function disconnect(name, label) {
+      if (!(await mvConfirm('Disconnect ' + label + '? Automations that use this account will stop working until you connect it again.', { okText: 'Disconnect' }))) return;
       try {
         var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (r.ok) { mvToast('Disconnected'); loadOAuth(); }
-        else { mvToast('Could not disconnect', { error: true }); }
-      } catch (e) { mvToast('Could not disconnect', { error: true }); }
+        if (r.ok) { mvToast(label + ' disconnected'); loadOAuth(); }
+        else { mvFail(r, 'disconnect ' + label); }
+      } catch (e) { mvFail(e, 'disconnect ' + label); }
     }
     document.getElementById('oauth-get-url').addEventListener('click', async function () {
       if (oauthBusy) return;
@@ -901,8 +996,8 @@
         var response = await fetch('/api/v1/oauth/' + encodeURIComponent(provider) + '/authorize-url', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_uri: redirect })
         });
+        if (!response.ok) throw new Error(plainError(response, 'start connecting this account'));
         var data = await response.json();
-        if (!response.ok) throw new Error(data && typeof data.detail === 'string' ? data.detail : 'Account connection is unavailable.');
         var consent = new URL(data.authorize_url);
         if (consent.protocol !== 'https:' || consent.searchParams.get('redirect_uri') !== redirect || consent.searchParams.get('code_challenge_method') !== 'S256' ||
             typeof data.verifier !== 'string' || !/^[A-Za-z0-9_~.\-]{43,128}$/.test(data.verifier)) throw new Error('The provider returned incomplete connection details. Try again.');
@@ -917,7 +1012,7 @@
           window.location.assign(consent.href);
         } else {
           document.getElementById('oauth-advanced-setup').open = true; oFinish.hidden = false;
-          oMsg.textContent = 'Open the consent page, then use the manual finish option for your custom return address.';
+          oMsg.textContent = 'Open the provider’s approval page, then enter the one-time code it shows.';
           oOpen.focus();
         }
       } catch (e) { clearPendingConnection(); oMsg.textContent = e.message || 'Could not start the connection. Check that your browser permits session storage and try again.'; }
@@ -926,7 +1021,7 @@
     document.getElementById('oauth-exchange').addEventListener('click', function () {
       if (oauthBusy) return;
       var code = document.getElementById('oauth-code').value.trim();
-      if (!code) { oMsg.textContent = 'Paste the authorization code first.'; return; }
+      if (!code) { oMsg.textContent = 'Enter the one-time code from the provider first.'; return; }
       exchangeConnection(code, pendingConnection || readPendingConnection());
     });
     loadOAuth().then(function () {
@@ -949,6 +1044,12 @@
     var flowsCount = document.getElementById('auto-flows-count');
     var flowsEmpty = document.getElementById('auto-flows-empty');
     var flowsMsg = document.getElementById('auto-flows-msg');
+    var flowNames = {};
+    var STATUS_WORDS = { paused_approval: 'Waiting for approval', paused_wait: 'Waiting', paused_event: 'Waiting for another app',
+      budget_limited: 'Paused — spending limit reached', indeterminate: 'Needs checking', queued: 'Waiting to start',
+      running: 'Running', completed: 'Finished', failed: 'Failed', rejected: 'Rejected', cancelled: 'Cancelled' };
+    function statusText(st) { return STATUS_WORDS[st] || mvHuman(st || 'unknown'); }
+    var ORIGIN_WORDS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item', retry: 'retry' };
     async function loadFlows() {
       var r;
       try { r = await fetch('/api/v1/flows'); } catch (e) { return; }
@@ -965,10 +1066,11 @@
         var title = el('div', 'mv-row__title');
         var a = document.createElement('a');
         a.href = '/flows/designer/' + encodeURIComponent(f.id);
-        a.textContent = f.name || f.id;                 // edit in the visual designer
+        a.textContent = f.name || mvHuman(f.id);        // edit in the visual designer
+        flowNames[f.id] = f.name || mvHuman(f.id);
         title.appendChild(a); main.appendChild(title);
-        main.appendChild(el('div', 'mv-row__sub', f.nodes + (f.nodes === 1 ? ' node' : ' nodes')
-          + (f.single_agent ? ' · single agent' : '')));
+        main.appendChild(el('div', 'mv-row__sub', f.nodes + (f.nodes === 1 ? ' step' : ' steps')
+          + (f.single_agent ? ' · one AI step' : '')));
         li.appendChild(main);
         li.appendChild(mkBtn('Edit', function () { location.href = '/flows/designer/' + encodeURIComponent(f.id); }));
         li.appendChild(mkBtn('Run', function () { runFlow(f.id, f.inputs || []); }));
@@ -1000,11 +1102,11 @@
         });
         var j;
         try { j = await r.json(); }
-        catch (e) { flowsMsg.textContent = 'Could not start run: invalid server response.'; return; }
-        if (r.ok) { flowsMsg.textContent = 'Run queued.'; }
-        else { flowsMsg.textContent = j && typeof j.detail === 'string' ? j.detail : 'Could not start run.'; }
+        catch (e) { flowsMsg.textContent = 'The run could not be confirmed. Check Recent runs before trying again.'; return; }
+        if (r.ok && j) { flowsMsg.textContent = 'Run started. It appears under Recent runs.'; }
+        else { flowsMsg.textContent = plainError(r, 'start the run'); }
         setTimeout(loadFlowRuns, 500);
-      } catch (e) { flowsMsg.textContent = 'Could not start run.'; }
+      } catch (e) { flowsMsg.textContent = plainError(e, 'start the run'); }
     }
     async function loadFlowRuns() {
       var r;
@@ -1018,11 +1120,11 @@
         var title = el('div', 'mv-row__title');
         var a = document.createElement('a');
         a.href = '/flows/' + encodeURIComponent(run.flow_id) + '/runs/' + encodeURIComponent(run.run_id);
-        a.textContent = run.flow_id + ' — ' + run.status;
+        a.textContent = (flowNames[run.flow_id] || mvHuman(run.flow_id)) + ' — ' + statusText(run.status);
         title.appendChild(a); main.appendChild(title);
         if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
         var bits = [];
-        if (run.origin && run.origin !== 'manual') bits.push('via ' + run.origin);
+        if (run.origin && run.origin !== 'manual') bits.push(ORIGIN_WORDS[run.origin] || mvHuman(run.origin));
         if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
         if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
         if (run.status === 'paused_approval') {
@@ -1034,33 +1136,29 @@
           if (card) {
             var effects = (card.consequences && card.consequences.known_effects) || [];
             var assumptions = (card.consequences && card.consequences.unresolved_assumptions) || [];
-            review.textContent = 'Recommendation only; prediction does not grant authority. '
-              + 'Target: ' + ((card.target && card.target.label) || 'Unavailable') + '. '
-              + 'Exact inputs: ' + (((card.parameters || {}).summary || []).join('; ') || 'Unavailable') + '. '
-              + 'Known effects: ' + (effects.join('; ') || 'None recorded') + '. '
-              + 'Unresolved assumptions: ' + (assumptions.join('; ') || 'None recorded') + '. '
-              + 'Expires: ' + String(card.expires_at || 'Unavailable') + '. '
-              + 'Current role: ' + ((run.approval_authority || {}).role || 'Unavailable') + '. '
-              + 'Credential revision: '
-              + ((run.approval_authority || {}).credential_inventory_sha256 || 'Unavailable') + '. '
-              + 'Budget revision: '
-              + ((run.approval_authority || {}).budget_authority_sha256 || 'Unavailable') + '.';
+            var expires = mvWhen(card.expires_at);
+            review.textContent = 'Lightwork’s suggestion — the decision is yours. '
+              + 'What it changes: ' + ((card.target && card.target.label) || 'Not available') + '. '
+              + 'What it will do: ' + (((card.parameters || {}).summary || []).join('; ') || 'Not available') + '. '
+              + 'What happens next: ' + (effects.join('; ') || 'Nothing listed') + '. '
+              + (assumptions.length ? 'Open questions: ' + assumptions.join('; ') + '. ' : '')
+              + (expires ? 'Decide by ' + expires + '.' : '');
           } else {
-            review.textContent = 'Current integrity-checked approval details are unavailable.';
+            review.textContent = 'The details of this request could not be checked. Open it to reload them.';
           }
           main.appendChild(review);
           var inspect = document.createElement('a');
           inspect.href = '/flows/' + encodeURIComponent(run.flow_id) + '/runs/'
             + encodeURIComponent(run.run_id);
-          inspect.textContent = 'Review full operation'; main.appendChild(inspect);
+          inspect.textContent = 'Open the full request'; main.appendChild(inspect);
           run._canDecide = Boolean(reviewed);
         }
         li.appendChild(main);
         if (run.status === 'paused_approval' && run._canDecide) {
-          li.appendChild(mkBtn('Approve exact operation', function () {
+          li.appendChild(mkBtn('Approve', function () {
             resumeRun(run, 'approved');
           }));
-          li.appendChild(mkBtn('Reject / request revision', function () {
+          li.appendChild(mkBtn('Reject', function () {
             resumeRun(run, 'rejected');
           }));
         }
@@ -1078,10 +1176,10 @@
         var r = await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry'
           + (fromFailure ? '?from_failure=1' : ''), { method: 'POST' });
         flowsMsg.textContent = r.ok
-          ? (fromFailure ? 'Resuming from the failed step…' : 'Retrying with the original inputs…')
-          : 'Could not retry.';
+          ? (fromFailure ? 'Starting again from the step that failed…' : 'Running again with the same answers…')
+          : plainError(r, 'run it again');
         setTimeout(loadFlowRuns, 500);
-      } catch (e) { flowsMsg.textContent = 'Could not retry.'; }
+      } catch (e) { flowsMsg.textContent = plainError(e, 'run it again'); }
     }
     async function resumeRun(run, decision) {
       try {
@@ -1091,10 +1189,10 @@
             approval_binding_sha256: run.approval_binding_sha256 || '' }),
         });
         flowsMsg.textContent = r.ok
-          ? (decision === 'approved' ? 'Approved — resuming.' : 'Rejected.')
-          : 'Approval changed or expired. Review the current operation again.';
+          ? (decision === 'approved' ? 'Approved — the run continues.' : 'Rejected.')
+          : (r.status === 409 ? 'This request changed or expired. Open it to review the latest version.' : plainError(r, 'record your decision'));
         setTimeout(loadFlowRuns, 500);
-      } catch (e) { flowsMsg.textContent = 'Could not resume.'; }
+      } catch (e) { flowsMsg.textContent = plainError(e, 'record your decision'); }
     }
     var insightsBox = document.getElementById('flow-insights');
     var insightsHead = document.getElementById('flow-insights-head');
@@ -1120,23 +1218,25 @@
         var title = el('div', 'mv-row__title');
         var a = document.createElement('a');
         a.href = '/flows/designer/' + encodeURIComponent(f.flow_id);
-        a.textContent = f.name || f.flow_id;
+        a.textContent = f.name || mvHuman(f.flow_id);
         title.appendChild(a); main.appendChild(title);
         (f.proposals || []).forEach(function (p) {
-          main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.from_kind + ' → ' + p.to_kind))));
+          main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.to_kind === 'action'
+            ? 'A step could always use the same fixed action instead of asking the AI each time.'
+            : 'A step could let the AI decide instead of always using the same action.'))));
           if (p.applicable !== false) {
             main.appendChild(mkBtn('Apply this improvement', function () { applyProposal(f.flow_id, p); }));
           } else {
             main.appendChild(el(
               'div', 'mv-row__sub',
-              p.blocking_reason || 'Review parameter bindings before applying.'
+              p.blocking_reason || 'Open the flow and check this step’s settings before applying.'
             ));
           }
         });
         (f.changes || []).forEach(function (ch) {
           var imp = ch.impact || {}, d = imp.delta;
-          var txt = 'node ' + ch.node_id + ' → ' + ch.to_kind
-            + (ch.source === 'auto-revert' ? ' (auto-reverted)' : '');
+          var txt = 'A step was changed to ' + (ch.to_kind === 'action' ? 'a fixed action' : 'an AI step')
+            + (ch.source === 'auto-revert' ? ' (undone automatically because results got worse)' : '');
           if (typeof d === 'number') txt += ' · ' + pct(d) + ' vs before';
           main.appendChild(el('div', 'mv-row__sub', txt));
         });
@@ -1153,14 +1253,20 @@
         // ask when it couldn't infer one confidently.
         var tool = (p.inferred_tool || '').trim();
         if (!tool) {
-          var vals = await window.mvForm('Harden node “' + p.node_id + '” to a deterministic action',
-            [{ key: 'tool', label: 'Tool it should call', required: true, placeholder: 'e.g. send_email',
-               help: 'The action node will call this tool directly instead of running an agent.' }],
-            { okText: 'Harden' });
+          var options = [];
+          try {
+            var tr = await fetch('/api/v1/tools');
+            if (tr.ok) options = ((await tr.json()).tools || []).map(function (t) { return { value: t.name, label: mvHuman(t.name) }; });
+          } catch (e) { options = []; }
+          if (!options.length) { insightsHead.textContent = 'The list of actions could not be loaded. Try again in a moment.'; return; }
+          var vals = await window.mvForm('Make this step always use a fixed action',
+            [{ key: 'tool', label: 'Action to use', type: 'select', required: true, options: options,
+               help: 'The step will run this action directly instead of asking the AI each time.' }],
+            { okText: 'Apply' });
           if (vals === null) { insightsHead.textContent = 'Cancelled.'; return; }
           tool = (vals.tool || '').trim();
         }
-        if (!tool) { insightsHead.textContent = 'Cancelled — hardening needs a tool.'; return; }
+        if (!tool) { insightsHead.textContent = 'Cancelled — choose an action to use.'; return; }
         body.tool = tool;
       }
       insightsHead.textContent = 'Applying…';
@@ -1168,10 +1274,9 @@
         var r = await fetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
-        var j = await r.json();
-        if (!r.ok) { insightsHead.textContent = j.detail || 'Could not apply.'; return; }
-        loadFlows();          // re-render node counts + refresh insights (proposal now enacted)
-      } catch (e) { insightsHead.textContent = 'Could not reach the server.'; }
+        if (!r.ok) { insightsHead.textContent = plainError(r, 'apply this improvement'); return; }
+        loadFlows();          // re-render step counts + refresh insights (proposal now enacted)
+      } catch (e) { insightsHead.textContent = plainError(e, 'apply this improvement'); }
     }
     loadFlows();
   }
