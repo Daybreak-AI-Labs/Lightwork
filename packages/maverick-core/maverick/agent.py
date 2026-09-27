@@ -7,6 +7,7 @@ without patching the kernel.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import inspect
 import itertools

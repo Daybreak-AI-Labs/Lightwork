@@ -73,7 +73,9 @@ def publish_batch(world, goal_id, records):
         data = _read_staged(record)
         directory = attachments._root_for_goal(goal_id)
         destination = directory / f"{record.sha256[:16]}-{record.filename}"
-        attachments._publish_attachment(destination, data, record.sha256)
+        # Sealed at rest like store(); staging is a transient private tempdir.
+        attachments._publish_attachment(
+            destination, attachments._encode_for_disk(data, destination), record.sha256)
         return attachments.Stored(record.filename, record.mime, record.size_bytes, record.sha256, destination)
 
     ids = SubmissionStore(world).admit(goal_id, records, publish=publish)
@@ -81,7 +83,7 @@ def publish_batch(world, goal_id, records):
     if attachments.s3_mirror_enabled():
         for record in records:
             destination = attachments._root_for_goal(goal_id) / f"{record.sha256[:16]}-{record.filename}"
-            attachments._s3_mirror(goal_id, destination, record.mime, _read_staged(record))
+            attachments._s3_mirror(goal_id, destination, record.mime, destination.read_bytes())
     return ids
 
 

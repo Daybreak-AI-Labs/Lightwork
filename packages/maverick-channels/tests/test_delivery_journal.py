@@ -182,6 +182,17 @@ def test_attachment_bytes_survive_restart_and_corruption_blocks_execution(isolat
         delivery._materialize(row)
 
 
+def test_attachment_blobs_are_sealed_at_rest_when_encryption_is_on(isolated, monkeypatch):
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    msg = _message()
+    msg.attachments = [{"filename": "payroll.csv", "mime": "text/plain", "data": b"salary,9000"}]
+    row = isolated.admit(msg, external_id="event1", account="account1")
+    path = delivery._blob_path(row["id"], row["message"]["attachments"][0]["sha256"])
+    assert b"salary" not in path.read_bytes()
+    assert delivery._materialize(delivery.DeliveryJournal().get(row["id"])).attachments == msg.attachments
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows extended-path inspection")
 def test_attachment_recovery_beyond_windows_max_path_preserves_digest_checks(isolated, monkeypatch):
     from maverick import paths

@@ -123,15 +123,14 @@ def _payload(msg, record_id):
 
 
 def _materialize(record):
-    from maverick.attachments import _verify_stored_attachment
+    from maverick.attachments import _verify_stored_attachment, read_bytes
 
     payload = dict(record["message"])
     files = []
     for item in payload.pop("attachments"):
         path = _blob_path(record["id"], item["sha256"])
         _verify_stored_attachment(path, item["sha256"])
-        with path.open("rb") as stream:
-            data = stream.read(item["size_bytes"] + 1)
+        data = read_bytes(path)  # sealed at rest like goal attachments
         if len(data) != item["size_bytes"]:
             raise DeliveryUnknown("Admitted channel attachment changed size")
         files.append({"filename": item["filename"], "mime": item["mime"], "data": data})
@@ -192,7 +191,7 @@ class DeliveryJournal:
         return changed
 
     def admit(self, msg, *, external_id, account, route=None):
-        from maverick.attachments import _publish_attachment
+        from maverick.attachments import _encode_for_disk, _publish_attachment
         from maverick.file_lock import ensure_private_directory
         from maverick.privacy_ops import RecordConflict
 
@@ -229,7 +228,7 @@ class DeliveryJournal:
         if row["execution"] == "staging":
             for path, data, sha in publications:
                 ensure_private_directory(path.parent)
-                _publish_attachment(path, data, sha)
+                _publish_attachment(path, _encode_for_disk(data, path), sha)
             try:
                 row = self.change(row, execution="received")
             except RecordConflict:
@@ -354,7 +353,7 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
     if row["execution"] == "received":
         inbound = await asyncio.to_thread(_materialize, row)
         if prepare is not None and not row.get("preparation_complete"):
-            from maverick.attachments import _publish_attachment
+            from maverick.attachments import _encode_for_disk, _publish_attachment
             from maverick.file_lock import ensure_private_directory
             from maverick.privacy_ops import RecordConflict
 
@@ -365,7 +364,7 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
                 raise PermissionError("Prepared channel input changed its admitted identity or text")
             for path, data, sha in publications:
                 await asyncio.to_thread(ensure_private_directory, path.parent)
-                await asyncio.to_thread(_publish_attachment, path, data, sha)
+                await asyncio.to_thread(_publish_attachment, path, _encode_for_disk(data, path), sha)
             try:
                 row = await asyncio.to_thread(journal.change, row, message=payload, preparation_complete=True)
             except RecordConflict:
