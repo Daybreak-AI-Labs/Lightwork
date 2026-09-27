@@ -38,14 +38,23 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     csp = response.headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     body = response.text
-    assert "Trust receipts" in body
+    assert "Trust Receipts" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert f'data-api-base="{page.API_BASE}"' in body
     assert page.ASSET_PATH in body
-    assert 'id="rcp-download-verifier"' in body and "/verifier" not in body.split("rcp-root")[1].split("rcp-cli")[0]
+    assert 'id="rcp-download-verifier"' in body and "/verifier" not in body
     assert 'id="rcp-verify-form"' in body and 'id="rcp-rows-form"' in body
-    for depth in ("signed", "chained", "anchored"):
-        assert f"<strong>{depth}</strong>" in body
+    for level in ("Genuine", "Nothing removed after it", "Matches a published checkpoint"):
+        assert f"<strong>{level}</strong>" in body
+    # Upload a file, choose from lists; no pasted documents, no command lines.
+    assert 'id="rcp-file"' in body and "<textarea" not in body
+    assert 'id="rcp-kind"' in body and "<select" in body
+    assert "python " not in body and "--key" not in body
+    assert 'id="rcp-proof-form"' in body and 'id="rcp-proof-verify-form"' in body
+    assert "<script>" not in body.split('id="rcp-root"')[1]   # the page CSP forbids inline script
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(body) == []
 
 
 def test_page_is_audit_gated(monkeypatch) -> None:

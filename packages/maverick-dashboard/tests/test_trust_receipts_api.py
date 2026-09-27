@@ -216,9 +216,39 @@ def test_every_route_is_audit_gated(monkeypatch):
     assert client.get(f"{BASE}/verifier").status_code == 403
     assert client.post(f"{BASE}/mint", json={"day": DAY, "row_hash": "a" * 64}).status_code == 403
     assert client.post(f"{BASE}/verify", json={"receipt": "{}"}).status_code == 403
+    assert client.post(f"{BASE}/attestation", json={}).status_code == 403
+    assert client.post(f"{BASE}/attestation/verify", json={"bundle": "{}"}).status_code == 403
+    assert client.get(f"{BASE}/attestation/verifier").status_code == 403
 
 
 def test_cross_origin_minting_is_refused_by_the_csrf_check():
     _write_day()
     foreign = TestClient(app, headers={"Origin": "http://evil.example"})
     assert foreign.post(f"{BASE}/mint", json={"day": DAY, "row_hash": "a" * 64}).status_code == 403
+
+
+def test_signed_proof_downloads_and_checks_against_this_installation():
+    _write_day()
+    r = client.post(f"{BASE}/attestation", json={"since_day": DAY})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-disposition"] == 'attachment; filename="lightwork-proof.json"'
+    bundle = r.text
+    assert json.loads(bundle)["signature"]["sig"]
+    checked = client.post(f"{BASE}/attestation/verify", json={"bundle": bundle})
+    assert checked.status_code == 200, checked.text
+    body = checked.json()
+    assert body["ok"] is True and body["depth"] in {"signed", "corroborated"}
+    assert {c["name"] for c in body["claims"]} >= {"policy_envelope", "authentic_history"}
+    # A different trusted key fails closed.
+    wrong = client.post(f"{BASE}/attestation/verify", json={"bundle": bundle, "key": "b" * 64,
+                                                            "use_own_key": False})
+    assert wrong.status_code == 200 and wrong.json()["ok"] is False
+    assert client.post(f"{BASE}/attestation/verify",
+                       json={"bundle": "not a proof"}).status_code == 422
+
+
+def test_proof_checker_download_is_the_standalone_module():
+    r = client.get(f"{BASE}/attestation/verifier")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == 'attachment; filename="attestation_verify.py"'
+    assert "import maverick" not in r.text
