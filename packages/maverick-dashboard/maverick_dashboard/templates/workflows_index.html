@@ -43,7 +43,7 @@
       {% for f in flows %}
       <li class="mv-row">
         <div class="mv-row__main">
-          <div class="mv-row__title">{{ f.name or f.id }}</div>
+          <div class="mv-row__title">{{ f.name or (f.id|humanize) }}</div>
           <div class="mv-row__sub">{{ f.nodes }} step{{ '' if f.nodes == 1 else 's' }}</div>
           <details hidden><summary>Technical details</summary><p class="muted">Flow reference: <code>{{ f.id }}</code></p></details>
         </div>
@@ -56,7 +56,7 @@
     </ul>
     {% else %}
     <div class="mv-empty"><p class="mv-empty__title">No flows yet</p>
-      <p class="mv-empty__sub"><a href="/flows/designer">Open the designer</a> or ask the copilot to build one.</p></div>
+      <p class="mv-empty__sub">Open the flow designer, or ask Copilot to build one for you.</p><a class="btn btn--primary" href="/flows/designer">Open the flow designer</a></div>
     {% endif %}
   </section>
   {% endif %}
@@ -68,8 +68,8 @@
       {% for t in templates %}
       <li class="mv-row">
         <div class="mv-row__main">
-          <div class="mv-row__title">{{ t.title or t.name }}</div>
-          <div class="mv-row__sub">{% if t.params %}You'll be asked for: {{ t.params|join(', ') }}{% else %}Ready to use with your instructions{% endif %}</div>
+          <div class="mv-row__title">{{ t.title or (t.name|humanize) }}</div>
+          <div class="mv-row__sub">{% if t.params %}You'll be asked for: {{ t.params|map('humanize')|map('lower')|join(', ') }}{% else %}Ready to use with your instructions{% endif %}</div>
           <details hidden><summary>Technical details</summary><p class="muted">Template reference: <code>{{ t.name }}</code></p></details>
         </div>
         <div class="mv-row__actions">
@@ -97,8 +97,8 @@
       {% for p in playbooks %}
       <li class="mv-row">
         <div class="mv-row__main">
-          <div class="mv-row__title">{{ p.name }}</div>
-          <div class="mv-row__sub">{% if p.description %}{{ p.description }}{% endif %}{% if p.suite %} · {{ p.suite }}{% endif %}</div>
+          <div class="mv-row__title">{{ p.name|humanize }}</div>
+          <div class="mv-row__sub">{% if p.description %}{{ p.description }}{% endif %}{% if p.suite %} · {{ p.suite|humanize }}{% endif %}</div>
         </div>
         <div class="mv-row__actions">
           <a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ p.name | urlencode }}">Edit</a>
