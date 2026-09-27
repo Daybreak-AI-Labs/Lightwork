@@ -41,8 +41,8 @@ def test_trajectory_renders_agent_filter(client, world_with_events):
     assert 'id="filter-agent"' in body
     assert "filter-agent" in body
     # Distinct agents from the rendered events become options.
-    assert ">orchestrator<" in body
-    assert ">coder<" in body
+    assert ">Orchestrator<" in body
+    assert ">Coder<" in body
 
 
 def test_trajectory_renders_severity_filter(client, world_with_events):
@@ -54,9 +54,9 @@ def test_trajectory_renders_severity_filter(client, world_with_events):
     assert 'id="filter-severity"' in body
     assert "filter-severity" in body
     # Distinct kinds from the rendered events become options.
-    assert ">tool<" in body
-    assert ">error<" in body
-    assert ">thinking<" in body
+    assert ">Action<" in body
+    assert ">Problem<" in body
+    assert ">Thinking<" in body
 
 
 def test_trajectory_rows_carry_filter_data_attrs(client, world_with_events):

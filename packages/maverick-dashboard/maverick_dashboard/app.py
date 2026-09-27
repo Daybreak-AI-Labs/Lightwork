@@ -6203,6 +6203,13 @@ async def run_tree_page(request: Request) -> HTMLResponse:
         cfg = get_session_tree()
     except Exception:  # pragma: no cover - unreadable config => documented defaults
         cfg = {"enable": False, "max_depth": 10}
+    try:
+        recent = [
+            {"id": g.id, "title": g.title, "status": g.status}
+            for g in _world().list_goals(owner=owner_filter, limit=50, order="desc")
+        ]
+    except Exception:  # pragma: no cover - the picker is best-effort
+        recent = []
     return templates.TemplateResponse(
         request,
         "run_tree.html",
@@ -6211,6 +6218,9 @@ async def run_tree_page(request: Request) -> HTMLResponse:
             "max_depth": cfg.get("max_depth"),
             "roots": rows,
             "tree": tree,
+            "recent": recent,
+            "can_operate": has_permission(request, "operate"),
+            "can_admin": has_permission(request, "admin"),
         },
     )
 
@@ -9887,10 +9897,17 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     events = w.goal_events(goal_id, limit=10_000)
+    try:
+        from maverick import session_tree
+
+        fork_enabled = session_tree.enabled()
+    except Exception:  # pragma: no cover - branching is optional
+        fork_enabled = False
     return templates.TemplateResponse(
         request,
         "trajectory.html",
-        {"goal": g, "events": events},
+        {"goal": g, "events": events, "fork_enabled": fork_enabled,
+         "can_operate": has_permission(request, "operate")},
     )
 
 
