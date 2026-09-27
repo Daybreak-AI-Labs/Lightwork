@@ -371,9 +371,10 @@
         if (!r.ok) return;
         const data = await r.json();
         const t = data.trend || [];
-        if (t.length < 2 || data.direction === 'unknown') return;
+        if (t.length < 2) return;
         const arrow = data.direction === 'up' ? '▲ Risk rising'
-          : data.direction === 'down' ? '▼ Risk falling' : '▬ Risk steady';
+          : data.direction === 'down' ? '▼ Risk falling'
+          : data.direction === 'unknown' ? '? Trend unclear (review order unknown)' : '▬ Risk steady';
         const cls = data.direction === 'up' ? 'blocked'
           : data.direction === 'down' ? 'done' : 'warn';
         const p = el('p', null);
