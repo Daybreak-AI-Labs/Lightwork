@@ -263,7 +263,10 @@ def test_program_report_page_and_api():
 
     html = client.get("/privacy/report").text
     assert "Privacy program report" in html
-    assert "most-missed clause" in html
-    assert "Print / save as PDF" in html
+    assert "Clause most often missing" in html
+    assert "Print or save as PDF" in html
+    assert "Approved" in html and "approved" not in html.split("<main", 1)[-1].split("</main>")[0].replace("Approved", "")
+    for jargon in (">JSON<", "Art. 28", "past 72h", "documented-no", "back to the workspace"):
+        assert jargon not in html, jargon
     # The workspace links to it.
     assert 'href="/privacy/report"' in client.get("/privacy").text
