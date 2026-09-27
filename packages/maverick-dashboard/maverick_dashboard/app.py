@@ -1174,6 +1174,9 @@ app.include_router(_compliance_controls_router)
 from .privacy_actions_api import router as _privacy_actions_router  # noqa: E402
 
 app.include_router(_privacy_actions_router)
+from .ui_choices_api import router as _ui_choices_router  # noqa: E402
+
+app.include_router(_ui_choices_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))

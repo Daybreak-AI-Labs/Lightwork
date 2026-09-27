@@ -55,11 +55,19 @@ def test_page_renders_pieces():
     html = resp.text
     assert html.count("<h1") == 1                       # exactly one page title
     assert "Autonomous Shoring" in html                 # hero title
-    assert "Shoring P&amp;L" in html                    # the P&L summary
-    assert "Book of work" in html
+    assert "Savings Summary" in html                    # the P&L summary
+    assert "Book of Work" in html
     assert 'id="sh-form"' in html                       # add-a-function form
-    assert "Exception desk" in html
+    assert "Waiting for a Person" in html
     assert "/approvals" in html                         # exception desk links out
+    # No slug, free-text department or free-text owner to type.
+    assert 'id="sh-department"' in html and '<select class="select" id="sh-department"' in html
+    assert '<select class="select" id="sh-owner"' in html
+    assert "Key (slug" not in html and "operating tag" not in html
+    assert "Add a target" in html and "window.confirm" not in html and "window.alert" not in html
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(html) == []
 
 
 def test_page_shows_book_and_sla_indicator():
@@ -72,10 +80,14 @@ def test_page_shows_book_and_sla_indicator():
     _add_function()
     html = client.get("/shoring").text
     assert "Accounts Payable" in html
-    assert "finance_ap" in html
+    assert "Finance ap" in html
     # The lifecycle badge and an SLA verdict word are present.
-    assert "running" in html
-    assert "breached" in html   # 1 delivered over 90d is far under 1/day
+    assert "Running" in html
+    assert "Missed" in html   # 1 delivered over 90d is far under 1/day
+    assert 'data-edit="ap"' in html and 'data-remove="ap"' in html
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(html) == []
 
 
 def test_page_exception_desk_lists_department_approvals():
@@ -90,8 +102,9 @@ def test_page_exception_desk_lists_department_approvals():
         reset_goal_context(tokens)
     _add_function()
     html = client.get("/shoring").text
-    assert "awaiting sign-off" in html
-    assert "wire.transfer" in html
+    assert "waiting" in html
+    assert "Wire transfer" in html
+    assert f"/goals/{goal}/trajectory" in html
 
 
 def test_page_empty_state():
@@ -121,4 +134,39 @@ def test_page_in_nav_registry_after_savings():
 
 def test_page_disabled_is_404(monkeypatch):
     monkeypatch.setenv("MAVERICK_SHORING", "0")
+    response = client.get("/shoring")
+    assert response.status_code == 404
+    assert "This page is turned off" in response.text
+    assert 'id="sh-turn-on"' in response.text          # open-mode viewer is an admin
+
+
+def test_turn_on_writes_the_setting_for_admins(tmp_path):
+    from maverick import config, shoring
+
+    (tmp_path / "config.toml").write_text("[shoring]\nenable = false\n", encoding="utf-8")
+    config.reset_config_cache()
+    assert not shoring.enabled()
     assert client.get("/shoring").status_code == 404
+    assert client.post("/api/v1/shoring/turn-on").status_code == 200
+    config.reset_config_cache()
+    assert shoring.enabled()
+    assert client.get("/shoring").status_code == 200
+
+
+def test_turn_on_reports_a_pinned_setting(monkeypatch):
+    monkeypatch.setenv("MAVERICK_SHORING", "0")
+    assert client.post("/api/v1/shoring/turn-on").status_code == 409
+
+
+def test_turn_on_needs_an_administrator(monkeypatch):
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: permission != "admin")
+    from fastapi import HTTPException
+
+    def deny(request, permission):
+        if permission == "admin":
+            raise HTTPException(status_code=403, detail="forbidden")
+
+    monkeypatch.setattr(auth, "require_global_permission", deny)
+    assert client.post("/api/v1/shoring/turn-on").status_code == 403

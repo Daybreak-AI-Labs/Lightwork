@@ -961,6 +961,7 @@ def set_research_execution(value: dict, *, expected_settings_sha256: str) -> dic
 SWITCHABLE_SECTIONS: tuple[str, ...] = (
     "dreaming", "self_improvement", "self_harness", "fleet_memory",
     "rehearsal", "flows", "threat_hunt", "env_hunt", "entity_graph",
+    "shoring",
 )
 
 
