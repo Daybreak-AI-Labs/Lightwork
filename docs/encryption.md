@@ -68,10 +68,12 @@ row or column still opens. Binding each field to its row needs the row id at
 write time, which the insert paths do not have; treat database write access as
 able to rearrange sealed values within a tenant.
 
-**Per-tenant keys** (`[encryption] per_tenant`) give each tenant its own data
-key with the tenant bound as authenticated data. Unset, they are **on in
-enterprise mode** (where every read and write is tenant-scoped) and off
-otherwise; `MAVERICK_ENCRYPT_PER_TENANT` or an explicit config value wins.
+**Per-tenant keys** (`[encryption] per_tenant`, off by default) give each
+tenant its own data key. A tenant data key is generated and wrapped on the host
+that first needs it, so it is not shared between replicas: attachments are
+therefore always sealed with the deployment (or keyring) key, with the tenant
+bound as authenticated data, so the S3 mirror opens on every replica that
+shares that key. The tenant id is bound in its canonical (NFC) form.
 
 ## Seal existing data
 

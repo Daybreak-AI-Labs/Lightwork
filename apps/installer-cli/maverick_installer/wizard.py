@@ -4820,8 +4820,7 @@ def pick_advanced() -> dict[str, Any]:
             "(wrapped by a KMS KEK) so one tenant's key never opens another's "
             "data — the posture a hosted multi-tenant store needs. Requires "
             "at-rest encryption; reads of existing data stay transparent. "
-            "Enterprise mode turns this on unless [encryption] per_tenant = "
-            "false; single-tenant boxes don't need it.",
+            "Off by default (single-tenant boxes don't need it).",
             default=False,
         ),
         "pg_rls": _q_confirm(

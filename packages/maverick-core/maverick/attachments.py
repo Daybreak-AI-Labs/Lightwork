@@ -291,12 +291,28 @@ def _seal_context(path: Path) -> str:
 
 def _encode_for_disk(data: bytes, path: Path) -> bytes:
     from .crypto_at_rest import at_rest_enabled, seal_bound
-    return seal_bound(data, _seal_context(path)) if at_rest_enabled() else data
+    # portable: the S3 mirror is read on other replicas, where a per-tenant data
+    # key (one host's) would not exist.
+    return seal_bound(data, _seal_context(path), portable=True) if at_rest_enabled() else data
 
 
-def _decode_stored(raw: bytes, path: Path) -> bytes:
-    from .crypto_at_rest import is_bound, unseal_bound
-    return unseal_bound(raw, _seal_context(path)) if is_bound(raw) else raw
+def _decode_stored(raw: bytes, path: Path, expected_sha256: str | None = None) -> bytes:
+    """Plaintext of stored bytes. A file that merely STARTS with the sealed-blob
+    magic but does not open is plaintext when encryption is off, or when its own
+    digest is the expected one (a legacy upload whose content begins that way)."""
+    from .crypto_at_rest import EncryptionUnavailable, at_rest_enabled, is_bound, unseal_bound
+    if not is_bound(raw):
+        return raw
+    try:
+        return unseal_bound(raw, _seal_context(path))
+    except EncryptionUnavailable:
+        # Stored names are "<sha256[:16]>-<filename>": that prefix is the digest
+        # of the plaintext, so it identifies a legacy upload when none is given.
+        expected = expected_sha256 or path.name.split("-", 1)[0]
+        if not at_rest_enabled() or (
+                len(expected) >= 16 and hashlib.sha256(raw).hexdigest().startswith(expected)):
+            return raw
+        raise
 
 
 def is_sealed_file(path: str | Path) -> bool:
@@ -309,7 +325,11 @@ def is_sealed_file(path: str | Path) -> bool:
 def read_bytes(path: str | Path) -> bytes:
     """The plaintext of a stored attachment (sealed or legacy)."""
     path = Path(path)
-    return _decode_stored(path.read_bytes(), path)
+    from .crypto_at_rest import EncryptionUnavailable
+    try:
+        return _decode_stored(path.read_bytes(), path)
+    except EncryptionUnavailable as exc:
+        raise AttachmentRejected("stored attachment could not be decrypted here") from exc
 
 
 @contextmanager
@@ -325,7 +345,12 @@ def plaintext_path(path: str | Path) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="mvk-att-") as tmp:
         os.chmod(tmp, 0o700)
         plain = Path(tmp) / path.name
-        file_lock.atomic_create_bytes(plain, _decode_stored(raw, path))
+        from .crypto_at_rest import EncryptionUnavailable
+        try:
+            data = _decode_stored(raw, path)
+        except EncryptionUnavailable as exc:
+            raise AttachmentRejected("stored attachment could not be decrypted here") from exc
+        file_lock.atomic_create_bytes(plain, data)
         yield plain
 
 
@@ -526,7 +551,7 @@ def _verify_stored_attachment(path: Path, expected_digest: str) -> None:
             os.close(fd)
 
     try:
-        payload = _decode_stored(payload, path)
+        payload = _decode_stored(payload, path, expected_digest)
     except Exception as exc:
         raise AttachmentRejected("stored attachment could not be decrypted here") from exc
     if len(payload) > MAX_FILE_BYTES:
@@ -579,7 +604,7 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
         except Exception:  # noqa: BLE001 -- fall back to a pre-scoping object
             obj = client.get_object(Bucket=bucket, Key=_legacy_s3_key(goal_id, name))
         content_length = obj.get("ContentLength")
-        if content_length is not None and int(content_length) > MAX_FILE_BYTES:
+        if content_length is not None and int(content_length) > MAX_FILE_BYTES + _SEAL_OVERHEAD:
             raise AttachmentRejected(
                 f"file too large: {content_length} bytes (limit {MAX_FILE_BYTES})"
             )
@@ -976,7 +1001,7 @@ def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int
         try:
             with plaintext_path(a.path) as source:
                 result = produce(source)
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttachmentRejected):
             continue
         if result is None:
             continue

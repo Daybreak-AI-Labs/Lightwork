@@ -388,14 +388,6 @@ def per_tenant_at_rest() -> bool:
         cfg = (load_config() or {}).get("encryption") or {}
     except Exception:
         return False
-    if "per_tenant" not in cfg:
-        # Unset: enterprise deployments (every read/write tenant-scoped) get
-        # one key per tenant by default; a single-tenant box keeps one key.
-        try:
-            from .enterprise import enterprise_enabled
-            return bool(enterprise_enabled())
-        except Exception:
-            return False
     v = cfg.get("per_tenant")
     return _truthy(v) if isinstance(v, str) else bool(v)
 
@@ -959,25 +951,35 @@ def _bound_aad(tenant: str | None, context: str) -> bytes:
     """Additional authenticated data: the tenant and the caller's context
     (e.g. ``attachment/<goal>/<name>``), length-prefixed so no two distinct
     pairs share an encoding."""
-    parts = [(tenant or "__default__").encode("utf-8"), context.encode("utf-8")]
+    # "t:" + the canonical (NFC) tenant id, or "n:" for no tenant, so a tenant
+    # literally named "__default__" and the unbound deployment never share an AAD.
+    if tenant:
+        from .paths import canonical_tenant_id
+        who = b"t:" + canonical_tenant_id(tenant).encode("utf-8")
+    else:
+        who = b"n:"
+    parts = [who, context.encode("utf-8")]
     return b"maverick-bound/v1\x00" + b"".join(
         str(len(p)).encode("ascii") + b":" + p for p in parts)
 
 
-def seal_bound(plaintext: bytes, context: str) -> bytes:
+def seal_bound(plaintext: bytes, context: str, *, portable: bool = False) -> bytes:
     """Seal bound to the current tenant AND ``context``.
 
     A blob copied to another tenant, another record or another field fails GCM
     authentication instead of decrypting there. Per-tenant mode seals under the
     tenant's own data key; otherwise the deployment (or active keyring) key, with
-    its key id embedded so rotation keeps working."""
+    its key id embedded so rotation keeps working. ``portable`` always uses the
+    deployment/keyring key: per-tenant data keys live on one host, so anything
+    read on another replica (the attachment S3 mirror) must not use them. The
+    tenant binding is kept either way through the authenticated data."""
     if not _have_crypto():
         raise EncryptionUnavailable("at-rest encryption needs 'cryptography'")
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     from .paths import current_tenant_id
     tenant = current_tenant_id()
-    if per_tenant_at_rest():
+    if per_tenant_at_rest() and not portable:
         from .tenant.kms import tenant_dek
         kind, keyid, key = b"T", bytes(_KEYID_BYTES), tenant_dek(tenant)
     else:

@@ -44,13 +44,13 @@ def test_per_tenant_mode_uses_the_tenant_key(monkeypatch):
 
 
 @pytest.mark.parametrize("enterprise,config,env,expected", [
-    (True, {}, None, True),                        # enterprise default: per-tenant keys
-    (False, {}, None, False),                      # single-tenant default: one key
-    (True, {"per_tenant": False}, None, False),    # explicit config wins
-    (False, {"per_tenant": True}, None, True),
-    (True, {}, "0", False),                        # env wins over everything
+    (True, {}, None, False),                       # opt-in even in enterprise mode:
+    (False, {}, None, False),                      # tenant DEKs are per host
+    (True, {"per_tenant": True}, None, True),      # explicit config
+    (False, {"per_tenant": "yes"}, None, True),
+    (True, {"per_tenant": True}, "0", False),      # env wins over everything
 ])
-def test_per_tenant_default_follows_enterprise_mode(monkeypatch, enterprise, config, env, expected):
+def test_per_tenant_keys_are_opt_in(monkeypatch, enterprise, config, env, expected):
     import maverick.config as config_mod
     import maverick.enterprise as ent
     if env is None:
@@ -60,3 +60,31 @@ def test_per_tenant_default_follows_enterprise_mode(monkeypatch, enterprise, con
     monkeypatch.setattr(config_mod, "load_config", lambda: {"encryption": config})
     monkeypatch.setattr(ent, "enterprise_enabled", lambda: enterprise)
     assert c.per_tenant_at_rest() is expected
+
+
+def test_portable_seals_use_the_deployment_key_even_in_per_tenant_mode(monkeypatch):
+    monkeypatch.setenv("MAVERICK_ENCRYPT_PER_TENANT", "1")
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "27" * 32)  # synthetic test key
+    from maverick.tenant import kms
+    monkeypatch.setattr(kms, "_dek_cache", {})
+    with tenant_scope(tenant="acme"):
+        blob = c.seal_bound(b"mirror me", "ctx", portable=True)
+        assert blob[len(c._BOUND_MAGIC):len(c._BOUND_MAGIC) + 1] == b"K"
+        monkeypatch.setattr(kms, "_dek_cache", {})
+        monkeypatch.setattr(kms, "tenant_dek", lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("another host has no tenant DEK")))
+        assert c.unseal_bound(blob, "ctx") == b"mirror me"
+    with tenant_scope(tenant="beta"), pytest.raises(c.EncryptionUnavailable):
+        c.unseal_bound(blob, "ctx")                  # tenant still bound via AAD
+
+
+def test_tenant_binding_uses_the_canonical_id_and_separates_unbound():
+    import unicodedata
+    nfd, nfc = unicodedata.normalize("NFD", "jos\u00e9"), "jos\u00e9"
+    with tenant_scope(tenant=nfd):
+        blob = c.seal_bound(b"x", "ctx")
+    with tenant_scope(tenant=nfc):
+        assert c.unseal_bound(blob, "ctx") == b"x"
+    unbound = c.seal_bound(b"y", "ctx")
+    with tenant_scope(tenant="__default__"), pytest.raises(c.EncryptionUnavailable):
+        c.unseal_bound(unbound, "ctx")

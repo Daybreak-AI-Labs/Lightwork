@@ -6,6 +6,7 @@ import hashlib
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 from maverick import attachments as att
 from maverick import file_lock
 
@@ -223,7 +224,93 @@ def test_sealed_attachments_bind_goal_name_and_tenant(monkeypatch, tmp_path):
         moved = tmp_path / "6" / st.path.name
         moved.parent.mkdir()
         moved.write_bytes(raw)
-        with pytest.raises(crypto_at_rest.EncryptionUnavailable):
+        with pytest.raises(att.AttachmentRejected):
             att.read_bytes(moved)  # another goal
-    with tenant_scope(tenant="beta"), pytest.raises(crypto_at_rest.EncryptionUnavailable):
+    with tenant_scope(tenant="beta"), pytest.raises(att.AttachmentRejected):
         att.read_bytes(st.path)  # another tenant
+
+
+def _s3_store(monkeypatch):
+    """A dict-backed fake bucket: what put_object stores, get_object returns."""
+    client = _fake_boto3(monkeypatch)
+    objects = {}
+
+    def get_object(Bucket, Key):
+        if Key not in objects:
+            raise RuntimeError("NoSuchKey")
+        body = MagicMock()
+        data = objects[Key]
+        body.read.side_effect = lambda n=-1: data[:n] if n >= 0 else data
+        return {"Body": body, "ContentLength": len(data), "ContentType": "text/plain"}
+
+    client.put_object.side_effect = lambda Bucket, Key, Body, ContentType: objects.__setitem__(Key, Body)
+    client.get_object.side_effect = get_object
+    return objects
+
+
+def test_sealed_file_at_the_size_limit_still_fetches(monkeypatch, tmp_path):
+    """The mirror holds the sealed blob, which is larger than the plaintext cap."""
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    monkeypatch.setattr(att, "MAX_FILE_BYTES", 1000)
+    monkeypatch.setattr(att, "MAX_GOAL_BYTES", 10_000)
+    _s3_store(monkeypatch)
+    st = att.store(3, "big.txt", "text/plain", b"a" * 1000, root=tmp_path / "a")
+    fetched = att.s3_fetch(3, st.path.name, root=tmp_path / "b")
+    assert fetched is not None and att.read_bytes(fetched) == b"a" * 1000
+
+
+def test_per_tenant_mode_keeps_the_mirror_readable_on_another_host(monkeypatch, tmp_path):
+    """Per-tenant data keys are host-local; the S3 mirror is sealed portable
+    (deployment key + tenant AAD) so another replica with the fleet key opens it."""
+    from maverick.paths import tenant_scope
+    from maverick.tenant import kms
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", "11" * 32)  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_ENCRYPT_PER_TENANT", "1")
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "hostA"))
+    monkeypatch.setattr(kms, "_dek_cache", {})
+    _s3_store(monkeypatch)
+    with tenant_scope(tenant="acme"):
+        st = att.store(5, "q.txt", "text/plain", b"hello", root=tmp_path / "rootA")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "hostB"))
+    monkeypatch.setattr(kms, "_dek_cache", {})
+    with tenant_scope(tenant="acme"):
+        fetched = att.s3_fetch(5, st.path.name, root=tmp_path / "rootB")
+        assert fetched is not None and att.read_bytes(fetched) == b"hello"
+
+
+def test_one_undecryptable_attachment_does_not_drop_the_others(monkeypatch, tmp_path):
+    import base64
+    from types import SimpleNamespace
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    good = att.store(1, "a.png", "image/png", png, root=tmp_path)
+    bad = att.store(1, "b.png", "image/png", png + b"1", root=tmp_path)
+    raw = bad.path.read_bytes()
+    bad.path.chmod(0o600)
+    bad.path.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))  # corrupt / foreign key
+    with pytest.raises(att.AttachmentRejected):
+        att.read_bytes(bad.path)
+    rows = [SimpleNamespace(id=i, filename=s.filename, mime="image/png", size_bytes=s.size_bytes,
+                            sha256=s.sha256, path=str(s.path)) for i, s in enumerate((good, bad))]
+    world = SimpleNamespace(list_attachments=lambda gid: rows, add_attachment=lambda *a, **k: None)
+    blocks = att.content_blocks_for_goal(world, 1, model=None, shield=None)
+    assert [b["source"]["data"] for b in blocks] == [base64.b64encode(png).decode("ascii")]
+    att.generate_companions(world, 1, root=tmp_path)  # must not raise
+
+
+def test_plaintext_that_starts_with_the_seal_magic_stays_readable(monkeypatch, tmp_path):
+    from maverick import crypto_at_rest
+    data = b"MVKBND1\nnotes about the sealed format\n"
+    assert crypto_at_rest.is_bound(data)
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    st = att.store(1, "notes.txt", "text/plain", data, root=tmp_path)
+    assert att.read_bytes(st.path) == data
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")  # written before sealing existed
+    assert att.read_bytes(st.path) == data
+    forged = st.path.with_name("0" * 16 + "-notes.txt")
+    forged.write_bytes(data)  # digest prefix does not match: not a legacy upload
+    with pytest.raises(att.AttachmentRejected):
+        att.read_bytes(forged)
