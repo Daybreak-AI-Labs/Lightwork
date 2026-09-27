@@ -156,6 +156,13 @@ class PostgresTransactions:
             try:
                 cursor = connection.cursor()
                 yield cursor
+                # A block that caught a database error and carried on leaves the
+                # transaction aborted; COMMIT then silently becomes ROLLBACK in
+                # PostgreSQL. Report it instead of returning apparent success.
+                status = getattr(getattr(connection, "info", None), "transaction_status", None)
+                if getattr(status, "name", None) == "INERROR":
+                    raise TransactionAborted(
+                        "the transaction was aborted by an earlier error; nothing was committed")
                 connection.commit()
             except BaseException:
                 try:
@@ -169,6 +176,10 @@ class PostgresTransactions:
                 if cursor is not None:
                     with contextlib.suppress(Exception):
                         cursor.close()
+
+
+class TransactionAborted(RuntimeError):
+    """A transaction block completed after its transaction had failed."""
 
 
 def close_postgres_pools(*, timeout: float = 5, wait: bool = True) -> None:

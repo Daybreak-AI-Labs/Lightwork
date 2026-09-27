@@ -285,3 +285,18 @@ def test_changed_pool_policy_requires_process_restart():
     changed = gr._BackendSelection("postgres", "not-a-secret-dsn", False, 2, 5)
     assert not gr._backend_authority_matches(gr._backend_authority_token(first),
                                              gr._backend_authority_token(changed))
+
+
+def test_a_block_that_swallowed_a_database_error_is_not_reported_as_committed():
+    connection = Connection()
+    connection.info = SimpleNamespace(transaction_status=SimpleNamespace(name="IDLE"))
+
+    def connect(*args, **kwargs):
+        return connection
+    facility = pt.PostgresTransactions("private-test-adapter", connect=connect)
+    with pytest.raises(pt.TransactionAborted), facility.transaction() as cursor:
+        cursor.execute("write that failed")
+        # the caller caught the database error and carried on; the server now
+        # holds an aborted transaction that COMMIT would silently roll back
+        connection.info.transaction_status = SimpleNamespace(name="INERROR")
+    assert connection.commits == 0 and connection.rollbacks == 1
