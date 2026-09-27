@@ -1051,6 +1051,7 @@ from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
+from .store_catalogs import router as store_catalogs_router  # noqa: E402
 from .support_api import router as support_router  # noqa: E402
 from .system_checks_api import router as system_checks_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
@@ -1063,6 +1064,7 @@ app.include_router(system_checks_router)
 app.include_router(channel_check_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
+app.include_router(store_catalogs_router)
 app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
@@ -7326,19 +7328,26 @@ async def cache_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/store", response_class=HTMLResponse)
-async def store_page(request: Request) -> HTMLResponse:
+async def store_page(request: Request, saved: str = "") -> HTMLResponse:
     """Skill Store: browse + install catalog skills without a terminal."""
     from maverick.catalog import load_catalog
+
+    from .store_catalogs import current_catalogs
 
     try:
         entries = [e.to_dict() for e in load_catalog("skills")]
     except Exception:
         entries = []
     installed = {s.name for s in _load_skills()}
+    catalogs, catalogs_default = current_catalogs()
     return templates.TemplateResponse(
         request,
         "store.html",
-        {"entries": entries, "installed": installed},
+        {"entries": entries, "installed": installed,
+         "is_admin": has_permission(request, "admin"),
+         "catalog_admin": has_global_permission(request, "admin"),
+         "install_allowed": os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"},
+         "catalogs": catalogs, "catalogs_default": catalogs_default, "saved": saved},
     )
 
 

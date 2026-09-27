@@ -87,8 +87,9 @@ def test_other_global_or_executable_deployments_have_the_same_safety_contract():
     assert "Could not reach the server — check your connection and try again." in governance
 
     assert "if (btn.dataset.inFlight === 'true') return;" in store
-    assert "Install skill “' + name + '” into this deployment?" in store
-    assert "Skill installation failed (HTTP ' + r.status + '). Try again." in store
+    assert "Add the skill “' + label + '”?" in store
+    assert "window.mvErrorText(r, 'add the skill')" in store
+    assert "HTTP" not in store
     assert "if (!installed)" in store
 
     assert "function beginMutation(button)" in roles

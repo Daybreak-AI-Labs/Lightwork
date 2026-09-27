@@ -474,7 +474,7 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
-                    "research_execution", "models",
+                    "research_execution", "models", "catalogs",
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
                     *SWITCHABLE_SECTIONS)):
         tbl = data.get(section) or {}
@@ -869,6 +869,42 @@ def set_model_discovery(enabled: bool) -> None:
                 "dashboard settings are unreadable; settings were not changed"
             )
         models["discovery"] = bool(enabled)
+        _write(data)
+
+
+def set_catalog_indexes(urls) -> None:
+    """Replace the skill-catalog addresses ([catalogs] indexes) in the overlay.
+
+    Each entry must be a plain https web address (no credentials in it); at
+    most five. An empty list removes the key so the built-in catalog is used
+    again. Installing from any catalog still needs the admin role and the
+    server's skill-install opt-in; this only changes what the Store lists."""
+    from urllib.parse import urlsplit
+
+    cleaned: list[str] = []
+    for raw in urls or []:
+        url = str(raw or "").strip().rstrip("/")
+        if not url:
+            continue
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or not parts.hostname or parts.username
+                or parts.password or len(url) > 300 or any(c.isspace() for c in url)):
+            raise ValueError("catalog addresses must be plain https web addresses")
+        if url not in cleaned:
+            cleaned.append(url)
+    if len(cleaned) > 5:
+        raise ValueError("at most five catalog addresses")
+    with _locked():
+        data = _load_overlay_for_update()
+        catalogs = data.setdefault("catalogs", {})
+        if not isinstance(catalogs, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        if cleaned:
+            catalogs["indexes"] = cleaned
+        else:
+            catalogs.pop("indexes", None)
         _write(data)
 
 
