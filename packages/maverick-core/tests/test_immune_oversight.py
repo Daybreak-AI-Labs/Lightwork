@@ -94,3 +94,35 @@ def test_signed_record_verifies_and_detects_tampering(world):
     assert o.verify_record(rec, pub)
     rec["body"]["decision"] = "denied"
     assert not o.verify_record(rec, pub)
+
+
+def test_generated_canary_copies_a_real_approval_and_plants_one_flaw(world, monkeypatch):
+    import random
+    monkeypatch.setattr(o, "canaries_enabled", lambda: True)
+    real = world.create_approval(
+        "stripe_payout", risk="high", requested_by="agent:ap_clerk",
+        detail="Pay invoice INV-7 $4,250.00 to vendor ops@acme.com, account 12345678")
+    world.create_approval("email", detail="Send weekly digest")  # other class
+    out = o.generate_canary(world, decision_class="stripe_payout", rng=random.Random(3))
+    canary = world.get_approval(out["approval_id"])
+    assert out["modelled_on"] == real and out["decision_class"] == "stripe_payout"
+    assert (canary.action, canary.risk, canary.requested_by) == (
+        "stripe_payout", "high", "agent:ap_clerk")
+    assert canary.detail != world.get_approval(real).detail
+    assert out["flaw"] in {"amount inflated tenfold", "destination account changed"} \
+        or out["flaw"].startswith("recipient domain swapped")
+    assert out["approval_id"] in o.canary_ids()
+    # canaries are never used as models for further canaries
+    again = o.generate_canary(world, decision_class="stripe_payout", rng=random.Random(4))
+    assert again["modelled_on"] == real
+
+
+def test_generated_canary_falls_back_to_urgency_and_needs_real_history(world, monkeypatch):
+    import random
+    monkeypatch.setattr(o, "canaries_enabled", lambda: True)
+    with pytest.raises(LookupError):
+        o.generate_canary(world, decision_class="wire")
+    world.create_approval("deploy", detail="Deploy build 42 to production")
+    out = o.generate_canary(world, rng=random.Random(1))
+    assert out["flaw"] == "urgency and verification-bypass pressure"
+    assert "skip the usual verification" in world.get_approval(out["approval_id"]).detail

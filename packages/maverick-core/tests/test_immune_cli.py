@@ -100,7 +100,7 @@ def test_twin_replay_list_and_awareness(tmp_path, monkeypatch):
     out = _run("twin", "replay", str(gid), "--max-dollars", "0.5")
     assert out.exit_code == 0, out.output
     assert seen == ["rows=12"] and json.loads(out.output)["served"] == 1
-    assert "served 1/1, unmatched 0" in _run("twin", "list").output
+    assert "served 1/1, approximate 0, unmatched 0" in _run("twin", "list").output
     assert _run("twin", "replay", "999").exit_code != 0
 
     s = tmp_path / "s.json"
@@ -111,3 +111,25 @@ def test_twin_replay_list_and_awareness(tmp_path, monkeypatch):
 
 def _d(twin, goal_id, tool, args, run):
     return twin.dispatch(goal_id, tool, args, lambda: run(tool, args))
+
+
+def test_canary_auto_prints_ids_but_never_the_flaw(tmp_path, monkeypatch):
+    import maverick.cli._immune_groups as groups
+    from maverick.immune import oversight
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setattr(config, "get_immune", lambda: {"canaries": True, "twin_record": False})
+    db = tmp_path / "w.db"
+    WorldModel(db).create_approval("stripe_payout", detail="Pay $1,200.00 to ops@acme.com")
+    monkeypatch.setattr(groups, "open_world", lambda *a, **k: WorldModel(db))
+    out = _run("canary-auto", "--count", "2")
+    assert out.exit_code == 0, out.output
+    assert out.output.count("seeded canary approval #") == 2
+    assert "inflated" not in out.output and "lookalike" not in out.output
+    assert len(oversight.canary_ids()) == 2
+    assert _run("canary-auto", "--class", "wire").exit_code != 0
+
+
+def test_awareness_requires_exactly_one_source():
+    assert _run("awareness").exit_code != 0

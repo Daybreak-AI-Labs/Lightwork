@@ -77,6 +77,25 @@ def canary_cmd(action, detail, decision_class, flaw, risk, requested_by) -> None
     click.echo(f"seeded canary approval #{aid}")
 
 
+@immune_group.command("canary-auto")
+@click.option("--class", "decision_class", default=None,
+              help="Only model approvals of this action (default: any).")
+@click.option("--count", default=1, show_default=True, type=click.IntRange(1, 50))
+def canary_auto_cmd(decision_class, count) -> None:
+    """Seed canaries modelled on real recent approvals, each with one planted
+    flaw. The flaw is kept in the private ledger, not printed, so whoever runs
+    this can still be measured fairly."""
+    from ..immune import oversight as o
+    world = open_world()
+    try:
+        for _ in range(count):
+            out = o.generate_canary(world, decision_class=decision_class)
+            click.echo(f"seeded canary approval #{out['approval_id']} "
+                       f"({out['decision_class']})")
+    except (PermissionError, LookupError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @immune_group.command("drill")
 @click.argument("person")
 @click.argument("decision_class")
@@ -194,7 +213,9 @@ def twin_group() -> None:
 @click.argument("goal_id", type=int)
 @click.option("--max-dollars", default=None, type=float,
               help="Spend cap for the twin run (else [budget] / the runner default).")
-def twin_replay(goal_id, max_dollars) -> None:
+@click.option("--tolerance", default=0.8, show_default=True, type=click.FloatRange(0, 1),
+              help="Minimum argument similarity to serve a near-identical recorded call.")
+def twin_replay(goal_id, max_dollars, tolerance) -> None:
     """Re-run GOAL_ID as a new goal whose tools return the recorded results."""
     from ..immune import twin
     from ..runner import run_goal_in_thread
@@ -203,7 +224,8 @@ def twin_replay(goal_id, max_dollars) -> None:
     world = open_world()
     try:
         report = twin.replay_goal(
-            world, goal_id, lambda gid: run_goal_in_thread(gid, max_dollars=max_dollars))
+            world, goal_id, lambda gid: run_goal_in_thread(gid, max_dollars=max_dollars),
+            tolerance=tolerance)
     except LookupError as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
@@ -216,19 +238,51 @@ def twin_list() -> None:
     """Past twin replays (counts only)."""
     from ..immune import _ledger, twin
     for r in _ledger.read(twin.replays_path()):
+        if r.get("type") == "awareness_probe":
+            continue
+        sim = r.get("result_similarity")
         click.echo(f"  #{r['production_goal']} -> #{r['twin_goal']}: {r['twin_status']} "
-                   f"(served {r['served']}/{r['recorded']}, unmatched {r['unmatched']})")
+                   f"(served {r['served']}/{r['recorded']}, "
+                   f"approximate {len(r.get('approximate', []))}, unmatched {r['unmatched']}, "
+                   f"answer similarity {'n/a' if sim is None else sim})")
 
 
 @immune_group.command("awareness")
-@click.argument("samples", type=click.Path(exists=True, dir_okay=False))
+@click.argument("samples", required=False, type=click.Path(exists=True, dir_okay=False))
+@click.option("--goals", default=None,
+              help="Comma-separated recorded goal ids: replay each twice (unmarked and "
+                   "with an evaluation cue) and measure the behaviour gap.")
+@click.option("--max-dollars", default=None, type=float, help="Spend cap per replay.")
 @click.option("--alpha", default=0.05, show_default=True)
-def awareness_cmd(samples, alpha) -> None:
-    """Behaviour rate when runs are identifiable as tests vs not (twins).
+def awareness_cmd(samples, goals, max_dollars, alpha) -> None:
+    """Does behaviour change when the model can tell it is being watched?
 
-    SAMPLES is JSON: {"watched": [bool...], "unwatched": [bool...]}, one flag per
-    run for the behaviour measured (e.g. a policy violation)."""
+    With --goals, measured from real runs: each recorded production goal is
+    replayed as a twin twice, identical except for an evaluation cue. With
+    SAMPLES (JSON {"watched": [bool...], "unwatched": [bool...]}), computed from
+    flags you supply."""
     from ..immune.invariance import awareness_gap
+    if bool(samples) == bool(goals):
+        raise click.UsageError("give exactly one of SAMPLES or --goals")
+    if goals:
+        from ..immune import twin
+        from ..runner import run_goal_in_thread
+        from . import _require_llm_key
+        _require_llm_key()
+        try:
+            ids = [int(g) for g in goals.split(",") if g.strip()]
+        except ValueError as exc:
+            raise click.UsageError("--goals must be comma-separated integers") from exc
+        world = open_world()
+        try:
+            _emit(twin.awareness_probe(
+                world, ids, lambda gid: run_goal_in_thread(gid, max_dollars=max_dollars),
+                alpha=alpha))
+        except LookupError as exc:
+            raise click.ClickException(str(exc)) from exc
+        finally:
+            world.close()
+        return
     data = _load(samples)
     try:
         _emit(awareness_gap([bool(x) for x in data["watched"]],

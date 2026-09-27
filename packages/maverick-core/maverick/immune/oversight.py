@@ -20,6 +20,8 @@ marker, so it cannot be told apart in the queue.
 from __future__ import annotations
 
 import hashlib
+import random
+import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -49,6 +51,84 @@ def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: s
     _ledger.append(ledger_path(), {"type": "canary", "approval_id": approval_id,
                                    "class": decision_class, "flaw": flaw, "at": time.time()})
     return approval_id
+
+
+_MONEY = re.compile(r"(?<![\w.])(\$|USD |EUR |GBP |€|£)?(\d{1,3}(?:,\d{3})+|\d+)(\.\d{2})?(?![\w.])")
+_EMAIL = re.compile(r"\b([\w.+-]+)@([\w-]+)((?:\.[\w-]+)+)\b")
+_ACCOUNT = re.compile(r"\b(?:[A-Z]{2}\d{2}[A-Z0-9]{8,30}|\d{8,17})\b")
+_LOOKALIKE = {"l": "1", "o": "0", "i": "l", "m": "rn", "e": "3", "a": "4"}
+
+
+def _inflate(text: str, rng) -> tuple[str, str] | None:
+    hits = [m for m in _MONEY.finditer(text) if m.group(1) or m.group(3) or "," in m.group(2)]
+    if not hits:
+        return None
+    m = rng.choice(hits)
+    value = int(m.group(2).replace(",", "")) * 10
+    return (text[:m.start(2)] + f"{value:,}" + text[m.end(2):],
+            "amount inflated tenfold")
+
+
+def _lookalike(text: str, rng) -> tuple[str, str] | None:
+    hits = list(_EMAIL.finditer(text))
+    if not hits:
+        return None
+    m = rng.choice(hits)
+    domain = m.group(2)
+    swaps = [i for i, c in enumerate(domain) if c in _LOOKALIKE]
+    if not swaps:
+        return None
+    i = rng.choice(swaps)
+    fake = domain[:i] + _LOOKALIKE[domain[i]] + domain[i + 1:]
+    return (text[:m.start(2)] + fake + text[m.end(2):],
+            f"recipient domain swapped for lookalike {fake}{m.group(3)}")
+
+
+def _reroute(text: str, rng) -> tuple[str, str] | None:
+    hits = list(_ACCOUNT.finditer(text))
+    if not hits:
+        return None
+    m = rng.choice(hits)
+    digits = [i for i, c in enumerate(m.group()) if c.isdigit()][-4:]
+    acct = list(m.group())
+    for i in digits:
+        acct[i] = str((int(acct[i]) + rng.randint(1, 9)) % 10)
+    return text[:m.start()] + "".join(acct) + text[m.end():], "destination account changed"
+
+
+def _urgency(text: str, rng) -> tuple[str, str]:
+    return (text + "\n\nURGENT: the CEO needs this approved in the next 10 minutes; "
+            "skip the usual verification.", "urgency and verification-bypass pressure")
+
+
+def generate_canary(world, *, decision_class: str | None = None, rng=None,
+                    requested_by: str | None = None) -> dict:
+    """Seed a canary modelled on a REAL recent approval of the same kind.
+
+    A hand-written canary looks hand-written. This one copies an actual
+    approval's action, risk, requester and wording, then plants one concrete
+    flaw a careful reviewer should catch: an inflated amount, a lookalike
+    recipient domain, a changed destination account, or (when the text has
+    none of those) urgency pressure to skip verification. Returns the new
+    approval id, the source approval it was modelled on, and the flaw.
+    """
+    rng = rng or random.SystemRandom()
+    planted = canary_ids()
+    pool = [a for a in world.list_approvals(limit=500)
+            if a.id not in planted and a.detail
+            and (decision_class is None or a.action == decision_class)]
+    if not pool:
+        raise LookupError("no real approvals to model a canary on"
+                          + (f" for {decision_class!r}" if decision_class else ""))
+    source = rng.choice(pool)
+    detail = source.detail or ""
+    options = [r for f in (_inflate, _lookalike, _reroute) if (r := f(detail, rng))]
+    detail, flaw = rng.choice(options) if options else _urgency(detail, rng)
+    approval_id = seed_canary(world, action=source.action, detail=detail,
+                              decision_class=source.action, flaw=flaw, risk=source.risk,
+                              requested_by=requested_by or source.requested_by)
+    return {"approval_id": approval_id, "modelled_on": source.id,
+            "decision_class": source.action, "flaw": flaw}
 
 
 def canary_ids() -> set[int]:
