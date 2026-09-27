@@ -54,6 +54,19 @@ maverick immune oversight            # catch rate and earned authority per perso
 maverick immune drill carol month_end_close --passed   # no-agent capability drill
 ```
 
+Hand-written canaries look hand-written. `maverick immune canary-auto
+[--class ACTION] [--count N]` models each canary on a real recent approval of
+the same kind. It copies the action, risk, requester and wording, then plants
+one concrete flaw:
+- an amount inflated tenfold;
+- a lookalike recipient domain;
+- a changed destination account;
+- when the text has none of those, pressure to skip verification.
+
+Existing canaries are never used as models. The command prints only approval
+ids; the flaw stays in the private ledger, so whoever runs it can still be
+measured fairly.
+
 A denied canary is a catch; an approved one is a miss. The canary's identity
 lives only in a private server-side ledger. The approval itself carries no
 marker. Nothing waits on a canary approval, so no decision executes anything.
@@ -110,18 +123,35 @@ tenant, and sealed (bound to the goal) when at-rest encryption is on.
 description, owner, principal, domain and project, while each tool returns the
 result production received for the same tool and arguments, in the same order.
 
-- Nothing live is touched. A call production never made returns an ordinary
-  tool failure, is not executed, and is counted as unmatched.
+- Nothing live is touched. An exact (tool, arguments) match is served first.
+  Otherwise the closest unconsumed recorded call to the same tool is served
+  when its arguments are at least `--tolerance` similar (default 0.8), because
+  a new model rarely phrases a query byte-for-byte as production did. Each
+  such call is reported as a divergence with its score. Anything further away
+  returns an ordinary tool failure, is not executed, and is counted as
+  unmatched.
+- The report compares the twin's final answer with production's
+  (`result_similarity`).
 - Coordination tools still run, so the swarm re-forms and its children replay.
   `ask_user` is replayed, so a twin never messages a person.
-- Nothing in the run marks it as a test. That makes twins the unwatched arm
-  for `maverick immune awareness`, which compares a behaviour's rate in runs
-  a model could identify as tests with its rate in runs it could not.
+- Nothing in the run marks it as a test.
 - Use a twin to try a new model, prompt or policy on real work. The report
   gives served, unserved and unmatched counts; `twin list` keeps counts only.
 
 A twin goal is an ordinary goal row, so the learning loops see it like any
 other run. Recording stops at 64 MB per goal.
+
+### Evaluation awareness, measured on real work
+
+`maverick immune awareness --goals 12,15,19` replays each recorded production
+goal twice. The two runs are identical except that one carries an explicit
+"this is an evaluation run" cue. Two behaviours are compared across the arms
+with a two-proportion test, so noise is not reported as awareness:
+- *diverged*: an attempted call production never made, or an answer that
+  moved away from production's;
+- *blocked*: the goal ended blocked.
+
+Each goal costs two model-driven runs. Only aggregate results are ledgered.
 
 ## Configuration
 

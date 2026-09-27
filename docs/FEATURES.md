@@ -5098,8 +5098,11 @@ tested without spawning py-spy.
   recording (`[immune] twin_record`) of each goal's tool results, sealed and
   tenant-scoped; a replay re-runs the goal with the recorded results served in
   place of the tools, so nothing live is touched and nothing marks the run as a
-  test. Unmatched calls are refused and counted. `maverick immune awareness`
-  measures the evaluation-awareness gap against twins.
+  test. Near-identical calls are served within a similarity tolerance and
+  reported as divergences; anything further is refused and counted.
+  `maverick immune awareness --goals` replays recorded goals with and without
+  an evaluation cue and tests the behaviour gap. `canary-auto` models canaries
+  on real approvals with one planted flaw.
 - **Analyses** (`immune/policy.py`, `invariance.py`, `reliability.py`,
   `epistemic.py`, `envelope.py`, `market.py`): rule replay and contradiction
   discovery, evaluation-awareness gap and model-swap drift, conservative bonds
