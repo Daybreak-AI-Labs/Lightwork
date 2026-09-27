@@ -17,7 +17,7 @@
       <td><strong>{{ m.name or m.email }}</strong>{% if m.name %}<div class="muted">{{ m.email }}</div>{% endif %}
         {% if m.id == staff.id %}<div class="muted">You</div>{% endif %}</td>
       <td>{{ m.role|role }}</td>
-      <td>{% if m.totp_enrolled %}<span class="badge b-active">Set up</span>{% else %}<span class="badge b-grace">Not set up yet</span>{% endif %}</td>
+      <td>{% if m.totp_enrolled %}<span class="badge b-active">Set up</span>{% else %}<span class="badge b-grace">Hasn't finished setting up</span>{% endif %}</td>
       <td>{% if m.disabled %}<span class="badge b-revoked">Turned off</span>{% else %}<span class="badge b-active">Can sign in</span>{% endif %}</td>
       {% if staff.role == 'owner' %}
       <td style="white-space:nowrap">
@@ -28,6 +28,7 @@
           </select>
           <button class="btn ghost small" type="submit">Save role</button>
         </form>
+        {% if not m.totp_enrolled and not m.disabled %}<a class="btn ghost small" href="/team/{{ m.id }}/link">Send a new set-up link</a>{% endif %}
         <a class="btn {% if not m.disabled %}danger{% else %}ghost{% endif %} small" href="/team/{{ m.id }}/access">{% if m.disabled %}Turn access on{% else %}Turn access off{% endif %}</a>
         {% else %}<span class="muted">Another owner can change your access.</span>{% endif %}
       </td>
@@ -40,7 +41,7 @@
 {% if staff.role == 'owner' %}
 <h2>Add a team member</h2>
 <div class="card">
-  <p class="help" style="margin-top:0">They sign in with the temporary password you set here, then set up two-step sign-in with an authenticator app before they can use the console. Share the password in person or by phone, not by email.</p>
+  <p class="help" style="margin-top:0">You'll get a set-up link to send them. With it they choose their own password and set up two-step sign-in. The link works once and expires in 3 days.</p>
   <form method="post" action="/team">
     <div class="formgrid">
       <div><label for="team-email">Work email</label><input id="team-email" name="email" type="email" value="{{ form.email or '' }}" autocomplete="off" required></div>
@@ -49,10 +50,8 @@
         <select id="team-role" name="role">
           {% for r in roles %}<option value="{{ r }}" {% if r == (form.role or 'viewer') %}selected{% endif %}>{{ r|role_help }}</option>{% endfor %}
         </select></div>
-      <div><label for="team-password">Temporary password <span class="muted">(at least 10 characters)</span></label>
-        <input id="team-password" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
     </div>
-    <div class="actions"><button class="btn" type="submit">Add team member</button></div>
+    <div class="actions"><button class="btn" type="submit">Add team member and create link</button></div>
   </form>
 </div>
 {% else %}

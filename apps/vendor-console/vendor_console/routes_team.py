@@ -2,26 +2,30 @@
 
 Owners and administrators can see the team; only an owner can add people,
 change roles, or turn sign-in off and on. Every change is audited. A new person
-signs in with the temporary password they were given and must set up two-step
-sign-in before reaching the console (the normal enrolment flow). Nobody can
+gets a single-use set-up link (shown once to the owner, stored only as a hash,
+valid for three days) where they choose their own password and then set up
+two-step sign-in. The owner never knows their password. Nobody can
 change their own role or access, and the last active owner can't be removed.
 """
 from __future__ import annotations
 
+import secrets
 import sqlite3
+import time
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from starlette.exceptions import HTTPException
 
-from . import audit, security, store
+from . import audit, store
 from .auth import require_owner, require_write
 from .models import ROLES, Staff
 from .render import render
+from .util import hash_token
 
 router = APIRouter()
 
-_MIN_PASSWORD = 10
+LINK_HOURS = 72
 
 
 def _page(request: Request, staff: Staff, *, error: str = "", notice: str = "",
@@ -44,17 +48,31 @@ def _member(conn: sqlite3.Connection, staff_id: int) -> Staff:
 
 @router.get("/team")
 def team(request: Request, notice: str = "", staff: Staff = Depends(require_write)):
-    messages = {"added": "Team member added. Give them their temporary password in person or by phone.",
-                "role": "Role changed. They will need to sign in again.",
+    messages = {"role": "Role changed. They will need to sign in again.",
                 "off": "Access turned off. They have been signed out everywhere.",
                 "on": "Access turned back on."}
     return _page(request, staff, notice=messages.get(notice, ""))
 
 
+def _issue_link(request: Request, staff: Staff, member: Staff, *, reset: bool):
+    """Create a set-up link, retire older ones, audit it (never the token) and
+    show it once."""
+    conn = request.app.state.conn
+    token = secrets.token_urlsafe(32)
+    expires = time.time() + LINK_HOURS * 3600
+    store.create_invite(conn, staff_id=member.id, token_hash=hash_token(token),
+                        expires_at=expires, created_by=staff.email, reset=reset)
+    audit.record(conn, actor=staff.email, action="staff.invite", target=member.email,
+                 detail={"expires_at": int(expires), "reissued": reset})
+    return render(request, "team_link.html", {
+        "staff": staff, "section": "team", "member": member, "reissued": reset,
+        "days": LINK_HOURS // 24,
+        "link": str(request.base_url).rstrip("/") + "/welcome/" + token})
+
+
 @router.post("/team")
 def team_add(request: Request, email: str = Form(...), name: str = Form(""),
-             role: str = Form("viewer"), password: str = Form(...),
-             staff: Staff = Depends(require_owner)):
+             role: str = Form("viewer"), staff: Staff = Depends(require_owner)):
     conn = request.app.state.conn
     form = {"email": email, "name": name, "role": role}
     email = email.strip().lower()
@@ -64,21 +82,48 @@ def team_add(request: Request, email: str = Form(...), name: str = Form(""),
     if role not in ROLES:
         return _page(request, staff, error="Choose a role from the list.", form=form,
                      status_code=400)
-    if len(password) < _MIN_PASSWORD:
-        return _page(request, staff, form=form, status_code=400,
-                     error=f"The temporary password must be at least {_MIN_PASSWORD} characters.")
     if store.get_staff_by_email(conn, email) is not None:
         return _page(request, staff, error="Someone with that email is already on the team.",
                      form=form, status_code=400)
     try:
-        store.create_staff(conn, email=email, name=name.strip(), role=role,
-                           pw_hash=security.hash_password(password))
+        # No password: nobody can sign in as this person until they use their link.
+        member_id = store.create_staff(conn, email=email, name=name.strip(), role=role,
+                                       pw_hash="")
     except sqlite3.IntegrityError:
         return _page(request, staff, error="Someone with that email is already on the team.",
                      form=form, status_code=400)
     audit.record(conn, actor=staff.email, action="staff.create", target=email,
                  detail={"role": role})
-    return RedirectResponse("/team?notice=added", status_code=303)
+    return _issue_link(request, staff, _member(conn, member_id), reset=False)
+
+
+@router.get("/team/{staff_id}/link")
+def team_link_confirm(request: Request, staff_id: int, staff: Staff = Depends(require_owner)):
+    member = _member(request.app.state.conn, staff_id)
+    who = member.name or member.email
+    return render(request, "confirm.html", {
+        "staff": staff, "section": "team",
+        "title": f"Send {who} a new set-up link?",
+        "consequence": (f"Any earlier link for {who} stops working, and if they already chose "
+                        "a password it is cleared. They finish setting up with the new link."),
+        "action": f"/team/{staff_id}/link", "hidden": {},
+        "button": "Create new link", "danger": False, "cancel": "/team"})
+
+
+@router.post("/team/{staff_id}/link")
+def team_link(request: Request, staff_id: int, staff: Staff = Depends(require_owner)):
+    conn = request.app.state.conn
+    member = _member(conn, staff_id)
+    if member.id == staff.id:
+        return _page(request, staff, status_code=400,
+                     error="You can't send yourself a set-up link. Use Change my password instead.")
+    if member.totp_enrolled:
+        return _page(request, staff, status_code=400,
+                     error="This person has already finished setting up their account.")
+    if member.disabled:
+        return _page(request, staff, status_code=400,
+                     error="Turn this person's access back on before sending a set-up link.")
+    return _issue_link(request, staff, member, reset=True)
 
 
 def _guard_change(conn: sqlite3.Connection, staff: Staff, member: Staff, *,

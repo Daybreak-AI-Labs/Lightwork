@@ -45,6 +45,9 @@ _ACTION = {
     "release.publish": "Published a release",
     "release.yank": "Withdrew a release",
     "staff.create": "Added a team member",
+    "staff.invite": "Created a set-up link",
+    "staff.invite.accept": "Used a set-up link and chose a password",
+    "staff.password.change": "Changed their password",  # pragma: allowlist secret
     "staff.role": "Changed a team member's role",
     "staff.disable": "Turned off a team member's access",
     "staff.enable": "Turned on a team member's access",

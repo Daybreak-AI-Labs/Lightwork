@@ -225,30 +225,13 @@ def test_ticket_assignee_is_picked_from_the_team(admin, app, make_staff):
 
 # ---- team --------------------------------------------------------------------
 
-def test_owner_adds_team_member_who_must_then_set_up_two_step(admin, app):
-    from fastapi.testclient import TestClient
-    r = admin.post("/team", data={"email": "New.Person@daybreak.co", "name": "New Person",
-                                  "role": "support", "password": "temporary-pass-1"})  # pragma: allowlist secret
-    assert r.status_code == 200 and "Team member added" in r.text
-    row = store.get_staff_by_email(app.state.conn, "new.person@daybreak.co")
-    assert row["role"] == "support" and not row["totp_enrolled"]
-    assert any(e.action == "staff.create" and e.target == "new.person@daybreak.co"
-               for e in audit.recent(app.state.conn))
-    login = TestClient(app).post("/login", data={"email": "new.person@daybreak.co",
-                                        "password": "temporary-pass-1"},  # pragma: allowlist secret
-                        follow_redirects=False)
-    assert login.headers["location"] == "/enroll-totp"            # two-step is still required
-    dup = admin.post("/team", data={"email": "new.person@daybreak.co", "role": "viewer",
-                                    "password": "another-pass-1"})  # pragma: allowlist secret
-    assert dup.status_code == 400 and "already on the team" in dup.text
-
-
 @pytest.mark.parametrize("role", ["admin", "support", "viewer"])
 def test_only_owners_change_the_team(client, make_staff, login_cookie, app, role):
     target = make_staff(email="target@daybreak.co", role="viewer")
     _as(client, make_staff, login_cookie, role)
-    assert client.post("/team", data={"email": "x@daybreak.co", "role": "owner",
-                                      "password": "long-enough-1"}).status_code == 403  # pragma: allowlist secret
+    assert client.post("/team", data={"email": "x@daybreak.co", "role": "owner"}).status_code == 403
+    assert client.post(f"/team/{target}/link").status_code == 403
+    assert client.get(f"/team/{target}/link").status_code == 403
     assert client.post(f"/team/{target}/role", data={"role": "owner"}).status_code == 403
     assert client.post(f"/team/{target}/access", data={"disabled": "1"}).status_code == 403
     assert store.get_staff(app.state.conn, target).role == "viewer"

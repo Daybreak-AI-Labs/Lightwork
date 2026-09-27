@@ -25,6 +25,7 @@
     <div class="who">
       <div class="email">{{ staff.email }}</div>
       <div class="role">{{ staff.role|role }}</div>
+      <a href="/account/password"{% if section == 'account' %} aria-current="page"{% endif %} style="display:block;font-size:12px;margin-bottom:6px">Change my password</a>
       <form method="post" action="/logout"><button class="link">Sign out</button></form>
     </div>
   </aside>
