@@ -121,7 +121,7 @@ def test_finance_board_payload_is_department_scoped_and_honest():
 def test_finance_board_page_and_workspace_links():
     assert "Finance command center" in client.get("/finance/board").text
     page = client.get("/finance").text
-    assert "/finance/board" in page and "Licenses" in page
+    assert "/finance/board" in page and "Licences" in page
 
 
 def test_binder_carries_finance_evidence():
