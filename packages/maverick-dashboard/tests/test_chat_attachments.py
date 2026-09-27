@@ -81,7 +81,18 @@ def test_chat_page_has_attach_control(monkeypatch, tmp_path):
     assert 'name="files"' in r.text
     assert 'id="attach-btn"' in r.text
     assert (
-        'id="attach-input" multiple aria-label="Attach files to this goal" '
+        'id="attach-input" multiple aria-label="Attach files to this task" '
         'tabindex="-1"'
     ) in r.text
     assert 'enctype="multipart/form-data"' in r.text
+
+
+def test_chat_pages_read_plainly_and_offer_a_menu_on_small_screens(monkeypatch, tmp_path):
+    from test_support.plain_language import developer_terms
+
+    _prep(monkeypatch, tmp_path)
+    r = _client().get("/chat")
+    assert developer_terms(r.text) == []
+    assert 'id="cs-menu" aria-controls="cs-side"' in r.text
+    assert 'aria-label="Start task"' in r.text and "Run this task" in r.text
+    assert "transcribe failed" not in r.text

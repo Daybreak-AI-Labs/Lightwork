@@ -240,10 +240,10 @@
     {% if goal.status == 'draft' %}<h2>Submission saved as a draft</h2>{% endif %}
     <p>{{ submission.detail.message }}</p>
     {% if submission.detail.coverage %}
-    <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: text companion {{ item.status }}</li>{% endfor %}</ul>
+    <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}readable text ready{% elif item.status in ('pending', 'queued') %}still being read{% else %}could not be read ({{ item.status | humanize | lower }}){% endif %}</li>{% endfor %}</ul>
     {% endif %}
     {% if goal.status == 'draft' %}
-    <p>AI work has not started. If all files were admitted, retry preparation using this saved draft.</p>
+    <p>AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.</p>
     <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
       <button class="btn" type="submit">Retry preparation</button>
     </form>
@@ -284,7 +284,7 @@
     <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
       <button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>
-      <input type="file" id="attach-add" multiple aria-label="Add files to this goal"
+      <input type="file" id="attach-add" multiple aria-label="Add files to this task"
              tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
@@ -332,15 +332,15 @@
         <div class="signoff">
           {% if signoff %}
             <div class="signoff__head">
-              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision }}</span>
-              <span class="muted">by {{ signoff.decided_by or 'operator' }} · <span data-when="{{ signoff.created_at }}"></span></span>
+              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision | humanize }}</span>
+              <span class="muted">by {{ (signoff.decided_by | identity).name if signoff.decided_by else 'a reviewer' }} · <span data-when="{{ signoff.created_at }}"></span></span>
             </div>
             {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
             {% if signoff.decision == 'approved' and rendered.table %}
               <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
             {% endif %}
           {% elif goal.status == 'done' %}
-            <p class="signoff__prompt">Needs <strong>{{ deliverable.gate }}</strong> sign-off before it's acted on.</p>
+            <p class="signoff__prompt">Needs <strong>{{ "a manager's approval" if deliverable.gate == 'approval' else "a reviewer's sign-off" }}</strong> before it's acted on.</p>
             <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
             <div class="signoff__actions">
               <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
@@ -348,7 +348,7 @@
             </div>
             <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
           {% else %}
-            <p class="signoff__prompt muted">Sign-off ({{ deliverable.gate }}) opens when the deliverable is finished.</p>
+            <p class="signoff__prompt muted">{{ "Approval" if deliverable.gate == 'approval' else "Sign-off" }} opens when the result is finished.</p>
           {% endif %}
         </div>
       {% endif %}
@@ -387,8 +387,8 @@
         <div class="artifact">
           <div class="artifact__head">
             <span class="artifact__title">{{ a.title or 'Untitled' }}</span>
-            <span class="badge">{{ a.kind }}</span>
-            <span class="muted artifact__ver">v{{ a.version }}{% if a.versions > 1 %} · {{ a.versions }} versions{% endif %}</span>
+            <span class="badge">{{ {'markdown': 'Document', 'table': 'Table', 'text': 'Text', 'code': 'Code', 'json': 'Data', 'csv': 'Table'}.get(a.kind, a.kind | humanize) }}</span>
+            <span class="muted artifact__ver">Version {{ a.version }}{% if a.versions > 1 %} of {{ a.versions }}{% endif %}</span>
           </div>
           {% if a.table %}
             <div class="deliverable__table-wrap">
@@ -400,7 +400,7 @@
               </table>
             </div>
           {% else %}
-            <pre class="artifact__body" tabindex="0">{{ a.prose }}</pre>
+            <div class="artifact__body prose" tabindex="0" data-markdown>{{ a.prose }}</div>
           {% endif %}
           {% if a.versions > 1 %}
             <details class="artifact__history" data-goal="{{ goal.id }}" data-title="{{ a.title }}">
@@ -434,7 +434,7 @@
       <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
       <ul id="share-list" class="share-list">
         {% for s in share_links %}
-          <li data-id="{{ s.id }}">Link #{{ s.id }} (read-only)
+          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
             <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">Revoke</button></li>
         {% endfor %}
       </ul>
@@ -457,7 +457,7 @@
           <div class="field">
             <label for="halt-resume-budget">Spending limit (USD, optional)</label>
             <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}Up to ${{ spend_ceiling_text }}{% else %}Optional task limit{% endif %}" aria-describedby="halt-resume-budget-hint">
-            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use this deployment’s spend cap of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
+            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use your workspace’s spending limit of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
@@ -504,6 +504,12 @@
 {% endblock %}
 {% block scripts_extra %}
   <script>
+    // Plain-language failure text for this page (no status codes or server text).
+    function cgErr(failure, what) {
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    }
+  </script>
+  <script>
     (function() {
       const goalId = {{ goal.id }};
       const eventsEl = document.getElementById('events');
@@ -548,7 +554,7 @@
         error: 'M8 4v5M8 11.5v.5M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11z', verify: 'M4 8.5l3 3 5-7', artifact: 'M4 3h5l3 3v7H4z',
         withheld: 'M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM5.5 8h5',
       };
-      const STATUS_LABELS = { pending: 'queued', running: 'working', done: 'done', blocked: 'paused', failed: 'failed', cancelled: 'cancelled' };
+      const STATUS_LABELS = { pending: 'Queued', running: 'Working', done: 'Done', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
@@ -657,7 +663,7 @@
         if (WITHHELD.has(content.trim())) {
           const n = Number(eventsEl.dataset.withheld || 0) + 1;
           eventsEl.dataset.withheld = String(n);
-          const text = (n === 1 ? '1 step' : n + ' steps') + ' completed. Step details are withheld by the evidence gateway until the result is ready.';
+          const text = (n === 1 ? '1 step' : n + ' steps') + ' completed. Step details will appear when the answer is ready.';
           if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '');
           else withheldRow.querySelector('.step__text').textContent = text;
           eventsEl.appendChild(withheldRow);  // stays the latest line
@@ -800,7 +806,7 @@
             } else {
               const j = await r.json().catch(function() { return {}; });
               actionMsg.style.color = 'var(--danger)';
-              actionMsg.textContent = j.detail || ('Submit failed: ' + r.status);
+              actionMsg.textContent = cgErr(r, 'send your answer');
             }
           } finally {
             answerInput.disabled = false;
@@ -820,7 +826,7 @@
           const r = await fetch(answerForm.action, { method: 'POST', body: new FormData(answerForm) });
           if (r.redirected) { window.location.href = r.url; return; }
           const j = await r.json().catch(function () { return {}; });
-          composerMessage(j.detail || ('Could not send (' + r.status + ').'), true);
+          composerMessage(cgErr(r, 'send your message'), true);
         } catch (e) {
           composerMessage('Could not send — check your connection and try again.', true);
         } finally {
@@ -830,7 +836,7 @@
       });
 
       cancelBtn.addEventListener('click', async function() {
-        if (!(await mvConfirm('Cancel this goal? The agent stops at its next tool-call boundary.', { okText: 'Cancel goal' }))) return;
+        if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task' }))) return;
         cancelBtn.disabled = true;
         actionMsg.textContent = '';
         let accepted = false;
@@ -839,10 +845,10 @@
           if (r.ok || r.status === 204) { accepted = true; return; }
           const j = await r.json().catch(function () { return {}; });
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = j.detail || ('Cancel failed: ' + r.status);
+          actionMsg.textContent = cgErr(r, 'stop the task');
         } catch (e) {
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = 'Cancel failed — check your connection and try again.';
+          actionMsg.textContent = 'Could not stop the task. Check your connection and try again.';
         } finally {
           if (!accepted) cancelBtn.disabled = false;
         }
@@ -1007,7 +1013,7 @@
           .then(function (r) {
             if (r.ok || r.status === 204) { location.reload(); return null; }
             return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.textContent = j && typeof j.detail === 'string' ? j.detail : ('Could not resume (' + r.status + '). Check the spending limit and try again.');
+              msg.textContent = cgErr(r, 'continue the task') + ' Check the spending limit too.';
               btn.disabled = false;
             });
           })
@@ -1051,12 +1057,12 @@
           if (r.ok) { location.reload(); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
-            msg.textContent = j.detail || ('Sign-off failed: ' + r.status);
+            msg.textContent = cgErr(r, 'record the sign-off');
             btns.forEach(function (b) { if (b) b.disabled = false; });
           });
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          msg.textContent = String(e);
+          msg.textContent = cgErr(e, 'record the sign-off');
           btns.forEach(function (b) { if (b) b.disabled = false; });
         });
       }
@@ -1097,12 +1103,12 @@
           if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
-            msg.textContent = j.detail || ('Feedback failed: ' + r.status);
+            msg.textContent = cgErr(r, 'save your feedback');
           });
         }).catch(function (e) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
           msg.style.color = 'var(--danger)';
-          msg.textContent = String(e);
+          msg.textContent = cgErr(e, 'save your feedback');
         });
       }
       if (up) up.addEventListener('click', function () { submit('up'); });
@@ -1135,7 +1141,7 @@
       var spin = document.getElementById('work-spin');
       if (!activity || !events || !nowEl) return;
       var TERMINAL = { done: 1, cancelled: 1, failed: 1, blocked: 1 };
-      var SETTLED = { done: 'complete', blocked: 'paused' };
+      var SETTLED = { done: 'Complete', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
 
       function stepTotal() { return Number(events.dataset && events.dataset.steps || 0) || events.children.length; }
       function steps(n) { return n + (n === 1 ? ' step' : ' steps'); }
@@ -1162,7 +1168,7 @@
         if (nowEl.classList) nowEl.classList.remove('is-live');
         if (spin) spin.style.display = 'none';
         nowEl.textContent = 'Work log: ' + steps(stepTotal());
-        metaEl.textContent = SETTLED[st] || st;
+        metaEl.textContent = SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st);
         return true;
       }
 
@@ -1207,9 +1213,9 @@
           if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
                       setTimeout(function () { location.reload(); }, 900); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
-            editMsg.style.color = 'var(--danger)'; editMsg.textContent = j.detail || ('Save failed: ' + r.status);
+            editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
           });
-        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = String(e); });
+        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(e, 'save your edit'); });
       });
     })();
   </script>
@@ -1234,7 +1240,7 @@
         fetch(url).then(function (r) {
           if (!r.ok) {
             return r.json().catch(function () { return {}; }).then(function (j) {
-              throw new Error(j.detail || ('History unavailable (HTTP ' + r.status + ')'));
+              throw new Error(cgErr(r, 'load earlier versions'));
             });
           }
           return r.json();
@@ -1307,9 +1313,9 @@
             msg.textContent = 'Copy this link now — it is shown only once.';
             if (j.id) addRow(j.id);
           } else {
-            msg.textContent = j.detail || ('Could not create link (' + r.status + ').');
+            msg.textContent = cgErr(r, 'create the link');
           }
-        } catch (e) { msg.textContent = String(e); }
+        } catch (e) { msg.textContent = cgErr(e, 'create the link'); }
         finally { createBtn.disabled = false; }
       });
 
@@ -1339,11 +1345,11 @@
             if (li) li.remove();
           } else {
             const detail = await r.json().catch(function () { return {}; });
-            msg.textContent = detail.detail || ('Could not revoke link (' + r.status + ').');
+            msg.textContent = cgErr(r, 'turn off the link');
             btn.disabled = false;
           }
         } catch (e) {
-          msg.textContent = 'Could not revoke link — check your connection and try again.';
+          msg.textContent = 'Could not turn off the link. Check your connection and try again.';
           btn.disabled = false;
         }
       });
@@ -1401,7 +1407,7 @@
           .then(function (r) {
             if (r.ok) return r.json();
             return r.json().catch(function () { return {}; }).then(function (body) {
-              throw new Error(body.detail || ('Could not load attachments (' + r.status + ').'));
+              throw new Error(cgErr(r, 'load the attached files'));
             });
           })
           .then(render)
@@ -1429,14 +1435,12 @@
               fd.append('file', f, f.name);
               return fetch('/api/v1/goals/' + goalId + '/attachments', { method: 'POST', body: fd })
                 .then(function (r) {
-                  if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) {
-                    throw new Error(j.detail || (f.name + ' upload failed'));
-                  });
+                  if (!r.ok) throw new Error(cgErr(r, 'upload ' + f.name));
                 });
             });
           });
           chain.then(function () { msg.textContent = ''; refresh(); })
-               .catch(function (e) { msg.textContent = String(e.message || e); refresh(); });
+               .catch(function (e) { msg.textContent = e && /^Could not/.test(e.message || '') ? e.message : cgErr(e, 'upload the file'); refresh(); });
         });
       }
       refresh();
@@ -1488,7 +1492,9 @@
             onFallback: fallback,
             onResult: fill,
           })
-            .catch(function () {})
+            .catch(function () {
+              if (window.mvToast) window.mvToast('We couldn\u2019t turn your recording into text. Try again, or type your answer.', { error: true });
+            })
             .finally(function () { busy = false; });
         }
         mic.addEventListener('click', function () {

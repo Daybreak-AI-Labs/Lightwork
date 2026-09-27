@@ -104,13 +104,13 @@ def test_settings_warns_before_one_section_discards_another():
 
 def test_goal_destructive_actions_and_attachment_failures_recover():
     source = (TEMPLATES / "chat_goal.html").read_text(encoding="utf-8")
-    assert "Cancel failed — check your connection and try again." in source
+    assert "Could not stop the task. Check your connection and try again." in source
     assert "if (!accepted) cancelBtn.disabled = false" in source
     assert "Revoke this share link?" in source
-    assert "Could not revoke link — check your connection" in source
+    assert "Could not turn off the link. Check your connection" in source
     assert "Attachments could not be loaded. You can still add a file" in source
     assert "panel.style.display = 'block'" in source
-    assert 'id="attach-add" multiple aria-label="Add files to this goal"' in source
+    assert 'id="attach-add" multiple aria-label="Add files to this task"' in source
     assert 'tabindex="-1"' in source
 
 

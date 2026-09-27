@@ -60,7 +60,7 @@ function lwVoiceUpload(blob, opts) {
             .then(function () { return post(body, filename); });
         }
         if (r.status === 503) { if (opts.onFallback) opts.onFallback(); return null; }
-        if (!r.ok) throw new Error('transcribe failed (' + r.status + ')');
+        if (!r.ok) throw new Error('We couldn\u2019t turn your recording into text. Try again, or type your message.');
         return r.json();
       })
       .then(function (d) { if (d && opts.onResult) opts.onResult(d.text); });
