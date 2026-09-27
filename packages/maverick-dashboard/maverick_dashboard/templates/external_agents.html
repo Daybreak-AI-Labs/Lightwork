@@ -179,7 +179,9 @@
     .then(function (j) {
       var sel = document.getElementById("xa-owner"); if (!sel) return;
       (j.items || []).forEach(function (p) {
-        var o = document.createElement("option"); o.value = p.ref; o.textContent = p.label + (p.is_you ? " (you)" : ""); sel.appendChild(o);
+        // Store a readable owner (an email where there is one), not a fingerprint.
+        var value = /^person:/.test(p.ref) ? String(p.label || "").replace(/\s*\(.*\)$/, "") : p.ref;
+        var o = document.createElement("option"); o.value = value; o.textContent = p.label + (p.is_you ? " (you)" : ""); sel.appendChild(o);
       });
     }).catch(function () {});
   fetch("/api/v1/departments").then(function (r) { return r.ok ? r.json() : []; })

@@ -2201,7 +2201,14 @@
   renderSampleFields();
   // People who can be asked to approve, and other saved flows (for pickers).
   fetch('/api/v1/people/assignable').then(function (r) { return r.ok ? r.json() : { items: [] }; })
-    .then(function (j) { people = (j.items || []).filter(function (x) { return x && x.ref; }); if (selected) renderProps(); })
+    .then(function (j) {
+      // An approver is stored as something a notification can reach (an email
+      // where there is one), never as a one-way fingerprint.
+      people = (j.items || []).filter(function (x) { return x && x.ref; }).map(function (x) {
+        return { ref: /^person:/.test(x.ref) ? String(x.label || '').replace(/\s*\(.*\)$/, '') : x.ref, label: x.label };
+      }).filter(function (x) { return x.ref; });
+      if (selected) renderProps();
+    })
     .catch(function () {});
   fetch('/api/v1/flows').then(function (r) { return r.ok ? r.json() : { flows: [] }; })
     .then(function (j) {

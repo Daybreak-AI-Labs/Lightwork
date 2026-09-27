@@ -15090,6 +15090,10 @@ router.include_router(ai_evidence_analysis_authority_router)
 from .people_picker_api import router as people_picker_router  # noqa: E402
 
 router.include_router(people_picker_router)
+
+from .facts_api import router as facts_router  # noqa: E402
+
+router.include_router(facts_router)
 from .knowledge_library_api import router as knowledge_library_router  # noqa: E402
 
 router.include_router(knowledge_library_router)
