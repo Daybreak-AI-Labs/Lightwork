@@ -1045,6 +1045,7 @@ from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1058,6 +1059,7 @@ app.include_router(provider_spending_router)
 app.include_router(support_router)
 app.include_router(system_checks_router)
 app.include_router(channel_check_router)
+app.include_router(page_assets_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
@@ -10722,7 +10724,26 @@ async def connections_page(request: Request) -> HTMLResponse:
     """Manage named SaaS connections (base URL + sealed token) so connectors can
     be wired without env vars. CRUD + reachability test go through
     /api/v1/connections; the feature gate is enforced there."""
-    return templates.TemplateResponse(request, "connections.html", {})
+    try:
+        from maverick import connections as _connections
+        enabled = bool(_connections.enabled())
+    except Exception:  # pragma: no cover -- the API still enforces the gate
+        enabled = True
+    people: list[dict] = []
+    if has_global_permission(request, "admin") or has_permission(request, "admin"):
+        # Choices for "Also allow these people"; the grant itself is still
+        # validated by the connections API.
+        try:
+            from . import invites, rbac
+            from .admin_pages import _invite_labels, _people, _signed_in_principals
+            labels = _invite_labels(invites.list_invites())
+            people = _people(rbac.list_users(), labels, _signed_in_principals())
+        except Exception:
+            people = []
+    return templates.TemplateResponse(request, "connections.html", {
+        "connections_enabled": enabled,
+        "people": people,
+    })
 
 
 @app.get(

@@ -92,3 +92,19 @@ def test_channels_page_reads_plainly(client):
     for label in ("Test connection", "Send a test message", "Remove saved settings", "Where do I find these details?",
                   "Advanced settings", "Your email provider"):
         assert label in text, label
+
+
+def test_connections_page_reads_plainly_and_offers_people_and_regions(client, monkeypatch):
+    from maverick_dashboard import rbac
+    rbac.set_role("user:dana@example.com", "operator")
+    page = client.get("/connections").text
+    text = visible_text(page)
+    for word in ("user:id", "principals", "Base URL", "API token", "encrypted at rest", "bearer",
+                 "Connector (tool name)", "Installation administrator: provider registration",
+                 "Configuration does not prove", "Exact provider permissions"):
+        assert word not in text, word
+    assert 'value="user:dana@example.com"' in page and "dana@example.com" in text
+    assert '<option value="eu-west-1">Europe (Ireland)</option>' in page
+    assert "Copy return address" in text
+    # Connections are off by default: the shared Turn on banner is offered.
+    assert 'data-module-gate="connections"' in page
