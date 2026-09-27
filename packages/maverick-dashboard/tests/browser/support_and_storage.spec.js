@@ -13,8 +13,8 @@ async function json(response){expect(response.ok(),await response.text()).toBeTr
 
 test('Help reviews the actual redacted support report before downloading its exact bytes',async({page},info)=>{
   await page.setViewportSize({width:320,height:800});await page.goto('/help');
-  await expect(page.locator('.support-scope')).toContainText('absolute Python executable and Lightwork data-root paths');
-  await expect(page.locator('.support-scope')).toContainText('Job identifiers, job types and raw error messages are excluded');
+  await expect(page.locator('.support-scope')).toContainText('the folder locations');
+  await expect(page.locator('.support-scope')).toContainText('Task names, task types and raw error messages are left out');
   await expect(page.locator('.support-scope')).toContainText('encrypted preview on this installation for up to ten minutes');
   await expect(page.locator('#support-status')).toHaveText('No report has been collected.');
   const response=page.waitForResponse(r=>r.url().endsWith('/api/v1/support/preview'));
