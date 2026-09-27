@@ -630,6 +630,40 @@ def create_policy_publication_routers(  # noqa: C901 - explicit route assembly
             **body.model_dump(),
         )
 
+    @admin.get("/artifacts")
+    async def list_artifacts(
+        request: Request,
+        limit: int = Query(default=200, ge=1, le=500),
+    ) -> dict[str, Any]:
+        require_global_permission(request, "audit")
+        tenant, store, _registry = authority()
+        return await call(store.list_artifacts, tenant, limit=limit)
+
+    @admin.get("/links")
+    async def list_links(
+        request: Request,
+        limit: int = Query(default=200, ge=1, le=500),
+    ) -> dict[str, Any]:
+        require_global_permission(request, "audit")
+        tenant, store, _registry = authority()
+        result = await call(store.list_links, tenant, limit=limit)
+        return {
+            **result,
+            "items": [
+                {**item, "stable_path": _stable_path(str(item["link_id"]))}
+                for item in result["items"]
+            ],
+        }
+
+    @admin.get("/jobs")
+    async def list_jobs(
+        request: Request,
+        limit: int = Query(default=200, ge=1, le=500),
+    ) -> dict[str, Any]:
+        require_global_permission(request, "audit")
+        tenant, store, _registry = authority()
+        return await call(store.list_jobs, tenant, limit=limit)
+
     @admin.get("/artifacts/{policy_id}/versions/{version}")
     async def artifact_status(
         request: Request,

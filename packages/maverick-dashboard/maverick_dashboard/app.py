@@ -6227,7 +6227,11 @@ async def policy_publication_links_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "policy_publication_links.html",
-        {"policy_publication_links_enabled": policy_publication_links.enabled()},
+        {
+            "policy_publication_links_enabled": policy_publication_links.enabled(),
+            "policy_links_can_admin": has_global_permission(request, "admin"),
+            "policy_links_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
