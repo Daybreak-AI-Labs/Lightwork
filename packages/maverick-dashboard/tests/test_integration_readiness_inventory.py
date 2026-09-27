@@ -64,7 +64,7 @@ def test_settings_renders_readiness_for_every_provider_row():
     for provider in PROVIDERS:
         assert provider["label"] in response.text
     assert response.text.count("Connection test:") >= len(PROVIDERS)
-    assert "A successful live connection has not been verified." in response.text
+    assert "Not set up" in response.text
 
 
 def test_provider_unknown_then_fingerprint_bound_live_verified(monkeypatch):

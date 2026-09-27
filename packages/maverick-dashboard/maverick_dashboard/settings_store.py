@@ -474,7 +474,7 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
-                    "research_execution",
+                    "research_execution", "models",
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
                     *SWITCHABLE_SECTIONS)):
         tbl = data.get(section) or {}
@@ -853,6 +853,22 @@ def set_webhooks_secret(secret: str | None) -> None:
             (data.get("webhooks") or {}).pop("secret", None)
             if not data.get("webhooks"):
                 data.pop("webhooks", None)
+        _write(data)
+
+
+def set_model_discovery(enabled: bool) -> None:
+    """Turn automatic model lists ([models] discovery) on or off in the overlay.
+
+    The MAVERICK_MODEL_DISCOVERY environment variable still wins; the Settings
+    page only offers this switch when no such override is present."""
+    with _locked():
+        data = _load_overlay_for_update()
+        models = data.setdefault("models", {})
+        if not isinstance(models, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        models["discovery"] = bool(enabled)
         _write(data)
 
 

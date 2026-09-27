@@ -53,7 +53,7 @@ def test_pickers_group_reachable_models_by_configured_provider(monkeypatch, tmp_
     _prep(monkeypatch, tmp_path)
     text = _client().get("/settings").text
     # Real selects, grouped by provider; only configured providers are offered.
-    assert '<select class="ctl" name="model"' in text
+    assert '<select class="select" name="model"' in text
     assert '<optgroup label="OpenAI">' in text
     assert '<optgroup label="Anthropic (Claude)">' not in text
     # A model the key reaches but the shipped catalog does not know is offered.
@@ -69,8 +69,10 @@ def test_pickers_group_reachable_models_by_configured_provider(monkeypatch, tmp_
     assert 'data-model-source="live"' in text and 'data-model-source="catalog"' in text
     # Discovery status is visible and refreshable.
     assert 'action="/settings/models/discover"' in text
-    assert "2 models reachable" in text
-    assert "HTTP 401" in text
+    assert "2 models available with your key" in text
+    # A failed list reads as a plain sentence, never a status code.
+    assert "HTTP 401" not in text
+    assert "The provider did not answer" in text
 
 
 def test_discover_refreshes_every_provider_or_one(monkeypatch, tmp_path):
@@ -186,6 +188,7 @@ def test_discovery_switched_off_is_explained_not_silent(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path, snapshot={})
     monkeypatch.setenv("MAVERICK_MODEL_DISCOVERY", "0")
     text = _client().get("/settings").text
-    assert "discovery is switched off" in text
+    assert "Automatic model lists are turned off" in text
+    assert "controlled by your installation" in text  # env override: no button
     # The catalog still offers the configured providers' shipped models.
     assert '<optgroup label="OpenAI">' in text and 'value="openai:gpt-5.4"' in text

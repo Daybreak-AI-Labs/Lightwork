@@ -22,8 +22,8 @@ def _isolated(tmp_path, monkeypatch):
 
 def test_settings_page_shows_webhook_state_without_the_value():
     page = client.get("/settings").text
-    assert "Automation webhooks" in page
-    assert "not set" in page
+    assert "Connections from other apps" in page
+    assert "Not set" in page
 
 
 def test_save_secret_roundtrip_and_clear():
@@ -41,7 +41,7 @@ def test_save_secret_roundtrip_and_clear():
     assert "MVKAR1:" in persisted
 
     page = client.get("/settings").text
-    assert "configured" in page
+    assert "Secret set" in page
     assert "s3cret-value-123" not in page  # pragma: allowlist secret -- never echoed back
 
     r = client.post("/settings/webhooks", data={"secret": "  "},

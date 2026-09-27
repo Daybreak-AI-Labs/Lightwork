@@ -10,7 +10,7 @@ templates.
 from __future__ import annotations
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
@@ -108,18 +108,23 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     from maverick_dashboard import model_pickers
     pickers = model_pickers.build(cfg_state["providers"], allow)
     groups_by_name = {g["name"]: g for g in pickers["model_groups"]}
+    from maverick_dashboard import plain_labels
     for provider in cfg_state["providers"]:
         provider["discovery"] = groups_by_name.get(provider["name"])
+        provider["key_help"] = plain_labels.PROVIDER_KEY_HELP.get(provider["name"], "")
+    for feature in cfg_state["features"]:
+        feature["info"] = plain_labels.feature_help(feature["name"], feature.get("info") or "")
     saved_msg = {
         "appearance": "Appearance updated.",
         "models": "Default model updated.",
-        "roles": "Per-role models updated.",
-        "budget": "Spend cap updated.",
-        "allowed": "Allowed models updated.",
-        "discover": "Model lists refreshed from the provider keys.",
+        "roles": "Role models updated.",
+        "budget": "Task spending limit updated.",
+        "allowed": "Approved models updated.",
+        "discover": "Model lists refreshed from your provider keys.",
         "providers": "Provider keys updated.",
-        "provider_test": "Provider readiness check finished.",
-        "webhooks": "Webhook signing secret updated.",
+        "provider_test": "Connection test finished. The result is shown next to the provider.",
+        "webhooks": "Secret for other apps updated.",
+        "discovery": "Automatic model lists updated.",
         "capabilities": "Capabilities updated.",
         "features": "Features updated.",
         "visibility": "Page visibility updated.",
@@ -132,6 +137,7 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "roles": "models",
         "allowed": "models",
         "discover": "models",
+        "discovery": "models",
         "providers": "integrations",
         "provider_test": "integrations",
         "webhooks": "integrations",
@@ -158,6 +164,8 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "task_limits_enabled": (task_limits_override() if task_limits_override() is not None
                                 else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
         "webhook_configured": _webhook_secret_configured(),
+        "webhook_locked": _webhook_secret_locked(),
+        "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
         "saved": saved_msg,
         "saved_section": saved_section,
     })
@@ -209,7 +217,9 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
             set_task_limits(False)
         elif mode == "configured" and val:
             set_budget(float(val))
-        elif mode == "configured":
+        elif mode in ("configured", "default"):
+            # "default" is the page's "use your installation's standard
+            # limits" choice: drop the Settings amount, keep limits on.
             clear_budget()
             set_task_limits(True)
         else:
@@ -297,6 +307,15 @@ def _webhook_secret_configured() -> bool:
         return False
 
 
+def _webhook_secret_locked() -> bool:
+    """True when an environment-provided secret outranks the Settings value."""
+    try:
+        from maverick.secret_provider import get_secret
+        return bool(get_secret("MAVERICK_WEBHOOK_SECRET"))
+    except Exception:  # pragma: no cover -- never break the settings page
+        return False
+
+
 @router.post("/settings/webhooks")
 def settings_set_webhooks(
     request: Request,
@@ -312,6 +331,58 @@ def settings_set_webhooks(
     from maverick_dashboard import settings_store
     settings_store.set_webhooks_secret(secret)
     return RedirectResponse("/settings?saved=webhooks", status_code=303)
+
+
+@router.post("/settings/webhooks/generate")
+def settings_generate_webhook_secret(request: Request) -> JSONResponse:
+    """Make, save and return a new random signing secret (admin).
+
+    The value is shown once to the administrator who asked for it so they can
+    copy it into the sending app; it is sealed at rest and never displayed
+    again. Refused when an environment-provided secret would outrank it."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    import secrets as _secrets
+
+    from maverick.secret_provider import get_secret
+
+    from maverick_dashboard import settings_store
+    if get_secret("MAVERICK_WEBHOOK_SECRET"):
+        raise HTTPException(
+            status_code=409,
+            detail="The signing secret is set on the computer running Lightwork, so it can't be changed here.",
+        )
+    value = _secrets.token_urlsafe(32)
+    settings_store.set_webhooks_secret(value)
+    return JSONResponse({"secret": value}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/settings/models/discovery")
+def settings_set_model_discovery(request: Request, enabled: str = Form("on")) -> RedirectResponse:
+    """Turn automatic model lists on or off from the Models section (admin)."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    import os as _os
+
+    from maverick_dashboard import settings_store
+    if _os.environ.get("MAVERICK_MODEL_DISCOVERY", "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="Automatic model lists are controlled by your installation, so this can't be changed here.",
+        )
+    try:
+        settings_store.set_model_discovery(enabled == "on")
+    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Settings are unavailable. Retry after storage is restored.",
+        ) from exc
+    try:
+        from maverick import config as _config
+        _config.reset_config_cache()
+    except Exception:  # pragma: no cover -- cache reset is best effort
+        pass
+    return RedirectResponse("/settings?saved=discovery", status_code=303)
 
 
 @router.post("/settings/providers")

@@ -37,8 +37,8 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
 
     assert 'id="settings-search"' in text
     assert 'role="tablist"' in text
-    assert text.count('role="tab" data-settings-tab=') == 5
-    for group in ("general", "models", "integrations", "controls", "access"):
+    assert text.count('role="tab" data-settings-tab=') == 6
+    for group in ("general", "models", "integrations", "controls", "access", "maintenance"):
         assert f'data-settings-tab="{group}"' in text
         assert f'data-settings-group="{group}"' in text
     assert "ArrowRight" in text and "ArrowLeft" in text
