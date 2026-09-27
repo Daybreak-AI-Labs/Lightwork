@@ -796,16 +796,13 @@
           body: JSON.stringify({ section: section, enabled: true }),
         }).then(function (r) {
           if (r.status === 403) {
-            throw new Error('Only an administrator can turn this on — ask yours.');
+            var denied = new Error('Only an administrator can turn this on. Ask yours.');
+            denied.plain = true; throw denied;
           }
-          if (!r.ok) {
-            return r.json().catch(function () { return {}; }).then(function (b) {
-              throw new Error(b.detail || ('Could not turn this on (' + r.status + ').'));
-            });
-          }
+          if (!r.ok) throw r;
           location.reload();   // re-render with the module live
         }).catch(function (e) {
-          if (err) err.textContent = (e && e.message) || 'Could not reach the server.';
+          if (err) err.textContent = (e && e.plain) ? e.message : window.mvErrorText(e, 'turn this on');
           btn.disabled = false;
         });
       });
