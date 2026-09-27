@@ -1454,6 +1454,14 @@ def _strip_final_marker(text: str) -> str:
     return text[end:].lstrip() if end is not None else text
 
 
+class _ReplayedDecision(Exception):
+    """A production twin's answer to a human approval gate (no human asked)."""
+
+    def __init__(self, granted: bool) -> None:
+        super().__init__("replayed approval decision")
+        self.granted = granted
+
+
 # ``NAME=`` / ``NAME:`` of a named secret (mirrors secret_detector's env_secret)
 # followed by an opening quote.
 _OPEN_SECRET_QUOTE = re.compile(
@@ -2727,8 +2735,7 @@ class Agent:
             return None
         if decision.mode == "approve":
             from .immune import twin
-            if twin.serving(name):  # recorded result, nothing leaves: never ping a human
-                return None
+            replayed = twin.human_gate(name, args)  # a twin never pings a human
             granted = False
             if not decision.explicit:
                 copied = ""
@@ -2738,6 +2745,8 @@ class Agent:
                 copied = " The call is too large to rule out that it carries the data literally."
             to = ifc.display_destination(decision.destination)
             try:
+                if replayed is not None:
+                    raise _ReplayedDecision(replayed)
                 from .safety.consent import require_consent
                 verdict = await asyncio.to_thread(
                     require_consent, name, risk="high", provenance="ifc",
@@ -2747,6 +2756,8 @@ class Agent:
                             + ", which leaves the tenant boundary." + copied),
                     allow_auto_approve=False, consult_ledger=False)
                 granted = bool(verdict.granted)
+            except _ReplayedDecision as replay_decision:
+                granted = replay_decision.granted
             except Exception:  # consent unavailable -> fail closed
                 granted = False
             ifc.record(decision, agent=self.name, goal_id=goal_id,
@@ -2955,13 +2966,12 @@ class Agent:
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
         from .immune import twin as _twin
-        if _twin.serving(name):
-            # A production twin serves the recorded result; nothing executes,
-            # so there is nothing for a human to approve.
-            return None, _gov.compliance_profiles
+        replayed = _twin.human_gate(name, args)  # a twin never pings a human
         import asyncio as _asyncio
         granted = False
         try:
+            if replayed is not None:
+                raise _ReplayedDecision(replayed)
             from .safety.consent import require_consent
             from .safety.tool_risk import tool_risk
             decision = await _asyncio.to_thread(
@@ -2979,6 +2989,8 @@ class Agent:
                 ),
             )
             granted = bool(decision.granted)
+        except _ReplayedDecision as replay_decision:
+            granted = replay_decision.granted
         except Exception:  # pragma: no cover -- consent unavailable -> fail closed
             granted = False
         if granted:
@@ -4251,8 +4263,10 @@ class Agent:
                     **_turn_kw,
                 )
                 if _preview is not None:
+                    # Only a normal completion shows its tail: any other stop
+                    # (token or context limit, refusal, unknown) may cut mid-secret.
                     _preview.finish(complete=getattr(resp, "stop_reason", None)
-                                    not in {"max_tokens", "length", "max_output_tokens"})
+                                    in {"end_turn", "stop_sequence", "tool_use", "stop"})
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")

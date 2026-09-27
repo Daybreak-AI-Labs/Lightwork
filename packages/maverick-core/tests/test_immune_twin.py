@@ -331,3 +331,56 @@ def test_a_twin_sends_no_run_webhooks(monkeypatch):
     with twin.replaying(twin.Replay([])):
         orchestrator._fire_webhook("goal_created", {})
     assert sent == ["goal_created"]
+
+
+@pytest.mark.asyncio
+async def test_a_twin_refuses_a_gated_call_production_never_made(recording_on, tmp_path,
+                                                                 monkeypatch):
+    from maverick import ifc
+    from maverick.agent import Agent
+    from maverick.blackboard import Blackboard
+    from maverick.budget import Budget
+    from maverick.safety import consent
+    from maverick.sandbox import LocalBackend
+    from maverick.swarm import SwarmContext
+    from maverick.tools import Tool
+    from maverick.world_model import WorldModel
+
+    asked: list = []
+    monkeypatch.setattr(consent, "require_consent",
+                        lambda *a, **k: asked.append(a) or type("D", (), {"granted": False})())
+    world = WorldModel(tmp_path / "world.db")
+    ctx = SwarmContext(llm=None, world=world, budget=Budget(max_dollars=1.0),
+                       blackboard=Blackboard(), sandbox=LocalBackend(workdir=tmp_path),
+                       goal_id=world.create_goal("g", ""), use_skills=False)
+    ctx.ifc = ifc.FlowTracker(mode="approve")
+    agent = Agent(ctx=ctx, role="analyst", brief="b")
+    agent.capability = None
+    schema = {"type": "object", "properties": {}}
+    agent.tools.register(Tool(name="sql_query", description="q", input_schema=schema,
+                              fn=lambda args: "rows"))
+    agent.tools.register(Tool(name="http_fetch", description="f", input_schema=schema,
+                              fn=lambda args: "200 OK"))
+    await agent._run_tool("sql_query", {"q": "x"})
+    prod = await agent._run_tool("http_fetch", {"url": "https://partner"})
+    assert "requires human approval" in prod and len(asked) == 1   # a human refused
+    ctx.ifc = ifc.FlowTracker(mode="approve")
+    replay = twin.Replay(twin.load(ctx.goal_id))
+    with twin.replaying(replay):
+        await agent._run_tool("sql_query", {"q": "x"})
+        out = await agent._run_tool("http_fetch", {"url": "https://partner"})
+    assert "requires human approval" in out and len(asked) == 1     # refused, nobody asked
+    assert replay.report()["unmatched"] == []                       # not a divergence
+
+
+def test_budget_and_halt_stops_are_not_recorded_as_tool_errors(recording_on):
+    from maverick.budget import BudgetExceeded
+
+    async def spent():
+        raise BudgetExceeded("dollar cap")
+
+    async def prod():
+        with pytest.raises(BudgetExceeded):
+            await twin.dispatch(6, "web_search", {"q": "x"}, spent)
+    asyncio.run(prod())
+    assert twin.load(6) == []

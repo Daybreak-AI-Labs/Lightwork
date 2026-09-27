@@ -107,3 +107,12 @@ def test_cli_adds_research_runs_to_a_dossier(services, tmp_path):
     assert "1 conception gate(s) added" in res.output
     check = CliRunner().invoke(main, ["immune", "title", "check", str(out)])
     assert check.exit_code == 1 and "unverified research export" in check.output
+
+
+def test_a_research_gate_stripped_of_its_verified_flag_is_still_reported(services):
+    registry, runs, state = services
+    run = runs.inspect(TENANT, "user:researcher", _plan(runs, _dataset(registry, state))["run_id"])
+    dossier = title.add_research_runs(_dossier(), [run], ["assay-design"], verified=True)
+    for gate in dossier["gates"]:
+        gate.pop("verified")
+    assert any("unverified research export" in p for p in title.problems(dossier))

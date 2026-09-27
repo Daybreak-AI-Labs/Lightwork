@@ -47,7 +47,7 @@ def _code_summary() -> dict:
         raise HTTPException(status_code=503, detail="world model unavailable")
     try:
         return features.summary(world)
-    except vault.VaultError as exc:
+    except Exception as exc:  # noqa: BLE001 -- vault, decryption or corrupt records
         raise HTTPException(status_code=503, detail="code vault unavailable") from exc
 
 

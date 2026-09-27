@@ -41,8 +41,12 @@ maverick code export payments ./payments   # plaintext clone for the owner
   files with host-owned plumbing (`read-tree`, `add`, `write-tree`,
   `commit-tree`, `update-ref`), so the run's own `.git` (hooks, config, a
   `gitdir:` pointer) is never read. Every host git call also disables hooks,
-  external diff drivers and fsmonitor. A change that adds an embedded git
-  repository is refused.
+  external diff drivers and fsmonitor. The working copy lives in its own
+  private directory, never beside the host repository, so a run cannot reach
+  host git config (a planted `filter` driver in `.gitattributes` has no
+  definition to run). A change that adds an embedded git repository is
+  refused. With the unsandboxed `local` backend the agent already has a shell
+  on the host, so use a container backend for code you do not trust.
 
 ## A feature request, end to end
 
@@ -56,8 +60,10 @@ maverick code export payments ./payments   # plaintext clone for the owner
 4. The independent reviewer reads the diff of that pinned commit. It uses a
    cross-family model where possible.
 5. The sealed proposal (diff, tests, review, branch bundle) parks a
-   `codebase_merge` approval, which states the test result, the review verdict
-   and, when the diff is too large to store whole, a warning. A change the swarm
+   `codebase_merge` approval: a structured approval card committing to the
+   repository, branch, base and approved head, stating the test result, the
+   review verdict and, when the diff is too large to store whole, a warning.
+   It can be approved in the dashboard's approvals queue for 7 days. A change the swarm
    did not make produces an `empty` proposal and no approval.
 6. `merge` and `push` require that approval to be an approved `codebase_merge`
    for this repository. Both verify the branch is the approved commit. Merges

@@ -136,10 +136,10 @@ def propose(world, name: str, title: str, description: str, run: Runner, *,
     branch = f"lightwork/{_slug(title)}-{pid[:6]}"
     goal_id = None
     try:
-        with vault.host_repo(name) as host:
+        with vault.host_repo(name) as host, vault.work_dir() as work_tmp:
             base = _git(["rev-parse", "--verify", f"refs/heads/{repo.default_branch}"],
                         git_dir=host).strip()
-            work = vault.clone_work(host, host.parent / "work", repo.default_branch)
+            work = vault.clone_work(host, work_tmp / "work", repo.default_branch)
             _git(["checkout", "-q", "-b", branch], cwd=work)
             goal_id = world.create_goal(f"[{name}] {title}", _brief(repo, title, description))
             with labelled_run({f"code:{name}"}, mode=repo.protect):
@@ -189,11 +189,16 @@ def propose(world, name: str, title: str, description: str, run: Runner, *,
     return proposal
 
 
+APPROVAL_TTL = 7 * 24 * 3600.0  # the longest an operation card may stay open
+
+
 def _approval_detail(p: dict) -> str:
+    """A structured approval card (the only kind the dashboard lets a human
+    approve) committing to the repository, branch, base and approved head."""
+    from ..approval_cards import encode_operation_approval_detail
     tests = p["tests"]
     review = p["review"]
-    lines = [f"Merge Lightwork proposal {p['id']} into {p['repo']}: {p['title']}",
-             f"Branch {p['branch']} at {p['head'][:12]} from {p['base'][:12]}; "
+    lines = [f"Branch {p['branch']} at {p['head'][:12]} from {p['base'][:12]}; "
              f"{len(p['files'])} file(s) changed.",
              "Tests: " + ("not configured" if tests is None else
                           f"{'PASSED' if tests['passed'] else 'FAILED'} (`{tests['command']}`)"),
@@ -208,7 +213,22 @@ def _approval_detail(p: dict) -> str:
     if len(p["files"]) > 40:
         lines.append(f"  ... and {len(p['files']) - 40} more file(s)")
     lines.append(f"Inspect: maverick code show {p['id']}")
-    return "\n".join(lines)
+    lines = [line[:500] for line in lines][:24]
+    return encode_operation_approval_detail(
+        action="codebase_merge",
+        summary=f"Merge Lightwork proposal {p['id']} into {p['repo']}: {p['title']}"[:500],
+        target_label=f"{p['repo']} <- {p['branch']}"[:500],
+        target={"repo": p["repo"], "branch": p["branch"]},
+        parameters={"proposal": p["id"], "base": p["base"], "head": p["head"],
+                    "files": p["files"]},
+        parameter_summary=lines, actor="agent:codebase", role="feature_swarm",
+        known_effects=[f"Merges the proposal into {p['repo']}'s default branch in the vault "
+                       "(no-fast-forward); pushing upstream is a separate step."[:500]],
+        unresolved_assumptions=[] if tests and tests["passed"] else
+        ["The repository's tests did not pass or are not configured."],
+        before=f"{p['repo']} default branch at {p['base'][:12]}.",
+        after=f"{p['repo']} default branch includes {p['head'][:12]}.",
+        irreversible=False, ttl_seconds=APPROVAL_TTL)
 
 
 def status(world, p: dict) -> str:

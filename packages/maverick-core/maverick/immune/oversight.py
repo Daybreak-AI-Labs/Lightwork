@@ -66,8 +66,7 @@ def _plain_card(action: str, detail: str, requested_by: str | None) -> str:
 
 def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: str,
                 risk: str = "medium", requested_by: str | None = None,
-                scope: str | None = None, provenance: str | None = None,
-                approvals_required: int = 1) -> int:
+                scope: str | None = None, approvals_required: int = 1) -> int:
     """Park a known-flawed approval in the real queue and remember it privately.
 
     ``detail`` is either an encoded approval card or plain text, which is
@@ -79,7 +78,6 @@ def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: s
     if decode_approval_detail(detail) is None:
         detail = _plain_card(action, detail, requested_by)
     approval_id = world.create_approval(action, risk=risk, detail=detail, scope=scope,
-                                        provenance=provenance,
                                         approvals_required=approvals_required,
                                         requested_by=requested_by)
     _ledger.append(ledger_path(), {"type": "canary", "approval_id": approval_id,
@@ -163,11 +161,22 @@ def _set(card, path, value) -> None:
 
 def _flawed_card(card: dict, rng, ttl: float) -> tuple[str, str]:
     """A real card with one flaw planted in what the reviewer reads, a fresh
-    expiry and a recomputed binding -- valid and approvable like the original."""
+    expiry and a recomputed binding -- valid and approvable like the original.
+
+    Every commitment to the real operation (target, parameters, inputs,
+    credentials) is replaced with a random one, so no system that checks a card
+    against the operation in hand can ever accept an approved canary as its own."""
+    import secrets as _secrets
+
     from ..approval_cards import ApprovalCardError, digest, encode_approval_detail
     base = copy.deepcopy(dict(card))
     base.pop("binding_sha256", None)
     base["expires_at"] = time.time() + ttl
+    base["target"]["sha256"] = digest({"canary": _secrets.token_hex(16)})
+    base["parameters"]["sha256"] = digest({"canary": _secrets.token_hex(16)})
+    base["inputs"] = {k: digest({"canary": _secrets.token_hex(16)}) for k in base["inputs"]}
+    base["credentials"] = {k: digest({"canary": _secrets.token_hex(16)})
+                           for k in base["credentials"]}
     options = [(path, r) for path in _card_fields(base)
                for f in (_inflate, _lookalike, _reroute) if (r := f(_get(base, path), rng))]
     rng.shuffle(options)
@@ -196,7 +205,8 @@ def generate_canary(world, *, decision_class: str | None = None, rng=None,
     """Seed a canary modelled on a REAL recent approval of the same kind.
 
     A hand-written canary looks hand-written. This one copies an actual
-    approval's action, risk, scope, provenance, quorum, requester and card, then
+    approval's action, risk, scope, quorum, requester and card (with random
+    commitments and no provenance, so it can never authorize anything), then
     plants one concrete flaw a careful reviewer should catch: an inflated
     amount, a lookalike recipient domain, a changed destination account, or
     (when the text has none of those) urgency pressure to skip verification.
@@ -224,11 +234,12 @@ def generate_canary(world, *, decision_class: str | None = None, rng=None,
     ttl = float(card["expires_at"]) - float(source.requested_at or 0)
     ttl = ttl if 60 <= ttl <= 30 * 86_400 else _DEFAULT_TTL
     detail, flaw = _flawed_card(card, rng, ttl)
+    # NOT the source's provenance: every system that consumes its own approvals
+    # selects them by provenance first, so a canary must never carry one.
     approval_id = seed_canary(world, action=source.action, detail=detail,
                               decision_class=source.action, flaw=flaw, risk=source.risk,
                               requested_by=requested_by or source.requested_by,
-                              scope=source.scope, provenance=source.provenance,
-                              approvals_required=source.approvals_required)
+                              scope=source.scope, approvals_required=source.approvals_required)
     return {"approval_id": approval_id, "modelled_on": source.id,
             "decision_class": source.action, "flaw": flaw}
 

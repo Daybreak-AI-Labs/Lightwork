@@ -126,7 +126,7 @@ def test_generated_canary_copies_a_real_approval_and_plants_one_flaw(world, monk
     assert out["modelled_on"] == real and out["decision_class"] == "stripe_payout"
     assert (canary.action, canary.risk, canary.requested_by, canary.scope, canary.provenance,
             canary.approvals_required) == ("stripe_payout", "high", "agent:ap_clerk",
-                                           "vendor:acme", "agent", 2)
+                                           "vendor:acme", None, 2)  # never the provenance
     card, orig = decode_approval_detail(canary.detail), decode_approval_detail(source.detail)
     assert card is not None and card["summary"] != orig["summary"]      # valid, and flawed
     assert card["parameters"]["summary"] == [card["summary"]]           # flawed consistently

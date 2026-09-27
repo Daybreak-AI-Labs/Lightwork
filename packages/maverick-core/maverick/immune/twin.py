@@ -10,8 +10,9 @@ safe way to try a new model, prompt or policy on real work.
 
 Coordination tools (spawn, peer bus) still run, so the swarm re-forms; their
 children replay too. ``ask_user`` is replayed, and a served tool's human
-approval gates (governance, information-flow) are skipped because nothing
-executes, so a twin never pings a human; outbound run webhooks are not sent. A
+approval gates (governance, information-flow) never ask a human: a call
+production made (so was approved) is served, one it has no record of is
+refused as production's was; outbound run webhooks are not sent. A
 production call that raised is recorded and raises again in the twin. A call
 production never made -- different tool or arguments -- is not executed: it
 returns an ordinary tool failure and is reported. The divergence is the finding.
@@ -185,22 +186,34 @@ class Replay:
             _raise_recorded(self.records[i]["error"])
         return self.records[i]["output"]
 
-    def serve(self, tool: str, args: dict) -> str:
+    def _find(self, tool: str, args: dict) -> tuple[int, float] | None:
+        """The recorded call that would serve ``(tool, args)``, without using it."""
         exact = [i for i in self._queues.get(_key(tool, args), ()) if i not in self._used]
         if exact:
-            return self._take(exact[0])
+            return exact[0], 1.0
         from ..safety.tool_risk import tool_risk
         near = [(_similarity(_plain(args), r["args"]), i) for i, r in enumerate(self.records)
                 if i not in self._used and r["tool"] == tool and tool_risk(tool) != "high"]
         if near:
             score, i = max(near, key=lambda t: (t[0], -t[1]))
             if score >= self.tolerance:
-                self.approximate.append({"tool": tool, "similarity": round(score, 3),
-                                         "args": _plain(args),
-                                         "recorded_args": self.records[i]["args"]})
-                return self._take(i)
-        self.unmatched.append({"tool": tool, "args": _plain(args)})
-        return f"ERROR: {tool} failed; no result was returned."
+                return i, score
+        return None
+
+    def has(self, tool: str, args: dict) -> bool:
+        return self._find(tool, args) is not None
+
+    def serve(self, tool: str, args: dict) -> str:
+        found = self._find(tool, args)
+        if found is None:
+            self.unmatched.append({"tool": tool, "args": _plain(args)})
+            return f"ERROR: {tool} failed; no result was returned."
+        i, score = found
+        if score < 1.0 or self.records[i]["key"] != _key(tool, args):
+            self.approximate.append({"tool": tool, "similarity": round(score, 3),
+                                     "args": _plain(args),
+                                     "recorded_args": self.records[i]["args"]})
+        return self._take(i)
 
     def report(self) -> dict:
         return {"recorded": len(self.records), "served": self.served,
@@ -222,10 +235,16 @@ def result_similarity(production: str | None, twin_result: str | None) -> float 
 _ACTIVE: ContextVar[Replay | None] = ContextVar("maverick_twin_replay", default=None)
 
 
-def serving(tool: str) -> bool:
-    """True when a twin is active and will serve ``tool`` from the recording:
-    nothing executes, so gates that would ask a human are skipped."""
-    return _ACTIVE.get() is not None and tool not in LIVE_IN_TWIN
+def human_gate(tool: str, args: dict) -> bool | None:
+    """What a human approval gate should do for this call. ``None``: no twin is
+    replaying it, ask as usual. Otherwise nobody is asked: ``True`` when
+    production made this call (so its approval was granted) and the recording
+    will serve it; ``False`` when production has no such call -- the approval
+    was refused, or never sought -- so the twin sees a refusal, as production did."""
+    replay = _ACTIVE.get()
+    if replay is None or tool in LIVE_IN_TWIN:
+        return None
+    return replay.has(tool, args)
 
 
 def active() -> bool:
@@ -255,7 +274,7 @@ async def dispatch(goal_id: int, tool: str, args: dict,
     try:
         output = await run()
     except Exception as exc:
-        if recording:
+        if recording and not _control_flow(exc):
             try:
                 record(goal_id, tool, args, None, error=exc)
             except Exception:  # noqa: BLE001 -- observation never breaks production
@@ -267,6 +286,15 @@ async def dispatch(goal_id: int, tool: str, args: dict,
         except Exception:  # noqa: BLE001 -- observation never breaks production
             pass
     return output
+
+
+def _control_flow(exc: BaseException) -> bool:
+    """Budget, halt and cancellation stops belong to the run, not to the tool:
+    a twin with its own budget must not inherit production's."""
+    from ..budget import BudgetExceeded
+    from ..killswitch import Halted
+    from ..run_outcome import GoalCancelled
+    return isinstance(exc, (BudgetExceeded, Halted, GoalCancelled))
 
 
 def run_kwargs(goal) -> dict:

@@ -168,3 +168,19 @@ def test_a_vault_error_is_a_503_not_a_crash(client, monkeypatch):
     monkeypatch.setattr(features, "summary", broken)
     response = client.get("/api/v1/code/summary")
     assert response.status_code == 503 and "secret" not in response.text
+
+
+def test_a_codebase_merge_approval_can_be_approved_in_the_dashboard(client):
+    from maverick.codebase.features import _approval_detail
+    from maverick_dashboard import app as dash_app
+    p = {"id": "0123456789abcdef", "repo": "r", "title": "t", "branch": "lightwork/t-012345",
+         "head": "a" * 40, "base": "b" * 40, "files": ["x.py"], "tests": None, "review": None,
+         "diff_truncated": False, "diff_chars": 1}
+    aid = dash_app._world().create_approval(
+        "codebase_merge", risk="high", scope="r", provenance="codebase",
+        requested_by="agent:codebase", detail=_approval_detail(p))
+    row = {r["id"]: r for r in client.get("/api/v1/approvals").json()["approvals"]}[aid]
+    assert row["approval_card_status"] == "current"
+    response = client.post(f"/api/v1/approvals/{aid}/approve", headers={
+        "X-Lightwork-Approval-Binding": row["approval_card"]["binding_sha256"]})
+    assert response.status_code in (200, 204), response.text[:300]

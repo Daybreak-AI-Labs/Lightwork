@@ -265,8 +265,20 @@ def clone_work(host: Path, dest: Path, branch: str) -> Path:
 def checkout(name: str) -> Iterator[Path]:
     """A private plaintext working copy of the default branch, removed on exit."""
     repo = get(name)
-    with host_repo(name) as host:
-        yield clone_work(host, host.parent / name, repo.default_branch)
+    with host_repo(name) as host, work_dir() as tmp:
+        yield clone_work(host, tmp / name, repo.default_branch)
+
+
+@contextmanager
+def work_dir() -> Iterator[Path]:
+    """A private directory for a working copy handed to an agent -- never the
+    host repository's parent, so nothing written there can reach host git
+    metadata (its config, hooks or filter definitions)."""
+    tmp = _private_tmp("lw-work-")
+    try:
+        yield tmp
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def commit_back(name: str, host: Path) -> str:

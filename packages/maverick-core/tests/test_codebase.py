@@ -357,3 +357,48 @@ def test_cli_end_to_end_with_approval_in_the_middle(upstream, tmp_path, monkeypa
     assert run(main, ["code", "merge"]).exit_code != 0
     out = run(main, ["code", "export", "pricing", str(tmp_path / "exp")])
     assert out.exit_code == 0 and (tmp_path / "exp" / "feature.py").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_a_run_cannot_reach_host_git_config_beside_its_working_copy(tmp_path, monkeypatch):
+    """The working copy is never the host repository's sibling, so a planted
+    filter driver has no definition to run."""
+    import subprocess
+
+    from maverick.codebase import features, vault
+    from maverick.world_model import WorldModel
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".mh"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    src = tmp_path / "up"
+    src.mkdir()
+    for args in (["init", "-q", "-b", "main"],):
+        subprocess.run(["git", *args], cwd=src, check=True)
+    (src / "a.py").write_text("a = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=src, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "i"],
+                   cwd=src, check=True)
+    vault.register("r", str(src))
+    mark = tmp_path / "PWNED"
+    seen: list = []
+
+    def run(goal_id, work):
+        seen.append(sorted(p.name for p in work.parent.iterdir()))
+        for cfg in work.parent.glob("*.git/config"):
+            with open(cfg, "a") as fh:
+                fh.write(f'[filter "x"]\n\tclean = touch {mark} && cat\n')
+        (work / ".gitattributes").write_text("*.py filter=x\n")
+        (work / "a.py").write_text("a = 2\n")
+    p = features.propose(WorldModel(tmp_path / "w.db"), "r", "T", "", run)
+    assert seen == [["work"]] and not mark.exists() and "a.py" in p["files"]
+
+
+def test_the_merge_approval_is_a_structured_card_committing_to_the_head():
+    from maverick.approval_cards import decode_approval_detail, digest
+    from maverick.codebase.features import _approval_detail
+    p = {"id": "0123456789abcdef", "repo": "r", "title": "t", "branch": "lightwork/t-012345",
+         "head": "a" * 40, "base": "b" * 40, "files": ["x.py"], "tests": None, "review": None,
+         "diff_truncated": False, "diff_chars": 1}
+    card = decode_approval_detail(_approval_detail(p))
+    assert card["action"] == "codebase_merge"
+    assert card["parameters"]["sha256"] == digest(
+        {"proposal": p["id"], "base": p["base"], "head": p["head"], "files": p["files"]})

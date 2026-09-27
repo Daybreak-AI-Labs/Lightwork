@@ -60,9 +60,14 @@ could never record a miss. A hand-written `--detail` is wrapped in a card.
 
 Hand-written canaries look hand-written. `maverick immune canary-auto
 [--class ACTION] [--count N]` models each canary on a real recent structured
-approval of the same kind. It copies the action, risk, scope, provenance,
-quorum, requester and card, gives it a fresh expiry, then plants one concrete
-flaw in what the reviewer reads (in every place the same wording appears):
+approval of the same kind. It copies the action, risk, scope, quorum,
+requester and card, gives it a fresh expiry, then plants one concrete flaw in
+what the reviewer reads (in every place the same wording appears). It never
+copies the source's provenance, and every commitment on its card (target,
+parameters, inputs, credentials) is random, so no system that consumes its own
+approvals can ever act on an approved canary. The missing provenance label is
+the one visible difference from the approval it was modelled on. The flaw is
+one of:
 - an amount with a currency marker, inflated tenfold;
 - a lookalike recipient domain;
 - a changed account number (only a number labelled as an account, IBAN or
@@ -158,8 +163,11 @@ result production received for the same tool and arguments, in the same order.
 - The twin runs as the same user as production. A goal bound to a capability
   principal (not `user:*`) cannot be replayed, because the goal does not hold
   that capability; the command says so before creating anything.
-- Human approval gates (governance, information-flow) are skipped for served
-  tools, because nothing executes, and no run webhooks are sent.
+- Human approval gates (governance, information-flow) never ask anyone. A call
+  production made (and so had approved) is served. A call production has no
+  record of is refused, as it was in production. No run webhooks are sent.
+- Budget, halt and cancellation stops are not recorded as tool errors: a twin
+  runs under its own budget.
 - The report compares the twin's final answer with production's
   (`result_similarity`).
 - Coordination tools still run, so the swarm re-forms and its children replay.

@@ -23567,37 +23567,37 @@
           "expression": "data_dir('codebase', *parts)"
         },
         {
-          "line": 131,
+          "line": 156,
           "function": "_save",
           "kind": "atomic_write_text",
           "expression": "atomic_write_text(_registry_path(), json.dumps(registry, indent=2, sort_keys=True))"
         },
         {
-          "line": 154,
+          "line": 179,
           "function": "_store_bundle",
           "kind": "atomic_write_bytes",
           "expression": "atomic_write_bytes(_bundle_path(name), _seal(out.read_bytes(), _context(name)))"
         },
         {
-          "line": 167,
+          "line": 198,
           "function": "register",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(_registry_path(), strict=True)"
         },
         {
-          "line": 195,
+          "line": 228,
           "function": "update_registry",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(_registry_path(), strict=True)"
         },
         {
-          "line": 213,
-          "function": "checkout",
+          "line": 248,
+          "function": "host_repo",
           "kind": "write_bytes",
           "expression": "bundle.write_bytes(_unseal(_bundle_path(name).read_bytes(), _context(name)))"
         },
         {
-          "line": 237,
+          "line": 310,
           "function": "sync",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(_bundle_path(name), strict=True)"
@@ -23616,25 +23616,25 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 44,
+          "line": 43,
           "function": "_save",
           "kind": "atomic_write_bytes",
           "expression": "atomic_write_bytes(_proposal_dir(p['repo']) / f\"{p['id']}.json\", vault._seal(body, f\"codebase/{p['repo']}/proposal/{p['id']}\"))"
         },
         {
-          "line": 144,
+          "line": 183,
           "function": "propose",
           "kind": "atomic_write_bytes",
           "expression": "atomic_write_bytes(_proposal_dir(name) / f'{pid}.bundle', vault._seal(bundle, f'codebase/{name}/proposal-bundle/{pid}'))"
         },
         {
-          "line": 188,
+          "line": 257,
           "function": "_fetch_proposal",
           "kind": "write_bytes",
           "expression": "b.write_bytes(vault._unseal(raw, f\"codebase/{p['repo']}/proposal-bundle/{p['id']}\"))"
         },
         {
-          "line": 200,
+          "line": 273,
           "function": "merge",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(vault._bundle_path(p['repo']), strict=True)"

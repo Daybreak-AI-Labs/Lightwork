@@ -38,7 +38,10 @@ def _composition() -> dict:
                            "sink_risk": f.sink_risk}
                           for f in found if f.kind == "trifecta"][:50],
         }
-        _roster_cache[tenant] = (time.monotonic(), value)
+        now = time.monotonic()
+        for key in [k for k, (at, _) in _roster_cache.items() if now - at >= _ROSTER_TTL]:
+            del _roster_cache[key]
+        _roster_cache[tenant] = (now, value)
         return value
 
 

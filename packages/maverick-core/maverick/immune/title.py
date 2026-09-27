@@ -72,7 +72,8 @@ def problems(dossier: dict) -> list[str]:
         out.append(f"search coverage {cov['examined']}/{cov['total']} "
                    f"({cov['examined'] / cov['total']:.0%})")
     out += [f"conception gate rests on an unverified research export: {g['id']}"
-            for g in dossier.get("gates", []) if g.get("verified") is False]
+            for g in dossier.get("gates", [])
+            if str(g.get("id", "")).startswith("research:") and g.get("verified") is not True]
     first = min((p["at"] for p in dossier.get("priority", [])), default=None)
     if first is not None and dossier.get("inputs_committed_at", float("inf")) > first:
         out.append("inputs were committed after the first recorded idea")

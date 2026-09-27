@@ -302,7 +302,9 @@ def test_a_stream_cut_at_the_token_limit_never_shows_a_partial_secret():
     assert all(token[:20] not in w for w in world.writes)
 
 
-@pytest.mark.parametrize("stop, shown_whole", [("end_turn", True), ("max_tokens", False)])
+@pytest.mark.parametrize("stop, shown_whole", [
+    ("end_turn", True), ("max_tokens", False), ("model_context_window_exceeded", False),
+    ("refusal", False), (None, False)])
 @pytest.mark.asyncio
 async def test_the_last_flush_follows_the_stop_reason(tmp_path, stop, shown_whole):
     text = "FINAL: " + "all good here " * 12 + "tail-token"
