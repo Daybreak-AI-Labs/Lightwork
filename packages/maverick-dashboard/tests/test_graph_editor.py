@@ -204,3 +204,20 @@ def test_mutations_blocked_cross_origin(client, world, tree):
     r = bare.post(f"/api/v1/goals/{g1}/retitle", json={"title": "evil"})
     assert r.status_code == 403
     assert world.get_goal(g1).title == "root"
+
+
+def test_task_map_page_reads_plainly(tmp_path, monkeypatch):
+    """The map speaks of tasks and never shows raw status keys or #ids."""
+    from fastapi.testclient import TestClient
+
+    from maverick import world_model
+    from maverick_dashboard.app import app
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    from test_support.plain_language import developer_terms
+
+    r = TestClient(app, headers={"Origin": "http://testserver"}).get("/graph-editor")
+    assert r.status_code == 200
+    assert "Task map" in r.text and "Add smaller task" in r.text
+    assert "request failed (" not in r.text and '"#" + n.id' not in r.text
+    assert developer_terms(r.text) == []

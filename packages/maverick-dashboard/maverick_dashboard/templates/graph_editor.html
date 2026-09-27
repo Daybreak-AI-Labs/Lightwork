@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Goal Map · Lightwork{% endblock %}
+{% block title %}Task Map · Lightwork{% endblock %}
 {% block content %}
 <style>
   .ge-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; }
@@ -26,43 +26,43 @@
   .tree ul { list-style: none; padding-inline-start: 1.5rem; border-inline-start: 1px solid var(--border); margin: 0; }
   .tree > ul { padding-inline-start: 0; border-inline-start: 0; }
 </style>
-<p class="muted"><a href="/goals">← all goals</a> · <a href="/plan-tree-3d">3D view</a></p>
-<h1 class="page-title">Goal map</h1>
-<p class="page-subtitle">See how your goals fit together. Select a goal to rename it, move it, or add a smaller goal beneath it.</p>
+<p class="muted"><a href="/goals">← All tasks</a> · <a href="/plan-tree-3d">3D view</a></p>
+<h1 class="page-title">Task map</h1>
+<p class="page-subtitle">See how your tasks fit together. Select a task to rename it, move it, or add a smaller task beneath it.</p>
 <div class="panel">
   <div class="legend">
-    <span><span class="badge active">active</span></span>
-    <span><span class="badge done">done</span></span>
-    <span><span class="badge blocked">blocked</span></span>
-    <span><span class="badge pending">pending</span></span>
-    <span><span class="badge cancelled">cancelled</span></span>
-    <span class="live" id="ge-status" role="status" aria-live="polite">loading…</span>
+    <span><span class="badge active">Running</span></span>
+    <span><span class="badge done">Done</span></span>
+    <span><span class="badge blocked">Blocked</span></span>
+    <span><span class="badge pending">Waiting</span></span>
+    <span><span class="badge cancelled">Cancelled</span></span>
+    <span class="live" id="ge-status" role="status" aria-live="polite">Loading…</span>
   </div>
   <div class="ge-wrap">
-    <svg id="ge-svg" role="img" aria-label="Map of {{ node_count }} goals. Use the editor beside the map to select and edit goals with the keyboard."></svg>
+    <svg id="ge-svg" role="img" aria-label="Map of {{ node_count }} tasks. Use the editor beside the map to select and edit tasks with the keyboard."></svg>
     <div class="ge-form panel" style="margin-bottom: 0;">
-      <h2 style="margin: 0; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Edit a goal</h2>
+      <h2 style="margin: 0; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Edit a task</h2>
 
-      <label for="ge-select">Selected goal</label>
-      <select id="ge-select"><option value="">Choose a goal here or on the map</option></select>
+      <label for="ge-select">Selected task</label>
+      <select id="ge-select"><option value="">Choose a task here or on the map</option></select>
 
       <label for="ge-title">Title</label>
       <input id="ge-title" type="text" maxlength="200" autocomplete="off">
       <button type="button" id="ge-retitle">Save title</button>
 
-      <label for="ge-parent">Move this goal under</label>
-      <select id="ge-parent"><option value="">Keep as a top-level goal</option></select>
-      <button type="button" id="ge-reparent">Move goal</button>
+      <label for="ge-parent">Move this task under</label>
+      <select id="ge-parent"><option value="">Keep as a main task</option></select>
+      <button type="button" id="ge-reparent">Move task</button>
 
-      <label for="ge-child-title">New subgoal title</label>
+      <label for="ge-child-title">New smaller task</label>
       <input id="ge-child-title" type="text" maxlength="200" autocomplete="off"
-             placeholder="Subgoal to add under the selected goal">
-      <button type="button" id="ge-add-child">Add subgoal</button>
+             placeholder="A smaller task to add under the selected one">
+      <button type="button" id="ge-add-child">Add smaller task</button>
 
       <p class="muted" style="font-size: 0.78rem; margin-bottom: 0;">
-        Subgoals created here are <em>pending</em> and not started —
-        run them from <a href="/chat">chat</a> when ready.
-        Drag a goal to move it on the map, hover to see its connections,
+        Smaller tasks added here wait and do not start on their own —
+        start them from <a href="/chat">chat</a> when ready.
+        Drag a task to move it on the map, hover to see its connections,
         drag the background to move the view, or scroll to zoom.
       </p>
       <p id="ge-error" role="alert" aria-live="assertive"
@@ -71,7 +71,7 @@
   </div>
   <noscript>
     <div class="tree">{{ fallback_html | safe }}</div>
-    <p class="muted">Editing requires JavaScript; this is the read-only tree.</p>
+    <p class="muted">Editing needs scripts turned on; this is a read-only list.</p>
   </noscript>
 </div>
 
@@ -90,6 +90,8 @@
   const titleEl = document.getElementById("ge-title");
   if (!svg) return;
   const el = (tag) => document.createElementNS(NS, tag);
+  const words = (v) => String(v || "").replace(/_/g, " ");
+  const count = (n) => n + (n === 1 ? " task" : " tasks");
   const reducedMotion = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -286,7 +288,7 @@
       const g = el("g");
       g.setAttribute("tabindex", "0");
       g.setAttribute("role", "button");
-      g.setAttribute("aria-label", "Goal " + p.id + " (" + p.status + "): " + (p.title || "(untitled)"));
+      g.setAttribute("aria-label", "Task (" + words(p.status) + "): " + (p.title || "(untitled)"));
       g.style.cursor = "pointer";
       const c = el("circle");
       c.setAttribute("r", p.r);
@@ -300,7 +302,7 @@
       t.textContent = s.length > 26 ? s.slice(0, 25) + "…" : s;
       g.appendChild(t);
       const tip = el("title");
-      tip.textContent = "#" + p.id + " [" + p.status + "] " + (p.title || "(untitled)");
+      tip.textContent = (p.title || "(untitled)") + " — " + words(p.status);
       g.appendChild(tip);
       p._g = g; p._c = c; p._t = t;
       labelEls.push(t);
@@ -385,19 +387,19 @@
       const o = document.createElement("option");
       o.value = value; o.textContent = text; return o;
     };
-    selectEl.replaceChildren(opt("", "Choose a goal here or on the map"));
+    selectEl.replaceChildren(opt("", "Choose a task here or on the map"));
     state.nodes.forEach((n) => {
-      selectEl.appendChild(opt(String(n.id), "#" + n.id + " " + (n.title || "(untitled)")));
+      selectEl.appendChild(opt(String(n.id), (n.title || "(untitled)") + " · " + words(n.status)));
     });
     selectEl.value = selected === null ? "" : String(selected);
-    parentEl.replaceChildren(opt("", "Keep as a top-level goal"));
+    parentEl.replaceChildren(opt("", "Keep as a main task"));
     if (selected !== null) {
       const banned = descendants(selected);
       banned.add(selected);
       const cur = (state.nodes.find((n) => n.id === selected) || {}).parent_id;
       state.nodes.forEach((n) => {
         if (banned.has(n.id)) return;
-        const o = opt(String(n.id), "#" + n.id + " " + (n.title || "(untitled)"));
+        const o = opt(String(n.id), (n.title || "(untitled)") + " · " + words(n.status));
         if (n.id === cur) o.selected = true;
         parentEl.appendChild(o);
       });
@@ -410,7 +412,7 @@
     titleEl.value = n ? n.title : "";
     rebuildSelects();
     paint();
-    setStatus(n ? ("Selected: " + (n.title || "Untitled goal")) : (state.nodes.length + " goals"));
+    setStatus(n ? ("Selected: " + (n.title || "Untitled task")) : count(state.nodes.length));
   }
 
   function seedLayout() {
@@ -436,18 +438,18 @@
     showError("");
     try {
       const r = await fetch("/api/v1/goal-tree", { headers: { Accept: "application/json" } });
-      if (!r.ok) { setStatus("error " + r.status); return; }
+      if (!r.ok) { setStatus("Could not load your tasks. Refresh the page to try again."); return; }
       const data = await r.json();
       state = { nodes: data.nodes || [], edges: data.edges || [] };
       if (selected !== null && !state.nodes.some((n) => n.id === selected)) selected = null;
       if (!state.nodes.length) {
         while (svg.firstChild) svg.removeChild(svg.firstChild);
         edgeRefs = []; labelEls = []; byId = {};
-        setStatus("no goals yet — create one in chat or the builder");
+        setStatus("No tasks yet — start one in chat or the task builder");
         rebuildSelects();
         return;
       }
-      setStatus(state.nodes.length + " goals");
+      setStatus(count(state.nodes.length));
       seedLayout();
       build();
       view = { x: 0, y: 0, k: 1 };
@@ -459,10 +461,11 @@
         requestAnimationFrame(loop);
       }
       rebuildSelects();
-    } catch (e) { setStatus("offline"); }
+    } catch (e) { setStatus("Can't reach Lightwork. Check your connection and refresh."); }
   }
 
-  async function post(url, body) {
+  async function post(url, body, action) {
+    action = action || "save that";
     showError("");
     try {
       const r = await fetch(url, {
@@ -471,37 +474,38 @@
         body: JSON.stringify(body),
       });
       if (!r.ok) {
-        let detail = "request failed (" + r.status + ")";
-        try { const j = await r.json(); if (j && j.detail) detail = j.detail; } catch (e) {}
-        showError(detail);
+        showError(window.mvErrorText ? window.mvErrorText({ status: r.status }, action)
+                                     : "Could not " + action + ". Please try again.");
         return false;
       }
       return true;
-    } catch (e) { showError("network error"); return false; }
+    } catch (e) { showError("Could not " + action + " — check your connection and try again."); return false; }
   }
 
   selectEl.addEventListener("change", () => {
     select(selectEl.value ? parseInt(selectEl.value, 10) : null);
   });
   document.getElementById("ge-retitle").addEventListener("click", async () => {
-    if (selected === null) { showError("select a goal first"); return; }
-    if (await post("/api/v1/goals/" + selected + "/retitle", { title: titleEl.value })) {
-      setStatus("title saved"); await load();
+    if (selected === null) { showError("Select a task first."); return; }
+    if (!titleEl.value.trim()) { showError("Type a title first."); return; }
+    if (await post("/api/v1/goals/" + selected + "/retitle", { title: titleEl.value }, "save the title")) {
+      setStatus("Title saved"); await load();
     }
   });
   document.getElementById("ge-reparent").addEventListener("click", async () => {
-    if (selected === null) { showError("select a goal first"); return; }
+    if (selected === null) { showError("Select a task first."); return; }
     const pid = parentEl.value ? parseInt(parentEl.value, 10) : null;
-    if (await post("/api/v1/goals/" + selected + "/reparent", { parent_id: pid })) {
-      setStatus("moved"); await load();
+    if (await post("/api/v1/goals/" + selected + "/reparent", { parent_id: pid }, "move the task")) {
+      setStatus("Moved"); await load();
     }
   });
   document.getElementById("ge-add-child").addEventListener("click", async () => {
-    if (selected === null) { showError("select a parent goal first"); return; }
+    if (selected === null) { showError("Select the task to add it under first."); return; }
     const t = document.getElementById("ge-child-title").value;
-    if (await post("/api/v1/goals/" + selected + "/children", { title: t })) {
+    if (!t.trim()) { showError("Type a title for the smaller task first."); return; }
+    if (await post("/api/v1/goals/" + selected + "/children", { title: t }, "add the smaller task")) {
       document.getElementById("ge-child-title").value = "";
-      setStatus("Subgoal created — ready to start when you are"); await load();
+      setStatus("Smaller task added — start it when you are ready"); await load();
     }
   });
 
