@@ -116,10 +116,10 @@ def test_goal_destructive_actions_and_attachment_failures_recover():
 
 def test_webhook_deletion_is_confirmed_and_surfaces_server_failure():
     source = (TEMPLATES / "workflow_builder.html").read_text(encoding="utf-8")
-    assert "Delete trigger “' + name + '”?" in source
-    assert "body.detail || ('Could not delete trigger (' + resp.status" in source
-    assert "Could not delete trigger — check your connection and try again." in source
-    assert "'Delete trigger ' + t.name" in source
+    assert "Other apps will no longer be able to start this workflow." in source
+    assert "var detail = plainErr(resp, 'delete it');" in source
+    assert "var message = plainErr(e, 'delete it');" in source
+    assert "'Delete the start ' + t.name" in source
 
 
 def test_high_impact_learning_workforce_and_agent_actions_confirm():
