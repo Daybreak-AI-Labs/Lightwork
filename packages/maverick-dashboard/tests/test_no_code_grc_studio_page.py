@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,7 +25,7 @@ def templates() -> Jinja2Templates:
     return selected
 
 
-def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) -> None:
+def test_page_is_list_driven_plain_and_permission_aware(monkeypatch) -> None:
     selected_templates = templates()
     monkeypatch.setattr(page, "require_permission", lambda *_: None)
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
@@ -41,13 +42,13 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     body = response.text
     assert "No-code GRC studio" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
-    assert "backdrop-filter: blur(26px)" in body
     assert page.ASSET_PATH in body
-    assert "Build with supported fields and rules" in body
-    assert 'id="grcs-builder-form"' in body
     assert 'data-can-operate="true"' in body
     assert 'data-can-audit="true"' in body
     assert 'data-can-admin="false"' in body
+    # The register is a table the script fills on load; actions live on each row.
+    assert 'id="grcs-version-list"' in body
+    assert 'id="grcs-builder-form"' in body
     for composer_control in (
         "grcs-add-object",
         "grcs-add-field",
@@ -55,13 +56,34 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
         "grcs-add-rule",
         "grcs-add-binding",
         "grcs-add-view",
-        "grcs-compose-blueprint",
     ):
         assert f'id="{composer_control}"' in body
+    # Record types and fields are picked from lists, never typed as identifiers.
+    assert 'id="grcs-field-object"' in body and "grcs-object-select" in body
     assert 'id="grcs-projection-form"' in body
-    assert 'id="grcs-projection-apply"' in body
     assert 'id="grcs-retention-purge"' in body
-    assert 'id="grcs-backup-verify-form"' in body
+    assert 'id="grcs-backup-list"' in body
+    # Administrator-only controls are disabled for this caller.
+    assert re.search(r'id="grcs-retention-purge"[^>]*disabled', body)
+    assert re.search(r'id="grcs-import"[^>]*disabled', body)
+    for removed in (
+        "Studio ID",
+        "Operation ID",
+        "blueprint_json",
+        "envelope_json",
+        "Expected integrity",
+        "Pointer revision",
+        "Backup ID",
+    ):
+        assert removed not in body
+    main = body.split('<main id="content"', 1)[1].split("</main>", 1)[0]
+    visible = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>", " ", main)
+    assert not re.search(
+        r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|idempoten\w*|"
+        r"json|revision|authority|projection|opaque)\b|/api/v1",
+        visible,
+        re.IGNORECASE,
+    ), visible
     assert "Content-Security-Policy" in response.headers
     assert "'unsafe-inline'" not in response.headers["Content-Security-Policy"]
 

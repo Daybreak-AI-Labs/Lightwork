@@ -628,6 +628,23 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
         _secure(response)
         return _jsonable(result)  # type: ignore[return-value]
 
+    @router.get("/operations/recovery/backups")
+    async def list_backups(
+        request: Request, response: Response, limit: int = Query(default=50, ge=1, le=500)
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        lister = getattr(store, "list_recovery_backups", None)
+        if not callable(lister):
+            raise HTTPException(status_code=503, detail="GRC studio backup list is unavailable")
+        rows = await call(ops, lister, tenant, limit=limit)
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-recovery-list.v1",
+            "count": len(rows),
+            "items": _jsonable(rows),
+        }
+
     @router.get("/operations/recovery/backups/{backup_id}")
     async def verify_backup(
         request: Request, response: Response, backup_id: ObjectPath
