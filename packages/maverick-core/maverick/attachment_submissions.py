@@ -120,7 +120,7 @@ class SubmissionStore:
                 "detail": json.loads(self.open(row[3]))}
 
     def create(self, *, token, fingerprint, owner, title, description, manifest,
-               parent_id=None, domain="", project_id=None):
+               parent_id=None, domain="", project_id=None, kind="chat"):
         key = self.token_key(token, owner)
         with self.transaction("submission:" + key) as connection:
             prior = self._receipt(connection, key)
@@ -146,7 +146,8 @@ class SubmissionStore:
             sql = f"INSERT INTO goals({columns}) VALUES({','.join('?' for _ in values)})"
             cursor = self.execute(connection, sql + ("" if self.sqlite else " RETURNING id"), tuple(values))
             goal_id = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
-            detail = {"manifest": manifest, "message": "Submission admitted as a draft; preparing attachments."}
+            detail = {"manifest": manifest, "kind": kind,
+                      "message": "Submission admitted as a draft; preparing attachments."}
             self.execute(connection, "INSERT INTO attachment_submissions "
                          "(submission_key,tenant_id,owner,goal_id,fingerprint,state,detail,updated_at) "
                          "VALUES(?,?,?,?,?,'draft',?,?)",

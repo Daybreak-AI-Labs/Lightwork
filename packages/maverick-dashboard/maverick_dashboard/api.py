@@ -1380,7 +1380,15 @@ def create_goal(
             assert_goal_access(request, g0)
             response.headers["Location"] = f"/api/v1/goals/{g0.id}"
             response.headers["Idempotency-Replayed"] = "true"
-            return _to_goal_out(g0)
+            if g0.status != "draft":
+                return _to_goal_out(g0)
+            # The first request stopped between admission and its dispatch
+            # claim, so nothing is running. The payload (and so its limits) is
+            # bound by the fingerprint: finish the claim below. The claim is an
+            # atomic draft->pending move, so concurrent replays run it once.
+            replay_resume = True
+        else:
+            replay_resume = False
     else:
         goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
         if domain:
@@ -1390,11 +1398,18 @@ def create_goal(
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if receipt is not None:
-        from .goal_submission import claim_api_dispatch
+        from .goal_submission import try_claim_api_dispatch
 
-        claim_api_dispatch(w, receipt, {"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds,
-            "max_depth": max_depth, "channel": "api", "user_id": user_id,
-            "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None})
+        intent = {"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds,
+                  "max_depth": max_depth, "channel": "api", "user_id": user_id,
+                  "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None}
+        if not try_claim_api_dispatch(w, receipt, intent):
+            if replay_resume:
+                g1 = w.get_goal(goal_id)
+                if g1 is not None and g1.status != "draft":
+                    return _to_goal_out(g1)  # a concurrent replay dispatched it
+            raise HTTPException(status_code=409, detail=(
+                "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -1419,7 +1434,7 @@ def create_goal(
     if g is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
-    response.headers["Idempotency-Replayed"] = "false"
+    response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
     return _to_goal_out(g)
 
 
@@ -1440,7 +1455,10 @@ def reconcile_goal_submission(request: Request, response: Response, kind: str = 
         exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
         raise
     response.headers["Cache-Control"] = "no-store"
-    return {"state": "accepted", "submission_state": receipt["state"],
+    # A draft was admitted but never dispatched: replaying the request with the
+    # same Idempotency-Key runs it. Do not report that as accepted work.
+    return {"state": "not_dispatched" if goal.status == "draft" else "accepted",
+            "submission_state": receipt["state"],
             "goal": {"id": goal.id, "status": goal.status},
             "replayed": True, "execution_confirmed": False}
 
@@ -6632,6 +6650,12 @@ def retry_flow_run_endpoint(
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
                 "resumed from its failure; use a plain retry instead",
+            )
+        ceiling = configured_max_dollars()
+        if budget_limit_dollars is not None and ceiling is not None and budget_limit_dollars > ceiling:
+            raise HTTPException(
+                status_code=409,
+                detail=f"The run allowance cannot exceed this deployment's per-run ceiling (${ceiling:g}).",
             )
         if run.status == "budget_limited":
             if budget_limit_dollars is None or budget_limit_dollars <= max(

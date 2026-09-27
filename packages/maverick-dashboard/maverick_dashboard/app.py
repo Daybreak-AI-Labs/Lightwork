@@ -8308,9 +8308,19 @@ async def recover_chat_submission(request: Request, bg: BackgroundTasks, goal_id
     if goal is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, goal)
+    # Recovery re-runs the owner's own chat draft. It never runs someone else's
+    # request under the recovering user's identity and suites.
+    if (goal.owner or "") != (caller_principal(request) or ""):
+        raise HTTPException(status_code=403, detail="Only the person who submitted this request can recover it")
     receipt = await run_in_threadpool(SubmissionStore(w).for_goal, goal_id)
     if receipt is None or goal.status != "draft":
         raise HTTPException(status_code=409, detail="This submission is not a recoverable draft")
+    detail = receipt["detail"]
+    if detail.get("kind") == "api" or (detail.get("dispatch_intent") or {}).get("channel") == "api":
+        # An API request carries the client's limits; replaying it with the same
+        # Idempotency-Key resumes it with exactly those. Chat recovery would not.
+        raise HTTPException(status_code=409, detail=(
+            "This request came through the API. Replay it with the same Idempotency-Key to run it."))
     records = {(r.filename, r.mime, r.size_bytes, r.sha256) for r in w.list_attachments(goal_id)}
     if any((r["filename"], r["mime"], r["size_bytes"], r["sha256"]) not in records
            for r in receipt["detail"]["manifest"]):

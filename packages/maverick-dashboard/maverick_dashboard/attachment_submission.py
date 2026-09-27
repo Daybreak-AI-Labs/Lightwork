@@ -78,7 +78,20 @@ def publish_batch(world, goal_id, records):
             destination, attachments._encode_for_disk(data, destination), record.sha256)
         return attachments.Stored(record.filename, record.mime, record.size_bytes, record.sha256, destination)
 
-    ids = SubmissionStore(world).admit(goal_id, records, publish=publish)
+    # Check the quota first, then write and seal the content-addressed files
+    # OUTSIDE the admission transaction: on SQLite that transaction holds the
+    # whole world's write lock, and sealing up to a goal's quota of files can
+    # take seconds. Publishing is idempotent (no overwrite, digest-verified);
+    # admission re-checks quota and inserts only metadata under the lock.
+    existing = {(a.filename, a.mime, int(a.size_bytes), a.sha256): int(a.size_bytes)
+                for a in world.list_attachments(goal_id)}
+    novel = {(r.filename, r.mime, int(r.size_bytes), r.sha256): int(r.size_bytes)
+             for r in records}.keys() - existing.keys()
+    if (any(not 0 < int(r.size_bytes) <= attachments.MAX_FILE_BYTES for r in records)
+            or sum(existing.values()) + sum(item[2] for item in novel) > attachments.MAX_GOAL_BYTES):
+        raise attachments.AttachmentRejected("Per-goal attachment quota exceeded")
+    published = [publish(record) for record in records]
+    ids = SubmissionStore(world).admit(goal_id, published)
     # Mirroring is optional/best-effort and follows authoritative admission.
     if attachments.s3_mirror_enabled():
         for record in records:

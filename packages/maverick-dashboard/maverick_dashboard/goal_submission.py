@@ -32,7 +32,8 @@ def reserve_api(world, *, key, owner, payload, title, description, domain, caps)
     }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
     try:
         return SubmissionStore(world).create(token=token, fingerprint=fingerprint, owner=owner,
-            title=title[:200], description=description, domain=domain or "", manifest=[])
+            title=title[:200], description=description, domain=domain or "", manifest=[],
+            kind="api")
     except SubmissionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -63,8 +64,14 @@ def lookup_receipt(world, *, key, owner, kind):
 
 
 def claim_api_dispatch(world, receipt, intent):
+    if not try_claim_api_dispatch(world, receipt, intent):
+        raise HTTPException(status_code=409, detail="Request retained; execution admission is unconfirmed. Reconcile before retrying.")
+
+
+def try_claim_api_dispatch(world, receipt, intent) -> bool:
+    """Move an admitted request's draft goal to pending exactly once. ``False``
+    when another request (a concurrent replay) already claimed it."""
     store = SubmissionStore(world)
     store.record_dispatch_intent(receipt["key"], intent)
     store.update(receipt["key"], state="ready", message="Request accepted; execution admission is pending.")
-    if not store.claim_dispatch(receipt["key"]):
-        raise HTTPException(status_code=409, detail="Request retained; execution admission is unconfirmed. Reconcile before retrying.")
+    return store.claim_dispatch(receipt["key"])
