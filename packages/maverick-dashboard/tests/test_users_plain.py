@@ -68,3 +68,16 @@ def test_role_changes_stay_admin_only(client, monkeypatch):
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vic")
     assert client.post("/users/roles/save", data={"name": "Helper"}).status_code == 403
     assert client.get("/users").status_code == 403
+
+
+def test_roles_and_permissions_pages_read_plainly(client):
+    roles = client.get("/roles?role=orchestrator").text
+    text = visible_text(roles)
+    for word in ("system-prompt", "addendum", "inherit", "orchestrator", "claude-opus", "HTTP ", "⛔"):
+        assert word not in text, word
+    assert "Planner" in text and "Thinking level" in text and "Extra instructions" in text
+    perms = client.get("/permissions").text
+    ptext = visible_text(perms)
+    for word in ("dashboard block", "base policy", "readiness unknown", "tenant", "ACL", "present"):
+        assert word not in ptext, word
+    assert "Change abilities in Settings" in ptext

@@ -146,6 +146,35 @@ FEATURE_HELP = {
     "world_model": "Tasks share one memory, so what Lightwork learns in one task carries to the next.",
 }
 
+# The core agent roles, as a title and one line on what each does.
+AGENT_ROLES = {
+    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right specialist."),
+    "researcher": ("Researcher", "Finds and reads sources, and gathers the facts a task needs."),
+    "coder": ("Coder", "Writes and changes code."),
+    "coding": ("Coding assistant", "Helps with smaller coding steps inside a larger task."),
+    "writer": ("Writer", "Drafts documents, emails and reports."),
+    "analyst": ("Analyst", "Works through numbers and data and explains what they show."),
+    "revisor": ("Editor", "Improves a draft after feedback."),
+    "verifier": ("Checker", "Checks finished work against what was asked before it is handed over."),
+    "reviewer": ("Reviewer", "Reviews work and points out problems to fix."),
+    "summarizer": ("Summarizer", "Writes short summaries of long material."),
+    "skill_distiller": ("Skill builder", "Turns work that went well into reusable skills."),
+    "vision": ("Image reader", "Reads screenshots, photos and scanned documents."),
+    "translator": ("Translator", "Translates text between languages."),
+}
+
+EFFORT_LABELS = {"low": "Low", "medium": "Medium", "high": "High", "xhigh": "Very high", "max": "Maximum"}
+
+
+def agent_role_title(role: object) -> str:
+    key = str(role or "")
+    return AGENT_ROLES.get(key, (key.replace("_", " ").capitalize(), ""))[0]
+
+
+def agent_role_help(role: object) -> str:
+    return AGENT_ROLES.get(str(role or ""), ("", ""))[1]
+
+
 # "Where do I get a key?" links, by provider.
 PROVIDER_KEY_HELP = {
     "anthropic": "https://console.anthropic.com/settings/keys",
@@ -227,4 +256,7 @@ def register(env) -> None:
     env.filters.setdefault("capability_label", capability_label)
     env.filters.setdefault("feature_label", feature_label)
     env.filters.setdefault("money", money)
+    env.filters.setdefault("agent_role", agent_role_title)
+    env.filters.setdefault("agent_role_help", agent_role_help)
+    env.filters.setdefault("effort_label", lambda v: EFFORT_LABELS.get(str(v or ""), str(v or "").capitalize()))
     env.filters.setdefault("filesize", size)

@@ -92,8 +92,8 @@ def test_other_global_or_executable_deployments_have_the_same_safety_contract():
     assert "if (!installed)" in store
 
     assert "function beginMutation(button)" in roles
-    assert "Deploy the authority and model override for role “' + role" in roles
-    assert "Reset role “' + role + '” to its built-in authority and model?" in roles
+    assert "'Save changes to the ' + roleName + ' role?" in roles
+    assert "'Put the ' + roleName + ' role back to its built-in settings?" in roles
     assert "Could not reach the server — check your connection and try again." in roles
     assert "finishMutation(saveBtn)" in roles
     assert "finishMutation(resetBtn)" in roles

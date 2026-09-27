@@ -46,8 +46,8 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "permissions.html",
             (
-                'aria-label="Add dashboard block for {{ t.name }} tool"',
-                'aria-label="Clear dashboard block for {{ t.name }} tool"',
+                'aria-label="Block the {{ t.name | humanize }} tool"',
+                'aria-label="Allow the {{ t.name | humanize }} tool"',
                 "btn.setAttribute('aria-label'",
             ),
         ),
