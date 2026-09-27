@@ -3427,12 +3427,15 @@ async def learned_page(request: Request) -> HTMLResponse:
     on-disk generated tools, with a remove action per generated tool (#427)."""
     from .api import _learned_snapshot
 
+    can_manage = has_global_permission(request, "admin")
     return templates.TemplateResponse(
         request,
         "learned.html",
-        _learned_snapshot(
-            include_pending_items=has_global_permission(request, "admin")
-        ),
+        {
+            **_learned_snapshot(include_pending_items=can_manage),
+            "can_manage": can_manage,
+            "can_remove_tools": has_permission(request, "admin"),
+        },
     )
 
 

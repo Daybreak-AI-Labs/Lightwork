@@ -250,7 +250,7 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
     t = client.get("/learning").text
     # engine off -> the section still renders (admin) with an in-app ON button
     # (the `flows` feature switch), not the live toggles and no config-file copy.
-    assert "Turn the flow engine on first" in t
+    assert "Turn on workflows first" in t
     assert 'id="lrn-flows-on"' in t
     assert "[flows]" not in t
     assert 'id="lrn-auto-evolve"' not in t
@@ -418,8 +418,8 @@ def test_learning_page_has_separate_dgm_risk_card(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     text = client.get("/learning").text
     assert 'id="lrn-dgm"' in text
-    assert "DGM code-evolution research" in text
-    assert "cannot deploy or adopt code" in text
+    assert "Experimental: let Lightwork try improving its own code" in text
+    assert "It can never install them" in text
 
 
 def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
