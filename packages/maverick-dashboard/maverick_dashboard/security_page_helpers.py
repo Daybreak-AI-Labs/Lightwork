@@ -15,6 +15,28 @@ SOC_CONNECTOR_LABELS: dict[str, str] = {
 }
 
 
+FRAMEWORK_LABELS: dict[str, str] = {
+    "soc2": "SOC 2", "iso27001": "ISO 27001", "nist_csf": "NIST CSF 2.0",
+    "nist_800_53": "NIST 800-53", "cis_v8": "CIS v8.1", "pci_dss": "PCI DSS 4.0.1",
+    "hipaa": "HIPAA", "cmmc_l2": "CMMC L2", "fedramp_moderate": "FedRAMP Class C",
+    "all": "All frameworks",
+}
+
+ATTACK_NAMES: dict[str, str] = {
+    "T1078": "Using stolen or valid accounts", "T1098": "Changing accounts to keep access",
+    "T1110": "Guessing passwords", "T1566": "Phishing", "T1190": "Attacking a public app",
+    "T1059": "Running commands or scripts", "T1486": "Encrypting data for ransom",
+    "T1041": "Sending data out over an existing connection", "T1567": "Sending data to a web service",
+    "T1530": "Taking data from cloud storage", "T1562": "Switching off defences",
+    "T1021": "Remote access", "T1136": "Creating new accounts", "T1485": "Deleting data",
+    "T1548": "Gaining higher permissions", "T1552": "Finding stored passwords or keys",
+}
+
+
+def attack_choices() -> list[dict]:
+    return [{"value": key, "label": f"{name} ({key})"} for key, name in ATTACK_NAMES.items()]
+
+
 # Plainer names for the built-in checks (the kernel's titles are for analysts).
 CURATED_TITLES: dict[str, str] = {
     "LW-SIGMA-001": "Someone signed in to the cloud console without a second sign-in step",
@@ -48,4 +70,4 @@ def soc_connector_choices() -> tuple[list[str], list[str]]:
     return pull, upload
 
 
-__all__ = ["CURATED_TITLES", "SOC_CONNECTOR_LABELS", "soc_connector_choices"]
+__all__ = ["ATTACK_NAMES", "CURATED_TITLES", "FRAMEWORK_LABELS", "attack_choices", "SOC_CONNECTOR_LABELS", "soc_connector_choices"]

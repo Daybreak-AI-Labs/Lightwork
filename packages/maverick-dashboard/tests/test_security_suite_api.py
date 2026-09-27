@@ -356,7 +356,7 @@ def test_security_pages_and_report_render_seeded_program():
     report = client.get("/security/report")
     assert report.status_code == 200, report.text
     assert "Security &amp; GRC" in report.text
-    assert "Print / save PDF" in report.text
+    assert "Print or save as PDF" in report.text
 
     for route, phrase in (
         ("/security/threats", "Platform Threat Hunter"),
@@ -365,6 +365,43 @@ def test_security_pages_and_report_render_seeded_program():
         response = client.get(route)
         assert response.status_code == 200, response.text
         assert phrase in response.text
+
+
+def test_security_workspace_reads_plainly_with_pickers_for_people_and_records():
+    """Owners, frameworks, controls and evidence are chosen from lists; statuses
+    and scores read as words; nothing on the page is developer language."""
+    from maverick_dashboard import rbac
+
+    from test_support.plain_language import developer_terms, visible_text
+
+    rbac.set_role("user:jane@example.com", "operator")
+    now = time.time()
+    control = _create_control()
+    evidence = _create_approved_evidence(control["id"])
+    _assert_ok(client.post("/api/v1/security/risks", json={
+        "title": "Privileged credential theft", "likelihood": 4, "impact": 5,
+        "likelihood_rationale": "Targeted.", "impact_rationale": "Admin access.",
+        "owner": "user:jane@example.com", "evidence_ids": [evidence["id"]]}), 201)
+    _assert_ok(client.post("/api/v1/security/poams", json={
+        "finding": "Restrict storage", "owner": "ciso", "due_at": now + 86400}), 201)
+    _assert_ok(client.post("/api/v1/security/policies", json={
+        "title": "Access policy", "owner": "ciso", "review_cadence_days": 365}), 201)
+    _assert_ok(client.post("/api/v1/security/incidents", json={
+        "title": "Lost laptop", "severity": "high", "clock_ids": ["gdpr_eu_72h"]}), 201)
+    page = client.get("/security").text
+    assert developer_terms(page) == []
+    text = visible_text(page)
+    for label in ("Choose a person", "Someone else…", "Add your own control",
+                  "Controls it supports", "Evidence behind it", "Reporting deadlines that might apply",
+                  "Send for review", "Retire", "4 – Likely", "5 – Severe", "Fix plans"):
+        assert label in text, label
+    assert "jane@example.com" in text  # the owner picker lists people by name
+    assert "20 of 25 (Critical)" in text  # risk score with its scale
+    assert "EU GDPR supervisory-authority notice" in text
+    assert "not_started" not in text and "revision" not in text.lower()
+    report = client.get("/security/report").text
+    assert developer_terms(report) == []
+    assert "Download data (for other tools)" in report and "onclick" not in report
 
 
 def test_control_evidence_human_review_and_revision_cas():

@@ -278,6 +278,6 @@ def test_security_operators_do_not_request_installation_switches(
         assert ('id="sec-hunters"' in response.text) is can_manage
         assert ("fetch('/api/v1/features/switches')" in response.text) is can_manage
         if not can_manage:
-            assert "An installation administrator manages hunter switches." in response.text
+            assert "An administrator turns threat hunting on or off." in response.text
     finally:
         reset_tenant(token)

@@ -4309,6 +4309,18 @@ async def security_page(request: Request) -> HTMLResponse:
         ][:10]
     ctx.update({"records": records, "program": report, "insights": insights})
     ctx["security_can_manage_hunters"] = has_global_permission(request, "admin")
+    from .immune_actions_api import people_choices
+    from .security_page_helpers import attack_choices
+
+    ctx["people"] = people_choices()
+    ctx["attack_techniques"] = attack_choices()
+    try:
+        ctx["clocks"] = [
+            {"value": c["key"], "label": f"{c.get('title') or c['key']} ({c.get('jurisdiction', '')})".replace(" ()", "")}
+            for c in security_ops.list_regulatory_clock_packs()
+        ] if records["enabled"] else []
+    except Exception:  # pragma: no cover - the incident form still opens without clocks
+        ctx["clocks"] = []
     return templates.TemplateResponse(request, "security.html", ctx)
 
 
@@ -4350,10 +4362,12 @@ async def security_report_page(request: Request) -> HTMLResponse:
                 }
             )
         control_rows.append({**row, "cited_evidence": cited})
+    from .security_page_helpers import FRAMEWORK_LABELS
+
     return templates.TemplateResponse(
         request,
         "security_report.html",
-        {"r": report, "controls": control_rows},
+        {"r": report, "controls": control_rows, "framework_labels": FRAMEWORK_LABELS},
     )
 
 
