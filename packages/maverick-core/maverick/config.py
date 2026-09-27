@@ -2004,6 +2004,30 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_ifc() -> dict:
+    """Return the ``[ifc]`` section: runtime information-flow control (:mod:`maverick.ifc`).
+
+    ``mode``: ``off`` | ``audit`` (default: record labelled data reaching an
+    external sink, allow it) | ``approve`` (a human approves each new
+    sink/label pair through the consent path) | ``block``. ``scope``:
+    ``context`` (default: an agent that has seen labelled data is labelled) or
+    ``explicit`` (act only when the data appears literally in the call).
+    ``allow_sinks``: external tools exempt from the check (e.g. ``web_search``).
+    ``MAVERICK_IFC_MODE`` overrides ``mode``. A malformed value falls back to
+    the default rather than silently disabling a stricter setting."""
+    cfg = load_config().get("ifc", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    mode = str(os.environ.get("MAVERICK_IFC_MODE") or cfg.get("mode", "audit")).strip().lower()
+    scope = str(cfg.get("scope", "context")).strip().lower()
+    sinks = cfg.get("allow_sinks", [])
+    return {
+        "mode": mode if mode in ("off", "audit", "approve", "block") else "audit",
+        "scope": scope if scope in ("context", "explicit") else "context",
+        "allow_sinks": sorted({str(t) for t in sinks}) if isinstance(sinks, list) else [],
+    }
+
+
 def get_swarm() -> dict:
     """Return the ``[swarm]`` section: how large one goal's swarm may grow.
 

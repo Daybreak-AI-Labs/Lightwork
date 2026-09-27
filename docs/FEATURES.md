@@ -5078,6 +5078,15 @@ tested without spawning py-spy.
   interoperability, subject matching, legal/regulator acceptance or production
   delivery.
 
+## Information-flow control
+
+- **Runtime label tracking** (`ifc.py`, `[ifc]`): a sensitive read labels the
+  agent (`data:<tool>`; a codebase run starts `code:<repo>`), labels propagate
+  through the blackboard, spawns and the peer bus, and a labelled agent's call
+  to an external sink is recorded, held for human approval, or blocked at the
+  tool gate. Fingerprints witness literal copies; `ifc_flow` audit rows record
+  labels and outcomes, never data.
+
 ## Adaptive immunity
 
 - **Composition-risk discovery** (`immune/network.py`, `maverick immune network`):

@@ -215,6 +215,12 @@ class Blackboard:
                 return []
             return [e for e in self.entries if e.agent == agent]
 
+    def posters_since(self, cursor: int) -> set[str]:
+        """Agents with posts after ``cursor`` (information-flow propagation:
+        a reader is shown what they posted, so it absorbs their labels)."""
+        with self._lock:
+            return {e.agent for e in self.entries if e.seq > cursor}
+
     def cursor(self) -> int:
         """The sequence number of the latest post; feed it to ``render_since``."""
         with self._lock:

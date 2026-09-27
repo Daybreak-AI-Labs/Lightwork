@@ -69,6 +69,15 @@ def _default_max_concurrent_model_calls() -> int:
                           "max_concurrent_model_calls", 0, 0)
 
 
+def _default_ifc():
+    try:
+        from .ifc import tracker_for_run
+        return tracker_for_run()
+    except Exception:  # pragma: no cover -- a broken config never disables a run
+        from .ifc import FlowTracker
+        return FlowTracker(mode="audit")
+
+
 def _new_bus_namespace() -> str:
     """Opaque routing capability for one swarm's in-process message bus."""
     return secrets.token_hex(16)
@@ -166,6 +175,9 @@ class SwarmContext:
     # tool-name actions, credit, learn-weight) -- the credit-weighted units the
     # data engine learns from. Empty when CSCA didn't run.
     last_subtrajectories: list = field(default_factory=list)
+    # Runtime information-flow control (maverick.ifc): the run's label tracker,
+    # or None when [ifc] mode is off. Typed Any to avoid importing ifc here.
+    ifc: Any | None = field(default_factory=_default_ifc)
     _spawns_used: int = 0
     _workdir_lock: asyncio.Lock | None = field(default=None, repr=False)
     _model_slots: asyncio.Semaphore | None = field(default=None, repr=False)

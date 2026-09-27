@@ -185,7 +185,7 @@
     "configuration": 56,
     "read_projection": 15,
     "coordinator": 1,
-    "audit": 21,
+    "audit": 22,
     "transient": 16,
     "business_records": 11,
     "execution": 21,
@@ -23461,7 +23461,7 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 34,
+          "line": 36,
           "function": "ledger_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'oversight.jsonl')"
@@ -23480,13 +23480,13 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 37,
+          "line": 39,
           "function": "recording_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'twin', f'{int(goal_id)}.jsonl')"
         },
         {
-          "line": 142,
+          "line": 182,
           "function": "replays_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'twin', 'replays.jsonl')"
@@ -23505,16 +23505,35 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 131,
+          "line": 150,
           "function": "title_seal",
           "kind": "write_text",
           "expression": "Path(out).write_text(json.dumps(t.seal(_load(dossier)), indent=2), encoding='utf-8')"
         },
         {
-          "line": 163,
+          "line": 182,
           "function": "title_research",
           "kind": "write_text",
           "expression": "Path(out).write_text(json.dumps(merged, indent=2, sort_keys=True), encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/ifc.py",
+      "contract": "audit",
+      "owner": "packages/maverick-core/maverick/ifc.py",
+      "purpose": "Information-flow control: counts-only projection of labelled data reaching external sinks; the signed ifc_flow audit row is the authority.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 223,
+          "function": "ledger_path",
+          "kind": "data_dir",
+          "expression": "data_dir('immune', 'ifc.jsonl')"
         }
       ]
     }

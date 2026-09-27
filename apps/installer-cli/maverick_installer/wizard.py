@@ -4002,6 +4002,24 @@ def _ask_self_harness_evaluation_boundary(advanced: dict[str, Any]) -> None:
     )
 
 
+def _pick_ifc(advanced: dict[str, Any]) -> None:
+    """Information-flow control: what an agent has read decides where it may send."""
+    mode = _q_select(
+        "  Information-flow control: when an agent that has read tenant data (or "
+        "your code) calls a tool that sends outside, Lightwork should",
+        choices=[
+            "audit   - record it and allow (default)",
+            "approve - ask a human each time a new kind of data would leave",
+            "block   - refuse it",
+            "off     - do not track",
+        ],
+        default="audit   - record it and allow (default)",
+    )
+    mode = (str(mode or "").split() or ["audit"])[0]
+    if mode in ("approve", "block", "off"):
+        advanced["ifc_mode"] = mode
+
+
 def _pick_swarm_scale(advanced: dict[str, Any]) -> None:
     """Swarm scale: a goal may create up to 64 agents by default. Raising it is
     safe only with a model-call bound, so the swarm queues for the provider."""
@@ -5104,6 +5122,7 @@ def pick_advanced() -> dict[str, Any]:
         _q_text("  SQL tool query timeout in seconds (1-300)", default="30"), default=30)))
     advanced["connector_max_attempts"] = min(5, max(1, _safe_int(
         _q_text("  REST connector read attempts (1-5)", default="3"), default=3)))
+    _pick_ifc(advanced)
     _pick_swarm_scale(advanced)
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
@@ -7941,6 +7960,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[fleet_memory]")
         lines.append("enable = true")
+    if advanced.get("ifc_mode"):
+        lines.append("")
+        lines.append("[ifc]")
+        lines.append("# Information-flow control (maverick.ifc): labelled data reaching an")
+        lines.append("# external sink is recorded (audit), held for approval, or blocked.")
+        lines.append(f'mode = "{advanced["ifc_mode"]}"')
     if advanced.get("swarm_max_total_spawns"):
         lines.append("")
         lines.append("[swarm]")

@@ -20,6 +20,9 @@ Payload shapes (kind -> required fields, all events also carry
                      call_commitment_algorithm:str, status:str, output_summary:str;
                      status=ok is the execution-completion evidence
   shield_block:      stage:str (input|tool|output), reason:str, score:float|None
+  ifc_flow:          tool:str, labels:list[str], explicit:list[str], mode:str,
+                     outcome:str (recorded|approved|denied|blocked); labelled data
+                     reaching an external sink (maverick.ifc); never arguments
   capability_denied: tool:str, principal:str, channel:str|None, user_id:str|None
   egress_blocked:    provider:str (enterprise-mode egress lock denial)
   consent_prompt:    action:str, risk:str (low|medium|high|critical)
@@ -156,6 +159,7 @@ class EventKind:
     TOOL_CALL       = "tool_call"
     TOOL_RESULT     = "tool_result"
     SHIELD_BLOCK    = "shield_block"
+    IFC_FLOW        = "ifc_flow"
     CAPABILITY_DENIED = "capability_denied"
     SANDBOX_DENIED = "sandbox_denied"
     # Per-call token exchange (zero-trust): one row per minted, single-tool,

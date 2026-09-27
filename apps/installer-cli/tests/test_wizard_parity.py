@@ -1300,3 +1300,11 @@ def test_write_config_emits_twin_record_alongside_canaries(tmp_path: Path, monke
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={
         "immune_canaries": True, "immune_twin_record": True})
     assert parsed["immune"] == {"canaries": True, "twin_record": True}
+
+
+def test_write_config_emits_ifc_mode_only_when_changed(tmp_path: Path, monkeypatch):
+    # [ifc] is a kernel knob (maverick.config.get_ifc); audit is the default.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"ifc_mode": "block"})
+    assert parsed["ifc"] == {"mode": "block"}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "ifc" not in parsed

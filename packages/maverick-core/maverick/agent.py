@@ -1647,6 +1647,9 @@ class Agent:
         # test/adapter context lacks the hook, legacy tool behavior is retained;
         # a real SwarmContext registration error fails the bus closed while the
         # rest of the agent can still run.
+        # Information flow: a child's brief comes from its parent's context.
+        if parent is not None and (tracker := getattr(self.ctx, "ifc", None)) is not None:
+            tracker.inherit(self.name, parent.name)
         _register_bus_agent = getattr(self.ctx, "register_bus_agent", None)
         if callable(_register_bus_agent):
             try:
@@ -2679,6 +2682,51 @@ class Agent:
             "findings) or get human approval via ask_user before retrying."
         )
 
+    async def _ifc_denial(self, name: str, args: dict) -> str | None:
+        """Information-flow gate (maverick.ifc): labelled data leaving through an
+        external sink is recorded, needs a human's approval, or is blocked,
+        per the run's mode. ``None`` = proceed."""
+        tracker = getattr(self.ctx, "ifc", None)
+        if tracker is None:
+            return None
+        from . import ifc
+        decision = tracker.decide(self.name, name, args)
+        if decision is None or tracker.granted(decision):
+            return None
+        goal_id = getattr(self.ctx, "goal_id", None)
+        labels = ", ".join(sorted(decision.labels))
+        if decision.mode == "audit":
+            ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="recorded")
+            return None
+        if decision.mode == "approve":
+            granted = False
+            try:
+                from .safety.consent import require_consent
+                verdict = await asyncio.to_thread(
+                    require_consent, name, risk="high", provenance="ifc",
+                    detail=(f"Agent {self.name} holds data from {labels} and wants to send "
+                            f"through '{name}', which leaves the tenant boundary."
+                            + (" The data appears literally in the call."
+                               if decision.explicit else "")),
+                    allow_auto_approve=False, consult_ledger=False)
+                granted = bool(verdict.granted)
+            except Exception:  # consent unavailable -> fail closed
+                granted = False
+            ifc.record(decision, agent=self.name, goal_id=goal_id,
+                       outcome="approved" if granted else "denied")
+            if granted:
+                tracker.grant(decision)
+                return None
+            return (f"⚠ '{name}' requires human approval: this agent holds data from "
+                    f"{labels}, and '{name}' sends outside the tenant boundary. Not granted. "
+                    "Finish without sending it, or ask a human to share it.")
+        ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="blocked")
+        self.ctx.blackboard.post(self.name, "error",
+                                 f"tool={name} BLOCKED by information-flow control")
+        return (f"⚠ BLOCKED by information-flow control: this agent holds data from {labels}, "
+                f"and '{name}' sends outside the tenant boundary. Do not retry through "
+                "another external tool; finish with what can stay inside.")
+
     async def _governance_denial(
         self,
         name: str,
@@ -3115,6 +3163,8 @@ class Agent:
             result_bytes(output)
             safe_name, _ = _redact_secrets(str(name)[:128])
             complete_output = output
+            if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+                tracker.observe_output(self.name, name, complete_output)
             limit = _tool_result_limit(self.model)
             if not needs_complete_output() and len(output) > limit:
                 output = self._retain_large_result(output, limit=limit, tool=safe_name)
@@ -3293,6 +3343,8 @@ class Agent:
         )
         if _governance_refusal is not None:
             return _governance_refusal
+        if (d := await self._ifc_denial(name, args)) is not None:
+            return d
 
         # PreToolUse hooks: any registered hook can BLOCK the call by
         # returning a non-zero exit code (shell hook) or a falsy value
@@ -3995,6 +4047,8 @@ class Agent:
         )
         # Everything up to here is in the brief; later posts reach this agent
         # as per-turn deltas (see the tool_results assembly below).
+        if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+            tracker.read_blackboard(self.name, bb.posters_since(0))
         self._bb_cursor = bb.cursor()
         first_content: list[dict] | str
         if image_blocks:
@@ -5152,6 +5206,9 @@ class Agent:
             # render problem break the turn.
             if tool_results and _BB_TURN_DELTA_ENTRIES:
                 try:
+                    if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+                        tracker.read_blackboard(
+                            self.name, bb.posters_since(getattr(self, "_bb_cursor", 0)))
                     _bb_delta, self._bb_cursor = bb.render_since(
                         getattr(self, "_bb_cursor", 0), exclude_agent=self.name,
                         max_entries=_BB_TURN_DELTA_ENTRIES,

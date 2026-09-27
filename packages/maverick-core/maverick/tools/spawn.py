@@ -34,6 +34,15 @@ SYNTHESIS_RESERVE = env_float("MAVERICK_SYNTHESIS_RESERVE", 0.25)
 _RESERVED_CHILD_ROLES = {"orchestrator"}
 
 
+def _absorb_child_labels(parent: Agent, children: list) -> None:
+    """Information flow (maverick.ifc): a child's answer returns to its parent,
+    and with it whatever labelled data the child saw."""
+    tracker = getattr(parent.ctx, "ifc", None)
+    if tracker is not None:
+        for child in children:
+            tracker.absorb(parent.name, tracker.labels(child.name))
+
+
 def _reserved_role_error(role: object) -> str | None:
     """Reject child roles reserved for kernel-created agents.
 
@@ -187,6 +196,7 @@ async def _run_child_and_report(parent, child) -> str:
     except BaseException:
         parent.ctx.release_spawns(1)
         raise
+    _absorb_child_labels(parent, [child])
     # Containment Rung 1: a sealed child's final is attacker-influenced, so it
     # must never surface -- not even inside a SUBAGENT_STOP hook payload (hook
     # consumers log/route it). Compute the withhold notice BEFORE emitting and
@@ -593,6 +603,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
     )
 
     results = await asyncio.gather(*(c.run() for c in children), return_exceptions=True)
+    _absorb_child_labels(parent, children)
 
     # #612: every child that RAISED never consumed its slot productively;
     # return those slots so a swarm with transient child failures doesn't
