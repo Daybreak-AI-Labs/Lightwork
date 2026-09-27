@@ -896,6 +896,12 @@
               else resultEl.setAttribute('aria-busy', 'true');
             }
           }
+        } else if (d.result === '' && lastResult) {
+          // The answer preview was withdrawn (Shield blocked a later part of
+          // it): take the text already shown off the page.
+          lastResult = '';
+          if (resultEl && !STRUCTURED) resultEl.textContent = '';
+          resultSection.style.display = 'none';
         }
         if (d.status === 'blocked') {
           pollQuestions();

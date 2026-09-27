@@ -11,17 +11,20 @@ import time
 from collections import Counter
 
 _ROSTER_TTL = 600.0
-_roster_cache: dict[str, object] = {}
+_roster_cache: dict[str, tuple[float, dict]] = {}
 _roster_lock = threading.Lock()
 
 
 def _composition() -> dict:
     """Composition risk of the installed roster at the deployment's settings.
-    Cached: the analysis walks every pack (seconds at roster scale)."""
+    Cached per tenant (a tenant's own packs are part of its roster): the
+    analysis walks every pack (seconds at roster scale)."""
+    from ..paths import current_tenant_id
+    tenant = current_tenant_id() or ""
     with _roster_lock:
-        hit = _roster_cache.get("value")
-        if hit is not None and time.monotonic() - _roster_cache["at"] < _ROSTER_TTL:
-            return hit
+        hit = _roster_cache.get(tenant)
+        if hit is not None and time.monotonic() - hit[0] < _ROSTER_TTL:
+            return hit[1]
         from . import network
         g = network.roster_graph()
         found = network.findings(g)
@@ -35,7 +38,7 @@ def _composition() -> dict:
                            "sink_risk": f.sink_risk}
                           for f in found if f.kind == "trifecta"][:50],
         }
-        _roster_cache.update(value=value, at=time.monotonic())
+        _roster_cache[tenant] = (time.monotonic(), value)
         return value
 
 

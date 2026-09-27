@@ -14,6 +14,7 @@ import itertools
 import json
 import logging
 import os
+import re
 import secrets as _secrets
 import time
 import uuid
@@ -1453,6 +1454,13 @@ def _strip_final_marker(text: str) -> str:
     return text[end:].lstrip() if end is not None else text
 
 
+# ``NAME=`` / ``NAME:`` of a named secret (mirrors secret_detector's env_secret)
+# followed by an opening quote.
+_OPEN_SECRET_QUOTE = re.compile(
+    r"[^\S\n]*(?:export\s+)?[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|CREDENTIAL)"
+    r"[A-Z0-9_]*\s*[:=]\s*(?P<q>[\"'])")
+
+
 class _PartialAnswerStream:
     """Mirror the root agent's answer into the goal's result column while the
     model is still writing it, so the chat page shows text within a second
@@ -1463,6 +1471,10 @@ class _PartialAnswerStream:
     shows only complete whitespace-delimited tokens that end at least
     ``HOLDBACK`` characters before the tail: a credential is one token, so a
     half-written one is never displayed, and a complete one is redacted whole.
+    A named secret whose quoted value is still open (``API_TOKEN="several words``)
+    is held back from the start of its line until the quote closes. The last
+    flush drops the holdback only when the model finished normally: a stream cut
+    at the token limit or at ``MAX_CHARS`` may end mid-credential.
     Every flush also passes the Shield output scan; a block withdraws the
     preview for the rest of the turn. The orchestrator's final write replaces
     the preview. Fails closed: a redaction, scan or write error ends the
@@ -1498,16 +1510,26 @@ class _PartialAnswerStream:
         next flush replaces what the page shows."""
         self._text = ""
 
-    def finish(self) -> None:
-        """Flush everything received (no holdback) once the turn has ended."""
-        self._flush(time.monotonic(), holdback=0)
+    def finish(self, *, complete: bool = True) -> None:
+        """Flush once the turn has ended: everything received when the model
+        finished normally, else still without the (possibly cut) tail."""
+        whole = complete and len(self._text) < self.MAX_CHARS
+        self._flush(time.monotonic(), holdback=0 if whole else self.HOLDBACK)
 
     def _flush(self, now: float, *, holdback: int) -> None:
         if self._failed:
             return
         try:
             from .safety.secret_detector import redact
-            visible, _ = redact(_strip_final_marker(self._text))
+            text = _strip_final_marker(self._text)
+            if holdback:
+                # A named secret's quoted value still open on the last line
+                # would be redacted only up to its first space: hold the line.
+                last = text.rfind("\n") + 1
+                m = _OPEN_SECRET_QUOTE.match(text, last)
+                if m and m.group("q") not in text[m.end():]:
+                    text = text[:last]
+            visible, _ = redact(text)
         except Exception:
             self._failed = True  # never show an unredacted preview
             return
@@ -4229,7 +4251,8 @@ class Agent:
                     **_turn_kw,
                 )
                 if _preview is not None:
-                    _preview.finish()
+                    _preview.finish(complete=getattr(resp, "stop_reason", None)
+                                    not in {"max_tokens", "length", "max_output_tokens"})
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")

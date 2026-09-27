@@ -98,3 +98,22 @@ def test_parallelism_flags_a_lagged_follower_only():
     hit = market.parallelism(leader, follower)
     assert (hit["lag"], hit["co_moves"], hit["flag"]) == (1, 1.0, True)
     assert not market.parallelism(leader, independent)["flag"]
+
+
+def test_composition_cache_is_per_tenant(monkeypatch):
+    from maverick.immune import network, report
+    from maverick.paths import tenant_scope
+    monkeypatch.setattr(report, "_roster_cache", {})
+    built: list = []
+
+    def graph():
+        from maverick.paths import current_tenant_id
+        built.append(current_tenant_id())
+        return network.Graph({f"pack-{current_tenant_id()}": frozenset()})
+    monkeypatch.setattr(network, "roster_graph", graph)
+    with tenant_scope(tenant="acme"):
+        assert report._composition()["agents"] == 1
+        report._composition()
+    with tenant_scope(tenant="globex"):
+        report._composition()
+    assert built == ["acme", "globex"]

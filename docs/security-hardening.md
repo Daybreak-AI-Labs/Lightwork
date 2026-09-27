@@ -814,6 +814,15 @@ the Anthropic provider; other providers still deliver the answer when the
 turn completes. The evidence gateway, when enabled, withholds the preview
 exactly as it withholds every other model-derived excerpt.
 
+The preview shows only whole words that ended at least 96 characters before
+the text received so far. A line that opens a quoted value for a named secret
+(`API_TOKEN="...`) is held until the quote closes. Every update also passes
+the Shield output scan: if a later part is blocked, the preview is withdrawn
+and the chat page clears it. When the model stops at its output limit, the
+cut-off tail is never shown, because it may end partway through a credential.
+Text in scripts that do not separate words with spaces (Chinese, Japanese)
+previews only at line breaks.
+
 A plain chat answer, reached with no tool use, no code block, and no edit
 block, is handed to the person without the self-verifier's second model round
 trip. Tool use, code, edit blocks, and long-form answers are always verified,

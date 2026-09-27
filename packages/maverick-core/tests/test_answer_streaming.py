@@ -284,12 +284,55 @@ def test_preview_fails_closed_on_a_write_error():
     assert stream.writes == 0 and stream._failed is True
 
 
-def test_preview_is_capped():
+def test_preview_is_capped_and_never_ends_on_a_cut_token():
     world = _Recorder()
     stream = _PartialAnswerStream(world, 1)
-    stream("y" * (_PartialAnswerStream.MAX_CHARS + 500))
+    stream("word " * (_PartialAnswerStream.MAX_CHARS // 5 + 100))
     stream.finish()
-    assert len(world.writes[-1]) == _PartialAnswerStream.MAX_CHARS
+    shown = world.writes[-1]
+    assert len(shown) <= _PartialAnswerStream.MAX_CHARS and shown.endswith("word")
+
+
+def test_a_stream_cut_at_the_token_limit_never_shows_a_partial_secret():
+    token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"  # pragma: allowlist secret
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1)
+    stream("Here is the token you asked me to rotate: " + token[:30])
+    stream.finish(complete=False)                              # stop_reason max_tokens
+    assert all(token[:20] not in w for w in world.writes)
+
+
+@pytest.mark.parametrize("stop, shown_whole", [("end_turn", True), ("max_tokens", False)])
+@pytest.mark.asyncio
+async def test_the_last_flush_follows_the_stop_reason(tmp_path, stop, shown_whole):
+    text = "FINAL: " + "all good here " * 12 + "tail-token"
+    llm = _StreamingLLM([LLMResponse(text=text, thinking=None, tool_calls=[], stop_reason=stop)])
+    ctx = _ctx(tmp_path, llm, conversation_id=7)
+    agent = Agent(ctx=ctx, role="orchestrator", brief="b")
+    seen: list = []
+    real = ctx.world.set_goal_partial_result
+    ctx.world.set_goal_partial_result = lambda gid, t: seen.append(t) or real(gid, t)
+    await agent.run()
+    assert any("tail-token" in w for w in seen) is shown_whole
+
+
+def test_an_open_quoted_secret_is_held_until_its_quote_closes():
+    words = " ".join(f"word{i:02d}" for i in range(30))
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1)
+    stream("Set this up first. " * 8 + "\nAPI_TOKEN=\"" + words + " " + "more " * 40)
+    assert world.writes and all("word05" not in w for w in world.writes)
+    stream._last_flush = float("-inf")
+    stream('"\nThen restart the service. ' + "ok " * 40)
+    stream.finish()
+    assert all("word05" not in w for w in world.writes)
+    assert "restart the service" in world.writes[-1]
+
+
+def test_the_chat_page_clears_a_withdrawn_preview():
+    page = (Path(__file__).resolve().parents[2] / "maverick-dashboard" / "maverick_dashboard"
+            / "templates" / "chat_goal.html").read_text(encoding="utf-8")
+    assert "} else if (d.result === '' && lastResult) {" in page
 
 
 # --- switches ---------------------------------------------------------------
