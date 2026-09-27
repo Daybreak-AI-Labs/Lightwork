@@ -44,9 +44,11 @@ _EXTERNAL = frozenset({
 })
 # Code execution reaches outside only when the sandbox allows egress.
 # (``wasm_run`` is WASI with no network: never a sink.)
-_SANDBOXED = frozenset({"shell", "notebook_exec", "code_exec"})
-_ISOLATED_BACKENDS = frozenset({"docker", "podman", "gvisor", "kubernetes", "k8s",
-                                "devcontainer", "modal", "ssh"})
+_SANDBOXED = frozenset({"shell", "notebook_exec", "code_exec", "repl_exec"})
+# Backends that honour ``allow_network``. ``ssh`` runs on a remote host with its
+# full network and unknown names degrade to ``local``: both count as egress.
+_ISOLATED_BACKENDS = frozenset({"docker", "podman", "gvisor", "kubernetes",
+                                "devcontainer", "modal"})
 
 
 def _sandbox_egress() -> bool:

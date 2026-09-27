@@ -384,3 +384,55 @@ def test_budget_and_halt_stops_are_not_recorded_as_tool_errors(recording_on):
             await twin.dispatch(6, "web_search", {"q": "x"}, spent)
     asyncio.run(prod())
     assert twin.load(6) == []
+
+
+def test_a_refused_gate_still_reports_the_call_as_divergence():
+    replay = twin.Replay([])
+    with twin.replaying(replay):
+        assert twin.human_gate("email", {"to": "new@evil.io"}) is False
+    assert replay.report()["unmatched"] == [{"tool": "email", "args": {"to": "new@evil.io"}}]
+    assert twin._diverged({**replay.report(), "result_similarity": 1.0}, 0.8)
+
+
+def test_a_connector_deadline_is_not_recorded_as_a_tool_error(recording_on):
+    from maverick.connector_attempts import ConnectorDeadlineExceeded
+
+    async def late():
+        raise ConnectorDeadlineExceeded("deadline")
+
+    async def prod():
+        with pytest.raises(ConnectorDeadlineExceeded):
+            await twin.dispatch(8, "web_search", {"q": "x"}, late)
+    asyncio.run(prod())
+    assert twin.load(8) == []
+
+
+@pytest.mark.asyncio
+async def test_twin_gate_answers_are_not_audited_as_human_decisions(recording_on, tmp_path,
+                                                                   monkeypatch):
+    from maverick import ifc
+    from maverick.agent import Agent
+    from maverick.blackboard import Blackboard
+    from maverick.budget import Budget
+    from maverick.sandbox import LocalBackend
+    from maverick.swarm import SwarmContext
+    from maverick.tools import Tool
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "world.db")
+    ctx = SwarmContext(llm=None, world=world, budget=Budget(max_dollars=1.0),
+                       blackboard=Blackboard(), sandbox=LocalBackend(workdir=tmp_path),
+                       goal_id=world.create_goal("g", ""), use_skills=False)
+    ctx.ifc = ifc.FlowTracker(mode="approve")
+    agent = Agent(ctx=ctx, role="analyst", brief="b")
+    agent.capability = None
+    schema = {"type": "object", "properties": {}}
+    agent.tools.register(Tool(name="sql_query", description="q", input_schema=schema,
+                              fn=lambda args: "rows"))
+    agent.tools.register(Tool(name="http_fetch", description="f", input_schema=schema,
+                              fn=lambda args: "200 OK"))
+    with twin.replaying(twin.Replay([])):
+        await agent._run_tool("sql_query", {"q": "x"})
+        await agent._run_tool("http_fetch", {"url": "https://partner"})
+    assert [r["outcome"] for r in _ledger.read(ifc.ledger_path())
+            if r["outcome"] in ("approved", "denied")] == []

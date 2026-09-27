@@ -1629,7 +1629,8 @@ class Agent:
         # with silent auto-approval disabled, so crossing an interval requires
         # an explicit operator decision to continue.
         self._review_checkpoint = None
-        if role == "orchestrator" or self._is_goal_root:
+        from .immune import twin as _twin_mod
+        if (role == "orchestrator" or self._is_goal_root) and not _twin_mod.active():
             try:
                 from .review_checkpoint import consent_review, from_config
                 _cp = from_config(
@@ -2773,8 +2774,11 @@ class Agent:
                 granted = replay_decision.granted
             except Exception:  # consent unavailable -> fail closed
                 granted = False
-            ifc.record(decision, agent=self.name, goal_id=goal_id,
-                       outcome="approved" if granted else "denied")
+            if replayed is None:  # a twin's replayed answer is no human's decision
+                ifc.record(decision, agent=self.name, goal_id=goal_id,
+                           outcome="approved" if granted else "denied")
+                if not granted:
+                    twin.record_refusal(self.ctx.goal_id, name, args)
             if granted:
                 tracker.grant(decision)
                 return None
@@ -3012,6 +3016,16 @@ class Agent:
             self.name, "error",
             f"tool={name} BLOCKED: governance requires human approval",
         )
+        if replayed is None:
+            _twin.record_refusal(self.ctx.goal_id, name, args)
+        else:
+            # A production twin: no human decided, so nothing is audited as a
+            # human denial or learned as an operator's "no".
+            return (
+                f"⚠ {name!r} requires human approval (EU AI Act Art 14): "
+                f"{_gov.reason}. Not granted, so the tool was not executed.",
+                _gov.compliance_profiles,
+            )
         from .audit import EventKind, audit_event
         from .regulatory_compiler import audit_tags as _obligation_tags
         audit_event(EventKind.GOVERNANCE_DENIED, agent=self.name,
@@ -4279,7 +4293,8 @@ class Agent:
                     # Only a normal completion shows its tail: any other stop
                     # (token or context limit, refusal, unknown) may cut mid-secret.
                     _preview.finish(complete=getattr(resp, "stop_reason", None)
-                                    in {"end_turn", "stop_sequence", "tool_use", "stop"})
+                                    in {"end_turn", "stop_sequence", "tool_use", "stop",
+                                        "eos_token"})
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")

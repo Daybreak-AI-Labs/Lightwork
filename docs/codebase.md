@@ -63,7 +63,10 @@ maverick code export payments ./payments   # plaintext clone for the owner
    `codebase_merge` approval: a structured approval card committing to the
    repository, branch, base and approved head, stating the test result, the
    review verdict and, when the diff is too large to store whole, a warning.
-   It can be approved in the dashboard's approvals queue for 7 days. A change the swarm
+   It can be approved in the dashboard's approvals queue for 7 days; after
+   that the proposal shows `expired` and `maverick code renew ID` parks a fresh
+   approval. The proposal is saved before its approval is parked, so a failure
+   there (`unrequested`) never loses the work. A change the swarm
    did not make produces an `empty` proposal and no approval.
 6. `merge` and `push` require that approval to be an approved `codebase_merge`
    for this repository. Both verify the branch is the approved commit. Merges

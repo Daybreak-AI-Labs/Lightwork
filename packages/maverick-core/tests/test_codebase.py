@@ -402,3 +402,47 @@ def test_the_merge_approval_is_a_structured_card_committing_to_the_head():
     assert card["action"] == "codebase_merge"
     assert card["parameters"]["sha256"] == digest(
         {"proposal": p["id"], "base": p["base"], "head": p["head"], "files": p["files"]})
+
+
+@pytest.mark.parametrize("files, title", [
+    ([" ", "\t"], "t"),
+    (["x.py"], " ".join("AKIA" + "A" * 16 for _ in range(30))),  # pragma: allowlist secret
+])
+def test_the_merge_card_is_built_for_awkward_names_and_titles(files, title):
+    from maverick.approval_cards import decode_approval_detail
+    from maverick.codebase.features import _approval_detail
+    p = {"id": "0123456789abcdef", "repo": "r", "title": title, "branch": "lightwork/t-012345",
+         "head": "a" * 40, "base": "b" * 40, "files": files, "tests": None, "review": None,
+         "diff_truncated": False, "diff_chars": 1}
+    assert decode_approval_detail(_approval_detail(p))["action"] == "codebase_merge"
+
+
+def test_an_unanswered_approval_can_be_renewed(tmp_path, monkeypatch):
+    import time
+    from types import SimpleNamespace
+
+    from maverick.codebase import features
+    saved: list = []
+    monkeypatch.setattr(features, "_save", lambda p: saved.append(dict(p)))
+    approvals: dict = {}
+
+    class World:
+        def get_approval(self, aid):
+            return approvals.get(aid)
+
+        def create_approval(self, action, **kw):
+            aid = len(approvals) + 1
+            approvals[aid] = SimpleNamespace(id=aid, status="pending", detail=kw["detail"])
+            return aid
+    p = {"id": "0123456789abcdef", "repo": "r", "title": "t", "branch": "lightwork/t-012345",
+         "head": "a" * 40, "base": "b" * 40, "files": ["x.py"], "tests": None, "review": None,
+         "diff_truncated": False, "diff_chars": 1, "status": "pending", "approval_id": None}
+    world = World()
+    assert features.status(world, p) == "unrequested"
+    assert features.request_approval(world, p) == 1 and features.status(world, p) == "pending"
+    with pytest.raises(features.VaultError, match="already has approval"):
+        features.request_approval(world, p)
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + features.APPROVAL_TTL + 60)
+    assert features.status(world, p) == "expired"
+    assert features.request_approval(world, p) == 2

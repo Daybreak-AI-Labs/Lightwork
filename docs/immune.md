@@ -163,11 +163,15 @@ result production received for the same tool and arguments, in the same order.
 - The twin runs as the same user as production. A goal bound to a capability
   principal (not `user:*`) cannot be replayed, because the goal does not hold
   that capability; the command says so before creating anything.
-- Human approval gates (governance, information-flow) never ask anyone. A call
-  production made (and so had approved) is served. A call production has no
-  record of is refused, as it was in production. No run webhooks are sent.
-- Budget, halt and cancellation stops are not recorded as tool errors: a twin
-  runs under its own budget.
+- Human approval gates (governance, information-flow) never ask anyone.
+  Production records the calls a human refused as well as the calls that ran.
+  In the twin, a call production made is served; a call production was refused
+  is refused again (not a divergence); any other gated call is refused and
+  counted as unmatched. A twin's gate answers are not audited or learned as
+  human decisions, the opt-in review checkpoint does not run, and no run
+  webhooks are sent.
+- Budget, connector-deadline, halt and cancellation stops are not recorded as
+  tool errors: a twin runs under its own budget.
 - The report compares the twin's final answer with production's
   (`result_similarity`).
 - Coordination tools still run, so the swarm re-forms and its children replay.

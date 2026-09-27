@@ -44,9 +44,10 @@ to a destination chosen in the call: `email`, `gmail`, `sendgrid`, `mailgun`,
 `telegram`, `twitter`, `github_issues`, `http_fetch`, `openapi_runner`,
 `git_advanced`, `web_search`, `browser`, public-data connectors and `mcp_*`.
 `websocket`, `ses` and `sns` send too. `shell`, `notebook_exec` and
-`code_exec` count when the sandbox can reach the network: always on the
-default `local` backend (it runs on the host), and on a container backend only
-with `[sandbox] allow_network` (firecracker: `network`). `wasm_run` never does. A
+`code_exec` and `repl_exec` count when the sandbox can reach the network:
+always on the default `local` backend (it runs on the host) and on `ssh` (a
+remote host's network), and on a container backend only with `[sandbox]
+allow_network` (firecracker: `network`). `wasm_run` never does. A
 tool can be both a source and a sink (`gmail`). A remote MCP server is not
 tainted by its own output: labels from `mcp_<server>__*` are ignored on calls
 back to that server. What happens depends on the mode:
@@ -55,7 +56,7 @@ back to that server. What happens depends on the mode:
 |---|---|
 | `off` | No tracking. |
 | `audit` (default) | Record an `ifc_flow` audit row and allow. |
-| `approve` | A human approves through the consent path, shown the destination (URL query strings elided); auto-approve modes count as denial. A grant covers that sink, that destination and those labels for the rest of the run. A new destination, a new label, or a literal copy the approver was not told about asks again, and so does every call whose destination cannot be identified from its arguments (search queries are data, not a destination). |
+| `approve` | A human approves through the consent path, shown the destination (URL query strings elided); auto-approve modes count as denial. A grant covers that sink, that destination and those labels for the rest of the run. A new destination (including any added `cc`/`bcc` recipient), a new label, or a literal copy the approver was not told about asks again, and so does every call whose destination cannot be identified from its arguments (search queries are data, not a destination) or has more parts than can be shown. |
 | `block` | Refuse. The agent is told not to route the data through another external tool. |
 
 `scope = "explicit"` acts only when the labelled data appears literally in the

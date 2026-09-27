@@ -182,17 +182,61 @@ def propose(world, name: str, title: str, description: str, run: Runner, *,
     if changed:
         atomic_write_bytes(_proposal_dir(name) / f"{pid}.bundle",
                            vault._seal(bundle, f"codebase/{name}/proposal-bundle/{pid}"))
-        proposal["approval_id"] = world.create_approval(
-            "codebase_merge", risk="high", scope=name, provenance="codebase",
-            requested_by="agent:codebase", detail=_approval_detail(proposal))
-    _save(proposal)
+    _save(proposal)  # the work is kept even if parking its approval fails
+    if changed:
+        try:
+            request_approval(world, proposal)
+        except Exception as exc:  # noqa: BLE001 -- `maverick code renew` parks it again
+            import logging
+            logging.getLogger(__name__).warning(
+                "proposal %s saved but its approval was not parked (%s); "
+                "run `maverick code renew %s`", pid, type(exc).__name__, pid)
     return proposal
+
+
+def _approval_expired(appr) -> bool:
+    from ..approval_cards import ApprovalCardError, decode_approval_detail
+    try:
+        card = decode_approval_detail(appr.detail)
+    except ApprovalCardError:
+        return True
+    return card is not None and time.time() >= float(card["expires_at"])
+
+
+def request_approval(world, p: dict) -> int:
+    """Park a (new) ``codebase_merge`` approval for a pending proposal: after
+    propose, or when the earlier one expired unanswered or failed to park."""
+    if p["status"] != "pending":
+        raise VaultError(f"proposal {p['id']} is {p['status']}")
+    appr = world.get_approval(p["approval_id"]) if p.get("approval_id") else None
+    if appr is not None and not (appr.status == "pending" and _approval_expired(appr)):
+        raise VaultError(f"proposal {p['id']} already has approval #{appr.id} ({appr.status})")
+    p["approval_id"] = world.create_approval(
+        "codebase_merge", risk="high", scope=p["repo"], provenance="codebase",
+        requested_by="agent:codebase", detail=_approval_detail(p))
+    _save(p)
+    return p["approval_id"]
 
 
 APPROVAL_TTL = 7 * 24 * 3600.0  # the longest an operation card may stay open
 
 
+def _safe_label(text: str, limit: int = 300) -> str:
+    """A card label that cannot be refused: printable, never empty, and short
+    enough to stay under the 500-character limit after secret redaction."""
+    text = "".join(c if c.isprintable() else "?" for c in str(text)).strip()
+    return (repr(text)[1:-1] if text else "(blank name)")[:limit]
+
+
 def _approval_detail(p: dict) -> str:
+    from ..approval_cards import ApprovalCardError
+    try:
+        return _approval_card(p, full=True)
+    except ApprovalCardError:
+        return _approval_card(p, full=False)  # names or title the card cannot state
+
+
+def _approval_card(p: dict, *, full: bool) -> str:
     """A structured approval card (the only kind the dashboard lets a human
     approve) committing to the repository, branch, base and approved head."""
     from ..approval_cards import encode_operation_approval_detail
@@ -209,14 +253,15 @@ def _approval_detail(p: dict) -> str:
         lines.append(f"WARNING: the diff is {p['diff_chars']} characters; review and the stored "
                      f"copy cover only the first {MAX_DIFF_CHARS}. Inspect the branch in full "
                      "before approving.")
-    lines += [f"  {f}" for f in p["files"][:40]]
+    lines += [f"  {_safe_label(f)}" for f in p["files"][:40]] if full else []
     if len(p["files"]) > 40:
         lines.append(f"  ... and {len(p['files']) - 40} more file(s)")
     lines.append(f"Inspect: maverick code show {p['id']}")
-    lines = [line[:500] for line in lines][:24]
+    lines = [_safe_label(line) for line in lines][:24]
     return encode_operation_approval_detail(
         action="codebase_merge",
-        summary=f"Merge Lightwork proposal {p['id']} into {p['repo']}: {p['title']}"[:500],
+        summary=_safe_label(f"Merge Lightwork proposal {p['id']} into {p['repo']}"
+                            + (f": {p['title']}" if full else "")),
         target_label=f"{p['repo']} <- {p['branch']}"[:500],
         target={"repo": p["repo"], "branch": p["branch"]},
         parameters={"proposal": p["id"], "base": p["base"], "head": p["head"],
@@ -235,8 +280,11 @@ def status(world, p: dict) -> str:
     if p["status"] in ("merged", "empty", "conflict"):
         return p["status"]
     appr = world.get_approval(p["approval_id"]) if p["approval_id"] else None
-    return {"approved": "approved", "denied": "rejected"}.get(
-        appr.status if appr else "", "pending")
+    if appr is None:
+        return "unrequested"  # its approval failed to park: `maverick code renew`
+    if appr.status == "pending" and _approval_expired(appr):
+        return "expired"      # unanswered for 7 days: `maverick code renew`
+    return {"approved": "approved", "denied": "rejected"}.get(appr.status, "pending")
 
 
 def _require_approved(world, p: dict) -> None:

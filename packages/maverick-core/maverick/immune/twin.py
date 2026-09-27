@@ -74,8 +74,20 @@ def _context(goal_id: int) -> str:
     return f"twin/{int(goal_id)}"
 
 
+def record_refusal(goal_id: int, tool: str, args: dict) -> None:
+    """Production asked a human for this call and was refused: the twin must
+    see the same refusal, and not count its own identical attempt as new.
+    Best-effort, like every recording."""
+    if not recording_enabled() or _ACTIVE.get() is not None:
+        return
+    try:
+        record(goal_id, tool, args, None, refused=True)
+    except Exception:  # noqa: BLE001 -- observation never breaks production
+        pass
+
+
 def record(goal_id: int, tool: str, args: dict, output: str | None, *,
-           error: BaseException | None = None) -> None:
+           error: BaseException | None = None, refused: bool = False) -> None:
     """Append one tool result -- or the exception it raised -- to the goal's
     recording (sealed when at-rest encryption is on). Best-effort: a recording
     failure never fails a run."""
@@ -84,6 +96,8 @@ def record(goal_id: int, tool: str, args: dict, output: str | None, *,
     payload: dict = {"args": _plain(args), "output": output}
     if error is not None:
         payload["error"] = {"type": type(error).__name__, "message": str(error)[:4000]}
+    if refused:
+        payload["refused"] = True
     body = _ledger.canonical(payload)
     entry = {"tool": tool, "key": _key(tool, args)}
     if at_rest_enabled():
@@ -188,12 +202,14 @@ class Replay:
 
     def _find(self, tool: str, args: dict) -> tuple[int, float] | None:
         """The recorded call that would serve ``(tool, args)``, without using it."""
-        exact = [i for i in self._queues.get(_key(tool, args), ()) if i not in self._used]
+        exact = [i for i in self._queues.get(_key(tool, args), ())
+                 if i not in self._used and not self.records[i].get("refused")]
         if exact:
             return exact[0], 1.0
         from ..safety.tool_risk import tool_risk
         near = [(_similarity(_plain(args), r["args"]), i) for i, r in enumerate(self.records)
-                if i not in self._used and r["tool"] == tool and tool_risk(tool) != "high"]
+                if i not in self._used and r["tool"] == tool and not r.get("refused")
+                and tool_risk(tool) != "high"]
         if near:
             score, i = max(near, key=lambda t: (t[0], -t[1]))
             if score >= self.tolerance:
@@ -202,6 +218,14 @@ class Replay:
 
     def has(self, tool: str, args: dict) -> bool:
         return self._find(tool, args) is not None
+
+    def take_refusal(self, tool: str, args: dict) -> bool:
+        """Consume production's recorded refusal of exactly this call."""
+        for i in self._queues.get(_key(tool, args), ()):
+            if i not in self._used and self.records[i].get("refused"):
+                self._used.add(i)
+                return True
+        return False
 
     def serve(self, tool: str, args: dict) -> str:
         found = self._find(tool, args)
@@ -216,10 +240,12 @@ class Replay:
         return self._take(i)
 
     def report(self) -> dict:
-        return {"recorded": len(self.records), "served": self.served,
+        refusals = sum(1 for r in self.records if r.get("refused"))
+        return {"recorded": len(self.records) - refusals, "served": self.served,
                 "exact": self.served - len(self.approximate),
                 "approximate": self.approximate,
-                "unserved": len(self.records) - len(self._used),
+                "unserved": sum(1 for i, r in enumerate(self.records)
+                                if i not in self._used and not r.get("refused")),
                 "unmatched": self.unmatched}
 
 
@@ -244,7 +270,14 @@ def human_gate(tool: str, args: dict) -> bool | None:
     replay = _ACTIVE.get()
     if replay is None or tool in LIVE_IN_TWIN:
         return None
-    return replay.has(tool, args)
+    if replay.has(tool, args):
+        return True
+    if replay.take_refusal(tool, args):
+        return False  # production was refused this same call: not a divergence
+    # A call production never made is the divergence this replay exists to
+    # find, even though the refused gate means it never reaches serve().
+    replay.unmatched.append({"tool": tool, "args": _plain(args)})
+    return False
 
 
 def active() -> bool:
@@ -292,9 +325,10 @@ def _control_flow(exc: BaseException) -> bool:
     """Budget, halt and cancellation stops belong to the run, not to the tool:
     a twin with its own budget must not inherit production's."""
     from ..budget import BudgetExceeded
-    from ..killswitch import Halted
-    from ..run_outcome import GoalCancelled
-    return isinstance(exc, (BudgetExceeded, Halted, GoalCancelled))
+    from ..connector_attempts import ConnectorDeadlineExceeded
+    from ..killswitch import Halted, HaltGenerationChanged
+    return isinstance(exc, (BudgetExceeded, ConnectorDeadlineExceeded, Halted,
+                            HaltGenerationChanged))
 
 
 def run_kwargs(goal) -> dict:

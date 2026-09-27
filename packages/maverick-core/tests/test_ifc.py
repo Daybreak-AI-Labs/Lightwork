@@ -317,3 +317,37 @@ async def test_calls_under_a_grant_are_recorded(tmp_path, monkeypatch):
     outcomes = [r["outcome"] for r in _ledger.read(ifc.ledger_path())]
     assert outcomes == ["approved", "allowed_by_grant"]
     assert "partner" not in str(_ledger.read(ifc.ledger_path()))  # digest, not the address
+
+
+def test_list_recipients_are_part_of_the_destination():
+    assert "attacker@evil.com" in ifc.destination({"to": ["attacker@evil.com"]})
+    t = _tracker(mode="approve")
+    t.observe_output("a", "sql_query", PAYROLL)
+    t.grant(t.decide("a", "email", {"to": "boss@corp.com", "body": "summary"}))
+    widened = t.decide("a", "email", {"to": "boss@corp.com", "cc": ["attacker@evil.com"],
+                                      "body": "summary"})
+    assert not t.granted(widened) and "attacker@evil.com" in ifc.display_destination(
+        widened.destination)
+
+
+def test_an_unstatable_destination_is_never_granted():
+    many = {f"x{i}_url": f"https://h{i}.example" for i in range(300)}
+    assert ifc.destination(many) == ""
+    assert "more characters" in ifc.display_destination("a" * 5000)
+
+
+def test_mcp_readings_must_agree_and_only_data_labels_are_exempted():
+    t = _tracker()
+    t.observe_output("a", "mcp_a__read", "customer record " * 10)
+    assert t.decide("a", "mcp_a___x", {"q": 1}) is not None       # server "a" or "a_"?
+    code = _tracker(base_labels=frozenset({"code:mcp_srv__x"}))
+    assert code.decide("a", "mcp_srv__send", {"q": 1}) is not None
+
+
+def test_ssh_and_unknown_backends_have_egress(monkeypatch):
+    import maverick.sandbox as sandbox
+    from maverick.immune import network as n
+    monkeypatch.setattr(sandbox, "container_backend_required", lambda: False)
+    for backend in ("ssh", "k8s"):
+        monkeypatch.setattr(config, "load_config", lambda b=backend: {"sandbox": {"backend": b}})
+        assert n.EXTERNAL in n.classify("shell") and n.EXTERNAL in n.classify("repl_exec")

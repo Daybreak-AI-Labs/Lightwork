@@ -158,6 +158,23 @@ def code_merge(pid, settle) -> None:
         world.close()
 
 
+@code_group.command("renew")
+@click.argument("pid")
+def code_renew(pid) -> None:
+    """Park a fresh approval for a proposal whose approval expired unanswered
+    (after 7 days) or could not be parked."""
+    vault = _guard()
+    from ..codebase import features
+    world = open_world()
+    try:
+        aid = features.request_approval(world, features.find(pid))
+    except vault.VaultError as exc:
+        _fail(exc)
+    finally:
+        world.close()
+    click.echo(f"approve codebase_merge #{aid} in the dashboard's approvals queue")
+
+
 @code_group.command("push")
 @click.argument("pid")
 def code_push(pid) -> None:

@@ -109,9 +109,16 @@ _DEST_KEYS = frozenset({
 _DEST_SUFFIXES = ("_url", "_uri", "_email", "_address", "_phone", "_number", "_webhook")
 
 
+_MAX_DEST_PARTS = 256
+
+
+class _Unidentifiable(Exception):
+    pass
+
+
 def _dest_parts(value: object, prefix: str, depth: int, out: list[str]) -> None:
-    if depth > 6 or len(out) > 32:
-        return
+    if depth > 6 or len(out) >= _MAX_DEST_PARTS:
+        raise _Unidentifiable
     if isinstance(value, str) and value[:1] in "{[" and depth:
         try:
             value = json.loads(value)  # REST connectors pass the body as JSON text
@@ -122,12 +129,15 @@ def _dest_parts(value: object, prefix: str, depth: int, out: list[str]) -> None:
             v = value[key]
             path = f"{prefix}.{key}" if prefix else key
             k = key.casefold()
-            if (k in _DEST_KEYS or k.endswith(_DEST_SUFFIXES)) and not isinstance(v, (dict, list)):
-                out.append(f"{path}={json.dumps(v, sort_keys=True, default=str)[:512]}")
+            if (k in _DEST_KEYS or k.endswith(_DEST_SUFFIXES)) and not isinstance(v, dict):
+                # A list of recipients is recorded whole (cc/bcc included).
+                out.append(f"{path}={json.dumps(v, sort_keys=True, default=str)}")
+                if len(out) > _MAX_DEST_PARTS:
+                    raise _Unidentifiable
             else:
                 _dest_parts(v, path, depth + 1, out)
     elif isinstance(value, list):
-        for i, v in enumerate(value[:32]):
+        for i, v in enumerate(value):
             _dest_parts(v, f"{prefix}[{i}]", depth + 1, out)
 
 
@@ -138,22 +148,28 @@ def destination(args: object) -> str:
     the destination could not be identified, and such a call is never covered
     by a grant."""
     out: list[str] = []
-    _dest_parts(args, "", 0, out)
-    return "&".join(out)[:2048]
+    try:
+        _dest_parts(args, "", 0, out)
+    except _Unidentifiable:
+        return ""  # too deep or too many to state honestly: ask every time
+    return "&".join(out)
 
 
 def display_destination(dest: str) -> str:
     """``dest`` for a human prompt: URL query strings and fragments (where data
-    rides) are elided."""
-    return re.sub(r"[?#][^\"&\s]*", "?…", dest)[:300]
+    rides) are elided. Never silently cut: a long list says how much is hidden."""
+    text = re.sub(r"[?#][^\"&\s]*", "?…", dest)
+    return text if len(text) <= 1500 else f"{text[:1500]} … (+{len(text) - 1500} more characters)"
 
 
-def _mcp_server(tool: str) -> str | None:
-    # Remote tool names cannot contain "__" (mcp_tools); server names can, so
-    # the server is everything before the LAST separator.
+def _mcp_server(tool: str) -> tuple[str, str] | None:
+    """Both readings of ``mcp_<server>__<tool>``: server names may contain "__"
+    and tool names may start with "_", so the split is ambiguous. Two names
+    are the same server only when both readings agree."""
     if not tool.startswith("mcp_") or "__" not in tool[4:]:
         return None
-    return tool[4:].rsplit("__", 1)[0]
+    rest = tool[4:]
+    return rest.split("__", 1)[0], rest.rsplit("__", 1)[0]
 
 
 def stricter(a: str, b: str) -> str:
@@ -280,7 +296,9 @@ class FlowTracker:
         labels = self.labels(agent)
         server = _mcp_server(tool)
         if server is not None:
-            labels = frozenset(lb for lb in labels if _mcp_server(lb[len("data:"):]) != server)
+            labels = frozenset(lb for lb in labels
+                               if not (lb.startswith("data:")
+                                       and _mcp_server(lb[len("data:"):]) == server))
         if not labels:
             return None
         seen = self.witness(args)
