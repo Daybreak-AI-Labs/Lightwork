@@ -1271,3 +1271,11 @@ def test_write_config_emits_swarm_scale_when_raised(tmp_path: Path, monkeypatch)
     assert parsed["swarm"] == {"max_total_spawns": 300, "max_concurrent_model_calls": 12}
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
     assert "swarm" not in parsed
+
+
+def test_write_config_emits_twin_record_alongside_canaries(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"immune_twin_record": True})
+    assert parsed["immune"] == {"twin_record": True}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "immune_canaries": True, "immune_twin_record": True})
+    assert parsed["immune"] == {"canaries": True, "twin_record": True}

@@ -2019,11 +2019,15 @@ def get_immune() -> dict:
 
     ``canaries`` lets operators seed known-flawed approvals into the real queue
     to measure whether reviewers catch them. OFF by default: it is an explicit
-    decision to test your people. A malformed value stays off."""
+    decision to test your people. ``twin_record`` records every goal's tool
+    results (sealed, tenant-scoped) so the goal can be replayed as a production
+    twin (:mod:`maverick.immune.twin`); OFF by default because it retains tool
+    output. A malformed value stays off."""
     cfg = load_config().get("immune", {})
     if not isinstance(cfg, dict):
         cfg = {}
-    return {"canaries": _strict_config_bool(cfg, "canaries", False)}
+    return {"canaries": _strict_config_bool(cfg, "canaries", False),
+            "twin_record": _strict_config_bool(cfg, "twin_record", False)}
 
 
 def get_commerce() -> dict:

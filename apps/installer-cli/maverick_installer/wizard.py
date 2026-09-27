@@ -4118,6 +4118,14 @@ def pick_advanced() -> dict[str, Any]:
             "An explicit decision to test your people; OFF by default.",
             default=False,
         ),
+        "immune_twin_record": _q_confirm(
+            "Production twin recording? Record every goal's tool results "
+            "(sealed, per tenant) so a goal can be replayed later against exactly "
+            "what production saw (`maverick immune twin replay`) -- to test a new "
+            "model, prompt or policy on real work with nothing live touched. "
+            "Retains tool output; OFF by default.",
+            default=False,
+        ),
         "cortex": _q_confirm(
             "Enable Cortex, the governed company memory over knowledge, skills, "
             "lessons, the Operating Record and fleet memory (recommended)? One "
@@ -7855,12 +7863,17 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append(f"max_total_spawns = {int(advanced['swarm_max_total_spawns'])}")
         lines.append("max_concurrent_model_calls = "
                      f"{int(advanced.get('swarm_max_concurrent_model_calls', 0))}")
-    if advanced.get("immune_canaries"):
+    if advanced.get("immune_canaries") or advanced.get("immune_twin_record"):
         lines.append("")
         lines.append("[immune]")
+    if advanced.get("immune_canaries"):
         lines.append("# Oversight canaries (maverick.immune.oversight): operators may seed")
         lines.append("# known-flawed approvals to measure reviewer catch rates.")
         lines.append("canaries = true")
+    if advanced.get("immune_twin_record"):
+        lines.append("# Production twin (maverick.immune.twin): record tool results so a")
+        lines.append("# goal can be replayed against exactly what production saw.")
+        lines.append("twin_record = true")
     if advanced.get("cortex"):
         lines.append("")
         lines.append("[cortex]")

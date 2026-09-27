@@ -61,3 +61,49 @@ def test_canary_refused_until_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "get_immune", lambda: {"canaries": False})
     out = _run("canary", "--action", "a", "--detail", "d", "--class", "c", "--flaw", "f")
     assert out.exit_code != 0 and "canaries are off" in out.output
+
+
+def test_twin_replay_list_and_awareness(tmp_path, monkeypatch):
+    import asyncio
+
+    import maverick.cli as cli_mod
+    import maverick.cli._immune_groups as groups
+    import maverick.runner as runner
+    from maverick.immune import twin
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(config, "get_immune", lambda: {"canaries": False, "twin_record": True})
+    db = tmp_path / "w.db"
+    world = WorldModel(db)
+    gid = world.create_goal("close the books", "")
+
+    async def live(tool, args):
+        return "rows=12"
+    asyncio.run(twin.dispatch(gid, "sql_query", {"q": "gl"}, live))
+    world.close()
+
+    monkeypatch.setattr(cli_mod, "_require_llm_key", lambda *a, **k: "k")
+    monkeypatch.setattr(groups, "open_world", lambda *a, **k: WorldModel(db))
+    seen = []
+
+    def fake_run(goal_id, max_dollars=None):
+        async def agent():  # stands in for the swarm's tool call
+            async def never(tool, args):
+                raise AssertionError("a twin must not execute tools")
+            return await twin.dispatch(goal_id, "sql_query", {"q": "gl"}, never)
+        seen.append(asyncio.run(agent()))
+        return "done"
+    monkeypatch.setattr(runner, "run_goal_in_thread", fake_run)
+
+    out = _run("twin", "replay", str(gid), "--max-dollars", "0.5")
+    assert out.exit_code == 0, out.output
+    assert seen == ["rows=12"] and json.loads(out.output)["served"] == 1
+    assert "served 1/1, unmatched 0" in _run("twin", "list").output
+    assert _run("twin", "replay", "999").exit_code != 0
+
+    s = tmp_path / "s.json"
+    s.write_text(json.dumps({"watched": [False] * 40, "unwatched": [True] * 20 + [False] * 20}))
+    gap = json.loads(_run("awareness", str(s)).output)
+    assert gap["significant"] and gap["gap"] == 0.5
