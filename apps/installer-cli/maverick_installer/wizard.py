@@ -4002,6 +4002,22 @@ def _ask_self_harness_evaluation_boundary(advanced: dict[str, Any]) -> None:
     )
 
 
+def _pick_swarm_scale(advanced: dict[str, Any]) -> None:
+    """Swarm scale: a goal may create up to 64 agents by default. Raising it is
+    safe only with a model-call bound, so the swarm queues for the provider."""
+    if not _q_confirm(
+        "  Allow larger swarms (more than 64 agents per goal)? The budget still "
+        "caps total spend.",
+        default=False,
+    ):
+        return
+    advanced["swarm_max_total_spawns"] = max(1, _safe_int(
+        _q_text("    Maximum agents one goal may create", default="256"), default=256))
+    advanced["swarm_max_concurrent_model_calls"] = max(0, _safe_int(
+        _q_text("    Model calls in flight at once per goal (0 = unbounded)",
+                default="16"), default=16))
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -5080,6 +5096,7 @@ def pick_advanced() -> dict[str, Any]:
         _q_text("  SQL tool query timeout in seconds (1-300)", default="30"), default=30)))
     advanced["connector_max_attempts"] = min(5, max(1, _safe_int(
         _q_text("  REST connector read attempts (1-5)", default="3"), default=3)))
+    _pick_swarm_scale(advanced)
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
     # `maverick tax prepare` / `maverick tax update`.
@@ -7916,6 +7933,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[fleet_memory]")
         lines.append("enable = true")
+    if advanced.get("swarm_max_total_spawns"):
+        lines.append("")
+        lines.append("[swarm]")
+        lines.append(f"max_total_spawns = {int(advanced['swarm_max_total_spawns'])}")
+        lines.append("max_concurrent_model_calls = "
+                     f"{int(advanced.get('swarm_max_concurrent_model_calls', 0))}")
     if advanced.get("immune_canaries"):
         lines.append("")
         lines.append("[immune]")

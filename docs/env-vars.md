@@ -21,7 +21,8 @@ for false unless noted otherwise.
 | `MAVERICK_MAX_STEPS` | unset | Optional explicit cap on agent loop steps per goal. Ordinary goals have no generated step cap. |
 | `MAVERICK_STEP_BUDGET_WARNING` | `3` | When this many tool-using turns remain before `MAVERICK_MAX_STEPS`, the loop nudges the agent to give its FINAL answer (so a long run isn't cut off mid-work). `0` disables. |
 | `MAVERICK_MAX_SWARM_FANOUT` | `8` | Max child agents a single spawn call may branch into. |
-| `MAVERICK_MAX_TOTAL_SPAWNS` | `64` | Process-wide cap on total spawned agents across a run. |
+| `MAVERICK_MAX_TOTAL_SPAWNS` | `64` | Cap on the agents one goal may create (overrides `[swarm] max_total_spawns`). |
+| `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` | `0` (unbounded) | Model calls in flight at once across one goal's swarm (overrides `[swarm] max_concurrent_model_calls`). |
 | `MAVERICK_MAX_CONCURRENT_GOALS` | `16` | Global ceiling on goals running in parallel — a host-overload backstop, sized so normal multi-user load never reaches it. |
 | `MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL` | `3` | Per-user concurrency lane: one principal can run this many goals at once without blocking other users (fair scheduling). |
 | `MAVERICK_GOAL_ACQUIRE_TIMEOUT` | `300` | Seconds to wait for a goal-execution slot (per-user lane, then global) before giving up. |

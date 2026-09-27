@@ -2004,6 +2004,29 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_swarm() -> dict:
+    """Return the ``[swarm]`` section: how large one goal's swarm may grow.
+
+    ``max_total_spawns`` bounds the agents a single goal may create (default
+    64; ``MAVERICK_MAX_TOTAL_SPAWNS`` wins). ``max_concurrent_model_calls``
+    bounds how many of the goal's agents are inside a model call at once
+    (0 = unbounded, the historical behaviour); set it when raising the spawn
+    cap so a large swarm queues for the provider instead of tripping its rate
+    limits. The budget still caps total spend whatever the size."""
+    cfg = load_config().get("swarm", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    def _int(key: str, default: int, floor: int) -> int:
+        try:
+            return max(floor, int(cfg.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    return {"max_total_spawns": _int("max_total_spawns", 64, 1),
+            "max_concurrent_model_calls": _int("max_concurrent_model_calls", 0, 0)}
+
+
 def get_immune() -> dict:
     """Return the ``[immune]`` section (:mod:`maverick.immune`).
 

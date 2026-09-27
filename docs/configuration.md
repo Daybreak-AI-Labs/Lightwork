@@ -708,6 +708,21 @@ MAVERICK_MAX_CONCURRENT_GOALS=4 maverick dashboard
 Default is 16. Raise on a beefy machine; lower on a Raspberry Pi. (A
 separate per-principal cap also limits concurrent goals from any one caller.)
 
+## Swarm size
+
+One goal may create up to 64 agents by default. To run larger swarms, raise
+the cap and bound the goal's model calls so the swarm queues for the provider
+instead of tripping its rate limits (the installer asks both):
+
+```toml
+[swarm]
+max_total_spawns = 256          # agents one goal may create (default 64)
+max_concurrent_model_calls = 16 # model calls in flight per goal (0 = unbounded, the default)
+```
+
+`MAVERICK_MAX_TOTAL_SPAWNS` and `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` override
+these. The per-call fan-out cap and the goal's budget still apply at any size.
+
 ## Go-live check
 
 `maverick launch-check` verifies the deliberate production switches are on and

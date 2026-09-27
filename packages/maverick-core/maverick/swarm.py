@@ -14,6 +14,7 @@ Children inherit the parent's context but get their own brief, role, and depth.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import secrets
 import threading
@@ -46,11 +47,26 @@ def _default_use_skills() -> bool:
         return True
 
 
-def _default_max_total_spawns() -> int:
+def _swarm_setting(env: str, key: str, default: int, floor: int) -> int:
+    """``env`` wins when set and valid, then ``[swarm] key``, then ``default``."""
     try:
-        return max(1, int(os.environ.get("MAVERICK_MAX_TOTAL_SPAWNS", "64")))
-    except ValueError:
-        return 64
+        return max(floor, int(os.environ[env]))
+    except (KeyError, ValueError):
+        pass
+    try:
+        from .config import get_swarm
+        return get_swarm()[key]
+    except Exception:
+        return default
+
+
+def _default_max_total_spawns() -> int:
+    return _swarm_setting("MAVERICK_MAX_TOTAL_SPAWNS", "max_total_spawns", 64, 1)
+
+
+def _default_max_concurrent_model_calls() -> int:
+    return _swarm_setting("MAVERICK_MAX_CONCURRENT_MODEL_CALLS",
+                          "max_concurrent_model_calls", 0, 0)
 
 
 def _new_bus_namespace() -> str:
@@ -113,6 +129,11 @@ class SwarmContext:
     # callers that don't checkpoint.
     episode_id: int = 0
     max_total_spawns: int = field(default_factory=_default_max_total_spawns)
+    # Model calls in flight across the whole swarm (0 = unbounded). Held only
+    # for one completion, never while an agent waits on its children, so a
+    # nested swarm cannot deadlock on it.
+    max_concurrent_model_calls: int = field(
+        default_factory=_default_max_concurrent_model_calls)
     # Names of skills recalled into any agent's prompt during this run. The
     # orchestrator attributes the run's final outcome to them at finalize
     # (see skill_stats.record_outcome) so the library curates itself. Shared
@@ -147,6 +168,7 @@ class SwarmContext:
     last_subtrajectories: list = field(default_factory=list)
     _spawns_used: int = 0
     _workdir_lock: asyncio.Lock | None = field(default=None, repr=False)
+    _model_slots: asyncio.Semaphore | None = field(default=None, repr=False)
 
     def register_bus_agent(self, agent_id: str) -> None:
         """Add an instantiated agent to this run's communication roster."""
@@ -179,6 +201,16 @@ class SwarmContext:
         if self._workdir_lock is None:
             self._workdir_lock = asyncio.Lock()
         return self._workdir_lock
+
+    def model_slot(self):
+        """Async context manager admitting one model call (see
+        ``max_concurrent_model_calls``). Created lazily inside the running loop,
+        like ``workdir_lock``."""
+        if self.max_concurrent_model_calls <= 0:
+            return contextlib.nullcontext()
+        if self._model_slots is None:
+            self._model_slots = asyncio.Semaphore(self.max_concurrent_model_calls)
+        return self._model_slots
 
     def try_reserve_spawns(self, n: int) -> bool:
         """Reserve ``n`` child-agent slots for this goal.
