@@ -4154,7 +4154,11 @@ async def third_party_intelligence_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_intelligence.html",
-        {"third_party_intelligence_enabled": (third_party_intelligence_enabled_for_page())},
+        {
+            "third_party_intelligence_enabled": (third_party_intelligence_enabled_for_page()),
+            "intelligence_can_admin": has_global_permission(request, "admin"),
+            "intelligence_can_audit": has_permission(request, "audit"),
+        },
     )
 
 

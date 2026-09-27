@@ -15,7 +15,6 @@ FEATURE_WORKBENCHES = (
     ("consent_public_clients.html", "consent_public_clients_enabled"),
     ("consent_publishing.html", "consent_publishing_enabled"),
     ("policy_publication_links.html", "policy_publication_links_enabled"),
-    ("third_party_intelligence.html", "third_party_intelligence_enabled"),
 )
 
 
@@ -94,6 +93,7 @@ def test_disabled_feature_workbenches_fail_closed_without_javascript(
 # Pages that replace the whole workbench with the module gate when the
 # feature is off: no workbench controls are rendered at all.
 MODULE_GATED_WORKBENCHES = (
+    ("third_party_intelligence.html", "third_party_intelligence_enabled", "tpi-root"),
     ("privacy_data_discovery.html", "privacy_data_discovery_enabled", "pdd-sources"),
     (
         "privacy_regulatory_intelligence.html",

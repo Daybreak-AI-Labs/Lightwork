@@ -705,6 +705,38 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
             verify_secret=True,
         )
 
+    # ---- read-only lists for the page (records load on open) -------------
+
+    def _lister(name: str, method: str):
+        async def listing(request: Request) -> dict[str, Any]:
+            require_permission(request, "view")
+            ops, tenant, store = authority(request)
+            return {"items": _jsonable(await call(ops, getattr(store, method), tenant, limit=500))}
+
+        listing.__name__ = f"list_{name}"
+        return listing
+
+    for _path, _name, _method in (
+        ("/sources", "sources", "list_sources"),
+        ("/snapshots", "snapshots", "list_source_snapshots"),
+        ("/vendors", "vendors", "list_vendors"),
+        ("/screening/runs", "screening_runs", "list_screening_runs"),
+        ("/risk/policies", "risk_policies", "list_risk_policies"),
+        ("/risk/decisions", "risk_decisions", "list_risk_decisions"),
+        ("/edd/cases", "edd_cases", "list_edd_cases"),
+        ("/monitors", "monitors", "list_monitors"),
+        ("/monitoring/alerts", "monitoring_alerts", "list_monitoring_alerts"),
+        ("/exchange/consents", "exchange_consents", "list_exchange_consents"),
+    ):
+        router.add_api_route(_path, _lister(_name, _method), methods=["GET"])
+
+    @router.get("/me")
+    async def me(request: Request) -> dict[str, Any]:
+        """This person's intelligence reference, so the page can tell which
+        records they created (and so cannot approve themselves)."""
+        require_permission(request, "view")
+        return {"principal_ref": _principal(request, _tenant_id())}
+
     @router.put("/sources/{source_id}")
     async def enroll_source(
         request: Request, source_id: ObjectPath, body: SourceIn

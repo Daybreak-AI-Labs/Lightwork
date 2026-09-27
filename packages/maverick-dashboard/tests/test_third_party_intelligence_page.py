@@ -38,86 +38,30 @@ def page_client() -> TestClient:
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
-def test_page_exposes_complete_governed_workflows_and_exact_boundaries(
+def test_page_is_a_set_of_record_lists_in_plain_words(
     page_client: TestClient,
 ) -> None:
     response = page_client.get("/third-party/intelligence")
     assert response.status_code == 200
     page = response.text
     assert "Third-party Intelligence" in page
-    assert "No bundled corpus" in page
-    assert "No provider acceptance" in page
-    assert "No silent match dismissal" in page
-    assert "Low-risk autoapproval is conditional" in page
-    assert "No assumed exchange anonymity or privacy" in page
-    assert "No raw credential or profile values" in page
-    assert "external-operation acceptance" in page
-    assert "different authenticated human" in page
     assert "/api/v1/third-party/intelligence" in page
-    assert "Named provider runtime readiness" in page
-    assert "RiskRecon" in page
-    assert "SupplyWisdom" in page
-    assert "ISS Corporate Solutions" in page
-    assert "/provider-runtime/status" in page
-    assert "/provider-runtime/sources/" in page
-    assert "ready for an attempt" in page
-    for heading in (
-        "Source approval, revocation, and snapshots",
-        "Pseudonymous vendor and relationship graph",
-        "Screening, findings, review, and completion",
-        "Risk policy, evaluation, override, and rollback",
-        "Enhanced due diligence tasks, evidence, and decision",
-        "Monitor, change alert, and durable outbox",
-        "Consent-bound risk exchange",
-        "Retention and integrity",
-    ):
-        assert heading in page
-    operations = (
-        "source-enroll",
-        "source-approve",
-        "source-revoke",
-        "snapshot-record",
-        "vendor-upsert",
-        "relationship-upsert",
-        "screening-start",
-        "finding-record",
-        "finding-review",
-        "screening-complete",
-        "policy-create",
-        "policy-approve",
-        "risk-evaluate",
-        "risk-override",
-        "risk-rollback",
-        "edd-open",
-        "edd-task",
-        "edd-evidence",
-        "edd-decision",
-        "monitor-create",
-        "monitor-observe",
-        "alert-get",
-        "outbox-claim",
-        "outbox-run",
-        "outbox-fail",
-        "outbox-ack",
-        "monitor-revoke",
-        "exchange-consent",
-        "exchange-review",
-        "exchange-contribute",
-        "exchange-query",
-        "exchange-withdraw",
-        "retention-purge",
-        "integrity",
-    )
-    for operation in operations:
-        assert f'value="{operation}"' in page
-    assert "tpi-load-status" in page
-    assert "tpi-load-provider-status" in page
-    assert "tpi-provider-source-readiness" in page
-    assert "tpi-provider-output" in page
-    assert "tpi-output" in page
-    assert "textContent" in page
-    assert "window.confirm" in page
-    assert "external notification side effect" in page
+    assert "/static/lightwork-third-party-intelligence.js" in page
+    assert "Enhanced due diligence" in page
+    assert "different person reviews them" in page
+    for host in ("tpi-sources", "tpi-vendors", "tpi-runs", "tpi-policies", "tpi-decisions",
+                 "tpi-cases", "tpi-monitors", "tpi-alerts", "tpi-consents"):
+        assert f'id="{host}"' in page
+    for label in ("Add a data source", "Add a vendor", "New risk policy",
+                  "Send waiting alerts now", "See what partners shared", "Delete expired records"):
+        assert label in page
+    # No operation consoles, JSON boxes, sample ids or confirm() walls.
+    for gone in ("Closed request JSON", "<textarea", "Load safe example", 'value="vendor-1"',
+                 'value="source-sanctions"', "window.confirm", "tpi-workbench"):
+        assert gone not in page
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(page) == []
 
 
 def test_page_is_fail_closed_and_uses_no_unsafe_dom_or_secret_inputs(
@@ -130,7 +74,7 @@ def test_page_is_fail_closed_and_uses_no_unsafe_dom_or_secret_inputs(
     assert response.status_code == 200
     assert 'data-module-gate="third_party_management.intelligence"' in response.text
     assert "[third_party_management.intelligence] enable = true" not in response.text
-    assert "fails closed" in response.text
+    assert "sanctions and risk data sources" in response.text
 
     template = (
         Path(__file__).resolve().parents[1]
