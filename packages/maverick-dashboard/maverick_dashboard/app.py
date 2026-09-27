@@ -1242,6 +1242,11 @@ app.include_router(cortex_router, prefix="/api/v1")
 app.include_router(shoring_router, prefix="/api/v1")
 app.include_router(evolution_ledger_router, prefix="/api/v1")
 app.include_router(immune_console_router, prefix="/api/v1")
+from .operations_actions import api_router as operations_actions_router  # noqa: E402
+from .operations_actions import asset_router as operations_assets_router  # noqa: E402
+
+app.include_router(operations_actions_router, prefix="/api/v1")
+app.include_router(operations_assets_router)
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.

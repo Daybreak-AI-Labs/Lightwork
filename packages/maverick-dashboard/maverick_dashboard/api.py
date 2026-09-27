@@ -11142,6 +11142,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "AI vendor risk",
         "requires": ("evidence_graph", "model_risk_assurance"),
     },
+    "codebase": {
+        "label": "Code projects",
+        "requires": (),
+    },
     "vendor_onboarding": {
         "label": "AI vendor onboarding",
         "requires": ("connections", "vendor_management", "evidence_graph", "model_risk_assurance", "ai_vendor_risk"),

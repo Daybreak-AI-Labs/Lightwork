@@ -1,9 +1,11 @@
-"""Read-only consoles for the immune layer (/immune) and the code vault (/code).
+"""Pages for the immune layer (/immune) and the code vault (/code).
 
 Both render a server template whose same-origin script reads one JSON summary.
 Summaries carry counts, scores, labels, statuses and names only -- never canary
-flaws, tool arguments, recorded outputs, diffs or code. Nothing here mutates:
-approvals are decided in the approvals queue, merges run through ``maverick code``.
+flaws, tool arguments, recorded outputs, diffs or code. The summaries never
+mutate; the pages' buttons call the administrator-only action routes in
+:mod:`.code_actions_api` and :mod:`.immune_actions_api`. Approvals are still
+decided in the approvals queue.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_permission
+from .auth import has_global_permission, has_permission, require_permission
 from .evolution_ledger_page import _HEADERS
 
 IMMUNE_PATH = "/immune"
@@ -34,7 +36,33 @@ def _world_or_none() -> Any:
 
 def _immune_summary() -> dict:
     from maverick.immune import report
-    return report.summary(_world_or_none())
+
+    from .identity_format import humanize_principal
+    world = _world_or_none()
+    data = report.summary(world)
+    # Readable names for the page: task titles and people, never raw ids.
+    ids: set[int] = set()
+    for row in (data.get("ifc") or {}).get("recent") or []:
+        if isinstance(row.get("goal_id"), int):
+            ids.add(row["goal_id"])
+    for row in (data.get("twin") or {}).get("replays") or []:
+        for key in ("production_goal", "twin_goal"):
+            if isinstance(row.get(key), int):
+                ids.add(row[key])
+    titles: dict[str, str] = {}
+    if world is not None:
+        for gid in sorted(ids)[:500]:
+            try:
+                goal = world.get_goal(gid)
+            except Exception:  # noqa: BLE001 -- a missing title falls back to a number
+                goal = None
+            if goal is not None and goal.title:
+                titles[str(gid)] = goal.title[:200]
+    data["goal_titles"] = titles
+    for kind in ("canary", "drill"):
+        for row in (data.get("oversight") or {}).get(kind) or []:
+            row["person_label"] = humanize_principal(row.get("person")).name
+    return data
 
 
 def _code_summary() -> dict:
@@ -49,6 +77,16 @@ def _code_summary() -> dict:
         return features.summary(world)
     except Exception as exc:  # noqa: BLE001 -- vault, decryption or corrupt records
         raise HTTPException(status_code=503, detail="code vault unavailable") from exc
+
+
+def _module_on(path: str) -> bool:
+    if path != CODE_PATH:
+        return True
+    try:
+        from maverick.codebase import vault
+        return bool(vault.enabled())
+    except Exception:  # noqa: BLE001 -- an unreadable switch shows as off
+        return False
 
 
 def create_immune_console_router() -> APIRouter:
@@ -83,7 +121,9 @@ def create_immune_console_page_router(templates: Jinja2Templates) -> APIRouter:
         nonce = secrets.token_urlsafe(18)
         response = templates.TemplateResponse(request, template, {
             "api_url": f"/api/v1{path}/summary", "page_path": path,
-            "csp_style_nonce": nonce})
+            "csp_style_nonce": nonce, "can_admin": has_permission(request, "admin"),
+            "can_global_admin": has_global_permission(request, "admin"),
+            "module_on": _module_on(path)})
         for name, value in _HEADERS.items():
             if name == "Content-Security-Policy":
                 value = value.replace("style-src 'self'", f"style-src 'self' 'nonce-{nonce}'")
