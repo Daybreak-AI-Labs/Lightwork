@@ -71,26 +71,15 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Global Opt-Out" in response.text
-    assert "real <code>opt_out</code>" in response.text
-    assert "retains only result digests" in response.text
-    assert "live mobile, email, connected-device" in response.text
+    assert "Opt Out Everywhere" in response.text
+    assert "as an opt-out request" in response.text
+    assert "keeps only a fingerprint of each request" in response.text
     assert 'id="goo-operations" disabled' in response.text
     assert 'data-copilot-page="/consent/global-opt-out"' in response.text
-    assert "/static/lightwork-consent-global-opt-out.css" in response.text
+    # Shared design system only: no per-page theme stylesheet.
+    assert "/static/lightwork-consent-global-opt-out.css" not in response.text
+    assert "/static/lightwork-consent-workbench.css" in response.text
     assert "/static/lightwork-consent-global-opt-out.js" in response.text
-
-    css = (PACKAGE / "static" / "lightwork-consent-global-opt-out.css").read_text(
-        encoding="utf-8"
-    )
-    for required in (
-        "backdrop-filter: blur(24px)",
-        ":focus-visible",
-        "prefers-reduced-motion",
-        "forced-colors",
-        "color-mix",
-    ):
-        assert required in css
 
 
 def test_workbench_forms_have_no_tenant_profile_or_raw_case_selector(client: TestClient) -> None:
@@ -166,3 +155,19 @@ def test_bounded_script_has_no_browser_persistence_or_html_injection() -> None:
 def test_page_rejects_unknown_query_keys(client: TestClient) -> None:
     response = client.get(f"{ROUTE}?tenant=alpha")
     assert response.status_code == 404
+
+
+def test_workbench_lists_set_ups_with_row_buttons_and_speaks_plainly(client: TestClient) -> None:
+    from test_support.plain_language import developer_terms
+
+    page_html = client.get(ROUTE).text
+    source = (PACKAGE / "static" / "lightwork-consent-global-opt-out.js").read_text(encoding="utf-8")
+    assert '<select class="select" id="goo-application-ref" name="application_ref" required>' in page_html
+    assert 'type="date"' in page_html
+    for label in ('label: "Edit"', 'label: "Switch on"', 'label: "Switch off"', 'label: "History"'):
+        assert label in source
+    assert "expected_revision: item.revision" in source
+    assert source.count("CW.confirm(") >= 2
+    for typed in ("Public client ID", "Unix timestamp", "Expected record revision", "Configuration ID"):
+        assert typed not in page_html
+    assert developer_terms(page_html) == []

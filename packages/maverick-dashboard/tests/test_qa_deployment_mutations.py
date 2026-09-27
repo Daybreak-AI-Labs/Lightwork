@@ -129,11 +129,9 @@ def test_consent_lifecycle_mutations_are_targeted_single_flight_actions():
     assert "expected_revision: x.revision" in experiments
     assert "Delete visitor records that are past their keep-until date?" in experiments
 
-    assert 'button.dataset.inFlight === "true"' in opt_out
-    assert "Activate Global Opt-Out configuration “" in opt_out
-    assert "Revoke Global Opt-Out configuration “" in opt_out
-    assert "Update and rebind Global Opt-Out configuration “" in opt_out
-    assert 'button.setAttribute("aria-busy", "true")' in opt_out
-    assert "delete button.dataset.inFlight" in opt_out
-    assert "Could not reach the server — check your connection and try again." in opt_out
-    assert "Purge expired Global Opt-Out retention records for this tenant?" in opt_out
+    # Opt-out set-ups: single-flight row buttons with plain confirmations.
+    assert "return CW.busy(button, async function" in opt_out
+    assert "Switch on opt-out for " in opt_out
+    assert "Switch off opt-out for " in opt_out
+    assert "expected_revision: item.revision" in opt_out
+    assert "Delete opt-out records that are past their keep-until date?" in opt_out
