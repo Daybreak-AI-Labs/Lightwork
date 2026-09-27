@@ -42,7 +42,7 @@ def _templates(*, custom_theme_css: str = "") -> Jinja2Templates:
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
     monkeypatch.setattr(
@@ -81,7 +81,7 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
         assert directive in csp
     assert "style-src 'self' 'nonce-" in csp
 
-    assert "AI entity tasks" in response.text
+    assert "AI system tasks" in response.text
     assert 'id="aet-operations" disabled' in response.text
     assert "Checking availability before enabling actions" in response.text
     assert "Lightwork checks that the item is current before saving a task" in response.text
@@ -144,6 +144,7 @@ def test_page_renders_exact_role_controls(
 
     assert ("disabled" not in by_id["aet-create-controls"]) is operate
     assert ("disabled" not in by_id["aet-update-controls"]) is operate
+    assert by_id["ai-entity-task-shell"]["data-can-operate"] == ("true" if operate else "false")
     assert ("disabled" not in by_id["aet-verify-integrity"]) is audit
     assert ("disabled" not in by_id["aet-retention-due"]) is audit
     assert ("disabled" not in by_id["aet-purge-controls"]) is admin
@@ -163,12 +164,10 @@ def test_page_collects_only_closed_task_fields(client: TestClient) -> None:
     assert forms and all("action" not in form for form in forms)
     assert {
         "entity_id",
-        "entity_revision",
         "kind",
         "title",
         "description",
         "assignee_ref",
-        "collaborator_refs",
         "priority",
         "due_at",
         "idempotency_key",
@@ -176,6 +175,16 @@ def test_page_collects_only_closed_task_fields(client: TestClient) -> None:
         "expected_revision",
         "status",
     }.issubset(names)
+    # The AI system, people, task and version are chosen or carried, never typed.
+    by_name = {
+        attrs.get("name"): (tag, attrs)
+        for tag, attrs in parser.tags
+        if tag in {"input", "select"} and isinstance(attrs.get("name"), str)
+    }
+    assert by_name["entity_id"][0] == "select" and by_name["assignee_ref"][0] == "select"
+    assert by_name["task_id"][1].get("type") == "hidden"
+    assert by_name["expected_revision"][1].get("type") == "hidden"
+    assert "entity_revision" not in names and "limit" not in names
     for forbidden in (
         "tenant_id",
         "actor_ref",
@@ -198,20 +207,17 @@ def test_page_rejects_query_material_and_requires_tenant(
     assert client.get(f"{ROUTE}?tenant_id=caller-selected").status_code == 404
     assert client.get(f"{ROUTE}?theme=light&density=compact").status_code == 200
 
-    def missing_tenant() -> None:
-        raise page.HTTPException(
-            status_code=409,
-            detail="select an active tenant before using AI-entity tasks",
-        )
-
-    monkeypatch.setattr(page, "_tenant_selected", missing_tenant)
-    assert client.get(ROUTE).status_code == 409
+    monkeypatch.setattr(page, "_tenant_selected", lambda: False)
+    missing = client.get(ROUTE)
+    assert missing.status_code == 200
+    assert "Choose a workspace first" in missing.text
+    assert page.ASSET_PATH not in missing.text
 
 
 def test_page_supports_custom_theme_with_one_csp_nonce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
     monkeypatch.setattr(
@@ -250,8 +256,6 @@ def test_liquid_glass_client_is_accessible_bounded_and_injection_safe() -> None:
     ).read_text(encoding="utf-8")
 
     for required in (
-        "backdrop-filter: blur(22px)",
-        "color-mix(",
         ":focus-visible",
         "prefers-reduced-motion",
         "forced-colors",
@@ -273,7 +277,7 @@ def test_liquid_glass_client_is_accessible_bounded_and_injection_safe() -> None:
         'operations.disabled = true',
         'operations.disabled = false',
         'request("/operations/integrity")',
-        'request("/operations/retention-due?limit="',
+        'request("/operations/retention-due?limit=',
         'request("/operations/purge-expired"',
         "payload.due_at = null",
         "payload.assignee_ref = null",
@@ -320,3 +324,23 @@ def test_task_client_parses_as_strict_javascript() -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_page_is_plain_language_with_a_task_table_and_row_actions(client: TestClient) -> None:
+    import re
+
+    body = client.get(ROUTE).text
+    main = body.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL))
+    banned = re.compile(
+        r"\b(tenant|principals?|payload|endpoint|schema|uuid|sha-?256|digest|idempoten\w*|"
+        r"revision|json|entity id|reference|retention-due)\b|/api/v1|HTTP \d{3}",
+        re.IGNORECASE,
+    )
+    assert banned.search(text) is None, banned.search(text)
+    assert 'id="aet-task-list"' in body
+    for label in ("All tasks", "New task", "Edit task", "Check records are intact", "Delete expired tasks"):
+        assert label in text
+    source = (PACKAGE / "static" / "lightwork-ai-entity-tasks.js").read_text(encoding="utf-8")
+    assert '"/api/v1/people/assignable"' in source and '"/api/v1/assurance/ai-inventory"' in source
+    assert "window.mvConfirm" in source
