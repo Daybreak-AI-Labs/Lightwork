@@ -40,16 +40,16 @@ def _seed(world, cost=0.42, owner=""):
 def test_billing_empty_renders(client):
     r = client.get("/billing")
     assert r.status_code == 200
-    assert "No priced runs" in r.text
+    assert "No charges yet" in r.text and "Start a task" in r.text
 
 
 def test_billing_shows_accrued_charges(client, world):
     _seed(world, cost=0.42)
     r = client.get("/billing")
     assert r.status_code == 200
-    assert "accrued charges" in r.text
+    assert "Charges so far" in r.text
     assert "0.42" in r.text
-    assert "Download invoice" in r.text
+    assert "Download this month" in r.text
 
 
 def test_billing_csv_invoice_is_itemized(client, world):
@@ -60,7 +60,7 @@ def test_billing_csv_invoice_is_itemized(client, world):
     assert r.headers["content-type"].startswith("text/csv")
     assert "attachment" in r.headers.get("content-disposition", "")
     lines = r.text.strip().splitlines()
-    assert lines[0].startswith("episode_id,goal_id")
+    assert lines[0].startswith("Run,Task,")
     assert len(lines) == 2                       # header + the one priced episode
     assert ",0.420000," in r.text
 
@@ -103,8 +103,8 @@ def test_billing_is_owner_scoped_for_authenticated_viewer(client, world, monkeyp
 
     statement = client.get("/billing", headers={"Authorization": "Bearer alice"})
     assert statement.status_code == 200
-    assert "$0.4200" in statement.text
-    assert "$9.9900" not in statement.text
+    assert "$0.42" in statement.text
+    assert "$9.99" not in statement.text
 
 
 def test_billing_linked_from_spend(client):
@@ -129,9 +129,9 @@ def test_usage_receipts_are_owner_scoped_and_distinguish_carry_forward(client, t
     ledger.record_cumulative("user:bob", "b" * 32, 99.0, 900, 900)
     page = client.get("/billing", headers={"Authorization":"Bearer alice"})
     assert page.status_code == 200
-    assert "a" * 32 in page.text and "b" * 32 not in page.text
-    assert "$0.300000" in page.text and "$99.000000" not in page.text
-    assert "Previously acknowledged usage carried forward: $0.100000" in page.text
+    # Only the caller's own adjustments are listed (bob's $99 never appears).
+    assert "$0.30" in page.text and "$99.00" not in page.text
+    assert "Already counted before the restart: $0.10" in page.text
     assert "25 new tokens counted" in page.text
 
 
@@ -143,5 +143,40 @@ def test_unavailable_reconciliation_does_not_fabricate_zero_usage(client, monkey
     monkeypatch.setattr(UsageLedger, "settlement_receipts", unavailable)
     response = client.get("/billing")
     assert response.status_code == 200
-    assert "absence has not been interpreted as zero usage" in response.text
+    assert "Missing records are not treated as zero" in response.text
     assert "internal private path" not in response.text
+
+
+def test_admin_makes_a_workspace_invoice_from_the_page(client, monkeypatch):
+    from maverick import billing
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", display_name="Acme Inc")
+    seen = {}
+
+    def fake_generate(tenant_id, card, *, since=None, until=None):
+        seen.update(tenant=tenant_id, since=since, until=until, markup=card.markup_pct)
+        return billing.Invoice(tenant=tenant_id, period_start=since or "", period_end=until or "",
+                               line_items=[billing.LineItem("user:ana@example.com", "2026-09-01", 1.0, 100, 50, 1.1)],
+                               subtotal=1.1, total=1.1, invoice_id="inv-1")
+    monkeypatch.setattr(billing, "generate_invoice", fake_generate)
+    page = client.get("/billing").text
+    assert "Make an invoice for a workspace" in page and '<option value="acme">Acme Inc</option>' in page
+    r = client.get("/api/v1/admin/billing/invoice", params={"tenant": "acme", "since": "2026-09-01",
+                                                             "until": "2026-09-30", "markup": 10})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1.1 and data["lines"][0]["person"] == "ana@example.com"
+    assert seen == {"tenant": "acme", "since": "2026-09-01", "until": "2026-09-30", "markup": 10.0}
+    sheet = client.get("/api/v1/admin/billing/invoice.csv", params={"tenant": "acme"})
+    assert sheet.status_code == 200 and sheet.text.startswith("Day,Person,Charge (USD)")
+    assert client.get("/api/v1/admin/billing/invoice", params={"tenant": "nope"}).status_code == 404
+    assert client.get("/api/v1/admin/billing/invoice", params={
+        "tenant": "acme", "since": "2026-10-01", "until": "2026-09-01"}).status_code == 422
+
+
+def test_invoice_maker_is_admin_only(client, monkeypatch):
+    from maverick_dashboard import auth, rbac
+    rbac.set_role("user:vic", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vic")
+    assert client.get("/api/v1/admin/billing/invoice", params={"tenant": "x"}).status_code == 403
+    assert client.get("/api/v1/admin/billing/invoice.csv", params={"tenant": "x"}).status_code == 403

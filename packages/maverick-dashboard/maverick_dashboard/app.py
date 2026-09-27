@@ -1044,6 +1044,7 @@ app.include_router(project_reviews_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
@@ -1062,6 +1063,7 @@ app.include_router(system_checks_router)
 app.include_router(channel_check_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
+app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
@@ -5266,8 +5268,8 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     if format == "csv":
         sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
         rows = [
-            "episode_id,goal_id,started_at,ended_at,outcome,"
-            "cost_dollars,input_tokens,output_tokens,tool_calls"
+            "Run,Task,Started,Finished,Result,"
+            "Cost (USD),Input tokens,Output tokens,Tool uses"
         ]
         for e in episodes:
             if not e.ended_at:
@@ -5318,8 +5320,20 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "invoice_admin": has_global_permission(request, "admin"),
+            "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
         },
     )
+
+
+def _invoice_workspaces(current: str, current_label: str) -> list[dict]:
+    """Workspaces an administrator can make an invoice for (Billing page)."""
+    try:
+        from maverick.tenant.registry import list_tenants
+        rows = [{"id": t.id, "name": t.display_name or t.id} for t in list_tenants()]
+    except Exception:  # noqa: BLE001 - registry optional
+        rows = []
+    return rows or [{"id": current, "name": current_label}]
 
 
 def _provider_integration_inventory() -> list[dict]:
