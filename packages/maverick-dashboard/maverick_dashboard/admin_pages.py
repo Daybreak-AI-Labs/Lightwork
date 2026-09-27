@@ -566,6 +566,43 @@ def _workspace_options(request: Request) -> tuple[list[dict], str]:
     return options, start
 
 
+def _signed_in_principals(limit: int = 200) -> list[str]:
+    """People who have signed in with company sign-in, most recent first."""
+    try:
+        from . import subject_directory
+        index = subject_directory.load_index()
+    except Exception:
+        return []
+    latest: dict[str, float] = {}
+    for entry in index.values():
+        sub = str(entry.get("sub") or "").strip()
+        if sub:
+            latest[sub] = max(latest.get(sub, 0.0), float(entry.get("ts") or 0.0))
+    ordered = sorted(latest, key=lambda sub: latest[sub], reverse=True)[:limit]
+    return [sub if sub.startswith("user:") else f"user:{sub}" for sub in ordered]
+
+
+def _people(users: dict, labels: dict, extra) -> list[dict]:
+    """Everyone the roster knows about, as choices for the people pickers.
+
+    Sources: explicit role holders, accepted invites, department grants,
+    installation administrators and people who have signed in. Each entry
+    carries a readable label; the exact sign-in identity is only the value."""
+    from .identity_format import humanize_principal
+    seen: dict[str, dict] = {}
+    for principal in [*users, *labels, *extra]:
+        principal = str(principal or "").strip()
+        if not principal.startswith("user:") or principal in seen:
+            continue
+        ident = humanize_principal(principal)
+        name = labels.get(principal) or ident.name
+        detail = "" if labels.get(principal) else ident.detail
+        seen[principal] = {"principal": principal,
+                           "label": f"{name} ({detail})" if detail and detail != "Email" else name,
+                           "role": users.get(principal)}
+    return sorted(seen.values(), key=lambda p: p["label"].lower())
+
+
 def _users_context(request: Request) -> dict:
     """Template context for the /users page (shared with the invite handler)."""
     import os as _os
@@ -607,8 +644,21 @@ def _users_context(request: Request) -> dict:
     except Exception:
         all_invites = []
     workspace_options, wm_tenant = _workspace_options(request)
+    role_map = rbac.list_users()
+    labels = _invite_labels(all_invites)
+    grants = suite_grants.list_grants()
+    people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
+    from .identity_format import role_label
+    defaults = set(default_suites) if default_suites is not None else None
     return {
-        "users": sorted(rbac.list_users().items()),
+        "people": people,
+        "people_labels": {p["principal"]: p["label"] for p in people},
+        "role_labels": {r: role_label(r) for r in rbac.known_roles()},
+        "grant_can_use_default": {
+            principal: defaults is not None and defaults.issubset(set(suites))
+            for principal, suites in grants.items()
+        },
+        "users": sorted(role_map.items()),
         "roles": rbac.known_roles(),
         "builtin_roles": rbac.ROLES,
         "custom_roles": custom_roles,
@@ -618,7 +668,7 @@ def _users_context(request: Request) -> dict:
         "auth_on": auth_on,
         "you": auth.caller_principal(request),
         "saved": saved,
-        "suite_grants": sorted(suite_grants.list_grants().items()),
+        "suite_grants": sorted(grants.items()),
         "all_suites": sorted(((k, department_title(k))
                               for k in suite_grants.known_suites()),
                              key=lambda kv: kv[1]),
@@ -626,7 +676,7 @@ def _users_context(request: Request) -> dict:
                            if default_suites is not None else None),
         "invites_on": invites.invites_enabled(),
         "pending_invites": [i for i in all_invites if i.pending],
-        "invite_labels": _invite_labels(all_invites),
+        "invite_labels": labels,
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
     }
@@ -688,9 +738,17 @@ def users_save_custom_role(
     from . import rbac
     atoms = {str(p).strip() for p in permissions if str(p).strip()}
     atoms.add("view")
+    # People type a role name ("Privacy officer"); the stored key is derived
+    # from it (privacy-officer), so saving the same name again updates it.
+    from .plain_labels import slugify
+    key = slugify(name, max_len=32)
+    if key and not key[0].isalpha():
+        key = ("role-" + key)[:32]
+    if len(key) < 2:
+        raise HTTPException(status_code=400, detail="Give the role a name of at least two letters.")
     try:
         rbac.set_custom_role(
-            name.strip(),
+            key,
             sorted(atoms),
             description.strip(),
             actor=auth.caller_principal(request) or "local",
