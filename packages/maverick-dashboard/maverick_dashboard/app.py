@@ -3838,7 +3838,11 @@ async def consent_scan_inventory_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_scan_inventory.html",
-        {"consent_scan_inventory_enabled": _enabled()},
+        {
+            "consent_scan_inventory_enabled": _enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -3854,7 +3858,10 @@ async def consent_scan_notice_proposals_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_scan_notice_proposals.html",
-        {"consent_scan_notice_proposals_enabled": (scan_notice_proposals_enabled_for_page())},
+        {
+            "consent_scan_notice_proposals_enabled": (scan_notice_proposals_enabled_for_page()),
+            "consent_can_admin": has_global_permission(request, "admin"),
+        },
     )
 
 

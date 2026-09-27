@@ -41,30 +41,28 @@ def page_client() -> TestClient:
 
 
 def test_page_exposes_complete_honest_operator_workbench(page_client) -> None:
+    from test_support.plain_language import developer_terms
+
     response = page_client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200
     page = response.text
-    assert "Scan Disclosure Proposals" in page
-    assert "server-enrolled, complete, independently reviewed scan" in page
-    assert "this browser cannot submit them" in page
-    assert "accepts no hosts, origins, paths, URLs, query strings" in page
-    assert "does not generate legal prose, mutate a site or app" in page
-    assert "not browser-estate, customer, accessibility, legal, provider" in page
+    assert "Disclosure Suggestions" in page
+    assert "Three different people take part" in page
+    assert "does not change your website or write any notice text" in page
     assert "/api/v1/consent/scan-notice-proposals" in page
-    for operation in (
-        "status",
-        "propose",
-        "get",
-        "rollback",
-        "approve",
-        "revoke",
-        "accept",
-        "export",
-        "integrity",
-    ):
-        assert f'value="{operation}"' in page
-    assert "acknowledge_local" in page
+    # Suggestions are rows with the buttons each person may use, not an
+    # operation dropdown with typed IDs and versions.
+    assert 'id="csnp-list"' in page
+    for label in ("Suggest an update from the latest scan", "Approve", "Withdraw my approval",
+                  "Accept", "Download", "What changes", "Check that records are intact"):
+        assert label in page
+    for typed in ("Proposal ID", "Current proposal version", "Expected head revision",
+                  "Expected approval revision", 'name="operation"', "Content-free result"):
+        assert typed not in page
+    assert "acknowledge_local_baseline_only: true" in page
+    assert page.count("CW.confirm(") >= 5
     assert "textContent" in page
+    assert developer_terms(page) == []
 
 
 def test_page_fails_closed_and_template_uses_safe_dom(page_client) -> None:
@@ -74,7 +72,7 @@ def test_page_fails_closed_and_template_uses_safe_dom(page_client) -> None:
     )
     assert disabled.status_code == 200
     assert 'data-module-gate="consent_preferences.scanner.notice_proposals"' in disabled.text
-    assert "Scan notice proposals is turned off." in disabled.text
+    assert "Disclosure suggestions is turned off." in disabled.text
     assert "[consent_preferences.scanner.notice_proposals]" not in disabled.text
 
     template = (

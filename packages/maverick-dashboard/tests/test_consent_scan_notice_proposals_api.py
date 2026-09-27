@@ -584,3 +584,40 @@ def test_default_authority_fails_closed_without_server_resolvers(
     response = client.get(f"{API}/proposals/CSNP-missing")
     assert response.status_code == 503
     assert response.json() == {"detail": "scan disclosure-proposal runtime is unavailable"}
+
+
+def test_list_shows_stage_head_and_only_the_viewers_own_role(environment) -> None:
+    client, _database, state = environment
+    empty = client.get(f"{API}/proposals")
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {"head_revision": 0, "items": [], "truncated": False}
+
+    created = _create(client)
+    approved = client.post(
+        f"{API}/proposals/{created['proposal_id']}/approve",
+        headers={"X-Test-Subject": "reviewer"},
+        json={"expected_proposal_revision": 1, "idempotency_key": "approve-list"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    as_creator = client.get(f"{API}/proposals", headers={"X-Test-Subject": "creator"}).json()
+    assert as_creator["head_revision"] == created["head_revision"]
+    row = as_creator["items"][0]
+    assert row["proposal_id"] == created["proposal_id"]
+    assert row["state"] == "approved"
+    assert row["revision"] == 2
+    assert row["disclosure_count"] == 1
+    assert row["classification_counts"]["analytics"] == 1
+    assert row["created_by_me"] is True
+    assert row["approval"]["approved_by_me"] is False
+    assert row["approval"]["revision"] == 1
+    assert row["is_current"] is True and row["is_effective"] is False
+
+    as_reviewer = client.get(f"{API}/proposals", headers={"X-Test-Subject": "reviewer"}).json()
+    assert as_reviewer["items"][0]["created_by_me"] is False
+    assert as_reviewer["items"][0]["approval"]["approved_by_me"] is True
+
+    serialized = json.dumps(as_creator)
+    for forbidden in ("actor_sha256", "created_by_sha256", "tenant", "tracker_key", "disclosures"):
+        assert forbidden not in serialized
+    assert ("tenant", "view") in state["permission_calls"]

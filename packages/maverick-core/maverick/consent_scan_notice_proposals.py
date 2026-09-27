@@ -2027,6 +2027,82 @@ class ConsentScanNoticeProposalStore:
                 )
             )
 
+    def list_proposals(self, *, limit: int = 100) -> dict[str, Any]:
+        """Newest-first proposals of the bound property with the current head.
+
+        Read-only. Each row says whether the signed-in person created or
+        approved it (booleans only; no person digest leaves the store), so a
+        page can offer only the steps that person may take.
+        """
+
+        snapshot, actor_sha, _now = self._context()
+        bound = _revision(limit, "limit", positive=True)
+        if bound > 500:
+            raise NoticeProposalValidationError("limit is outside its bound")
+        tenant, property_id = snapshot["tenant_id"], snapshot["property_id"]
+        with self._connect() as connection:
+            head_row = connection.execute(
+                "SELECT * FROM scan_notice_heads WHERE tenant=? AND property_id=?",
+                (tenant, property_id),
+            ).fetchone()
+            rows = connection.execute(
+                "SELECT * FROM scan_notice_proposals WHERE tenant=? AND property_id=? "
+                "ORDER BY version DESC LIMIT ?",
+                (tenant, property_id, bound + 1),
+            ).fetchall()
+            approvals = {
+                str(row["proposal_id"]): self._approval_result(row)
+                for row in connection.execute(
+                    "SELECT * FROM scan_notice_approvals WHERE tenant=? AND property_id=?",
+                    (tenant, property_id),
+                ).fetchall()
+            }
+        head = self._head_result(head_row) if head_row is not None else None
+        items: list[dict[str, Any]] = []
+        for row in rows[:bound]:
+            proposal = self._proposal_result(row)
+            metadata = proposal.get("metadata") if isinstance(proposal.get("metadata"), Mapping) else {}
+            approval = approvals.get(str(proposal["proposal_id"]))
+            items.append(
+                {
+                    "proposal_id": proposal["proposal_id"],
+                    "version": proposal["version"],
+                    "action": proposal["action"],
+                    "state": proposal["state"],
+                    "revision": proposal["revision"],
+                    "created_at": proposal.get("created_at"),
+                    "expires_at": proposal.get("expires_at"),
+                    "accepted_at": proposal.get("accepted_at"),
+                    "rollback_target_proposal_id": proposal.get("rollback_target_proposal_id"),
+                    "classification_counts": dict(metadata.get("classification_counts") or {}),
+                    "disclosure_count": metadata.get("disclosure_count"),
+                    "first_party_count": metadata.get("first_party_count"),
+                    "third_party_count": metadata.get("third_party_count"),
+                    "scan_complete": metadata.get("scan_complete"),
+                    "created_by_me": _same(proposal.get("created_by_sha256"), actor_sha),
+                    "approval": (
+                        None
+                        if approval is None
+                        else {
+                            "revision": approval["revision"],
+                            "approved_at": approval.get("approved_at"),
+                            "expires_at": approval.get("expires_at"),
+                            "revoked": approval.get("revoked_at") is not None,
+                            "approved_by_me": _same(approval.get("actor_sha256"), actor_sha),
+                        }
+                    ),
+                    "is_current": head is not None
+                    and head["current_proposal_id"] == proposal["proposal_id"],
+                    "is_effective": head is not None
+                    and head["effective_proposal_id"] == proposal["proposal_id"],
+                }
+            )
+        return {
+            "head_revision": head["revision"] if head is not None else 0,
+            "items": items,
+            "truncated": len(rows) > bound,
+        }
+
     def export_signed_metadata(self, proposal_id: str, *, idempotency_key: str) -> dict[str, Any]:
         """Export signed structured metadata; never export copy, secrets, or URLs."""
 
