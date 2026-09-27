@@ -58,4 +58,23 @@ final class ConnectionTests: XCTestCase {
         let store = ConnectionStore(storage: memory, legacy: { DashboardConnection(address: "https://old.example", token: "old-synthetic") })
         XCTAssertThrowsError(try store.load())
     }
+
+    func testMessagesArePlainAndCarryNoStatusNumbers() {
+        for status in [400, 401, 403, 404, 429, 500, 503, -1] {
+            let text = ConnectionError.response(status).errorDescription ?? ""
+            XCTAssertFalse(text.isEmpty)
+            XCTAssertNil(text.range(of: "[0-9]{3}", options: .regularExpression), text)
+            XCTAssertFalse(text.contains("status"), text)
+        }
+        XCTAssertFalse((ConnectionError.secureStorage(-25300).errorDescription ?? "").contains("25300"))
+        XCTAssertEqual(plainMessage(for: URLError(.notConnectedToInternet)).hasPrefix("Could not reach the dashboard"), true)
+    }
+
+    func testEmptyAddressAsksForOneAndBareHostGetsSecureScheme() {
+        XCTAssertThrowsError(try DashboardConnection(address: "  ").validatedURL()) { error in
+            XCTAssertEqual(error.localizedDescription, ConnectionError.missingAddress.errorDescription)
+        }
+        XCTAssertEqual(addressWithScheme(" lightwork.example.com "), "https://lightwork.example.com")
+        XCTAssertEqual(addressWithScheme("http://127.0.0.1:8400"), "http://127.0.0.1:8400")
+    }
 }

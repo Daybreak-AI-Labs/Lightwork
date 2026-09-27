@@ -148,8 +148,8 @@ def test_legacy_conflicts_are_visible_in_staff_console(admin, app):
     db.init_db(app.state.conn)
     response = admin.get("/support")
     assert response.status_code == 200
-    assert "Legacy duplicate tickets need review" in response.text
-    assert f"Customer {customer}" in response.text
+    assert "Duplicate tickets to review" in response.text
+    assert store.get_customer(app.state.conn, customer).name in response.text
     assert all(f"Ticket {ticket_id}" in response.text for ticket_id in ids)
 
 

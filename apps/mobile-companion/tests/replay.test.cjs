@@ -105,7 +105,7 @@ test('mobile replay bounds display without skipping server cursors and refuses s
   assert.equal(result.next_id,1200);assert.equal(result.events.length,1000);assert.equal(result.truncated,true);
   const broken=source('src/runReplay.ts',{'./api':{ApiError:Error,getGoalEvents:async()=>({events:[],next_id:0,has_more:true,terminal:false})}})
     .createRunReplay(settings,1);
-  await assert.rejects(broken.poll(new AbortController().signal),/no valid progress/);
+  await assert.rejects(broken.poll(new AbortController().signal),/could not read/);
 });
 
 function hook(clock,continuePolling) {
@@ -157,6 +157,6 @@ for(const screen of ['RunsListScreen','GlanceScreen']) for(const mode of ['acces
   let app;
   await act(async()=>{app=create(React.createElement(component,{settings,onOpenRun:()=>{}}));});
   assert.ok(allowed.every(value=>!value));
-  assert.match(text(app),mode==='access'?/Access denied/:/Unsupported mobile transport/);assert.doesNotMatch(text(app),/offline/);
+  assert.match(text(app),mode==='access'?/Access problem/:/Update needed/);assert.doesNotMatch(text(app),/offline/);
   app.unmount();
 });

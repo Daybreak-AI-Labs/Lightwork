@@ -56,6 +56,90 @@ def list_staff(conn: sqlite3.Connection) -> list[Staff]:
             conn.execute("SELECT * FROM staff ORDER BY email").fetchall()]
 
 
+def set_staff_role(conn: sqlite3.Connection, staff_id: int, role: str) -> None:
+    """Change a role and end that person's live sessions, so the new role
+    applies from their next sign-in (roles are read from the DB, never the cookie)."""
+    conn.execute("UPDATE staff SET role = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (role, staff_id))
+    conn.commit()
+
+
+def set_staff_disabled(conn: sqlite3.Connection, staff_id: int, disabled: bool) -> None:
+    """Turn sign-in off (or back on). Turning it off also ends live sessions."""
+    conn.execute("UPDATE staff SET disabled = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (1 if disabled else 0, staff_id))
+    conn.commit()
+
+
+def set_password(conn: sqlite3.Connection, staff_id: int, pw_hash: str) -> int:
+    """Replace a password and end every live session; returns the new epoch so
+    the caller can re-issue its own session."""
+    conn.execute("UPDATE staff SET pw_hash = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (pw_hash, staff_id))
+    conn.commit()
+    return conn.execute("SELECT session_epoch FROM staff WHERE id = ?",
+                        (staff_id,)).fetchone()["session_epoch"]
+
+
+# ---- set-up links ------------------------------------------------------------
+
+def create_invite(conn: sqlite3.Connection, *, staff_id: int, token_hash: str,
+                  expires_at: float, created_by: str, reset: bool = False) -> None:
+    """Store a new set-up link for a person and retire every older unused one.
+    ``reset`` (a re-sent link) also clears their password and unfinished
+    two-step secret, so only the newest link can finish the account."""
+    now = time.time()
+    with db.transaction(conn) as tx:
+        tx.execute("UPDATE staff_invites SET used_at = ? WHERE staff_id = ? AND used_at IS NULL",
+                   (now, staff_id))
+        if reset:
+            tx.execute("UPDATE staff SET pw_hash = '', totp_secret = '', "
+                       "session_epoch = session_epoch + 1 WHERE id = ? AND totp_enrolled = 0",
+                       (staff_id,))
+        tx.execute("INSERT INTO staff_invites(staff_id, token_hash, created_by, created_at, "
+                   "expires_at) VALUES (?,?,?,?,?)",
+                   (staff_id, token_hash, created_by, now, expires_at))
+
+
+def invite_staff(conn: sqlite3.Connection, token_hash: str,
+                 *, now: float | None = None) -> Staff | None:
+    """The person a still-usable link belongs to (unused, unexpired, account
+    on), without using it up. None for unknown, used and expired alike."""
+    now = now if now is not None else time.time()
+    r = conn.execute(
+        "SELECT s.* FROM staff_invites i JOIN staff s ON s.id = i.staff_id "
+        "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? "
+        "AND s.disabled = 0", (token_hash, now)).fetchone()
+    return Staff.from_row(r) if r else None
+
+
+def consume_invite(conn: sqlite3.Connection, token_hash: str, pw_hash: str,
+                   *, now: float | None = None) -> Staff | None:
+    """Atomically use a link once and set the person's own password. Returns
+    None (changing nothing) for an unknown, used, expired or disabled link."""
+    now = now if now is not None else time.time()
+    with db.transaction(conn) as tx:
+        row = tx.execute(
+            "SELECT i.id, i.staff_id FROM staff_invites i JOIN staff s ON s.id = i.staff_id "
+            "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? "
+            "AND s.disabled = 0", (token_hash, now)).fetchone()
+        if row is None:
+            return None
+        cur = tx.execute("UPDATE staff_invites SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                         (now, row["id"]))
+        if cur.rowcount != 1:
+            return None
+        tx.execute("UPDATE staff SET pw_hash = ?, session_epoch = session_epoch + 1 "
+                   "WHERE id = ?", (pw_hash, row["staff_id"]))
+        staff_id = row["staff_id"]
+    return get_staff(conn, staff_id)
+
+
+def count_active_owners(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) AS n FROM staff WHERE role = 'owner' AND disabled = 0"
+                        ).fetchone()["n"]
+
+
 def count_staff(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) AS n FROM staff").fetchone()["n"]
 

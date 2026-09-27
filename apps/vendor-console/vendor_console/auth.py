@@ -84,3 +84,11 @@ def require_support(request: Request) -> Staff:
     if st.role not in SUPPORT_ROLES:
         raise HTTPException(status_code=403, detail="requires a support role")
     return st
+
+
+def require_owner(request: Request) -> Staff:
+    """Only an owner may add team members, change roles or turn access off."""
+    st = require_staff(request)
+    if st.role != "owner":
+        raise HTTPException(status_code=403, detail="requires the owner role")
+    return st

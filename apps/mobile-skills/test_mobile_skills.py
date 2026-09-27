@@ -83,3 +83,24 @@ def test_buildozer_spec_is_pure_python_and_offline():
     assert re.search(r"^requirements = python3,kivy$", spec, re.MULTILINE)
     assert re.search(r"^android\.permissions =\s*$", spec, re.MULTILINE)  # no INTERNET
     assert "buildozer android debug" in spec  # maintainer instructions inline
+
+
+def test_phone_results_are_worded_for_people():
+    # The Kivy screen shows plain_results(); the terminal fallback keeps the
+    # raw numbers for maintainers.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("kivy_main", _HERE / "kivy-shell" / "main.py")
+    main = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main)
+    text = main.plain_results()
+    assert "0% different: they all agree" in text
+    assert "100% different: every answer is different" in text
+    assert "entropy" not in text and "=" not in text and "-0%" not in text
+
+
+def test_browser_results_are_worded_for_people():
+    html = _HTML.read_text()
+    assert "difference=" not in html and "entropy=" not in html.split("<script>", 1)[1]
+    assert "% different: " in html
+    assert "0% means all answers agree. 100% means every answer is different." in html

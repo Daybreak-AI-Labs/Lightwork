@@ -103,3 +103,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
   .pagehead{flex-direction:column;gap:12px}
   .formgrid,.checkgrid{grid-template-columns:minmax(0,1fr)}
 }
+
+/* ---- plain-language additions ---- */
+.skip{position:absolute;left:-9999px;top:0}
+.skip:focus{left:12px;top:12px;background:var(--panel);padding:8px 12px;border-radius:8px;z-index:10}
+.help{font-size:12px;color:var(--dim);margin:4px 0 0}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:16px}
+.confirm-card{max-width:620px}
+.confirm-card h1{font-size:20px}
+.empty{padding:6px 0}
+.empty p{margin:0 0 10px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.filters>div{min-width:180px}
+.btn.on{background:var(--panel2);color:var(--brand2);border-color:var(--brand)}
+.btn[aria-disabled="true"]{opacity:.55;pointer-events:none}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:13px}
+.kv dt{color:var(--dim)}
+.kv dd{margin:0}

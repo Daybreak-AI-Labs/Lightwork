@@ -6,31 +6,36 @@
   <meta name="robots" content="noindex,nofollow">
   <title>{% block title %}Daybreak Console{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/console.js" defer></script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
 {% if staff %}
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">◐ Daybreak<span>Customer administration</span></div>
-    <nav>
-      <a href="/customers" class="{% if section=='customers' %}on{% endif %}">Customers</a>
-      <a href="/releases" class="{% if section=='releases' %}on{% endif %}">Releases</a>
-      <a href="/support" class="{% if section=='support' %}on{% endif %}">Support desk</a>
-      <a href="/fleet" class="{% if section=='fleet' %}on{% endif %}">Fleet health</a>
-      {% if staff.can_write %}<a href="/audit" class="{% if section=='audit' %}on{% endif %}">Audit log</a>{% endif %}
+    <nav aria-label="Console sections">
+      {% set links = [('customers', '/customers', 'Customers'), ('releases', '/releases', 'Releases'),
+                      ('support', '/support', 'Support desk'), ('fleet', '/fleet', 'Installations')] %}
+      {% if staff.can_write %}{% set links = links + [('team', '/team', 'Team'), ('audit', '/audit', 'Activity log')] %}{% endif %}
+      {% for key, href, text in links %}
+      <a href="{{ href }}"{% if section == key %} class="on" aria-current="page"{% endif %}>{{ text }}</a>
+      {% endfor %}
     </nav>
     <div class="who">
       <div class="email">{{ staff.email }}</div>
-      <div class="role">{{ staff.role }}</div>
+      <div class="role">{{ staff.role|role }}</div>
+      <a href="/account/password"{% if section == 'account' %} aria-current="page"{% endif %} style="display:block;font-size:12px;margin-bottom:6px">Change my password</a>
       <form method="post" action="/logout"><button class="link">Sign out</button></form>
     </div>
   </aside>
-  <main class="main">
+  <main class="main" id="main">
+    {% if notice %}<div class="ok" role="status">{{ notice }}</div>{% endif %}
     {% block main %}{% endblock %}
   </main>
 </div>
 {% else %}
-  <div class="auth-wrap">{% block auth %}{% endblock %}</div>
+  <div class="auth-wrap" id="main">{% block auth %}{% endblock %}</div>
 {% endif %}
 </body>
 </html>

@@ -3,14 +3,14 @@
 {% block auth %}
 <div class="auth-card">
   <div class="brand">◐ Daybreak<span>Customer administration</span></div>
-  <p class="sub">Sign in to continue.</p>
+  <p class="sub">Sign in with your work email and password. Next, you'll enter a code from your authenticator app.</p>
   {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/login">
     <label for="console-login-email">Email</label>
     <input id="console-login-email" name="email" type="email" autocomplete="username" required autofocus>
     <label for="console-login-password">Password</label>
     <input id="console-login-password" name="password" type="password" autocomplete="current-password" required>
-    <button class="btn" type="submit">Sign in</button>
+    <button class="btn" type="submit">Continue</button>
   </form>
 </div>
 {% endblock %}

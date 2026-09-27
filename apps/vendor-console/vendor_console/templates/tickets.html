@@ -4,19 +4,18 @@
 <div class="pagehead">
   <div>
     <h1>Support desk</h1>
-    <p class="sub">Tickets from customer support bundles, grouped by customer and correlation id.</p>
+    <p class="sub">Tickets opened when a customer's installation sends a support report. Open a ticket to add notes, change its status or assign it.</p>
   </div>
 </div>
 
 {% if intake_conflicts %}
 <div class="card" role="status">
-  <h2>Legacy duplicate tickets need review</h2>
-  <p>New bundles attach to the newest active ticket for that customer. Historical
-     tickets are preserved. Review these duplicates and close those no longer needed.</p>
+  <h2>Duplicate tickets to review</h2>
+  <p>Some older reports created more than one open ticket for the same problem. New reports go to the newest open ticket. Review these and close the ones you no longer need.</p>
   <ul>
     {% for conflict in intake_conflicts %}
-    <li>{{ 'Customer ' ~ conflict.customer_id if conflict.customer_id is not none else 'Unassigned staff intake' }}:
-      {{ conflict.active_count }} active tickets for {{ conflict.correlation_id }}.
+    <li>{{ customer_names.get(conflict.customer_id, 'A customer') if conflict.customer_id is not none else 'Reports added by staff' }}:
+      {{ conflict.active_count }} open tickets for the same report.
       {% for ticket_id in conflict.ticket_ids %}<a href="/support/{{ ticket_id }}">Ticket {{ ticket_id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
     </li>
     {% endfor %}
@@ -25,30 +24,31 @@
 </div>
 {% endif %}
 
-<div class="card" style="padding:12px 16px">
-  <a class="btn ghost small {% if not status %}on{% endif %}" href="/support">All</a>
-  {% for s in ["open", "in_progress", "waiting", "resolved", "closed"] %}
-  <a class="btn ghost small" href="/support?status={{ s }}">{{ s.replace('_',' ') }}
+<nav class="card filters" aria-label="Filter tickets by status" style="padding:12px 16px">
+  <a class="btn ghost small{% if not status %} on{% endif %}" href="/support"{% if not status %} aria-current="page"{% endif %}>All</a>
+  {% for s in statuses %}
+  <a class="btn ghost small{% if s == status %} on{% endif %}" href="/support?status={{ s }}"{% if s == status %} aria-current="page"{% endif %}>{{ s|ticket_status }}
     <span class="muted">{{ counts.get(s, 0) }}</span></a>
   {% endfor %}
-</div>
+</nav>
 
 <div class="card">
   <table>
-    <tr><th>#</th><th>Subject</th><th>Tier</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Updated</th></tr>
+    <tr><th>Ticket</th><th>Subject</th><th>Plan</th><th>Status</th><th>Priority</th><th>Assigned to</th><th>Updated</th></tr>
     {% for t in tickets %}
     <tr>
       <td class="muted">{{ t.id }}</td>
-      <td><a href="/support/{{ t.id }}"><strong>{{ t.subject or '(no subject)' }}</strong></a>
-        <div class="muted mono" style="font-size:11px">{{ t.correlation_id or '—' }}</div></td>
-      <td><span class="tier tier-{{ t.tier or 'basic' }}">{{ t.tier or '—' }}</span></td>
-      <td><span class="badge b-{% if t.status in ('resolved','closed') %}active{% elif t.status=='waiting' %}grace{% else %}none{% endif %}">{{ t.status.replace('_',' ') }}</span></td>
-      <td>{% if t.priority in ('high','urgent') %}<span class="badge b-expired">{{ t.priority }}</span>{% else %}<span class="muted">{{ t.priority }}</span>{% endif %}</td>
-      <td class="muted">{{ t.assignee or '—' }}</td>
-      <td class="mono muted">{{ t.updated_at|ts }}</td>
+      <td><a href="/support/{{ t.id }}"><strong>{{ t.subject or 'Support report' }}</strong></a>
+        {% if t.customer_id %}<div class="muted" style="font-size:12px">{{ customer_names.get(t.customer_id, '') }}</div>{% endif %}</td>
+      <td>{% if t.tier %}<span class="tier tier-{{ t.tier }}">{{ t.tier|tier }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><span class="badge b-{% if t.status in ('resolved','closed') %}active{% elif t.status=='waiting' %}grace{% else %}none{% endif %}">{{ t.status|ticket_status }}</span></td>
+      <td>{% if t.priority in ('high','urgent') %}<span class="badge b-expired">{{ t.priority|priority }}</span>{% else %}<span class="muted">{{ t.priority|priority }}</span>{% endif %}</td>
+      <td class="muted">{{ t.assignee or 'Nobody yet' }}</td>
+      <td class="muted">{{ t.updated_at|ts }}</td>
     </tr>
     {% endfor %}
-    {% if not tickets %}<tr><td colspan="7" class="muted">No tickets{{ ' with that status' if status }}.</td></tr>{% endif %}
+    {% if not tickets %}<tr><td colspan="7" class="empty"><p>{% if status %}No tickets are {{ status|ticket_status|lower }}.{% else %}No tickets yet. They appear when a customer's installation sends a support report.{% endif %}</p>
+      {% if status %}<a class="btn ghost small" href="/support">Show all tickets</a>{% endif %}</td></tr>{% endif %}
   </table>
 </div>
 {% endblock %}

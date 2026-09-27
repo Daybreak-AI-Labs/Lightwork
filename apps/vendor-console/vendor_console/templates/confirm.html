@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Confirm · Daybreak Console{% endblock %}
+{% block main %}
+<div class="card confirm-card">
+  <h1>{{ title }}</h1>
+  <p>{{ consequence }}</p>
+  <form method="post" action="{{ action }}">
+    {% for name, value in hidden.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    {% if reason %}
+    <label for="confirm-reason">{{ reason.label }} <span class="muted">(optional)</span></label>
+    <input id="confirm-reason" name="{{ reason.name }}" maxlength="500">
+    {% endif %}
+    <div class="actions">
+      <button class="btn{% if danger %} danger{% endif %}" type="submit">{{ button }}</button>
+      <a class="btn ghost" href="{{ cancel }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

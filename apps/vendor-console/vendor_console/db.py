@@ -12,7 +12,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS staff (
@@ -129,6 +129,19 @@ CREATE TABLE IF NOT EXISTS audit (
     prev_hash   TEXT NOT NULL DEFAULT '',
     hash        TEXT NOT NULL
 );
+
+-- Single-use set-up links for new team members (v4). Only a SHA-256 of the
+-- random token is stored; the link itself is shown once to the owner.
+CREATE TABLE IF NOT EXISTS staff_invites (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id    INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    token_hash  TEXT NOT NULL UNIQUE,
+    created_by  TEXT NOT NULL DEFAULT '',
+    created_at  REAL NOT NULL,
+    expires_at  REAL NOT NULL,
+    used_at     REAL                                  -- set on use OR when superseded
+);
+CREATE INDEX IF NOT EXISTS ix_staff_invites_staff ON staff_invites(staff_id, used_at);
 
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,

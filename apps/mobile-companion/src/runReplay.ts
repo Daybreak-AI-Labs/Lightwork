@@ -1,5 +1,8 @@
 import { ApiError, GoalEventsResponse, Settings, getGoalEvents } from "./api";
 
+// Shown to people when the activity feed is not in a shape this app trusts.
+export const UNREADABLE = "The dashboard sent task activity this app could not read. Update the app, or open the task on the dashboard.";
+
 export function createRunReplay(settings: Settings, runId: number) {
   let state: GoalEventsResponse = {events: [], next_id: 0, status: "loading", result: null, has_more: false, terminal: false};
   let generation = 0;
@@ -12,17 +15,17 @@ export function createRunReplay(settings: Settings, runId: number) {
         if (!Array.isArray(data.events) || data.events.length > 200 ||
             !Number.isSafeInteger(data.next_id) || data.next_id < state.next_id ||
             typeof data.has_more !== "boolean" || typeof data.terminal !== "boolean") {
-          throw new ApiError("Unsupported event page; update the dashboard or client.", undefined, "protocol");
+          throw new ApiError(UNREADABLE, undefined, "protocol");
         }
         let cursor = state.next_id;
         for (const event of data.events) {
           if (!Number.isSafeInteger(event.id) || event.id <= cursor || event.id > data.next_id) {
-            throw new ApiError("Invalid event replay cursor.", undefined, "protocol");
+            throw new ApiError(UNREADABLE, undefined, "protocol");
           }
           cursor = event.id;
         }
         if (cursor !== data.next_id || (data.has_more && cursor === state.next_id)) {
-          throw new ApiError("Event replay made no valid progress.", undefined, "protocol");
+          throw new ApiError(UNREADABLE, undefined, "protocol");
         }
         const added = data.events.map(event => ({...event, content: String(event.content || "").slice(0, 16000)}));
         const events = [...state.events, ...added];

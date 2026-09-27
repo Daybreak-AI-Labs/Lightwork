@@ -3,7 +3,7 @@
 Local Swift package shared by the watch and visionOS prototypes. Add this
 package to each Xcode app target and link `LightworkConnectionKit`.
 
-The Connection screen saves the dashboard address and token together in one
+The Settings screen saves the dashboard address and token together in one
 device-only Keychain record. Existing scheme variables and legacy UserDefaults
 are read only until the first successful in-app save; a saved Keychain record
 then takes precedence. A successful save removes the legacy plaintext token.

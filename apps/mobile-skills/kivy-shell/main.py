@@ -47,6 +47,26 @@ def load_skill():
     )
 
 
+def _verdict(score: float) -> str:
+    if score <= 0.0005:
+        return "they all agree"
+    if score >= 0.9995:
+        return "every answer is different"
+    return "they partly disagree"
+
+
+def plain_results() -> str:
+    """The same comparison, worded for people: answers, a percentage, a verdict."""
+    skill = load_skill()
+    lines = []
+    for answers in SAMPLES.values():
+        score = max(0.0, skill.answer_entropy(answers))
+        shown = ", ".join(answer.title() for answer in answers)
+        lines.append(f"{shown}\n{score * 100:.0f}% different: {_verdict(score)}")
+    lines.append("0% means all answers agree. 100% means every answer is different.")
+    return "\n\n".join(lines)
+
+
 def run_skill() -> str:
     skill = load_skill()
     lines = [
@@ -78,26 +98,34 @@ def main() -> None:
                 text="Compare sample answers\nA preview of how Lightwork measures disagreement.",
                 size_hint_y=None, height=80,
             ))
-            output = Label(text="Tap Compare to see the sample results.")
+            output = Label(
+                text="Tap Compare sample answers to see how much three sets of answers differ.",
+                halign="center", valign="middle",
+            )
+            output.bind(size=lambda label, size: setattr(label, "text_size", size))
             diagnostic = ""
 
             def on_run(_button):
                 nonlocal diagnostic
                 try:
-                    output.text = run_skill().replace("entropy=", "difference=").replace("proposers agree", "all answers agree")
+                    output.text = plain_results()
                     details_button.disabled = True
                 except FileNotFoundError as exc:
                     diagnostic = str(exc)
-                    output.text = "The demo is not installed correctly. Ask your administrator to complete setup."
+                    output.text = (
+                        "This demo is not set up on this phone yet. Ask your administrator to finish "
+                        "setting it up. They can tap Setup details for what is missing."
+                    )
                     details_button.disabled = False
 
             run_button = Button(
-                text="Compare", size_hint_y=None, height=56,
+                text="Compare sample answers", size_hint_y=None, height=56,
             )
             run_button.bind(on_press=on_run)
             root.add_widget(run_button)
             root.add_widget(output)
-            details_button = Button(text="Technical details", size_hint_y=None, height=48, disabled=True)
+            # Only enabled after a setup problem; the text is for an administrator.
+            details_button = Button(text="Setup details", size_hint_y=None, height=48, disabled=True)
             details_button.bind(on_press=lambda _button: setattr(output, "text", diagnostic))
             root.add_widget(details_button)
             return root

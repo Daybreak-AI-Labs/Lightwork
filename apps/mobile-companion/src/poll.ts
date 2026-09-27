@@ -5,7 +5,7 @@
  * model. The fetcher's failures are surfaced, not swallowed, so screens can
  * fall back to the offline cache. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAccessDenied } from "./api";
+import { NETWORK_TROUBLE, isAccessDenied } from "./api";
 
 export type Polled<T> = {
   data: T | null;
@@ -49,7 +49,7 @@ export function usePolling<T>(
       activeController = controller;
       pending = true;
       const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => { controller.abort(); reject(new Error("Dashboard refresh timed out.")); }, 20_000);
+        deadline = setTimeout(() => { controller.abort(); reject(new Error("The dashboard took too long to answer. Check your network, then try again.")); }, 20_000);
       });
       Promise.race([timeout, Promise.resolve().then(() => fetcher(controller.signal))]).then(
         (data) => {
@@ -65,7 +65,7 @@ export function usePolling<T>(
           setSnapshot(previous => ({
             fetcher,
             data: !denied && !unsupported && previous.fetcher === fetcher ? previous.data : null,
-            error: e instanceof Error ? e.message : String(e),
+            error: plainError(e),
             accessDenied: denied,
             unsupported,
           }));
@@ -97,6 +97,14 @@ export function usePolling<T>(
     unsupported: matches ? snapshot.unsupported : false,
     refresh,
   };
+}
+
+// Messages from this app's own client are written for people. Anything else
+// (a raw network failure from the platform) gets one plain sentence.
+function plainError(e: unknown): string {
+  if (e instanceof Error && typeof (e as {kind?: unknown}).kind === "string" && e.message) return e.message;
+  if (e instanceof Error && e.message.startsWith("The dashboard took too long")) return e.message;
+  return NETWORK_TROUBLE;
 }
 
 function keepPolling<T>(_data: T): boolean { return true; }
