@@ -10984,6 +10984,7 @@ def walkthroughs_page(request: Request) -> HTMLResponse:
             captions = p.with_suffix(".vtt")
             items.append(
                 {
+                    "title": getattr(g, "title", "") or "",
                     "name": p.name,
                     "size_mb": round(p.stat().st_size / 1_048_576, 2),
                     "mtime": p.stat().st_mtime,
@@ -10993,10 +10994,18 @@ def walkthroughs_page(request: Request) -> HTMLResponse:
             )
     # NB: not named "dir" — the context processor injects the page's text
     # direction under that key (RTL support) and would shadow it.
+    # Recent runs the caller can open, for the "make a video" picker (the
+    # export API still checks access on the chosen run).
+    runs = [
+        {"id": g.id, "title": g.title or "Untitled task", "status": g.status,
+         "has_video": any(it["goal_id"] == g.id for it in items)}
+        for g in _world().list_goals(owner=goal_owner_filter(request), limit=100, order="desc")
+        if g.status not in {"pending", "running"}
+    ]
     return templates.TemplateResponse(
         request,
         "walkthroughs.html",
-        {"items": items, "artifact_dir": str(d)},
+        {"items": items, "runs": runs},
     )
 
 

@@ -39,9 +39,12 @@ def test_page_empty_state_is_honest(client, home):
     r = client.get("/walkthroughs")
     assert r.status_code == 200
     assert "No walkthroughs yet" in r.text
-    # the real export path + where artifacts land
+    # the real export path, but never a server folder path on the page
     assert "/api/v1/goals/" in r.text and "/walkthrough" in r.text
-    assert str(home / "walkthroughs") in r.text
+    assert str(home / "walkthroughs") not in r.text
+    # no finished tasks yet: the next step is a button, not a number field
+    assert 'href="/chat"' in r.text
+    assert 'type="number"' not in r.text
     # no fake thumbnails / placeholder videos
     assert "<video" not in r.text
 
@@ -50,6 +53,7 @@ def test_page_lists_artifacts_with_video_and_captions(client, world, home):
     d = home / "walkthroughs"
     d.mkdir(parents=True)
     world.create_goal("exported", "")  # goal id 1
+    world.set_goal_status(1, "done")
     for _ in range(6):
         world.create_goal("padding", "")
     (d / "goal-7.mp4").write_bytes(b"\x00\x00fake")
@@ -62,6 +66,10 @@ def test_page_lists_artifacts_with_video_and_captions(client, world, home):
     assert '<track kind="captions" src="/walkthroughs/media/goal-7.vtt"' in r.text
     # goal-N names link to the run's tutorial export
     assert "/api/v1/goals/7/tutorial.md" in r.text
+    # finished tasks are picked from a list
+    assert '<select class="select" id="wt-goal-id" required>' in r.text
+    assert '<option value="1" data-has-video="0">exported (done)' in r.text
+    assert "· goal-7.mp4" not in r.text  # titled by task, not by file name
     assert 'src="/walkthroughs/media/freeform.mp4"' not in r.text
 
 
