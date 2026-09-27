@@ -31,14 +31,70 @@ describe('installer terminal state', () => {
     vi.restoreAllMocks();
   });
 
-  it('explains source installation and access requirements before install', async () => {
+  it('explains in plain words what happens and what the person needs before install', async () => {
     render(App);
-    const disclosure = screen.getByText(/downloads and installs Lightwork's source code/);
+    const disclosure = screen.getByText(/installs Lightwork on this computer, then opens it/);
     expect(disclosure.closest('details')).toBeNull();
-    expect(screen.getByText(/authorized access to the private Lightwork repository on GitHub/).closest('details')).toBeNull();
-    expect(screen.getByText(/internet connection/)).toBeTruthy();
+    const access = screen.getByText(/GitHub account that Daybreak AI Labs has given access to Lightwork/);
+    expect(access.closest('details')).toBeNull();
+    expect(screen.getByText(/An internet connection/)).toBeTruthy();
+    expect(screen.getByText(/Permission to install apps/)).toBeTruthy();
+    const page = document.body.textContent ?? '';
+    for (const phrase of ['source code', 'private Lightwork repository', 'Python will be installed', 'Python source code', 'authorized access']) {
+      expect(page).not.toContain(phrase);
+    }
     expect((await screen.findByRole('button', { name: 'Install Lightwork' }) as HTMLButtonElement).disabled).toBe(false);
     expect(tauri.invoke).not.toHaveBeenCalled();
+  });
+
+  it('shows plain progress steps and keeps raw output under details for support', async () => {
+    let logHandler: ((event: { payload: string }) => void) | undefined;
+    tauri.listen.mockImplementation(async (event: string, handler: (event: { payload: string }) => void) => {
+      if (event === 'install-log') logHandler = handler;
+      return tauri.unlisten;
+    });
+    tauri.invoke.mockReturnValue(new Promise<void>(() => {}));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Lightwork' }));
+    const steps = screen.getByRole('list', { name: 'Installation progress' });
+    expect(steps.querySelector('[aria-current="step"]')?.textContent).toBe('Getting this computer ready');
+    logHandler?.({ payload: '==> Downloading a fresh Lightwork source tree (owner/repo@abc) ...' });
+    await waitFor(() => expect(steps.querySelector('[aria-current="step"]')?.textContent).toBe('Downloading Lightwork'));
+    const raw = await screen.findByText(/Downloading a fresh Lightwork source tree/);
+    expect(raw.closest('details')?.open).toBe(false);
+    expect(raw.closest('details')?.querySelector('summary')?.textContent).toBe('Details for support');
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
+  });
+
+  it('turns a missing GitHub sign-in into a plain next step', async () => {
+    let logHandler: ((event: { payload: string }) => void) | undefined;
+    let failInstall!: (reason: unknown) => void;
+    tauri.listen.mockImplementation(async (event: string, handler: (event: { payload: string }) => void) => {
+      if (event === 'install-log') logHandler = handler;
+      return tauri.unlisten;
+    });
+    tauri.invoke.mockReturnValue(new Promise<void>((_resolve, reject) => { failInstall = reject; }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Lightwork' }));
+    logHandler?.({ payload: "fatal: could not read Username for 'https://github.com': terminal prompts disabled" });
+    failInstall({ code: 'failed', message: 'Installer exited with status 1' });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('not signed in to a GitHub account that has access to Lightwork');
+    expect(alert.textContent).not.toContain('fatal');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('copies the support details to the clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    tauri.invoke.mockRejectedValue({ code: 'failed', message: 'synthetic failure detail' });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Lightwork' }));
+    await screen.findByRole('heading', { name: "Lightwork couldn't be installed" });
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('synthetic failure detail')));
+    expect(await screen.findByText('Copied.')).toBeTruthy();
   });
 
   it('shows success when invoke resolves even if no completion event arrives', async () => {
@@ -78,8 +134,9 @@ describe('installer terminal state', () => {
       await screen.findByRole('button', { name: 'Install Lightwork' })
     );
 
-    expect(await screen.findByRole('heading', { name: 'Install failed' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: "Lightwork couldn't be installed" })).toBeTruthy();
     expect(screen.getByText('authorization denied')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Select Try again');
     expect(screen.getByRole('alert').textContent).not.toContain('authorization denied');
     expect(screen.getByText('authorization denied').closest('details')?.open).toBe(false);
     await waitFor(() => {
@@ -115,11 +172,11 @@ describe('installer terminal state', () => {
     render(App);
     await fireEvent.click(await screen.findByRole('button', { name: 'Install Lightwork' }));
     await fireEvent.click(await screen.findByRole('button', { name: 'Open Lightwork' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('Review startup details');
+    expect((await screen.findByRole('alert')).textContent).toContain('select Open Lightwork again');
     expect(screen.getByRole('alert').textContent).not.toContain('synthetic');
     expect((screen.getByRole('button', { name: 'Open Lightwork' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByText('synthetic launch error').closest('details')?.open).toBe(false);
-    await fireEvent.click(screen.getByRole('button', { name: 'Refresh startup details' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Show startup messages' }));
     expect(await screen.findByText('synthetic startup output')).toBeTruthy();
   });
 
@@ -220,7 +277,8 @@ describe('installer terminal state', () => {
     );
     closeHandler?.();
 
-    expect(await screen.findByRole('heading', { name: 'Install failed' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: "Lightwork couldn't be installed" })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Close the installer' })).toBeTruthy();
     expect(
       screen.getByText('installer descendants survived forced teardown')
     ).toBeTruthy();
