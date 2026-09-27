@@ -5091,7 +5091,9 @@ tested without spawning py-spy.
   finding; signed oversight records. Canaries never feed agent graduation.
 - **Discovery Title** (`immune/title.py`): commit-reveal priority, pre-run
   input commitments, human conception gates with a claim-to-conception map,
-  verification and coverage; signed and verified offline.
+  verification and coverage; signed and verified offline. Governed research
+  runs supply gates and input commitments from their hash-chained planning
+  events (`maverick immune title research`).
 - **Production twin** (`immune/twin.py`, `maverick immune twin replay`): opt-in
   recording (`[immune] twin_record`) of each goal's tool results, sealed and
   tenant-scoped; a replay re-runs the goal with the recorded results served in
