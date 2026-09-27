@@ -178,6 +178,45 @@ var FDCore = (function () {
     return errs;
   }
 
+  // The same checks in plain words for people: each problem names the step by
+  // its label (or its kind of step) instead of an internal id or field name.
+  var KIND_WORDS = { agent: 'AI task', action: 'connected action', branch: 'decision', switch: '“choose a path” step',
+    foreach: '“repeat for each item” step', while: '“repeat while” step', parallel: '“run together” step',
+    approval: 'approval', delay: 'wait', wait_event: '“wait for another app” step', scope: '“handle a failure” step',
+    subflow: '“run another flow” step', setvar: '“update data” step' };
+  function plainProblems(f) {
+    var out = [];
+    var nodes = f.nodes || [];
+    if (!nodes.length) return ['Add at least one step.'];
+    var ids = {};
+    nodes.forEach(function (n) { ids[n.id] = true; });
+    function name(n) {
+      if (n.label && String(n.label).trim()) return 'The step “' + String(n.label).trim() + '”';
+      var w = KIND_WORDS[n.kind] || 'step';
+      return (/^[aeiouAEIOU]/.test(w) ? 'An ' : 'A ') + w;
+    }
+    if (!f.start || !ids[f.start]) out.push('Choose which step comes first.');
+    nodes.forEach(function (n) {
+      var broken = ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].some(function (k) { return n[k] != null && !ids[n[k]]; })
+        || (n.cases || []).some(function (c) { return c.to != null && !ids[c.to]; });
+      if (broken) out.push(name(n) + ' points to a step that no longer exists. Choose its next step again.');
+      if (n.kind === 'action' && !n.tool) out.push(name(n) + ' needs an action chosen.');
+      if (n.kind === 'agent' && !n.brief) out.push(name(n) + ' needs instructions for the AI.');
+      if ((n.kind === 'branch' || n.kind === 'while') && !n.condition) out.push(name(n) + ' needs a question to check.');
+      if (n.kind === 'switch' && !n.condition) out.push(name(n) + ' needs the information to choose by.');
+      if (n.kind === 'switch' && !(n.cases && n.cases.length)) out.push(name(n) + ' needs at least one path.');
+      if ((n.kind === 'while' || n.kind === 'scope' || n.kind === 'foreach') && !(n.body && n.body.nodes && n.body.nodes.length))
+        out.push(name(n) + ' needs at least one step inside it.');
+      if (n.kind === 'foreach' && !n.items) out.push(name(n) + ' needs a list to go through.');
+      if (n.kind === 'wait_event' && !n.prompt) out.push(name(n) + ' needs to say what it is waiting for.');
+      if (n.kind === 'parallel' && !(n.branches && n.branches.some(function (b) { return b && b.nodes && b.nodes.length; })))
+        out.push(name(n) + ' needs at least one path with steps.');
+      if (n.kind === 'approval' && !n.prompt) out.push(name(n) + ' needs a question for the approver.');
+      if (n.kind === 'subflow' && !n.flow_ref) out.push(name(n) + ' needs a flow chosen.');
+    });
+    return out;
+  }
+
   // The view {x, y, k} that fits every node into a cw x ch canvas with padding.
   // Zoom is clamped to the designer's wheel range; an empty flow gets the
   // default view.
@@ -209,7 +248,7 @@ var FDCore = (function () {
            serializeFlow: serializeFlow, cloneFlow: cloneFlow,
            commitRawParams: commitRawParams,
            upstreamOutputs: upstreamOutputs, fitView: fitView,
-           validateFlow: validateFlow,
+           validateFlow: validateFlow, plainProblems: plainProblems,
            COND_OPS: COND_OPS, COND_RE: COND_RE };
 })();
 
