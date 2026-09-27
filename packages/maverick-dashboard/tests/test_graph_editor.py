@@ -209,7 +209,6 @@ def test_mutations_blocked_cross_origin(client, world, tree):
 def test_task_map_page_reads_plainly(tmp_path, monkeypatch):
     """The map speaks of tasks and never shows raw status keys or #ids."""
     from fastapi.testclient import TestClient
-
     from maverick import world_model
     from maverick_dashboard.app import app
 
