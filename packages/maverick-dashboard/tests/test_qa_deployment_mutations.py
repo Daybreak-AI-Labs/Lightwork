@@ -103,12 +103,13 @@ def test_tenant_policy_and_notice_publication_are_confirmed_and_retryable():
     data_use = _source("data_use_governance.html")
     privacy = _source("privacy.html")
 
-    assert "if(f.dataset.inFlight==='true')return" in data_use
-    assert "Activate data-use policy “'+policyId+'” version '+version" in data_use
-    assert "New authorization decisions will use this governed version" in data_use
-    assert "delete f.dataset.inFlight" in data_use
-    assert "Could not reach the server — check your connection and try again." in data_use
-    assert "'HTTP '+response.status+'. Try again.'" in data_use
+    # Switching a rule on is a single-flight row button, confirmed with its
+    # plain consequence first; a stale or same-author 409 is explained.
+    assert "CW.busy(b, function () { return activatePolicy(p); })" in data_use
+    assert "New requests will be decided with it straight away." in data_use
+    assert "expected_revision: policy.revision" in data_use
+    assert "error.status === 409" in data_use
+    assert "Request failed: the server returned an invalid JSON response." in data_use
 
     assert "if (noticeBtn.dataset.inFlight === 'true') return;" in privacy
     assert "Publish privacy notice version “' + version + '” for this tenant?" in privacy
