@@ -39,7 +39,11 @@ function source(relative, mocks = {}) {
     if (name.endsWith('/api')) return source('src/api.ts', mocks);
     if (name.endsWith('/runReplay')) return source('src/runReplay.ts', mocks);
     if (name.endsWith('/poll')) return source('src/poll.ts', mocks);
-    if (name === '../components/ConnectionNotice') return source('src/components/ConnectionNotice.tsx', mocks);
+    if (name.endsWith('/format')) return source('src/format.ts', mocks);
+    if (name.endsWith('/theme')) return source('src/theme.ts', mocks);
+    if (name.endsWith('/offlineCache') && Object.hasOwn(mocks, '@react-native-async-storage/async-storage')) return source('src/offlineCache.ts', mocks);
+    if (name.endsWith('/components/ConnectionNotice')) return source('src/components/ConnectionNotice.tsx', mocks);
+    if (name.endsWith('/components/ui')) return source('src/components/ui.tsx', mocks);
     if (name.includes('/screens/')) {
       const screen = name.split('/').at(-1);
       if (screen === 'SettingsScreen') return source('src/screens/SettingsScreen.tsx', mocks);

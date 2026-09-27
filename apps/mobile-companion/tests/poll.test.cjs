@@ -63,7 +63,7 @@ test('latest refresh failure keeps the last good data and rejects older pending 
   await act(async () => { snapshot(app).refresh(); });
   await act(async () => { old.resolve('OLDER'); });
   assert.equal(snapshot(app).data, 'COMMITTED');
-  assert.equal(snapshot(app).error, 'latest failure');
+  assert.match(snapshot(app).error, /Could not reach the dashboard/);
   app.unmount();
 });
 

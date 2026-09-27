@@ -1,27 +1,52 @@
-import React, { useState } from "react";
+/* A plain explanation of why the latest information is missing, with the
+ * next step as a button. Messages come from src/api.ts and are written for
+ * people; no addresses, status codes or code names reach this component. */
+import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-export function ConnectionNotice({ message, accessDenied = false }: { message: string; accessDenied?: boolean }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
+import { theme } from "../theme";
+
+export function ConnectionNotice({ message, accessDenied = false, unsupported = false, onRetry, onOpenSettings }: {
+  message: string;
+  accessDenied?: boolean;
+  unsupported?: boolean;
+  onRetry?: () => void;
+  onOpenSettings?: () => void;
+}): React.JSX.Element {
+  const headline = unsupported ? "Update needed"
+    : accessDenied ? "Access problem"
+      : "Can't get the latest information";
   return (
-    <View style={styles.notice}>
-      <Text style={styles.error} accessibilityRole="alert">
-        {message.startsWith("Unsupported mobile transport:") ? message :
-          accessDenied ? "Access denied. Check your sign-in and permissions. Cached information is hidden." :
-          "Could not load the latest information. Check your connection and dashboard settings."}
-      </Text>
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
-        onPress={() => setExpanded(!expanded)}>
-        <Text style={styles.link}>{expanded ? "Hide connection details" : "Connection details"}</Text>
-      </Pressable>
-      {expanded ? <Text style={styles.detail} selectable>{message}</Text> : null}
+    <View style={styles.notice} accessibilityRole="alert">
+      <Text style={styles.headline}>{headline}</Text>
+      <Text style={styles.body}>{message}</Text>
+      {accessDenied ? <Text style={styles.body}>Saved information is hidden until your access is fixed.</Text> : null}
+      <View style={styles.actions}>
+        {onRetry && !unsupported ? (
+          <Pressable style={styles.primary} accessibilityRole="button" onPress={onRetry}>
+            <Text style={styles.primaryText}>Try again</Text>
+          </Pressable>
+        ) : null}
+        {onOpenSettings ? (
+          <Pressable style={styles.secondary} accessibilityRole="button" onPress={onOpenSettings}>
+            <Text style={styles.secondaryText}>Check settings</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  notice: { padding: 12 },
-  error: { color: "#cf222e", fontSize: 13 },
-  link: { color: "#0969da", paddingVertical: 8, fontSize: 13 },
-  detail: { color: "#57606a", fontSize: 12 },
+  notice: {
+    margin: 12, padding: 12, borderRadius: 8,
+    backgroundColor: theme.dangerBg, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.danger,
+  },
+  headline: { color: theme.danger, fontSize: 15, fontWeight: "700" },
+  body: { color: theme.text, fontSize: 14, marginTop: 4, lineHeight: 20 },
+  actions: { flexDirection: "row", gap: 10, marginTop: 10 },
+  primary: { backgroundColor: theme.accent, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14 },
+  primaryText: { color: "#ffffff", fontSize: 14, fontWeight: "600" },
+  secondary: { borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: theme.border },
+  secondaryText: { color: theme.accent, fontSize: 14, fontWeight: "600" },
 });

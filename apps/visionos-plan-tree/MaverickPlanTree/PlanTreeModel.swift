@@ -53,7 +53,7 @@ final class PlanTreeModel: ObservableObject {
             error = nil
         } catch {
             guard current == generation else { return }
-            self.error = error.localizedDescription
+            self.error = plainMessage(for: error)
         }
     }
 }
@@ -66,5 +66,20 @@ func statusColorName(_ status: String) -> String {
     case "failed", "blocked": return "red"
     case "cancelled": return "gray"
     default: return "yellow"   // pending and anything new
+    }
+}
+
+/// Status -> the plain words people see (never the stored code word).
+func statusLabel(_ status: String) -> String {
+    switch status {
+    case "active", "running": return "In progress"
+    case "pending", "queued": return "Waiting to start"
+    case "blocked": return "Needs attention"
+    case "done", "succeeded", "completed": return "Finished"
+    case "failed", "error": return "Did not finish"
+    case "cancelled", "canceled": return "Stopped"
+    default:
+        let words = status.replacingOccurrences(of: "_", with: " ").lowercased()
+        return words.isEmpty ? "Unknown" : words.prefix(1).uppercased() + words.dropFirst()
     }
 }

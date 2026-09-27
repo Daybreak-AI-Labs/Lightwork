@@ -60,7 +60,9 @@
         // indexURL must match the vendored layout.
         var pyodide = await loadPyodide({ indexURL: "./vendor/pyodide/" });
 
-        var src = await (await fetch(SKILL_MODULE)).text();
+        var response = await fetch(SKILL_MODULE);
+        if (!response.ok) throw new Error("skill module not found at " + SKILL_MODULE);
+        var src = await response.text();
         pyodide.FS.writeFile("disagreement.py", src);
 
         btn.textContent = "Compare sample answers";
@@ -70,17 +72,20 @@
           try {
           var result = await pyodide.runPythonAsync(
             "import disagreement\n" +
-            "cases = {\n" +
-            "    'all identical': ['paris', 'paris', 'paris'],\n" +
-            "    'one dissenter': ['paris', 'paris', 'lyon'],\n" +
-            "    'all unique':    ['paris', 'lyon', 'nice'],\n" +
-            "}\n" +
-            "'\\n'.join(f'{k:>14}: difference={disagreement.answer_entropy(v):.3f}'\n" +
-            "          for k, v in cases.items())"
+            "cases = [\n" +
+            "    ['paris', 'paris', 'paris'],\n" +
+            "    ['paris', 'paris', 'lyon'],\n" +
+            "    ['paris', 'lyon', 'nice'],\n" +
+            "]\n" +
+            "def verdict(s):\n" +
+            "    return 'they all agree' if s <= 0.0005 else 'every answer is different' if s >= 0.9995 else 'they partly disagree'\n" +
+            "'\\n\\n'.join(', '.join(a.title() for a in v) + '\\n' +\n" +
+            "    f'{max(0.0, disagreement.answer_entropy(v)) * 100:.0f}% different: ' + verdict(disagreement.answer_entropy(v))\n" +
+            "    for v in cases)"
           );
           out.textContent =
             result +
-            "\n\n0 means all answers agree. 1 means every answer is different.";
+            "\n\n0% means all answers agree. 100% means every answer is different.";
           } catch (e) {
             out.textContent = "The comparison could not finish. Try again or ask your administrator for help.";
             diagnostics.textContent = "Comparison details: " + e;

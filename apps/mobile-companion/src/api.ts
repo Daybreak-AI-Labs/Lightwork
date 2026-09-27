@@ -17,7 +17,7 @@
 
 import { connectionValidationError } from "./connectionValidation";
 
-export type Settings = { baseUrl: string; token: string; cacheScope?: string };
+export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean };
 
 export type Goal = {
   id: number;
@@ -89,6 +89,21 @@ export function isTokenTransportSafe(baseUrl: string): boolean {
   return connectionValidationError(baseUrl) === null;
 }
 
+// Every message below is shown to people as-is, so it stays plain: no
+// addresses, status codes or code names. The status and kind stay on the
+// error for program logic.
+export const UNSUPPORTED_BUILD = "This version of the app cannot connect safely. Install the latest version of the app, then try again.";
+export const NETWORK_TROUBLE = "Could not reach the dashboard. Check that you are on your organization's network or VPN, then try again.";
+
+export function statusMessage(status: number): string {
+  if (status === 401) return "The dashboard did not accept your access token. Check it in Settings or ask your administrator for a new one.";
+  if (status === 403) return "Your access token does not allow viewing this information. Ask your administrator to check your access.";
+  if (status === 404) return "This dashboard does not offer this information yet. Ask your administrator to update the dashboard.";
+  if (status === 429) return "The dashboard is busy. Wait a minute, then try again.";
+  if (status >= 500) return "The dashboard had a problem answering. Try again in a few minutes.";
+  return "The dashboard could not answer this request. Try again, or check your settings.";
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status?: number, public kind = "transient") { super(message); }
 }
@@ -100,11 +115,11 @@ export function isAccessDenied(error: unknown): boolean {
 
 async function boundedResponseText(res: Response, signal: AbortSignal): Promise<string> {
   const limit = 4 * 1024 * 1024;
-  const oversized = () => new ApiError("Dashboard response exceeds the client limit.", undefined, "protocol");
+  const oversized = () => new ApiError("The dashboard sent more information than this app can show. Open the dashboard on a computer instead.", undefined, "protocol");
   const declared = Number(res.headers?.get("content-length"));
   if (Number.isFinite(declared) && declared > limit) throw oversized();
   if (!res.body?.getReader) {
-    throw new ApiError("Unsupported mobile transport: this build needs a streaming response reader. Update the app build before connecting.", undefined, "unsupported");
+    throw new ApiError(UNSUPPORTED_BUILD, undefined, "unsupported");
   }
   const reader = res.body.getReader();
   const cancel = () => { void reader.cancel().catch(() => {}); };
@@ -130,13 +145,13 @@ async function boundedResponseText(res: Response, signal: AbortSignal): Promise<
 
 async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Promise<T> {
   const error = connectionValidationError(cfg.baseUrl, cfg.token);
-  if (error) throw new Error(error);
+  if (error) throw new ApiError(error, undefined, "settings");
   // Fail before the native bridge fetches/buffers a body when its Fetch API
   // cannot enforce a streaming byte limit. This scaffold must use a supported
   // streaming transport in its eventual packaged native build.
   if (typeof ReadableStream !== "function" || typeof TextDecoder !== "function" ||
       typeof Response !== "function" || !("body" in Response.prototype)) {
-    throw new ApiError("Unsupported mobile transport: this build needs a streaming response reader. Update the app build before connecting.", undefined, "unsupported");
+    throw new ApiError(UNSUPPORTED_BUILD, undefined, "unsupported");
   }
   const base = cfg.baseUrl.trim().replace(/\/+$/, "");
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -150,16 +165,20 @@ async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Pro
   if (signal?.aborted) abort();
   signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => {
-    controller.abort(); rejectAbort(new ApiError("Dashboard request timed out."));
+    controller.abort(); rejectAbort(new ApiError("The dashboard took too long to answer. Check your network, then try again."));
   }, 15_000);
   try {
     return await Promise.race([cancelled, (async () => {
       if (signal?.aborted) throw new ApiError("Request cancelled.", undefined, "cancelled");
       const res = await fetch(`${base}${path}`, { method: "GET", headers, signal: controller.signal, redirect: "error" });
-      if (!res.ok) throw new ApiError(`GET ${path} -> HTTP ${res.status}`, res.status,
+      if (!res.ok) throw new ApiError(statusMessage(res.status), res.status,
         res.status === 401 || res.status === 403 ? "access" : "transient");
       const raw = await boundedResponseText(res, controller.signal);
-      return JSON.parse(raw) as T;
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        throw new ApiError("The dashboard sent a reply this app could not read. Ask your administrator to check the dashboard address.", undefined, "protocol");
+      }
     })()]);
   } finally {
     clearTimeout(timer);

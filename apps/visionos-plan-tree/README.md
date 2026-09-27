@@ -22,7 +22,7 @@ macOS with the visionOS SDK; an Apple Vision Pro or the visionOS
 simulator. Create a visionOS App target named `MaverickPlanTree`, choose
 the *Volume* window style, and add the two Swift files and the local
 `apps/apple-companion-core` package, linking `LightworkConnectionKit`.
-Use **Connection** in the app to save the dashboard address and token in one
+Use **Settings** in the app to save the dashboard address and token in one
 device-only Keychain record. Remote dashboards require HTTPS; redirects are
 rejected. Legacy scheme settings are read until the first successful save.
 CI compiles/tests the shared connection package on macOS with isolated storage;

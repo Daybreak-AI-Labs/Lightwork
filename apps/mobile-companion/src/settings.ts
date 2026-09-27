@@ -58,8 +58,12 @@ export function loadSettings(): Promise<Settings> {
     }
     // Legacy installs are read without a migration write. The next successful
     // save creates the atomic record; failure leaves the old pair untouched.
-    const baseUrl = (await SecureStore.getItemAsync(BASE_URL_KEY)) ?? DEFAULT_BASE_URL;
-    const token = (await SecureStore.getItemAsync(TOKEN_KEY)) ?? "";
+    const savedUrl = await SecureStore.getItemAsync(BASE_URL_KEY);
+    const savedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+    const baseUrl = savedUrl ?? DEFAULT_BASE_URL;
+    const token = savedToken ?? "";
+    // Nothing saved at all: the app shows its first-run connection setup.
+    if (savedUrl === null && savedToken === null) return { baseUrl, token, needsSetup: true };
     return { baseUrl, token };
   });
 }

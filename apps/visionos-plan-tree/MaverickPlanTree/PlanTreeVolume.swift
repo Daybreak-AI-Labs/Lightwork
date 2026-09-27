@@ -57,17 +57,18 @@ struct PlanTreeVolume: View {
         .overlay(alignment: .top) {
             VStack {
                 HStack {
-                    Button("Connection") { settingsShown.toggle() }
-                    Button("Refresh") { Task { await model.refresh() } }
+                    Button("Settings") { settingsShown.toggle() }
+                    Button(model.error == nil ? "Refresh" : "Try again") { Task { await model.refresh() } }
                 }
                 .padding(12).glassBackgroundEffect()
                 if settingsShown {
-                    ConnectionSettingsView(store: model.connectionStore, onClose: { settingsShown = false }) {
+                    ConnectionSettingsView(store: model.connectionStore, testPath: "api/v1/goal-tree",
+                                           onClose: { settingsShown = false }) {
                         selected = nil
                         model.connectionChanged()
                         Task { await model.refresh() }
                     }
-                    .frame(width: 420, height: 440)
+                    .frame(width: 420, height: 520)
                     .glassBackgroundEffect()
                 }
             }
@@ -75,18 +76,31 @@ struct PlanTreeVolume: View {
         .overlay(alignment: .bottom) {
             if let node = selected {
                 VStack(spacing: 4) {
-                    Text(node.title).font(.headline).lineLimit(2)
-                    Text("#\(node.id) · \(node.status)").font(.caption)
+                    Text(node.title.isEmpty ? "Untitled task" : node.title).font(.headline).lineLimit(2)
+                    Text(statusLabel(node.status)).font(.caption)
                 }
                 .padding(12)
                 .glassBackgroundEffect()
                 .padding(.bottom, 24)
             } else if let err = model.error {
-                VStack {
-                    Text("Could not load your plan. Check your dashboard connection and try again.")
-                    DisclosureGroup("Connection details") { Text(err) }
+                VStack(spacing: 6) {
+                    Text("Could not load your plan").font(.headline)
+                    Text(err)
+                    Button("Try again") { Task { await model.refresh() } }
                 }
                 .font(.caption).padding(12).glassBackgroundEffect()
+            } else if let forest = model.forest, forest.nodes.isEmpty {
+                VStack(spacing: 6) {
+                    Text("No tasks to show yet").font(.headline)
+                    Text("Start a task from the Lightwork dashboard, then tap Refresh.")
+                }
+                .font(.caption).padding(12).glassBackgroundEffect()
+            } else if model.forest == nil {
+                ProgressView("Loading your plan…")
+                    .padding(12).glassBackgroundEffect()
+            } else {
+                Text("Look at a sphere and pinch to see the task's name and status.")
+                    .font(.caption).padding(12).glassBackgroundEffect()
             }
         }
         .task { await model.refresh() }
