@@ -129,6 +129,62 @@ def _has_automation() -> bool:
         return False
 
 
+# What each installation check means, and the page that fixes it. The raw
+# check detail and the terminal remediation stay available to administrators
+# under "Technical details"; people see these words and a button.
+_CHECK_WORDS: dict[str, tuple[str, str, str]] = {
+    "config": ("Lightwork's settings", "Settings", "/settings#settings-maintenance"),
+    "provider": ("AI service", "Add an AI provider key", "/settings#settings-integrations"),
+    "model_routes": ("Models", "Choose models", "/settings#settings-models"),
+    "provider_dependencies": ("Software the AI service needs", "Run the health check", "/settings#settings-maintenance"),
+    "storage": ("Saved data", "Run the health check", "/settings#settings-maintenance"),
+    "dashboard": ("This dashboard", "Run the health check", "/settings#settings-maintenance"),
+    "tenant_scope": ("Workspace", "Choose a workspace", "/workspace/tenant"),
+}
+_STATUS_WORDS = {"ready": "Ready", "blocked": "Needs fixing", "attention": "Could be improved"}
+
+
+def _plain_check(check: dict[str, Any], switchable: frozenset[str]) -> dict[str, Any]:
+    check_id = str(check.get("id") or "")
+    status = str(check.get("status") or "attention")
+    title, fix_label, fix_href = _CHECK_WORDS.get(check_id, (str(check.get("label") or "Setup"), "", ""))
+    module = ""
+    if check_id.startswith("gateway_"):
+        title = str(check.get("label") or "Assurance setup").replace("Gateway", "Evidence gateway")
+        fix_label, fix_href = "Open assurance setup", "/security/assurance"
+    elif not check_id:
+        fix_label, fix_href = "Run the health check", "/settings#settings-maintenance"
+    elif not fix_label:
+        module = check_id if check_id in switchable else ""
+        fix_label, fix_href = ("", "") if module else ("Open assurance setup", "/security/assurance")
+    if status == "ready":
+        summary = "Ready."
+    elif check_id == "config":
+        summary = "Lightwork's settings need to be saved or repaired."
+    elif module or check_id not in _CHECK_WORDS:
+        summary = "Turned off, or waiting on something else to be set up first."
+    else:
+        summary = "Waiting on setup. Use the button to fix it."
+    return {**check, "title": title, "state_label": _STATUS_WORDS.get(status, "Could be improved"),
+            "summary": summary, "fix_label": "" if status == "ready" else fix_label,
+            "fix_href": "" if status == "ready" else fix_href,
+            "module": "" if status == "ready" else module}
+
+
+def _with_plain_checks(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from . import api as _api
+        switchable = frozenset(_api._MODULE_SWITCHES)
+    except Exception:  # pragma: no cover -- fall back to links only
+        switchable = frozenset()
+    checks = [_plain_check(check, switchable) for check in payload.get("checks") or []]
+    payload["checks"] = checks
+    first = next((c for c in checks if c.get("status") == "blocked"), None) or next(
+        (c for c in checks if c.get("status") == "attention"), None)
+    payload["next_fix"] = first
+    return payload
+
+
 def _preflight_state(profile: str) -> dict[str, Any]:
     from maverick.operator_preflight import collect
 
@@ -138,23 +194,23 @@ def _preflight_state(profile: str) -> dict[str, Any]:
             raise TypeError("preflight report contract is invalid")
     except Exception as exc:
         label = "Runtime" if profile == "run" else "Assurance"
-        return {
+        return _with_plain_checks({
             "ready": False,
             "status": "failed",
             "checks": [
                 {
                     "status": "blocked",
-                    "label": f"{label} preflight",
+                    "label": f"{label} checks",
                     "detail": "Readiness evidence could not be evaluated safely.",
                     "remediation": "maverick preflight --json",
                 }
             ],
             "next_action": "maverick preflight --json",
             "error_type": type(exc).__name__,
-        }
+        })
     payload["ready"] = payload.get("ready") is True
     payload["status"] = "ready" if payload["ready"] else "incomplete"
-    return payload
+    return _with_plain_checks(payload)
 
 
 def build(

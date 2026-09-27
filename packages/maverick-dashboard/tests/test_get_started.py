@@ -51,10 +51,12 @@ def test_fresh_workspace_nothing_done(monkeypatch, tmp_path):
     assert "Connect your AI service" in t and "Choose a workflow or agent" in t
     assert "0 of 4 done" in t and 'role="progressbar"' in t
     assert "Installation checks" in t
-    assert "maverick preflight --json" in t
-    assert "SYNTHETIC DEMO DATA" in t
-    assert "Every generated record stays labeled synthetic" in t
-    assert "production assurance" in t
+    # Fixes are buttons to the page that fixes them, never terminal commands
+    # (those stay inside the collapsed technical details for administrators).
+    assert "Fix next:" in t and 'href="/settings#settings-maintenance"' in t
+    # The demo is still clearly labelled as sample data that never counts as evidence.
+    assert "Sample data" in t
+    assert "marked as sample data and never counts as real evidence" in t
 
 
 def test_checklist_reflects_progress(monkeypatch, tmp_path):
