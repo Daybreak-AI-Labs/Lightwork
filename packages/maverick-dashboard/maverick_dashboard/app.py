@@ -7390,11 +7390,18 @@ def fleets_page(request: Request) -> HTMLResponse:
         fleets = [f for f in fleets if f.owner == owner]
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
+    try:  # role picker for new agents (same roles the access page offers)
+        from . import rbac as _rbac
+
+        role_options = list(_rbac.known_roles())
+    except Exception:  # pragma: no cover - the picker falls back to typing
+        role_options = []
     return templates.TemplateResponse(
         request,
         "fleets.html",
         {
             "fleets": fleets,
+            "role_options": role_options,
             "runs_by_fleet": runs_by_fleet,
             "holds": _recent_governance_holds(),
             "pending_count": len(_world().pending_approvals()),

@@ -84,7 +84,7 @@
     <div class="panel">
       {% if facts %}
         {% for k, v in facts.items() %}
-          <p><strong>{{ k }}</strong> <span class="muted">— {{ v }}</span></p>
+          <p><strong>{{ k|humanize }}</strong> <span class="muted">— {{ v }}</span></p>
         {% endfor %}
       {% else %}
         <p class="muted">Nothing recorded yet. Lightwork remembers useful business details as it works. Review them on the <a href="/facts">Facts</a> page.</p>

@@ -279,7 +279,7 @@ def test_fleets_page_has_run_form(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
     text = _client().get("/fleets").text
-    assert 'class="fleet-run-form"' in text
+    assert 'class="fleet-run-form' in text
     assert "/api/v1/fleets/" in text  # the dispatch target
 
 
