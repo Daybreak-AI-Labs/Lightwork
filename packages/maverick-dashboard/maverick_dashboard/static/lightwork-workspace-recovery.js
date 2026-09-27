@@ -63,7 +63,7 @@
       && reconciliation.unresolved === 0 && reconciliation.global_start_blocked !== true;
     get("reconciliation-confirm").disabled = !canComplete;
     get("reconciliation-complete").disabled = !canComplete || !get("reconciliation-confirm").checked;
-    get("reconciliation").querySelectorAll('input[type="text"], textarea').forEach(function (input) { input.disabled = !ready; });
+    get("reconciliation").querySelectorAll('input:not([type="checkbox"]), textarea, select').forEach(function (input) { input.disabled = !ready; });
   }
   function clearReview() { review = null; get("review").hidden = true; get("review-text").textContent = ""; get("confirm").checked = false; }
   function clearConfirmations() {
@@ -128,7 +128,7 @@
     if (!response.ok) {
       clearConfirmations(); clearEvidence();
       var error = await response.json().catch(function () { return {}; });
-      throw new Error(typeof error.detail === "string" ? error.detail : "Recovery could not complete this step.");
+      throw new Error(plainDetail(error.detail, response));
     }
     if (asFile) {
       var blob = await response.blob();
@@ -140,6 +140,14 @@
     }
     return response.json();
   }
+  // The recovery service explains refusals in sentences written for people;
+  // anything else (codes, internal names) becomes a plain fallback.
+  function plainDetail(detail, response) {
+    if (typeof detail === "string" && detail.length <= 400 && /^[A-Z]/.test(detail)
+      && !/[_{}<>\[\]]|HTTP|Traceback|Error:/.test(detail)) return detail;
+    if (window.mvErrorText) return window.mvErrorText(response, "complete this recovery step");
+    return "Recovery could not complete this step.";
+  }
   function list(id, items) {
     get(id).replaceChildren();
     items.forEach(function (text) { var item = document.createElement("li"); item.textContent = text; get(id).appendChild(item); });
@@ -150,21 +158,21 @@
     var retained = bootstrap.retained_keys && typeof bootstrap.retained_keys === "object" ? bootstrap.retained_keys.state : "not_installed";
     var messages = {
       prepared: retained === "installed" ? "This empty installation is prepared and the exact tested encryption keys are installed. Select the snapshot and prepare restore."
-        : retained === "installing" ? "Key installation was interrupted. Choose the exact tested key ZIP again to finish safely."
+        : retained === "installing" ? "Key installation was interrupted. Choose the exact tested key file again to finish safely."
           : "This empty installation is prepared. Test and install its separately retained encryption keys before restoring encrypted records.",
-      restore_pending: "A bootstrap restore was interrupted. Recover it here before attempting another restore.",
+      restore_pending: "A restore onto this new installation was interrupted. Recover it here before attempting another restore.",
       reconciliation_required: "Restored files are held while you review queued and possibly external work below.",
       completed: "The most recent new-install recovery and restored-work review completed.",
-      unavailable: bootstrap.detail || "Bootstrap recovery state is unavailable. Remain in recovery mode.",
+      unavailable: bootstrap.detail || "New-installation recovery status is unavailable. Remain in recovery mode.",
     };
-    get("bootstrap-status").textContent = messages[bootstrap.state] || "Bootstrap recovery remains in a protected state. Refresh before continuing.";
+    get("bootstrap-status").textContent = messages[bootstrap.state] || "New-installation recovery is still protected. Refresh before continuing.";
   }
   function verifyReconciliation(row) {
     var validStates = ["not_required", "prepared", "restore_pending", "reconciliation_required", "completed"];
     if (!row || typeof row !== "object" || validStates.indexOf(row.state) === -1 || !Array.isArray(row.items)
-      || !count(row.unresolved) || row.items.length > 10000) throw new Error("The restored-work inventory is malformed. Remain in recovery mode.");
+      || !count(row.unresolved) || row.items.length > 10000) throw new Error("The list of restored work could not be read. Stay in recovery mode and refresh.");
     if (row.state !== "reconciliation_required") {
-      if (row.items.length || row.unresolved) throw new Error("The restored-work inventory state is inconsistent. Remain in recovery mode.");
+      if (row.items.length || row.unresolved) throw new Error("The list of restored work doesn't add up. Stay in recovery mode and refresh.");
       return;
     }
     var ids = new Set(), unresolved = 0;
@@ -176,30 +184,129 @@
         && typeof item.prior_state === "string" && item.prior_state.length <= 256
         && typeof item.safe_state === "string" && item.safe_state.length <= 256
         && typeof item.requires_external_readback === "boolean" && ["unresolved", "resolved"].indexOf(item.state) !== -1;
-      if (!okay) throw new Error("The restored-work inventory is malformed. Remain in recovery mode.");
+      if (!okay) throw new Error("The list of restored work could not be read. Stay in recovery mode and refresh.");
       ids.add(item.id); if (item.state === "unresolved") unresolved++;
     });
     if (unresolved !== row.unresolved) throw new Error("The restored-work count changed. Reload recovery.");
     var protectedState = row.protected_authority;
     if (!protectedState || protectedState.classification_complete !== true || !count(protectedState.file_count)
       || protectedState.file_count !== protectedState.classified_count || !digest(protectedState.state_sha256)) {
-      throw new Error("The protected-authority inventory is incomplete. Remain in recovery mode.");
+      throw new Error("Not every protected record could be checked. Stay in recovery mode.");
     }
   }
   function reconciliationActionButton(label, item, disposition, evidenceInput) {
-    var button = document.createElement("button"); button.type = "button"; button.textContent = label;
+    var button = document.createElement("button"); button.type = "button"; button.textContent = label; button.className = "btn";
     button.addEventListener("click", function () { return action(async function () {
       var selected = get("snapshot").value;
       var reference = evidenceInput ? evidenceInput.value.trim() : null;
-      if (evidenceInput && reference.length < 8) throw new Error("Enter a short reference to the authoritative external readback.");
+      if (evidenceInput && reference.length < 8) throw new Error("Enter where the proof is, such as a ticket or record reference (at least 8 characters).");
       await request("reconciliation/items/" + encodeURIComponent(item.id), {
         confirm: true, disposition: disposition, evidence_reference: reference,
       });
       get("reconciliation-confirm").checked = false;
       await load(selected);
-      say("Restored-work disposition recorded. Review the remaining items before returning to normal use.");
+      say("Your decision was recorded. Review the remaining items before going back to normal.");
     }); });
     return button;
+  }
+  // Guided form for a held chat-app message or reading position: the person
+  // checks the service itself and records what they saw. The exact readback
+  // the server verifies is built from the template it sent; nothing replays.
+  function field(labelText, control) {
+    var label = document.createElement("label"); label.textContent = labelText + " "; label.append(control); return label;
+  }
+  function outcomeSelect(labelText, yes, no) {
+    var select = document.createElement("select"); select.className = "select";
+    [["", "Choose what you found"], ["recorded", yes], ["absent", no]].forEach(function (pair) {
+      var option = document.createElement("option"); option.value = pair[0]; option.textContent = pair[1]; select.append(option);
+    });
+    select.setAttribute("aria-label", labelText);
+    return { select: select, label: field(labelText, select) };
+  }
+  function localNow() {
+    var now = new Date(); now.setSeconds(0, 0);
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  }
+  function channelReadbackForm(item) {
+    var template = item.readback_template || {}, box = document.createElement("div"), getters = [];
+    box.className = "wrec-readback";
+    var intro = document.createElement("p");
+    intro.textContent = "Check this in the chat service itself, then record what you found. Nothing is sent again.";
+    box.append(intro);
+    var when = document.createElement("input"); when.type = "datetime-local"; when.className = "input"; when.value = localNow();
+    box.append(field("When did you check? (within the last 15 minutes)", when));
+    var proof = document.createElement("input"); proof.type = "text"; proof.className = "input"; proof.maxLength = 512; proof.autocomplete = "off";
+    proof.placeholder = "Ticket, screenshot name, log or record reference";
+    box.append(field("Where is the proof?", proof));
+    if (template.namespace === "channel-deliveries") {
+      var run = outcomeSelect("Did Lightwork's request reach the service?", "Yes, it arrived", "No, it never arrived");
+      var sent = outcomeSelect("Was the message delivered?", "Yes, it was delivered", "No, it was not delivered");
+      box.append(run.label, sent.label);
+      getters.push(function (out) {
+        if (!run.select.value || !sent.select.value) throw new Error("Choose what you found for the request and the delivery.");
+        out.execution = run.select.value; out.delivery = sent.select.value;
+      });
+      var chunkInputs = Object.keys(template.chunks || {}).map(function (key, index) {
+        var part = outcomeSelect("Message part " + (index + 1) + ": was it delivered?", "Yes, it was delivered", "No, it was not delivered");
+        var ref = document.createElement("input"); ref.type = "text"; ref.className = "input"; ref.maxLength = 512; ref.autocomplete = "off";
+        box.append(part.label, field("Message part " + (index + 1) + ": reference shown by the service (if delivered)", ref));
+        return { key: key, select: part.select, ref: ref };
+      });
+      getters.push(function (out) {
+        out.chunks = {};
+        chunkInputs.forEach(function (row, index) {
+          if (!row.select.value) throw new Error("Choose what you found for message part " + (index + 1) + ".");
+          out.chunks[row.key] = { outcome: row.select.value, provider_id: row.ref.value.trim() };
+        });
+      });
+    } else {
+      var checkpoint = template.checkpoint || {};
+      if ("cursor" in checkpoint) {
+        var note = document.createElement("p");
+        note.textContent = "Nothing else to fill in: reading restarts safely from the service's own list of unread messages.";
+        box.append(note);
+        getters.push(function (out) { out.checkpoint = { cursor: "" }; });
+      } else if ("last_rowid" in checkpoint) {
+        var last = document.createElement("input"); last.type = "number"; last.className = "input"; last.min = "0"; last.step = "1";
+        box.append(field("Number of the last message already handled", last));
+        getters.push(function (out) {
+          var value = Number(last.value);
+          if (last.value === "" || !Number.isSafeInteger(value) || value < 0) throw new Error("Enter the number of the last message already handled.");
+          out.checkpoint = { last_rowid: value };
+        });
+      } else if ("watermark" in checkpoint) {
+        var newest = document.createElement("input"); newest.type = "text"; newest.inputMode = "numeric"; newest.className = "input"; newest.maxLength = 40;
+        box.append(field("Number of the newest post already handled", newest));
+        getters.push(function (out) {
+          if (!/^[0-9]{1,40}$/.test(newest.value.trim())) throw new Error("Enter the newest post number using digits only.");
+          out.checkpoint = { watermark: newest.value.trim() };
+        });
+      } else {
+        var after = document.createElement("input"); after.type = "datetime-local"; after.className = "input";
+        box.append(field("Only pick up messages sent after", after));
+        getters.push(function (out) {
+          var at = new Date(after.value);
+          if (!after.value || !Number.isFinite(at.getTime())) throw new Error("Choose the time to pick up messages from.");
+          out.checkpoint = { floor: at.toISOString() };
+        });
+      }
+    }
+    var confirm = document.createElement("button"); confirm.type = "button"; confirm.className = "btn btn--primary";
+    confirm.textContent = "Confirm what I found and retire the old work";
+    confirm.addEventListener("click", function () { return action(async function () {
+      var observed = new Date(when.value).getTime() / 1000;
+      if (!when.value || !Number.isFinite(observed)) throw new Error("Choose when you checked the service.");
+      if (proof.value.trim().length < 8) throw new Error("Enter where the proof is (at least 8 characters).");
+      var readback = Object.assign({}, template, { observed_at: observed, evidence_reference: proof.value.trim(), outcome: "confirmed" });
+      getters.forEach(function (apply) { apply(readback); });
+      await request("reconciliation/items/" + encodeURIComponent(item.id), {
+        confirm: true, disposition: "channel_readback_confirmed", channel_readback: readback,
+      });
+      await load(get("snapshot").value);
+      say("What you found was recorded. The old messages will not be sent again automatically.");
+    }); });
+    box.append(confirm);
+    return box;
   }
   function renderReconciliation(row) {
     verifyReconciliation(row); reconciliation = row;
@@ -210,39 +317,27 @@
     var globalBlocked = false;
     row.items.forEach(function (item) {
       var entry = document.createElement("li"), title = document.createElement("strong"), detail = document.createElement("p");
-      title.textContent = item.category.replaceAll("_", " ") + " · " + (item.record_id || "record");
-      detail.textContent = "Restored state: " + item.prior_state + ". Safe local state: " + item.safe_state + ". Source: " + item.source + ".";
-      entry.append(title, detail);
+      var human = function (value) { return window.mvHuman ? window.mvHuman(value) : String(value || "").replaceAll("_", " "); };
+      title.textContent = human(item.category);
+      detail.textContent = "When the copy was made it was " + human(item.prior_state).toLowerCase() + "; it is now held as " + human(item.safe_state).toLowerCase() + ".";
+      var where = document.createElement("details"), whereSummary = document.createElement("summary"), whereText = document.createElement("p");
+      whereSummary.textContent = "Technical details"; whereText.textContent = "Record: " + (item.record_id || "none") + ". Source: " + item.source + ".";
+      where.append(whereSummary, whereText);
+      entry.append(title, detail, where);
       if (item.state === "resolved") {
-        var resolved = document.createElement("p"); resolved.textContent = "Resolved: " + (item.disposition || "recorded safe disposition") + "."; entry.append(resolved);
+        var resolved = document.createElement("p"); resolved.textContent = "Resolved: " + (window.mvHuman ? window.mvHuman(item.disposition || "recorded") : (item.disposition || "recorded")) + "."; entry.append(resolved);
       } else if (item.safe_state === "global_start_blocked") {
         globalBlocked = true;
-        var blocked = document.createElement("p"); blocked.textContent = "This authority cannot be safely changed by this build. Normal startup remains blocked."; entry.append(blocked);
+        var blocked = document.createElement("p"); blocked.textContent = "This version of Lightwork can't safely sort out this item. Normal use stays blocked."; entry.append(blocked);
       } else if (item.category === "channel_authority") {
-        var instructions = document.createElement("p"), readback = document.createElement("textarea");
-        instructions.textContent = "Administrator attestation from authoritative readback: replace unknown outcomes with absent or recorded, set outcome to confirmed, and supply the observation time and evidence reference. This action never replays the old request.";
-        readback.rows = 14; readback.maxLength = 262144;
-        readback.setAttribute("aria-label", "Exact channel readback for " + item.record_id);
-        readback.value = JSON.stringify(item.readback_template, null, 2);
-        var confirmReadback = document.createElement("button"); confirmReadback.type = "button";
-        confirmReadback.textContent = "Confirm exact channel readback and retire old work";
-        confirmReadback.addEventListener("click", function () { return action(async function () {
-          var value;
-          try { value = JSON.parse(readback.value); }
-          catch (_error) { throw new Error("Enter a valid channel readback JSON object."); }
-          await request("reconciliation/items/" + encodeURIComponent(item.id), {
-            confirm: true, disposition: "channel_readback_confirmed", channel_readback: value,
-          });
-          await load(get("snapshot").value);
-          say("Exact channel readback recorded. Old receipts remain retired from automatic replay.");
-        }); });
-        entry.append(instructions, readback, confirmReadback);
+        entry.append(channelReadbackForm(item));
       } else if (item.requires_external_readback) {
         var label = document.createElement("label"), evidence = document.createElement("input");
         evidence.type = "text"; evidence.maxLength = 512; evidence.autocomplete = "off"; evidence.placeholder = "Ticket, receipt, log, or external record reference";
-        label.textContent = "Authoritative readback reference "; label.append(evidence); entry.append(label);
-        entry.append(reconciliationActionButton("Readback shows no external effect", item, "external_effect_absent", evidence));
-        entry.append(reconciliationActionButton("Record the existing external effect", item, "external_effect_recorded", evidence));
+        evidence.className = "input";
+        label.textContent = "Where is the proof of what happened? "; label.append(evidence); entry.append(label);
+        entry.append(reconciliationActionButton("It did not happen outside Lightwork", item, "external_effect_absent", evidence));
+        entry.append(reconciliationActionButton("It did happen: record it", item, "external_effect_recorded", evidence));
       } else {
         entry.append(reconciliationActionButton("Retire restored request", item, "retire_and_create_new_request", null));
       }
@@ -252,7 +347,7 @@
     get("reconciliation-blocked").hidden = !globalBlocked;
     get("reconciliation-status").textContent = row.unresolved
       ? row.unresolved + " restored item" + (row.unresolved === 1 ? " remains" : "s remain") + " unresolved. Normal startup is blocked."
-      : "Every restored item has a recorded disposition. Confirm once to complete recovery and restart normal work.";
+      : "Every restored item has a decision. Confirm below to finish recovery and restart normal work.";
     controls();
   }
   async function load(selected) {
@@ -266,7 +361,7 @@
     renderBootstrapStatus();
     get("identity").textContent = "Workspace: " + result.tenant + " · Lightwork " + result.application_version;
     var last = result.last_restore;
-    get("last-restore").textContent = !last ? "" : last.state === "completed" ? "The most recent local restore completed and passed file and SQLite checks. Its safety snapshot remains saved."
+    get("last-restore").textContent = !last ? "" : last.state === "completed" ? "The most recent local restore completed and passed file and database checks. Its safety snapshot remains saved."
       : last.state === "reconciliation_required" ? "The restored files passed local checks, but restored work is still held for review below."
         : last.state === "rolled_back_to_empty" ? "An interrupted new-install restore was safely rolled back to the signed empty state. Prepare and review the restore again."
           : "The most recent restore does not have a verified completion receipt. Remain in recovery mode and review the saved safety snapshot before resuming work.";
@@ -353,14 +448,14 @@
       summary.textContent = "File verification details"; details.append(summary);
       ["snapshot", "current"].forEach(function (side) {
         var text = document.createElement("p"), file = item[side];
-        text.textContent = (side === "snapshot" ? "Snapshot" : "Current at comparison") + ": " + (file ? file.size + " bytes · SHA-256 " + file.sha256 : "Not present");
+        text.textContent = (side === "snapshot" ? "Snapshot" : "Current at comparison") + ": " + (file ? file.size + " bytes · fingerprint " + file.sha256 : "Not present");
         details.append(text);
       });
       li.append(name, description, details); get("comparison-items").append(li);
     });
     get("comparison-identity").textContent = "Snapshot application: " + row.snapshot.application_version + " · Compatibility: " + row.snapshot.compatibility
-      + ". Compared using Lightwork " + row.application_version + ". Snapshot archive SHA-256: " + row.snapshot.sha256
-      + ". Snapshot file-set SHA-256: " + row.snapshot_state_sha256 + ". Current file-set SHA-256 at comparison: " + row.live_state_sha256
+      + ". Compared using Lightwork " + row.application_version + ". Snapshot archive fingerprint: " + row.snapshot.sha256
+      + ". Snapshot file-set fingerprint: " + row.snapshot_state_sha256 + ". Current file-set fingerprint at comparison: " + row.live_state_sha256
       + ". Files: " + row.snapshot_file_count + " in the snapshot, " + row.live_file_count + " at comparison.";
     get("comparison-report").hidden = false;
   }
@@ -426,7 +521,7 @@
       + " seconds. Snapshot created " + new Date(row.snapshot_created_at * 1000).toLocaleString() + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
     get("drill-report-build").textContent = row.current_build_matches ? "The tested application build matches this app. This historical test does not prove the current workspace is ready for recovery."
       : "This test used a different application build (Lightwork " + row.application_version + "). Keep it as historical evidence; it does not prove readiness for this app.";
-    get("drill-report-identity").textContent = "Snapshot: " + row.snapshot + ". Archive SHA-256: " + row.archive_sha256 + ". Test report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
+    get("drill-report-identity").textContent = "Snapshot: " + row.snapshot + ". Archive fingerprint: " + row.archive_sha256 + ". Test report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
     get("drill-report-scope").textContent = row.verification_scope;
     get("drill-report-status").textContent = "Saved restore-test evidence loaded. No live restore has been authorized.";
     get("drill-report").hidden = false;
@@ -470,7 +565,7 @@
       names.add(item.format); verified += item.verified; failed += item.failed; unsupported += item.unsupported; return true;
     });
     if (valid) valid = row.outcome === (failed ? "failed" : unsupported ? "incomplete" : verified ? "verified_supported_formats" : "no_encrypted_records");
-    if (!valid) throw new Error("The retained-key test could not be verified for this workspace, snapshot and custody copy. Load the saved report or select your copy again.");
+    if (!valid) throw new Error("The retained-key test could not be verified for this workspace, snapshot and key file. Load the saved report or select your copy again.");
   }
   function renderCustody(row, context) {
     custodyEvidence = row; custodyContext = context;
@@ -489,24 +584,24 @@
     get("custody-totals").textContent = totals.verified + " recognized encrypted records verified; " + totals.failed + " failed; " + totals.unsupported + " unsupported. " + row.unexamined_files + " files were not examined. Review the limits below even when no failures were found.";
     get("custody-coverage").textContent = row.files_scanned + " files and " + row.sqlite_columns_scanned + " SQLite columns scanned; " + row.unexamined_files + " files not examined. Coverage is limited to the recognized formats reported above.";
     list("custody-limits", row.limits);
-    get("custody-identity").textContent = "Snapshot: " + row.snapshot + ". Archive SHA-256: " + row.archive_sha256 + ". Uploaded custody copy SHA-256: " + row.custody_sha256 + ". Report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
+    get("custody-identity").textContent = "Snapshot: " + row.snapshot + ". Archive fingerprint: " + row.archive_sha256 + ". Uploaded key file fingerprint: " + row.custody_sha256 + ". Report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
     get("custody-report").hidden = false;
   }
   on("custody-test", async function () {
     if (!get("custody-confirm").checked) return;
     clearCustodyReport();
     var file = get("custody-file").files[0], selected = get("snapshot").value, context = state.context, generation = custodyGeneration;
-    if (!file || !file.size || file.size > 4 * 1024 * 1024) throw new Error("Choose a nonempty retained-key ZIP no larger than 4 MiB.");
+    if (!file || !file.size || file.size > 4 * 1024 * 1024) throw new Error("Choose a nonempty key file no larger than 4 MB.");
     get("custody-confirm").checked = false;
-    say("Verifying the selected snapshot before testing your uploaded custody copy…");
+    say("Verifying the selected snapshot before testing your key file…");
     var inspected = await request(path("inspect"), {});
-    if (!custodyCurrent(selected, context, generation)) throw new Error("The custody-test selection changed. Select your retained copy and confirm again.");
+    if (!custodyCurrent(selected, context, generation)) throw new Error("The key test selection changed. Select your retained copy and confirm again.");
     if (!inspected || inspected.id !== selected || !digest(inspected.sha256)) throw new Error("The selected snapshot could not be verified. Verify it again before testing retained keys.");
     var uploadHash = await custodyFileSha256(file);
-    if (!custodyCurrent(selected, context, generation)) throw new Error("The custody-test selection changed. Select your retained copy and confirm again.");
+    if (!custodyCurrent(selected, context, generation)) throw new Error("The key test selection changed. Select your retained copy and confirm again.");
     say("Testing recognized encrypted formats in a fresh temporary process. No live files or shared keys are being changed…");
     var row = await request(path("custody-test"), file, undefined, undefined, inspected.sha256);
-    if (!custodyCurrent(selected, context, generation)) throw new Error("The custody-test selection changed. Load the current snapshot's saved report again.");
+    if (!custodyCurrent(selected, context, generation)) throw new Error("The key test selection changed. Load the current snapshot's saved report again.");
     verifyCustody(row, selected, inspected.sha256, uploadHash);
     clearCustodyUpload(); renderCustody(row, context); say("Retained-key test finished. Review the recorded outcome and coverage below.");
   });
@@ -514,8 +609,8 @@
     clearCustodyReport(); clearCustodyUpload();
     var selected = get("snapshot").value, context = state.context, generation = custodyGeneration;
     var row = await request(path("custody-test/report"), {});
-    if (!custodyCurrent(selected, context, generation)) throw new Error("The custody-test selection changed. Load the current snapshot's saved report again.");
-    if (row && row.state === "not_recorded" && row.snapshot === selected) { get("custody-status").textContent = "No retained-key test has been recorded for this snapshot. Choose your separately saved custody copy to run a temporary test."; return; }
+    if (!custodyCurrent(selected, context, generation)) throw new Error("The key test selection changed. Load the current snapshot's saved report again.");
+    if (row && row.state === "not_recorded" && row.snapshot === selected) { get("custody-status").textContent = "No retained-key test has been recorded for this snapshot. Choose your separately saved key file to run a temporary test."; return; }
     verifyCustody(row, selected); renderCustody(row, context);
   });
   on("custody-report-download", async function () {
@@ -530,9 +625,9 @@
     if (!custodyEvidence || !get("custody-install-confirm").checked) return;
     var evidence = custodyEvidence, context = custodyContext, selected = get("snapshot").value;
     var file = get("custody-install-file").files[0];
-    if (!file || !file.size || file.size > 4 * 1024 * 1024) throw new Error("Choose the exact nonempty retained-key ZIP tested for this snapshot.");
+    if (!file || !file.size || file.size > 4 * 1024 * 1024) throw new Error("Choose the exact nonempty key file tested for this snapshot.");
     var uploadHash = await custodyFileSha256(file);
-    if (!state || context !== state.context || selected !== evidence.snapshot || uploadHash !== evidence.custody_sha256) throw new Error("This key ZIP does not match the signed retained-key test. Choose the exact tested copy.");
+    if (!state || context !== state.context || selected !== evidence.snapshot || uploadHash !== evidence.custody_sha256) throw new Error("This key file does not match the signed retained-key test. Choose the exact tested copy.");
     get("custody-install-confirm").checked = false;
     say("Installing the exact tested key set into the empty recovery installation…");
     var result = await request(path("retained-keys/install"), file, undefined, undefined, undefined, {
@@ -609,7 +704,7 @@
   on("installation-transition-review", async function () {
     clearIdentityTransition(); get("installation-code").value = "";
     var file = get("installation-transition-file").files[0], binding = state.context;
-    if (!file || file.size > 65536) throw new Error("Choose a signed bridge JSON file no larger than 64 KiB.");
+    if (!file || file.size > 65536) throw new Error("Choose the signed review file (no larger than 64 KB).");
     var envelope = await file.text();
     var result = await request("installation/identity-transition", { envelope: envelope });
     if (file !== get("installation-transition-file").files[0] || state.context !== binding || !/^[a-f0-9]{64}$/.test(result.sha256 || "")) throw new Error("The signing transition review changed. Select and verify it again.");
