@@ -86,7 +86,10 @@
                   aria-label="Branch from step {{ loop.index }}">Branch from here</button>
           {% endif %}
         </span>
-        {% if ev.content %}
+        {% if ev.content and ev.kind == 'error' %}
+          <p class="ev-content">Something went wrong in this step. <a href="/goals/{{ goal.id }}/errors">See all problems</a></p>
+          <details><summary>Technical details (for support)</summary><div class="ev-content">{{ ev.content }}</div></details>
+        {% elif ev.content %}
           {% if ev.content|length > 2000 %}
           <div class="ev-content">{{ ev.content[:2000] }}…</div>
           <details><summary>Show the full step</summary><div class="ev-content">{{ ev.content }}</div></details>
