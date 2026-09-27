@@ -113,10 +113,20 @@ def test_ekko_page_and_agent_factory_entry_explain_the_safe_boundary(
         "Never captures",
         "not employee productivity",
         "lightwork.authoring-handoff",
+        'id="ekko-enroll-go"',
+        'id="ekko-enroll-days"',
+        '<select class="select" id="ekko-device"',
     ):
         assert phrase in page.text
     assert "collector online" not in page.text.lower()
-    assert "collector heartbeat stale" in page.text.lower()
+    assert "recorder lost contact" in page.text.lower()
+    from test_support.plain_language import developer_terms
+    assert developer_terms(page.text) == []
+    from test_support.plain_language import visible_text
+    content = visible_text(page.text[page.text.index("<main"):])
+    for gone in ("maverick ekko", "tenant", "egress", "DGM", "collector", "Device ID"):
+        assert gone not in content
+    assert "Request failed (" not in page.text
 
     factory = client.get("/agents")
     assert factory.status_code == 200
@@ -273,3 +283,69 @@ def test_ekko_inline_script_runs_after_shared_ui_helpers_load(tmp_path, monkeypa
     assert inline_script_open > html.index(ui_tag)
     # The JSON bootstrap must still precede the code that reads it.
     assert html.index(bootstrap_tag) < inline_script_open
+
+
+def test_enroll_from_the_page_narrows_apps_and_is_audited(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    status = client.get("/api/v1/ekko/status?device_id=desk").json()
+    assert status["app_choices"] == [
+        {"value": "excel", "label": "Microsoft Excel"},
+        {"value": "powerpoint", "label": "Microsoft PowerPoint"},
+    ]
+    assert status["enrollment_days"] == 30
+
+    base = {"device_id": "desk", "apps": ["excel"], "days": 14}
+    assert client.post("/api/v1/ekko/enroll", json=base).status_code == 400  # no consent tick
+    outside = client.post("/api/v1/ekko/enroll", json={**base, "apps": ["slack"], "acknowledge_capture_scope": True})
+    assert outside.status_code == 422
+    assert "apps your administrator allows" in outside.json()["detail"]
+    assert client.post("/api/v1/ekko/enroll", json={**base, "days": 365, "acknowledge_capture_scope": True}).status_code == 422
+    injected = client.post("/api/v1/ekko/enroll", json={**base, "acknowledge_capture_scope": True, "owner": "user:mallory"})
+    assert injected.status_code == 422
+
+    kinds: list[tuple[str, dict]] = []
+    from maverick_dashboard import ekko_routes
+
+    real = ekko_routes._audit
+
+    def spy(kind, **payload):
+        kinds.append((str(kind), payload))
+        return real(kind, **payload)
+
+    monkeypatch.setattr(ekko_routes, "_audit", spy)
+    enrolled = client.post("/api/v1/ekko/enroll", json={**base, "acknowledge_capture_scope": True})
+    assert enrolled.status_code == 200, enrolled.text
+    body = enrolled.json()
+    assert body["status"]["enrollment"]["active"] is True
+    assert body["status"]["allowed_apps"] == ["excel"]  # narrowed, never widened
+    assert [p.get("state") for _, p in kinds] == ["enroll_authorized", "enrolled"]
+    assert kinds[0][1]["required"] is True
+    # enrolling only records consent; nothing is watched yet
+    assert body["status"]["session"] is None
+
+    started = client.post("/api/v1/ekko/sessions", json={"device_id": "desk", "acknowledge_capture_scope": True})
+    assert started.status_code == 201
+    revoked = client.post("/api/v1/ekko/revoke", json={"device_id": "desk"})
+    assert revoked.status_code == 200 and revoked.json()["revoked"] is True
+    after = revoked.json()["status"]
+    assert not (after["enrollment"] or {}).get("active")
+    assert after["session"]["state"] == "stopped"
+
+
+def test_enroll_needs_ekko_on_and_operate(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch, enabled=False)
+    off = client.post("/api/v1/ekko/enroll", json={"device_id": "desk", "apps": ["excel"],
+                                                   "acknowledge_capture_scope": True})
+    assert off.status_code == 409
+    assert "turned off" in off.json()["detail"]
+    from maverick_dashboard import auth
+
+    def deny(request, permission):
+        from fastapi import HTTPException
+        assert permission == "operate"
+        raise HTTPException(status_code=403, detail="no")
+
+    monkeypatch.setattr(auth, "require_permission", deny)
+    assert client.post("/api/v1/ekko/enroll", json={"device_id": "desk", "apps": ["excel"],
+                                                    "acknowledge_capture_scope": True}).status_code == 403
+    assert client.post("/api/v1/ekko/revoke", json={"device_id": "desk"}).status_code == 403
