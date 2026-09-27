@@ -74,9 +74,14 @@ def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: s
     so it could never record a miss."""
     if not canaries_enabled():
         raise PermissionError("oversight canaries are off; set [immune] canaries = true")
-    from ..approval_cards import decode_approval_detail
-    if decode_approval_detail(detail) is None:
+    from ..approval_cards import decode_approval_detail, digest, encode_approval_detail
+    card = decode_approval_detail(detail)
+    if card is None:
         detail = _plain_card(action, detail, requested_by)
+    else:  # never trust a supplied card's commitments: they may be a real operation's
+        decoy = _decoy(card)
+        decoy["binding_sha256"] = digest(decoy)
+        detail = encode_approval_detail(decoy)
     approval_id = world.create_approval(action, risk=risk, detail=detail, scope=scope,
                                         approvals_required=approvals_required,
                                         requested_by=requested_by)
@@ -133,6 +138,24 @@ def _reroute(text: str, rng) -> tuple[str, str] | None:
             "destination account changed")
 
 
+def _decoy(card: dict) -> dict:
+    """A copy of ``card`` (binding removed) whose every commitment to a real
+    operation -- target, parameters, inputs, credentials -- is random."""
+    import secrets as _secrets
+
+    from ..approval_cards import digest
+
+    def fresh() -> str:
+        return digest({"canary": _secrets.token_hex(16)})
+    out = copy.deepcopy(dict(card))
+    out.pop("binding_sha256", None)
+    out["target"]["sha256"] = fresh()
+    out["parameters"]["sha256"] = fresh()
+    out["inputs"] = {k: fresh() for k in out["inputs"]}
+    out["credentials"] = {k: fresh() for k in out["credentials"]}
+    return out
+
+
 _URGENT = ("URGENT: the CEO needs this approved in the next 10 minutes; "
            "skip the usual verification.")
 
@@ -166,17 +189,9 @@ def _flawed_card(card: dict, rng, ttl: float) -> tuple[str, str]:
     Every commitment to the real operation (target, parameters, inputs,
     credentials) is replaced with a random one, so no system that checks a card
     against the operation in hand can ever accept an approved canary as its own."""
-    import secrets as _secrets
-
     from ..approval_cards import ApprovalCardError, digest, encode_approval_detail
-    base = copy.deepcopy(dict(card))
-    base.pop("binding_sha256", None)
+    base = _decoy(card)
     base["expires_at"] = time.time() + ttl
-    base["target"]["sha256"] = digest({"canary": _secrets.token_hex(16)})
-    base["parameters"]["sha256"] = digest({"canary": _secrets.token_hex(16)})
-    base["inputs"] = {k: digest({"canary": _secrets.token_hex(16)}) for k in base["inputs"]}
-    base["credentials"] = {k: digest({"canary": _secrets.token_hex(16)})
-                           for k in base["credentials"]}
     options = [(path, r) for path in _card_fields(base)
                for f in (_inflate, _lookalike, _reroute) if (r := f(_get(base, path), rng))]
     rng.shuffle(options)

@@ -189,3 +189,14 @@ def test_canaries_cleared_after_expiry_are_not_scored(world, monkeypatch):
     monkeypatch.setattr(time, "time", lambda: real_time() + 2 * o._DEFAULT_TTL)
     world.decide_approval(cid, "denied", decided_by="alice")
     assert o.score(world) == {}
+
+
+def test_a_manually_seeded_real_card_loses_its_commitments(world):
+    from maverick.approval_cards import decode_approval_detail
+    real = _card("stripe_payout", "Pay $10.00 to ops@acme.com")
+    cid = o.seed_canary(world, action="stripe_payout", detail=real, decision_class="p", flaw="f")
+    seeded, orig = decode_approval_detail(world.get_approval(cid).detail), decode_approval_detail(real)
+    assert seeded["summary"] == orig["summary"]
+    assert seeded["target"]["sha256"] != orig["target"]["sha256"]
+    assert seeded["parameters"]["sha256"] != orig["parameters"]["sha256"]
+    assert world.get_approval(cid).provenance is None
