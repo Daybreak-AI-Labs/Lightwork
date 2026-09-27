@@ -4212,7 +4212,11 @@ async def third_party_collaboration_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_collaboration.html",
-        {"third_party_collaboration_enabled": (third_party_collaboration_enabled_for_page())},
+        {
+            "third_party_collaboration_enabled": (third_party_collaboration_enabled_for_page()),
+            "collaboration_can_admin": has_permission(request, "admin"),
+            "collaboration_can_audit": has_permission(request, "audit"),
+        },
     )
 
 

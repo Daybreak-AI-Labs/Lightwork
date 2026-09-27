@@ -8,13 +8,16 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
 
+// The third-party lifecycle, collaboration and intelligence pages now load
+// their records through lightwork-record-workflows.js (LwRecords.call), which
+// fails closed on malformed JSON and turns errors into plain sentences; their
+// behaviour is covered by the page workflow tests.
 const JSON_CLIENTS = [
   ["consent_delivery.html", "call", ["/probe"]],
   ["consent_experiments.html", "call", ["/probe"]],
   ["consent_public_clients.html", "call", ["/probe"]],
   ["consent_publishing.html", "call", ["/probe"]],
   ["policy_publication_links.html", "call", ["/probe"]],
-  ["third_party_intelligence.html", "request", ["/probe", "GET", {}]],
   ["consent_scan_notice_proposals.html", "call", ["/probe"]],
   ["consent_profile_data.html", "request", ["/probe"]],
   ["data_use_governance.html", "call", ["/probe"]],
@@ -27,8 +30,6 @@ const JSON_CLIENTS = [
 
 const TEXT_CLIENTS = [
   "ai_cloud_agent_governance.html",
-  "third_party_lifecycle.html",
-  "third_party_collaboration.html",
   "consumer_trust_center_authority.html",
   "compliance_scoping.html",
   "compliance_scope_actions.html",

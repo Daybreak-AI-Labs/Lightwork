@@ -399,3 +399,33 @@ def test_external_failures_are_non_enumerating_and_disabled_is_hidden(environmen
     status = client.get(f"{INTERNAL}/status")
     assert status.status_code == 200
     assert status.json()["enabled"] is False
+
+
+def test_sharing_reports_portal_address_and_limits_for_admins(environment, monkeypatch) -> None:
+    client, _store, state = environment
+    monkeypatch.setattr(collaboration, "load_policy", lambda: collaboration.ThirdPartyCollaborationPolicy())
+    client.app.state.third_party_collaboration_current_portal_ref = lambda: PORTAL
+    body = client.get(f"{INTERNAL}/sharing").json()
+    assert body["portal_path"] == f"{EXTERNAL}/{PORTAL}/portal"
+    assert set(body["limits"]) == {"invitation_seconds", "retention_seconds", "max_artifacts",
+                                   "max_artifact_bytes"}
+    assert state["permissions"][-1] == "admin"
+    assert TOKEN not in repr(body)
+
+
+def test_sharing_without_a_portal_still_reports_limits(environment, monkeypatch) -> None:
+    client, _store, _state = environment
+    monkeypatch.setattr(collaboration, "load_policy", lambda: collaboration.ThirdPartyCollaborationPolicy())
+
+    def broken():
+        raise RuntimeError("no routing key")
+
+    client.app.state.third_party_collaboration_current_portal_ref = broken
+    body = client.get(f"{INTERNAL}/sharing").json()
+    assert body["portal_path"] is None and body["limits"]["max_artifacts"] >= 0
+
+
+def test_sharing_is_off_with_the_feature(environment) -> None:
+    client, _store, state = environment
+    state["enabled"] = False
+    assert client.get(f"{INTERNAL}/sharing").status_code == 403

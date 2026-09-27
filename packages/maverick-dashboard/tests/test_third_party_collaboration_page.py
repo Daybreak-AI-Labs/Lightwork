@@ -41,21 +41,23 @@ def _client(*, enabled: bool) -> TestClient:
     return TestClient(app)
 
 
-def test_enabled_page_exposes_only_closed_operator_workbench() -> None:
+def test_enabled_page_is_an_invitation_list_with_an_invite_form() -> None:
     page = _client(enabled=True).get("/third-party/collaboration")
     assert page.status_code == 200
     text = page.text
     assert "/api/v1/third-party/collaboration" in text
-    assert "Issue invitation" in text
-    assert "Rotate credential" in text
-    assert "Request follow-up" in text
-    assert "Verify integrity" in text
-    assert "credential, provider decision" in text
-    assert "independently verify respondent attestations" in text
-    assert "provider_decision" in text
-    assert "risk_score" in text
-    assert "content" in text
-    assert "bytes" in text
+    assert "/static/lightwork-third-party-collaboration.js" in text
+    for label in ("Invite a vendor", "Create invitation", "Choose the notice file",
+                  "Clean up expired data", "shown only once"):
+        assert label in text
+    assert 'id="tpc-invitations"' in text and 'id="tpc-once"' in text
+    # No operation dropdown, path JSON, body JSON or confirmation wall.
+    for gone in ('id="tpc-operation"', "tpc-path-values", "Action details (JSON)",
+                 "<textarea", "I reviewed the exact"):
+        assert gone not in text
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(text) == []
 
 
 def test_disabled_page_is_inert_and_names_all_required_gates() -> None:
@@ -64,7 +66,7 @@ def test_disabled_page_is_inert_and_names_all_required_gates() -> None:
     text = page.text
     assert 'data-module-gate="third_party_management.lifecycle.portal"' in text
     assert "[third_party_management.lifecycle.portal]" not in text
-    assert "deployment-owned public-reference" in text
+    assert "public web address" in text
     assert "/api/v1/third-party/collaboration" not in text
 
 

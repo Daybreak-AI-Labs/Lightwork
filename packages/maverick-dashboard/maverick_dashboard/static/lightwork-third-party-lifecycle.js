@@ -37,6 +37,7 @@
     var s = String(value);
     if (state.peopleByRef[s]) { return state.peopleByRef[s]; }
     if (/^(tpl|tpc)-principal-/.test(s)) { return "Another person"; }
+    if (/^vendor-contact\./.test(s)) { return "The vendor's contact at " + vendorName(s.slice(15)); }
     s = s.replace(/^(vendor-contact|note|file|vendor|dep|task|q|t)[.:]/, "");
     s = s.replace(/[-_.:]+/g, " ").trim();
     return s.charAt(0).toUpperCase() + s.slice(1);
@@ -294,7 +295,7 @@
       if (!vendorRef) { say("Choose the vendor or type its name."); return; }
       var parts = v.template.split("@");
       var template = state.templates.filter(function (t) { return t.template_id === parts[0] && String(t.version) === parts[1]; })[0];
-      var respondent = v.answerer === "vendor" ? ref(vendorRef.replace(/^vendor\./, ""), "vendor-contact.") : v.answerer;
+      var respondent = v.answerer === "vendor" ? ("vendor-contact." + vendorRef).slice(0, 128) : v.answerer;
       var assignments = {};
       template.questions.forEach(function (q) { assignments[q.question_id] = respondent; });
       var id = R.newId("assessment");
