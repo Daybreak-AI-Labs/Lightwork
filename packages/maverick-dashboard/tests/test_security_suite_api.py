@@ -1743,10 +1743,14 @@ def test_environment_ingest_runs_curated_and_custom_sigma_without_raw_persistenc
     assert client.get("/api/v1/security/soc/findings/ef_missing").status_code == 404
     page = client.get("/security/soc")
     assert page.status_code == 200
-    assert "Customer Sigma rules" in page.text
-    assert "MITRE ATT&amp;CK heatmap" in page.text
-    assert 'id="soc-shield"' in page.text
-    assert "Shield autonomy posture" in page.text
+    assert "Your own checks" in page.text and "Add a check" in page.text
+    assert "Kinds of attack seen" in page.text
+    assert 'id="hunt-safety"' in page.text
+    assert "A new cloud access key was created" in page.text  # built-in check library
+    assert 'type="file" id="soc-file"' in page.text        # exported log file, not pasted JSON
+    assert "<textarea" not in page.text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(page.text) == []
 
 
 def test_environment_auto_response_recognizes_normalized_edr_source():

@@ -5147,8 +5147,14 @@ async def platform_threats_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     from maverick import platform_hunt
 
+    from .immune_actions_api import people_choices
+
     return templates.TemplateResponse(
-        request, "security_threats.html", {"enabled": platform_hunt.enabled()}
+        request, "security_threats.html", {
+            "enabled": platform_hunt.enabled(),
+            "can_global_admin": has_global_permission(request, "admin"),
+            "people": people_choices(),
+        },
     )
 
 
@@ -5158,12 +5164,29 @@ async def environment_threats_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     from maverick import env_hunt
 
+    from .immune_actions_api import people_choices
+    from .security_page_helpers import (
+        CURATED_TITLES,
+        SOC_CONNECTOR_LABELS,
+        soc_connector_choices,
+    )
+
+    enabled = env_hunt.enabled()
+    pull, push = soc_connector_choices() if enabled else ([], [])
+    rules = [{"title": CURATED_TITLES.get(r.id, r.title), "level": r.level,
+              "techniques": list(r.mitre_techniques)}
+             for r in env_hunt.curated_rules()] if enabled else []
     return templates.TemplateResponse(
         request,
         "security_soc.html",
         {
-            "enabled": env_hunt.enabled(),
+            "enabled": enabled,
             "response_execution": env_hunt.response_execution_enabled(),
+            "can_global_admin": has_global_permission(request, "admin"),
+            "people": people_choices(),
+            "pull_connectors": [{"value": n, "label": SOC_CONNECTOR_LABELS.get(n, n)} for n in pull],
+            "push_connectors": [{"value": n, "label": SOC_CONNECTOR_LABELS.get(n, n)} for n in push],
+            "curated_rules": rules,
         },
     )
 
