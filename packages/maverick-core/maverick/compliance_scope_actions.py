@@ -2042,6 +2042,43 @@ class ComplianceScopeActionStore:
         if not hmac.compare_digest(expected, export.signature_hmac_sha256):
             raise ComplianceScopeActionIntegrityError("scope-action export signature is invalid")
 
+    def list_records(self, tenant_id: str, *, limit: int = 200) -> dict[str, tuple]:
+        """Read-only, newest-first listing of catalogs, plans and exports,
+        each loaded through the integrity-checked single-record readers."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        self._actor()
+        with self._connect() as connection:
+            catalogs = tuple(
+                self._get_catalog(connection, tenant, row[0], int(row[1]))
+                for row in connection.execute(
+                    "SELECT catalog_id, version FROM action_catalog_definitions "
+                    "WHERE tenant_id=? ORDER BY catalog_id, version DESC LIMIT ?",
+                    (tenant, bounded),
+                ).fetchall()
+            )
+            plans = tuple(
+                self._get_plan(connection, tenant, row[0])
+                for row in connection.execute(
+                    "SELECT plan_id FROM scope_action_plans WHERE tenant_id=? "
+                    "ORDER BY rowid DESC LIMIT ?",
+                    (tenant, bounded),
+                ).fetchall()
+            )
+            exports = tuple(
+                self._export(*self._get(
+                    connection, "scope_action_exports", tenant, "export_id",
+                    row[0], "action plan export",
+                ))
+                for row in connection.execute(
+                    "SELECT export_id FROM scope_action_exports WHERE tenant_id=? "
+                    "ORDER BY rowid DESC LIMIT ?",
+                    (tenant, bounded),
+                ).fetchall()
+            )
+        return {"catalogs": catalogs, "plans": plans, "exports": exports}
+
     def verify_integrity(self, tenant_id: str) -> IntegrityVerification:
         tenant = _tenant(tenant_id)
         self._actor()

@@ -6246,7 +6246,11 @@ async def compliance_scope_actions_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "compliance_scope_actions.html",
-        {"compliance_scope_actions_enabled": (compliance_scope_actions_enabled_for_page())},
+        {
+            "compliance_scope_actions_enabled": (compliance_scope_actions_enabled_for_page()),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 

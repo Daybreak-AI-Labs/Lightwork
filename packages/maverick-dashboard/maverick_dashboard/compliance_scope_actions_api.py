@@ -126,6 +126,15 @@ class ExportPlanIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class ReportIn(_StrictModel):
+    idempotency_key: IdempotencyKey
+
+
+#: Signing key the page's "Create report" button uses; nobody types a key
+#: reference. The key itself stays in the environment.
+DEFAULT_REPORT_SIGNING_KEY_REF = "env:MAVERICK_COMPLIANCE_SCOPE_SIGNING_KEY"
+
+
 def _enabled() -> bool:
     from maverick import compliance_scope_actions as actions
 
@@ -361,6 +370,73 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
             "status_request_external_network_io": False,
         }
 
+    @router.get("/records")
+    async def records(request: Request) -> dict[str, Any]:
+        """Catalogs, plans and reports in this workspace, newest first."""
+
+        require_permission(request, "view")
+        actions, tenant, store = authority(request)
+        listed = await call(actions, store.list_records, tenant)
+        callback = getattr(request.app.state, "compliance_scope_actions_apply_callback", None)
+        return {
+            "can_create_tasks": callable(callback),
+            "catalogs": [
+                {
+                    "catalog_id": c.catalog_id,
+                    "version": c.version,
+                    "status": c.status,
+                    "entries": len(c.entries),
+                    "revision": c.revision,
+                    "created_at": c.created_at,
+                }
+                for c in listed["catalogs"]
+            ],
+            "plans": [
+                {
+                    "plan_id": p.plan_id,
+                    "scope_id": p.scope_id,
+                    "catalog_id": p.catalog_id,
+                    "catalog_version": p.catalog_version,
+                    "status": p.status,
+                    "controls": len(p.control_intents),
+                    "evidence_tasks": len(p.evidence_task_intents),
+                    "approved": bool(p.approved_by),
+                    "last_outcome": p.last_outcome,
+                    "revision": p.revision,
+                    "retained_until": p.retained_until,
+                    "created_at": p.created_at,
+                }
+                for p in listed["plans"]
+            ],
+            "reports": [
+                {"export_id": e.export_id, "plan_id": e.plan_id, "created_at": e.created_at}
+                for e in listed["exports"]
+            ],
+        }
+
+    @router.post("/plans/{plan_id}/report")
+    async def create_report(request: Request, plan_id: ObjectPath, body: ReportIn):
+        """Signed report for a plan with the deployment signing key."""
+
+        require_permission(request, "operate")
+        actions, tenant, store = authority(request)
+        plan = await call(actions, store.get_plan, tenant, plan_id)
+        export_id = "report-" + hashlib.sha256(
+            f"{plan_id}:{body.idempotency_key}".encode()
+        ).hexdigest()[:24]
+        return _jsonable(
+            await call(
+                actions,
+                store.export_plan,
+                tenant,
+                plan_id,
+                export_id,
+                signing_key_ref=DEFAULT_REPORT_SIGNING_KEY_REF,
+                retained_until=plan.retained_until,
+                idempotency_key=body.idempotency_key,
+            )
+        )
+
     @router.put("/catalogs/{catalog_id}/versions")
     async def create_catalog_version(
         request: Request,
@@ -548,6 +624,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
 router = create_compliance_scope_actions_router()
 
 __all__ = [
+    "DEFAULT_REPORT_SIGNING_KEY_REF",
     "ComplianceScopeActionDependencies",
     "compliance_scope_actions_enabled_for_page",
     "create_compliance_scope_actions_router",
