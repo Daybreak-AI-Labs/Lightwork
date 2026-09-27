@@ -67,24 +67,23 @@
   {% from "_hero.html" import hero, state %}
   {% call hero('Governance', 'Assessments',
                subtitle='Continuous review',
-               lede='Privacy, security, and AI-risk reviews of every agent
-                     and flow — auto-drafted from what each one is actually
-                     allowed to do (its tools, data access, and risk
-                     ceiling), reviewed and signed off per lens, and
-                     automatically flagged for re-review when it changes.') %}
-    {{ state('Current state', 'Daily drift sweep',
+               lede='Privacy, security and AI-risk reviews of every agent
+                     and flow. Lightwork drafts each review from what the
+                     agent or flow is allowed to do; a person approves each
+                     part, and anything that changes later is flagged for a
+                     fresh review.') %}
+    {{ state('Current state', 'Checked every day',
              badge='automatic', badge_class='ok',
-             copy='Every subject is re-checked each day; anything that
-                   changed since sign-off is flagged below for a fresh
-                   review.') }}
+             copy='Every agent and flow is re-checked daily; anything that
+                   changed since it was approved shows up under Needs
+                   attention.') }}
   {% endcall %}
 
   <div class="as-bar">
     <span class="pill" id="as-due-count" title="Subjects needing attention">—</span>
-    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-assess every subject now (catch drift) and refresh what's due — the same sweep that runs automatically each day">↻ Re-check due now</button>
+    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-check every agent and flow now for changes — the same check that runs automatically each day">Re-check everything now</button>
     <span class="as-bar__spacer"></span>
-    <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">⬇ Export CSV</a>
-    <a class="btn btn--ghost" href="/api/v1/assessments/export?format=json" target="_blank" rel="noopener">⬇ JSON</a>
+    <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">Download spreadsheet</a>
   </div>
   <p class="muted" id="as-page-msg" role="status" aria-live="polite" aria-atomic="true"
      style="min-height:1.25rem; margin:calc(-1 * var(--space-2)) 0 var(--space-3);"></p>
@@ -107,16 +106,16 @@
         <div class="as-card__title">Assess a subject</div>
         <label class="as-field">
           <span>Agent</span>
-          <input list="as-agents" id="as-agent" placeholder="Search {{ agents|length }} agents…" autocomplete="off" aria-label="Agent to assess">
-          <datalist id="as-agents">
-            {% for a in agents %}<option value="{{ a.name }}"></option>{% endfor %}
-          </datalist>
+          <select id="as-agent" aria-label="Agent to assess">
+            <option value="">{{ 'Choose an agent…' if agents else 'No agents yet' }}</option>
+            {% for a in agents %}<option value="{{ a.name }}">{{ a.name }}</option>{% endfor %}
+          </select>
         </label>
         {% if flows %}
         <label class="as-field">
           <span>…or a flow</span>
           <select id="as-flow" aria-label="Flow to assess">
-            <option value="">— choose a flow —</option>
+            <option value="">Choose a flow…</option>
             {% for f in flows %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
           </select>
         </label>
@@ -139,6 +138,13 @@
 (function () {
   'use strict';
   var LENS_LABEL = { privacy: 'Privacy', security: 'Security', ai_risk: 'AI risk' };
+  var STATUS_LABEL = { draft: 'Draft', in_review: 'In review', needs_review: 'Needs review', reviewed: 'Reviewed' };
+  var KIND_LABEL = { agent: 'Agent', flow: 'Flow' };
+  var SEVERITY_LABEL = { low: 'Low', medium: 'Medium', high: 'High' };
+  var CADENCE = [[0, 'Never'], [90, 'Every 3 months'], [180, 'Every 6 months'], [365, 'Every year']];
+  function statusLabel(value) {
+    return STATUS_LABEL[value] || (window.mvHuman ? window.mvHuman(value) : String(value || ''));
+  }
   var listEl = document.getElementById('as-list');
   var dueEl = document.getElementById('as-due');
   var dueCount = document.getElementById('as-due-count');
@@ -169,9 +175,10 @@
     });
   }
   function responseDetail(result, fallback) {
-    var detail = result && result.data && result.data.detail;
-    if (typeof detail === 'string') return detail;
-    return fallback || ('Request failed (' + ((result && result.status) || 'network') + ').');
+    var reason = typeof window.mvErrorText === 'function'
+      ? window.mvErrorText({ status: (result && result.status) || 0 })
+      : 'Something went wrong. Please try again.';
+    return (fallback ? fallback + ' ' : '') + reason;
   }
   function pageMessage(text, error) {
     pageMsg.textContent = text || '';
@@ -207,7 +214,7 @@
   }
 
   function statusPill(a) {
-    return '<span class="pill status-' + esc(a.status) + '">' + esc((a.status || '').replace('_', ' ')) + '</span>';
+    return '<span class="pill status-' + esc(a.status) + '">' + esc(statusLabel(a.status)) + '</span>';
   }
   function lensesMini(a) {
     var ls = a.lens_status || {};
@@ -217,14 +224,14 @@
   }
 
   function renderList(items) {
-    if (!items.length) { listEl.innerHTML = '<div class="as-empty">No assessments yet. Pick an agent on the right and run one.</div>'; return; }
+    if (!items.length) { listEl.innerHTML = '<div class="as-empty">No assessments yet. Choose an agent or flow under Assess a subject and press Run assessment.</div>'; return; }
     listEl.innerHTML = '';
     items.forEach(function (a) {
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'as-item'; b.dataset.kind = a.kind; b.dataset.subject = a.subject;
       if (current && current.kind === a.kind && current.subject === a.subject) b.classList.add('sel');
       b.innerHTML = '<span class="as-item__main"><div class="as-item__name">' + esc(a.subject)
-        + '</div><div class="as-item__sub">' + esc(a.kind) + (a.open_high ? ' · ' + a.open_high + ' high open' : '') + '</div></span>'
+        + '</div><div class="as-item__sub">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.open_high ? ' · ' + a.open_high + ' serious ' + (a.open_high === 1 ? 'issue' : 'issues') + ' open' : '') + '</div></span>'
         + lensesMini(a) + statusPill(a);
       b.addEventListener('click', function () { open(a.kind, a.subject); });
       listEl.appendChild(b);
@@ -238,7 +245,7 @@
     dueEl.innerHTML = items.map(function (a) {
       return '<button type="button" class="as-item" data-kind="' + esc(a.kind) + '" data-subject="' + esc(a.subject) + '">'
         + '<span class="as-item__main"><div class="as-item__name">' + esc(a.subject) + '</div>'
-        + '<div class="as-item__sub">' + esc((a.status || '').replace('_', ' ')) + '</div></span>' + statusPill(a) + '</button>';
+        + '<div class="as-item__sub">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.drift_note ? ' · changed since approval' : '') + '</div></span>' + statusPill(a) + '</button>';
     }).join('');
     Array.prototype.forEach.call(dueEl.querySelectorAll('.as-item'), function (el) {
       el.addEventListener('click', function () { open(el.dataset.kind, el.dataset.subject); });
@@ -246,14 +253,14 @@
   }
 
   function findingHTML(kind, subject, lens, f) {
-    var ev = (f.evidence || []).map(function (e) { return '<div class="finding__ev">✎ ' + esc(e) + '</div>'; }).join('');
+    var ev = (f.evidence || []).map(function (e) { return '<div class="finding__ev">Evidence: ' + esc(e) + '</div>'; }).join('');
     return '<div class="finding">'
-      + '<div class="finding__head"><span class="sev ' + esc(f.severity) + '">' + esc(f.severity) + '</span>'
-      + '<strong>' + esc(f.control) + '</strong>'
-      + (f.status === 'accepted' ? ' <span class="pill status-reviewed">accepted</span>' : '') + '</div>'
+      + '<div class="finding__head"><span class="sev ' + esc(f.severity) + '">' + esc(SEVERITY_LABEL[f.severity] || f.severity) + '</span>'
+      + '<strong>' + esc(window.mvHuman ? window.mvHuman(f.control) : f.control) + '</strong>'
+      + (f.status === 'accepted' ? ' <span class="pill status-reviewed">Accepted</span>' : '') + '</div>'
       + '<p class="finding__note">' + esc(f.note) + '</p>'
-      + '<p class="finding__mit">↳ ' + esc(f.mitigation) + '</p>' + ev
-      + '<button type="button" class="btn btn--ghost as-ev" data-lens="' + esc(lens) + '" data-control="' + esc(f.control) + '" style="font-size:var(--text-xs); margin-top:4px;">+ evidence</button>'
+      + '<p class="finding__mit">What to do: ' + esc(f.mitigation) + '</p>' + ev
+      + '<button type="button" class="btn btn--ghost as-ev" data-lens="' + esc(lens) + '" data-control="' + esc(f.control) + '" style="font-size:var(--text-xs); margin-top:4px;">Add evidence</button>'
       + '</div>';
   }
 
@@ -261,12 +268,12 @@
     pageMessage('', false);
     current = { kind: a.kind, subject: a.subject };
     detailCard.hidden = false;
-    var drift = a.drift_note ? '<div class="drift">⚠ ' + esc(a.drift_note) + '</div>' : '';
+    var drift = a.drift_note ? '<div class="drift">Changed since it was approved: ' + esc(a.drift_note) + '</div>' : '';
     var head = '<div class="as-detail-head">'
       + '<div class="as-card__title">' + esc(a.subject) + '</div>' + statusPill(a)
-      + '<button type="button" class="btn btn--ghost" id="as-rerun" style="margin-inline-start:auto; font-size:var(--text-sm);">↻ Re-assess</button>'
-      + '<button type="button" class="btn btn--ghost" id="as-del" style="font-size:var(--text-sm);">Delete</button></div>'
-      + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>'
+      + '<button type="button" class="btn btn--ghost" id="as-rerun" style="margin-inline-start:auto; font-size:var(--text-sm);">Re-assess</button>'
+      + '<button type="button" class="btn btn--danger" id="as-del" style="font-size:var(--text-sm);">Delete</button></div>'
+      + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>'
       + '<p class="muted" id="as-detail-msg" role="status" aria-live="polite" style="margin:0 0 var(--space-3); font-size:var(--text-sm);"></p>';
     var lenses = Object.keys(a.lenses || {}).map(function (lens) {
       var lv = a.lenses[lens];
@@ -275,16 +282,23 @@
       return '<div class="lens"><div class="lens__head">'
         + '<span class="dot ' + (lv.findings.some(function (f) { return f.status === 'open' && f.severity === 'high'; }) ? 'attention' : 'ok') + '"></span>'
         + '<span class="lens__title">' + esc(LENS_LABEL[lens] || lens) + '</span>'
-        + (accepted ? '<span class="pill status-reviewed" style="margin-inline-start:auto;">accepted' + (lv.reviewer ? ' · ' + esc(lv.reviewer) : '') + '</span>'
-                    : '<span class="pill" style="margin-inline-start:auto;">' + (lv.findings.length) + ' findings</span>') + '</div>'
+        + (accepted ? '<span class="pill status-reviewed" style="margin-inline-start:auto;">Approved</span>'
+                    : '<span class="pill" style="margin-inline-start:auto;">' + (lv.findings.length) + (lv.findings.length === 1 ? ' finding' : ' findings') + '</span>') + '</div>'
         + '<div class="lens__body">' + body
         + '<div class="lens__actions">'
-        + '<button type="button" class="btn btn--primary as-accept" data-lens="' + lens + '" style="font-size:var(--text-sm);">Accept lens</button>'
-        + '<button type="button" class="btn as-needs" data-lens="' + lens + '" style="font-size:var(--text-sm);">Needs work</button>'
+        + '<button type="button" class="btn btn--primary as-accept" data-lens="' + esc(lens) + '" style="font-size:var(--text-sm);">Approve ' + esc((LENS_LABEL[lens] || lens).toLowerCase()) + ' review</button>'
+        + '<button type="button" class="btn as-needs" data-lens="' + esc(lens) + '" style="font-size:var(--text-sm);">Needs work</button>'
         + '</div></div></div>';
     }).join('');
-    var cadence = '<label class="as-field" style="max-width:16rem;"><span>Re-review cadence (days, 0 = none)</span>'
-      + '<input type="number" min="0" max="3650" id="as-cadence" value="' + (a.cadence_days || 0) + '"></label>';
+    var currentCadence = a.cadence_days || 0;
+    var cadenceOptions = CADENCE.slice();
+    if (!cadenceOptions.some(function (c) { return c[0] === currentCadence; })) {
+      cadenceOptions.push([currentCadence, 'Every ' + currentCadence + ' days']);
+    }
+    var cadence = '<label class="as-field" style="max-width:16rem;"><span>Review again</span>'
+      + '<select id="as-cadence">' + cadenceOptions.map(function (c) {
+        return '<option value="' + c[0] + '"' + (c[0] === currentCadence ? ' selected' : '') + '>' + esc(c[1]) + '</option>';
+      }).join('') + '</select></label>';
     detailEl.innerHTML = head + drift + lenses + cadence;
     wireDetail(a);
   }
@@ -333,7 +347,7 @@
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-ev'), function (el) {
       el.addEventListener('click', async function () {
         var vals = await mvForm('Add evidence', [
-          { key: 'note', label: 'Evidence note or link for “' + el.dataset.control + '”',
+          { key: 'note', label: 'Evidence note or link for “' + (window.mvHuman ? window.mvHuman(el.dataset.control) : el.dataset.control) + '”',
             type: 'text', required: true },
         ], { okText: 'Add' });
         if (vals === null) return;
@@ -375,9 +389,9 @@
 
   function reload() {
     return jfetch('/api/v1/assessments').then(function (r) {
-      if (r.status === 403) { listEl.innerHTML = '<div class="as-empty">Assessments are audit-level — sign in with an audit or admin role to view.</div>'; return null; }
+      if (r.status === 403) { listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null; }
       if (!r.ok) {
-        pageMessage('Could not load the assessment register (HTTP ' + r.status + '). Reload to try again.', true);
+        pageMessage('Could not load the assessment register. Reload to try again.', true);
         return null;
       }
       return r.json();
@@ -409,28 +423,39 @@
     var flow = flowSel ? flowSel.value : '';
     var kind = agent ? 'agent' : (flow ? 'flow' : '');
     var name = agent || flow;
-    if (!name) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Pick an agent or a flow first.'; return; }
+    if (!name) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Choose an agent or a flow first.'; return; }
+    if (agent && flow) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Choose either an agent or a flow, not both.'; return; }
     draftMsg.style.color = 'var(--muted)'; draftMsg.textContent = 'Assessing…';
     jfetch('/api/v1/assessments/' + kind + '/' + encodeURIComponent(name) + '/refresh',
       { method: 'POST', body: JSON.stringify({ template: tplSel.value || null, expected_revision: 0 }) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(responseData)
       .then(function (res) {
-        if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = res.j.detail || 'Failed.'; return; }
-        draftMsg.style.color = 'var(--accent)'; draftMsg.textContent = 'Assessed ' + name + '.';
-        renderDetail(res.j); reload();
-      }).catch(function () { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Failed.'; });
+        if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = responseDetail(res, 'Could not run the assessment.'); return; }
+        var label = agent || (flowSel.options[flowSel.selectedIndex] || {}).textContent || name;
+        draftMsg.style.color = 'var(--accent)'; draftMsg.textContent = 'Assessed ' + label + '.';
+        renderDetail(res.data); reload();
+      }).catch(function () { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Could not run the assessment. Check your connection and try again.'; });
   });
 
   var sweepBtn = document.getElementById('as-sweep');
   if (sweepBtn) sweepBtn.addEventListener('click', function () {
     sweepBtn.disabled = true; var label = sweepBtn.textContent; sweepBtn.textContent = 'Re-checking…';
     jfetch('/api/v1/assessments/sweep', { method: 'POST', body: '{}' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(responseData)
       .then(function (res) {
         sweepBtn.disabled = false; sweepBtn.textContent = label;
-        if (res) { dueCount.textContent = (res.due || []).length + ' need attention'; reload(); }
+        if (res.ok) {
+          dueCount.textContent = ((res.data && res.data.due) || []).length + ' need attention';
+          pageMessage('Everything was re-checked.', false);
+          reload();
+        } else {
+          pageMessage(responseDetail(res, 'Could not re-check everything.'), true);
+        }
       })
-      .catch(function () { sweepBtn.disabled = false; sweepBtn.textContent = label; });
+      .catch(function () {
+        sweepBtn.disabled = false; sweepBtn.textContent = label;
+        pageMessage('Could not re-check everything. Check your connection and try again.', true);
+      });
   });
 
   reload();

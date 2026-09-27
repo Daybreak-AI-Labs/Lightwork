@@ -11,7 +11,7 @@ async function fixture(action) {
   const dom=new JSDOM(source+'<p id="approval-msg"></p><table><tbody><tr data-id="22" data-assessment="B"><td><button class="approval-btn" data-id="22" data-action="approve" disabled>Approve</button><button class="approval-btn" data-id="22" data-action="deny">Deny</button></td></tr></tbody></table>',{url:"https://fixture.invalid/approvals",runScripts:"outside-only"});
   const w=dom.window,doc=w.document,dlg=doc.getElementById("arv-dialog"),calls=[],events=[];
   dlg.showModal=()=>{dlg.open=true;};dlg.close=()=>{dlg.open=false;dlg.dispatchEvent(new w.Event("close"));};
-  w.mvConfirm=async()=>true;w.prompt=question=>question.includes("days")?"30":"Reviewed";
+  w.mvConfirm=async()=>true;w.mvForm=async(_title,fields)=>fields.some(field=>field.key==="expires_days")?{rationale:"Reviewed",expires_days:"90"}:{reason:"Contract renewal",note:"Reviewed"};
   doc.addEventListener("mv-assessment-decided",event=>events.push({...event.detail}));
   let resolve,reject;
   w.fetch=async(url,options)=>{
@@ -55,4 +55,10 @@ test("a current decision emits only the captured assessment identity",async()=>{
     f.resolve({ok:true,json:async()=>({...record("A"),revision:2,status:"rejected"})});await flush();
     assert.deepEqual(f.events,[{id:"A",decision:"rejected"}]);
   }finally{f.dom.window.close();}
+});
+test("the review dialog uses in-page forms and plain wording, never browser prompts or status codes",()=>{
+  assert.equal(source.includes("window.prompt"),false);
+  assert.equal(/'HTTP '|\(HTTP /.test(source),false);
+  assert.equal(source.includes("JSON.stringify(old.ai_metadata"),false);
+  for(const label of ["Risk before safeguards","Risk after safeguards","Accept the remaining risk","Start a new review now","No scheduled review"])assert.ok(source.includes(label),label);
 });

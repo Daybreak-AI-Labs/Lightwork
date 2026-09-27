@@ -126,7 +126,7 @@ test("risk summary distinguishes empty, unresolved and complete questionnaires w
     ui.context.render(rec);
     const childrenText = ui.context.body.children.flatMap(element => [element.textContent, ...element.children]).join(" ");
     if (state === "complete") {
-      assert.equal(ui.context.riskEl.textContent, "residual minimal");
+      assert.equal(ui.context.riskEl.textContent, "Risk after safeguards: Minimal");
       assert.ok(childrenText.includes("in-scope risk areas controlled"));
     } else {
       assert.match(ui.context.riskEl.textContent, state === "empty" ? /not yet assessed/ : /provisional/);
