@@ -3938,10 +3938,10 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
     from .auth import has_global_permission
 
     if current_tenant_id_strict() is None:
-        raise HTTPException(
-            status_code=409,
-            detail="select an active tenant before using privacy data discovery",
-        )
+        from fastapi.responses import RedirectResponse
+
+        # Choose a workspace first, then come straight back here.
+        return RedirectResponse("/workspace/tenant?next=/privacy/data-discovery", status_code=303)
     if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
         raise HTTPException(
             status_code=404,
@@ -10445,6 +10445,17 @@ async def privacy_data_discovery_client() -> FileResponse:
             "Cache-Control": "no-store, private, max-age=0",
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@app.get("/static/lightwork-record-workflows.js")
+async def record_workflows_client() -> FileResponse:
+    """Shared record-list helpers for the privacy and compliance pages."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-record-workflows.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
     )
 
 

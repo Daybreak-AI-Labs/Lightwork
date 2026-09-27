@@ -32,7 +32,7 @@ def test_standalone_fields_resolve_the_existing_api_request_schemas():
 
     templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
     bindings = []
-    for name in ("privacy_data_discovery.html", "consent_experiments.html"):
+    for name in ("consent_experiments.html",):
         inputs = GuidedInputs((templates / name).read_text(encoding="utf-8")).inputs
         assert len(inputs) == 2
         for field in inputs:
@@ -57,7 +57,29 @@ def test_standalone_fields_resolve_the_existing_api_request_schemas():
                 assert "equal_choice_evidence_sha256" in resolve(child["items"])["required"]
             else:
                 assert any(option.get("type") == "null" for option in child["anyOf"])
-    assert bindings == ["limits", "limits", "variants", "audience"]
+    assert bindings == ["variants", "audience"]
+
+
+def test_discovery_scan_limits_match_the_api_request_schema():
+    import json
+    import re
+
+    app = FastAPI()
+    app.include_router(discovery_router, prefix="/api/v1")
+    document = app.openapi()
+    schemas = document["components"]["schemas"]
+    limits = schemas["ScanLimitsIn"]
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "maverick_dashboard" / "static" / "lightwork-privacy-data-discovery.js"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"var DEFAULT_LIMITS = (\{[^}]*\});", script)
+    assert match is not None
+    defaults = json.loads(re.sub(r"(\w+):", r'"\1":', match.group(1)))
+    assert set(defaults) == set(limits["properties"])
+    for key, value in defaults.items():
+        bound = limits["properties"][key]
+        assert bound["minimum"] <= value <= bound["maximum"], key
 
 
 def test_each_publishing_resource_kind_binds_its_own_closed_request_contract():

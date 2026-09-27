@@ -43,7 +43,7 @@
       if (response.status === 204) return {};
       return response.text().then(function (text) {
         if (!text) return {};
-        try { return JSON.parse(text); } catch (e) { var err = new Error('unreadable'); err.name = 'ParseError'; throw err; }
+        try { return JSON.parse(text); } catch (e) { var err = new Error('Request failed: the server returned an invalid JSON response.'); err.name = 'ParseError'; throw err; }
       });
     });
   }

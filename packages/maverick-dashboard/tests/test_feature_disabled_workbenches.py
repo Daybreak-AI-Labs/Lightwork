@@ -15,11 +15,6 @@ FEATURE_WORKBENCHES = (
     ("consent_public_clients.html", "consent_public_clients_enabled"),
     ("consent_publishing.html", "consent_publishing_enabled"),
     ("policy_publication_links.html", "policy_publication_links_enabled"),
-    ("privacy_data_discovery.html", "privacy_data_discovery_enabled"),
-    (
-        "privacy_regulatory_intelligence.html",
-        "privacy_regulatory_intelligence_enabled",
-    ),
     ("third_party_intelligence.html", "third_party_intelligence_enabled"),
 )
 
@@ -94,6 +89,39 @@ def test_disabled_feature_workbenches_fail_closed_without_javascript(
     assert enabled.attrs["data-feature-enabled"] == "true"
     assert "disabled" not in enabled.attrs
     assert "aria-disabled" not in enabled.attrs
+
+
+# Pages that replace the whole workbench with the module gate when the
+# feature is off: no workbench controls are rendered at all.
+MODULE_GATED_WORKBENCHES = (
+    ("privacy_data_discovery.html", "privacy_data_discovery_enabled", "pdd-sources"),
+    (
+        "privacy_regulatory_intelligence.html",
+        "privacy_regulatory_intelligence_enabled",
+        "pri-app",
+    ),
+)
+
+
+@pytest.mark.parametrize(("template_name", "enabled_name", "marker"), MODULE_GATED_WORKBENCHES)
+def test_module_gated_workbenches_render_no_controls_when_disabled(
+    template_name: str,
+    enabled_name: str,
+    marker: str,
+) -> None:
+    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates.env.globals.update(
+        theme="dark", font="default", lang="en", density="comfortable",
+        custom_theme_css="", custom_theme_names=[], dir="ltr", nav_groups=[],
+        t=lambda key: key,
+    )
+    template = templates.env.get_template(template_name)
+    request = SimpleNamespace(url=SimpleNamespace(path="/feature"))
+    disabled = template.render(request=request, **{enabled_name: False})
+    enabled = template.render(request=request, **{enabled_name: True})
+    assert "data-module-gate=" in disabled
+    assert f'id="{marker}"' not in disabled
+    assert f'id="{marker}"' in enabled
 
 
 def test_glass_styles_exclude_destructive_buttons() -> None:

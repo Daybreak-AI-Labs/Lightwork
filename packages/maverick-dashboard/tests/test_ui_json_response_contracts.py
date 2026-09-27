@@ -38,6 +38,19 @@ FAIL_CLOSED_TEMPLATES = (
 )
 
 
+# Pages whose requests live in static scripts rather than inline.
+PAGE_SCRIPTS = {
+    "privacy_data_discovery.html": (
+        "lightwork-privacy-data-discovery.js",
+        "lightwork-record-workflows.js",
+    ),
+    "privacy_regulatory_intelligence.html": (
+        "lightwork-privacy-regulatory-intelligence.js",
+        "lightwork-record-workflows.js",
+    ),
+}
+
+
 def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
     swallowed_json = re.compile(
         r"catch\s*\([^)]*\)\s*\{\s*(?:body|payload|result)\s*=\s*\{\s*\}",
@@ -47,10 +60,8 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
 
     for name in FAIL_CLOSED_TEMPLATES:
         source = (TEMPLATES / name).read_text(encoding="utf-8")
-        if name == "privacy_data_discovery.html":
-            source += (STATIC / "lightwork-privacy-data-discovery.js").read_text(
-                encoding="utf-8"
-            )
+        for script in PAGE_SCRIPTS.get(name, ()):
+            source += (STATIC / script).read_text(encoding="utf-8")
         assert "Request failed: the server returned an invalid JSON response." in source, name
         assert swallowed_json.search(source) is None, name
         assert raw_body_fallback.search(source) is None, name

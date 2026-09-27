@@ -14,7 +14,6 @@ const JSON_CLIENTS = [
   ["consent_public_clients.html", "call", ["/probe"]],
   ["consent_publishing.html", "call", ["/probe"]],
   ["policy_publication_links.html", "call", ["/probe"]],
-  ["privacy_data_discovery.html", "call", ["/probe"]],
   ["third_party_intelligence.html", "request", ["/probe", "GET", {}]],
   ["consent_scan_notice_proposals.html", "call", ["/probe"]],
   ["consent_profile_data.html", "request", ["/probe"]],
