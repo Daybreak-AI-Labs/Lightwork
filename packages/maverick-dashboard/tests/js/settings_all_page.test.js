@@ -150,3 +150,122 @@ test("module switches call the module service and search filters rows",async()=>
     assert.match(ui.d.getElementById("settings-all-filter-status").textContent,/1 setting shown/);
   }finally{ui.dom.window.close();}
 });
+
+// ---- guided forms: publisher keys, tables, parts of a group -----------------
+const FORMS=`<!doctype html><main>
+<div role="status" id="settings-all-status" hidden></div>
+<input id="settings-all-search"><select id="settings-all-group"><option value="">All</option></select>
+<input type="checkbox" id="settings-all-changed"><p id="settings-all-filter-status"></p>
+<div id="settings-all-groups">
+<section class="settings-all-group" data-group="safety"><h2>Safety</h2>
+ <select data-subgroup-pick><option value="">Everything</option><option value="safety-skill-publishers">Skill publishers</option><option value="safety-limits">Limits</option></select>
+ <h3 data-subgroup-head="safety-skill-publishers">Skill publishers</h3>
+ <div class="settings-all-row" data-setting-id="skills.trusted_pubkeys" data-control="keys" data-source="here" data-subgroup="safety-skill-publishers" data-search="trusted skill publishers">
+  <strong data-value-text>1 trusted key</strong><span data-source-text>Set here</span>
+  <div data-keys><ul data-key-list><li data-key-item data-key="aa11"><span>Publisher key, fingerprint <strong>AAAA BBBB</strong></span><button data-key-remove>Remove</button></li></ul>
+  <p data-keys-empty hidden>No publishers are trusted yet.</p>
+  <input type="file" data-key-file><textarea data-key-paste></textarea><button data-key-add>Add this key</button></div>
+  <button data-save>Save</button><button data-reset>Reset to default</button><p data-row-status></p></div>
+ <p data-subgroup-actions="safety-skill-publishers"><button data-save-subgroup="safety-skill-publishers">Save Skill publishers</button></p>
+ <h3 data-subgroup-head="safety-limits">Limits</h3>
+ <div class="settings-all-row" data-setting-id="rate_limits.other" data-control="table" data-source="default" data-subgroup="safety-limits" data-search="usage limits other tools">
+  <strong data-value-text>None</strong><span data-source-text>Default</span>
+  <div data-table data-row-kind="rate" data-choices-url="/api/v1/settings/catalog/choices/rate_limits.other">
+   <table><tbody data-table-body></tbody></table><p data-table-empty>No other limits yet.</p>
+   <input type="search" data-table-search><select data-table-pick><option value="">Search above</option></select><button data-table-add>Add a limit</button></div>
+  <button data-save>Save</button><button data-reset>Reset to default</button><p data-row-status></p></div>
+ <div class="settings-all-row" data-setting-id="mcp_sidecar.tools" data-control="table" data-source="default" data-subgroup="safety-limits" data-search="reviewed tools">
+  <strong data-value-text>None</strong><span data-source-text>Default</span>
+  <div data-table data-row-kind="risk"><table><tbody data-table-body></tbody></table><p data-table-empty>No tools are offered yet.</p>
+   <input type="text" data-table-newname><select data-table-newrisk><option value="low">Low risk</option><option value="high" selected>High risk</option></select><button data-table-add>Add a tool</button></div>
+  <button data-save>Save</button><button data-reset>Reset to default</button><p data-row-status></p></div>
+ <p data-subgroup-actions="safety-limits"><button data-save-subgroup="safety-limits">Save Limits</button></p>
+</section></div><p id="settings-all-empty" hidden></p></main>`;
+
+async function formsPage(handler){
+  const dom=new JSDOM(FORMS,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
+  const w=dom.window,d=w.document,calls=[],confirms=[];
+  w.mvConfirm=async message=>{confirms.push(message);return true;};
+  w.mvErrorText=(failure,action)=>"Could not "+action+".";
+  w.mvToast=()=>{};
+  w.fetch=async(url,init={})=>{
+    const body=init.body?JSON.parse(init.body):null;calls.push({url,method:init.method||"GET",body});
+    return handler(url,body,calls.length);
+  };
+  w.eval(read("static/lightwork-settings-all.js"));
+  await flush();
+  return {dom,w,d,calls,confirms};
+}
+
+test("publisher keys: paste adds a key, remove drops one, save sends kept and new keys",async()=>{
+  const ui=await formsPage(()=>reply(200,{changed:["skills.trusted_pubkeys"],...stateFor("skills.trusted_pubkeys",
+    {key_items:[{value:"bb22",fingerprint:"CCCC DDDD"}],value_text:"1 trusted key"})}));
+  try{
+    const r=row(ui,"skills.trusted_pubkeys");
+    await click(r.querySelector("[data-key-add]"));
+    assert.match(r.querySelector("[data-row-status]").textContent,/Paste the publisher key first/);
+    r.querySelector("[data-key-paste]").value="ssh-ed25519 AAAA publisher";
+    await click(r.querySelector("[data-key-add]"));
+    assert.match(r.textContent,/New publisher key/);
+    await click(r.querySelector("[data-key-remove]"));
+    await click(r.querySelector("[data-save]"));
+    assert.deepEqual(ui.calls[0].body.changes,[{id:"skills.trusted_pubkeys",value:["ssh-ed25519 AAAA publisher"]}]);
+    // The page redraws the list from the server: fingerprints only.
+    assert.match(r.querySelector("[data-key-list]").textContent,/CCCC DDDD/);
+    assert.doesNotMatch(r.querySelector("[data-key-list]").textContent,/ssh-ed25519/);
+    assert.equal(r.querySelector("[data-keys-empty]").hidden,true);
+  }finally{ui.dom.window.close();}
+});
+
+test("usage limits: the tool picker loads live choices, search narrows it, rows are sent",async()=>{
+  const ui=await formsPage(url=>url.indexOf("/choices/")!==-1
+    ?reply(200,{choices:[{value:"mcp_*",label:"Every tool from outside tool servers"},{value:"wiki_search",label:"Wiki search"}]})
+    :reply(200,{changed:["rate_limits.other"],groups:[]}));
+  try{
+    const r=row(ui,"rate_limits.other");
+    await click(r.querySelector("[data-table-add]"));
+    assert.match(r.querySelector("[data-row-status]").textContent,/Find and choose a tool first/);
+    const search=r.querySelector("[data-table-search]");
+    search.value="wiki";search.dispatchEvent(new ui.w.Event("input",{bubbles:true}));await flush();
+    const pick=r.querySelector("[data-table-pick]");
+    assert.deepEqual([...pick.options].map(o=>o.value),["","wiki_search"]);
+    pick.value="wiki_search";
+    await click(r.querySelector("[data-table-add]"));
+    const tr=r.querySelector("[data-table-row]");
+    assert.equal(tr.querySelector("[data-row-label]").textContent,"Wiki search");
+    assert.ok(tr.querySelector("[data-count]").getAttribute("aria-label"));
+    tr.querySelector("[data-count]").value="5";tr.querySelector("[data-period]").value="3600";
+    await click(ui.d.querySelector('[data-save-subgroup="safety-limits"]'));
+    const save=ui.calls.find(c=>c.method==="POST");
+    assert.deepEqual(save.body.changes,[{id:"rate_limits.other",value:[{name:"wiki_search",count:5,seconds:3600}]}]);
+  }finally{ui.dom.window.close();}
+});
+
+test("reviewed tools: names are checked in the page and the risk level is sent",async()=>{
+  const ui=await formsPage(()=>reply(200,{changed:["mcp_sidecar.tools"],groups:[]}));
+  try{
+    const r=row(ui,"mcp_sidecar.tools");
+    r.querySelector("[data-table-newname]").value="bad name";
+    await click(r.querySelector("[data-table-add]"));
+    assert.match(r.querySelector("[data-row-status]").textContent,/letters, numbers/);
+    r.querySelector("[data-table-newname]").value="search.docs";
+    r.querySelector("[data-table-newrisk]").value="low";
+    await click(r.querySelector("[data-table-add]"));
+    assert.equal(r.querySelector("[data-table-empty]").hidden,true);
+    await click(r.querySelector("[data-save]"));
+    assert.deepEqual(ui.calls[0].body.changes,[{id:"mcp_sidecar.tools",value:[{name:"search.docs",risk:"low"}]}]);
+  }finally{ui.dom.window.close();}
+});
+
+test("choosing one part of a group shows only that part and its save button",async()=>{
+  const ui=await formsPage(()=>reply(200,{}));
+  try{
+    const pick=ui.d.querySelector("[data-subgroup-pick]");
+    pick.value="safety-limits";pick.dispatchEvent(new ui.w.Event("change",{bubbles:true}));
+    assert.equal(row(ui,"skills.trusted_pubkeys").hidden,true);
+    assert.equal(row(ui,"rate_limits.other").hidden,false);
+    assert.equal(ui.d.querySelector('[data-subgroup-head="safety-skill-publishers"]').hidden,true);
+    assert.equal(ui.d.querySelector('[data-subgroup-actions="safety-skill-publishers"]').hidden,true);
+    assert.equal(ui.d.querySelector('[data-subgroup-actions="safety-limits"]').hidden,false);
+  }finally{ui.dom.window.close();}
+});

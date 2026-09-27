@@ -47,6 +47,11 @@ def test_every_catalog_key_is_read_by_the_kernel(setting):
         )
         assert registered, f"{setting.id}: {setting.key!r} is not a registered tool"
         assert _quoted(reader, setting.top)
+    elif setting.key_kind == "entries":
+        # The rows are the table's own keys: the reader must read the whole table.
+        assert _quoted(reader, setting.top), f"{setting.id}: {setting.reader} never reads it"
+        for fixed in setting.fixed_keys:
+            assert f"{setting.top}.{fixed}" in catalog.BY_ID, fixed
     else:
         assert _quoted(reader, setting.key), (
             f"{setting.id}: key {setting.key!r} is not read by {setting.reader}"

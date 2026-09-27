@@ -11200,6 +11200,75 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Data broker deletion requests",
         "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
     },
+    "ai_regulatory_feed": {  # ai_regulatory_feed.enabled -> finance_operations + evidence_gateway
+        "label": "AI regulation updates",
+        "requires": ("finance_operations", "evidence_gateway"),
+    },
+    "ai_business_intake": {  # ai_business_intake.enabled -> model_risk_assurance
+        "label": "AI project intake",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_dynamic_risk": {  # ai_dynamic_risk.enabled
+        "label": "Changing AI risk scores",
+        "requires": (),
+    },
+    "ai_policy_management": {  # ai_policy_management.enabled
+        "label": "AI policy library",
+        "requires": (),
+    },
+    "ai_runtime_guardrails": {  # ai_runtime_guardrails.enabled
+        "label": "AI guardrails while running",
+        "requires": (),
+    },
+    "ai_explainability": {  # ai_explainability.enabled
+        "label": "AI explanation records",
+        "requires": (),
+    },
+    "ai_conformity_workflow": {  # ai_conformity_workflow.enabled -> model_risk_assurance
+        "label": "AI conformity reviews",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_insurability": {  # ai_insurability.enabled
+        "label": "AI insurance readiness",
+        "requires": (),
+    },
+    "ai_regulated_verticals": {  # ai_regulated_verticals.enabled
+        "label": "AI rules for regulated industries",
+        "requires": (),
+    },
+    "ai_bank_mrm": {  # ai_bank_mrm.enabled
+        "label": "Bank model risk management",
+        "requires": (),
+    },
+    "ai_discovery_sensors": {  # ai_discovery_sensors.enabled
+        "label": "Find unlisted AI use",
+        "requires": (),
+    },
+    "portfolio_risk": {  # portfolio_risk.enabled -> model_risk_assurance
+        "label": "AI portfolio risk",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_cost_roi": {  # ai_cost_roi.enabled
+        "label": "AI cost and return",
+        "requires": (),
+    },
+    "eu_ai_incidents": {  # eu_ai_incidents.enabled
+        "label": "EU AI incident reports",
+        "requires": (),
+    },
+    "grc_outbound_sync": {  # grc_outbound_sync.policy_from_config
+        "label": "Outbound assurance records",
+        "requires": (),
+    },
+    "incident_attachment_metadata": {  # incident_attachment_metadata.enabled
+        "label": "Incident attachments",
+        "requires": (),
+    },
+    # agent_topology.enabled -> entity_graph (on by default) + model_risk_assurance
+    "agent_topology": {
+        "label": "Agent dependency map",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
 }
 
 

@@ -374,6 +374,15 @@ def _toml_str(value: str) -> str:
     return json.dumps(str(value))  # JSON strings are valid TOML basic strings
 
 
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_key(key: object) -> str:
+    """A table key, quoted unless TOML allows it bare (``"mcp_*"`` must be)."""
+    text = str(key)
+    return text if _BARE_KEY.fullmatch(text) else _toml_str(text)
+
+
 def _toml_value(value) -> str:
     """Render the bounded TOML value types load_overlay can return.
 
@@ -438,13 +447,14 @@ def _dump_selector_sections(lines: list[str], data: dict) -> None:
             continue
         lines.append(f"[{section}]")
         for k in keys:
-            lines.append(f"{k} = {_toml_value(tbl[k])}")
+            lines.append(f"{_toml_key(k)} = {_toml_value(tbl[k])}")
         lines.append("")
 
 
 def _dump_plugins(lines: list[str], plugins: dict) -> None:
     """Emit [plugins] -- the dashboard-install allowlist + opt-in switch
-    (set_installable_plugins / set_plugin_install_allowed)."""
+    (set_installable_plugins / set_plugin_install_allowed) and the permission
+    grants the All settings page writes (grant / enforce_permissions)."""
     if not plugins:
         return
     lines.append("[plugins]")
@@ -454,6 +464,12 @@ def _dump_plugins(lines: list[str], plugins: dict) -> None:
         )
     if plugins.get("installable"):
         lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
+    if isinstance(plugins.get("grant"), list):
+        lines.append(f"grant = {_toml_value(list(plugins['grant']))}")
+    if isinstance(plugins.get("enforce_permissions"), bool):
+        lines.append(
+            f"enforce_permissions = {'true' if plugins['enforce_permissions'] else 'false'}"
+        )
     lines.append("")
 
 
@@ -483,7 +499,7 @@ def _dump(data: dict) -> str:
         if tbl:
             lines.append(f"[{section}]")
             for k in sorted(tbl):
-                lines.append(f"{k} = {_toml_value(tbl[k])}")
+                lines.append(f"{_toml_key(k)} = {_toml_value(tbl[k])}")
             lines.append("")
     _dump_selector_sections(lines, data)
     _dump_plugins(lines, data.get("plugins") or {})
@@ -522,7 +538,10 @@ def _dump(data: dict) -> str:
         if not ccfg:
             continue
         lines.append(f"[channels.{name}]")
-        lines.append(f"enabled = {'true' if ccfg.get('enabled') else 'false'}")
+        # Only an explicit on/off is written: a channel whose allow list alone
+        # was set on the All settings page must keep the installer's on/off.
+        if "enabled" in ccfg:
+            lines.append(f"enabled = {'true' if ccfg.get('enabled') else 'false'}")
         secret_fields = {
             field["key"]
             for field in (_CHANNELS_BY_NAME.get(name) or {}).get("fields", [])
@@ -532,14 +551,10 @@ def _dump(data: dict) -> str:
             if k == "enabled":
                 continue
             v = ccfg[k]
-            if isinstance(v, bool):
-                lines.append(f"{k} = {'true' if v else 'false'}")
-            elif isinstance(v, int):
-                lines.append(f"{k} = {v}")
-            else:
-                if k in secret_fields:
-                    v = _seal_global_secret(v)
-                lines.append(f"{k} = {_toml_str(v)}")
+            if isinstance(v, str) and k in secret_fields:
+                v = _seal_global_secret(v)
+            # Catalog secrets arrive already sealed (set_catalog_values).
+            lines.append(f"{_toml_key(k)} = {_toml_value(v)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -1183,6 +1198,25 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "explainability",
     "content_provenance",
     "breach_notification",
+    # agent_topology.enabled also needs the entity graph, which is on by
+    # default and has its own switch on the Learning page.
+    "agent_topology",
+    "ai_regulatory_feed",
+    "ai_business_intake",
+    "ai_dynamic_risk",
+    "ai_policy_management",
+    "ai_runtime_guardrails",
+    "ai_explainability",
+    "ai_conformity_workflow",
+    "ai_insurability",
+    "ai_regulated_verticals",
+    "ai_bank_mrm",
+    "ai_discovery_sensors",
+    "portfolio_risk",
+    "ai_cost_roi",
+    "eu_ai_incidents",
+    "grc_outbound_sync",
+    "incident_attachment_metadata",
 })
 
 # Top-level tables the module paths live under; _dump is an allowlist, so a
@@ -1222,7 +1256,7 @@ def set_module_enables(paths, enabled: bool) -> None:
 
 # Tables with their own serializer above; every other catalog table goes
 # through the generic allowlisted loop in _dump.
-_CATALOG_SPECIAL_SECTIONS = frozenset({"dashboard", "sandbox", "webhooks"})
+_CATALOG_SPECIAL_SECTIONS = frozenset({"channels", "dashboard", "plugins", "sandbox", "webhooks"})
 
 
 def _catalog_generic_sections() -> tuple[str, ...]:
@@ -1248,12 +1282,19 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     """
     from .settings_catalog import SETTINGS
 
-    by_path = {s.path: s for s in SETTINGS}
+    by_path = {s.path: s for s in SETTINGS if s.key_kind != "entries"}
+    # "entries" tables (usage limits for any tool) own every other key of
+    # their table: one path per row, never a key another setting owns.
+    entries = {s.path: s for s in SETTINGS if s.key_kind == "entries"}
     if not isinstance(changes, dict) or not changes:
         raise ValueError("no settings given")
     for path in changes:
-        if path not in by_path:
+        table = entries.get(tuple(path[:-1]))
+        if path in by_path:
+            continue
+        if table is None or not path[-1] or path[-1] in table.fixed_keys:
             raise ValueError("unknown setting")
+        by_path[path] = table
     previous: dict[tuple[str, ...], object] = {}
     with _locked():
         data = _load_overlay_for_update()
