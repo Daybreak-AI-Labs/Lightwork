@@ -41,7 +41,7 @@ def test_mirror_uploads_when_configured(monkeypatch, tmp_path):
     client.put_object.assert_called_once()
     kw = client.put_object.call_args.kwargs
     assert kw["Bucket"] == "my-bucket"
-    assert kw["Key"] == f"attach/7/{st.path.name}"
+    assert kw["Key"] == f"attach/__default__/7/{st.path.name}"  # tenant-scoped
     assert kw["Body"] == b"world"
     assert kw["ContentType"] == "text/plain"
 
@@ -67,7 +67,7 @@ def test_s3_fetch_pulls_missing_file(monkeypatch, tmp_path):
     assert p is not None and p.read_bytes() == data
     assert file_lock.private_path_is_restricted(p.parent, 0o700)
     assert file_lock.private_path_is_restricted(p)
-    client.get_object.assert_called_once_with(Bucket="b", Key=f"9/{name}")
+    client.get_object.assert_called_once_with(Bucket="b", Key=f"__default__/9/{name}")
     # Second fetch short-circuits on the local file.
     client.get_object.reset_mock()
     assert att.s3_fetch(9, name, root=tmp_path) == p
@@ -116,7 +116,7 @@ def test_s3_fetch_enforces_file_size_limit(monkeypatch, tmp_path):
     else:  # pragma: no cover - keeps the assertion message useful
         raise AssertionError("accepted oversized S3 attachment")
 
-    body.read.assert_called_once_with(5)
+    body.read.assert_called_once_with(4 + att._SEAL_OVERHEAD + 1)
     assert not (tmp_path / "9" / "abcd1234-zz.txt").exists()
 
 
@@ -174,3 +174,56 @@ def test_s3_fetch_rejects_content_address_mismatch(monkeypatch, tmp_path):
         raise AssertionError("accepted an S3 object under the wrong content address")
 
     assert not (tmp_path / "9" / name).exists()
+
+
+def test_s3_keys_are_tenant_scoped_and_legacy_objects_still_fetch(monkeypatch, tmp_path):
+    """Goal ids are per-tenant counters: two tenants must not share an object
+    key. Objects mirrored before scoping are still found under the old key."""
+    from maverick.paths import tenant_scope
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    client = _fake_boto3(monkeypatch)
+    with tenant_scope(tenant="acme"):
+        assert att._s3_key(3, "n.txt") == "acme/3/n.txt"
+    with tenant_scope(tenant="beta"):
+        assert att._s3_key(3, "n.txt") == "beta/3/n.txt"
+    data = b"legacy-object"
+    name = _content_name(data)
+    body = MagicMock()
+    body.read.return_value = data
+
+    def get_object(Bucket, Key):
+        if Key != f"9/{name}":
+            raise RuntimeError("NoSuchKey")
+        return {"Body": body}
+
+    client.get_object.side_effect = get_object
+    p = att.s3_fetch(9, name, root=tmp_path)
+    assert p is not None and att.read_bytes(p) == data
+
+
+def test_sealed_attachments_bind_goal_name_and_tenant(monkeypatch, tmp_path):
+    """With at-rest encryption on, bytes on disk and in the mirror are sealed
+    and only open for the same tenant, goal and stored name."""
+    import pytest
+    from maverick import crypto_at_rest
+    from maverick.paths import tenant_scope
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    client = _fake_boto3(monkeypatch)
+    secret = b"quarterly numbers: 4.2M"
+    with tenant_scope(tenant="acme"):
+        st = att.store(5, "q3.txt", "text/plain", secret, root=tmp_path)
+        raw = st.path.read_bytes()
+        assert crypto_at_rest.is_bound(raw) and secret not in raw
+        assert client.put_object.call_args.kwargs["Body"] == raw  # mirror sealed too
+        assert att.read_bytes(st.path) == secret
+        with att.plaintext_path(st.path) as plain:
+            assert plain.read_bytes() == secret and plain != st.path
+        assert not plain.exists()  # temporary plaintext removed
+        moved = tmp_path / "6" / st.path.name
+        moved.parent.mkdir()
+        moved.write_bytes(raw)
+        with pytest.raises(crypto_at_rest.EncryptionUnavailable):
+            att.read_bytes(moved)  # another goal
+    with tenant_scope(tenant="beta"), pytest.raises(crypto_at_rest.EncryptionUnavailable):
+        att.read_bytes(st.path)  # another tenant

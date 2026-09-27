@@ -37,6 +37,9 @@ import logging
 import os
 import re
 import stat
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
@@ -271,6 +274,61 @@ def _root_for_goal(goal_id: int, root: Path | None = None) -> Path:
         raise AttachmentRejected("attachment storage directory is not private") from exc
 
 
+# ---- at-rest sealing --------------------------------------------------------
+#
+# With at-rest encryption on, attachment bytes are sealed on disk and in the S3
+# mirror, bound to the tenant AND to ``attachment/<goal>/<stored name>``: a file
+# copied to another goal, name or tenant does not decrypt there. Content
+# addresses (sha256) stay those of the plaintext. Files written before sealing
+# was enabled remain readable as-is.
+
+_SEAL_OVERHEAD = 64  # bound header + nonce + tag, with room to spare
+
+
+def _seal_context(path: Path) -> str:
+    return f"attachment/{path.parent.name}/{path.name}"
+
+
+def _encode_for_disk(data: bytes, path: Path) -> bytes:
+    from .crypto_at_rest import at_rest_enabled, seal_bound
+    return seal_bound(data, _seal_context(path)) if at_rest_enabled() else data
+
+
+def _decode_stored(raw: bytes, path: Path) -> bytes:
+    from .crypto_at_rest import is_bound, unseal_bound
+    return unseal_bound(raw, _seal_context(path)) if is_bound(raw) else raw
+
+
+def is_sealed_file(path: str | Path) -> bool:
+    """Whether a stored attachment is sealed (reads only its header)."""
+    from .crypto_at_rest import is_bound
+    with open(path, "rb") as fh:
+        return is_bound(fh.read(16))
+
+
+def read_bytes(path: str | Path) -> bytes:
+    """The plaintext of a stored attachment (sealed or legacy)."""
+    path = Path(path)
+    return _decode_stored(path.read_bytes(), path)
+
+
+@contextmanager
+def plaintext_path(path: str | Path) -> Iterator[Path]:
+    """A path external tools (STT, document parsers) can open. A sealed file is
+    decrypted into a private temporary directory, removed on exit."""
+    path = Path(path)
+    raw = path.read_bytes()
+    from .crypto_at_rest import is_bound
+    if not is_bound(raw):
+        yield path
+        return
+    with tempfile.TemporaryDirectory(prefix="mvk-att-") as tmp:
+        os.chmod(tmp, 0o700)
+        plain = Path(tmp) / path.name
+        file_lock.atomic_create_bytes(plain, _decode_stored(raw, path))
+        yield plain
+
+
 # ---- S3 mirror (opt-in) -----------------------------------------------------
 
 def _s3_settings() -> tuple[str, str]:
@@ -307,8 +365,20 @@ def _s3_client():
 
 
 def _s3_key(goal_id: int, name: str) -> str:
+    """Tenant-scoped object key: goal ids are per-tenant counters, so two
+    tenants sharing a bucket must never share ``<goal>/<name>``."""
     bucket, prefix = _s3_settings()
     assert bucket
+    from urllib.parse import quote
+
+    from .paths import current_tenant_id
+    tenant = quote(current_tenant_id() or "__default__", safe="")
+    return f"{prefix}{tenant}/{goal_id}/{name}"
+
+
+def _legacy_s3_key(goal_id: int, name: str) -> str:
+    """Pre-tenant-scoping key, read-only fallback for objects mirrored earlier."""
+    _bucket, prefix = _s3_settings()
     return f"{prefix}{goal_id}/{name}"
 
 
@@ -446,7 +516,7 @@ def _verify_stored_attachment(path: Path, expected_digest: str) -> None:
             raise AttachmentRejected("stored attachment identity changed")
         with os.fdopen(fd, "rb") as fh:
             fd = -1
-            payload = fh.read(MAX_FILE_BYTES + 1)
+            payload = fh.read(MAX_FILE_BYTES + _SEAL_OVERHEAD + 1)
     except AttachmentRejected:
         raise
     except OSError as exc:
@@ -455,6 +525,10 @@ def _verify_stored_attachment(path: Path, expected_digest: str) -> None:
         if fd >= 0:
             os.close(fd)
 
+    try:
+        payload = _decode_stored(payload, path)
+    except Exception as exc:
+        raise AttachmentRejected("stored attachment could not be decrypted here") from exc
     if len(payload) > MAX_FILE_BYTES:
         raise AttachmentRejected("stored attachment exceeds the file-size limit")
     actual = hashlib.sha256(payload).hexdigest()
@@ -500,13 +574,16 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
     try:
         client = _s3_client()
         bucket, _ = _s3_settings()
-        obj = client.get_object(Bucket=bucket, Key=_s3_key(goal_id, name))
+        try:
+            obj = client.get_object(Bucket=bucket, Key=_s3_key(goal_id, name))
+        except Exception:  # noqa: BLE001 -- fall back to a pre-scoping object
+            obj = client.get_object(Bucket=bucket, Key=_legacy_s3_key(goal_id, name))
         content_length = obj.get("ContentLength")
         if content_length is not None and int(content_length) > MAX_FILE_BYTES:
             raise AttachmentRejected(
                 f"file too large: {content_length} bytes (limit {MAX_FILE_BYTES})"
             )
-        data = obj["Body"].read(MAX_FILE_BYTES + 1)
+        data = _decode_stored(obj["Body"].read(MAX_FILE_BYTES + _SEAL_OVERHEAD + 1), dest)
         if len(data) > MAX_FILE_BYTES:
             raise AttachmentRejected(
                 f"file too large: {len(data)} bytes (limit {MAX_FILE_BYTES})"
@@ -532,7 +609,7 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
     except Exception as e:  # noqa: BLE001 -- absent object / S3 down -> None
         log.warning("attachment S3 fetch failed: %s", e)
         return None
-    _publish_attachment(dest, data, actual_digest)
+    _publish_attachment(dest, _encode_for_disk(data, dest), actual_digest)
     return dest
 
 
@@ -605,9 +682,10 @@ def store(
     # filename don't collide and so a re-upload of the same bytes is a
     # no-op (idempotent).
     dest = dest_dir / f"{sha256[:16]}-{filename}"
-    created = _publish_attachment(dest, data, sha256)
+    on_disk = _encode_for_disk(data, dest)
+    created = _publish_attachment(dest, on_disk, sha256)
     if created and s3_mirror_enabled():
-        _s3_mirror(goal_id, dest, mime, data)
+        _s3_mirror(goal_id, dest, mime, on_disk)
 
     return Stored(
         filename=filename,
@@ -717,8 +795,8 @@ def content_blocks_for_goal(
     for a in world.list_attachments(goal_id):
         if a.mime in ALLOWED_IMAGE_MIMES:
             try:
-                b = Path(a.path).read_bytes()
-            except OSError:
+                b = read_bytes(a.path)
+            except (OSError, AttachmentRejected, ValueError):
                 continue
             blocks.append({
                 "type": "image",
@@ -732,8 +810,8 @@ def content_blocks_for_goal(
             if a.size_bytes > doc_budget:
                 continue  # over budget: stays reachable via the tools
             try:
-                b = Path(a.path).read_bytes()
-            except OSError:
+                b = read_bytes(a.path)
+            except (OSError, AttachmentRejected, ValueError):
                 continue
             doc_budget -= len(b)
             doc_blocks.append({
@@ -753,8 +831,8 @@ def content_blocks_for_goal(
             if a.size_bytes > text_budget:
                 continue
             try:
-                body = Path(a.path).read_text(encoding="utf-8", errors="replace")
-            except OSError:
+                body = read_bytes(a.path).decode("utf-8", errors="replace")
+            except (OSError, AttachmentRejected, ValueError):
                 continue
             if not _shield_allows_companion_text(shield, a.filename, body):
                 continue
@@ -895,7 +973,11 @@ def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int
         name = a.filename + suffix
         if name in have:
             continue
-        result = produce(Path(a.path))
+        try:
+            with plaintext_path(a.path) as source:
+                result = produce(source)
+        except (OSError, ValueError):
+            continue
         if result is None:
             continue
         try:

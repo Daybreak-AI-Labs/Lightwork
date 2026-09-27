@@ -98,3 +98,19 @@ def test_download_404_for_wrong_attachment(monkeypatch, tmp_path):
     gid = app_mod._world().create_goal("empty", "")
     r = c.get(f"/api/v1/goals/{gid}/attachments/999/download")
     assert r.status_code == 404
+
+
+def test_sealed_attachment_downloads_as_plaintext(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    c = _client()
+    from maverick_dashboard import app as app_mod
+    gid = app_mod._world().create_goal("sealed file", "")
+    r = c.post(f"/api/v1/goals/{gid}/attachments",
+               files={"file": ("notes.txt", io.BytesIO(b"board minutes"), "text/plain")})
+    assert r.status_code == 201, r.text
+    att = app_mod._world().list_attachments(gid)[0]
+    from pathlib import Path
+    assert b"board minutes" not in Path(att.path).read_bytes()  # sealed on disk
+    dl = c.get(f"/api/v1/goals/{gid}/attachments/{r.json()['id']}/download")
+    assert dl.status_code == 200 and dl.content == b"board minutes"

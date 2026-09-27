@@ -233,6 +233,7 @@ _DEFAULT_RISK: dict[str, str] = {
     "read_file": "low",
     "sql_query_read": "low",  # forced SQLite read-only connection and authorizer
     "spreadsheet_read": "low",  # info/read only; no edits or recalculation
+    "read_attachment": "low",
     "list_dir": "low",
     "list_specialists": "low",
     "repo_map": "low",
