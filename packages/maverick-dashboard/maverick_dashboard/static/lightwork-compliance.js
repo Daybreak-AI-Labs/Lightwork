@@ -57,7 +57,9 @@
         if (body.active) setTimeout(function () { location.reload(); }, 800);
         else btn.disabled = false;
       }).catch(function (failure) {
-        say(status, errorText(failure, 'turn this protection on'));
+        say(status, failure && failure.status === 409
+          ? 'Set up sign-in for Lightwork first. Once this is on, everyone must sign in.'
+          : errorText(failure, 'turn this protection on'));
         btn.disabled = false;
       });
     });

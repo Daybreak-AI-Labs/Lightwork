@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import has_permission, require_permission
+from .auth import has_global_permission, has_permission, require_permission
 
 PAGE_PATH = "/compliance/obligations"
 API_BASE = "/api/v1/regulatory"
@@ -55,6 +55,7 @@ def create_regulatory_obligations_page_router(templates: Jinja2Templates) -> API
                 "page_path": PAGE_PATH,
                 "csp_style_nonce": nonce,
                 "rob_can_audit": has_permission(request, "audit"),
+                "rob_can_admin": has_global_permission(request, "admin"),
             },
         )
         for name, value in _HEADERS.items():

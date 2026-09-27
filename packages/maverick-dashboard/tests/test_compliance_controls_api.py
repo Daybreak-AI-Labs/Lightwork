@@ -156,3 +156,11 @@ def test_compliance_template_passes_a11y_audit():
 
     template = Path(app_mod.__file__).resolve().parent / "templates" / "compliance.html"
     assert audit_file(template) == []
+
+
+def test_strict_mode_is_refused_until_sign_in_exists(monkeypatch):
+    from maverick_dashboard import settings_store
+
+    r = client.post("/api/v1/compliance/switches/strict_mode")
+    assert r.status_code == 409 and "sign-in" in r.json()["detail"]
+    assert "enterprise" not in settings_store.load_overlay()

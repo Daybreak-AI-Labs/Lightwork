@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 from pathlib import Path
 
@@ -983,6 +984,7 @@ COMPLIANCE_SETTINGS: dict[tuple[str, str], type] = {
     ("encryption", "at_rest"): bool,
     ("enterprise", "mode"): bool,
     ("compliance", "disclosure_text"): str,
+    ("compliance", "profiles"): list,
     ("retention", "audit_days"): int,
     ("retention", "episodes_days"): int,
     ("retention", "events_days"): int,
@@ -993,6 +995,7 @@ COMPLIANCE_SETTING_SECTIONS: tuple[str, ...] = tuple(
     dict.fromkeys(section for section, _key in COMPLIANCE_SETTINGS)
 )
 _RETENTION_DAY_BOUNDS = (1, 3650)
+_PROFILE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
 def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
@@ -1008,6 +1011,20 @@ def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
             if value is not True:
                 # Protections can only be switched on from the dashboard.
                 raise ValueError("unknown setting")
+        elif kind is list:
+            # Regulation keys only; callers must pass a superset of what is
+            # already active (checked where the active set is known).
+            if (
+                not isinstance(value, list)
+                or not value
+                or len(value) > 16
+                or any(
+                    not isinstance(item, str) or not _PROFILE_KEY.fullmatch(item)
+                    for item in value
+                )
+            ):
+                raise ValueError("regulation list is invalid")
+            value = list(dict.fromkeys(value))
         elif kind is int:
             low, high = _RETENTION_DAY_BOUNDS
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:

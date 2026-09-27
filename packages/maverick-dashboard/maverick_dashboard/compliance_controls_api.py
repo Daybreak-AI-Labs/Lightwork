@@ -207,6 +207,25 @@ def _settings_for(key: str) -> dict[tuple[str, str], object]:
     raise HTTPException(status_code=404, detail="That protection is not available here.")
 
 
+#: Protections that put the deployment into a regulated posture, which makes
+#: the dashboard require sign-in. Turning one on without sign-in configured
+#: would lock everyone out, so it is refused until sign-in is set up.
+_NEEDS_SIGN_IN = frozenset({"strict_mode"})
+SIGN_IN_FIRST = (
+    "Set up sign-in for Lightwork first. Once this is on, everyone must sign in, "
+    "so without sign-in nobody could open the dashboard."
+)
+
+
+def sign_in_configured() -> bool:
+    """Whether the dashboard has a sign-in mechanism (token, OIDC, SSO...)."""
+    import os
+
+    from . import auth
+
+    return bool(os.environ.get("MAVERICK_DASHBOARD_TOKEN")) or not auth.auth_genuinely_off()
+
+
 def _status_by_control() -> dict[str, str]:
     from maverick.compliance import compliance_report
 
@@ -228,6 +247,8 @@ async def turn_on_protection(request: Request, key: str) -> dict:
     require_global_permission(request, "admin")
     if key not in SWITCHES:
         raise HTTPException(status_code=404, detail="That protection is not available here.")
+    if key in _NEEDS_SIGN_IN and not sign_in_configured():
+        raise HTTPException(status_code=409, detail=SIGN_IN_FIRST)
     from . import settings_store
 
     updates = _settings_for(key)
@@ -660,4 +681,4 @@ async def control_finder(request: Request, q: str = "") -> dict:
     }
 
 
-__all__ = ["CONTROL_GUIDE", "RETENTION_FIELDS", "STATUS_TEXT", "SWITCHES", "guide_for", "router"]
+__all__ = ["CONTROL_GUIDE", "SIGN_IN_FIRST", "sign_in_configured", "RETENTION_FIELDS", "STATUS_TEXT", "SWITCHES", "guide_for", "router"]

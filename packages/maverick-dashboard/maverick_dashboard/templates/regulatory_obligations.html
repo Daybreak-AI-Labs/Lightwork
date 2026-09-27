@@ -1,48 +1,113 @@
 {% extends "base.html" %}
-{% block title %}Regulatory Obligations - Lightwork{% endblock %}
+{% block title %}Regulations and Rules · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .rob-shell{--rob-glass:color-mix(in srgb,var(--panel) 66%,transparent);--rob-soft:color-mix(in srgb,var(--panel) 45%,transparent);--rob-edge:color-mix(in srgb,var(--text) 14%,transparent);display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr);isolation:isolate;min-width:0;overflow-wrap:anywhere;position:relative}
-  .rob-shell::before{background:radial-gradient(circle at 10% 8%,color-mix(in srgb,#34d399 16%,transparent),transparent 30rem),radial-gradient(circle at 88% 18%,color-mix(in srgb,#3b82f6 15%,transparent),transparent 32rem),radial-gradient(circle at 50% 94%,color-mix(in srgb,#f59e0b 11%,transparent),transparent 28rem);content:"";inset:0;pointer-events:none;position:fixed;z-index:-1}
-  .rob-glass{background:var(--rob-glass);border:1px solid var(--rob-edge);box-shadow:0 18px 52px color-mix(in srgb,#000 22%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 13%,transparent);-webkit-backdrop-filter:blur(26px) saturate(155%);backdrop-filter:blur(26px) saturate(155%)}
-  .rob-hero{align-items:center;border-radius:1.65rem;display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr) minmax(17rem,25rem);overflow:hidden;padding:clamp(1.4rem,3vw,2.8rem)}
-  .rob-kicker{color:var(--accent);font-size:.73rem;font-weight:850;letter-spacing:.13em;margin:0 0 .5rem;text-transform:uppercase}.rob-title{font-size:clamp(2.2rem,6vw,4.7rem);letter-spacing:-.055em;line-height:.95;margin:0;max-width:13ch}.rob-lede{color:var(--text-muted);line-height:1.65;margin:1rem 0 0;max-width:72ch}
-  .rob-health{background:var(--rob-soft);border-radius:1.2rem;display:grid;gap:.8rem;padding:1.1rem}.rob-row,.rob-card-head{align-items:center;display:flex;flex-wrap:wrap;gap:.7rem;justify-content:space-between}.rob-mark{align-items:center;background:var(--rob-soft);border:1px solid var(--rob-edge);border-radius:999px;display:inline-flex;font-size:.72rem;font-weight:850;gap:.42rem;padding:.34rem .68rem;text-transform:uppercase}.rob-mark::before{background:currentColor;border-radius:50%;content:"";height:.55rem;width:.55rem}.rob-mark[data-state=ready]{color:var(--success,#45c786)}.rob-mark[data-state=partial]{color:var(--warn)}.rob-mark[data-state=failed]{color:var(--danger,#f06b75)}
-  .rob-boundary{border-left:.3rem solid var(--accent);border-radius:1.15rem;padding:1.1rem 1.35rem}.rob-boundary h2,.rob-card h2{margin:0 0 .55rem}.rob-boundary p,.rob-help{color:var(--text-muted);line-height:1.55;margin:.35rem 0}.rob-boundary pre{background:color-mix(in srgb,#020617 77%,transparent);border:1px solid var(--rob-edge);border-radius:.8rem;color:#dbeafe;margin:.6rem 0 0;overflow:auto;padding:.8rem}
-  .rob-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(12,minmax(0,1fr))}.rob-card{border-radius:1.2rem;grid-column:span 6;min-width:0;padding:clamp(1rem,2vw,1.45rem)}.rob-card--wide{grid-column:1/-1}
-  .rob-metrics{display:grid;gap:.7rem;grid-template-columns:repeat(3,minmax(0,1fr))}.rob-metric{background:var(--rob-soft);border:1px solid var(--rob-edge);border-radius:1rem;padding:.9rem}.rob-metric strong{display:block;font-size:1.4rem}.rob-metric span{color:var(--text-muted);font-size:.75rem}
-  .rob-form{display:grid;gap:.85rem}.rob-fields{display:grid;gap:.75rem;grid-template-columns:repeat(2,minmax(0,1fr))}.rob-form label{color:var(--text-muted);display:grid;font-size:.82rem;font-weight:700;gap:.35rem}.rob-form :where(.input,.select){background:color-mix(in srgb,var(--bg) 55%,transparent);border-color:var(--rob-edge);min-width:0;width:100%}.rob-output{background:color-mix(in srgb,#020617 77%,transparent);border:1px solid var(--rob-edge);border-radius:1rem;color:#dbeafe;max-height:28rem;min-height:7rem;overflow:auto;padding:1rem;white-space:pre-wrap;word-break:break-word}
-  .rob-table{border-collapse:collapse;font-size:.8rem;width:100%}.rob-table th,.rob-table td{border-bottom:1px solid var(--rob-edge);padding:.55rem;text-align:left;vertical-align:top}.rob-table td{color:var(--text-muted);word-break:break-word}.rob-table-wrap{overflow:auto}
-  .rob-effect{border-radius:999px;display:inline-block;font-size:.7rem;font-weight:850;letter-spacing:.05em;padding:.2rem .55rem;text-transform:uppercase}.rob-effect[data-effect=deny]{background:color-mix(in srgb,var(--danger,#f06b75) 22%,transparent);color:var(--danger,#f06b75)}.rob-effect[data-effect=require_human]{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}.rob-effect[data-effect=attenuate]{background:color-mix(in srgb,#3b82f6 22%,transparent);color:#60a5fa}
-  .rob-verdict{font-size:1.5rem;font-weight:900;letter-spacing:-.02em;margin:0}.rob-verdict[data-decision=allow]{color:var(--success,#45c786)}.rob-verdict[data-decision=require_human]{color:var(--warn)}.rob-verdict[data-decision=deny]{color:var(--danger,#f06b75)}
-  .rob-library{display:grid;gap:.5rem;list-style:none;margin:.7rem 0 0;padding:0}.rob-library li{align-items:center;background:var(--rob-soft);border:1px solid var(--rob-edge);border-radius:.8rem;display:flex;flex-wrap:wrap;gap:.6rem;justify-content:space-between;padding:.65rem .8rem}.rob-library button{white-space:nowrap}
-  .rob-problems{color:var(--danger,#f06b75);margin:.4rem 0 0;padding-left:1.2rem}
-  @media(max-width:900px){.rob-hero{grid-template-columns:minmax(0,1fr)}.rob-card{grid-column:1/-1}.rob-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-  @media(max-width:560px){.rob-fields,.rob-metrics{grid-template-columns:minmax(0,1fr)}}
+  .rob-shell { display: grid; gap: var(--space-4); min-width: 0; }
+  .rob-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .rob-row--end { align-items: end; }
+  .rob-row label { display: flex; flex-direction: column; gap: .25rem; }
+  .rob-metrics { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); margin-top: .75rem; }
+  .rob-metric { border: 1px solid var(--border); border-radius: 8px; padding: .7rem .9rem; }
+  .rob-metric strong { display: block; font-size: var(--text-xl); }
+  .rob-metric span { color: var(--muted); font-size: var(--text-sm); }
+  .rob-table-wrap { overflow-x: auto; }
+  .rob-library { display: grid; gap: .5rem; list-style: none; margin: .5rem 0 0; padding: 0; }
+  .rob-library li { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: space-between;
+                    border: 1px solid var(--border); border-radius: 8px; padding: .6rem .8rem; }
+  .rob-verdict { font-size: var(--text-xl); font-weight: var(--font-bold); margin: .5rem 0 0; }
+  .rob-problems { margin: .4rem 0 0; padding-left: 1.2rem; }
 </style>
 {% endblock %}
 {% block content %}
-<div class="rob-shell" id="rob-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-audit="{{ 'true' if rob_can_audit else 'false' }}">
-  <section class="rob-hero rob-glass" aria-labelledby="rob-title">
-    <div><p class="rob-kicker">Compliance by construction</p><h1 class="rob-title" id="rob-title">Regulatory obligations</h1><p class="rob-lede">See which regulatory checks are active in this installation, verify that they work, and preview whether a proposed action would be allowed — from the same policy the agents run under.</p></div>
-    <div class="rob-health"><div class="rob-row"><span class="rob-mark" data-state="partial" id="rob-state">Checking</span><button class="btn" id="rob-refresh" type="button">Refresh</button></div><strong id="rob-health-title">Checking active regulations</strong><span class="rob-help" id="rob-health-detail">Verifying that active rules actually block, pause, or limit the actions they cover.</span><div class="rob-metrics"><div class="rob-metric"><strong id="rob-active">—</strong><span>Active regulations</span></div><div class="rob-metric"><strong id="rob-count">—</strong><span>Active checks</span></div><div class="rob-metric"><strong id="rob-problems">—</strong><span>Checks needing attention</span></div></div></div>
+<div class="rob-shell" id="rob-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+     data-can-admin="{{ 'true' if rob_can_admin else 'false' }}">
+  {% from "_hero.html" import hero %}
+  {% call hero('Compliance', 'Regulations and rules',
+               subtitle='Which rules your AI workers follow',
+               lede='Each regulation you turn on adds rules that block, pause for approval, or limit certain
+                     actions. See which rules are active, check that they work, and test what would happen
+                     to a specific action.') %}
+    <div class="rob-row">
+      <span class="badge idle" id="rob-state" role="status">Checking</span>
+      <button class="btn btn--ghost" id="rob-refresh" type="button">Refresh</button>
+    </div>
+    <p><strong id="rob-health-title">Checking your regulations…</strong><br>
+       <span class="muted" id="rob-health-detail"></span></p>
+    <ul class="rob-problems" id="rob-problem-list" hidden></ul>
+    <div class="rob-metrics">
+      <div class="rob-metric"><strong id="rob-active">—</strong><span>Regulations on</span></div>
+      <div class="rob-metric"><strong id="rob-count">—</strong><span>Rules in force</span></div>
+      <div class="rob-metric"><strong id="rob-problems">—</strong><span>Rules not working</span></div>
+    </div>
+  {% endcall %}
+
+  <div id="rob-operation-state" class="muted" role="status" aria-live="polite"></div>
+
+  <section aria-labelledby="rob-library-title">
+    <div class="section-head"><h2 id="rob-library-title">Regulations</h2></div>
+    <div class="panel">
+      <p class="muted" style="margin-top: 0;">Choose a regulation to see its rules.{% if rob_can_admin %} Turning one on takes effect right away.{% endif %} To turn a regulation off, ask the person who installed Lightwork.</p>
+      <ul class="rob-library" id="rob-library"><li>Loading…</li></ul>
+    </div>
   </section>
 
-  <section class="rob-boundary rob-glass"><h2>How obligations are enabled</h2><p>Regulatory checks are selected during installation. This page lets you inspect and test them; it cannot change which checks are enforced.</p><details hidden><summary>Technical details: installation and verification</summary><pre id="rob-enable-snippet">[compliance]
-profiles = ["gdpr", "eu_ai_act", "hipaa"]</pre><p class="rob-help">Installation verification command: <code>maverick regulatory verify --ci</code>.</p></details></section>
+  <section aria-labelledby="rob-rules-title">
+    <div class="section-head"><h2 id="rob-rules-title">Rules</h2><span class="muted" id="rob-obligations-note">Loading…</span></div>
+    <div class="panel rob-table-wrap">
+      <table>
+        <thead><tr><th scope="col">Regulation</th><th scope="col">Article</th><th scope="col">Rule</th>
+          <th scope="col">What it does</th><th scope="col">Applies to</th><th scope="col">Source</th></tr></thead>
+        <tbody id="rob-rows"><tr><td colspan="6">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 
-  <div class="rob-grid">
-    <section class="rob-card rob-card--wide rob-glass"><div class="rob-card-head"><div><p class="rob-kicker">Enforcement checks</p><h2>Active obligations</h2></div><span class="rob-help" id="rob-obligations-note">Loading…</span></div><div class="rob-table-wrap"><table class="rob-table"><thead><tr><th scope="col">Regulation</th><th scope="col">Article</th><th scope="col">Obligation</th><th scope="col">Effect</th><th scope="col">Scope</th><th scope="col">Source</th></tr></thead><tbody id="rob-rows"><tr><td colspan="6">No obligations loaded.</td></tr></tbody></table></div></section>
+  <section aria-labelledby="rob-check-title">
+    <div class="section-head"><h2 id="rob-check-title">Test an action</h2></div>
+    <div class="panel">
+      <form id="rob-check-form" autocomplete="off" class="rob-row rob-row--end">
+        <label for="rob-action-filter">Search actions
+          <input class="input" id="rob-action-filter" type="search" placeholder="For example: email">
+        </label>
+        <label for="rob-action">Action
+          <select class="select" id="rob-action" name="action" required><option value="">Loading…</option></select>
+        </label>
+        <label for="rob-scope">Under
+          <select class="select" id="rob-scope" name="scope">
+            <option value="active">The regulations that are on</option>
+            <option value="all">Every regulation</option>
+          </select>
+        </label>
+        <button class="btn btn--primary" type="submit">Test</button>
+      </form>
+      <div id="rob-verdict-box" hidden role="status" aria-live="polite">
+        <p class="rob-verdict" id="rob-verdict" data-decision="allow">—</p>
+        <p class="muted" id="rob-verdict-detail"></p>
+      </div>
+    </div>
+  </section>
 
-    <section class="rob-card rob-glass"><p class="rob-kicker">Preview a decision</p><h2>Check an action</h2><form class="rob-form" id="rob-check-form" autocomplete="off"><div class="rob-fields"><label>Tool / action<input class="input" name="action" list="rob-tools" maxlength="64" required placeholder="sql_query"></label><label>Under<select class="select" name="scope"><option value="active">Active regulations</option><option value="all">Every regulation in the library</option></select></label></div><datalist id="rob-tools"></datalist><button class="btn btn--primary" type="submit">Evaluate</button></form><div id="rob-verdict-box" hidden><p class="rob-verdict" id="rob-verdict" data-decision="allow">—</p><p class="rob-help" id="rob-verdict-detail"></p></div></section>
+  <section aria-labelledby="rob-updates-title">
+    <div class="section-head"><h2 id="rob-updates-title">Regulatory updates</h2></div>
+    <div class="panel">
+      <p class="muted" style="margin-top: 0;">Notices about rule changes that affect your customers, and evidence that needs refreshing because a rule changed.</p>
+      <div id="rob-updates" role="status" aria-live="polite"><p class="muted">Loading…</p></div>
+    </div>
+  </section>
 
-    <section class="rob-card rob-glass"><p class="rob-kicker">Library</p><h2>Regulations</h2><p class="rob-help">Browse supported regulations and inspect the checks each would enable.</p><ul class="rob-library" id="rob-library"><li>Loading…</li></ul></section>
-
-    <section class="rob-card rob-card--wide rob-glass"><div class="rob-card-head"><div><p class="rob-kicker">Gateway overlay</p><h2>Preview restrictive gateway constraints</h2></div><span class="rob-help" id="rob-gateway-preview-state" role="status" aria-live="polite" aria-atomic="true">No gateway constraint document has been previewed.</span></div><p class="rob-help">Preview a supported gateway-constraint document. It can describe blocked actions, required human approval, or reduced permissions; it cannot add exemptions. The preview is not saved and does not change enforcement. Source authenticity and signatures require separate verification.</p><form class="rob-form" id="rob-gateway-preview-form" autocomplete="off"><label>Gateway constraint document (JSON)<textarea class="input" name="document" rows="10" maxlength="131072" required spellcheck="false" placeholder='{"schema":"lightwork.gateway-constraint-import.v1",...}'></textarea></label><button class="btn btn--primary" type="submit">Preview restrictive overlay</button></form></section>
-
-    <section class="rob-card rob-card--wide rob-glass"><div class="rob-card-head"><div><p class="rob-kicker">Policy summary</p><h2>Active policy checks</h2></div><span class="rob-help" id="rob-operation-state" role="status" aria-live="polite">No operation has run.</span></div><ul class="rob-problems" id="rob-problem-list" hidden></ul><details hidden><summary>Technical details: policy record</summary><pre class="rob-output" id="rob-output" tabindex="0"></pre></details></section>
-  </div>
-  <noscript><p class="rob-boundary rob-glass">Enable JavaScript to use these controls.</p></noscript>
+  <details class="panel">
+    <summary>Advanced: preview rules from an AI gateway</summary>
+    <p class="muted">If you use an AI gateway with its own restrictions, upload its rules file to see how they would combine with yours. This is only a preview; nothing is saved or changed.</p>
+    <form id="rob-gateway-preview-form" class="rob-row rob-row--end" autocomplete="off">
+      <label for="rob-gateway-file">Gateway rules file
+        <input class="input" id="rob-gateway-file" name="document" type="file" accept=".json,application/json" required>
+      </label>
+      <button class="btn btn--ghost" type="submit">Preview</button>
+    </form>
+    <p class="muted" id="rob-gateway-preview-state" role="status" aria-live="polite" aria-atomic="true">No file previewed yet.</p>
+    <div id="rob-gateway-result"></div>
+  </details>
+  <noscript><p class="panel">Turn on JavaScript in your browser to use this page.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-regulatory-obligations.js" defer></script>{% endblock %}
