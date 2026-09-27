@@ -88,12 +88,35 @@ offline, including any priority commitments the holder chooses to open.
 
 The dossier is evidence for counsel, not a legal opinion on inventorship.
 
+## Production twin
+
+With `[immune] twin_record = true`, every tool result a goal receives is
+recorded at the agent's single execution point. The recording is private, per
+tenant, and sealed (bound to the goal) when at-rest encryption is on.
+`maverick immune twin replay GOAL` runs a new goal with the same title,
+description, owner, principal, domain and project, while each tool returns the
+result production received for the same tool and arguments, in the same order.
+
+- Nothing live is touched. A call production never made returns an ordinary
+  tool failure, is not executed, and is counted as unmatched.
+- Coordination tools still run, so the swarm re-forms and its children replay.
+  `ask_user` is replayed, so a twin never messages a person.
+- Nothing in the run marks it as a test. That makes twins the unwatched arm
+  for `maverick immune awareness`, which compares a behaviour's rate in runs
+  a model could identify as tests with its rate in runs it could not.
+- Use a twin to try a new model, prompt or policy on real work. The report
+  gives served, unserved and unmatched counts; `twin list` keeps counts only.
+
+A twin goal is an ordinary goal row, so the learning loops see it like any
+other run. Recording stops at 64 MB per goal.
+
 ## Configuration
 
 ```toml
 [immune]
 canaries = false   # allow `maverick immune canary` to seed the approvals queue
+twin_record = false  # record tool results so goals can be replayed as twins
 ```
 
-The analyses are read-only and need no switch. Only canary seeding writes to
-shared state, so only canary seeding is gated.
+The analyses are read-only and need no switch. Canary seeding writes to shared
+state and twin recording retains tool output, so those two are gated.

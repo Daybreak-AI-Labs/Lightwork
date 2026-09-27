@@ -164,3 +164,55 @@ def rules_cmd(rules_file, candidate, events, max_extra_friction) -> None:
         ok, report = policy.better(_load(candidate)["rules"], rules, _load(events)["events"],
                                    max_extra_friction=max_extra_friction)
         _emit({"promote": ok, **report})
+
+
+@immune_group.group("twin")
+def twin_group() -> None:
+    """Production twin: replay a recorded goal against what production saw."""
+
+
+@twin_group.command("replay")
+@click.argument("goal_id", type=int)
+@click.option("--max-dollars", default=None, type=float,
+              help="Spend cap for the twin run (else [budget] / the runner default).")
+def twin_replay(goal_id, max_dollars) -> None:
+    """Re-run GOAL_ID as a new goal whose tools return the recorded results."""
+    from ..immune import twin
+    from ..runner import run_goal_in_thread
+    from . import _require_llm_key
+    _require_llm_key()
+    world = open_world()
+    try:
+        report = twin.replay_goal(
+            world, goal_id, lambda gid: run_goal_in_thread(gid, max_dollars=max_dollars))
+    except LookupError as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        world.close()
+    _emit(report)
+
+
+@twin_group.command("list")
+def twin_list() -> None:
+    """Past twin replays (counts only)."""
+    from ..immune import _ledger, twin
+    for r in _ledger.read(twin.replays_path()):
+        click.echo(f"  #{r['production_goal']} -> #{r['twin_goal']}: {r['twin_status']} "
+                   f"(served {r['served']}/{r['recorded']}, unmatched {r['unmatched']})")
+
+
+@immune_group.command("awareness")
+@click.argument("samples", type=click.Path(exists=True, dir_okay=False))
+@click.option("--alpha", default=0.05, show_default=True)
+def awareness_cmd(samples, alpha) -> None:
+    """Behaviour rate when runs are identifiable as tests vs not (twins).
+
+    SAMPLES is JSON: {"watched": [bool...], "unwatched": [bool...]}, one flag per
+    run for the behaviour measured (e.g. a policy violation)."""
+    from ..immune.invariance import awareness_gap
+    data = _load(samples)
+    try:
+        _emit(awareness_gap([bool(x) for x in data["watched"]],
+                            [bool(x) for x in data["unwatched"]], alpha=alpha))
+    except (KeyError, ValueError) as exc:
+        raise click.ClickException(f"bad samples: {exc}") from exc

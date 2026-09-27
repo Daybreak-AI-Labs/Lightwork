@@ -21,11 +21,11 @@ def _canary(world, cls="payments"):
 
 def test_config_default_is_off(monkeypatch):
     monkeypatch.setattr(config, "load_config", dict)
-    assert config.get_immune() == {"canaries": False}
+    assert config.get_immune() == {"canaries": False, "twin_record": False}
     monkeypatch.setattr(config, "load_config", lambda: {"immune": {"canaries": "yes"}})
-    assert config.get_immune() == {"canaries": False}  # malformed stays off
+    assert config.get_immune()["canaries"] is False  # malformed stays off
     monkeypatch.setattr(config, "load_config", lambda: {"immune": {"canaries": True}})
-    assert config.get_immune() == {"canaries": True}
+    assert config.get_immune()["canaries"] is True
 
 
 def test_seeding_refused_when_off(tmp_path, monkeypatch):

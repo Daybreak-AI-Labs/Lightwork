@@ -5092,6 +5092,12 @@ tested without spawning py-spy.
 - **Discovery Title** (`immune/title.py`): commit-reveal priority, pre-run
   input commitments, human conception gates with a claim-to-conception map,
   verification and coverage; signed and verified offline.
+- **Production twin** (`immune/twin.py`, `maverick immune twin replay`): opt-in
+  recording (`[immune] twin_record`) of each goal's tool results, sealed and
+  tenant-scoped; a replay re-runs the goal with the recorded results served in
+  place of the tools, so nothing live is touched and nothing marks the run as a
+  test. Unmatched calls are refused and counted. `maverick immune awareness`
+  measures the evaluation-awareness gap against twins.
 - **Analyses** (`immune/policy.py`, `invariance.py`, `reliability.py`,
   `epistemic.py`, `envelope.py`, `market.py`): rule replay and contradiction
   discovery, evaluation-awareness gap and model-swap drift, conservative bonds

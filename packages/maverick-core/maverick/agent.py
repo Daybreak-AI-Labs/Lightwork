@@ -3041,9 +3041,10 @@ class Agent:
             # 'active' past max_wall_seconds and ignore `maverick halt`
             # until it happened to return.
             from .connector_attempts import bind_tool_budget
+            from .immune import twin
             with bind_tool_budget(self.ctx.budget):
                 output = await self._await_wall_clock_guarded(
-                    lambda: self.tools.run(name, args),
+                    lambda: twin.dispatch(self.ctx.goal_id, name, args, self.tools.run),
                     in_flight_note="mid-tool-execution")
             # From this point onward the connector returned normally and may
             # already have committed an external mutation.  Keep that fact
