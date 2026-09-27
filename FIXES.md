@@ -21,7 +21,7 @@
 
 ## P1 — Security & legal (would fail a security review or a buyer's lawyers)
 
-- [~] **Postgres backend stores content PLAINTEXT** while SQLite seals at rest — **the security contradiction is now closed (fail-closed):** `open_world` raises `PostgresAtRestUnsupported` when encryption-at-rest is enabled with the Postgres backend, so regulated/encrypted data can never silently land as plaintext in PG (documented in `docs/encryption.md`; tested in `test_postgres_at_rest_gate.py`). **Follow-up `(open eng)`:** actually *seal* the PG columns so encrypted deployments can use Postgres — a ~16-method change that must mirror SQLite's per-method read-modify-write (e.g. `reclaim_orphan_goals` can't raw-SQL-concat a sealed `result`); needs a PG-equipped env to verify.
+- [x] **Postgres backend stores content PLAINTEXT** -- resolved: the Postgres backend now seals the same content columns as SQLite through the shared `_enc_field` path (`world_model_backends/postgres.py`). The `PostgresAtRestUnsupported` class that once made `open_world` fail closed is no longer raised anywhere.
 - [ ] **In-tree consumer-chat session-providers (ToS risk)** — `(needs you)` product/legal decision: isolate into a separate optional package, harden the gate, or remove. A buyer's counsel will flag it.
 - [ ] **Generated-tool `fn` runs in-process at runtime** — `(open eng)` hardening (out-of-process tool runtime); only registration is currently sandboxed.
 - [x] **`self_edit` stays unregistered-by-default** — confirmed (`tools/__init__.py:1194` "self_edit intentionally is not registered"), documented in code.

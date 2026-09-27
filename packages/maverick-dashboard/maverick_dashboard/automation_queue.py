@@ -747,6 +747,12 @@ def _handle_dream(_job=None) -> None:
     def _cycle() -> None:
         # Enablement can be overridden per tenant; check it inside the pin.
         if dreaming.enabled():
+            # Same rollback point `maverick dream` takes: a scheduled cycle must
+            # never mutate learned state that `dream --rollback` cannot undo.
+            # A snapshot failure raises before dream_cycle runs (fail closed).
+            cfg = dreaming.settings()
+            if cfg.get("snapshots", True):
+                dreaming.snapshot_learning_state(keep_last=int(cfg.get("snapshot_keep_last", 5)))
             dreaming.dream_cycle(_world())
 
     _run_for_active_tenants("scheduled dream cycle", _cycle)

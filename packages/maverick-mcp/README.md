@@ -52,14 +52,17 @@ MCP servers menu.
 | `maverick_skills_list` | List installed / distilled skills |
 | `maverick_fact_set` | Set a fact in the world model |
 | `maverick_facts_get` | Get all known facts |
+| `maverick_fleet_ingest` | Deposit a governed lesson into fleet memory (`[fleet_memory] enable`) |
+| `maverick_fleet_recall` | Recall governed lessons from fleet memory (`[fleet_memory] enable`) |
 
 All calls go through `maverick.orchestrator.run_goal` -- same Shield
 chokepoints, same budget caps, same per-role model routing.
 
 ## Protocol
 
-Minimal JSON-RPC 2.0 over stdio, matching the MCP 2025-11-25 spec
-(with a 2024-11-05 fallback)
-(`initialize`, `tools/list`, `tools/call`). No external dependencies.
+Minimal JSON-RPC 2.0 over stdio (`lightwork mcp`) or streamable HTTP
+(`lightwork mcp --http`), matching the MCP 2025-11-25 spec (with a
+2024-11-05 fallback). Stdio has no external dependencies; the HTTP
+transport needs the `[http]` extra (FastAPI + uvicorn).
 The full `mcp` Python SDK is an option for a future hardening pass;
 this hand-rolled version keeps the dependency footprint tiny.

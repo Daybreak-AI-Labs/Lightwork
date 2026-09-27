@@ -1991,6 +1991,18 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_immune() -> dict:
+    """Return the ``[immune]`` section (:mod:`maverick.immune`).
+
+    ``canaries`` lets operators seed known-flawed approvals into the real queue
+    to measure whether reviewers catch them. OFF by default: it is an explicit
+    decision to test your people. A malformed value stays off."""
+    cfg = load_config().get("immune", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {"canaries": _strict_config_bool(cfg, "canaries", False)}
+
+
 def get_commerce() -> dict:
     """Return the ``[commerce]`` section (shopper + merchant agent surface over
     the governed storefront/merchant backends, :mod:`maverick.commerce`).

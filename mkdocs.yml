@@ -126,6 +126,7 @@ nav:
       - Regulated deployment: regulated-deployment.md
       - Compliance assessments: compliance-assessments.md
       - Agent threat hunting: threat-hunting.md
+      - Adaptive immunity: immune.md
   - Enterprise:
       - Editions: enterprise/editions.md
       - Security & compliance overview: enterprise/security-overview.md

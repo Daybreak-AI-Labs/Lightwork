@@ -1252,3 +1252,12 @@ def test_write_config_emits_adapter_rung(tmp_path: Path, monkeypatch):
 def test_write_config_omits_adapter_rung_when_off(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
     assert "adapter_rung" not in parsed
+
+
+def test_write_config_emits_immune_canaries_when_enabled(tmp_path: Path, monkeypatch):
+    # [immune] canaries is a kernel knob (maverick.config.get_immune); the
+    # wizard step is what makes it reachable (rule 6). Off by default.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"immune_canaries": True})
+    assert parsed["immune"]["canaries"] is True
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"fleet_memory": True})
+    assert "immune" not in parsed

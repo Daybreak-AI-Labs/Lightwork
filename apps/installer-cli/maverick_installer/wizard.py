@@ -4094,6 +4094,14 @@ def pick_advanced() -> dict[str, Any]:
             "An explicit trust decision; OFF by default.",
             default=False,
         ),
+        "immune_canaries": _q_confirm(
+            "Oversight canaries? Let operators seed realistic, known-flawed "
+            "approvals into the real approvals queue (`maverick immune canary`) "
+            "to measure whether reviewers catch them -- per person and decision "
+            "class, with earned approval authority. Nothing executes on a canary. "
+            "An explicit decision to test your people; OFF by default.",
+            default=False,
+        ),
         "cortex": _q_confirm(
             "Enable Cortex, the governed company memory over knowledge, skills, "
             "lessons, the Operating Record and fleet memory (recommended)? One "
@@ -7823,6 +7831,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[fleet_memory]")
         lines.append("enable = true")
+    if advanced.get("immune_canaries"):
+        lines.append("")
+        lines.append("[immune]")
+        lines.append("# Oversight canaries (maverick.immune.oversight): operators may seed")
+        lines.append("# known-flawed approvals to measure reviewer catch rates.")
+        lines.append("canaries = true")
     if advanced.get("cortex"):
         lines.append("")
         lines.append("[cortex]")

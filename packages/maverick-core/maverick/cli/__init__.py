@@ -7347,6 +7347,7 @@ from . import (  # noqa: E402,F401
     _external_agent_groups,
     _finance_groups,
     _governed_execution_groups,
+    _immune_groups,
     _import_groups,
     _knowledge_groups,
     _learning_groups,

@@ -15,8 +15,9 @@ unreinforced one fades over a few cycles). It is the positive complement of
 ``negative_knowledge`` (which consolidates causally-*harmful* patterns into
 guardrails): this consolidates the causally-*good* ones into recallable memories.
 
-Pure + OFF by default: consolidation runs only on the opt-in trajectory corpus,
-and ``recall`` on an empty store returns nothing (no behaviour change).
+Pure: consolidation runs over the captured trajectory corpus when the flywheel
+turns (``[data_engine]``, on by default), and ``recall`` on an empty store
+returns nothing (no behaviour change).
 """
 from __future__ import annotations
 

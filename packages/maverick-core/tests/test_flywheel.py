@@ -112,3 +112,14 @@ def test_maybe_run_noop_when_disabled(monkeypatch):
     monkeypatch.setattr("maverick.config.get_data_engine", lambda: {"enable": False})
     rep = flywheel.maybe_run()
     assert rep.n_episodes == 0 and not rep.acted
+
+
+def test_run_once_audits_its_learned_writes(tmp_path, monkeypatch):
+    import maverick.audit as audit
+    rows = []
+    monkeypatch.setattr(audit, "record", lambda kind, **kw: rows.append((kind, kw)))
+    rep = flywheel.run_once(_corpus(), guardrails=nk.GuardrailRegistry(path=tmp_path / "g.json"),
+                            memory=pm.MemoryStore(path=tmp_path / "m.json"))
+    ((kind, kw),) = rows
+    assert kind == audit.EventKind.LEARNING_UPDATE and kw["agent"] == "flywheel"
+    assert (kw["guardrails_written"], kw["memories_written"]) == (len(rep.guardrails), len(rep.memories))
