@@ -38,7 +38,7 @@ def test_create_and_view_then_revoke(tmp_path, monkeypatch):
     assert page.status_code == 200
     assert "Refresh forecast" in page.text
     assert "<td>300</td>" in page.text          # deliverable rendered
-    assert "read-only shared view" in page.text.lower()
+    assert "shared for reading only" in page.text.lower()
 
     # revoke -> the link dies
     rev = client.post(f"/api/v1/goals/{gid}/share/{body['id']}/revoke")
