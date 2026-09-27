@@ -5979,24 +5979,31 @@ def _is_intervention(e: dict) -> bool:
 
 
 def _intervention_detail(e: dict) -> str:
-    """A one-line, human summary of an intervention, by kind."""
+    """A one-line, plain-language summary of an intervention, by kind."""
+    from .identity_format import humanize
+
     kind = e.get("kind")
     if kind == "shield_block":
-        return f"{e.get('stage') or '?'}: {e.get('reason') or ''}".strip()
+        stage = humanize(e.get("stage") or "")
+        reason = str(e.get("reason") or "").strip()
+        return f"Safety filter stopped it{(' at ' + stage.lower()) if stage else ''}: {reason}".strip(": ")
     if kind == "capability_denied":
-        return f"tool={e.get('tool') or '?'} principal={e.get('principal') or '?'}"
+        return f"Not allowed to use {humanize(e.get('tool') or 'this tool').lower()}"
     if kind == "egress_blocked":
-        return f"provider={e.get('provider') or '?'}"
+        return f"Not allowed to send data to {humanize(e.get('provider') or 'that service')}"
     if kind == "consent_result":
-        return f"{e.get('decision') or '?'}: {e.get('action') or ''}".strip()
+        decision = str(e.get("decision") or "").lower()
+        what = "Consent timed out" if decision == "timeout" else "Consent refused"
+        return f"{what}: {e.get('action') or ''}".strip(": ")
     if kind == "halt":
-        return f"{e.get('source') or '?'}: {e.get('detail') or ''}".strip()
+        detail = str(e.get("detail") or "").strip()
+        return f"Emergency stop{(': ' + detail) if detail else ''}"
     # governance_denied (and any future kind): the reason, plus which policy
     # rule fired so the operator can see why it was held.
     detail = str(e.get("reason") or e.get("detail") or e.get("tool") or "")
     rule = e.get("rule")
     if kind == "governance_denied" and rule:
-        detail = f"{detail} [{rule}]".strip()
+        detail = f"{detail} (company rule: {humanize(rule).lower()})".strip()
     return detail
 
 
@@ -6118,12 +6125,26 @@ def oversight_page(request: Request) -> HTMLResponse:
                 total += 1
                 recent.append(e)
 
+    titles: dict[int, str] = {}
+
+    def _goal_title(goal_id) -> str:
+        if not isinstance(goal_id, int):
+            return ""
+        if goal_id not in titles:
+            try:
+                goal = w.get_goal(goal_id)
+            except Exception:  # pragma: no cover - a missing title shows a number
+                goal = None
+            titles[goal_id] = (goal.title if goal is not None else "") or ""
+        return titles[goal_id]
+
     rows = [
         {
             "ts": e.get("ts"),
             "kind": e.get("kind"),
-            "agent": e.get("agent") or "-",
+            "agent": e.get("agent") or "",
             "goal_id": e.get("goal_id"),
+            "goal_title": _goal_title(e.get("goal_id")),
             "detail": _intervention_detail(e),
         }
         for e in reversed(recent)
@@ -6157,6 +6178,7 @@ def oversight_page(request: Request) -> HTMLResponse:
             "since": since,
             "until": until,
             "halted": halted,
+            "can_halt": has_global_permission(request, "operate"),
             "approvals": approvals,
             **approval_context,
             "pending": len(approvals),

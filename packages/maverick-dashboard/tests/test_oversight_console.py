@@ -53,13 +53,16 @@ def test_unifies_every_guardrail(monkeypatch, tmp_path):
     text = _client().get("/oversight").text
     # Every guardrail's events surface in one pane (the gap: capability + egress
     # had no aggregated view before).
-    for kind in ("governance_denied", "shield_block", "capability_denied", "egress_blocked"):
-        assert kind in text
-    # And their key details render.
-    assert "require_human_actions" in text
+    for label in ("Held by a company rule", "Stopped by the safety filter", "Tool not allowed",
+                  "Data not allowed to leave"):
+        assert label in text
+    # And their key details render, in plain words.
+    assert "company rule: require human actions" in text
     assert "prompt injection" in text
-    assert "s3" in text
-    assert "openai" in text
+    assert "Not allowed to use s3" in text
+    assert "Not allowed to send data to Openai" in text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(text) == []
 
 
 def test_consent_approve_excluded_deny_counted(monkeypatch, tmp_path):
@@ -79,7 +82,7 @@ def test_non_intervention_events_excluded(monkeypatch, tmp_path):
     record("tool_call", agent="a", name="read_file", input_summary="x")
     text = _client().get("/oversight").text
     # Ordinary activity isn't an intervention -> empty state.
-    assert "No interventions for the selected day" in text
+    assert "No interventions on this day" in text and "Pick another day" in text
 
 
 def test_halt_state_reflected(monkeypatch, tmp_path):
@@ -90,13 +93,15 @@ def test_halt_state_reflected(monkeypatch, tmp_path):
     # read so it re-stats the isolated file. (base.html's halt-pill JS always
     # contains "HALTED. Click to resume.", so assert on the template marker.)
     ks._last_file_check_ts = 0.0
-    assert "<strong>HALTED</strong>" not in _client().get("/oversight").text
+    page = _client().get("/oversight").text
+    assert 'data-halted="false"' in page and "Stop all work now" in page
     # Arm the killswitch (the same HALT file the nav pill / api toggle uses).
     p = ks._halt_file_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("test halt", encoding="utf-8")
     ks._last_file_check_ts = 0.0
-    assert "<strong>HALTED</strong>" in _client().get("/oversight").text
+    page = _client().get("/oversight").text
+    assert 'data-halted="true"' in page and "Resume all work" in page
 
 
 def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
@@ -265,10 +270,12 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
 
     text = _client().get("/oversight", headers=_as("alice")).text
 
-    assert "alice.agent.internal" in text
-    assert "alice-secret-tool" in text
-    assert "bob.agent.internal" not in text
-    assert "prod-admin-shell" not in text
+    # Names are shown in plain words; the owner scoping is what matters.
+    lowered = text.lower()
+    assert "alice.agent.internal" in lowered
+    assert "alice secret tool" in lowered
+    assert "bob.agent.internal" not in lowered
+    assert "prod admin shell" not in lowered and "prod-admin-shell" not in lowered
     assert '<div class="num">1</div>' in text
 
 
