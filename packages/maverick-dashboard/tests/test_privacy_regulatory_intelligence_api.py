@@ -369,3 +369,29 @@ def test_delivery_worker_fails_closed_without_destination_resolver(environment) 
     )
     assert response.status_code == 503
     assert "destination resolver" in response.json()["detail"]
+
+
+def test_records_list_documents_trackers_and_reports_without_text(environment) -> None:
+    client, _store, _monkeypatch = environment
+    assert client.get(f"{API}/records").json() == {"documents": [], "trackers": [], "reports": []}
+    client.put(f"{API}/sources/primary-law", json=_source())
+    client.post(
+        f"{API}/sources/primary-law/review",
+        json={"expected_revision": 1, "rationale": "Checked.", "approved": True,
+              "idempotency_key": "approve-1"},
+        headers={"X-Test-Subject": "privacy-counsel"},
+    )
+    assert client.put(f"{API}/documents/access-law", json=_document()).status_code == 200
+    saved = client.put(
+        f"{API}/subscriptions/access-tracker",
+        json={"query": "access request", "jurisdictions": ["US-CA"],
+              "destination_ref": "privacy-team", "cadence_seconds": 86_400,
+              "expected_revision": 0, "idempotency_key": "tracker-1"},
+    )
+    assert saved.status_code == 200, saved.text
+    listed = client.get(f"{API}/records")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert [d["title"] for d in body["documents"]] == ["California access timing"]
+    assert body["trackers"][0]["subscription_id"] == "access-tracker"
+    assert "respond within the timing" not in listed.text

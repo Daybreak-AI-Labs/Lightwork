@@ -32,7 +32,7 @@ def page_client():
         return templates.TemplateResponse(
             request,
             "privacy_regulatory_intelligence.html",
-            {"privacy_regulatory_intelligence_enabled": enabled},
+            {"privacy_regulatory_intelligence_enabled": enabled, "can_admin": True},
         )
 
     return TestClient(app, headers={"Origin": "http://testserver"})
@@ -43,22 +43,30 @@ def test_page_renders_operator_contract_and_no_unsafe_dom_sink(
 ) -> None:
     response = page_client.get("/privacy/regulatory-intelligence")
     assert response.status_code == 200
-    assert "Privacy Regulatory Intelligence" in response.text
-    assert "does not bundle or reproduce OneTrust DataGuidance" in response.text
-    assert "different authenticated reviewer" in response.text
-    assert "explicit abstention" in response.text
-    assert "not legal advice" in response.text
-    assert "Saved-query tracker and durable delivery" in response.text
-    assert "Verify retained-state integrity" in response.text
-    assert "/api/v1/privacy/regulatory-intelligence" in response.text
-    template = (
+    body = response.text
+    assert "Privacy law research" in body
+    assert "does not include any third-party legal database" in body
+    assert "a different administrator confirms" in body
+    assert "Lightwork says so instead of guessing" in body
+    assert "not legal advice" in body
+    for element in ('id="pri-research"', 'id="pri-trackers"', 'id="pri-reports"', 'id="pri-documents"',
+                    'id="pri-sources"', 'name="pri-where"', 'type="date"', 'id="pri-doc-authority"',
+                    "lightwork-privacy-regulatory-intelligence.js"):
+        assert element in body
+    main = body.split("<main", 1)[-1]
+    for jargon in ("JSON", "comma-separated", "Retention seconds", "Cadence seconds", "Source ID",
+                   "Tracker ID", "Report ID", "Current version", "SHA-256", "lease", "Claim"):
+        assert jargon not in main, jargon
+    script = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"
-        / "templates"
-        / "privacy_regulatory_intelligence.html"
+        / "static"
+        / "lightwork-privacy-regulatory-intelligence.js"
     ).read_text(encoding="utf-8")
-    assert ".innerHTML" not in template
-    assert "textContent" in template
+    assert "/api/v1/privacy/regulatory-intelligence" in script
+    assert ".innerHTML" not in script
+    assert "textContent" in script
+    assert "window.confirm" not in script
 
 
 def test_page_renders_fail_closed_gate_guidance(page_client: TestClient) -> None:
@@ -68,7 +76,7 @@ def test_page_renders_fail_closed_gate_guidance(page_client: TestClient) -> None
     )
     assert response.status_code == 200
     assert 'data-module-gate="privacy_automation.regulatory_intelligence"' in response.text
-    assert "Privacy regulatory intelligence is turned off." in response.text
+    assert "Privacy law research is turned off." in response.text
     assert "privacy_automation.regulatory_intelligence.enable" not in response.text
 
 

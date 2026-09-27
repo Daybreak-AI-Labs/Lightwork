@@ -3984,7 +3984,10 @@ async def privacy_regulatory_intelligence_page(request: Request) -> HTMLResponse
     return templates.TemplateResponse(
         request,
         "privacy_regulatory_intelligence.html",
-        {"privacy_regulatory_intelligence_enabled": (privacy_regulatory_intelligence.enabled())},
+        {
+            "privacy_regulatory_intelligence_enabled": (privacy_regulatory_intelligence.enabled()),
+            "can_admin": has_global_permission(request, "admin"),
+        },
     )
 
 
