@@ -184,3 +184,24 @@ def test_direct_action_requires_repair_instead_of_truncating_oversized_inputs():
     )])
     with pytest.raises(ValueError, match="inputs require repair"):
         to_flow_with_report(imported)
+
+
+def test_n8n_references_parse_in_linear_time():
+    import time
+
+    from maverick.automation_import import predicates
+    start = time.perf_counter()
+    for n in (4_000, 60_000):
+        with pytest.raises(ValueError):
+            predicates.n8n_key("{{" + " " * n + "x")
+    assert time.perf_counter() - start < 1.0          # was 30 s at 4,000 characters
+    assert predicates.n8n_key("={{ $json.status }}") == "status"
+
+
+@pytest.mark.parametrize("ref", ["{{ $json.or }}", "{{ $json.and }}", "OR"])
+def test_reserved_words_cannot_be_data_paths(ref):
+    from maverick.automation_import import predicates
+    with pytest.raises(ValueError, match="repair"):
+        predicates.n8n_key(ref)
+    with pytest.raises(ValueError, match="repair"):
+        predicates.wdl_key("triggerBody()?['and']")

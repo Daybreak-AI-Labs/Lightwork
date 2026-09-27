@@ -38,8 +38,13 @@ class Predicate:
     children: tuple[Predicate, ...] = ()
 
 
+# The flow runtime splits conditions on these words, so a field with this
+# exact name would compile to a condition that can never match.
+_RESERVED_PATHS = frozenset({"or", "and"})
+
+
 def _path(value: str) -> str:
-    if len(value) > 512 or not _PATH.fullmatch(value):
+    if len(value) > 512 or not _PATH.fullmatch(value) or value.lower() in _RESERVED_PATHS:
         raise repair("unsupported data reference")
     return value
 
@@ -48,9 +53,12 @@ def n8n_key(value: Any) -> str:
     if not isinstance(value, str):
         raise repair("left operand must name a data field")
     value = value.strip()
-    wrapped = re.fullmatch(r"=?\{\{\s*(.*?)\s*\}\}", value)
-    if wrapped:
-        value = wrapped[1].strip()
+    if len(value) > 1024:  # no data reference is this long; bounds all work below
+        raise repair("unsupported data reference")
+    # Linear delimiter parse (a lazy regex here was cubic on "{{" + spaces).
+    body = value[1:] if value.startswith("=") else value
+    if body.startswith("{{") and body.endswith("}}") and len(body) >= 4:
+        value = body[2:-2].strip()
     if value.startswith("$json"):
         suffix = value[5:]
         suffix = re.sub(r"\[['\"]([A-Za-z_]\w*)['\"]\]", r".\1", suffix)
