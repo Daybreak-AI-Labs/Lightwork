@@ -41,8 +41,10 @@ def test_workforce_deploy_is_single_flight_and_surfaces_response_details():
     assert '"Deploy the " + deptTitle + " team?' in deploy
     assert "btn.disabled = true" in deploy
     assert 'btn.setAttribute("aria-busy", "true")' in deploy
-    assert "res.body.detail" in deploy
-    assert '" team (HTTP " + res.status + "). Try again."' in deploy
+    # Failures read as plain sentences (status mapped by mvErrorText), never
+    # a raw server detail or an HTTP code.
+    assert 'window.mvErrorText(res, "deploy the " + deptTitle + " team")' in deploy
+    assert "HTTP" not in deploy and "res.body.detail" not in deploy
     assert "check your connection and try again" in deploy
     assert "finally" in deploy
     assert "delete btn.dataset.inFlight" in deploy
