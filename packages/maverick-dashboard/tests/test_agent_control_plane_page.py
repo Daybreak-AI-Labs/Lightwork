@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -51,7 +52,7 @@ def test_page_is_wired_hardened_and_permission_aware(monkeypatch) -> None:
     csp = response.headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     body = response.text
-    assert "Agent Control Plane" in body
+    assert "Agent controls" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert f'data-api-base="{page.API_BASE}"' in body
     assert page.ASSET_PATH in body
@@ -80,7 +81,7 @@ def test_auditor_form_remains_usable_without_mutation_verbs(monkeypatch) -> None
     assert '<option value="resume"' not in body
     assert '<option value="contain"' not in body
     assert '<option value="release"' not in body
-    assert '<option value="ledger">Ledger</option>' in body
+    assert '<option value="ledger">View history</option>' in body
     assert 'id="acp-verb-controls" disabled' not in body
     assert 'id="acp-attenuate-controls" disabled aria-disabled="true" data-role-disabled="true"' in body
 
@@ -149,31 +150,31 @@ def test_agent_console_source_uses_bounded_governed_interactions() -> None:
     assert 'request("/snapshot?limit=" + rosterLimit + "&offset=" + offset)' in source
     assert "planeRequested" in source and "planeRefreshPromise" in source
     assert "controlPlaneReady" in source and "haltAuthorityReady" in source
-    assert "AbortController" in source and "request timed out" in source
+    assert "AbortController" in source and "took too long" in source
     assert "response.body.getReader" in source and "utf8ByteLength" in source
-    assert 'button.setAttribute("aria-label", label + " principal " + principal)' in source
+    assert 'button.setAttribute("aria-label", label + " " + displayName(row))' in source
     assert "restoreRosterFocus" in source and "rosterHeading.focus()" in source
     assert 'principal.scope = "row"' in source
     assert 'aria-live="polite" aria-atomic="true"' in template
-    assert 'class="acp-health" role="status" aria-live="polite"' in template
-    assert 'class="acp-table" aria-labelledby="acp-roster-title"' in template
+    assert 'class="hero-statebox" role="status" aria-live="polite"' in template
     assert '<caption class="sr-only">' in template
     assert ".acp-form fieldset{border:0;margin:0;min-inline-size:0;padding:0}" in template
     assert 'name="reason" maxlength="200" required' in template
     assert 'name="max_dollars" type="number" min="0.01" max="1000000"' in template
-    assert 'name="max_wall_seconds" type="number" min="1" max="31536000"' in template
-    assert template.count('name="principal" maxlength="512"') == 2
+    assert '<select class="select" name="max_wall_seconds">' in template
+    assert 'name="principal" maxlength' not in template
+    assert template.count('<select class="select" name="principal"') == 2
     assert 'request("/principals/" + verb' in source
     assert 'request("/principals/ledger?" + query.toString())' in source
     assert 'request("/bulk/select"' in source
     assert 'request("/bulk/actions"' in source
     assert "validateFleetSelection" in source
-    assert "review a new exact selection" in source
+    assert "Press Review group again" in source
     assert 'id="acp-fleet-form"' in template
     assert 'id="acp-fleet-review"' in template
     assert 'id="acp-fleet-apply"' in template
     assert 'id="acp-fleet-selection-state"' in template
-    assert "Snapshot-pinned controls" in template
+    assert "Act on a group" in template
     assert "--text-muted: var(--muted);" in shared_css
 
 
@@ -185,3 +186,53 @@ def test_page_requires_a_template_authority() -> None:
     import pytest
     with pytest.raises(TypeError):
         page.create_agent_control_plane_page_router(object())  # type: ignore[arg-type]
+
+
+_BANNED = re.compile(
+    r"\b(tenant|principals?|payload|endpoint|schema|uuid|sha-?256|digest|"
+    r"idempoten\w*|revision|json|yaml|toml|ledger|attenuat\w*|halt|"
+    r"fail[- ]soft|control[- ]plane)\b|\[[a-z_]+\]|/api/v1|HTTP \d{3}",
+    re.IGNORECASE,
+)
+
+
+def _visible_text(html: str) -> str:
+    main = html.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    main = re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL | re.IGNORECASE)
+    return re.sub(r"<[^>]+>", " ", main)
+
+
+def test_page_uses_plain_language_selectors_and_row_actions(monkeypatch) -> None:
+    body = _app(
+        monkeypatch,
+        {"operate", "audit", "admin"},
+        global_allowed={"operate"},
+    ).get(page.PAGE_PATH).text
+    text = _visible_text(body)
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+    for label in (
+        "Agents and people", "Reload list", "Act on one agent or person",
+        "Limit an outside agent", "Act on a group", "Review group",
+        "Stop all agents now", "Resume all work", "Technical details",
+    ):
+        assert label in text
+    # Choices come from the loaded list, never typed identifiers or seconds.
+    assert 'id="acp-verb-principal"' in body and 'id="acp-attenuate-principal"' in body
+    assert 'id="acp-fleet-scope"' in body and 'name="tenant"' not in body
+    assert 'name="release_after_seconds" type="number"' not in body
+    assert 'data-auto-reference type="hidden" name="idempotency_key"' in body
+
+
+def test_group_actions_are_bound_to_the_active_workspace(monkeypatch) -> None:
+    import maverick.paths as paths
+
+    monkeypatch.setattr(paths, "current_tenant_id_strict", lambda: "acme")
+    body = _app(monkeypatch, {"operate"}).get(page.PAGE_PATH).text
+    assert 'data-workspace-scope="true"' in body and 'data-workspace-value="acme"' in body
+
+    def _broken() -> str:
+        raise RuntimeError("tenant boundary unreadable")
+
+    monkeypatch.setattr(paths, "current_tenant_id_strict", _broken)
+    body = _app(monkeypatch, {"operate"}).get(page.PAGE_PATH).text
+    assert 'data-workspace-scope="false"' in body and 'data-workspace-value=""' in body

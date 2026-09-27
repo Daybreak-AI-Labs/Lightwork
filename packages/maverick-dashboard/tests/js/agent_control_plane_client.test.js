@@ -323,18 +323,18 @@ test("row actions are mutually exclusive, target-labeled, and focus-restoring", 
   await settle();
   const rows = elements.get("acp-rows").children;
 
-  assert.deepEqual(actionButtons(rows[0]).map((button) => button.textContent), ["Release", "Ledger"]);
-  assert.deepEqual(actionButtons(rows[1]).map((button) => button.textContent), ["Resume", "Ledger"]);
+  assert.deepEqual(actionButtons(rows[0]).map((button) => button.textContent), ["End isolation", "View history"]);
+  assert.deepEqual(actionButtons(rows[1]).map((button) => button.textContent), ["Resume", "View history"]);
   assert.deepEqual(
     actionButtons(rows[2]).map((button) => button.textContent),
-    ["Suspend", "Contain", "Ledger"],
+    ["Pause", "Isolate", "View history"],
   );
   assert.equal(
     actionButtons(rows[2])[0].attributes.get("aria-label"),
-    "Suspend principal user:active",
+    "Pause active",
   );
-  assert.match(rows[0].children[4].textContent, /Allowed tools: review/);
-  assert.match(rows[0].children[4].textContent, /Maximum wall time: 45 seconds/);
+  assert.match(rows[0].children[4].textContent, /Only these tools: Review/);
+  assert.match(rows[0].children[4].textContent, /Time limit: 45 seconds/);
 
   const oldSuspend = actionButtons(rows[2])[0];
   oldSuspend.focus();
@@ -353,12 +353,13 @@ test("snapshot failure disables plane mutations while preserving verified halt",
   const rows = elements.get("acp-rows").children;
 
   assert.equal(rows.length, 1);
-  assert.match(rows[0].children[0].textContent, /Roster unavailable/);
+  assert.match(rows[0].children[0].textContent, /Couldn't load the list/);
   assert.equal(elements.get("acp-attenuate-controls").disabled, true);
   assert.equal(elements.get("acp-halt-controls").disabled, false);
   assert.equal(elements.get("acp-clear-halt").disabled, false);
   assert.equal(elements.get("acp-state").textContent, "Unavailable");
-  assert.match(elements.get("acp-health-detail").textContent, /dependency is unavailable/);
+  assert.match(elements.get("acp-health-detail").textContent, /Something went wrong/);
+  assert.doesNotMatch(elements.get("acp-health-detail").textContent, /dependency|503|HTTP/);
   assert.ok(requests.some(({ url }) => url.endsWith("/snapshot?limit=100&offset=0")));
 });
 
@@ -374,10 +375,10 @@ test("an incomplete status contract fails closed before rendering mutations", as
   await settle();
 
   assert.equal(elements.get("acp-attenuate-controls").disabled, true);
-  assert.match(elements.get("acp-health-detail").textContent, /incomplete control-plane status contract/);
+  assert.match(elements.get("acp-health-detail").textContent, /returned something unexpected/);
   assert.match(
     elements.get("acp-rows").children[0].children[0].textContent,
-    /Roster unavailable/,
+    /Couldn't load the list/,
   );
 });
 
@@ -393,7 +394,7 @@ test("status and roster from different scans are rejected", async () => {
   await settle();
 
   assert.equal(elements.get("acp-attenuate-controls").disabled, true);
-  assert.match(elements.get("acp-health-detail").textContent, /incomplete control-plane status contract/);
+  assert.match(elements.get("acp-health-detail").textContent, /returned something unexpected/);
 });
 
 test("halt authority uncertainty also disables principal mutations", async () => {
@@ -406,7 +407,7 @@ test("halt authority uncertainty also disables principal mutations", async () =>
 
   for (const row of elements.get("acp-rows").children) {
     for (const button of actionButtons(row)) {
-      assert.equal(button.disabled, button.textContent !== "Ledger");
+      assert.equal(button.disabled, button.textContent !== "View history");
     }
   }
   assert.equal(elements.get("acp-attenuate-controls").disabled, true);
@@ -430,7 +431,7 @@ test("unverified readiness cannot be bypassed by dispatching a form submit", asy
   });
   await settle();
 
-  assert.match(elements.get("acp-operation-state").textContent, /state is not verified/);
+  assert.match(elements.get("acp-operation-state").textContent, /has not confirmed the current state/);
   assert.equal(requests.some(({ url }) => url.includes("/attenuate")), false);
 });
 
@@ -440,12 +441,12 @@ test("a disabled runtime keeps mutation controls fail closed without blocking le
 
   for (const row of elements.get("acp-rows").children) {
     for (const button of actionButtons(row)) {
-      assert.equal(button.disabled, button.textContent !== "Ledger");
+      assert.equal(button.disabled, button.textContent !== "View history");
     }
   }
   assert.equal(elements.get("acp-attenuate-controls").disabled, true);
   assert.equal(elements.get("acp-halt-controls").disabled, false);
-  assert.equal(elements.get("acp-state").textContent, "Read-only");
+  assert.equal(elements.get("acp-state").textContent, "View only");
 });
 
 test("reason-dialog cancellation is neutral and duplicate clicks stay single-flight", async () => {
@@ -485,7 +486,7 @@ test("emergency controls mutate only the hardened halt endpoint and verify with 
   await settle();
   assert.ok(requests.some(({ url, options }) =>
     url === "/api/v1/halt" && options && options.method === "POST"));
-  assert.match(elements.get("acp-operation-state").textContent, /Deployment halt verified/);
+  assert.match(elements.get("acp-operation-state").textContent, /All agents are stopped/);
 
   elements.get("acp-clear-halt").listeners.get("click")({
     currentTarget: elements.get("acp-clear-halt"),
@@ -521,7 +522,7 @@ test("halt verification uses one post-mutation GET from the serialized refresh",
   await settle();
 
   assert.equal(getCalls, 2);
-  assert.match(elements.get("acp-operation-state").textContent, /Deployment halt verified/);
+  assert.match(elements.get("acp-operation-state").textContent, /All agents are stopped/);
 });
 
 test("overlapping roster refreshes collapse and stale results never render", async () => {
@@ -564,7 +565,7 @@ test("overlapping roster refreshes collapse and stale results never render", asy
 
   assert.equal(rosterCalls, 2);
   assert.equal(elements.get("acp-rows").children.length, 1);
-  assert.equal(elements.get("acp-rows").children[0].children[0].textContent, "user:fresh");
+  assert.equal(elements.get("acp-rows").children[0].children[0].textContent, "fresh");
 });
 
 test("one combined snapshot drives status and roster and counts native containment", async () => {
@@ -606,10 +607,10 @@ test("protected resume conflict preserves its structured result and audit state"
   actionButtons(elements.get("acp-rows").children[1])[0].listeners.get("click")();
   await settle();
 
-  assert.match(elements.get("acp-operation-state").textContent, /Not applied: resume/);
+  assert.match(elements.get("acp-operation-state").textContent, /Not done: Resume suspended/);
   assert.match(
     elements.get("acp-operation-state").textContent,
-    /control-plane action audit row written/,
+    /It was recorded in the history/,
   );
   assert.match(elements.get("acp-output").textContent, /protected_containment/);
   assert.equal(
@@ -636,7 +637,7 @@ test("structured FastAPI validation errors are announced with their field", asyn
 
   assert.match(
     elements.get("acp-operation-state").textContent,
-    /reason: String should have at most 200 characters/,
+    /Some of the details need fixing/,
   );
 });
 
@@ -659,7 +660,7 @@ test("a failed mutation never claims state was re-read when refresh also fails",
   actionButtons(elements.get("acp-rows").children[1])[0].listeners.get("click")();
   await settle();
 
-  assert.match(elements.get("acp-operation-state").textContent, /could not be re-read/);
+  assert.match(elements.get("acp-operation-state").textContent, /list could not be refreshed/);
   assert.doesNotMatch(elements.get("acp-operation-state").textContent, /was re-read/);
 });
 
@@ -674,7 +675,7 @@ test("empty attenuation is rejected locally without a POST", async () => {
   });
   await settle();
 
-  assert.match(elements.get("acp-operation-state").textContent, /attenuation restriction is required/);
+  assert.match(elements.get("acp-operation-state").textContent, /Choose at least one limit/);
   assert.equal(requests.some(({ url }) => url.includes("/attenuate")), false);
 });
 
@@ -692,7 +693,7 @@ test("halt reason uses the API's 200-character bound before sending", async () =
   });
   await settle();
 
-  assert.match(elements.get("acp-operation-state").textContent, /at most 200 characters/);
+  assert.match(elements.get("acp-operation-state").textContent, /under 200 characters/);
   assert.equal(requests.some(({ url, options }) =>
     url === "/api/v1/halt" && options && options.method === "POST"), false);
 });
@@ -717,7 +718,7 @@ test("fail-soft audit result is announced precisely", async () => {
 
   assert.match(
     elements.get("acp-operation-state").textContent,
-    /control-plane action audit row was not written/,
+    /Warning: it was not recorded in the history/,
   );
 });
 
@@ -730,10 +731,10 @@ test("cluster halt status without an explicit cluster verdict stays disabled", a
 
   assert.equal(elements.get("acp-halt-controls").disabled, true);
   assert.equal(elements.get("acp-clear-halt").disabled, true);
-  assert.equal(elements.get("acp-state").textContent, "Halt unknown");
+  assert.equal(elements.get("acp-state").textContent, "Unknown");
   for (const row of elements.get("acp-rows").children) {
     for (const button of actionButtons(row)) {
-      assert.equal(button.disabled, button.textContent !== "Ledger");
+      assert.equal(button.disabled, button.textContent !== "View history");
     }
   }
 });
@@ -850,11 +851,11 @@ test("the latest concurrent ledger read owns the Last operation panel", async ()
   const olderUrl = [...pending.keys()].find((url) => url.includes("agent%3Acontained"));
   pending.get(newerUrl)(jsonResponse({ count: 1, items: [{ source: "newer" }] }));
   await settle();
-  assert.match(elements.get("acp-operation-state").textContent, /user:suspended/);
+  assert.match(elements.get("acp-operation-state").textContent, /History for suspended/);
 
   pending.get(olderUrl)(jsonResponse({ count: 1, items: [{ source: "older" }] }));
   await settle();
-  assert.match(elements.get("acp-operation-state").textContent, /user:suspended/);
+  assert.match(elements.get("acp-operation-state").textContent, /History for suspended/);
   assert.doesNotMatch(elements.get("acp-output").textContent, /older/);
 });
 
@@ -876,7 +877,7 @@ test("a roster refresh error does not steal unrelated focus", async () => {
   await settle();
 
   assert.equal(document.activeElement, outside);
-  assert.match(elements.get("acp-roster-page").textContent, /unavailable/);
+  assert.match(elements.get("acp-roster-page").textContent, /Couldn't load the list/);
 });
 
 test("refresh marks visible health stale until the snapshot settles", async () => {
@@ -896,12 +897,12 @@ test("refresh marks visible health stale until the snapshot settles", async () =
   const refresh = elements.get("acp-refresh");
   refresh.listeners.get("click")({ currentTarget: refresh });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(elements.get("acp-state").textContent, "Refreshing");
+  assert.equal(elements.get("acp-state").textContent, "Checking");
   assert.equal(elements.get("acp-verb-submit").disabled, true);
 
   releaseRefresh(jsonResponse({ status: statusPayload(), agents: rosterPayload() }));
   await settle();
-  assert.equal(elements.get("acp-state").textContent, "Enabled");
+  assert.equal(elements.get("acp-state").textContent, "Ready");
 });
 
 test("a stalled request times out and leaves controls fail closed", async () => {
@@ -918,7 +919,7 @@ test("a stalled request times out and leaves controls fail closed", async () => 
   await new Promise((resolve) => setTimeout(resolve, 30));
   await settle();
 
-  assert.match(elements.get("acp-health-detail").textContent, /timed out/);
+  assert.match(elements.get("acp-health-detail").textContent, /took too long/);
   assert.equal(elements.get("acp-verb-submit").disabled, true);
   assert.equal(elements.get("acp-state").textContent, "Unavailable");
 });
@@ -935,7 +936,7 @@ test("fallback response limits count UTF-8 bytes rather than JS characters", asy
   });
   await settle();
 
-  assert.match(elements.get("acp-health-detail").textContent, /byte bound/);
+  assert.match(elements.get("acp-health-detail").textContent, /returned something unexpected/);
   assert.equal(elements.get("acp-verb-submit").disabled, true);
 });
 
@@ -962,7 +963,7 @@ test("opaque identity-provider subjects use body transport without canonicalizat
   });
   await settle();
 
-  assert.match(elements.get("acp-operation-state").textContent, /Applied: resume/);
+  assert.match(elements.get("acp-operation-state").textContent, /Done: Resume/);
   assert.match(elements.get("acp-output").textContent, /auth0\|tenant\/alice 名/);
 });
 
@@ -975,8 +976,8 @@ test("malformed roster control fields fail closed before action rendering", asyn
   await settle();
 
   assert.equal(elements.get("acp-state").textContent, "Unavailable");
-  assert.match(elements.get("acp-health-detail").textContent, /allowed tool list/);
-  assert.match(elements.get("acp-rows").children[0].children[0].textContent, /Roster unavailable/);
+  assert.match(elements.get("acp-health-detail").textContent, /returned something unexpected/);
+  assert.match(elements.get("acp-rows").children[0].children[0].textContent, /Couldn't load the list/);
 });
 
 test("a newer ledger result cannot be overwritten by an older mutation", async () => {
@@ -997,14 +998,14 @@ test("a newer ledger result cannot be overwritten by an older mutation", async (
   const mutationUrl = [...pending.keys()].find((url) => url.endsWith("/principals/resume"));
   pending.get(ledgerUrl)(jsonResponse({ count: 1, items: [{ source: "newer ledger" }] }));
   await settle();
-  assert.match(elements.get("acp-operation-state").textContent, /Ledger: agent:contained/);
+  assert.match(elements.get("acp-operation-state").textContent, /History for contained/);
 
   pending.get(mutationUrl)(jsonResponse({
     verb: "resume", principal: "user:suspended", ok: true, code: null,
     detail: "revocation lifted", notes: [], audit_written: true,
   }));
   await settle();
-  assert.match(elements.get("acp-operation-state").textContent, /Ledger: agent:contained/);
+  assert.match(elements.get("acp-operation-state").textContent, /History for contained/);
   assert.match(elements.get("acp-output").textContent, /newer ledger/);
 });
 
@@ -1022,7 +1023,7 @@ test("a declared oversized response is cancelled before body allocation", async 
   await settle();
 
   assert.equal(cancelled, true);
-  assert.match(elements.get("acp-health-detail").textContent, /byte bound/);
+  assert.match(elements.get("acp-health-detail").textContent, /returned something unexpected/);
 });
 
 test("a chunked response is cancelled as soon as its byte budget is exceeded", async () => {
@@ -1048,7 +1049,7 @@ test("a chunked response is cancelled as soon as its byte budget is exceeded", a
   await settle();
 
   assert.equal(cancelled, true);
-  assert.match(elements.get("acp-health-detail").textContent, /byte bound/);
+  assert.match(elements.get("acp-health-detail").textContent, /returned something unexpected/);
 });
 
 test("timeout aborts a response whose streamed body stalls", async () => {
@@ -1077,6 +1078,23 @@ test("timeout aborts a response whose streamed body stalls", async () => {
   await settle();
 
   assert.equal(aborted, true);
-  assert.match(elements.get("acp-health-detail").textContent, /timed out/);
+  assert.match(elements.get("acp-health-detail").textContent, /took too long/);
   assert.equal(elements.get("acp-verb-submit").disabled, true);
+});
+
+test("row buttons offer Limit for outside agents and plain labels only", async () => {
+  const payload = rosterPayload();
+  payload.items[0] = { ...payload.items[0], contained: false, revoked: false, state: "active", label: "Vega assistant" };
+  const { elements } = harness({
+    rosterFetch: async () => jsonResponse({ status: statusPayload(), agents: payload }),
+  });
+  await settle();
+  const row = elements.get("acp-rows").children[0];
+  assert.equal(row.children[0].textContent, "Vega assistant");
+  assert.equal(row.children[1].textContent, "Outside agent");
+  assert.equal(row.children[2].children[0].textContent, "Active");
+  assert.deepEqual(actionButtons(row).map((button) => button.textContent),
+    ["Pause", "Isolate", "Limit", "View history"]);
+  const text = elements.get("acp-rows").children.map((r) => r.children.map((c) => c.textContent).join(" ")).join(" ");
+  assert.doesNotMatch(text, /principal|agent:|user:|missing_trust|ledger/i);
 });

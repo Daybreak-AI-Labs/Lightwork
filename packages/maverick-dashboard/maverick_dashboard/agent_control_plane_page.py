@@ -55,6 +55,17 @@ def _halt_authority(request: Request) -> tuple[bool, str]:
         return False, "unknown"
 
 
+def _workspace_scope() -> tuple[bool, str]:
+    """The active workspace a group action may target, or unknown (fail closed)."""
+
+    try:
+        from maverick.paths import current_tenant_id_strict
+
+        return True, current_tenant_id_strict() or ""
+    except Exception:
+        return False, ""
+
+
 def create_agent_control_plane_page_router(templates: Jinja2Templates) -> APIRouter:
     if not isinstance(templates, Jinja2Templates):
         raise TypeError("agent control plane page requires a Jinja template authority")
@@ -67,6 +78,7 @@ def create_agent_control_plane_page_router(templates: Jinja2Templates) -> APIRou
             raise HTTPException(status_code=404, detail="agent control plane unavailable")
         nonce = secrets.token_urlsafe(18)
         acp_can_halt, acp_halt_scope = _halt_authority(request)
+        acp_workspace_scope_known, acp_workspace_scope = _workspace_scope()
         response = templates.TemplateResponse(
             request,
             "agent_control_plane.html",
@@ -79,6 +91,8 @@ def create_agent_control_plane_page_router(templates: Jinja2Templates) -> APIRou
                 "acp_can_admin": has_permission(request, "admin"),
                 "acp_can_halt": acp_can_halt,
                 "acp_halt_scope": acp_halt_scope,
+                "acp_workspace_scope_known": acp_workspace_scope_known,
+                "acp_workspace_scope": acp_workspace_scope,
             },
         )
         for name, value in _HEADERS.items():
