@@ -104,7 +104,7 @@ def test_real_agent_dispatch_binds_its_existing_budget_to_connector_retry(connec
     budget.record_tool_call()
     registry = ToolRegistry()
     registry.register(connector)
-    obj = SimpleNamespace(ctx=SimpleNamespace(budget=budget), tools=registry,
+    obj = SimpleNamespace(ctx=SimpleNamespace(budget=budget, goal_id=1), tools=registry,
                           _HALT_POLL_SECONDS=0.01, _audit_tool_event=lambda *_a, **_k: True)
     obj._await_wall_clock_guarded = Agent._await_wall_clock_guarded.__get__(obj)
     with pytest.raises(BudgetExceeded):

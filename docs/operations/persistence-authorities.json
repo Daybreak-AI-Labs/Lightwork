@@ -177,15 +177,15 @@
   },
   "counts": {
     "governed": 70,
-    "artifact": 46,
+    "artifact": 47,
     "a2a": 4,
     "preferences": 3,
-    "learning": 53,
+    "learning": 54,
     "sqlite_domain": 78,
     "configuration": 56,
     "read_projection": 15,
     "coordinator": 1,
-    "audit": 20,
+    "audit": 21,
     "transient": 16,
     "business_records": 11,
     "execution": 21,
@@ -194,7 +194,7 @@
     "composition": 54,
     "external": 18,
     "key_custody": 2,
-    "storage_primitive": 7,
+    "storage_primitive": 8,
     "world": 4,
     "mixed_api": 7,
     "knowledge": 4,
@@ -23421,6 +23421,100 @@
           "function": "foreign_settled_totals",
           "kind": "data_dir",
           "expression": "data_dir('usage', 'ledger.json', tenant=tenant)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/immune/_ledger.py",
+      "contract": "storage_primitive",
+      "owner": "packages/maverick-core/maverick/immune/_ledger.py",
+      "purpose": "Append-only private JSONL helper for the immune layer; each caller's ledger owns its authority.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 17,
+          "function": "append",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 18,
+          "function": "append",
+          "kind": "open_private_append",
+          "expression": "open_private_append(path, require_private_parent=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/immune/oversight.py",
+      "contract": "audit",
+      "owner": "packages/maverick-core/maverick/immune/oversight.py",
+      "purpose": "Proof of Oversight ledger: server-side canary identities and capability-drill results behind signed oversight records.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 34,
+          "function": "ledger_path",
+          "kind": "data_dir",
+          "expression": "data_dir('immune', 'oversight.jsonl')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/immune/twin.py",
+      "contract": "learning",
+      "owner": "packages/maverick-core/maverick/immune/twin.py",
+      "purpose": "Production-twin recordings of a goal's tool results (opt-in, tenant-scoped, sealed at rest) and the counts-only replay ledger.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 37,
+          "function": "recording_path",
+          "kind": "data_dir",
+          "expression": "data_dir('immune', 'twin', f'{int(goal_id)}.jsonl')"
+        },
+        {
+          "line": 142,
+          "function": "replays_path",
+          "kind": "data_dir",
+          "expression": "data_dir('immune', 'twin', 'replays.jsonl')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/cli/_immune_groups.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-core/maverick/cli/_immune_groups.py",
+      "purpose": "maverick immune CLI: writes only operator-requested output files (sealed or merged Discovery Title dossiers).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 131,
+          "function": "title_seal",
+          "kind": "write_text",
+          "expression": "Path(out).write_text(json.dumps(t.seal(_load(dossier)), indent=2), encoding='utf-8')"
+        },
+        {
+          "line": 163,
+          "function": "title_research",
+          "kind": "write_text",
+          "expression": "Path(out).write_text(json.dumps(merged, indent=2, sort_keys=True), encoding='utf-8')"
         }
       ]
     }
