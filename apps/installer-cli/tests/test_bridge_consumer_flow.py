@@ -137,7 +137,7 @@ def test_bridge_governance_level_applies(monkeypatch, tmp_path):
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
     assert config["governance"]["profile"] == "regulated"
     assert config["audit"]["sign"] is True
-    assert config["quotas"]["enforce"] is True
+    assert "quotas" not in config  # no spending caps unless an administrator sets them
     assert config["self_learning"]["enable"] is True
 
 
