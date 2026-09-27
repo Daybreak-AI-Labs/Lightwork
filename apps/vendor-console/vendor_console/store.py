@@ -56,6 +56,26 @@ def list_staff(conn: sqlite3.Connection) -> list[Staff]:
             conn.execute("SELECT * FROM staff ORDER BY email").fetchall()]
 
 
+def set_staff_role(conn: sqlite3.Connection, staff_id: int, role: str) -> None:
+    """Change a role and end that person's live sessions, so the new role
+    applies from their next sign-in (roles are read from the DB, never the cookie)."""
+    conn.execute("UPDATE staff SET role = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (role, staff_id))
+    conn.commit()
+
+
+def set_staff_disabled(conn: sqlite3.Connection, staff_id: int, disabled: bool) -> None:
+    """Turn sign-in off (or back on). Turning it off also ends live sessions."""
+    conn.execute("UPDATE staff SET disabled = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (1 if disabled else 0, staff_id))
+    conn.commit()
+
+
+def count_active_owners(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) AS n FROM staff WHERE role = 'owner' AND disabled = 0"
+                        ).fetchone()["n"]
+
+
 def count_staff(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) AS n FROM staff").fetchone()["n"]
 

@@ -6,8 +6,8 @@
   <div>
     <h1>{{ customer.name }}</h1>
     <p class="sub">
-      <span class="badge b-{{ customer.status }}">{{ customer.status }}</span>
-      &nbsp;{{ environment(customer.posture) }} &nbsp;·&nbsp; {{ customer.contact_email or 'no contact email' }}
+      <span class="badge b-{{ customer.status }}">{{ customer.status|customer_status }}</span>
+      &nbsp;{{ environment(customer.posture) }} &nbsp;·&nbsp; {{ customer.primary_contact or '' }}{% if customer.primary_contact %} {% endif %}{{ customer.contact_email or 'No contact email yet' }}
     </p>
   </div>
   <a class="btn ghost small" href="/customers">← All customers</a>
@@ -18,66 +18,69 @@
     <h2>Licenses</h2>
     <div class="card">
       <table>
-        <tr><th>Tier</th><th>Suites</th><th>Status</th><th>Issued</th><th>Expires</th><th></th></tr>
+        <tr><th>Plan</th><th>Add-on suites</th><th>Status</th><th>Issued</th><th>Expires</th><th>Actions</th></tr>
         {% for r in licenses %}
         <tr>
-          <td><span class="tier tier-{{ r.lic.tier }}">{{ r.lic.tier }}</span></td>
-          <td class="muted">{{ r.lic.suites|join(', ') or '—' }}</td>
-          <td><span class="badge b-{{ r.status }}">{{ r.status }}</span></td>
-          <td class="mono muted">{{ r.lic.issued_at[:10] }}</td>
-          <td class="mono muted">{{ (r.lic.expires_at or '—')[:10] }}</td>
+          <td><span class="tier tier-{{ r.lic.tier }}">{{ r.lic.tier|tier }}</span></td>
+          <td class="muted">{% for s in r.lic.suites %}{{ feature(s) }}{% if not loop.last %}, {% endif %}{% else %}None{% endfor %}</td>
+          <td><span class="badge b-{{ r.status }}">{{ r.status|license_status }}</span></td>
+          <td class="muted">{{ r.lic.issued_at|date }}</td>
+          <td class="muted">{{ r.lic.expires_at|date if r.lic.expires_at else 'Never' }}</td>
           <td style="white-space:nowrap">
-            <a class="btn ghost small" href="/licenses/{{ r.lic.license_id }}/download">Download</a>
+            <a class="btn ghost small" href="/licenses/{{ r.lic.license_id }}/download">Download license file</a>
             {% if staff.can_write and not r.lic.revoked %}
-            <form method="post" action="/licenses/{{ r.lic.license_id }}/revoke"
-                  style="display:inline" onsubmit="return confirm('Revoke this license?')">
-              <button class="btn danger small" type="submit">Revoke</button>
-            </form>
+            <a class="btn danger small" href="/licenses/{{ r.lic.license_id }}/revoke">Revoke</a>
             {% endif %}
           </td>
         </tr>
         {% endfor %}
-        {% if not licenses %}<tr><td colspan="6" class="muted">No licenses issued yet.</td></tr>{% endif %}
+        {% if not licenses %}<tr><td colspan="6" class="empty">
+          <p>No licenses issued yet.{% if staff.can_write %} Choose a plan and features below, then select <strong>Issue signed license</strong>.{% endif %}</p>
+        </td></tr>{% endif %}
       </table>
+      {% if licenses %}<p class="help">Offline customers need the license file: download it and send it to their administrator.</p>{% endif %}
     </div>
 
     {% if staff.can_write %}
-    <h2>Feature access</h2>
+    <h2>Plan and features</h2>
     <div class="card">
-      <p class="muted" style="margin-top:0;font-size:13px">Choose the features this customer can use. Saving issues a new signed license.
-        Connected installations receive it on their next refresh. Checked features
-        are enabled, including those outside the selected plan; unchecked features
-        are disabled, including those normally included in the plan.</p>
+      <p class="help" style="margin-top:0">Choose what this customer can use, then issue a new signed license. Connected installations receive it on their next check-in (about a minute). Checked features are on, even when the plan doesn't normally include them; unchecked features are off.</p>
       <form method="post" action="/customers/{{ customer.id }}/licenses">
         <div class="formgrid">
-          <div><label for="console-customer_detail-tier">Tier</label>
+          <div><label for="console-customer_detail-tier">Plan</label>
             <select id="console-customer_detail-tier" name="tier">
               <option value="basic" {% if matrix.tier=='basic' %}selected{% endif %}>Basic</option>
               <option value="gold" {% if matrix.tier=='gold' or not matrix.tier %}selected{% endif %}>Gold</option>
               <option value="platinum" {% if matrix.tier=='platinum' %}selected{% endif %}>Platinum</option>
             </select>
           </div>
-          <div><label for="console-customer_detail-seats">Seats <span class="muted">(blank = unlimited)</span></label>
-            <input id="console-customer_detail-seats" name="seats" inputmode="numeric"></div>
-          <div><label for="console-customer_detail-expires">Expires <span class="muted">(YYYY-MM-DD, blank = perpetual)</span></label>
-            <input id="console-customer_detail-expires" name="expires" placeholder="2027-01-01"></div>
-          <div><label for="console-customer_detail-grace_days">Grace days</label><input id="console-customer_detail-grace_days" name="grace_days" value="14" inputmode="numeric"></div>
+          <div><label for="console-customer_detail-seats">Seats</label>
+            <input id="console-customer_detail-seats" name="seats" type="number" min="1" step="1" inputmode="numeric" aria-describedby="seats-help">
+            <p class="help" id="seats-help">Leave empty for unlimited seats.</p></div>
+          <div><label for="console-customer_detail-expires">Expires on</label>
+            <input id="console-customer_detail-expires" name="expires" type="date" min="{{ today }}" aria-describedby="expires-help">
+            <p class="help" id="expires-help">Leave empty for a license that never expires.</p></div>
+          <div><label for="console-customer_detail-grace_days">Grace period after expiry</label>
+            <select id="console-customer_detail-grace_days" name="grace_days" aria-describedby="grace-help">
+              {% for d in [0, 7, 14, 30, 60, 90] %}<option value="{{ d }}" {% if d == 14 %}selected{% endif %}>{% if d == 0 %}No grace period{% else %}{{ d }} days{% endif %}</option>{% endfor %}
+            </select>
+            <p class="help" id="grace-help">How long features keep working after the license expires.</p></div>
         </div>
 
-        <label style="margin-top:14px">Available features</label>
+        <fieldset style="border:0;padding:0;margin:14px 0 0"><legend class="muted" style="font-size:12px">Features</legend>
         <div class="checkgrid">
           {% for f in matrix.features %}
           <label class="check">
             <input type="checkbox" name="features_on" value="{{ f.name }}"
                    {% if f.enabled %}checked{% endif %}>
             <span title="{{ f.name }}">{{ feature(f.name) }}</span>
-            <span class="muted" style="font-size:11px">{{ f.min_tier }}+
-              {%- if f.source == 'grant' %} · à la carte{% elif f.source == 'denied' %} · denied{% endif %}</span>
+            <span class="muted" style="font-size:11px">Included from {{ f.min_tier|tier }}
+              {%- if f.source == 'grant' %} · added individually{% elif f.source == 'denied' %} · turned off{% endif %}</span>
           </label>
           {% endfor %}
-        </div>
+        </div></fieldset>
 
-        <label style="margin-top:12px">Add-on suites</label>
+        <fieldset style="border:0;padding:0;margin:12px 0 0"><legend class="muted" style="font-size:12px">Add-on suites</legend>
         <div class="checkgrid">
           {% for s in matrix.suites %}
           <label class="check">
@@ -86,47 +89,84 @@
             <span title="{{ s.name }}">{{ feature(s.name) }}</span>
           </label>
           {% endfor %}
-        </div>
+        </div></fieldset>
 
         <details style="margin-top:12px"><summary>Advanced feature settings</summary>
           <label for="console-customer_detail-features_extra">Custom feature access <span class="muted">(feature names, separated by commas)</span></label>
           <input id="console-customer_detail-features_extra" name="features_extra" value="{{ matrix.extra|join(', ') }}">
+          <p class="help">Only for features an engineer has asked you to add by name. Leave empty otherwise.</p>
         </details>
 
-        <button class="btn" type="submit" style="margin-top:16px">Issue signed license</button>
+        <div class="actions"><button class="btn" type="submit">Issue signed license</button></div>
       </form>
     </div>
     {% endif %}
   </div>
 
   <div>
-    <h2>Deployment</h2>
+    <h2>Installation</h2>
     <div class="card">
       {% if checkin %}
-      <div class="muted" style="font-size:12px">LAST CHECK-IN</div>
-      <div class="mono">{{ checkin.version or 'unknown' }} · {{ checkin.license_status }}</div>
-      <div class="muted mono" style="font-size:11px;margin-top:4px">{{ checkin.deployment_id or '—' }}</div>
+      <dl class="kv">
+        <dt>Last check-in</dt><dd>{{ checkin.at|ts }}</dd>
+        <dt>Version</dt><dd>{{ checkin.version or 'Not reported' }}</dd>
+        <dt>What it did</dt><dd>{{ checkin.license_status|checkin }}</dd>
+      </dl>
+      {% if checkin.deployment_id %}<details style="margin-top:8px"><summary>Installation ID</summary><div class="mono muted">{{ checkin.deployment_id }}</div></details>{% endif %}
       {% else %}
-      <p class="muted" style="margin:0">This installation has not connected yet. It may be offline or set up without a network connection.</p>
+      <p class="muted" style="margin:0">This customer's installation hasn't checked in yet. Offline installations never check in; connected ones appear after they first use their connection token.</p>
       {% endif %}
       {% if staff.can_write %}
       <form method="post" action="/customers/{{ customer.id }}/channel" style="margin-top:12px">
-        <label for="console-customer_detail-channel">Release channel</label>
-        <select id="console-customer_detail-channel" name="channel" onchange="this.form.submit()">
-          <option value="stable" {% if customer.channel=='stable' %}selected{% endif %}>stable</option>
-          <option value="edge" {% if customer.channel=='edge' %}selected{% endif %}>edge</option>
+        <label for="console-customer_detail-channel">Updates they're offered</label>
+        <select id="console-customer_detail-channel" name="channel">
+          {% for c in channels %}<option value="{{ c }}" {% if customer.channel==c %}selected{% endif %}>{{ c|channel_help }}</option>{% endfor %}
         </select>
+        <button class="btn ghost small" type="submit" style="margin-top:8px">Save update channel</button>
       </form>
+      <div class="actions">
+        <a class="btn danger small" href="/customers/{{ customer.id }}/token">Replace connection token</a>
+      </div>
+      <p class="help">Use this if the token was lost or shared by mistake.</p>
       {% else %}
-      <div class="muted" style="font-size:12px;margin-top:10px">Channel: {{ customer.channel }}</div>
+      <div class="muted" style="font-size:12px;margin-top:10px">Updates offered: {{ customer.channel|channel }}</div>
       {% endif %}
     </div>
+
+    {% if staff.can_write %}
+    <h2>Customer details</h2>
+    <div class="card">
+      <form method="post" action="/customers/{{ customer.id }}/status">
+        <label for="customer-status">Status</label>
+        <select id="customer-status" name="status">
+          {% for s in statuses %}<option value="{{ s }}" {% if s == customer.status %}selected{% endif %}>{{ s|customer_status }}</option>{% endfor %}
+        </select>
+        <p class="help">For your records. It doesn't change the license; revoke or reissue the license to change access.</p>
+        <button class="btn ghost small" type="submit" style="margin-top:8px">Save status</button>
+      </form>
+      <form method="post" action="/customers/{{ customer.id }}/details" style="margin-top:16px">
+        <label for="customer-contact">Contact name</label>
+        <input id="customer-contact" name="primary_contact" value="{{ customer.primary_contact }}">
+        <label for="customer-email">Contact email</label>
+        <input id="customer-email" name="contact_email" type="email" value="{{ customer.contact_email }}">
+        <label for="customer-posture">Environment</label>
+        <select id="customer-posture" name="posture">
+          {% for p in postures %}<option value="{{ p }}" {% if p == customer.posture %}selected{% endif %}>{{ environment(p) }}</option>{% endfor %}
+        </select>
+        <label for="customer-notes">Notes</label>
+        <textarea id="customer-notes" name="notes" rows="3">{{ customer.notes }}</textarea>
+        <button class="btn ghost small" type="submit" style="margin-top:8px">Save details</button>
+      </form>
+    </div>
+    {% endif %}
+
     <h2>License verification</h2>
     <div class="card">
-      <details><summary>Verification key and setup</summary>
-      <div class="muted" style="font-size:12px">PUBLISHER PUBLIC KEY</div>
-      <div class="codebox" style="font-size:11px">{{ pubkey }}</div>
-      <p class="muted" style="font-size:12px">Your installation administrator uses this public key to verify licenses from your organization.</p></details>
+      <details><summary>Verification key for the customer's administrator</summary>
+      <div class="codebox" style="font-size:11px" id="pubkey">{{ pubkey }}</div>
+      <button class="btn ghost small" type="button" data-copy="pubkey" style="margin-top:8px">Copy key</button>
+      <span id="pubkey-status" role="status" class="muted"></span>
+      <p class="muted" style="font-size:12px">The customer's installation uses this public key to check that licenses really come from Daybreak. It is safe to share.</p></details>
     </div>
   </div>
 </div>

@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import db, routes_api, routes_auth, routes_console
+from . import auth, db, labels, routes_api, routes_auth, routes_console, routes_team
 from .render import render
 from .util import same_origin
 
@@ -52,14 +52,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
         if exc.status_code == 401:
             return RedirectResponse("/login", status_code=303)
+        title, text = labels.error_page(exc.status_code, exc.detail)
         resp = render(request, "error.html",
-                      {"code": exc.status_code, "detail": exc.detail})
+                      {"code": exc.status_code, "detail": exc.detail,
+                       "title": title, "text": text,
+                       "staff": auth.load_staff(request)})
         resp.status_code = exc.status_code
         return resp
 
     app.include_router(routes_api.router)
     app.include_router(routes_auth.router)
     app.include_router(routes_console.router)
+    app.include_router(routes_team.router)
     return app
 
 

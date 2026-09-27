@@ -1,24 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Audit log · Daybreak Console{% endblock %}
+{% block title %}Activity log · Daybreak Console{% endblock %}
 {% block main %}
-<h1>Vendor audit log</h1>
-<p class="sub">Review recorded customer administration activity and its verification status.
-  {% if chain_ok %}<span class="badge b-active">History verified</span>
-  {% else %}<span class="badge b-expired">Verification failed at entry #{{ broken }}</span>{% endif %}
+<h1>Activity log</h1>
+<p class="sub">Everything staff and customer installations have done in this console, newest first. The log is protected against editing.
+  {% if chain_ok %}<span class="badge b-active">Log intact</span>
+  {% else %}<span class="badge b-expired">Log may have been altered at entry {{ broken }}. Tell an owner right away.</span>{% endif %}
 </p>
 <div class="card">
   <table>
-    <tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+    <tr><th>Time</th><th>Who</th><th>What happened</th><th>About</th><th>Details</th></tr>
     {% for e in events %}
     <tr>
-      <td class="mono muted">{{ e.ts|ts }}</td>
-      <td class="mono">{{ e.actor }}</td>
-      <td><strong>{{ e.action.replace(".", " ").replace("_", " ")|title }}</strong></td>
+      <td class="muted">{{ e.ts|ts }}</td>
+      <td>{{ e.actor }}</td>
+      <td><strong>{{ e.action|action }}</strong></td>
       <td>{{ e.target }}</td>
       <td><details><summary>View details</summary><pre class="mono">{{ e.detail }}</pre></details></td>
     </tr>
     {% endfor %}
-    {% if not events %}<tr><td colspan="5" class="muted">No events yet.</td></tr>{% endif %}
+    {% if not events %}<tr><td colspan="5" class="muted">Nothing has happened yet.</td></tr>{% endif %}
   </table>
 </div>
 {% endblock %}

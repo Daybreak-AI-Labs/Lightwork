@@ -16,6 +16,10 @@ from .util import client_ip, secure_cookie
 
 router = APIRouter()
 
+_LOCKED = "Too many attempts. Wait 5 minutes, then try again."
+_BAD_CODE = ("That code didn't work. Codes change every 30 seconds, so enter the newest "
+             "one. If it still fails, check the time on your phone is set automatically.")
+
 # A fixed hash so login spends PBKDF2 time even when the email is unknown/disabled
 # — equalizes response timing so an attacker can't enumerate staff by latency.
 _DUMMY_PW_HASH = security.hash_password("timing-equalizer")
@@ -64,15 +68,15 @@ def login_submit(request: Request, email: str = Form(...), password: str = Form(
     key = "login:" + email.strip().lower()
     if ratelimit.locked(key):
         return render(request, "login.html",
-                      {"error": "Too many attempts — try again later."})
+                      {"error": _LOCKED})
     row = store.get_staff_by_email(conn, email)
     if row is None or row["disabled"]:
         security.verify_password(password, _DUMMY_PW_HASH)     # equalize timing
         ratelimit.record_failure(key)
-        return render(request, "login.html", {"error": "Invalid credentials."})
+        return render(request, "login.html", {"error": "That email and password don't match. Check them and try again."})
     if not security.verify_password(password, row["pw_hash"]):
         ratelimit.record_failure(key)
-        return render(request, "login.html", {"error": "Invalid credentials."})
+        return render(request, "login.html", {"error": "That email and password don't match. Check them and try again."})
     ratelimit.record_success(key)
     enrolled = bool(row["totp_enrolled"])
     audit.record(conn, actor=row["email"], action="staff.login.password",
@@ -99,13 +103,13 @@ def totp_submit(request: Request, code: str = Form(...)):
     key = "totp:" + str(st.id)
     if ratelimit.locked(key):
         return render(request, "totp.html",
-                      {"error": "Too many attempts — try again later."})
+                      {"error": _LOCKED})
     row = store.get_staff_row(conn, st.id)
     step = security.totp_match_step(row["totp_secret"], code,
                                     after_step=row["totp_last_step"])
     if step is None:
         ratelimit.record_failure(key)
-        return render(request, "totp.html", {"error": "Wrong or expired code."})
+        return render(request, "totp.html", {"error": _BAD_CODE})
     store.set_totp_last_step(conn, st.id, step)                 # single-use
     ratelimit.record_success(key)
     audit.record(conn, actor=st.email, action="staff.login.totp", target=st.email,
@@ -139,7 +143,7 @@ def enroll_submit(request: Request, code: str = Form(...)):
     key = "totp:" + str(st.id)
     if ratelimit.locked(key):
         return render(request, "enroll_totp.html",
-                      {"error": "Too many attempts — try again later."})
+                      {"error": _LOCKED})
     row = store.get_staff_row(conn, st.id)
     step = security.totp_match_step(row["totp_secret"], code,
                                     after_step=row["totp_last_step"])
@@ -148,7 +152,7 @@ def enroll_submit(request: Request, code: str = Form(...)):
         return render(request, "enroll_totp.html",
                       {"secret": row["totp_secret"],
                        "uri": security.totp_uri(row["totp_secret"], st.email),
-                       "error": "Wrong code — check your authenticator and retry."})
+                       "error": _BAD_CODE})
     store.set_totp(conn, st.id, row["totp_secret"], enrolled=True)
     store.set_totp_last_step(conn, st.id, step)                 # single-use
     ratelimit.record_success(key)

@@ -87,7 +87,7 @@ def test_audit_record_keeps_technical_detail_in_closed_disclosure(admin, app):
                  target="preview", detail={"synthetic_internal_field": "review-only"})
     response = admin.get("/audit")
     assert response.status_code == 200
-    assert "Customer Update" in response.text
+    assert "Updated customer details" in response.text
     assert '<details><summary>View details</summary>' in response.text
     assert "synthetic_internal_field" in response.text
     assert "<details open" not in response.text
