@@ -7,7 +7,7 @@ const snapshot={goal_id:7,title:"Captured <img src=x>",result:"Sensitive <img sr
 const packet={id:"PRP-one",revision:1,source_version:"a".repeat(64),snapshot,owner:"user:owner",reviewer:"user:reviewer",project_name:"Project",status:"pending",due_at:2000000000,note:"Review this.",history:[{actor:"user:owner",action:"sent",at:1000,note:"Review this."}],stale:false,can_respond:true};
 async function fixture({principal="user:owner",intercept=()=>undefined,fragment=""}={}){
   const dom=new JSDOM(markup,{url:"https://lightwork.example/project-reviews"+fragment,runScripts:"outside-only"}),{window}=dom,calls=[];
-  window.document.getElementById("pr-root").dataset.context="context-one";window.TextEncoder=TextEncoder;window.confirm=()=>true;
+  window.document.getElementById("pr-root").dataset.context="context-one";window.TextEncoder=TextEncoder;window.mvConfirm=async()=>true;
   window.fetch=async(url,options={})=>{const call={url:new URL(url,window.location),...options};calls.push(call);const injected=await intercept(call);if(injected instanceof Response)return injected;let data=injected;
     if(data===undefined){const route=call.url.pathname;
       if(route.endsWith("/preview"))data={snapshot,source_version:packet.source_version};
@@ -27,8 +27,8 @@ async function preview(ui){ui.change("project","1");await ui.settle();ui.change(
 test("sharing needs a current preview and explicit confirmation, and keeps the exact captured version",async t=>{
   const ui=await fixture();t.after(()=>ui.window.close());assert.equal(ui.el("send-button").disabled,true);ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
   await preview(ui);assert.equal(ui.el("preview-text").querySelector("img"),null);assert.match(ui.el("preview-text").textContent,/Sensitive/);
-  ui.window.confirm=()=>false;ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
-  ui.window.confirm=()=>true;ui.submit("send");await ui.settle();const write=ui.calls.find(row=>row.method==="POST"),body=JSON.parse(write.body);
+  ui.window.mvConfirm=async()=>false;ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
+  ui.window.mvConfirm=async()=>true;ui.submit("send");await ui.settle();const write=ui.calls.find(row=>row.method==="POST"),body=JSON.parse(write.body);
   assert.equal(body.source_version,packet.source_version);assert.equal(body.expected_team_revision,2);assert.equal(body.goal_id,7);assert.equal(write.headers["X-Lightwork-Review-Context"],"context-one");assert.match(ui.el("status").textContent,/No task was run or signed off/);
 });
 test("an uncertain send preserves input and exact retry identity while refusing duplicate clicks",async t=>{
@@ -45,7 +45,7 @@ test("same packet refresh keeps an unsaved review comment; changed packet versio
 test("stale packets cannot be approved in the UI and revoked packet reads clear prior content",async t=>{
   let revoked=false;const ui=await fixture({principal:"user:reviewer",intercept:call=>call.url.pathname.includes("/packets/")?(revoked?new Response('{"detail":"Access revoked"}',{status:404}):{...packet,stale:true}):undefined});t.after(()=>ui.window.close());
   ui.el("inbox").querySelector("button").click();await ui.settle();assert.equal(ui.el("action").querySelector('option[value="approve"]').disabled,true);assert.match(ui.el("stale").textContent,/source task changed/i);
-  revoked=true;await ui.click("refresh");assert.equal(ui.el("packet").hidden,true);assert.equal(ui.el("result").textContent,"");assert.match(ui.el("status").textContent,/Access revoked/);
+  revoked=true;await ui.click("refresh");assert.equal(ui.el("packet").hidden,true);assert.equal(ui.el("result").textContent,"");assert.match(ui.el("status").textContent,/no longer exists/);
 });
 
 test("failed refresh authorization clears prior packet and project content",async t=>{
@@ -65,9 +65,9 @@ for(const code of [401,403])test(`HTML ${code} on a write erases private review 
 test('unfinished review notes warn before leaving and a cancelled packet switch retains the original draft',async t=>{
   const ui=await fixture({principal:'user:reviewer',intercept:call=>call.url.pathname==='/api/v1/project-reviews'?{context:'context-one',principal:'user:reviewer',projects:[],items:[{...packet,title:'First'},{...packet,id:'PRP-two',title:'Second'}],counts:{total:2,pending:2,overdue:0},total:2,offset:0,limit:50,has_more:false}:call.url.pathname.endsWith('PRP-two')?{...packet,id:'PRP-two'}:undefined});t.after(()=>ui.window.close());ui.el('inbox').querySelector('button').click();await ui.settle();
   ui.change('response-note','Keep this reasoning');const event=new ui.window.Event('beforeunload',{cancelable:true});ui.window.dispatchEvent(event);assert.equal(event.defaultPrevented,true);
-  ui.window.confirm=()=>false;const before=ui.calls.length;ui.el('inbox').querySelectorAll('button')[1].click();await ui.settle();
+  ui.window.mvConfirm=async()=>false;const before=ui.calls.length;ui.el('inbox').querySelectorAll('button')[1].click();await ui.settle();
   assert.equal(ui.el('response-note').value,'Keep this reasoning');assert.equal(ui.calls.length,before);
-  ui.window.confirm=()=>true;ui.el('inbox').querySelectorAll('button')[1].click();await ui.settle();assert.equal(ui.el('response-note').value,'');
+  ui.window.mvConfirm=async()=>true;ui.el('inbox').querySelectorAll('button')[1].click();await ui.settle();assert.equal(ui.el('response-note').value,'');
   const discarded=new ui.window.Event('beforeunload',{cancelable:true});ui.window.dispatchEvent(discarded);assert.equal(discarded.defaultPrevented,false);
 });
 
@@ -79,7 +79,14 @@ test("packet fragments read only the exact permitted record after the context ch
   const identifier="PRP-"+"c".repeat(32);
   const ui=await fixture({principal:"user:reviewer",fragment:"#packet="+identifier,intercept:call=>call.url.pathname.endsWith(identifier)?{...packet,id:identifier}:undefined});t.after(()=>ui.window.close());
   assert.equal(ui.calls[0].url.pathname,"/api/v1/project-reviews");assert.equal(ui.calls[1].url.pathname,"/api/v1/project-reviews/packets/"+identifier);assert.equal(ui.calls[1].headers["X-Lightwork-Review-Context"],"context-one");assert.match(ui.el("result").textContent,/Sensitive/);assert.equal(ui.calls.some(call=>call.method==="POST"),false);
-  const denied=await fixture({fragment:"#packet="+identifier,intercept:call=>call.url.pathname.endsWith(identifier)?new Response('{"detail":"Access revoked"}',{status:404}):undefined});t.after(()=>denied.window.close());assert.equal(denied.el("packet").hidden,true);assert.equal(denied.el("result").textContent,"");assert.match(denied.el("status").textContent,/Access revoked/);
+  const denied=await fixture({fragment:"#packet="+identifier,intercept:call=>call.url.pathname.endsWith(identifier)?new Response('{"detail":"Access revoked"}',{status:404}):undefined});t.after(()=>denied.window.close());assert.equal(denied.el("packet").hidden,true);assert.equal(denied.el("result").textContent,"");assert.match(denied.el("status").textContent,/no longer exists/);
   const changed=await fixture({fragment:"#packet="+identifier,intercept:call=>call.url.pathname==="/api/v1/project-reviews"?{context:"other-account"}:undefined});t.after(()=>changed.window.close());assert.equal(changed.calls.length,1);assert.equal(changed.el("result").textContent,"");
   const invalid=await fixture({fragment:"#packet=../../secrets"});t.after(()=>invalid.window.close());assert.equal(invalid.calls.length,1);
+});
+
+test("sharing asks through the shared dialog and refuses when it is missing; people show by name",async t=>{
+  assert.equal(/window\.confirm\s*\(/.test(source),false);
+  const ui=await fixture();t.after(()=>ui.window.close());delete ui.window.mvConfirm;await preview(ui);
+  assert.match(ui.el("reviewer").textContent,/reviewer/);assert.equal(/user:/.test(ui.el("reviewer").textContent),false);
+  ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
 });

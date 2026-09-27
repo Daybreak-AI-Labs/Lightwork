@@ -8,7 +8,7 @@
   <p id="pr-status" role="status" aria-live="polite">Loading your reviews…</p>
   <button id="pr-refresh" class="btn" type="button">Refresh reviews</button>
   <section class="panel" aria-labelledby="pr-inbox-title">
-    <h2 id="pr-inbox-title">Your review packets</h2><p id="pr-counts"></p>
+    <h2 id="pr-inbox-title">Reviews shared with you</h2><p id="pr-counts"></p>
     <label for="pr-search">Find a review by task or project</label><input id="pr-search" class="input" maxlength="200"><button id="pr-search-button" type="button" class="btn">Search reviews</button>
     <div id="pr-inbox"></div><p id="pr-page"></p><button id="pr-previous" type="button" class="btn">Previous reviews</button><button id="pr-next" type="button" class="btn">Next reviews</button>
   </section>
@@ -17,10 +17,10 @@
     <label for="pr-project">Your project</label><select id="pr-project" class="input"></select>
     <div id="pr-setup" hidden>
       <h3>Project review team</h3>
-      <p>Grant access only to colleagues who should review selected results. Removing a member ends their packet access immediately. Workspace membership and permissions must remain current.</p>
-      <p><a href="/users">Manage workspace members</a></p>
-      <label for="pr-member">Workspace colleague</label><select id="pr-member" class="input"></select>
-      <button id="pr-grant" class="btn" type="button">Grant project review access</button>
+      <p>Add only colleagues who should review results you choose. Removing someone ends their access straight away.</p>
+      <p><a class="btn btn--ghost" href="/users">Manage people</a></p>
+      <label for="pr-member">Colleague</label><select id="pr-member" class="input"></select>
+      <button id="pr-grant" class="btn" type="button">Add as reviewer</button>
       <ul id="pr-members"></ul>
       <h3>Select a result to share</h3>
       <label for="pr-goal">Stopped task with a saved result</label><select id="pr-goal" class="input"></select>
@@ -45,7 +45,7 @@
       <label for="pr-response-note">Review comment</label><textarea id="pr-response-note" class="input" rows="3" maxlength="4000" required></textarea>
       <button id="pr-response-button" class="btn btn--primary" type="submit">Save review response</button>
     </form>
-    <p>Approving this packet does not approve tool use, run the task, or provide its final sign-off.</p>
+    <p>Approving this review does not approve tool use, run the task, or provide its final sign-off.</p>
   </section>
 </div>
 <style>
