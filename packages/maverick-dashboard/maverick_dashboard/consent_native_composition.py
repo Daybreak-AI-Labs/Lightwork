@@ -1741,6 +1741,82 @@ def _device_authority(
     )
 
 
+_MAX_LISTED_DEVICES = 500
+
+
+def list_native_applications(
+    directory: NativeApplicationDirectory,
+    registry: NativeConsentDeviceRegistry,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> dict[str, Any]:
+    """Safe, read-only rows for the tenant's registered native applications.
+
+    Every row is re-validated against the tenant-private registry, so a row
+    that no longer matches its directory binding fails closed rather than
+    being listed. No key material other than the public key identity is shown.
+    """
+
+    items: list[dict[str, Any]] = []
+    for record in directory.records_for_tenant(tenant_id, limit=limit):
+        authority = _validate_directory_registry(record, registry)
+        items.append(
+            {
+                "application_ref": record.application_ref,
+                "application_id": authority.application_id,
+                "platform": authority.platform,
+                "property_id": authority.property_id,
+                "minimum_sdk_version": authority.minimum_sdk_version,
+                "default_locale": authority.default_locale,
+                "directory_revision": record.directory_revision,
+                "current_key_id": record.current_key_id,
+                "current_key_revision": record.current_key_revision,
+            }
+        )
+    return {"items": items}
+
+
+def list_native_devices(
+    registry: NativeConsentDeviceRegistry,
+    *,
+    application_ref: str,
+    limit: int = _MAX_LISTED_DEVICES,
+) -> dict[str, Any]:
+    """Read-only device rows for one application; no key or install subject."""
+
+    app_ref = _ref(application_ref, "application_ref")
+    bound = _integer(limit, "native device list limit", 1, _MAX_LISTED_DEVICES)
+    path = registry.path
+    try:
+        ensure_private_file(path, 0o600)
+        uri = f"{path.resolve().as_uri()}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT device_id,platform,sdk_version,revision,status,created_at,"
+                "updated_at,attestation_valid_until FROM native_consent_devices "
+                "WHERE application_ref=? ORDER BY status, created_at DESC, device_id LIMIT ?",
+                (app_ref, bound + 1),
+            ).fetchall()
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        raise NativeConsentCompositionError("native device registry is unavailable") from exc
+    items = [
+        {
+            "device_id": _ref(row["device_id"], "device_id"),
+            "platform": str(row["platform"]),
+            "sdk_version": int(row["sdk_version"]),
+            "revision": int(row["revision"]),
+            "status": "revoked" if row["status"] == "revoked" else "active",
+            "created_at": float(row["created_at"]),
+            "updated_at": float(row["updated_at"]),
+            "attestation_valid_until": float(row["attestation_valid_until"]),
+        }
+        for row in rows[:bound]
+    ]
+    return {"items": items, "truncated": len(rows) > bound}
+
+
 def attach_consent_native_composition(  # noqa: C901 - explicit deployment seam checks
     app: FastAPI,
     *,
@@ -2029,6 +2105,30 @@ def attach_consent_native_composition(  # noqa: C901 - explicit deployment seam 
             "directory_valid": True,
         }
 
+    def applications(*, request: object, tenant_id: str, principal_ref: str) -> dict[str, Any]:
+        _request_for(app, request, tenant_id, principal_ref)
+        settings = settings_for_tenant(tenant_id)
+        return list_native_applications(
+            directory,
+            _registry_for(tenant_id, settings),
+            tenant_id=tenant_id,
+            limit=settings.max_applications,
+        )
+
+    def devices(
+        *,
+        request: object,
+        tenant_id: str,
+        principal_ref: str,
+        application_ref: str,
+    ) -> dict[str, Any]:
+        _request_for(app, request, tenant_id, principal_ref)
+        settings = settings_for_tenant(tenant_id)
+        record = directory.resolve(application_ref, claimed_tenant_id=tenant_id)
+        tenant_registry = _registry_for(tenant_id, settings)
+        _validate_directory_registry(record, tenant_registry)
+        return list_native_devices(tenant_registry, application_ref=record.application_ref)
+
     def public_receipt_keys(application_ref: str) -> dict[str, Any]:
         record = directory.resolve(application_ref)
         settings = settings_for_tenant(record.tenant_id)
@@ -2044,6 +2144,8 @@ def attach_consent_native_composition(  # noqa: C901 - explicit deployment seam 
     app.state.consent_native_admin_revoke_device = revoke_device
     app.state.consent_native_admin_readiness = readiness
     app.state.consent_native_admin_integrity = integrity
+    app.state.consent_native_admin_applications = applications
+    app.state.consent_native_admin_devices = devices
     app.state.consent_native_public_receipt_keys = public_receipt_keys
     app.state.consent_native_enabled_probe = native_consent_enabled
     setattr(app.state, marker, True)
@@ -2056,6 +2158,8 @@ __all__ = [
     "NativeConsentCompositionError",
     "NativeConsentSettings",
     "attach_consent_native_composition",
+    "list_native_applications",
+    "list_native_devices",
     "native_consent_enabled",
     "native_consent_principal_ref",
     "native_consent_settings",
