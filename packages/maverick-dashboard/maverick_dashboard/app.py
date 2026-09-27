@@ -3635,6 +3635,8 @@ def _privacy_page_data() -> tuple[dict, dict]:
         estate["consent_posture"] = consent_registry.consent_posture()
         try:
             estate["notices"] = consent_registry.list_notices()[:20]
+            for notice in estate["notices"]:
+                notice["published_date"] = _date(notice.get("published_at"))
             estate["notice_coverage"] = consent_registry.notice_coverage()
         except Exception:
             pass
