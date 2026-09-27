@@ -546,9 +546,10 @@ class MCPClient:
             # req_id is already on the wire; without a cancel the server runs
             # the call to completion and emits a late reply. De-register the
             # Future so the reader drops that late reply, then tell the server
-            # to stop (#541 behavior).
+            # to stop (#541 behavior). Our own timeout, not a caller cancel, so
+            # the bounded notice is awaited: it is on the wire when this raises.
             self._pending.pop(req_id, None)
-            self._schedule_cancel_notice(req_id)
+            await self._bounded_send_cancel(req_id)
             raise
         except asyncio.CancelledError:
             # The awaiting caller's task was cancelled (not our timeout). The
@@ -582,24 +583,22 @@ class MCPClient:
         except Exception:  # noqa: BLE001 -- the request is already lost
             pass
 
+    async def _bounded_send_cancel(self, request_id: int) -> None:
+        try:
+            await asyncio.wait_for(
+                self._send_cancel(request_id), timeout=_CANCEL_NOTICE_TIMEOUT,
+            )
+        except Exception:  # noqa: BLE001 -- request already abandoned
+            pass
+
     def _schedule_cancel_notice(self, request_id: int) -> None:
         """Send a best-effort cancellation notice without blocking callers."""
-
-        async def _bounded_send_cancel() -> None:
-            try:
-                await asyncio.wait_for(
-                    self._send_cancel(request_id),
-                    timeout=_CANCEL_NOTICE_TIMEOUT,
-                )
-            except Exception:  # noqa: BLE001 -- request already abandoned
-                pass
-
         # Keep a strong reference: the event loop only holds a WEAK ref to a
         # task, so a bare `create_task` whose handle isn't stored can be GC'd
         # mid-flight, dropping the cancel notice ("Task was destroyed but it is
         # pending"). Track it like _handle_inbound_request does so it stays alive
         # until done and is cancelled on stop().
-        task = asyncio.create_task(_bounded_send_cancel())
+        task = asyncio.create_task(self._bounded_send_cancel(request_id))
         self._inbound_tasks.add(task)
         task.add_done_callback(self._inbound_tasks.discard)
 
