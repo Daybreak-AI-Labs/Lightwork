@@ -32,6 +32,13 @@ def world(monkeypatch, tmp_path):
     killswitch._shared_world = None
     killswitch.clear()
     yield w
+    # ...and after: a cached cluster halt is served for up to 2 s without
+    # re-reading the backend, so leaving one behind halted whichever test the
+    # same worker ran next (the intermittent "DID NOT RAISE" lifecycle failures).
+    killswitch._last_shared_check_ts = 0.0
+    killswitch._last_shared_halt = None
+    killswitch._shared_world = None
+    killswitch.clear()
 
 
 def test_world_halt_roundtrip(world):
