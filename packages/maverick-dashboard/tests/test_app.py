@@ -140,7 +140,7 @@ def test_compartments_page_renders(tmp_path, monkeypatch):
     found = client.get("/compartments", params={"q": "finance"})
     assert found.status_code == 200
     assert "finance" in found.text
-    assert "matching agents" in found.text
+    assert "matching specialists" in found.text
     # the deliverable of a specific pack is on its search result
     cash = client.get("/compartments", params={"q": "finance_cash13w"})
     assert "13-week cash forecast" in cash.text
