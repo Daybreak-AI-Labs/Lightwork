@@ -364,3 +364,50 @@ def test_view_operate_and_admin_permission_floors(environment) -> None:
     assert ("tenant", "view") in calls
     assert calls.count(("tenant", "operate")) >= 2
     assert ("global", "admin") in calls
+
+
+def test_lists_load_every_record_kind_for_the_workspace(environment) -> None:
+    client, state = environment
+    principal = client.get(f"{API}/status").json()["principal_ref"]
+    assert client.put(f"{API}/templates/standard", json=_template_body()).status_code == 200
+    assert client.put(
+        f"{API}/lifecycles/lifecycle-list",
+        json={"vendor_ref": "vendor-list", "owner_ref": principal, "dependencies": [],
+              "retention_seconds": DAY, "idempotency_key": "list-create"},
+    ).status_code == 200
+    templates = client.get(f"{API}/templates").json()["items"]
+    assert [(t["template_id"], t["version"], t["state"]) for t in templates] == [
+        ("standard", 1, "pending_approval")
+    ]
+    lifecycles = client.get(f"{API}/lifecycles").json()["items"]
+    assert [item["lifecycle_id"] for item in lifecycles] == ["lifecycle-list"]
+    assert client.get(f"{API}/assessments").json() == {"items": []}
+    assert client.get(f"{API}/offboarding").json() == {"items": []}
+    calls = state["permission_calls"]
+    assert calls.count(("tenant", "view")) >= 4
+    # Another workspace sees none of it.
+    state["tenant"] = "tenant-b"
+    assert client.get(f"{API}/templates").json() == {"items": []}
+    assert client.get(f"{API}/lifecycles").json() == {"items": []}
+
+
+def test_lists_are_off_with_the_feature(environment) -> None:
+    client, state = environment
+    state["enabled"] = False
+    for path in ("templates", "assessments", "lifecycles", "offboarding"):
+        assert client.get(f"{API}/{path}").status_code == 403
+
+
+def test_people_list_carries_lifecycle_references(environment, monkeypatch) -> None:
+    client, state = environment
+    from maverick_dashboard import ui_choices_api
+
+    monkeypatch.setattr(ui_choices_api, "people_choices",
+                        lambda: [{"value": "user:ann@example.com", "label": "ann@example.com"}])
+    body = client.get(f"{API}/people").json()
+    me = client.get(f"{API}/status").json()["principal_ref"]
+    assert body["me"] == me
+    ann = api._principal_ref_for("tenant-a", "user:ann@example.com")
+    assert {"value": ann, "label": "ann@example.com"} in body["items"]
+    assert {"value": me, "label": "Me"} in body["items"]
+    assert ("tenant", "operate") in state["permission_calls"]

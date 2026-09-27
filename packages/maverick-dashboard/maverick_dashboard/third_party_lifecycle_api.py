@@ -268,6 +268,12 @@ def _principal(request: Request, tenant_id: str) -> str:
     subject = authenticated_subject(
         request, error_detail="an authenticated principal is required for third-party lifecycle",
     )
+    return _principal_ref_for(tenant_id, subject)
+
+
+def _principal_ref_for(tenant_id: str, subject: str) -> str:
+    """The lifecycle reference for one person (same digest as ``_principal``)."""
+
     digest = hashlib.sha256(
         (f"lightwork.third-party-lifecycle.identity.v1:{tenant_id}:{subject}").encode()
     ).hexdigest()
@@ -392,6 +398,51 @@ def create_third_party_lifecycle_router(  # noqa: C901, PLR0915
             "raw_provider_credentials_accepted": False,
             "raw_vendor_profile_values_accepted": False,
         }
+
+    # ---- read-only lists for the page (records load on open) -------------
+
+    @router.get("/people")
+    async def people(request: Request) -> dict[str, Any]:
+        """Workspace members with their lifecycle references, so owners and
+        assignees are chosen from a list and shown by name."""
+        require_permission(request, "operate")
+        tenant = _tenant_id()
+        me = _principal(request, tenant)
+        from .ui_choices_api import people_choices
+
+        try:
+            rows = await run_in_threadpool(people_choices)
+        except Exception:
+            rows = []
+        items = [{"value": _principal_ref_for(tenant, row["value"]), "label": row["label"]}
+                 for row in rows]
+        if not any(item["value"] == me for item in items):
+            items.insert(0, {"value": me, "label": "Me"})
+        return {"me": me, "items": items}
+
+    @router.get("/templates")
+    async def list_templates(request: Request) -> dict[str, Any]:
+        require_permission(request, "view")
+        ops, tenant, _principal_ref, store = authority(request)
+        return {"items": _jsonable(await call(ops, store.list_templates, tenant, limit=500))}
+
+    @router.get("/assessments")
+    async def list_assessments(request: Request) -> dict[str, Any]:
+        require_permission(request, "view")
+        ops, tenant, _principal_ref, store = authority(request)
+        return {"items": _jsonable(await call(ops, store.list_assessments, tenant, limit=500))}
+
+    @router.get("/lifecycles")
+    async def list_lifecycles(request: Request) -> dict[str, Any]:
+        require_permission(request, "view")
+        ops, tenant, _principal_ref, store = authority(request)
+        return {"items": _jsonable(await call(ops, store.list_lifecycles, tenant, limit=500))}
+
+    @router.get("/offboarding")
+    async def list_offboarding(request: Request) -> dict[str, Any]:
+        require_permission(request, "view")
+        ops, tenant, _principal_ref, store = authority(request)
+        return {"items": _jsonable(await call(ops, store.list_offboarding_plans, tenant, limit=500))}
 
     @router.put("/templates/{template_id}")
     async def create_template(request: Request, template_id: ObjectPath, body: TemplateCreateIn):

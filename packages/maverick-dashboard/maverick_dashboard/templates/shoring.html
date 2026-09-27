@@ -248,6 +248,7 @@
 (function () {
   'use strict';
   var form = document.getElementById('sh-form');
+  function F(name) { return form.elements.namedItem(name); }
   var msg = document.getElementById('sh-status-msg');
   var rowsHost = document.getElementById('sh-sla-rows');
   var api = {{ api_base | tojson }};
@@ -333,7 +334,7 @@
       if (!g.options || !g.options.length) return;
       var og = document.createElement('optgroup'); og.label = g.label;
       g.options.forEach(function (pair) { var o = el('option', '', pair[1]); o.value = pair[0]; og.appendChild(o); });
-      form.department.appendChild(og);
+      F('department').appendChild(og);
     });
   } catch (e) { /* recent areas remain available */ }
 
@@ -343,7 +344,7 @@
 
   function resetForm() {
     form.reset();
-    form.key.value = '';
+    F('key').value = '';
     rowsHost.textContent = '';
     document.getElementById('sh-form-title').textContent = 'Add a Business Area';
     document.getElementById('sh-cancel').hidden = true;
@@ -354,18 +355,18 @@
     var f = functions.filter(function (x) { return x.key === key; })[0];
     if (!f) return;
     resetForm();
-    form.key.value = f.key;
-    form.name.value = f.name;
-    setOption(form.department, f.department || '');
-    setOption(form.owner, f.owner || '');
-    form.status.value = f.lifecycle;
+    F('key').value = f.key;
+    F('name').value = f.name;
+    setOption(F('department'), f.department || '');
+    setOption(F('owner'), f.owner || '');
+    F('status').value = f.lifecycle;
     statusHelp.textContent = (stageHelp[f.lifecycle] || ['', ''])[1];
-    form.scope.value = f.scope || '';
+    F('scope').value = f.scope || '';
     (f.slas || []).forEach(function (s) { addSlaRow(s); });
     document.getElementById('sh-form-title').textContent = 'Edit ' + f.name;
     document.getElementById('sh-cancel').hidden = false;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    form.name.focus();
+    F('name').focus();
   }
 
   document.getElementById('sh-add-sla').addEventListener('click', function () {
@@ -373,7 +374,7 @@
   });
   document.getElementById('sh-cancel').addEventListener('click', resetForm);
   document.querySelectorAll('[data-sh-new]').forEach(function (b) {
-    b.addEventListener('click', function () { resetForm(); form.scrollIntoView({ behavior: 'smooth' }); form.name.focus(); });
+    b.addEventListener('click', function () { resetForm(); form.scrollIntoView({ behavior: 'smooth' }); F('name').focus(); });
   });
   document.querySelectorAll('[data-edit]').forEach(function (b) {
     b.addEventListener('click', function () { edit(b.getAttribute('data-edit')); });
@@ -381,15 +382,15 @@
 
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var name = form.name.value.trim();
-    if (!name) { msg.textContent = 'Enter a name for this business area.'; form.name.focus(); return; }
+    var name = F('name').value.trim();
+    if (!name) { msg.textContent = 'Enter a name for this business area.'; F('name').focus(); return; }
     var body = {
-      key: form.key.value || newKey(name),
+      key: F('key').value || newKey(name),
       name: name,
-      department: form.department.value,
-      scope: form.scope.value.trim(),
-      status: form.status.value,
-      owner: form.owner.value,
+      department: F('department').value,
+      scope: F('scope').value.trim(),
+      status: F('status').value,
+      owner: F('owner').value,
       slas: collectSlas()
     };
     msg.textContent = 'Saving…';

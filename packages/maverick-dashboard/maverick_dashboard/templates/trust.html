@@ -216,6 +216,7 @@
 (function () {
   var agents = {{ agents | tojson }};
   var form = document.getElementById("trust-add");
+  function F(name) { return form ? form.elements.namedItem(name) : null; }
   var msg = document.getElementById("tr-form-msg");
   function errorText(failure, action) { return window.mvErrorText(failure, action); }
   function reloadSoon(text) { window.mvToast(text); setTimeout(function () { window.location.reload(); }, 350); }
@@ -340,7 +341,7 @@
     });
   } catch (e) { /* recent areas remain */ }
   form.querySelectorAll('input[name="tools_mode"]').forEach(function (r) {
-    r.addEventListener("change", function () { allowBox.hidden = form.tools_mode.value !== "some"; });
+    r.addEventListener("change", function () { allowBox.hidden = F("tools_mode").value !== "some"; });
   });
   document.getElementById("tr-pubkey-file").addEventListener("click", function () {
     var input = document.createElement("input"); input.type = "file"; input.accept = ".txt,.pub,.key,text/plain";
@@ -348,7 +349,7 @@
       var f = input.files && input.files[0]; if (!f) return;
       f.text().then(function (t) {
         var m = String(t).match(/[0-9a-fA-F]{64}/);
-        if (m) { form.pubkey.value = m[0]; msg.textContent = "Key loaded from " + f.name + "."; }
+        if (m) { F("pubkey").value = m[0]; msg.textContent = "Key loaded from " + f.name + "."; }
         else msg.textContent = "That file doesn't contain a security key.";
       });
     });
@@ -358,20 +359,20 @@
   function checked(name) { return Array.prototype.map.call(form.querySelectorAll('input[name="' + name + '"]:checked'), function (c) { return c.value; }); }
   function body() {
     var num = function (v) { v = String(v || "").trim(); return v === "" ? null : Number(v); };
-    var minutes = num(form.max_minutes.value);
+    var minutes = num(F("max_minutes").value);
     return {
-      pubkey: form.pubkey.value.trim(),
-      direction: form.direction.value,
-      max_risk: form.max_risk.value || null,
-      allow_tools: form.tools_mode.value === "some" ? checked("allow_tools") : [],
+      pubkey: F("pubkey").value.trim(),
+      direction: F("direction").value,
+      max_risk: F("max_risk").value || null,
+      allow_tools: F("tools_mode").value === "some" ? checked("allow_tools") : [],
       deny_tools: checked("deny_tools"),
       data_scopes: Array.prototype.map.call(scopes.selectedOptions, function (o) { return o.value; }),
-      max_dollars: num(form.max_dollars.value),
+      max_dollars: num(F("max_dollars").value),
       max_wall_seconds: minutes === null ? null : Math.round(minutes * 60),
     };
   }
   function resetForm() {
-    form.reset(); form.id.value = ""; form.name.disabled = false; allowBox.hidden = true;
+    form.reset(); F("id").value = ""; F("name").disabled = false; allowBox.hidden = true;
     document.getElementById("tr-form-title").textContent = "Add an Outside Agent";
     document.getElementById("tr-save").textContent = "Add agent";
     document.getElementById("tr-cancel").hidden = true; msg.textContent = "";
@@ -379,34 +380,34 @@
   function edit(id) {
     var a = agents.filter(function (x) { return x.id === id; })[0]; if (!a) return;
     resetForm();
-    form.id.value = a.id; form.name.value = a.id.replace(/[-_.]+/g, " "); form.name.disabled = true;
-    form.direction.value = a.direction;
-    form.max_risk.value = a.max_risk === "unbounded" ? "high" : a.max_risk;
-    form.max_dollars.value = a.max_dollars == null ? "" : a.max_dollars;
-    form.max_minutes.value = a.max_wall_seconds == null ? "" : Math.round(a.max_wall_seconds / 60);
+    F("id").value = a.id; F("name").value = a.id.replace(/[-_.]+/g, " "); F("name").disabled = true;
+    F("direction").value = a.direction;
+    F("max_risk").value = a.max_risk === "unbounded" ? "high" : a.max_risk;
+    F("max_dollars").value = a.max_dollars == null ? "" : a.max_dollars;
+    F("max_minutes").value = a.max_wall_seconds == null ? "" : Math.round(a.max_wall_seconds / 60);
     var some = !(a.allow_tools.length === 1 && a.allow_tools[0] === "*");
     form.querySelector('input[name="tools_mode"][value="' + (some ? "some" : "all") + '"]').checked = true;
     allowBox.hidden = !some;
     form.querySelectorAll('input[name="allow_tools"]').forEach(function (c) { c.checked = some && a.allow_tools.indexOf(c.value) >= 0; });
     form.querySelectorAll('input[name="deny_tools"]').forEach(function (c) { c.checked = a.deny_tools.indexOf(c.value) >= 0; });
     Array.prototype.forEach.call(scopes.options, function (o) { o.selected = a.data_scopes.indexOf(o.value) >= 0; });
-    document.getElementById("tr-form-title").textContent = "Edit " + form.name.value;
+    document.getElementById("tr-form-title").textContent = "Edit " + F("name").value;
     document.getElementById("tr-save").textContent = "Save changes";
     document.getElementById("tr-cancel").hidden = false;
-    form.scrollIntoView({ behavior: "smooth" }); form.direction.focus();
+    form.scrollIntoView({ behavior: "smooth" }); F("direction").focus();
   }
   document.querySelectorAll("[data-tr-edit]").forEach(function (b) { b.addEventListener("click", function () { edit(b.getAttribute("data-tr-edit")); }); });
-  document.querySelectorAll("[data-tr-new]").forEach(function (b) { b.addEventListener("click", function () { resetForm(); form.scrollIntoView({ behavior: "smooth" }); form.name.focus(); }); });
+  document.querySelectorAll("[data-tr-new]").forEach(function (b) { b.addEventListener("click", function () { resetForm(); form.scrollIntoView({ behavior: "smooth" }); F("name").focus(); }); });
   document.getElementById("tr-cancel").addEventListener("click", resetForm);
   form.addEventListener("submit", function (ev) {
     ev.preventDefault();
     var b = body();
-    if (form.tools_mode.value === "some" && !b.allow_tools.length) { msg.textContent = "Choose at least one tool, or pick All tools."; return; }
-    if (form.id.value) {
-      send("/api/v1/trust/agents/" + encodeURIComponent(form.id.value), { method: "PUT", body: JSON.stringify(b) }, "Changes saved.", "save this agent");
+    if (F("tools_mode").value === "some" && !b.allow_tools.length) { msg.textContent = "Choose at least one tool, or pick All tools."; return; }
+    if (F("id").value) {
+      send("/api/v1/trust/agents/" + encodeURIComponent(F("id").value), { method: "PUT", body: JSON.stringify(b) }, "Changes saved.", "save this agent");
       return;
     }
-    var id = slug(form.name.value);
+    var id = slug(F("name").value);
     if (agents.some(function (a) { return a.id === id; })) { msg.textContent = "An agent with this name is already on the list. Use its Edit button instead."; return; }
     b.id = id;
     send("/api/v1/trust/agents", { method: "POST", body: JSON.stringify(b) }, "Agent added.", "add this agent");
