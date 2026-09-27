@@ -878,3 +878,114 @@ def test_admin_router_is_global_permission_bound_and_metadata_only(
     )
     assert rejected.status_code == 422
     assert material.registry.current_registry_revision("artifact", "artifact-extra") == 0
+
+
+def test_registry_lists_only_usable_authorities_for_pickers(tmp_path: Path) -> None:
+    clock = Clock()
+    material = _build(tmp_path, clock=clock)
+    artifact, criteria = _enroll_round_trip_authorities(material, b"picker evidence")
+    artifacts = material.registry.list_usable_artifacts()
+    assert [item["artifact_id"] for item in artifacts] == ["artifact-one"]
+    assert artifacts[0]["authority_sha256"] == artifact.authority_sha256
+    assert artifacts[0]["case_ref"] == "case-one"
+    assert artifacts[0]["registry_revision"] == 1
+    listed = material.registry.list_usable_criteria()
+    assert listed == [
+        {
+            "criteria_set_id": "criteria-one",
+            "revision": 1,
+            "criterion_ids": ["criterion-access"],
+            "valid_until": criteria.valid_until,
+            "authority_sha256": criteria.authority_sha256,
+            "registry_revision": 1,
+        }
+    ]
+    material.registry.revoke_artifact("artifact-one", expected_registry_revision=1)
+    assert material.registry.list_usable_artifacts() == []
+    clock.value += 7_200
+    assert material.registry.list_usable_criteria() == []
+    other = _build(tmp_path / "other", clock=clock)
+    assert other.registry.list_usable_artifacts() == []
+
+
+def test_picker_lists_use_tenant_view_permission_and_the_workspace_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    material = _build(tmp_path)
+    _enroll_round_trip_authorities(material, b"picker api evidence")
+    permissions: list[str] = []
+    monkeypatch.setattr(authority_api, "_tenant_id", lambda: TENANT)
+    monkeypatch.setattr(
+        authority_api, "require_permission", lambda _request, value: permissions.append(value)
+    )
+    monkeypatch.setattr(
+        authority_api,
+        "require_global_permission",
+        lambda _request, value: permissions.append("global:" + value),
+    )
+    requested: list[str] = []
+    app = FastAPI()
+
+    def factory(tenant: str):
+        requested.append(tenant)
+        return material.registry
+
+    app.state.ai_evidence_analysis_authority_registry_factory = factory
+    app.include_router(
+        authority_api.create_ai_evidence_analysis_authority_router(), prefix="/api/v1"
+    )
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    artifacts = client.get("/api/v1/ai-evidence-analysis/authorities/artifacts")
+    criteria = client.get("/api/v1/ai-evidence-analysis/authorities/criteria")
+    assert artifacts.status_code == 200 and criteria.status_code == 200
+    assert artifacts.json()["items"][0]["artifact_id"] == "artifact-one"
+    assert criteria.json()["items"][0]["criteria_set_id"] == "criteria-one"
+    assert permissions == ["view", "view"]
+    assert requested == [TENANT, TENANT]
+    assert "content" not in artifacts.json()["items"][0]
+
+
+def test_upload_registration_computes_the_fingerprint_on_the_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    material = _build(tmp_path)
+    permissions: list[str] = []
+    monkeypatch.setattr(authority_api, "_tenant_id", lambda: TENANT)
+    monkeypatch.setattr(
+        authority_api,
+        "require_global_permission",
+        lambda _request, value: permissions.append(value),
+    )
+    app = FastAPI()
+    app.state.ai_evidence_analysis_authority_registry_factory = lambda _tenant: material.registry
+    app.include_router(
+        authority_api.create_ai_evidence_analysis_authority_router(), prefix="/api/v1"
+    )
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    raw = b"supplier contract text"
+    response = client.post(
+        "/api/v1/ai-evidence-analysis/authorities/artifacts/register",
+        params={"name": "Supplier Contract.txt", "matter": "Supplier review 2026",
+                "received_at": NOW - 86_400, "valid_days": 30},
+        content=raw,
+        headers={"Content-Type": evidence.MEDIA_TEXT},
+    )
+    assert response.status_code == 200, response.text
+    assert permissions == ["admin"]
+    authority = response.json()["authority"]
+    digest = hashlib.sha256(raw).hexdigest()
+    assert authority["content_sha256"] == digest
+    assert authority["byte_length"] == len(raw)
+    assert authority["artifact_id"] == f"supplier-contract-txt.{digest[:8]}"
+    assert raw.decode() not in response.text
+    listed = material.registry.list_usable_artifacts()
+    assert listed[0]["case_ref"] == "supplier-review-2026"
+    unsupported = client.post(
+        "/api/v1/ai-evidence-analysis/authorities/artifacts/register",
+        params={"name": "x", "matter": "y", "received_at": NOW},
+        content=b"<html>",
+        headers={"Content-Type": "text/html"},
+    )
+    assert unsupported.status_code == 415

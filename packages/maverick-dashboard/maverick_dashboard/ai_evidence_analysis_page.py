@@ -33,14 +33,11 @@ _HEADERS = {
 }
 
 
-def _tenant_selected() -> None:
+def _tenant_selected() -> bool:
+    """Whether a workspace is selected; every API call still requires one."""
     from maverick.paths import current_tenant_id_strict
 
-    if current_tenant_id_strict() is None:
-        raise HTTPException(
-            status_code=409,
-            detail="select an active tenant before using AI evidence analysis",
-        )
+    return current_tenant_id_strict() is not None
 
 
 def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRouter:
@@ -58,7 +55,7 @@ def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRo
     )
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
-        _tenant_selected()
+        workspace_selected = _tenant_selected() is not False
         if any(
             key not in {"theme", "density", "font", "lang"}
             for key in request.query_params
@@ -73,6 +70,7 @@ def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRo
             {
                 "api_base": "/api/v1/ai-evidence-analysis",
                 "csp_style_nonce": style_nonce,
+                "evidence_workspace_missing": not workspace_selected,
                 "evidence_can_operate": has_permission(request, "operate"),
                 "evidence_can_audit": has_permission(request, "audit"),
                 "evidence_can_admin": has_permission(request, "admin"),
