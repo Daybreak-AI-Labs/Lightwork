@@ -465,7 +465,8 @@ def test_an_approved_but_expired_approval_no_longer_merges_and_can_be_renewed(tm
             approvals[aid] = SimpleNamespace(id=aid, status="pending", detail=kw["detail"],
                                              action=action, scope=kw["scope"])
             return aid
-    p = {"id": "0123456789abcdee", "repo": "r", "title": "t", "branch": "lightwork/t-012345",
+    p = {"id": "0123456789abcdee",  # pragma: allowlist secret
+         "repo": "r", "title": "t", "branch": "lightwork/t-012345",
          "head": "a" * 40, "base": "b" * 40, "files": ["x.py"], "tests": None, "review": None,
          "diff_truncated": False, "diff_chars": 1, "status": "pending", "approval_id": None}
     world = World()
