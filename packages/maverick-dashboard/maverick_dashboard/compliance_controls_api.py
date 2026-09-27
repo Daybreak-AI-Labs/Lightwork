@@ -488,7 +488,7 @@ async def export_person(request: Request, person: PersonIn) -> Response:
     )
 
 
-def _run_erase(channel: str, user: str) -> dict:
+def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
     import click
     from maverick.cli import erase as erase_command
     from maverick.erasure_verify import verify_erasure
@@ -506,8 +506,16 @@ def _run_erase(channel: str, user: str) -> dict:
     out, err = io.StringIO(), io.StringIO()
     with _ERASE_LOCK, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         ctx = click.Context(erase_command, obj={"db": getattr(world, "path", None)})
-        with ctx:
-            ctx.invoke(erase_command, channel=channel, user=user, yes=True)
+        try:
+            with ctx:
+                ctx.invoke(erase_command, channel=channel, user=user, yes=True)
+        except (SystemExit, click.exceptions.Exit, click.ClickException) as exc:
+            # A command-line exit must not end the server's worker thread.
+            raise RuntimeError("erasure command stopped") from exc
+    # Who erased, never whose data (the subject is exactly what was erased).
+    from maverick.audit import EventKind, audit_event
+    audit_event(EventKind.ERASE, agent="operator", actor=actor, channel=channel,
+                conversations=before, source="dashboard")
     try:
         report = verify_erasure(user, channel=channel, world=world)
     except Exception:  # pragma: no cover - the erase itself committed
@@ -529,7 +537,9 @@ async def erase_person(request: Request, person: PersonIn) -> dict:
     require_permission(request, "admin")
     channel, user = _validated(person)
     try:
-        return await run_in_threadpool(_run_erase, channel, user)
+        from .auth import caller_principal
+        return await run_in_threadpool(
+            _run_erase, channel, user, caller_principal(request) or "local")
     except HTTPException:
         raise
     except Exception as exc:

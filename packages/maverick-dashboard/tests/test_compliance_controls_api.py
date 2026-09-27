@@ -104,9 +104,20 @@ def test_people_list_export_and_erase_are_workspace_scoped():
     assert client.post(
         "/api/v1/compliance/people/export", json={"channel": "../x", "user": "U123"}
     ).status_code == 422
-    erased = client.post("/api/v1/compliance/people/erase", json=body)
+    import maverick.audit as audit
+    rows = []
+    real_audit_event = audit.audit_event
+    audit.audit_event = lambda kind, **kw: rows.append((kind, kw)) or True
+    try:
+        erased = client.post("/api/v1/compliance/people/erase", json=body)
+    finally:
+        audit.audit_event = real_audit_event
     assert erased.status_code == 200, erased.text
     assert erased.json()["erased"] is True
+    # Who erased is recorded; whose data was erased is not written again.
+    assert [kind for kind, _ in rows] == ["erase"]
+    assert rows[0][1]["source"] == "dashboard" and rows[0][1]["conversations"] == 1
+    assert "U123" not in repr(rows)
     assert client.get("/api/v1/compliance/people").json()["people"] == []
     again = client.post("/api/v1/compliance/people/erase", json=body).json()
     assert again["erased"] is False and "Nothing was found" in again["message"]
