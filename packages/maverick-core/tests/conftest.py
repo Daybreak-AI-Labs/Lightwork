@@ -178,28 +178,6 @@ def _isolate_root_logging():
 
 
 @pytest.fixture(autouse=True)
-def _reset_cluster_halt_cache():
-    """Forget the killswitch's cached cluster-wide halt after every test.
-
-    ``killswitch._shared_halt_active`` serves its last answer for up to two
-    seconds without re-reading the backend. A test that armed or observed a
-    cluster halt therefore halted whichever test the same worker ran next --
-    whole files failing with "DID NOT RAISE" when ``run_goal`` stopped cleanly
-    instead of raising.
-    """
-    yield
-    try:
-        from maverick import killswitch
-        killswitch._last_shared_check_ts = 0.0
-        killswitch._last_shared_halt = None
-        world, killswitch._shared_world = killswitch._shared_world, None
-        if world is not None and hasattr(world, "close"):
-            world.close()
-    except Exception:
-        pass
-
-
-@pytest.fixture(autouse=True)
 def _reset_client_binding_cache():
     """Reset the process-global client-id floor + per-tenant DEK cache per test.
 
