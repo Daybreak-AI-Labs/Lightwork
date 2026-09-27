@@ -3,7 +3,6 @@
 (function (global) {
   var MAX_RESPONSE_BYTES = 64 * 1024;
   var MAX_JSON_INPUT_BYTES = 48 * 1024;
-  var MAX_RENDER_CHARS = 32 * 1024;
   var MAX_UI_ITEMS = 500;
   var ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
   var IDEMPOTENCY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}$/;
@@ -307,13 +306,6 @@
     return payload;
   }
 
-  function boundedText(value) {
-    var text;
-    try { text = JSON.stringify(value, null, 2); } catch (_error) { text = "Unable to render response."; }
-    if (text.length <= MAX_RENDER_CHARS) { return text; }
-    return text.slice(0, MAX_RENDER_CHARS) + "\n… output truncated by browser render bound";
-  }
-
   global.LightworkConsentBulkJobsClient = {
     MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
     MAX_JSON_INPUT_BYTES: MAX_JSON_INPUT_BYTES,
@@ -330,30 +322,27 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     var shell = document.getElementById("consent-bulk-jobs-shell");
-    if (!shell) { return; }
+    var CW = global.LightworkConsentWorkbench;
+    if (!shell || !CW) { return; }
+    var $ = function (id) { return document.getElementById(id); };
     var apiBase = shell.dataset.apiBase;
+    var consentBase = "/api/v1/consent";
     var canAudit = shell.dataset.canAudit === "true";
     var canAdmin = shell.dataset.canAdmin === "true";
-    var operations = document.getElementById("cbj-operations");
-    var statusMark = document.getElementById("cbj-status-mark");
-    var readiness = document.getElementById("cbj-readiness");
-    var readinessDetail = document.getElementById("cbj-readiness-detail");
-    var statusOutput = document.getElementById("cbj-status-output");
-    var operationStatus = document.getElementById("cbj-operation-status");
-    var operationOutput = document.getElementById("cbj-operation-output");
-    var jobList = document.getElementById("cbj-job-list");
-    var listStatus = document.getElementById("cbj-list-status");
-    var listCount = document.getElementById("cbj-list-count");
-    var controlForm = document.getElementById("cbj-job-control-form");
-    var download = document.getElementById("cbj-download");
-    var downloadHint = document.getElementById("cbj-download-hint");
-    var downloadUrl = "";
-    var latestStatus = null;
-    var operationInFlight = false;
+    var operations = $("cbj-operations");
+    var readinessDetail = $("cbj-readiness-detail");
+    var status = $("cbj-operation-status");
+    var form = $("cbj-create");
+    var state = { status: null, jobs: [], credit: null, profiles: [], chosen: new Set(), policies: [], identifiers: [], receipts: [] };
+    var WHAT = {
+      export_receipts: "Export consent records", edit_preferences: "Change choices", delete_subject: "Delete consent records",
+      change_identifier_type: "Change how people are identified", reactivate: "Bring back earlier choices", clear_expiration: "Remove end dates"
+    };
+    var STATE_LABELS = { queued: ["Waiting", "warn"], running: ["Running", "info"], succeeded: ["Finished", "ok"], failed: ["Failed", "danger"], cancelled: ["Cancelled", "idle"] };
 
-    function formValues(form) { return Object.fromEntries(new FormData(form).entries()); }
-
-    async function request(path, options) {
+    // Requests go through the bounded client above; a refusal keeps only its
+    // status so the person sees a plain sentence from mvErrorText.
+    async function request(base, path, options) {
       var selected = options || {};
       var headers = { Accept: "application/json" };
       var body;
@@ -361,394 +350,383 @@
         headers["Content-Type"] = "application/json";
         body = JSON.stringify(selected.body);
       }
-      var response = await fetch(apiBase + path, {
-        method: selected.method || "GET",
-        headers: headers,
-        body: body,
-        credentials: "same-origin",
-        cache: "no-store",
-        redirect: "error",
-        referrerPolicy: "no-referrer"
+      var response = await fetch(base + path, {
+        method: selected.method || "GET", headers: headers, body: body,
+        credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer"
       });
       return parseResponse(response);
     }
-
-    function setOperation(label, payload) {
-      operationStatus.textContent = label;
-      operationOutput.textContent = boundedText(payload);
-    }
-
-    async function runOperation(label, functionValue) {
-      operationStatus.textContent = label + "…";
-      operationOutput.textContent = "";
-      try {
-        var result = await functionValue();
-        setOperation(label + " complete.", result);
-        return result;
-      } catch (error) {
-        operationStatus.textContent = label + " failed.";
-        operationOutput.textContent = String(error && error.message ? error.message : "Request failed.").slice(0, 500);
-        throw error;
+    function api(path, options) { return request(apiBase, path, options); }
+    function say(text, isError) { CW.say(status, text, isError); }
+    function fail(error, action) { return CW.fail(status, error, action); }
+    // One change at a time. The clicked control stays enabled (and focused)
+    // until the shared confirmation captures it; a handler disables it only
+    // after the person confirms, by calling disableControls().
+    var operationInFlight = false;
+    function handle(button, work) {
+      if (operationInFlight) {
+        say("Another operation is already running. Wait for it to finish.", true);
+        return Promise.resolve();
       }
-    }
-
-    function confirmOperation(message, okText) {
-      if (typeof global.mvConfirm === "function") {
-        return global.mvConfirm(message, { okText: okText });
-      }
-      return Promise.resolve(global.confirm(message));
-    }
-
-    function handle(handler, options) {
-      options = options || {};
-      return function (event) {
-        if (event) { event.preventDefault(); }
-        if (operationInFlight) {
-          operationStatus.textContent = "Another operation is already running. Wait for it to finish.";
-          return;
-        }
-        operationInFlight = true;
-        shell.dataset.operationInFlight = "true";
-        var source = event && event.currentTarget;
-        var controls = [];
-        if (source && source.matches && source.matches("form")) {
-          controls = Array.from(source.querySelectorAll('button[type="submit"], input[type="submit"]'));
-        } else if (source && "disabled" in source) {
-          controls = [source];
-        }
-        var disabledBefore = controls.map(function (control) { return control.disabled; });
-        var controlsDisabled = false;
-        function disableControls() {
-          if (controlsDisabled) { return; }
-          controls.forEach(function (control) { control.disabled = true; });
-          controlsDisabled = true;
-        }
-        // Destructive handlers defer this until their confirmation resolves.
-        // Keeping the invoking control enabled lets mvConfirm capture and
-        // restore the real opener instead of falling back to document.body.
-        if (!options.deferDisable) { disableControls(); }
-        Promise.resolve().then(function () {
-          return handler(event, disableControls);
-        }).catch(function () {}).finally(function () {
-          if (controlsDisabled) {
-            controls.forEach(function (control, index) { control.disabled = disabledBefore[index]; });
-          }
-          operationInFlight = false;
-          delete shell.dataset.operationInFlight;
-        });
-      };
-    }
-
-    function setCapabilityControls(status) {
-      var actionSelect = document.querySelector('#cbj-action-form select[name="operation"]');
-      Array.from(actionSelect.options).forEach(function (option) {
-        option.disabled = !canAdmin || !status.operations || status.operations[option.value] !== true;
+      operationInFlight = true;
+      shell.dataset.operationInFlight = "true";
+      var wasDisabled = button ? button.disabled : false, controlsDisabled = false;
+      function disableControls() { if (button && !controlsDisabled) { button.disabled = true; controlsDisabled = true; } }
+      return Promise.resolve().then(function () {
+        return work(disableControls);
+      }).catch(function (error) { fail(error, "finish the change"); }).finally(function () {
+        if (controlsDisabled) button.disabled = wasDisabled;
+        operationInFlight = false;
+        delete shell.dataset.operationInFlight;
       });
-      var exportControls = document.getElementById("cbj-export-controls");
-      exportControls.disabled = !canAdmin || !status.operations || status.operations.export_receipts !== true;
-      var actionControls = document.getElementById("cbj-action-controls");
-      var selectedReady = status.operations && status.operations[actionSelect.value] === true;
-      actionControls.disabled = !canAdmin || !selectedReady;
     }
-
-    function renderStatus(status) {
-      latestStatus = status;
-      statusOutput.textContent = boundedText(status);
-      var ready = status && status.ready === true;
-      var capabilityValues = status && status.operations ? Object.values(status.operations) : [];
-      var complete = capabilityValues.length > 0 && capabilityValues.every(function (value) { return value === true; });
-      operations.disabled = !(ready && canAudit);
-      if (!ready) {
-        readiness.textContent = "Not ready";
-        statusMark.dataset.state = "failed";
-        statusMark.textContent = "Closed";
-        readinessDetail.textContent = "Bulk actions are disabled, need setup, or are unavailable. Check the availability details before continuing.";
-      } else if (!complete) {
-        readiness.textContent = "Partially ready";
-        statusMark.dataset.state = "partial";
-        statusMark.textContent = "Partial";
-        readinessDetail.textContent = "Exports and installed actions are available. Missing explicit mutation primitives remain closed.";
-      } else {
-        readiness.textContent = "Ready";
-        statusMark.dataset.state = "ready";
-        statusMark.textContent = "Ready";
-        readinessDetail.textContent = "Bulk actions are ready for this workspace.";
-      }
-      if (ready) { setCapabilityControls(status); }
-    }
+    document.querySelectorAll("[data-cbj-close]").forEach(function (b) { b.addEventListener("click", function () { $(b.dataset.cbjClose).hidden = true; }); });
 
     async function refreshStatus() {
       operations.disabled = true;
       if (!canAudit) {
-        renderStatus({ enabled: false, configured: false, ready: false, operations: {} });
-        readinessDetail.textContent = "Global audit authority is required to read this administrative surface.";
-        return;
+        CW.say(readinessDetail, "You need audit access to use bulk changes.", true);
+        return false;
       }
-      readiness.textContent = "Checking…";
-      statusMark.dataset.state = "checking";
-      statusMark.textContent = "Checking";
       try {
-        renderStatus(await request("/status"));
+        var result = await api("/status");
+        state.status = result;
+        var ready = result && result.ready === true;
+        operations.disabled = !ready;
+        if (!ready) {
+          CW.say(readinessDetail, result && result.enabled === false ? "Bulk changes are turned off for this workspace." : "Bulk changes are not ready yet. An administrator needs to finish setting them up.", true);
+          return false;
+        }
+        var ops = result.operations || {};
+        var missing = Object.keys(WHAT).filter(function (k) { return ops[k] !== true; });
+        CW.say(readinessDetail, missing.length ? "Some kinds of change are not set up yet: " + missing.map(function (k) { return WHAT[k].toLowerCase(); }).join(", ") + "." : "");
+        form.querySelectorAll("input[name=operation]").forEach(function (radio) {
+          radio.disabled = !canAdmin || ops[radio.value] !== true;
+        });
+        return true;
       } catch (error) {
-        renderStatus({ enabled: false, configured: false, ready: false, operations: {} });
-        readinessDetail.textContent = String(error.message || "Readiness check failed.").slice(0, 500);
+        CW.fail(readinessDetail, error, "check whether bulk changes are available");
+        return false;
       }
     }
 
-    function addDefinition(list, term, value) {
-      var dt = document.createElement("dt");
-      var dd = document.createElement("dd");
-      dt.textContent = term;
-      dd.textContent = String(value === null || value === undefined ? "—" : value).slice(0, 300);
-      list.appendChild(dt);
-      list.appendChild(dd);
+    function progressText(job) {
+      var text = job.processed_items + " of " + job.total_items + " done";
+      if (job.failed_items) text += ", " + job.failed_items + " could not be changed";
+      return text;
     }
-
-    function makeDownloadAvailable(jobId) {
-      downloadUrl = apiBase + "/" + encodeURIComponent(jobId) + "/download";
-      download.disabled = !canAudit;
-      downloadHint.textContent = canAudit
-        ? "Export ready for job " + String(jobId).slice(0, 128) + "."
-        : "Global audit authority is required to download this export.";
-    }
-
-    function selectJob(jobId, revision) {
-      controlForm.elements.job_id.value = jobId;
-      controlForm.elements.expected_revision.value = revision || "";
-      makeDownloadAvailable(jobId);
-    }
-
-    function renderJobs(payload) {
-      jobList.replaceChildren();
-      var jobs = payload && Array.isArray(payload.jobs) ? payload.jobs.slice(0, 100) : [];
-      jobs.forEach(function (job) {
-        var article = document.createElement("article");
-        article.className = "cbj-job";
-        var head = document.createElement("div");
-        head.className = "cbj-job-head";
-        var title = document.createElement("h3");
-        title.textContent = String(job.job_id || "Unknown job").slice(0, 128);
-        var state = document.createElement("span");
-        state.className = "cbj-pill";
-        state.textContent = String(job.state || "unknown").slice(0, 24);
-        head.appendChild(title);
-        head.appendChild(state);
-        var detail = document.createElement("dl");
-        addDefinition(detail, "Operation", job.operation);
-        addDefinition(detail, "Progress", String(job.progress_percent) + "%");
-        addDefinition(detail, "Items", String(job.processed_items) + " / " + String(job.total_items));
-        addDefinition(detail, "Failures", job.failed_items);
-        addDefinition(detail, "Revision", job.revision);
-        var choose = document.createElement("button");
-        choose.type = "button";
-        choose.className = "btn";
-        choose.textContent = "Select job";
-        choose.addEventListener("click", function () { selectJob(job.job_id, job.revision); });
-        article.appendChild(head);
-        article.appendChild(detail);
-        article.appendChild(choose);
-        jobList.appendChild(article);
-      });
-      if (jobs.length === 0) {
-        var empty = document.createElement("p");
-        empty.className = "cbj-empty";
-        empty.textContent = "No jobs match these filters.";
-        jobList.appendChild(empty);
-      }
-      listCount.textContent = jobs.length + (jobs.length === 1 ? " job" : " jobs");
-      listStatus.textContent = payload && payload.truncated
-        ? "More jobs are available. Narrow the status filter to find them."
-        : "Job register refreshed.";
-    }
-
     async function refreshJobs() {
-      var values = formValues(document.getElementById("cbj-list-form"));
-      var limit = integer(values.limit, "Result limit", 1, 100);
-      var path = "?limit=" + encodeURIComponent(String(limit));
-      if (values.state) {
-        if (!STATES.has(values.state)) { throw failure("State is invalid.", "invalid_input"); }
-        path += "&state=" + encodeURIComponent(values.state);
+      var filter = $("cbj-state-filter").value;
+      try {
+        var result = await api("?limit=200" + (filter ? "&state=" + encodeURIComponent(filter) : ""));
+        state.jobs = result.jobs || [];
+        CW.table($("cbj-job-list"), state.jobs, {
+          label: "Jobs", name: function (j) { return WHAT[j.operation] || CW.human(j.operation); },
+          columns: [
+            { label: "What", value: function (j) { return WHAT[j.operation] || CW.human(j.operation); } },
+            { label: "People", value: function (j) { return String(j.total_items); } },
+            { label: "Progress", value: progressText },
+            { label: "Starts", value: function (j) { return j.scheduled_for ? CW.when(j.scheduled_for) : "As soon as possible"; } },
+            { label: "Status", value: function (j) { var m = STATE_LABELS[j.state] || [CW.human(j.state), "idle"]; return CW.badge(j.cancel_requested && j.state !== "cancelled" ? "Cancelling" : m[0], m[1]); } }
+          ],
+          actions: [
+            { label: "Details", run: function (j, b) { CW.busy(b, function () { return showDetail(j); }); } },
+            { label: "Download", when: function (j) { return j.operation === "export_receipts" && j.state === "succeeded"; }, run: function (j) { global.location.assign(apiBase + "/" + encodeURIComponent(j.job_id) + "/download"); } },
+            { label: "Run now", kind: "primary", when: function (j) { return canAdmin && (j.state === "queued" || j.state === "running"); }, run: function (j, b) { handle(b, function (disableControls) { return runJob(j, disableControls); }); } },
+            { label: "Cancel", kind: "danger", when: function (j) { return canAdmin && (j.state === "queued" || j.state === "running") && !j.cancel_requested; }, run: function (j, b) { handle(b, function (disableControls) { return cancelJob(j, disableControls); }); } }
+          ],
+          empty: { title: "No jobs yet.", body: "Start a bulk change to export or change many people’s consent records at once.", action: canAdmin ? { label: "Start a bulk change", run: openCreate } : null }
+        });
+      } catch (error) {
+        $("cbj-job-list").replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the jobs")));
       }
-      renderJobs(await request(path));
     }
 
-    function selectedJobId() {
-      return identifier(controlForm.elements.job_id.value, "Job ID");
+    async function showDetail(job) {
+      var body = $("cbj-detail-body");
+      $("cbj-detail-title").textContent = WHAT[job.operation] || "Job details";
+      body.replaceChildren(CW.el("p", "muted", "Loading…"));
+      $("cbj-detail").hidden = false;
+      try {
+        var history = await api("/" + encodeURIComponent(job.job_id) + "/history?limit=100");
+        body.replaceChildren();
+        CW.facts(body, [
+          ["Status", (STATE_LABELS[job.state] || [CW.human(job.state)])[0]],
+          ["Progress", progressText(job)],
+          ["Created", CW.when(job.created_at)],
+          ["Starts", job.scheduled_for ? CW.when(job.scheduled_for) : "As soon as possible"]
+        ]);
+        var list = CW.el("ul");
+        (history.events || []).forEach(function (event) { list.appendChild(CW.el("li", "", CW.when(event.created_at) + " – " + CW.human(event.event_type))); });
+        body.appendChild(CW.el("h4", "", "History"));
+        body.appendChild(list);
+        CW.open($("cbj-detail"), null);
+      } catch (error) { body.replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the job details"))); }
+    }
+    async function runJob(job, disableControls) {
+      if (!(await CW.confirm("Run the next part of this job now? It may change or delete people’s consent records.", "Run now"))) return;
+      disableControls();
+      try { await api("/" + encodeURIComponent(job.job_id) + "/run", { method: "POST", body: {} }); say("The job ran its next part."); await refreshJobs(); }
+      catch (error) { fail(error, "run the job"); }
+    }
+    async function cancelJob(job, disableControls) {
+      if (!(await CW.confirm("Cancel this job? Changes already made are not undone.", "Cancel job"))) return;
+      disableControls();
+      try { await api("/" + encodeURIComponent(job.job_id) + "/cancel", { method: "POST", body: { expected_revision: job.revision, idempotency_key: CW.reference() } }); say("Job cancelled."); await refreshJobs(); }
+      catch (error) { fail(error, "cancel the job"); }
     }
 
-    document.getElementById("cbj-refresh-status").addEventListener("click", handle(refreshStatus));
-    document.getElementById("cbj-list-form").addEventListener("submit", handle(refreshJobs));
-    document.getElementById("cbj-export-form").addEventListener("submit", handle(async function () {
-      var payload = buildExportPayload(formValues(document.getElementById("cbj-export-form")));
-      var result = await runOperation("Create export job", function () {
-        return request("/exports", { method: "POST", body: payload });
+    // ----- Start a bulk change -----
+    function operation() { var r = form.querySelector("input[name=operation]:checked"); return r ? r.value : "export_receipts"; }
+    function syncForm() {
+      var op = operation();
+      form.querySelectorAll("[data-for]").forEach(function (node) {
+        var key = node.dataset.for;
+        var show = key === op || (key === "people" && op !== "change_identifier_type") || (key === "identifiers" && op === "change_identifier_type") || (key === "receipts" && (op === "reactivate" || op === "clear_expiration"));
+        node.hidden = !show;
       });
-      selectJob(result.job_id, result.revision);
-      await refreshJobs();
-    }));
-    document.getElementById("cbj-action-form").addEventListener("submit", handle(async function (_event, disableControls) {
-      var payload = buildActionPayload(formValues(document.getElementById("cbj-action-form")));
-      if (!(await confirmOperation(
-        "Create exactly one “" + payload.operation.replace(/_/g, " ") + "” bulk job for " +
-          payload.items.length + (payload.items.length === 1 ? " item" : " items") +
-          "? The queued job may execute automatically when it becomes due.",
-        "Create action job"
-      ))) { return; }
-      disableControls();
-      var result = await runOperation("Create action job", function () {
-        return request("/actions", { method: "POST", body: payload });
+      var later = form.elements.when.value === "later";
+      form.querySelector("[data-when=later]").hidden = !later;
+    }
+    function renderPeople() {
+      var term = $("cbj-people-search").value.trim().toLowerCase(), host = $("cbj-people");
+      host.replaceChildren();
+      var shown = state.profiles.filter(function (p) { return !term || String(p.profile_id).toLowerCase().indexOf(term) >= 0; }).slice(0, 200);
+      if (!state.profiles.length) host.appendChild(CW.el("p", "muted", "No people with consent records yet."));
+      shown.forEach(function (p) {
+        var label = CW.el("label"), input = document.createElement("input");
+        input.type = "checkbox"; input.name = "person"; input.value = p.profile_id; input.checked = state.chosen.has(p.profile_id);
+        input.addEventListener("change", function () { if (input.checked) state.chosen.add(p.profile_id); else state.chosen.delete(p.profile_id); countPeople(); });
+        label.append(input, " " + p.profile_id + (p.identity_kind === "anonymous" ? " (anonymous)" : ""));
+        host.appendChild(label);
       });
-      selectJob(result.job_id, result.revision);
-      await refreshJobs();
-    }, { deferDisable: true }));
-    document.querySelector('#cbj-action-form select[name="operation"]').addEventListener("change", function (event) {
-      if (latestStatus) {
-        document.getElementById("cbj-action-controls").disabled = !canAdmin
-          || !latestStatus.operations
-          || latestStatus.operations[event.target.value] !== true;
+      countPeople();
+    }
+    function countPeople() {
+      var n = state.chosen.size;
+      $("cbj-people-count").textContent = n ? n + (n === 1 ? " person selected." : " people selected.") : "No one selected.";
+    }
+    async function readLines(file) {
+      var text = await file.text();
+      return text.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+    }
+    function profileById(id) { for (var i = 0; i < state.profiles.length; i++) if (state.profiles[i].profile_id === id) return state.profiles[i]; return null; }
+    async function openCreate() {
+      form.reset();
+      form.elements.idempotency_key.value = CW.reference();
+      state.chosen = new Set(); state.identifiers = []; state.receipts = [];
+      $("cbj-receipts").replaceChildren();
+      $("cbj-identifier-count").textContent = "No file chosen.";
+      try {
+        var results = await Promise.all([request(consentBase, "/profiles?limit=500"), request(consentBase, "/policies?limit=500")]);
+        state.profiles = results[0].profiles || []; state.policies = results[1].policies || [];
+      } catch (error) { fail(error, "load people and policies"); }
+      var latest = {};
+      state.policies.forEach(function (p) { if (!latest[p.policy_id] || latest[p.policy_id].version < p.version) latest[p.policy_id] = p; });
+      CW.fill(form.elements.policy_key, Object.keys(latest).sort().map(function (k) { return { value: k + "|" + latest[k].version, label: CW.human(k) + " (version " + latest[k].version + ")" }; }));
+      fillPurposes();
+      CW.fill(form.elements.channel, CW.CHANNELS);
+      CW.fill(form.elements.jurisdiction, CW.JURISDICTIONS);
+      CW.fill(form.elements.country_code, CW.COUNTRIES);
+      var first = form.querySelector("input[name=operation]:not(:disabled)");
+      if (first) first.checked = true;
+      renderPeople(); syncForm();
+      CW.open(form, "input[name=operation]:checked");
+    }
+    function fillPurposes() {
+      var key = form.elements.policy_key.value.split("|"), policy = state.policies.filter(function (p) { return p.policy_id === key[0] && String(p.version) === key[1]; })[0];
+      CW.fill(form.elements.purpose_id, Object.keys((policy && policy.purposes) || {}).map(function (k) { return { value: k, label: CW.human(k) }; }));
+    }
+    async function loadReceipts() {
+      var ids = Array.from(state.chosen);
+      if (!ids.length) { say("Choose the people first.", true); return; }
+      var host = $("cbj-receipts");
+      host.replaceChildren(CW.el("p", "muted", "Loading…"));
+      state.receipts = [];
+      try {
+        for (var i = 0; i < ids.length && i < 50; i++) {
+          var exported = await request(consentBase, "/profiles/" + encodeURIComponent(ids[i]) + "/export?access_purpose=bulk-change-selection&receipt_limit=100");
+          (exported.receipts || []).forEach(function (r) { state.receipts.push(r); });
+        }
+        host.replaceChildren();
+        if (!state.receipts.length) host.appendChild(CW.el("p", "muted", "These people have no recorded choices."));
+        state.receipts.forEach(function (r) {
+          var label = CW.el("label"), input = document.createElement("input");
+          input.type = "checkbox"; input.name = "receipt"; input.value = r.receipt_id;
+          var choices = (r.choices || []).map(function (c) { return CW.human(c.purpose_id) + ": " + CW.human(c.action) + (c.expires_at ? " (ends " + CW.when(c.expires_at) + ")" : ""); }).join("; ");
+          label.append(input, " " + r.profile_id + " – " + choices + " – recorded " + CW.when(r.created_at));
+          host.appendChild(label);
+        });
+        if (ids.length > 50) host.appendChild(CW.el("p", "muted", "Only the first 50 people are shown. Start another job for the rest."));
+      } catch (error) { host.replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load their choices"))); }
+    }
+    function whenValue() {
+      if (form.elements.when.value !== "later") return "";
+      var seconds = CW.toSeconds(form.elements.scheduled_for.value);
+      if (!(seconds > Date.now() / 1000)) throw Object.assign(new Error("when"), { plain: "Choose a start time in the future." });
+      return new Date(seconds * 1000).toISOString();
+    }
+    async function buildItems(op) {
+      var items = [], n = 0;
+      function next() { n += 1; return "item-" + n; }
+      if (op === "change_identifier_type") {
+        if (!state.identifiers.length) throw Object.assign(new Error("ids"), { plain: "Upload the list of people and their new identifiers." });
+        for (var k = 0; k < state.identifiers.length; k++) {
+          var entry = state.identifiers[k];
+          items.push({ item_id: next(), profile_id: entry.profile.profile_id, expected_revision: entry.profile.revision, identity_kind: form.elements.identity_kind.value, subject_sha256: await CW.sha256(entry.identifier) });
+        }
+        return items;
       }
-    });
-    document.getElementById("cbj-load-detail").addEventListener("click", handle(async function () {
-      var jobId = selectedJobId();
-      await runOperation("Load job detail", function () { return request("/" + encodeURIComponent(jobId)); });
-      makeDownloadAvailable(jobId);
-    }));
-    document.getElementById("cbj-load-progress").addEventListener("click", handle(async function () {
-      var jobId = selectedJobId();
-      await runOperation("Load job progress", function () { return request("/" + encodeURIComponent(jobId) + "/progress"); });
-      makeDownloadAvailable(jobId);
-    }));
-    document.getElementById("cbj-load-history").addEventListener("click", handle(async function () {
-      var jobId = selectedJobId();
-      await runOperation("Load change history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
-      makeDownloadAvailable(jobId);
-    }));
-    document.getElementById("cbj-run-job").addEventListener("click", handle(async function (_event, disableControls) {
-      var jobId = selectedJobId();
-      if (!(await confirmOperation(
-        "Run the next executable batch for consent bulk job “" + jobId + "” now? Its queued action may change or delete consent records.",
-        "Run this job"
-      ))) { return; }
-      disableControls();
-      var result = await runOperation("Run job batch", function () {
-        return request("/" + encodeURIComponent(jobId) + "/run", { method: "POST", body: {} });
+      var people = Array.from(state.chosen).map(profileById).filter(Boolean);
+      if (!people.length) throw Object.assign(new Error("people"), { plain: "Choose at least one person." });
+      if (op === "export_receipts") return people.map(function (p) { return { item_id: next(), profile_id: p.profile_id, receipt_limit: Number(form.elements.receipt_limit.value) }; });
+      if (op === "delete_subject") return people.map(function (p) { return { item_id: next(), profile_id: p.profile_id, expected_revision: p.revision, reason_code: form.elements.reason_code.value }; });
+      if (op === "edit_preferences") {
+        var key = form.elements.policy_key.value.split("|");
+        if (!key[0] || !form.elements.purpose_id.value) throw Object.assign(new Error("policy"), { plain: "Choose a consent policy and a use of data." });
+        return people.map(function (p) {
+          return { item_id: next(), profile_id: p.profile_id, expected_revision: p.revision, policy_id: key[0], policy_version: Number(key[1]),
+            context: { jurisdiction: form.elements.jurisdiction.value, country_code: form.elements.country_code.value, region_code: "", collection_point: "admin", asserted_source: "operator" },
+            choices: [{ purpose_id: form.elements.purpose_id.value, action: form.elements.action.value, channel: form.elements.channel.value, vendor_id: "all" }] };
+        });
+      }
+      var picked = Array.prototype.filter.call(form.querySelectorAll("input[name=receipt]"), function (c) { return c.checked; }).map(function (c) { return c.value; });
+      if (!picked.length) throw Object.assign(new Error("receipts"), { plain: "Show the people’s choices and tick the ones to change." });
+      var at = op === "reactivate" ? CW.toSeconds(form.elements.reactivation_at.value) : 0;
+      if (op === "reactivate" && !(at > Date.now() / 1000)) throw Object.assign(new Error("at"), { plain: "Choose when to bring the choices back, in the future." });
+      return picked.map(function (receiptId) {
+        var receipt = state.receipts.filter(function (r) { return r.receipt_id === receiptId; })[0], person = profileById(receipt.profile_id);
+        var item = { item_id: next(), profile_id: receipt.profile_id, expected_revision: person ? person.revision : receipt.profile_revision, receipt_id: receiptId };
+        if (op === "reactivate") item.reactivation_at = at;
+        return item;
       });
-      selectJob(jobId, result.revision);
-      await refreshJobs();
-    }, { deferDisable: true }));
-    document.getElementById("cbj-cancel-job").addEventListener("click", handle(async function (_event, disableControls) {
-      var jobId = selectedJobId();
-      var payload = {
-        expected_revision: integer(controlForm.elements.expected_revision.value, "Expected revision", 1, 2147483647),
-        idempotency_key: idempotencyKey(controlForm.elements.idempotency_key.value)
-      };
-      if (!(await confirmOperation(
-        "Cancel consent bulk job “" + jobId + "” at revision " + payload.expected_revision +
-          "? Completed items will not be rolled back.",
-        "Cancel this job"
-      ))) { return; }
-      disableControls();
-      var result = await runOperation("Cancel job", function () {
-        return request("/" + encodeURIComponent(jobId) + "/cancel", { method: "POST", body: payload });
-      });
-      selectJob(jobId, result.revision);
-      await refreshJobs();
-    }, { deferDisable: true }));
-    controlForm.elements.job_id.addEventListener("input", function () {
-      downloadUrl = "";
-      download.disabled = true;
-      downloadHint.textContent = "Select or load this job before downloading its export.";
-    });
-    download.addEventListener("click", function () {
-      if (download.disabled || !canAudit || !downloadUrl) { return; }
-      global.location.assign(downloadUrl);
-    });
-    document.getElementById("cbj-load-credits").addEventListener("click", handle(async function () {
-      var result = await runOperation("Load credit detail", function () { return request("/credits/detail"); });
-      document.getElementById("cbj-credit-detail").textContent =
-        "Available " + result.available + " · reserved " + result.reserved + " · consumed " + result.consumed + " · revision " + result.revision;
-      document.querySelector('#cbj-credit-form input[name="expected_revision"]').value = result.revision;
-    }));
-    document.getElementById("cbj-credit-form").addEventListener("submit", handle(async function (_event, disableControls) {
-      var values = formValues(document.getElementById("cbj-credit-form"));
-      var payload = {
-        amount: integer(values.amount, "Credit amount", 1, 1000000000),
-        expected_revision: integer(values.expected_revision, "Credit revision", 1, 2147483647),
-        idempotency_key: idempotencyKey(values.idempotency_key)
-      };
-      if (!(await confirmOperation(
-        "Grant exactly " + payload.amount + " bulk-operation credits at ledger revision " +
-          payload.expected_revision + "? This changes the tenant credit balance.",
-        "Grant credits"
-      ))) { return; }
-      disableControls();
-      var result = await runOperation("Grant credits", function () {
-        return request("/credits/grant", { method: "POST", body: payload });
-      });
-      document.querySelector('#cbj-credit-form input[name="expected_revision"]').value = result.revision;
-    }, { deferDisable: true }));
-    document.getElementById("cbj-run-next").addEventListener("click", handle(async function (_event, disableControls) {
-      if (!(await confirmOperation(
-        "Run exactly the next due consent bulk job now? Its queued action may change or delete consent records.",
-        "Run next due job"
-      ))) { return; }
-      disableControls();
-      await runOperation("Run next due job", function () {
-        return request("/worker/run-next", { method: "POST", body: {} });
-      });
-      await refreshJobs();
-    }, { deferDisable: true }));
-    document.getElementById("cbj-verify-integrity").addEventListener("click", handle(function () {
-      return runOperation("Verify audit history", function () { return request("/operations/integrity"); });
-    }));
-    document.getElementById("cbj-recover").addEventListener("click", handle(async function (_event, disableControls) {
-      var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Recovery limit", 1, 500);
-      var confirmed = await confirmOperation(
-        "Recover up to " + limit + " expired consent worker leases? Recovered jobs can become runnable again.",
-        "Recover leases"
-      );
-      if (!confirmed) { return null; }
-      disableControls();
-      return runOperation("Recover expired worker leases", function () {
-        return request("/operations/recover", { method: "POST", body: { limit: limit } });
-      });
-    }, { deferDisable: true }));
-    document.getElementById("cbj-retention-due").addEventListener("click", handle(function () {
-      var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Retention limit", 1, 500);
-      var before = optionalTimestamp(document.getElementById("cbj-retention-before").value, "Retention cutoff");
-      var path = "/operations/retention?limit=" + encodeURIComponent(String(limit));
-      if (before !== null) { path += "&before=" + encodeURIComponent(String(before)); }
-      return runOperation("Review retention-due jobs", function () { return request(path); });
-    }));
-    document.getElementById("cbj-purge").addEventListener("click", handle(async function (_event, disableControls) {
-      var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Purge limit", 1, 500);
-      var before = optionalTimestamp(document.getElementById("cbj-retention-before").value, "Retention cutoff");
-      var body = { limit: limit };
-      if (before !== null) { body.before = before; }
-      var cutoff = before === null ? "the server retention cutoff" : new Date(before * 1000).toISOString();
-      if (!(await confirmOperation(
-        "Permanently purge up to " + limit + " retention-due consent jobs before " + cutoff +
-          "? Purged job records cannot be recovered from this interface.",
-        "Purge these jobs"
-      ))) { return; }
-      disableControls();
-      await runOperation("Purge retention-due jobs", function () {
-        return request("/operations/retention/purge", { method: "POST", body: body });
-      });
-      await refreshJobs();
-    }, { deferDisable: true }));
+    }
+    async function submitCreate(disableControls) {
+      var op = operation();
+      try {
+        var items = await buildItems(op);
+        var itemsJson = JSON.stringify(items);
+        if (items.length > MAX_UI_ITEMS || new TextEncoder().encode(itemsJson).byteLength > MAX_JSON_INPUT_BYTES) {
+          say("That is too many records for one job. Choose fewer people and start another job for the rest.", true);
+          return;
+        }
+        var values = { items_json: itemsJson, idempotency_key: form.elements.idempotency_key.value, scheduled_for: whenValue() };
+        var payload;
+        if (op === "export_receipts") payload = buildExportPayload(values);
+        else { values.operation = op; payload = buildActionPayload(values); }
+        var count = payload.items.length;
+        if (op !== "export_receipts" && !(await CW.confirm(WHAT[op] + " for " + count + (count === 1 ? " record" : " records") + "? This changes people’s consent records and cannot be undone by cancelling.", "Start job"))) return;
+        disableControls();
+        await api(op === "export_receipts" ? "/exports" : "/actions", { method: "POST", body: payload });
+        form.hidden = true;
+        say("Job started." + (op === "export_receipts" ? " Download the file from the job list when it has finished." : ""));
+        await Promise.all([refreshJobs(), refreshCredit()]);
+      } catch (error) {
+        if (error && error.plain) { say(error.plain, true); return; }
+        if (error && error.code === "invalid_input") { say("Some of the details could not be used. Check your choices and try again.", true); return; }
+        fail(error, "start the job");
+      }
+    }
 
-    refreshStatus().then(function () {
-      if (!operations.disabled) {
-        return Promise.all([refreshJobs(), request("/credits/detail").then(function (credit) {
-          document.getElementById("cbj-credit-detail").textContent =
-            "Available " + credit.available + " · reserved " + credit.reserved + " · consumed " + credit.consumed + " · revision " + credit.revision;
-          document.querySelector('#cbj-credit-form input[name="expected_revision"]').value = credit.revision;
-        })]);
+    // ----- Allowance and upkeep -----
+    async function refreshCredit() {
+      try {
+        var credit = await api("/credits/detail");
+        state.credit = credit;
+        $("cbj-credit-detail").textContent = credit.available + " jobs can still be started (" + credit.reserved + " set aside for waiting jobs, " + credit.consumed + " used).";
+      } catch (error) { CW.fail($("cbj-credit-detail"), error, "load the allowance"); }
+    }
+    async function addCredits(disableControls) {
+      if (!state.credit) return;
+      var answers = await global.mvForm("Add to the allowance", [{ key: "amount", label: "How many more jobs", type: "select", required: true, default: "10", options: [{ value: "10", label: "10" }, { value: "50", label: "50" }, { value: "100", label: "100" }, { value: "500", label: "500" }] }], { okText: "Continue" });
+      if (!answers) return;
+      if (!(await CW.confirm("Allow " + answers.amount + " more bulk jobs in this workspace?", "Add"))) return;
+      disableControls();
+      try { await api("/credits/grant", { method: "POST", body: { amount: Number(answers.amount), expected_revision: state.credit.revision, idempotency_key: CW.reference() } }); say("Allowance updated."); await refreshCredit(); }
+      catch (error) { fail(error, "update the allowance"); }
+    }
+
+    $("cbj-new").addEventListener("click", function (event) { CW.busy(event.currentTarget, openCreate); });
+    $("cbj-state-filter").addEventListener("change", refreshJobs);
+    form.querySelectorAll("input[name=operation]").forEach(function (radio) { radio.addEventListener("change", syncForm); });
+    form.elements.when.addEventListener("change", syncForm);
+    form.elements.policy_key.addEventListener("change", fillPurposes);
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      handle(form.querySelector("button[type=submit]"), function (disableControls) { return submitCreate(disableControls); });
+    });
+    $("cbj-people-search").addEventListener("input", renderPeople);
+    $("cbj-select-shown").addEventListener("click", function () { $("cbj-people").querySelectorAll("input[name=person]").forEach(function (c) { c.checked = true; state.chosen.add(c.value); }); countPeople(); });
+    $("cbj-clear-people").addEventListener("click", function () { state.chosen = new Set(); renderPeople(); });
+    $("cbj-people-file").addEventListener("change", async function (event) {
+      var file = event.target.files && event.target.files[0];
+      if (!file) return;
+      var lines = await readLines(file), found = 0, missing = 0;
+      lines.forEach(function (line) { var id = line.split(",")[0].trim(); if (profileById(id)) { state.chosen.add(id); found += 1; } else missing += 1; });
+      renderPeople();
+      say(found + " people added from the list." + (missing ? " " + missing + " lines did not match anyone." : ""), missing > 0);
+    });
+    $("cbj-identifier-file").addEventListener("change", async function (event) {
+      var file = event.target.files && event.target.files[0];
+      if (!file) return;
+      var lines = await readLines(file), missing = 0;
+      state.identifiers = [];
+      lines.forEach(function (line) {
+        var parts = line.split(","), profile = profileById((parts[0] || "").trim()), identifier = parts.slice(1).join(",").trim();
+        if (profile && identifier) state.identifiers.push({ profile: profile, identifier: identifier }); else missing += 1;
+      });
+      $("cbj-identifier-count").textContent = state.identifiers.length + " people ready." + (missing ? " " + missing + " lines could not be matched." : "");
+    });
+    $("cbj-load-receipts").addEventListener("click", function (event) { CW.busy(event.currentTarget, loadReceipts); });
+    $("cbj-add-credits").addEventListener("click", function (event) { handle(event.currentTarget, addCredits); });
+    $("cbj-run-next").addEventListener("click", function (event) {
+      handle(event.currentTarget, async function (disableControls) {
+        if (!(await CW.confirm("Run the next job that is due now? It may change or delete people’s consent records.", "Run next job"))) return;
+        disableControls();
+        try { await api("/worker/run-next", { method: "POST", body: {} }); say("The next due job ran."); await refreshJobs(); }
+        catch (error) { fail(error, "run the next job"); }
+      });
+    });
+    $("cbj-recover").addEventListener("click", function (event) {
+      handle(event.currentTarget, async function (disableControls) {
+        if (!(await CW.confirm("Restart jobs that stopped part-way? They will carry on from where they stopped.", "Restart"))) return;
+        disableControls();
+        try { await api("/operations/recover", { method: "POST", body: { limit: 100 } }); say("Stuck jobs restarted."); await refreshJobs(); }
+        catch (error) { fail(error, "restart stuck jobs"); }
+      });
+    });
+    $("cbj-verify-integrity").addEventListener("click", function (event) {
+      CW.busy(event.currentTarget, async function () {
+        try { var result = await api("/operations/integrity"); var ok = !(result && result.valid === false); say(ok ? "The history is intact." : "The check found a problem. Contact support before changing anything.", !ok); }
+        catch (error) { fail(error, "check the history"); }
+      });
+    });
+    $("cbj-retention-before").value = CW.toInput(Date.now() / 1000, true);
+    $("cbj-retention").addEventListener("submit", function (event) {
+      event.preventDefault();
+      handle($("cbj-purge"), purgeOld);
+    });
+    async function purgeOld(disableControls) {
+      var before = CW.toSeconds($("cbj-retention-before").value);
+      if (!(before > 0)) { say("Choose a date.", true); return; }
+      try {
+        var due = await api("/operations/retention?limit=500&before=" + encodeURIComponent(String(before)));
+        var count = (due.jobs || due.items || []).length;
+        if (!count) { say("No finished jobs reached the end of their keeping period before " + CW.when(before) + "."); return; }
+        if (!(await CW.confirm("Permanently delete " + count + " finished jobs from before " + CW.when(before) + "? They cannot be recovered.", "Delete"))) return;
+        disableControls();
+        await api("/operations/retention/purge", { method: "POST", body: { before: before, limit: 500 } });
+        say("Old jobs deleted."); await refreshJobs();
+      } catch (error) { fail(error, "delete old jobs"); }
+    }
+
+    refreshStatus().then(function (ready) {
+      if (!ready) {
+        $("cbj-job-list").replaceChildren(CW.el("p", "muted", "Jobs appear here once bulk changes are set up."));
+        $("cbj-credit-detail").textContent = "";
+        return null;
       }
-      return null;
-    }).catch(function (error) {
-      setOperation("Initial bounded load failed.", { detail: String(error.message || "Request failed.").slice(0, 500) });
+      return Promise.all([refreshJobs(), refreshCredit()]);
     });
   });
 })(typeof window !== "undefined" ? window : this);
