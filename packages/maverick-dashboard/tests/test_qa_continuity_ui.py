@@ -130,9 +130,9 @@ def test_high_impact_learning_workforce_and_agent_actions_confirm():
     assert "Enable automatic application of proven workflow improvements?" in learning
     assert "Scheduled and triggered workflows may begin running" in learning
     assert "This creates an operational fleet and its specialists" in workforce
-    assert "This creates an operational fleet and its specialists" in agents
-    assert "Its saved authority and workflow become available to operators" in agents
-    assert "Custom authority and workflow edits will be removed" in agents
+    assert "This adds its specialists so you can give the team work" in agents
+    assert "Its allowed actions and steps take effect for everyone who uses it" in agents
+    assert "Your changes to its allowed actions and steps will be removed" in agents
 
 
 def test_privacy_decision_network_failure_restores_the_draft_control():

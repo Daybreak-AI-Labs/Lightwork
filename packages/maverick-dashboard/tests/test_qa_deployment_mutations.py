@@ -53,14 +53,14 @@ def test_agent_factory_deploy_and_reset_mutations_are_guarded():
 
     assert "if (dlgDeploy.dataset.inFlight === 'true') return;" in source
     assert "if (btn.dataset.inFlight === 'true') return;" in source
-    assert source.count("This creates an operational fleet and its specialists") >= 2
+    assert source.count("This adds its specialists so you can give the team work") >= 2
     assert source.count(".finally(function ()") >= 2
     assert "function beginMutation(button)" in source
     assert "if (!beginMutation(saveBtn)) return;" in source
     assert "if (!name || !beginMutation(resetBtn)) return;" in source
-    assert "Its saved authority and workflow become available to operators" in source
-    assert "Custom authority and workflow edits will be removed" in source
-    assert "Could not reach the server — check your connection and try again." in source
+    assert "Its allowed actions and steps take effect for everyone who uses it" in source
+    assert "Your changes to its allowed actions and steps will be removed" in source
+    assert "throw new Error(plainError(error, 'reach Lightwork'))" in source
     assert "finishMutation(saveBtn)" in source
     assert "finishMutation(resetBtn)" in source
 

@@ -63,7 +63,9 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
         loaded = re.findall(r'src="/static/(lightwork-[a-z-]+\.js)"', source)
         for script in dict.fromkeys([*loaded, *PAGE_SCRIPTS.get(name, ())]):
             source += (STATIC / script).read_text(encoding="utf-8")
-        assert "Request failed: the server returned an invalid JSON response." in source, name
+        # Either wording fails closed; the plain one keeps code words off the page.
+        assert ("Request failed: the server returned an invalid JSON response." in source
+                or "could not be confirmed" in source), name
         assert swallowed_json.search(source) is None, name
         assert raw_body_fallback.search(source) is None, name
 
@@ -80,5 +82,5 @@ def test_agent_department_deploy_does_not_turn_invalid_json_into_success() -> No
     source = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
     assert ".json().catch(function () { return {}; })" not in source
     assert source.count(
-        ".json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); })"
+        ".json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); })"
     ) == 2
