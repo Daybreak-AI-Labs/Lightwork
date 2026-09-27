@@ -126,7 +126,7 @@ test('renders explicit synthetic provenance and exact incomplete cost without en
   const value = overview({registry:{...overview().registry,
     datasets:[dataset({usage_constraints:[unsafe]})]}});
   const ui = await fixture(async () => value);
-  assert.match(ui.document.getElementById('research-registry-items').textContent, /Synthetic fixture/);
+  assert.match(ui.document.getElementById('research-registry-items').textContent, /Generated test data/);
   assert.match(ui.document.getElementById('research-governed-runs').textContent, /USD 1.25/);
   assert.match(ui.document.getElementById('research-governed-runs').textContent, /provider report pending/);
   assert.equal(ui.document.querySelector('#research-registry-items img'), null);
@@ -205,7 +205,7 @@ test('known failed attempts expose an in-app retry bound to the current revision
     return overview({governed_runs:[failed]});
   });
   const button = [...ui.document.querySelectorAll('#research-governed-runs button')]
-    .find(item => item.textContent === 'Retry failed run');
+    .find(item => item.textContent === 'Try again');
   button.click(); await settle();
   assert.deepEqual(retry, {context:CONTEXT, confirm:true, expected_revision:7});
   ui.dom.window.close();
@@ -217,7 +217,7 @@ test('a historically approved version with revoked current rights is absent from
   const ui = await fixture(async () => overview({registry:{...overview().registry,
     datasets:[blocked]}, governed_runs:[]}));
   assert.equal(ui.document.getElementById('research-run-form').elements.dataset_refs.options.length, 0);
-  assert.match(ui.document.getElementById('research-registry-items').textContent, /Current use eligibility: blocked/);
+  assert.match(ui.document.getElementById('research-registry-items').textContent, /Can it be used now: Blocked/);
   ui.dom.window.close();
 });
 

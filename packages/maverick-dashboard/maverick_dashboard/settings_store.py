@@ -475,7 +475,7 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
-                    "research_execution", "models", "catalogs", "agent_trust",
+                    "research_execution", "models", "catalogs", "agent_trust", "immune",
                     *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
                     *SWITCHABLE_SECTIONS, *_catalog_generic_sections())):
@@ -1028,6 +1028,25 @@ def set_agent_trust_enforce(enforced: bool) -> None:
         _write(data)
 
 
+def set_immune_settings(*, canaries: bool | None = None, twin_record: bool | None = None) -> None:
+    """Overlay the Safety monitoring page's two switches: reviewer tests
+    (``[immune] canaries``) and recording tasks for practice re-runs
+    (``[immune] twin_record``). Only these two keys, only booleans."""
+    changes = {k: bool(v) for k, v in (("canaries", canaries), ("twin_record", twin_record))
+               if v is not None}
+    if not changes:
+        raise ValueError("unknown setting")
+    with _locked():
+        data = _load_overlay_for_update()
+        table = data.setdefault("immune", {})
+        if not isinstance(table, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        table.update(changes)
+        _write(data)
+
+
 def set_section_enable(section: str, enabled: bool) -> None:
     """Overlay one switchable platform system's ``enable`` flag."""
     if section not in SWITCHABLE_SECTIONS:
@@ -1116,6 +1135,7 @@ def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
 # enable). The single authority the /features/switches API trusts for
 # module switching; anything not listed stays config-file-only.
 MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
+    "codebase",
     "connections",
     "ai_inventory",
     "ai_entity_tasks",

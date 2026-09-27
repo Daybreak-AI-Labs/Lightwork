@@ -1254,6 +1254,11 @@ app.include_router(cortex_router, prefix="/api/v1")
 app.include_router(shoring_router, prefix="/api/v1")
 app.include_router(evolution_ledger_router, prefix="/api/v1")
 app.include_router(immune_console_router, prefix="/api/v1")
+from .operations_actions import api_router as operations_actions_router  # noqa: E402
+from .operations_actions import asset_router as operations_assets_router  # noqa: E402
+
+app.include_router(operations_actions_router, prefix="/api/v1")
+app.include_router(operations_assets_router)
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
@@ -3444,12 +3449,15 @@ async def learned_page(request: Request) -> HTMLResponse:
     on-disk generated tools, with a remove action per generated tool (#427)."""
     from .api import _learned_snapshot
 
+    can_manage = has_global_permission(request, "admin")
     return templates.TemplateResponse(
         request,
         "learned.html",
-        _learned_snapshot(
-            include_pending_items=has_global_permission(request, "admin")
-        ),
+        {
+            **_learned_snapshot(include_pending_items=can_manage),
+            "can_manage": can_manage,
+            "can_remove_tools": has_permission(request, "admin"),
+        },
     )
 
 
@@ -4389,6 +4397,18 @@ async def security_page(request: Request) -> HTMLResponse:
         ][:10]
     ctx.update({"records": records, "program": report, "insights": insights})
     ctx["security_can_manage_hunters"] = has_global_permission(request, "admin")
+    from .immune_actions_api import people_choices
+    from .security_page_helpers import attack_choices
+
+    ctx["people"] = people_choices()
+    ctx["attack_techniques"] = attack_choices()
+    try:
+        ctx["clocks"] = [
+            {"value": c["key"], "label": f"{c.get('title') or c['key']} ({c.get('jurisdiction', '')})".replace(" ()", "")}
+            for c in security_ops.list_regulatory_clock_packs()
+        ] if records["enabled"] else []
+    except Exception:  # pragma: no cover - the incident form still opens without clocks
+        ctx["clocks"] = []
     return templates.TemplateResponse(request, "security.html", ctx)
 
 
@@ -4430,10 +4450,12 @@ async def security_report_page(request: Request) -> HTMLResponse:
                 }
             )
         control_rows.append({**row, "cited_evidence": cited})
+    from .security_page_helpers import FRAMEWORK_LABELS
+
     return templates.TemplateResponse(
         request,
         "security_report.html",
-        {"r": report, "controls": control_rows},
+        {"r": report, "controls": control_rows, "framework_labels": FRAMEWORK_LABELS},
     )
 
 
@@ -5236,8 +5258,14 @@ async def platform_threats_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     from maverick import platform_hunt
 
+    from .immune_actions_api import people_choices
+
     return templates.TemplateResponse(
-        request, "security_threats.html", {"enabled": platform_hunt.enabled()}
+        request, "security_threats.html", {
+            "enabled": platform_hunt.enabled(),
+            "can_global_admin": has_global_permission(request, "admin"),
+            "people": people_choices(),
+        },
     )
 
 
@@ -5247,12 +5275,29 @@ async def environment_threats_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     from maverick import env_hunt
 
+    from .immune_actions_api import people_choices
+    from .security_page_helpers import (
+        CURATED_TITLES,
+        SOC_CONNECTOR_LABELS,
+        soc_connector_choices,
+    )
+
+    enabled = env_hunt.enabled()
+    pull, push = soc_connector_choices() if enabled else ([], [])
+    rules = [{"title": CURATED_TITLES.get(r.id, r.title), "level": r.level,
+              "techniques": list(r.mitre_techniques)}
+             for r in env_hunt.curated_rules()] if enabled else []
     return templates.TemplateResponse(
         request,
         "security_soc.html",
         {
-            "enabled": env_hunt.enabled(),
+            "enabled": enabled,
             "response_execution": env_hunt.response_execution_enabled(),
+            "can_global_admin": has_global_permission(request, "admin"),
+            "people": people_choices(),
+            "pull_connectors": [{"value": n, "label": SOC_CONNECTOR_LABELS.get(n, n)} for n in pull],
+            "push_connectors": [{"value": n, "label": SOC_CONNECTOR_LABELS.get(n, n)} for n in push],
+            "curated_rules": rules,
         },
     )
 
@@ -5572,12 +5617,17 @@ def safe_audit_day(day: str | None) -> str | None:
 
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
-    """Tail of the local audit log."""
+    """The activity log: recent events for a day or a date range, filtered by
+    kind of event, person and text, shown as a readable table."""
     # Gate on ``audit`` to match the ``/api/v1/audit/tail`` twin -- otherwise a
     # view-only caller reads the full audit log via the HTML page despite the
     # API denying them.
     require_permission(request, "audit")
+    from collections import deque
+
     from maverick.audit import default_audit_log
+
+    from . import audit_actions_api as _audit_plain
 
     try:
         n = max(1, min(int(request.query_params.get("n") or 200), 1000))
@@ -5590,18 +5640,45 @@ async def audit_page(request: Request) -> HTMLResponse:
             status_code=400,
             detail="Invalid audit day. Enter a real date in YYYY-MM-DD format.",
         )
+    since = safe_audit_day(request.query_params.get("since"))
+    until = safe_audit_day(request.query_params.get("until"))
     audit_log = default_audit_log()
     from maverick.audit.segments import ReadReport
 
     read_report = ReadReport()
-    events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
-    # Distinct kinds in this tail (for the filter dropdown), computed before
-    # filtering so every available kind stays selectable; then optionally
-    # narrow to one kind (e.g. shield_block, tool_call).
-    kinds = sorted({str(e.get("kind")) for e in events if e.get("kind")})
+    if since or until:
+        from maverick.audit.export import iter_audit_events
+
+        def _window() -> list[dict]:
+            kept: deque = deque(maxlen=5000)
+            for scanned, e in enumerate(iter_audit_events(since=since, until=until,
+                                                          report=read_report)):
+                if scanned >= 200_000:
+                    break
+                kept.append(e)
+            return list(kept)
+
+        events = await run_in_threadpool(_window)
+    else:
+        events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
+    # Distinct kinds and people in the window (for the filter dropdowns),
+    # computed before filtering so every choice stays selectable.
+    kinds = sorted({str(e.get("kind")) for e in events if e.get("kind")},
+                   key=_audit_plain.kind_label)
+    people = sorted({_audit_plain.event_person(e) for e in events} - {""})
     kind = (request.query_params.get("kind") or "").strip()
+    person = (request.query_params.get("person") or "").strip()
+    q = (request.query_params.get("q") or "").strip()[:200]
     if kind:
         events = [e for e in events if e.get("kind") == kind]
+    if person:
+        events = [e for e in events if _audit_plain.event_person(e) == person]
+    if q:
+        needle = q.lower()
+        events = [e for e in events if needle in json.dumps(e, default=str).lower()
+                  or needle in _audit_plain.kind_label(e.get("kind")).lower()]
+    if since or until:
+        events = events[-n:]
     return templates.TemplateResponse(
         request,
         "audit.html",
@@ -5609,10 +5686,18 @@ async def audit_page(request: Request) -> HTMLResponse:
             "events": events,
             "n": n,
             "day": day,
+            "since": since,
+            "until": until,
             "kind": kind,
             "kinds": kinds,
+            "person": person,
+            "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
+            "q": q,
+            "can_admin": has_permission(request, "admin"),
+            "can_global_admin": has_global_permission(request, "admin"),
             "audit_signing_enabled": bool(audit_log.signing_enabled),
             "audit_read_report": read_report.as_dict(),
+            **_audit_plain.page_helpers(),
         },
     )
 
@@ -5643,8 +5728,11 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
     b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    from .audit_actions_api import kind_label
+
     return templates.TemplateResponse(
-        request, "audit_binder.html", {"b": b, "days": b["window_days"]}
+        request, "audit_binder.html",
+        {"b": b, "days": b["window_days"], "kind_label": kind_label},
     )
 
 
@@ -6099,24 +6187,31 @@ def _is_intervention(e: dict) -> bool:
 
 
 def _intervention_detail(e: dict) -> str:
-    """A one-line, human summary of an intervention, by kind."""
+    """A one-line, plain-language summary of an intervention, by kind."""
+    from .identity_format import humanize
+
     kind = e.get("kind")
     if kind == "shield_block":
-        return f"{e.get('stage') or '?'}: {e.get('reason') or ''}".strip()
+        stage = humanize(e.get("stage") or "")
+        reason = str(e.get("reason") or "").strip()
+        return f"Safety filter stopped it{(' at ' + stage.lower()) if stage else ''}: {reason}".strip(": ")
     if kind == "capability_denied":
-        return f"tool={e.get('tool') or '?'} principal={e.get('principal') or '?'}"
+        return f"Not allowed to use {humanize(e.get('tool') or 'this tool').lower()}"
     if kind == "egress_blocked":
-        return f"provider={e.get('provider') or '?'}"
+        return f"Not allowed to send data to {humanize(e.get('provider') or 'that service')}"
     if kind == "consent_result":
-        return f"{e.get('decision') or '?'}: {e.get('action') or ''}".strip()
+        decision = str(e.get("decision") or "").lower()
+        what = "Consent timed out" if decision == "timeout" else "Consent refused"
+        return f"{what}: {e.get('action') or ''}".strip(": ")
     if kind == "halt":
-        return f"{e.get('source') or '?'}: {e.get('detail') or ''}".strip()
+        detail = str(e.get("detail") or "").strip()
+        return f"Emergency stop{(': ' + detail) if detail else ''}"
     # governance_denied (and any future kind): the reason, plus which policy
     # rule fired so the operator can see why it was held.
     detail = str(e.get("reason") or e.get("detail") or e.get("tool") or "")
     rule = e.get("rule")
     if kind == "governance_denied" and rule:
-        detail = f"{detail} [{rule}]".strip()
+        detail = f"{detail} (company rule: {humanize(rule).lower()})".strip()
     return detail
 
 
@@ -6238,12 +6333,26 @@ def oversight_page(request: Request) -> HTMLResponse:
                 total += 1
                 recent.append(e)
 
+    titles: dict[int, str] = {}
+
+    def _goal_title(goal_id) -> str:
+        if not isinstance(goal_id, int):
+            return ""
+        if goal_id not in titles:
+            try:
+                goal = w.get_goal(goal_id)
+            except Exception:  # pragma: no cover - a missing title shows a number
+                goal = None
+            titles[goal_id] = (goal.title if goal is not None else "") or ""
+        return titles[goal_id]
+
     rows = [
         {
             "ts": e.get("ts"),
             "kind": e.get("kind"),
-            "agent": e.get("agent") or "-",
+            "agent": e.get("agent") or "",
             "goal_id": e.get("goal_id"),
+            "goal_title": _goal_title(e.get("goal_id")),
             "detail": _intervention_detail(e),
         }
         for e in reversed(recent)
@@ -6277,6 +6386,7 @@ def oversight_page(request: Request) -> HTMLResponse:
             "since": since,
             "until": until,
             "halted": halted,
+            "can_halt": has_global_permission(request, "operate"),
             "approvals": approvals,
             **approval_context,
             "pending": len(approvals),
@@ -11169,6 +11279,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
     snap = _benchmark_snapshot()
     for s in snap["suites"]:
         s["spark"] = _sparkline_points([e["score"] for e in s["entries"]])
+    snap["can_record"] = has_global_permission(request, "admin")
     return templates.TemplateResponse(request, "benchmarks.html", snap)
 
 

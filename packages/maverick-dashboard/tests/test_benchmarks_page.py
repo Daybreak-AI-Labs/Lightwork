@@ -31,12 +31,41 @@ def test_api_empty_state_is_honest(store):
     assert "bench_track" in data["note"]
 
 
-def test_page_empty_state_names_the_real_recorder(store):
+def test_page_empty_state_is_plain_and_offers_a_form(store):
+    from test_support.plain_language import developer_terms, visible_text
+
     r = client.get("/benchmarks")
     assert r.status_code == 200
-    assert "No benchmark runs recorded" in r.text
-    assert "bench_track" in r.text
-    assert "history.json" in r.text
+    assert "No scores recorded yet" in r.text
+    assert 'id="bench-record"' in r.text and "Add this score" in r.text
+    text = visible_text(r.text)
+    for gone in ("bench_track", "history.json", "maverick.", "docs/comparison.md"):
+        assert gone not in text
+    assert developer_terms(r.text) == []
+
+
+def test_record_score_appends_to_the_same_history(store):
+    cb = store
+    c = TestClient(app, headers={"Origin": "http://testserver"})
+    r = c.post("/api/v1/benchmarks/scores", json={"name": "support_quality", "score": 0.8, "note": "march"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"name": "support_quality", "runs": 1}
+    c.post("/api/v1/benchmarks/scores", json={"name": "support_quality", "score": 0.7})
+    rows = cb.load_history(cb._store_path())
+    assert [(row["name"], row["score"]) for row in rows] == [("support_quality", 0.8), ("support_quality", 0.7)]
+    page = client.get("/benchmarks").text
+    assert "Support quality" in page and "70.0%" in page and "Down 10.0%" in page
+
+
+@pytest.mark.parametrize("body", [
+    {"name": "<script>", "score": 1},
+    {"name": "ok", "score": "abc"},
+    {"name": "", "score": 1},
+])
+def test_record_score_rejects_bad_input(store, body):
+    c = TestClient(app, headers={"Origin": "http://testserver"})
+    assert c.post("/api/v1/benchmarks/scores", json=body).status_code == 422
+    assert store.load_history(store._store_path()) == []
 
 
 def test_api_groups_history_and_flags_regressions(store):
@@ -87,9 +116,9 @@ def test_page_renders_sparklines_and_comparison_table(store):
 
     r = client.get("/benchmarks")
     assert r.status_code == 200
-    assert "swe_bench" in r.text
+    assert "Swe bench" in r.text
     assert "<polyline points=" in r.text     # server-side trend sparkline
-    assert ">ok<" in r.text                  # verdict badge
-    # honest framing: this deployment only, qualitative comparison elsewhere
-    assert "this deployment" in r.text
-    assert "docs/comparison.md" in r.text
+    assert ">Steady<" in r.text              # verdict badge
+    assert "47.0%" in r.text                 # 0..1 scores read as percentages
+    # honest framing: this deployment only, no competitor numbers
+    assert "this deployment’s own recorded scores only" in r.text

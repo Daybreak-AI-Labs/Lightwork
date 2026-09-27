@@ -1,4 +1,4 @@
-"""The read-only Immune layer and Code consoles, through the real dashboard app."""
+"""The Safety monitoring (Immune) and Code pages, through the real dashboard app."""
 from __future__ import annotations
 
 import json
@@ -48,11 +48,12 @@ def test_pages_render_accessibly_with_a_tight_csp(client, path):
     response = client.get(path)
     assert response.status_code == 200, response.text[:300]
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
-    assert '/static/lightwork-immune-console.js' in response.text
+    script = "lightwork-code.js" if path == "/code" else "lightwork-immune-console.js"
+    assert f'/static/{script}' in response.text
     assert audit_html(response.text) == []
     assert "<th>" not in response.text
     assert client.get(path + "?x=1").status_code == 404
-    assert client.get("/static/lightwork-immune-console.js").status_code == 200
+    assert client.get(f"/static/{script}").status_code == 200
 
 
 def test_immune_summary_is_counts_and_labels_only(client, monkeypatch):
@@ -118,7 +119,7 @@ def test_permissions_are_enforced(monkeypatch):
 
 
 def test_client_never_injects_html():
-    js = STATIC.read_text()
+    js = STATIC.read_text() + (STATIC.parent / "lightwork-code.js").read_text()
     for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "eval(", "new Function"):
         assert banned not in js
     from maverick.a11y_audit import audit_file

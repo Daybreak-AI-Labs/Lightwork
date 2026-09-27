@@ -124,7 +124,7 @@ def test_audit_binder_payload_and_page():
     page = client.get("/audit/binder")
     assert page.status_code == 200
     assert "Audit binder" in page.text
-    assert "Signed audit chain" in page.text
+    assert "Tamper-evident activity log" in page.text
 
 
 # --- partner fleet ----------------------------------------------------------

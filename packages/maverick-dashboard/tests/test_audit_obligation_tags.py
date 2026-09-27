@@ -37,8 +37,7 @@ def test_denial_rows_link_their_obligation_and_tool_calls_list_what_was_checked(
     r = TestClient(app).get("/audit")
     assert r.status_code == 200, r.text
     body = r.text
-    assert ('<a href="/compliance/obligations" class="aud-obligation-link" '
-            'title="Open Regulatory Obligations">gdpr-art32-outbound-transfer</a>') in body
+    assert '<a href="/compliance/obligations">gdpr-art32-outbound-transfer</a>' in body
     assert 'class="aud-kv aud-obligation"' in body
     assert "Art. 32" in body and "GDPR" in body
     # A list of checked obligations renders as text, not as a JSON blob.
@@ -53,4 +52,4 @@ def test_rows_without_obligations_render_exactly_as_before(monkeypatch, tmp_path
     ])
     body = TestClient(app).get("/audit").text
     assert "aud-obligation" not in body.split("<tbody>", 1)[1]
-    assert "read_file" in body
+    assert "Read file" in body

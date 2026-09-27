@@ -20,8 +20,9 @@ from fastapi.templating import Jinja2Templates
 from maverick.cortex import SOURCES
 from starlette.concurrency import run_in_threadpool
 
-from .auth import has_permission, require_permission
+from .auth import has_global_permission, has_permission, require_permission
 from .cortex_api import DEFAULT_K, MAX_K, MAX_QUERY
+from .identity_format import humanize, humanize_principal
 
 PAGE_PATH = "/cortex"
 API_BASE = "/api/v1/cortex"
@@ -54,13 +55,32 @@ _HEADERS = {
 
 #: What each source is, in the order Cortex consults them.
 _SOURCE_COPY: dict[str, tuple[str, str]] = {
-    "knowledge": ("Knowledge", "The tenant's documents and data, retrieved with citations."),
-    "skills": ("Skills", "The recipes the workforce learned on this operation."),
-    "lessons": ("Lessons", "Guidance mined from failures and proven on held-out work."),
-    "record": ("Operating Record", "Every decision and sign-off: who decided, what, and when."),
-    "fleet": ("Fleet memory",
-              "What agents you didn't build deposited, roster-gated and Shield-scanned."),
+    "knowledge": ("Documents", "Your company's documents and data, with where each answer came from."),
+    "skills": ("Skills", "The ways of working your assistants have learned here."),
+    "lessons": ("Lessons", "Advice learned from past mistakes and checked on new work."),
+    "record": ("Decision history", "Every decision and sign-off: who decided what, and when."),
+    "fleet": ("Outside assistants' notes",
+              "What approved outside assistants have shared, after a safety check."),
 }
+
+#: Sources an administrator can turn on from this page, and the feature
+#: switch (``/api/v1/features/switches``) that turns each one on.
+_SOURCE_SWITCH = {"lessons": "self_harness", "fleet": "fleet_memory"}
+_UNREACHABLE = "This source could not be reached right now. Try again later or ask your administrator."
+
+
+def _label(name: str) -> str:
+    return _SOURCE_COPY.get(name, (humanize(name), ""))[0]
+
+
+def _departments() -> list[dict[str, str]]:
+    """Business areas for the search filter: the enabled departments."""
+    try:
+        from maverick.departments import list_departments
+
+        return [{"value": d.key, "label": d.title} for d in list_departments()]
+    except Exception:
+        return []
 
 
 def _status() -> dict[str, Any]:
@@ -97,32 +117,38 @@ def _card(name: str, info: dict[str, Any]) -> dict[str, Any]:
     """One "what it holds" card: label, blurb, availability and its counts."""
     label, blurb = _SOURCE_COPY.get(name, (name.title(), ""))
     error = info.get("error")
-    counts: list[tuple[str, int]] = []
+    counts: list[tuple[str, str, int]] = []
     collections: list[str] = []
     if name == "knowledge":
         available = bool(info.get("available"))
         collections = [str(c) for c in (info.get("collections") or [])]
-        counts.append(("collections", len(collections)))
+        counts.append(("collections", "Document groups", len(collections)))
     elif name == "skills":
         available = True
-        counts += [("skills", _int(info.get("count"))), ("verified", _int(info.get("verified")))]
+        counts += [("skills", "Skills", _int(info.get("count"))),
+                   ("verified", "Checked", _int(info.get("verified")))]
     elif name == "lessons":
         available = bool(info.get("enabled"))
-        counts += [("models", _int(info.get("models"))), ("lines", _int(info.get("lines")))]
+        counts += [("models", "AI models", _int(info.get("models"))),
+                   ("lines", "Lessons", _int(info.get("lines")))]
     elif name == "record":
         available = True
-        counts += [("entries", _int(info.get("entries"))), ("goals", _int(info.get("n_goals"))),
-                   ("approvals", _int(info.get("n_approvals"))),
-                   ("human decisions", _int(info.get("n_human_decisions")))]
+        counts += [("entries", "Entries", _int(info.get("entries"))),
+                   ("goals", "Tasks", _int(info.get("n_goals"))),
+                   ("approvals", "Approvals", _int(info.get("n_approvals"))),
+                   ("human decisions", "People's decisions", _int(info.get("n_human_decisions")))]
     else:  # fleet
         available = bool(info.get("enabled"))
         ingested = info.get("ingested") or {}
         deposits = sum(_int(n) for by in ingested.values() if isinstance(by, dict)
                        for n in by.values())
-        counts += [("agents", len(info.get("agents") or ())), ("deposits", deposits)]
+        counts += [("agents", "Outside assistants", len(info.get("agents") or ())),
+                   ("deposits", "Notes shared", deposits)]
     return {"name": name, "label": label, "blurb": blurb,
             "available": available and not error, "counts": counts,
-            "collections": collections, "error": str(error) if error else ""}
+            "collections": [humanize(c) for c in collections],
+            "error": _UNREACHABLE if error else "",
+            "switch": _SOURCE_SWITCH.get(name, "") if not available and not error else ""}
 
 
 def _cards(status: dict[str, Any]) -> list[dict[str, Any]]:
@@ -154,23 +180,25 @@ def _row(event: dict[str, Any]) -> dict[str, Any]:
 
     per_source = event.get("per_source")
     denied = event.get("denied")
+    caller = str(event.get("caller") or event.get("principal") or "")
     return {
         "kind": str(event.get("kind") or ""),
         "verb": "read" if event.get("kind") == EventKind.CORTEX_RECALL else "write",
         "when": _when(event.get("ts")),
-        "caller": str(event.get("caller") or event.get("principal") or "—"),
+        "caller": caller or "—",
+        "caller_label": humanize_principal(caller).name if caller else "—",
         "external": bool(event.get("external")),
         "vendor": str(event.get("vendor") or ""),
         "tenant": str(event.get("tenant") or "—"),
-        "per_source": ({str(k): _int(v) for k, v in per_source.items()}
+        "per_source": ({_label(str(k)): _int(v) for k, v in per_source.items()}
                        if isinstance(per_source, dict) else {}),
-        "denied": ({str(k): str(v) for k, v in denied.items()}
+        "denied": ({_label(str(k)): str(v) for k, v in denied.items()}
                    if isinstance(denied, dict) else {}),
         "hits": event.get("hits"),
         "took_ms": event.get("took_ms"),
-        "deposit_kind": str(event.get("deposit_kind") or ""),
+        "deposit_kind": _label(str(event.get("deposit_kind"))) if event.get("deposit_kind") else "",
         "ok": event.get("ok"),
-        "reason": str(event.get("reason") or ""),
+        "reason": humanize(str(event.get("reason") or "")),
     }
 
 
@@ -212,6 +240,9 @@ def create_cortex_page_router(templates: Jinja2Templates) -> APIRouter:
             {
                 "api_base": API_BASE, "page_path": PAGE_PATH, "csp_style_nonce": nonce,
                 "status": status, "cards": cards, "sources": list(SOURCES),
+                "source_labels": {name: _label(name) for name in SOURCES},
+                "departments": await run_in_threadpool(_departments),
+                "can_switch": has_global_permission(request, "admin"),
                 "answering": sum(1 for c in cards if c["available"]), "total": len(cards),
                 "can_audit": can_audit, "recent": recent, "recent_n": _RECENT_N,
                 "max_query": MAX_QUERY, "max_k": MAX_K, "default_k": DEFAULT_K,

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Security &amp; GRC - Lightwork{% endblock %}
+{% block title %}Security &amp; GRC · Lightwork{% endblock %}
 {% block content %}
 <style>
   /* The live board below supersedes the workspace chassis' static hero
@@ -45,110 +45,162 @@
   .sec-hunter__desc { margin:0; color:var(--muted); font-size:var(--text-sm); }
   .sec-hunter__foot { display:flex; align-items:center; gap:var(--space-2);
                       flex-wrap:wrap; margin-top:auto; }
+  .sec-link-group { display:flex; gap:var(--space-2); flex-wrap:wrap; align-items:center; }
+  .sec-link-group strong { min-width:8rem; }
+  .sec-links { flex-direction:column; align-items:stretch; }
+  .sec-pick { border:1px solid var(--border); border-radius:8px; padding:var(--space-2); min-width:0; }
+  .sec-pick__list { display:flex; flex-direction:column; gap:.2rem; max-height:10rem; overflow:auto; }
+  .sec-buttons { display:flex; gap:var(--space-2); flex-wrap:wrap; }
+  .sec-stat { display:inline-block; min-width:9rem; }
   @media (max-width:900px) {
     .sec-grid,.sec-form,.sec-frameworks,.sec-hunters { grid-template-columns:minmax(0,1fr); }
   }
 </style>
 
 {% from "_hero.html" import hero, state %}
+{% set status_words = {
+  'not_started': 'Not started', 'not_implemented': 'Not in place', 'planned': 'Planned',
+  'not_applicable': 'Does not apply', 'partial': 'Partly in place', 'implemented': 'In place',
+  'approved': 'Approved', 'rejected': 'Rejected', 'needs_work': 'Needs more work',
+  'pending_review': 'Waiting for review', 'review required': 'Waiting for review',
+  'present': 'Found', 'missing': 'Not found', 'open': 'Open', 'in_progress': 'In progress',
+  'blocked': 'Blocked', 'complete': 'Complete', 'accepted': 'Accepted', 'closed': 'Closed',
+  'draft': 'Draft', 'review': 'In review', 'attested': 'Signed off', 'retired': 'Retired',
+  'mitigate': 'Reduce it', 'accept': 'Accept it', 'transfer': 'Transfer it', 'avoid': 'Avoid it',
+  'unassigned': 'Not decided', 'planning': 'Planning', 'fieldwork': 'Testing', 'submitted': 'Submitted',
+  'resolved': 'Resolved', 'remediated': 'Fixed', 'pass': 'Passed', 'fail': 'Failed', 'needs_review': 'Needs review',
+  'awaiting_human_applicability': 'Waiting for your decision', 'running': 'Clock running',
+  'notify': 'Notification required', 'documented_not_notifiable': 'No notification needed',
+  'low': 'Low', 'medium': 'Medium', 'high': 'High', 'critical': 'Critical',
+} %}
+{% set likelihood_words = [(1, '1 – Rare'), (2, '2 – Unlikely'), (3, '3 – Possible'), (4, '4 – Likely'), (5, '5 – Almost certain')] %}
+{% set impact_words = [(1, '1 – Minimal'), (2, '2 – Minor'), (3, '3 – Moderate'), (4, '4 – Major'), (5, '5 – Severe')] %}
+{% set people_values = people | map(attribute='value') | list %}
+{% set control_items = [] %}
+{% for c in records.controls %}{% set _ = control_items.append({'value': c.get('control_id') or c.id, 'label': (c.get('title') or c.get('control_id') or 'Control') ~ ((' (' ~ c.get('framework') ~ ')') if c.get('framework') else '')}) %}{% endfor %}
+{% set evidence_items = [] %}
+{% for e in records.evidence %}{% set _ = evidence_items.append({'value': e.id, 'label': e.get('title') or 'Evidence'}) %}{% endfor %}
+
+{% macro owner_field(name='owner', label='Owner', required=false, value='') -%}
+<label>{{ label }}
+  <select class="select" name="{{ name }}" data-owner-select{% if required %} required{% endif %}>
+    <option value="">Choose a person</option>
+    {% for person in people %}<option value="{{ person.value }}"{% if person.value == value %} selected{% endif %}>{{ person.label }}</option>{% endfor %}
+    {% if value and value not in people_values %}<option value="{{ value }}" selected>{{ value | identity }}</option>{% endif %}
+    <option value="__other__">Someone else…</option>
+  </select>
+  <input class="input" data-owner-other hidden maxlength="200" aria-label="{{ label }}: name of someone else">
+</label>
+{%- endmacro %}
+
+{% macro pick_list(name, label, items, selected=[], help='') -%}
+<fieldset class="sec-pick"><legend>{{ label }}</legend>
+  {% if help %}<p class="sec-empty">{{ help }}</p>{% endif %}
+  {% if items %}<div class="sec-pick__list">{% for item in items %}<label><input type="checkbox" name="{{ name }}" value="{{ item.value }}"{% if item.value in selected %} checked{% endif %}> {{ item.label }}</label>{% endfor %}</div>
+  {% else %}<p class="sec-empty">None yet.</p>{% endif %}
+</fieldset>
+{%- endmacro %}
+
+{% macro score_text(value) -%}
+{%- if value is number -%}{{ value }} of 25 ({{ 'Critical' if value >= 20 else 'High' if value >= 12 else 'Medium' if value >= 6 else 'Low' }}){%- else -%}—{%- endif -%}
+{%- endmacro %}
+
 {% call hero('Governed workspaces', 'Security &amp; GRC',
-             subtitle='Program of record',
-             lede='One governed workspace for framework assessments,
-                   controls, cited evidence, risks and exceptions,
-                   POA&amp;M, vendors, policies, incidents, and audits.
-                   Deterministic engines prepare the record; accountable
-                   people decide applicability, exceptions, evidence
-                   acceptance, and notifications.') %}
-  {{ state('Current state', 'Engines prepare, people decide',
-           badge='governed', badge_class='ok',
-           copy='Every record below cites its evidence; applicability and
-                 exception decisions are named, human, and audited.') }}
+             subtitle='Your security program',
+             lede='One place for security assessments, controls and their evidence, risks and exceptions, fix plans
+                   (POA&amp;M), vendors, policies, incidents and audits. Lightwork prepares the records; people decide
+                   what applies, accept evidence and approve exceptions.') %}
+  {{ state('Current state', 'Lightwork prepares, people decide',
+           badge='Every decision is recorded', badge_class='ok',
+           copy='Each record points to its evidence, and every decision names the person who made it.') }}
 {% endcall %}
 <div class="sec-links">
-  <a class="btn" href="/security/report">Readiness board pack</a>
-  <a class="btn" href="/security/assurance">Model Risk &amp; AI Assurance</a>
-  <a class="btn" href="/third-party/intelligence">Third-Party Intelligence</a>
-  <a class="btn" href="/third-party/lifecycle">Third-Party Lifecycle</a>
-  <a class="btn" href="/governance-agents">Governance Agents</a>
-  <a class="btn" href="/ai-evidence-analysis">AI Evidence Analysis</a>
-  <a class="btn" href="/assurance/cloud-agents">Cloud Agent Governance</a>
-  <a class="btn" href="/third-party/collaboration">Third-Party Collaboration</a>
-  <a class="btn" href="/security/threats">Platform threat hunter</a>
-  <a class="btn" href="/security/soc">Environment SOC hunter</a>
+  <div class="sec-link-group"><strong>Reports</strong>
+    <a class="btn btn--ghost" href="/security/report">Readiness report</a></div>
+  <div class="sec-link-group"><strong>Third parties</strong>
+    <a class="btn btn--ghost" href="/third-party/intelligence">Vendor intelligence</a>
+    <a class="btn btn--ghost" href="/third-party/lifecycle">Vendor lifecycle</a>
+    <a class="btn btn--ghost" href="/third-party/collaboration">Work with vendors</a></div>
+  <div class="sec-link-group"><strong>AI assurance</strong>
+    <a class="btn btn--ghost" href="/security/assurance">Model risk and AI assurance</a>
+    <a class="btn btn--ghost" href="/governance-agents">Governance agents</a>
+    <a class="btn btn--ghost" href="/ai-evidence-analysis">AI evidence analysis</a>
+    <a class="btn btn--ghost" href="/assurance/cloud-agents">Cloud assistant governance</a></div>
+  <div class="sec-link-group"><strong>Threat hunting</strong>
+    <a class="btn btn--ghost" href="/security/threats">Lightwork threat check</a>
+    <a class="btn btn--ghost" href="/security/soc">Threat monitoring</a></div>
 </div>
 
 <div class="bd-toolbar">
   <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
-    <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+    <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">Loading…</span></span>
 </div>
 
 <div class="bd-kpis" id="bd-kpis"></div>
 
 <div class="viz-grid">
   <div class="panel viz-card viz-card--wide">
-    <h2>Assessment flow</h2>
-    <p class="viz-sub">Assessments opened vs decided per month over the last year. Hover for exact numbers.</p>
+    <h2>Assessments over time</h2>
+    <p class="viz-sub">Assessments started and decided each month over the last year. Point at a bar for exact numbers.</p>
     <div id="bd-flow"></div>
   </div>
   <div class="panel viz-card">
-    <h2>Residual risk</h2>
-    <p class="viz-sub">Where the record stands after treatment.</p>
+    <h2>Risk after fixes</h2>
+    <p class="viz-sub">Where things stand once fixes are in place.</p>
     <div id="bd-risk"></div>
   </div>
   <div class="panel viz-card viz-card--wide">
     <h2>By framework</h2>
-    <p class="viz-sub">Approved against total, per assessment type.</p>
+    <p class="viz-sub">Approved out of total, per kind of assessment.</p>
     <div id="bd-frameworks"></div>
   </div>
 </div>
 
 {% include "_workspace_worklist.html" %}
 
-<div class="section-head"><h2>Defensive hunters</h2></div>
+<div class="section-head"><h2>Threat hunting</h2></div>
 <div class="panel">
   {% if security_can_manage_hunters %}
-  <p class="muted">Lightwork ships two always-defensive hunters. Each one is
-    opt-in, reads only telemetry it is allowed to see, and proposes containment
-    to the human approval queue &mdash; switching a hunter on never grants it an
-    autonomous response path. Administrators can turn each hunter on or off
-    here; the change applies immediately, no restart.</p>
-  <div class="sec-hunters" id="sec-hunters" aria-label="Defensive hunter switches">
-    <p class="sec-empty">Loading hunter switches&hellip;</p>
+  <p class="muted">Two checks look for attacks: one in Lightwork’s own activity, one in the systems you connect. Each only
+    reads, and any containment goes to the approvals queue. Turn each one on or off here; it takes effect right away.</p>
+  <div class="sec-hunters" id="sec-hunters" aria-label="Threat hunting switches">
+    <p class="sec-empty">Loading…</p>
   </div>
   <p class="muted" id="sec-hunters-status" role="status" aria-live="polite"></p>
   {% else %}
-  <p class="muted">An installation administrator manages hunter switches.
-    You can continue reviewing the security work available to your workspace.</p>
+  <p class="muted">An administrator turns threat hunting on or off. You can keep working on the security records below.</p>
   {% endif %}
 </div>
 
 {% if not records.enabled %}
 <div class="panel">
-  <h2>Security operations are disabled</h2>
-  <p>Security program records are switched off for this deployment, so
-    controls, evidence, risks, and incident records are not being tracked.
-    Ask an administrator to enable Security operations for this workspace.
-    Assessment records remain available above.</p>
+  <h2>Security records are turned off</h2>
+  <p>Controls, evidence, risks and incidents are not being tracked. Assessments above still work.</p>
+  {% if security_can_manage_hunters %}
+  <button type="button" class="btn btn--primary" id="sec-records-on">Turn on security records</button>
+  <span class="muted" id="sec-records-on-msg" role="status" aria-live="polite"></span>
+  {% else %}
+  <p class="muted">Ask an administrator to turn them on.</p>
+  {% endif %}
 </div>
 {% else %}
-<div class="section-head"><h2>Program insights</h2></div>
+<div class="section-head"><h2>How you are doing</h2></div>
 <div class="sec-grid">
   <section class="panel">
-    <h3 style="margin-top:0;">Control coverage</h3>
-    <p class="muted">Implemented controls divided by controls in the register. This is
-      readiness telemetry, not a certification.</p>
-    <div class="stat" style="display:inline-block; min-width:9rem;">
+    <h3>Control coverage</h3>
+    <p class="muted">Controls in place out of all your controls. This shows readiness, not a certification.</p>
+    <div class="stat sec-stat">
       <div class="num">{{ insights.coverage_percent }}%</div>
-      <div class="label">implemented</div>
+      <div class="label">In place</div>
     </div>
-    <div class="sec-heat" aria-label="Control status heatmap">
+    <div class="sec-heat" aria-label="Controls by status">
       {% for status, count in insights.control_status.items() %}
       <div class="sec-heat__cell">
         <span class="sec-heat__n">{{ count }}</span>
-        <span class="muted">{{ status | replace('_', ' ') }}</span>
+        <span class="muted">{{ status_words.get(status) or (status | humanize) }}</span>
       </div>
       {% else %}
-      <p class="sec-empty">Initialize the control register to calculate coverage.</p>
+      <p class="sec-empty">No controls yet. Set them up under Controls below.</p>
       {% endfor %}
     </div>
     <h4>Coverage by framework</h4>
@@ -157,74 +209,73 @@
       <div class="sec-framework">
         <strong>{{ framework.label }}</strong>
         <span>{{ framework.coverage_percent }}%</span><br>
-        <span class="muted">{{ framework.controls_implemented }} implemented,
-          {{ framework.controls_partial }} partial of
-          {{ framework.controls_applicable }} applicable</span>
+        <span class="muted">{{ framework.controls_implemented }} in place, {{ framework.controls_partial }} partly, of
+          {{ framework.controls_applicable }} that apply</span>
       </div>
-      {% else %}<p class="sec-empty">Initialize the control register to calculate framework coverage.</p>{% endfor %}
+      {% else %}<p class="sec-empty">No controls yet.</p>{% endfor %}
     </div>
   </section>
   <section class="panel">
-    <h3 style="margin-top:0;">Cross-framework reuse</h3>
-    <p class="muted">Control mappings let one reviewed evidence item support multiple
-      applicable requirements without pretending the frameworks are identical.</p>
-    <div class="stat" style="display:inline-block; min-width:9rem;">
+    <h3>One piece of evidence, many frameworks</h3>
+    <p class="muted">Each control is matched to the same requirement in other frameworks, so evidence you collect once can count for all of them.</p>
+    <div class="stat sec-stat">
       <div class="num">{{ insights.crosswalk_links }}</div>
-      <div class="label">crosswalk links</div>
+      <div class="label">Matches between frameworks</div>
     </div>
     <div class="sec-scroll">
-      <table aria-label="Cross-framework control matrix">
-        <thead><tr><th>canonical control</th>{% for framework in insights.crosswalk_frameworks %}<th>{{ framework.label }}</th>{% endfor %}</tr></thead>
+      <table aria-label="Controls matched across frameworks">
+        <thead><tr><th scope="col">Control</th>{% for framework in insights.crosswalk_frameworks %}<th scope="col">{{ framework.label }}</th>{% endfor %}</tr></thead>
         <tbody>
         {% for row in insights.crosswalk_matrix %}
-          <tr><td><code>{{ row.control_id }}</code><br>{{ row.title }}</td>
+          <tr><td>{{ row.title or row.control_id }}</td>
             {% for framework in insights.crosswalk_frameworks %}
               {% set references = row.get('mappings', {}).get(framework.key, []) %}
-              <td>{{ references | join(', ') if references else '-' }}</td>
+              <td>{{ references | join(', ') if references else '—' }}</td>
             {% endfor %}
           </tr>
-        {% else %}<tr><td colspan="10" class="sec-empty">No crosswalk definitions available.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="10" class="sec-empty">No matches yet.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
   </section>
   <section class="panel">
-    <h3 style="margin-top:0;">Top open POA&amp;M</h3>
+    <h3>Open fix plans</h3>
     <table>
-      <thead><tr><th>finding</th><th>owner</th><th>due</th><th>status</th></tr></thead>
+      <thead><tr><th scope="col">Problem</th><th scope="col">Owner</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead>
       <tbody>
       {% for row in insights.open_poams %}
-        <tr><td>{{ row.get('finding', '-') }}</td><td>{{ row.get('owner', '-') }}</td>
-          <td class="{{ 'sec-overdue' if row.get('overdue') else '' }}">{{ row.get('due_date') or row.get('due_at') or '-' }}</td>
-          <td><span class="badge {{ 'done' if row.status in ('closed','complete') else 'warn' }}">{{ row.status }}</span></td></tr>
-      {% else %}<tr><td colspan="4" class="sec-empty">No open remediation items.</td></tr>{% endfor %}
+        <tr><td>{{ row.get('finding', '—') }}</td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td>
+          <td class="{{ 'sec-overdue' if row.get('overdue') else '' }}">{{ (row.get('due_at') | datetime) if row.get('due_at') is number else (row.get('due_date') or row.get('due_at') or '—') }}{% if row.get('overdue') %} (overdue){% endif %}</td>
+          <td><span class="badge {{ 'done' if row.status in ('closed','complete') else 'warn' }}">{{ status_words.get(row.status) or (row.status | humanize) }}</span></td></tr>
+      {% else %}<tr><td colspan="4" class="sec-empty">No open fix plans.</td></tr>{% endfor %}
       </tbody>
     </table>
   </section>
   <section class="panel">
-    <h3 style="margin-top:0;">Exception expiry queue</h3>
+    <h3>Exceptions ending soon</h3>
     <table>
-      <thead><tr><th>risk</th><th>owner</th><th>expiry</th><th>state</th></tr></thead>
+      <thead><tr><th scope="col">Risk</th><th scope="col">Owner</th><th scope="col">Ends</th><th scope="col">State</th></tr></thead>
       <tbody>
       {% for row in insights.exceptions_due %}
         {% set exc = row.get('exception') or {} %}
-        <tr><td>{{ row.get('title', row.id) }}</td><td>{{ exc.get('owner') or row.get('owner','-') }}</td>
-          <td>{{ exc.get('expires_at') or row.get('exception_expires_at','-') }}</td>
+        {% set ends = exc.get('expires_at') or row.get('exception_expires_at') %}
+        <tr><td>{{ row.get('title', 'Risk') }}</td><td>{{ ((exc.get('owner') or row.get('owner')) | identity) if (exc.get('owner') or row.get('owner')) else '—' }}</td>
+          <td>{{ (ends | datetime) if ends is number else (ends or '—') }}</td>
           <td><span class="badge {{ 'blocked' if row.get('exception_expired') else 'warn' }}">
-            {{ 'expired' if row.get('exception_expired') else 'due soon' }}</span></td></tr>
-      {% else %}<tr><td colspan="4" class="sec-empty">No exceptions due or expired.</td></tr>{% endfor %}
+            {{ 'Ended' if row.get('exception_expired') else 'Ending soon' }}</span></td></tr>
+      {% else %}<tr><td colspan="4" class="sec-empty">No exceptions ending soon.</td></tr>{% endfor %}
       </tbody>
     </table>
   </section>
 </div>
 
-<div class="section-head"><h2>Security program records</h2></div>
+<div class="section-head"><h2>Security records</h2></div>
 <div class="panel">
   <div class="sec-tabs" role="tablist" aria-label="Security record types">
     <button class="btn btn--primary" id="sec-tab-controls" role="tab" aria-selected="true" aria-controls="sec-panel-controls" tabindex="0" data-sec-tab="controls" type="button">Controls ({{ records.controls|length }})</button>
     <button class="btn" id="sec-tab-evidence" role="tab" aria-selected="false" aria-controls="sec-panel-evidence" tabindex="-1" data-sec-tab="evidence" type="button">Evidence ({{ records.evidence|length }})</button>
     <button class="btn" id="sec-tab-risks" role="tab" aria-selected="false" aria-controls="sec-panel-risks" tabindex="-1" data-sec-tab="risks" type="button">Risks ({{ records.risks|length }})</button>
-    <button class="btn" id="sec-tab-poams" role="tab" aria-selected="false" aria-controls="sec-panel-poams" tabindex="-1" data-sec-tab="poams" type="button">POA&amp;M ({{ records.poams|length }})</button>
+    <button class="btn" id="sec-tab-poams" role="tab" aria-selected="false" aria-controls="sec-panel-poams" tabindex="-1" data-sec-tab="poams" type="button">Fix plans ({{ records.poams|length }})</button>
     <button class="btn" id="sec-tab-vendors" role="tab" aria-selected="false" aria-controls="sec-panel-vendors" tabindex="-1" data-sec-tab="vendors" type="button">Vendors ({{ records.vendors|length }})</button>
     <button class="btn" id="sec-tab-policies" role="tab" aria-selected="false" aria-controls="sec-panel-policies" tabindex="-1" data-sec-tab="policies" type="button">Policies ({{ records.policies|length }})</button>
     <button class="btn" id="sec-tab-incidents" role="tab" aria-selected="false" aria-controls="sec-panel-incidents" tabindex="-1" data-sec-tab="incidents" type="button">Incidents ({{ records.incidents|length }})</button>
@@ -232,168 +283,230 @@
   </div>
 
   <section class="sec-tab" id="sec-panel-controls" role="tabpanel" aria-labelledby="sec-tab-controls" data-sec-panel="controls">
+    <span id="sec-controls"></span>
     {% if not records.controls %}
     <form class="sec-form" data-control-initialize>
-      <label>Default control owner<input name="owner" required maxlength="200" placeholder="Security control owner"></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Initialize canonical control register</button><span role="status" class="muted"></span></div>
+      <p class="wide">Start with Lightwork’s standard set of controls, matched across SOC 2, ISO 27001, NIST and more. You can change any of them later.</p>
+      {{ owner_field('owner', 'Who owns these controls', required=true) }}
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Set up standard controls</button><span role="status" class="muted"></span></div>
     </form>
     {% endif %}
-    <form class="sec-form" data-endpoint="/api/v1/security/controls">
-      <label>Framework<input name="framework" required maxlength="80" placeholder="NIST CSF 2.0"></label>
-      <label>Control ID<input name="control_id" required maxlength="120" placeholder="PR.AA-01"></label>
-      <label>Owner<input name="owner" maxlength="200"></label>
-      <label class="wide">Title<input name="title" required maxlength="500"></label>
-      <label>Status<select name="implementation_status"><option>not_started</option><option>not_implemented</option><option>planned</option><option>not_applicable</option></select></label>
-      <label>Applicable<select name="applicable"><option value="true">yes</option><option value="false">no</option></select></label>
-      <label class="wide">Applicability rationale<input name="applicability_rationale" maxlength="2000" placeholder="Human scope decision; required when not applicable"></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add control</button><span role="status" class="muted"></span></div>
-    </form>
-    <div class="sec-scroll"><table><thead><tr><th>control</th><th>framework</th><th>status</th><th>owner</th><th>revision</th></tr></thead><tbody>
-    {% for row in records.controls %}<tr><td><code>{{ row.get('control_id') or row.id }}</code><br>{{ row.get('title','') }}</td><td>{{ row.get('framework','-') }}</td><td><span class="badge {{ 'done' if row.get('implementation_status') == 'implemented' else 'warn' }}">{{ row.get('implementation_status','not_started') }}</span><form class="sec-action" data-endpoint="/api/v1/security/controls/{{ row.id }}" data-method="PATCH"><label>Governed status<select name="implementation_status" required>{% if row.get('implementation_status') in ['partial','implemented'] %}<option value="" selected disabled>evidence-backed: {{ row.get('implementation_status') }}</option>{% endif %}{% for status in ['not_started','not_implemented','planned','not_applicable'] %}<option{% if status == row.get('implementation_status') %} selected{% endif %}>{{ status }}</option>{% endfor %}</select></label><label>Applicable<select name="applicable"><option value="true"{% if row.get('applicable',true) %} selected{% endif %}>yes</option><option value="false"{% if not row.get('applicable',true) %} selected{% endif %}>no</option></select></label><label>Applicability rationale<input name="applicability_rationale" required maxlength="2000" value="{{ row.get('applicability_rationale','') }}"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Update scope/status</button><span role="status" class="muted"></span></form></td><td>{{ row.get('owner','-') }}</td><td>{{ row.revision }}</td></tr>
-    {% else %}<tr><td colspan="5" class="sec-empty">No controls in the register.</td></tr>{% endfor %}</tbody></table></div>
+    <details>
+      <summary>Add your own control</summary>
+      <form class="sec-form" data-endpoint="/api/v1/security/controls">
+        <label>Framework
+          <select class="select" name="framework" data-other-select required>
+            {% for framework in insights.crosswalk_frameworks %}<option value="{{ framework.label }}">{{ framework.label }}</option>{% endfor %}
+            <option value="__other__">Another framework…</option>
+          </select>
+          <input class="input" data-other-input hidden maxlength="80" aria-label="Name of the framework">
+        </label>
+        <label>Reference in that framework<input class="input" name="control_id" required maxlength="120" placeholder="For example: PR.AA-01"></label>
+        {{ owner_field() }}
+        <label class="wide">What the control does<input class="input" name="title" required maxlength="500"></label>
+        <label>Status<select class="select" name="implementation_status">{% for s in ['not_started','not_implemented','planned','not_applicable'] %}<option value="{{ s }}">{{ status_words[s] }}</option>{% endfor %}</select></label>
+        <label>Applies to you?<select class="select" name="applicable"><option value="true">Yes</option><option value="false">No</option></select></label>
+        <label class="wide">Why it does or does not apply<input class="input" name="applicability_rationale" maxlength="2000" placeholder="Needed when it does not apply"></label>
+        <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add control</button><span role="status" class="muted"></span></div>
+      </form>
+    </details>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Control</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Owner</th></tr></thead><tbody>
+    {% for row in records.controls %}
+      {% set impl = row.get('implementation_status') or 'not_started' %}
+      <tr><td>{{ row.get('title') or row.get('control_id') }}<br><span class="muted">{{ row.get('control_id') or '' }}</span>
+        <details class="sec-details"><summary>Change status or scope</summary>
+        <form class="sec-action" data-endpoint="/api/v1/security/controls/{{ row.id }}" data-method="PATCH">
+          <label>Status<select class="select" name="implementation_status" required>{% if impl in ['partial','implemented'] %}<option value="" selected disabled>{{ status_words[impl] }} (set by approved evidence)</option>{% endif %}{% for status in ['not_started','not_implemented','planned','not_applicable'] %}<option value="{{ status }}"{% if status == impl %} selected{% endif %}>{{ status_words[status] }}</option>{% endfor %}</select></label>
+          <label>Applies to you?<select class="select" name="applicable"><option value="true"{% if row.get('applicable',true) %} selected{% endif %}>Yes</option><option value="false"{% if not row.get('applicable',true) %} selected{% endif %}>No</option></select></label>
+          <label>Why<input class="input" name="applicability_rationale" required maxlength="2000" value="{{ row.get('applicability_rationale','') }}"></label>
+          <input type="hidden" name="expected_revision" value="{{ row.revision }}">
+          <button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form></details></td>
+        <td>{{ row.get('framework') or '—' }}</td>
+        <td><span class="badge {{ 'done' if impl == 'implemented' else 'warn' }}">{{ status_words.get(impl) or (impl | humanize) }}</span></td>
+        <td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td></tr>
+    {% else %}<tr><td colspan="4" class="sec-empty">No controls yet. Use “Set up standard controls” above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-evidence" role="tabpanel" aria-labelledby="sec-tab-evidence" data-sec-panel="evidence" hidden>
     <form class="sec-form" data-endpoint="/api/v1/security/evidence">
-      <label>Title<input name="title" required maxlength="300"></label>
-      <label>Source<input name="source" maxlength="80" value="paste"></label>
-      <label>Control IDs<input name="control_ids" maxlength="1000" placeholder="CC6.1, PR.AA-01"></label>
-      <label class="wide">Evidence text<textarea name="text" required rows="6" maxlength="2000000"></textarea></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Map evidence</button><span role="status" class="muted"></span></div>
+      <label>Title<input class="input" name="title" required maxlength="300"></label>
+      <label>Where it came from<select class="select" name="source"><option value="paste">Typed or pasted</option><option value="upload">From a file</option><option value="email">From an email</option><option value="ticket">From a ticket</option></select></label>
+      <label>Or load a text file<input class="input" type="file" data-text-into="text" accept=".txt,.md,.csv,.json,.log,text/plain"></label>
+      {{ pick_list('control_ids', 'Controls it supports', control_items, help='Lightwork checks the text against these controls.') }}
+      <label class="wide">Evidence text<textarea class="textarea" name="text" required rows="6" maxlength="2000000"></textarea></label>
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Check this evidence</button><span role="status" class="muted"></span></div>
     </form>
     <div class="sec-form sec-doc-search">
-      <label class="wide">Connected evidence subject
-        <input id="sec-evidence-subject" maxlength="300"
-          placeholder="Policy, system, vendor, audit, or evidence package name">
+      <label class="wide">Find a document in your connected sources
+        <input class="input" id="sec-evidence-subject" maxlength="300" placeholder="Policy, system, vendor or audit name">
       </label>
-      <label class="wide">Framework, canonical, or register control IDs
-        <input id="sec-evidence-controls" maxlength="1000"
-          placeholder="CC6.1, PR.AA-01, CTL-IAM-01">
-      </label>
+      {{ pick_list('sec-evidence-controls', 'Controls it supports', control_items) }}
       <div class="sec-form__actions">
-        <button class="btn" id="sec-evidence-search" type="button">Search connected sources</button>
+        <button class="btn" id="sec-evidence-search" type="button">Search</button>
         <span id="sec-evidence-search-status" role="status" class="muted"></span>
       </div>
       <div class="wide" id="sec-evidence-hits"></div>
     </div>
-    <p class="muted">Machine extraction is always marked untrusted. A reviewer must accept or reject it before it can change a control.</p>
-    <div class="sec-scroll"><table><thead><tr><th>evidence</th><th>source</th><th>verdicts</th><th>review</th></tr></thead><tbody>
+    <p class="muted">What Lightwork finds in evidence is only a suggestion. A reviewer must approve or reject it before it can change a control.</p>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Evidence</th><th scope="col">Where from</th><th scope="col">What was found</th><th scope="col">Review</th></tr></thead><tbody>
     {% for row in records.evidence %}
       <tr>
-        <td>{{ row.get('title',row.id) }}<br><code>{{ row.id }}</code></td>
-        <td>{{ row.get('source','-') }}</td>
-        <td>{{ row.get('verdicts',[])|length }}
-          <details class="sec-details"><summary>View cited verdicts</summary>
+        <td>{{ row.get('title') or 'Evidence' }}</td>
+        <td>{{ {'paste': 'Typed or pasted', 'upload': 'From a file'}.get(row.get('source')) or (row.get('source') | humanize) or '—' }}</td>
+        <td>{{ row.get('verdicts',[])|length }} requirement{{ '' if row.get('verdicts',[])|length == 1 else 's' }} checked
+          <details class="sec-details"><summary>Show what was found</summary>
             {% for verdict in row.get('verdicts',[]) %}
-            <p><code>{{ verdict.get('external_control_id') or verdict.get('control_id','control') }}</code>
-              <span class="badge {{ 'done' if verdict.get('status') == 'present' else 'warn' }}">{{ verdict.get('status','missing') }}</span><br>
-              {% if verdict.get('evidence_quote') %}<q>{{ verdict.get('evidence_quote') }}</q>{% else %}<span class="muted">No matching excerpt; the requirement remains missing.</span>{% endif %}
+            <p>{{ verdict.get('external_control_id') or verdict.get('control_id','Control') }}
+              <span class="badge {{ 'done' if verdict.get('status') == 'present' else 'warn' }}">{{ status_words.get(verdict.get('status','missing')) }}</span><br>
+              {% if verdict.get('evidence_quote') %}<q>{{ verdict.get('evidence_quote') }}</q>{% else %}<span class="muted">Nothing in the text matched, so this requirement is still missing.</span>{% endif %}
             </p>
             {% endfor %}
           </details>
         </td>
         <td>
-          <span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ row.get('status','review required') }}</span>
+          <span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ status_words.get(row.get('status') or 'review required') or (row.get('status') | humanize) }}</span>
           <form class="sec-action" data-endpoint="/api/v1/security/evidence/{{ row.id }}/decision">
-            <label>Decision<select name="decision"><option>approved</option><option>rejected</option></select></label>
-            <label>Reviewer rationale<input name="rationale" required maxlength="4000"></label>
+            <label>Decision<select class="select" name="decision"><option value="approved">Approve</option><option value="rejected">Reject</option></select></label>
+            <label>Why<input class="input" name="rationale" required maxlength="4000"></label>
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
-            <button class="btn" type="submit">Record decision</button><span role="status" class="muted"></span>
+            <button class="btn" type="submit">Save decision</button><span role="status" class="muted"></span>
           </form>
           {% if row.get('status') == 'approved' and records.controls %}
           <form class="sec-action" data-endpoint-template="/api/v1/security/controls/{control_id}/evidence">
-            <label>Apply to control<select name="_control_target" required>
-              {% for control in records.controls %}<option value="{{ control.id }}::{{ control.revision }}">{{ control.get('control_id',control.id) }} (revision {{ control.revision }})</option>{% endfor %}
+            <label>Use for control<select class="select" name="_control_target" required>
+              {% for control in records.controls %}<option value="{{ control.id }}::{{ control.revision }}">{{ control.get('title') or control.get('control_id') }}</option>{% endfor %}
             </select></label>
-            <label>Resulting status<select name="implementation_status"><option>partial</option><option>implemented</option></select></label>
+            <label>Then the control is<select class="select" name="implementation_status"><option value="partial">Partly in place</option><option value="implemented">In place</option></select></label>
             <input type="hidden" name="evidence_id" value="{{ row.id }}">
-            <button class="btn" type="submit">Apply approved evidence</button><span role="status" class="muted"></span>
+            <button class="btn" type="submit">Use this evidence</button><span role="status" class="muted"></span>
           </form>
           {% endif %}
         </td>
       </tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No evidence mapped.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No evidence yet. Add some above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-risks" role="tabpanel" aria-labelledby="sec-tab-risks" data-sec-panel="risks" hidden>
     <form class="sec-form" data-endpoint="/api/v1/security/risks">
-      <label class="wide">Risk title<input name="title" required maxlength="300"></label>
-      <label>Likelihood<select name="likelihood"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
-      <label>Impact<select name="impact"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
-      <label>Owner<input name="owner" required maxlength="200"></label>
-      <label class="wide">Description<textarea name="description" rows="3" maxlength="4000"></textarea></label>
-      <label class="wide">Likelihood rationale<textarea name="likelihood_rationale" required rows="2" maxlength="4000"></textarea></label>
-      <label class="wide">Impact rationale<textarea name="impact_rationale" required rows="2" maxlength="4000"></textarea></label>
-      <label class="wide">Evidence IDs<input name="evidence_ids" required maxlength="1000" placeholder="EVD-..."></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Register risk</button><span role="status" class="muted"></span></div>
+      <label class="wide">Risk<input class="input" name="title" required maxlength="300"></label>
+      <label>How likely<select class="select" name="likelihood">{% for v, l in likelihood_words %}<option value="{{ v }}"{% if v == 3 %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label>How bad<select class="select" name="impact">{% for v, l in impact_words %}<option value="{{ v }}"{% if v == 3 %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      {{ owner_field(required=true) }}
+      <label class="wide">Description<textarea class="textarea" name="description" rows="3" maxlength="4000"></textarea></label>
+      <label class="wide">Why that likelihood<textarea class="textarea" name="likelihood_rationale" required rows="2" maxlength="4000"></textarea></label>
+      <label class="wide">Why that impact<textarea class="textarea" name="impact_rationale" required rows="2" maxlength="4000"></textarea></label>
+      {{ pick_list('evidence_ids', 'Evidence behind it', evidence_items, help='Choose at least one.') }}
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add risk</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th>risk</th><th>inherent</th><th>residual</th><th>treatment</th><th>owner</th></tr></thead><tbody>
-    {% for row in records.risks %}<tr><td>{{ row.get('title',row.id) }}<details class="sec-details"><summary>Manage risk</summary><form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/treatment"><label>Treatment<select name="treatment"><option>mitigate</option><option>accept</option><option>transfer</option><option>avoid</option></select></label><label>Plan<input name="plan" required maxlength="4000"></label><label>Residual likelihood<input name="residual_likelihood" type="number" min="1" max="5" value="1"></label><label>Residual likelihood rationale<input name="residual_likelihood_rationale" required maxlength="4000"></label><label>Residual impact<input name="residual_impact" type="number" min="1" max="5" value="1"></label><label>Residual impact rationale<input name="residual_impact_rationale" required maxlength="4000"></label><label>Evidence IDs<input name="evidence_ids" required maxlength="1000" value="{{ row.get('evidence_ids',[])|join(', ') }}"></label><label>Owner<input name="owner" required maxlength="200"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Set treatment</button><span role="status" class="muted"></span></form><form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/exception"><label>Exception owner<input name="owner" required maxlength="200"></label><label>Rationale<input name="rationale" required maxlength="4000"></label><label>Expires<input name="expires_at" type="datetime-local" data-epoch required></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Grant exception</button><span role="status" class="muted"></span></form><form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/close"><label>Closure rationale<input name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Close risk</button><span role="status" class="muted"></span></form></details></td><td>{{ row.get('inherent_score',row.get('score','-')) }}</td><td>{{ row.get('residual_score','-') }}</td><td>{{ row.get('treatment','unassigned') }}</td><td>{{ row.get('owner','-') }}</td></tr>
-    {% else %}<tr><td colspan="5" class="sec-empty">No risks registered.</td></tr>{% endfor %}</tbody></table></div>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Risk</th><th scope="col">Before fixes</th><th scope="col">After fixes</th><th scope="col">Plan</th><th scope="col">Owner</th></tr></thead><tbody>
+    {% for row in records.risks %}<tr><td>{{ row.get('title') or 'Risk' }}<details class="sec-details"><summary>Manage this risk</summary>
+      <form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/treatment">
+        <label>Plan<select class="select" name="treatment">{% for t in ['mitigate','accept','transfer','avoid'] %}<option value="{{ t }}">{{ status_words[t] }}</option>{% endfor %}</select></label>
+        <label>What will be done<input class="input" name="plan" required maxlength="4000"></label>
+        <label>Likelihood after<select class="select" name="residual_likelihood">{% for v, l in likelihood_words %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
+        <label>Why<input class="input" name="residual_likelihood_rationale" required maxlength="4000"></label>
+        <label>Impact after<select class="select" name="residual_impact">{% for v, l in impact_words %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
+        <label>Why<input class="input" name="residual_impact_rationale" required maxlength="4000"></label>
+        {{ pick_list('evidence_ids', 'Evidence behind it', evidence_items, selected=row.get('evidence_ids',[])) }}
+        {{ owner_field(required=true, value=row.get('owner','')) }}
+        <input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save plan</button><span role="status" class="muted"></span></form>
+      <form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/exception">
+        {{ owner_field(label='Who approves the exception', required=true) }}
+        <label>Why<input class="input" name="rationale" required maxlength="4000"></label>
+        <label>Ends on<input class="input" name="expires_at" type="datetime-local" data-epoch required></label>
+        <input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit" data-confirm="Grant an exception for this risk until the chosen date?">Grant exception</button><span role="status" class="muted"></span></form>
+      <form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/close">
+        <label>Why it can be closed<input class="input" name="rationale" required maxlength="4000"></label>
+        <input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit" data-confirm="Close this risk?">Close risk</button><span role="status" class="muted"></span></form>
+      </details></td>
+      <td>{{ score_text(row.get('inherent_score', row.get('score'))) }}</td><td>{{ score_text(row.get('residual_score')) }}</td>
+      <td>{{ status_words.get(row.get('treatment') or 'unassigned') or (row.get('treatment') | humanize) }}</td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="sec-empty">No risks yet. Add one above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-poams" role="tabpanel" aria-labelledby="sec-tab-poams" data-sec-panel="poams" hidden>
+    <p class="muted">Fix plans (sometimes called a plan of action and milestones, or POA&amp;M) track problems until they are fixed.</p>
     <form class="sec-form" data-endpoint="/api/v1/security/poams">
-      <label class="wide">Finding<input name="finding" required maxlength="1000"></label>
-      <label>Owner<input name="owner" required maxlength="200"></label>
-      <label>Due date<input name="due_at" type="datetime-local" data-epoch required></label>
-      <label>Control IDs<input name="control_ids" maxlength="1000"></label>
-      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Create POA&amp;M</button><span role="status" class="muted"></span></div>
+      <label class="wide">Problem to fix<input class="input" name="finding" required maxlength="1000"></label>
+      {{ owner_field(required=true) }}
+      <label>Due<input class="input" name="due_at" type="datetime-local" data-epoch required></label>
+      {{ pick_list('control_ids', 'Related controls', control_items) }}
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add fix plan</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th>finding</th><th>owner</th><th>due</th><th>status</th></tr></thead><tbody>
-    {% for row in records.poams %}<tr><td>{{ row.get('finding',row.id) }}<form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}" data-method="PATCH"><label>Status<select name="status"><option selected>{{ row.get('status','open') }}</option><option>open</option><option>in_progress</option><option>blocked</option><option>complete</option><option>accepted</option><option>closed</option></select></label><label>Update note<input name="note" maxlength="2000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Update</button><span role="status" class="muted"></span></form><form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}/review"><label>Review trigger reason<input name="reason" required maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Trigger review</button><span role="status" class="muted"></span></form></td><td>{{ row.get('owner','-') }}</td><td class="{{ 'sec-overdue' if row.get('overdue') else '' }}">{{ row.get('due_at','-') }}</td><td>{{ row.get('status','open') }}</td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No POA&amp;M items.</td></tr>{% endfor %}</tbody></table></div>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Problem</th><th scope="col">Owner</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead><tbody>
+    {% for row in records.poams %}<tr><td>{{ row.get('finding') or 'Fix plan' }}<details class="sec-details"><summary>Update</summary>
+      <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}" data-method="PATCH"><label>Status<select class="select" name="status">{% for st in ['open','in_progress','blocked','complete','accepted','closed'] %}<option value="{{ st }}"{% if st == row.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><label>Note<input class="input" name="note" maxlength="2000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>
+      <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}/review"><label>Why it needs another look<input class="input" name="reason" required maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Ask for a review</button><span role="status" class="muted"></span></form></details></td>
+      <td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td class="{{ 'sec-overdue' if row.get('overdue') else '' }}">{{ (row.get('due_at') | datetime) if row.get('due_at') is number else (row.get('due_at') or '—') }}{% if row.get('overdue') %} (overdue){% endif %}</td><td>{{ status_words.get(row.get('status','open')) or (row.get('status') | humanize) }}</td></tr>
+    {% else %}<tr><td colspan="4" class="sec-empty">No fix plans yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-vendors" role="tabpanel" aria-labelledby="sec-tab-vendors" data-sec-panel="vendors" hidden>
     <form class="sec-form" data-endpoint="/api/v1/security/vendors">
-      <label>Vendor name<input name="name" required maxlength="300"></label><label>Criticality<select name="criticality"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select></label><label>Owner<input name="owner" maxlength="200"></label><label class="wide">Services<textarea name="services" maxlength="2000"></textarea></label>
-      {% for key,label in [('independent_assurance','Independent assurance'),('encryption','Encryption'),('mfa','MFA and least privilege'),('incident_sla','Incident SLA'),('subprocessors','Subprocessor governance'),('vulnerability_management','Vulnerability management'),('business_continuity','Business continuity'),('data_deletion','Offboarding deletion')] %}<label>{{ label }}<select name="posture.{{ key }}"><option value="null">unverified</option><option value="true">present</option><option value="false">missing</option></select></label>{% endfor %}
+      <label>Vendor name<input class="input" name="name" required maxlength="300"></label>
+      <label>How important<select class="select" name="criticality">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ status_words[c] }}</option>{% endfor %}</select></label>
+      {{ owner_field() }}
+      <label class="wide">What they do for you<textarea class="textarea" name="services" maxlength="2000"></textarea></label>
+      {% for key,label in [('independent_assurance','Independent audit report (for example SOC 2)'),('encryption','Encrypts your data'),('mfa','Second sign-in step and limited access'),('incident_sla','Promises to report incidents quickly'),('subprocessors','Controls their own suppliers'),('vulnerability_management','Fixes security flaws'),('business_continuity','Plans for outages'),('data_deletion','Deletes your data when you leave')] %}<label>{{ label }}<select class="select" name="posture.{{ key }}"><option value="null">Not checked</option><option value="true">Yes</option><option value="false">No</option></select></label>{% endfor %}
       <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Assess vendor</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th>vendor</th><th>risk</th><th>status / decision</th><th>owner</th><th>revision</th></tr></thead><tbody>{% for row in records.vendors %}<tr><td>{{ row.get('name',row.id) }}</td><td>{{ row.get('residual_risk','-') }}</td><td><span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ row.get('status','pending_review') }}</span><form class="sec-action" data-endpoint="/api/v1/security/vendors/{{ row.id }}/decision"><label>Decision<select name="decision"><option>approved</option><option>needs_work</option><option>rejected</option></select></label><label>Decision rationale<input name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Decide</button><span role="status" class="muted"></span></form></td><td>{{ row.get('owner','-') }}</td><td>{{ row.revision }}</td></tr>{% else %}<tr><td colspan="5" class="sec-empty">No vendor assessments.</td></tr>{% endfor %}</tbody></table></div>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Vendor</th><th scope="col">Risk</th><th scope="col">Decision</th><th scope="col">Owner</th></tr></thead><tbody>{% for row in records.vendors %}<tr><td>{{ row.get('name') or 'Vendor' }}</td><td>{{ status_words.get(row.get('residual_risk')) or (row.get('residual_risk') | humanize) or '—' }}</td><td><span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ status_words.get(row.get('status','pending_review')) or (row.get('status') | humanize) }}</span>
+      <form class="sec-action" data-endpoint="/api/v1/security/vendors/{{ row.id }}/decision"><label>Decision<select class="select" name="decision"><option value="approved">Approve</option><option value="needs_work">Needs more work</option><option value="rejected">Reject</option></select></label><label>Why<input class="input" name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save decision</button><span role="status" class="muted"></span></form></td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td></tr>{% else %}<tr><td colspan="4" class="sec-empty">No vendors assessed yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-policies" role="tabpanel" aria-labelledby="sec-tab-policies" data-sec-panel="policies" hidden>
-    <form class="sec-form" data-endpoint="/api/v1/security/policies"><label>Policy title<input name="title" required maxlength="300"></label><label>Owner<input name="owner" required maxlength="200"></label><label>Review cadence (days)<input name="review_cadence_days" type="number" min="1" max="3650" value="365"></label><label class="wide">Document reference<input name="content_ref" maxlength="2000" placeholder="Repository path or governed document URL"></label><div class="sec-form__actions"><button class="btn btn--primary" type="submit">Create policy</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th>policy</th><th>status</th><th>owner</th><th>governed actions</th></tr></thead><tbody>
+    <form class="sec-form" data-endpoint="/api/v1/security/policies">
+      <label>Policy name<input class="input" name="title" required maxlength="300"></label>
+      {{ owner_field(required=true) }}
+      <label>Review every<select class="select" name="review_cadence_days"><option value="90">3 months</option><option value="180">6 months</option><option value="365" selected>Year</option><option value="730">2 years</option></select></label>
+      <label class="wide">Link to the policy document<input class="input" name="content_ref" type="url" maxlength="2000" placeholder="https://"></label>
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add policy</button><span role="status" class="muted"></span></div></form>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Policy</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col">Actions</th></tr></thead><tbody>
     {% for row in records.policies %}
       {% set policy_status = row.get('status','draft') %}
-      <tr><td>{{ row.get('title',row.id) }}<br><span class="muted">revision {{ row.revision }}</span></td><td>{{ policy_status }}</td><td>{{ row.get('owner','-') }}</td><td>
+      <tr><td>{% if row.get('content_ref') and (row.get('content_ref').startswith('https://') or row.get('content_ref').startswith('http://')) %}<a href="{{ row.get('content_ref') }}" rel="noopener">{{ row.get('title') or 'Policy' }}</a>{% else %}{{ row.get('title') or 'Policy' }}{% endif %}</td><td>{{ status_words.get(policy_status) or (policy_status | humanize) }}</td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td>
         {% if policy_status != 'retired' %}
-        <details class="sec-details"><summary>Review, approve, attest, or retire</summary>
+        <details class="sec-details"><summary>Review, approve, sign off or retire</summary>
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/transition">
-            <label>Target<select name="target_status">
-              {% if policy_status == 'draft' %}<option>review</option><option>retired</option>{% endif %}
-              {% if policy_status == 'review' %}<option>draft</option><option>approved</option><option>retired</option>{% endif %}
-              {% if policy_status in ['approved','attested'] %}<option>review</option><option>retired</option>{% endif %}
-            </select></label>
-            <label>Decision note<input name="note" required maxlength="2000"></label>
+            <label>Note<input class="input" name="note" required maxlength="2000"></label>
+            <input type="hidden" name="target_status" value="">
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
-            <button class="btn" type="submit">Transition</button><span role="status" class="muted"></span>
+            <span class="sec-buttons">
+            {% if policy_status == 'draft' %}<button class="btn" type="submit" data-set="target_status=review">Send for review</button>{% endif %}
+            {% if policy_status == 'review' %}<button class="btn btn--primary" type="submit" data-set="target_status=approved">Approve</button><button class="btn" type="submit" data-set="target_status=draft">Back to draft</button>{% endif %}
+            {% if policy_status in ['approved','attested'] %}<button class="btn" type="submit" data-set="target_status=review">Review again</button>{% endif %}
+            <button class="btn btn--danger" type="submit" data-set="target_status=retired" data-confirm="Retire this policy? It can no longer be changed.">Retire</button>
+            </span><span role="status" class="muted"></span>
           </form>
           {% if policy_status in ['approved','attested'] %}
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/attest">
-            <label>Subject<input name="subject" required maxlength="300"></label>
-            <label>Statement<input name="statement" required maxlength="2000"></label>
+            {{ owner_field('subject', 'Who is signing off', required=true) }}
+            <label>What they confirm<input class="input" name="statement" required maxlength="2000" value="I have read and will follow this policy."></label>
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
-            <button class="btn" type="submit">Attest</button><span role="status" class="muted"></span>
+            <button class="btn" type="submit">Record sign-off</button><span role="status" class="muted"></span>
           </form>
           {% endif %}
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/review">
-            <label>Review reason<input name="reason" required maxlength="1000"></label>
+            <label>Why it needs another look<input class="input" name="reason" required maxlength="1000"></label>
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
-            <button class="btn" type="submit">Trigger review</button><span role="status" class="muted"></span>
+            <button class="btn" type="submit">Ask for a review</button><span role="status" class="muted"></span>
           </form>
         </details>
-        {% else %}<span class="muted">Retired; no further lifecycle actions.</span>{% endif %}
+        {% else %}<span class="muted">Retired. No further changes.</span>{% endif %}
       </td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No policies.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No policies yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-incidents" role="tabpanel" aria-labelledby="sec-tab-incidents" data-sec-panel="incidents" hidden>
-    <form class="sec-form" data-endpoint="/api/v1/security/incidents"><label>Incident title<input name="title" required maxlength="300"></label><label>Severity<select name="severity"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select></label><label>Regulatory clock keys<input name="clock_ids" maxlength="1000" placeholder="eu_nis2, sec_cybersecurity"></label><label class="wide">Description<textarea name="description" maxlength="8000"></textarea></label><label>MITRE techniques<input name="mitre_techniques" maxlength="1000" placeholder="T1078, T1041"></label><label>Discovered at<input name="discovered_at" type="datetime-local" data-epoch data-omit-empty></label><div class="sec-form__actions"><button class="btn btn--primary" type="submit">Open incident</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th>incident</th><th>severity / status</th><th>clocks</th><th>response lifecycle</th></tr></thead><tbody>
+    <form class="sec-form" data-endpoint="/api/v1/security/incidents">
+      <label>What happened<input class="input" name="title" required maxlength="300"></label>
+      <label>How serious<select class="select" name="severity">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ status_words[c] }}</option>{% endfor %}</select></label>
+      <label>When it was discovered<input class="input" name="discovered_at" type="datetime-local" data-epoch data-omit-empty></label>
+      <label class="wide">Details<textarea class="textarea" name="description" maxlength="8000"></textarea></label>
+      {{ pick_list('clock_ids', 'Reporting deadlines that might apply', clocks, help='Lightwork tracks each deadline once you confirm it applies.') }}
+      {{ pick_list('mitre_techniques', 'Kind of attack (if known)', attack_techniques) }}
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Open incident</button><span role="status" class="muted"></span></div></form>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Incident</th><th scope="col">Seriousness and status</th><th scope="col">Reporting deadlines</th><th scope="col">Response</th></tr></thead><tbody>
     {% for row in records.incidents %}
       {% set contained = row.get('timeline',[]) | selectattr('phase','equalto','containment') | list %}
       {% set eradicated = row.get('timeline',[]) | selectattr('phase','equalto','eradication') | list %}
@@ -403,33 +516,39 @@
         {% if clock.get('state') not in ['notify','documented_not_notifiable'] %}{% set clock_state.unresolved = true %}{% endif %}
         {% if clock.get('state') == 'awaiting_human_applicability' %}{% set clock_state.startable = true %}{% endif %}
       {% endfor %}
-      <tr><td>{{ row.get('title',row.id) }}<br><span class="muted">revision {{ row.revision }}</span></td><td>{{ row.get('severity','-') }} / {{ row.get('status','open') }}</td><td>
-        {% for clock in row.get('regulatory_clocks',[]) %}<code>{{ clock.get('key') }}</code> &mdash; {{ clock.get('state') }}{% if clock.get('deadline_at') %}, deadline {{ clock.get('deadline_at') }}{% endif %}<br>{% else %}<span class="muted">No clocks selected</span>{% endfor %}
-      </td><td>{% if row.get('status','open') != 'closed' %}<details class="sec-details"><summary>Record containment, clocks, notification, or closure</summary>
-        <form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/phase"><label>Phase<select name="phase"><option>containment</option><option>eradication</option><option>recovery</option></select></label><label>Timeline note<input name="note" required maxlength="4000"></label><label>Occurred<input name="occurred_at" type="datetime-local" data-epoch data-omit-empty></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Add phase</button><span role="status" class="muted"></span></form>
-        {% if clock_state.startable %}<form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/clock"><label>Clock<select name="clock_id">{% for clock in row.regulatory_clocks %}{% if clock.get('state') == 'awaiting_human_applicability' %}<option value="{{ clock.key }}">{{ clock.title }}</option>{% endif %}{% endfor %}</select></label><label>Human anchor time<input name="anchor_at" type="datetime-local" data-epoch required></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Start clock</button><span role="status" class="muted"></span></form>{% endif %}
-        {% if clock_state.unresolved %}<form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/notification"><label>Clock<select name="clock_id">{% for clock in row.regulatory_clocks %}{% if clock.get('state') not in ['notify','documented_not_notifiable'] %}<option value="{{ clock.key }}" data-started="{{ 'true' if clock.get('anchor_at') else 'false' }}">{{ clock.title }}{% if not clock.get('anchor_at') %} (not started){% endif %}</option>{% endif %}{% endfor %}</select></label><label>Decision<select name="notifiable"><option value="true">notification required</option><option value="false">not notifiable</option></select></label><label>Rationale<input name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Record decision</button><span role="status" class="muted"></span><span class="muted">A notification-required decision needs the clock's human anchor first; a documented non-applicability decision does not.</span></form>{% endif %}
-        {% if contained and eradicated and recovered and not clock_state.unresolved %}<form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/close"><label>Closure summary<input name="summary" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Close incident</button><span role="status" class="muted"></span></form>{% elif not contained or not eradicated or not recovered %}<p class="muted">Record chronological containment, eradication, and recovery phases before closing this incident.</p>{% else %}<p class="muted">Document a human notification decision for every regulatory clock before closure.</p>{% endif %}
-      </details>{% else %}<span class="muted">Closed; response history is read-only.</span>{% endif %}</td></tr>
+      <tr><td>{{ row.get('title') or 'Incident' }}</td><td>{{ status_words.get(row.get('severity')) or '—' }} · {{ status_words.get(row.get('status','open')) or (row.get('status') | humanize) }}</td><td>
+        {% for clock in row.get('regulatory_clocks',[]) %}{{ clock.get('title') or (clock.get('key') | humanize) }}: {{ status_words.get(clock.get('state')) or (clock.get('state') | humanize) }}{% if clock.get('deadline_at') %}, due {{ (clock.get('deadline_at') | datetime) if clock.get('deadline_at') is number else clock.get('deadline_at') }}{% endif %}<br>{% else %}<span class="muted">None chosen</span>{% endfor %}
+      </td><td>{% if row.get('status','open') != 'closed' %}<details class="sec-details"><summary>Record progress, deadlines or closure</summary>
+        <form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/phase"><label>Step<select class="select" name="phase"><option value="containment">Contained it</option><option value="eradication">Removed the cause</option><option value="recovery">Recovered</option></select></label><label>Note<input class="input" name="note" required maxlength="4000"></label><label>When<input class="input" name="occurred_at" type="datetime-local" data-epoch data-omit-empty></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Add step</button><span role="status" class="muted"></span></form>
+        {% if clock_state.startable %}<form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/clock"><label>Deadline<select class="select" name="clock_id">{% for clock in row.regulatory_clocks %}{% if clock.get('state') == 'awaiting_human_applicability' %}<option value="{{ clock.key }}">{{ clock.title }}</option>{% endif %}{% endfor %}</select></label><label>When did you become aware?<input class="input" name="anchor_at" type="datetime-local" data-epoch required></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Start the deadline clock</button><span role="status" class="muted"></span></form>{% endif %}
+        {% if clock_state.unresolved %}<form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/notification"><label>Deadline<select class="select" name="clock_id">{% for clock in row.regulatory_clocks %}{% if clock.get('state') not in ['notify','documented_not_notifiable'] %}<option value="{{ clock.key }}" data-started="{{ 'true' if clock.get('anchor_at') else 'false' }}">{{ clock.title }}{% if not clock.get('anchor_at') %} (clock not started){% endif %}</option>{% endif %}{% endfor %}</select></label><label>Decision<select class="select" name="notifiable"><option value="true">We must notify</option><option value="false">No notification needed</option></select></label><label>Why<input class="input" name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save decision</button><span role="status" class="muted"></span><span class="muted">Start the deadline clock before deciding you must notify.</span></form>{% endif %}
+        {% if contained and eradicated and recovered and not clock_state.unresolved %}<form class="sec-action" data-endpoint="/api/v1/security/incidents/{{ row.id }}/close"><label>Summary<input class="input" name="summary" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit" data-confirm="Close this incident? Its history becomes read-only.">Close incident</button><span role="status" class="muted"></span></form>{% elif not contained or not eradicated or not recovered %}<p class="muted">Record that it was contained, its cause removed and systems recovered before closing it.</p>{% else %}<p class="muted">Decide whether to notify for every reporting deadline before closing.</p>{% endif %}
+      </details>{% else %}<span class="muted">Closed. The history is read-only.</span>{% endif %}</td></tr>
     {% else %}<tr><td colspan="4" class="sec-empty">No incidents.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
   <section class="sec-tab" id="sec-panel-audits" role="tabpanel" aria-labelledby="sec-tab-audits" data-sec-panel="audits" hidden>
-    <form class="sec-form" data-endpoint="/api/v1/security/audits"><label>Engagement name<input name="name" required maxlength="300"></label><label>Framework<input name="framework" required maxlength="120"></label><label>Owner<input name="owner" required maxlength="200"></label><label class="wide">Scope<textarea name="scope" required maxlength="4000"></textarea></label><label>Due date<input name="due_at" type="datetime-local" data-epoch data-omit-empty></label><div class="sec-form__actions"><button class="btn btn--primary" type="submit">Create audit engagement</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th>engagement</th><th>status</th><th>workpapers</th><th>fieldwork actions</th></tr></thead><tbody>
+    <form class="sec-form" data-endpoint="/api/v1/security/audits">
+      <label>Audit name<input class="input" name="name" required maxlength="300"></label>
+      <label>Framework<select class="select" name="framework" data-other-select required>{% for framework in insights.crosswalk_frameworks %}<option value="{{ framework.label }}">{{ framework.label }}</option>{% endfor %}<option value="__other__">Another framework…</option></select><input class="input" data-other-input hidden maxlength="120" aria-label="Name of the framework"></label>
+      {{ owner_field(required=true) }}
+      <label class="wide">What it covers<textarea class="textarea" name="scope" required maxlength="4000"></textarea></label>
+      <label>Due<input class="input" name="due_at" type="datetime-local" data-epoch data-omit-empty></label>
+      <div class="sec-form__actions"><button class="btn btn--primary" type="submit">Add audit</button><span role="status" class="muted"></span></div></form>
+    <div class="sec-scroll"><table><thead><tr><th scope="col">Audit</th><th scope="col">Status</th><th scope="col">Work so far</th><th scope="col">Actions</th></tr></thead><tbody>
     {% for row in records.audits %}
       {% set audit_status = row.get('status','planned') %}
-      <tr><td>{{ row.get('name',row.id) }}<br>{{ row.get('framework','-') }} &middot; revision {{ row.revision }}</td><td>{{ audit_status }}</td><td>{{ row.get('evidence_requests',[])|length }} requests<br>{{ row.get('control_tests',[])|length }} tests<br>{{ row.get('findings',[])|length }} findings</td><td><details class="sec-details"><summary>Manage engagement</summary>
-        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/status" data-method="PATCH"><label>Next status<select name="status">{% if audit_status == 'complete' %}<option>review</option><option>closed</option>{% elif audit_status == 'closed' %}<option>review</option>{% else %}{% for status in ['planning','planned','fieldwork','review','complete','closed'] %}<option{% if status == audit_status %} selected{% endif %}>{{ status }}</option>{% endfor %}{% endif %}</select></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Update status</button><span role="status" class="muted"></span></form>
+      <tr><td>{{ row.get('name') or 'Audit' }}<br><span class="muted">{{ row.get('framework') or '' }}</span></td><td>{{ status_words.get(audit_status) or (audit_status | humanize) }}</td><td>{{ row.get('evidence_requests',[])|length }} evidence requests<br>{{ row.get('control_tests',[])|length }} tests<br>{{ row.get('findings',[])|length }} findings</td><td><details class="sec-details"><summary>Manage this audit</summary>
+        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/status" data-method="PATCH"><label>Status<select class="select" name="status">{% if audit_status == 'complete' %}<option value="review">{{ status_words['review'] }}</option><option value="closed">{{ status_words['closed'] }}</option>{% elif audit_status == 'closed' %}<option value="review">{{ status_words['review'] }}</option>{% else %}{% for status in ['planning','planned','fieldwork','review','complete','closed'] %}<option value="{{ status }}"{% if status == audit_status %} selected{% endif %}>{{ status_words[status] }}</option>{% endfor %}{% endif %}</select></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>
         {% if audit_status not in ['complete','closed'] %}
-        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/evidence-requests"><label>Evidence request<input name="description" required maxlength="2000"></label><label>Owner<input name="owner" required maxlength="200"></label><label>Due<input name="due_at" type="datetime-local" data-epoch required></label><label>Controls<input name="control_ids" maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Request evidence</button><span role="status" class="muted"></span></form>
-        {% for request_row in row.get('evidence_requests',[]) %}<form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/evidence-requests" data-method="PATCH"><label>Request<select name="request_id"><option value="{{ request_row.id }}">{{ request_row.get('description',request_row.id) }}</option></select></label><label>Status<select name="status"><option selected>{{ request_row.get('status','open') }}</option><option>open</option><option>submitted</option><option>accepted</option><option>rejected</option><option>closed</option></select></label><label>Evidence IDs<input name="evidence_ids" maxlength="1000" value="{{ request_row.get('evidence_ids',[])|join(', ') }}"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Update request</button><span role="status" class="muted"></span></form>{% endfor %}
-        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/control-tests"><label>Control ID<input name="control_id" required maxlength="160"></label><label>Procedure<input name="procedure" required maxlength="4000"></label><label>Result<select name="result"><option>pass</option><option>fail</option><option>needs_review</option></select></label><label>Evidence IDs<input name="evidence_ids" maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Record test</button><span role="status" class="muted"></span></form>
-        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/findings"><label>Finding title<input name="title" required maxlength="500"></label><label>Severity<select name="severity"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></label><label>Owner<input name="owner" maxlength="200"></label><label>Control IDs<input name="control_ids" maxlength="1000"></label><label>Due<input name="due_at" type="datetime-local" data-epoch data-omit-empty></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Add finding</button><span role="status" class="muted"></span></form>
-        {% for finding in row.get('findings',[]) %}<form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/findings" data-method="PATCH"><label>Finding<select name="finding_id"><option value="{{ finding.id }}">{{ finding.get('title',finding.id) }}</option></select></label><label>Status<select name="status"><option selected>{{ finding.get('status','open') }}</option><option>open</option><option>in_progress</option><option>resolved</option><option>remediated</option><option>accepted</option><option>closed</option></select></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Update finding</button><span role="status" class="muted"></span></form>{% endfor %}
-        {% else %}<p class="muted">Workpapers are locked. Reopen the engagement in review before changing evidence, tests, or findings.</p>{% endif %}
+        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/evidence-requests"><label>Evidence needed<input class="input" name="description" required maxlength="2000"></label>{{ owner_field(required=true) }}<label>Due<input class="input" name="due_at" type="datetime-local" data-epoch required></label>{{ pick_list('control_ids', 'Related controls', control_items) }}<input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Ask for evidence</button><span role="status" class="muted"></span></form>
+        {% for request_row in row.get('evidence_requests',[]) %}<form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/evidence-requests" data-method="PATCH"><input type="hidden" name="request_id" value="{{ request_row.id }}"><p>{{ request_row.get('description') or 'Evidence request' }}</p><label>Status<select class="select" name="status">{% for st in ['open','submitted','accepted','rejected','closed'] %}<option value="{{ st }}"{% if st == request_row.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label>{{ pick_list('evidence_ids', 'Evidence provided', evidence_items, selected=request_row.get('evidence_ids',[])) }}<input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>{% endfor %}
+        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/control-tests"><label>Control<select class="select" name="control_id" required>{% for item in control_items %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select></label><label>How it was tested<input class="input" name="procedure" required maxlength="4000"></label><label>Result<select class="select" name="result">{% for r in ['pass','fail','needs_review'] %}<option value="{{ r }}">{{ status_words[r] }}</option>{% endfor %}</select></label>{{ pick_list('evidence_ids', 'Evidence used', evidence_items) }}<input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Record test</button><span role="status" class="muted"></span></form>
+        <form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/findings"><label>Finding<input class="input" name="title" required maxlength="500"></label><label>How serious<select class="select" name="severity">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}">{{ status_words[c] }}</option>{% endfor %}</select></label>{{ owner_field() }}{{ pick_list('control_ids', 'Related controls', control_items) }}<label>Due<input class="input" name="due_at" type="datetime-local" data-epoch data-omit-empty></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Add finding</button><span role="status" class="muted"></span></form>
+        {% for finding in row.get('findings',[]) %}<form class="sec-action" data-endpoint="/api/v1/security/audits/{{ row.id }}/findings" data-method="PATCH"><input type="hidden" name="finding_id" value="{{ finding.id }}"><p>{{ finding.get('title') or 'Finding' }}</p><label>Status<select class="select" name="status">{% for st in ['open','in_progress','resolved','remediated','accepted','closed'] %}<option value="{{ st }}"{% if st == finding.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>{% endfor %}
+        {% else %}<p class="muted">This audit is finished, so its work is locked. Set it back to “In review” to change anything.</p>{% endif %}
       </details></td></tr>
-    {% else %}<tr><td colspan="4" class="sec-empty">No audit engagements.</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<tr><td colspan="4" class="sec-empty">No audits yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 </div>
 {% endif %}
@@ -439,6 +558,15 @@
 <script>
 (function () {
   'use strict';
+  var LIST_KEYS = { control_ids: 1, evidence_ids: 1, clock_ids: 1, mitre_techniques: 1 };
+  function plainError(response, body, action) {
+    if (response.status === 422 && Array.isArray(body.detail) && window.mvValidation) return null;
+    var d = typeof body.detail === 'string' ? body.detail : '';
+    if ((response.status === 409 || response.status === 422) && d && d.length < 200 && !/[_{}\[\]<>]|revision|http/i.test(d)) {
+      return d.charAt(0).toUpperCase() + d.slice(1) + (/[.!?]$/.test(d) ? '' : '.');
+    }
+    return window.mvErrorText(response, action);
+  }
   var buttons = document.querySelectorAll('[data-sec-tab]');
   function activateTab(button, focus) {
     buttons.forEach(function (b) {
@@ -453,9 +581,7 @@
     if (focus) button.focus();
   }
   buttons.forEach(function (button) {
-    button.addEventListener('click', function () {
-      activateTab(button, false);
-    });
+    button.addEventListener('click', function () { activateTab(button, false); });
     button.addEventListener('keydown', function (event) {
       var list = Array.prototype.slice.call(buttons);
       var index = list.indexOf(button);
@@ -464,33 +590,52 @@
       if (event.key === 'ArrowLeft') next = list[(index - 1 + list.length) % list.length];
       if (event.key === 'Home') next = list[0];
       if (event.key === 'End') next = list[list.length - 1];
-      if (next) {
-        event.preventDefault();
-        activateTab(next, true);
-      }
+      if (next) { event.preventDefault(); activateTab(next, true); }
     });
   });
+  if (location.hash === '#sec-controls' && document.getElementById('sec-tab-controls')) {
+    activateTab(document.getElementById('sec-tab-controls'), false);
+  }
+
+  // "Someone else…" / "Another framework…" reveal a text field.
+  document.querySelectorAll('select[data-owner-select], select[data-other-select]').forEach(function (sel) {
+    var other = sel.parentNode.querySelector('[data-owner-other], [data-other-input]');
+    function sync() { if (other) { other.hidden = sel.value !== '__other__'; other.required = sel.value === '__other__' && sel.required; } }
+    sel.addEventListener('change', sync); sync();
+  });
+  // A text file can fill the evidence text box.
+  document.querySelectorAll('input[type=file][data-text-into]').forEach(function (input) {
+    input.addEventListener('change', async function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var target = input.form && input.form.elements.namedItem(input.dataset.textInto);
+      if (target) target.value = (await file.text()).slice(0, 2000000);
+      var source = input.form && input.form.elements.namedItem('source');
+      if (source) source.value = 'upload';
+    });
+  });
+
   var evidenceSearch = document.getElementById('sec-evidence-search');
   if (evidenceSearch) {
     evidenceSearch.addEventListener('click', function () {
       var subject = document.getElementById('sec-evidence-subject').value.trim();
-      var controls = document.getElementById('sec-evidence-controls').value
-        .split(',').map(function (value) { return value.trim(); }).filter(Boolean);
+      var controls = Array.prototype.slice.call(document.querySelectorAll('input[name="sec-evidence-controls"]:checked')).map(function (b) { return b.value; });
       var status = document.getElementById('sec-evidence-search-status');
       var hits = document.getElementById('sec-evidence-hits');
-      if (!subject) { status.textContent = 'Enter a subject to search.'; return; }
-      status.textContent = 'Searching connected sources...';
+      if (!subject) { status.textContent = 'Type what you are looking for first.'; return; }
+      status.textContent = 'Searching…';
       hits.textContent = '';
       fetch('/api/v1/security/evidence-documents?subject=' + encodeURIComponent(subject))
         .then(function (response) {
-          return response.json().then(function (body) {
-            if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
-            return body;
-          });
+          if (!response.ok) throw response;
+          return response.json();
         })
         .then(function (body) {
           if (!body.enabled) {
-            status.textContent = 'No document source is connected. Configure a least-privilege Microsoft Graph, Slack, or Google Drive connection.';
+            status.textContent = 'No document source is connected yet. ';
+            var link = document.createElement('a');
+            link.className = 'btn btn--ghost'; link.href = '/connections'; link.textContent = 'Connect a document source';
+            status.appendChild(link);
             return;
           }
           status.textContent = body.hits.length ? '' : 'No matching documents found.';
@@ -498,33 +643,23 @@
             var row = document.createElement('div');
             row.className = 'sec-form__actions';
             var description = document.createElement('span');
-            description.style.flex = '1';
-            description.textContent = hit.name + ' - ' + hit.source;
+            description.textContent = hit.name + ' (' + hit.source + ')';
             var mapButton = document.createElement('button');
             mapButton.type = 'button';
             mapButton.className = 'btn';
-            mapButton.textContent = 'Map this document';
+            mapButton.textContent = 'Check this document';
             mapButton.addEventListener('click', function () {
               mapButton.disabled = true;
-              status.textContent = 'Fetching and mapping as untrusted evidence...';
+              status.textContent = 'Reading the document…';
               fetch('/api/v1/security/evidence/from-document', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                  title: hit.name,
-                  source: hit.source,
-                  doc_id: hit.doc_id,
-                  ref: hit.ref || null,
-                  control_ids: controls
-                })
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ title: hit.name, source: hit.source, doc_id: hit.doc_id, ref: hit.ref || null, control_ids: controls })
               }).then(function (response) {
-                return response.json().then(function (body) {
-                  if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
-                  location.reload();
-                });
+                if (!response.ok) throw response;
+                location.reload();
               }).catch(function (error) {
                 mapButton.disabled = false;
-                status.textContent = error.message;
+                status.textContent = window.mvErrorText(error, 'read the document');
               });
             });
             row.appendChild(description);
@@ -532,16 +667,16 @@
             hits.appendChild(row);
           });
         })
-        .catch(function (error) { status.textContent = error.message; });
+        .catch(function (error) { status.textContent = window.mvErrorText(error, 'search your documents'); });
     });
   }
   {% if security_can_manage_hunters %}
   var huntersHost = document.getElementById('sec-hunters');
   if (huntersHost) {
-    var hunterConsoles = {
-      threat_hunt: '/security/threats',
-      env_hunt: '/security/soc'
-    };
+    var hunterConsoles = { threat_hunt: '/security/threats', env_hunt: '/security/soc' };
+    var hunterNames = { threat_hunt: 'Lightwork threat check', env_hunt: 'Threat monitoring (your systems)' };
+    var hunterHelp = { threat_hunt: 'Looks through Lightwork’s own activity for signs of misuse.',
+                       env_hunt: 'Looks through activity from the systems you connect for signs of an attack.' };
     var huntersStatus = document.getElementById('sec-hunters-status');
     var renderHunter = function (row) {
       var card = document.createElement('section');
@@ -549,14 +684,14 @@
       var head = document.createElement('div');
       head.className = 'sec-hunter__head';
       var name = document.createElement('strong');
-      name.textContent = row.label;
+      name.textContent = hunterNames[row.section] || row.label;
       head.appendChild(name);
       var switchLabel = document.createElement('label');
       switchLabel.className = 'sec-hunter__switch';
       var toggle = document.createElement('input');
       toggle.type = 'checkbox';
       toggle.checked = !!row.enabled;
-      toggle.setAttribute('aria-label', 'Turn the ' + row.label + ' on or off');
+      toggle.setAttribute('aria-label', 'Turn ' + name.textContent + ' on or off');
       var stateText = document.createElement('span');
       stateText.textContent = toggle.checked ? 'On' : 'Off';
       switchLabel.appendChild(toggle);
@@ -565,53 +700,45 @@
       card.appendChild(head);
       var description = document.createElement('p');
       description.className = 'sec-hunter__desc';
-      description.textContent = row.description || '';
+      description.textContent = hunterHelp[row.section] || row.description || '';
       card.appendChild(description);
       var foot = document.createElement('div');
       foot.className = 'sec-hunter__foot';
       var consoleLink = document.createElement('a');
       consoleLink.className = 'btn';
       consoleLink.href = hunterConsoles[row.section];
-      consoleLink.textContent = 'Open console';
+      consoleLink.textContent = 'Open';
       foot.appendChild(consoleLink);
       var note = document.createElement('span');
       note.className = 'muted';
       note.setAttribute('role', 'status');
       foot.appendChild(note);
       card.appendChild(foot);
-      toggle.addEventListener('change', function () {
+      toggle.addEventListener('change', async function () {
         var wanted = toggle.checked;
+        var ok = await window.mvConfirm((wanted ? 'Turn on ' : 'Turn off ') + name.textContent + '?', { okText: wanted ? 'Turn on' : 'Turn off' });
+        if (!ok) { toggle.checked = !wanted; return; }
         toggle.disabled = true;
-        note.textContent = 'Saving...';
+        note.textContent = 'Saving…';
         fetch('/api/v1/features/switches', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({section: row.section, enabled: wanted})
         }).then(function (response) {
+          if (!response.ok) throw response;
           return response.json().then(function (body) {
-            if (!response.ok) {
-              throw new Error(typeof body.detail === 'string'
-                ? body.detail : ('HTTP ' + response.status));
-            }
             stateText.textContent = body.enabled ? 'On' : 'Off';
-            note.textContent = body.enabled
-              ? 'Hunter switched on.' : 'Hunter switched off.';
+            note.textContent = body.enabled ? 'Turned on.' : 'Turned off.';
           });
         }).catch(function (error) {
           toggle.checked = !wanted;
           stateText.textContent = toggle.checked ? 'On' : 'Off';
-          note.textContent = error.message;
+          note.textContent = window.mvErrorText(error, 'change this');
         }).then(function () { toggle.disabled = false; });
       });
       return card;
     };
     fetch('/api/v1/features/switches')
-      .then(function (response) {
-        return response.json().then(function (body) {
-          if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
-          return body;
-        });
-      })
+      .then(function (response) { if (!response.ok) throw response; return response.json(); })
       .then(function (body) {
         var rows = (body.switches || []).filter(function (row) {
           return Object.prototype.hasOwnProperty.call(hunterConsoles, row.section);
@@ -620,7 +747,7 @@
         if (!rows.length) {
           var none = document.createElement('p');
           none.className = 'sec-empty';
-          none.textContent = 'No hunter switches are available on this deployment.';
+          none.textContent = 'Threat hunting is not available on this installation.';
           huntersHost.appendChild(none);
           return;
         }
@@ -628,41 +755,68 @@
       })
       .catch(function (error) {
         huntersHost.textContent = '';
-        huntersStatus.textContent =
-          'Hunter switches could not be loaded: ' + error.message;
+        huntersStatus.textContent = window.mvErrorText(error, 'load the threat hunting switches');
       });
   }
+  var recordsOn = document.getElementById('sec-records-on');
+  if (recordsOn) {
+    recordsOn.addEventListener('click', async function () {
+      var msg = document.getElementById('sec-records-on-msg');
+      if (!(await window.mvConfirm('Turn on security records for this installation?', { okText: 'Turn on' }))) return;
+      recordsOn.disabled = true;
+      try {
+        var current = await fetch('/api/v1/security/config');
+        if (!current.ok) throw current;
+        var cfg = await current.json();
+        var r = await fetch('/api/v1/security/config', { method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ security_ops: true, threat_hunt: !!cfg.threat_hunt, env_hunt: !!cfg.env_hunt,
+            response_execution: !!cfg.response_execution, expected_revision: cfg.revision }) });
+        if (!r.ok) throw r;
+        location.reload();
+      } catch (e) { msg.textContent = window.mvErrorText(e, 'turn on security records'); recordsOn.disabled = false; }
+    });
+  }
   {% endif %}
+  function ownerValue(form, name) {
+    var sel = form.querySelector('select[name="' + name + '"][data-owner-select], select[name="' + name + '"][data-other-select]');
+    if (!sel) return null;
+    if (sel.value !== '__other__') return sel.value;
+    var other = sel.parentNode.querySelector('[data-owner-other], [data-other-input]');
+    return other ? other.value.trim() : '';
+  }
   var controlInitializer = document.querySelector('[data-control-initialize]');
   if (controlInitializer) {
     controlInitializer.addEventListener('submit', function (event) {
       event.preventDefault();
-      var owner = controlInitializer.elements.namedItem('owner').value.trim();
+      var owner = ownerValue(controlInitializer, 'owner') || '';
       var status = controlInitializer.querySelector('[role="status"]');
-      if (!owner) { status.textContent = 'Enter a named control owner.'; return; }
-      status.textContent = 'Initializing the governed control register...';
-      fetch('/api/v1/security/controls/initialize?owner=' + encodeURIComponent(owner), {
-        method: 'POST'
-      }).then(function (response) {
-        return response.json().then(function (body) {
-          if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
-          status.textContent = 'Created ' + body.created + ' canonical controls. Reloading...';
-          setTimeout(function () { location.reload(); }, 600);
-        });
-      }).catch(function (error) { status.textContent = error.message; });
+      if (!owner) { status.textContent = 'Choose who owns these controls.'; return; }
+      status.textContent = 'Setting up the standard controls…';
+      fetch('/api/v1/security/controls/initialize?owner=' + encodeURIComponent(owner), { method: 'POST' })
+        .then(function (response) {
+          if (!response.ok) throw response;
+          return response.json().then(function (body) {
+            status.textContent = 'Added ' + body.created + ' controls. Refreshing…';
+            setTimeout(function () { location.reload(); }, 600);
+          });
+        }).catch(function (error) { status.textContent = window.mvErrorText(error, 'set up the controls'); });
     });
   }
-  document.querySelectorAll('.sec-form:not([data-control-initialize]),.sec-action').forEach(function (form) {
+  document.querySelectorAll('.sec-form:not([data-control-initialize]):not(.sec-doc-search),.sec-action').forEach(function (form) {
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
       var status = form.querySelector('[role="status"]');
+      var submitter = event.submitter;
+      if (submitter && submitter.dataset.confirm) {
+        if (!(await window.mvConfirm(submitter.dataset.confirm, { okText: submitter.textContent }))) return;
+      }
       var data = {};
       new FormData(form).forEach(function (value, key) {
         var field = form.elements.namedItem(key);
         if (field && field.dataset && field.dataset.omitEmpty !== undefined && value === '') return;
         if (field && field.dataset && field.dataset.epoch !== undefined) {
           value = Math.floor(new Date(value).getTime() / 1000);
-        } else if (field && field.type === 'number' && value !== '') {
+        } else if (field && (field.type === 'number' || /^(likelihood|impact|residual_likelihood|residual_impact|review_cadence_days)$/.test(key)) && value !== '') {
           value = Number(value);
         }
         if (key.indexOf('posture.') === 0) {
@@ -671,48 +825,57 @@
           data.posture[postureKey] = value === 'true' ? true : (value === 'false' ? false : null);
           return;
         }
+        if (LIST_KEYS[key]) { (data[key] = data[key] || []).push(value); return; }
         data[key] = value;
       });
+      Object.keys(LIST_KEYS).forEach(function (key) {
+        if (form.querySelector('[name="' + key + '"]') && !(key in data)) data[key] = [];
+      });
+      ['owner', 'subject', 'framework'].forEach(function (key) {
+        var v = ownerValue(form, key);
+        if (v !== null) { if (v) data[key] = v; else delete data[key]; }
+      });
+      if (submitter && submitter.dataset.set) {
+        var pair = submitter.dataset.set.split('=');
+        data[pair[0]] = pair[1];
+      }
       ['applicable','notifiable'].forEach(function (key) {
         if (key in data) data[key] = data[key] === 'true';
       });
       if (form.dataset.endpoint && form.dataset.endpoint.indexOf('/notification') !== -1 && data.notifiable === true) {
         var selectedClock = form.querySelector('[name="clock_id"] option:checked');
         if (!selectedClock || selectedClock.dataset.started !== 'true') {
-          status.textContent = 'Start this regulatory clock with its human anchor before recording notification required.';
+          status.textContent = 'Start this deadline clock first, then record that you must notify.';
           return;
         }
       }
-      ['control_ids','evidence_ids','clock_ids','mitre_techniques'].forEach(function (key) {
-        if (key in data) data[key] = data[key].split(',').map(function (v) { return v.trim(); }).filter(Boolean);
-      });
       var endpoint = form.dataset.endpoint;
       if (form.dataset.endpointTemplate) {
         var target = String(data._control_target || '');
         var separator = target.lastIndexOf('::');
-        if (separator < 1) {
-          status.textContent = 'Select a valid control revision.';
-          return;
-        }
+        if (separator < 1) { status.textContent = 'Choose a control.'; return; }
         var controlId = target.slice(0, separator);
         data.expected_revision = Number(target.slice(separator + 2));
         delete data._control_target;
-        endpoint = form.dataset.endpointTemplate.replace(
-          '{control_id}', encodeURIComponent(controlId)
-        );
+        endpoint = form.dataset.endpointTemplate.replace('{control_id}', encodeURIComponent(controlId));
       }
-      status.textContent = 'Saving...';
+      status.textContent = 'Saving…';
       try {
         var response = await fetch(endpoint, {
           method: form.dataset.method || 'POST',
           headers: {'Content-Type':'application/json'},
-          body:JSON.stringify(data)
+          body: JSON.stringify(data)
         });
-        var body = await response.json();
-        if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail || ('HTTP ' + response.status)));
-        status.textContent = 'Saved. Reloading...';
+        if (!response.ok) {
+          var body = await response.json().catch(function () { return {}; });
+          var text = plainError(response, body, 'save this');
+          if (text === null) { window.mvValidation.show(form, body.detail); text = 'Some details need fixing. Check the highlighted fields.'; }
+          status.textContent = text;
+          return;
+        }
+        status.textContent = 'Saved. Refreshing…';
         setTimeout(function () { location.reload(); }, 600);
-      } catch (error) { status.textContent = error.message; }
+      } catch (error) { status.textContent = window.mvErrorText(error, 'save this'); }
     });
   });
 })();
@@ -722,19 +885,19 @@
 (function () {
   'use strict';
   var B = window.LWBoard;
-  var EMPTY = 'No security assessments yet — run one from the workspace below.';
+  var EMPTY = 'No security assessments yet. Start one from the list below.';
 
   function render(D) {
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
     k.appendChild(B.kpi({ label: 'Assessments', value: D.kpis.total,
-      sub: 'on the security record' }));
+      sub: 'in your security records' }));
     k.appendChild(B.kpi({ label: 'Open', value: D.kpis.open,
-      sub: D.kpis.needs_more + ' awaiting answers' }));
+      sub: D.kpis.needs_more + ' waiting for answers' }));
     k.appendChild(B.kpi({ label: 'Approved', value: D.kpis.approved,
       sparkCls: 'ok', sub: D.kpis.rejected + ' rejected' }));
-    k.appendChild(B.kpi({ label: 'Due for re-review', value: D.kpis.due_review,
-      sub: D.kpis.due_review ? 'cadence has come around' : 'nothing due' }));
+    k.appendChild(B.kpi({ label: 'Due for another review', value: D.kpis.due_review,
+      sub: D.kpis.due_review ? 'time to look again' : 'nothing due' }));
 
     if (D.kpis.total) {
       B.area(document.getElementById('bd-flow'), {

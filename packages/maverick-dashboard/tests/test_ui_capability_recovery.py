@@ -45,7 +45,8 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     assert learning.status_code == 200
     assert permissions.status_code == 200
     assert 'data-can-halt="false"' in learning.text
-    assert "changing deployment-wide learning controls requires a global administrator" in learning.text
+    assert "only an administrator can change learning settings" in learning.text
+    assert "Run learning now" not in learning.text
     assert "disabled" in _button(learning.text, "lrn-enable")
     assert "disabled" in _button(learning.text, "lrn-auto-evolve")
     assert "only a global administrator can change where work runs" in permissions.text

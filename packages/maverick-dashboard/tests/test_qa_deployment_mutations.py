@@ -21,15 +21,15 @@ def test_learning_mutations_confirm_targets_and_recover_for_retry():
 
     assert "This changes the deployment-wide learning posture" in source
     assert "sw.label + '” for this deployment? ' + impact" in source
-    assert "Scheduled and triggered workflows may begin running" in source
+    assert "Scheduled and triggered workflows may start running" in source
     assert "Disable automatic rollback of workflow regressions?" in source
     assert "Disable automatic application of workflow improvements?" in source
-    assert "Disable research-only DGM for this deployment?" in source
+    assert "Stop these experiments? Results so far are kept." in source
     assert source.count("if (btn.dataset.inFlight === 'true') return;") >= 5
     assert source.count("btn.setAttribute('aria-busy', 'true')") >= 5
     assert source.count("delete btn.dataset.inFlight") >= 10
-    assert "body.detail || ('Could not update “' + sw.label" in source
-    assert "body.detail || ('Could not turn the flow engine on" in source
+    assert "window.mvErrorText(r, 'change “' + sw.label + '”')" in source
+    assert "window.mvErrorText(r, 'turn on workflows')" in source
     assert "check your connection and try again" in source
 
 

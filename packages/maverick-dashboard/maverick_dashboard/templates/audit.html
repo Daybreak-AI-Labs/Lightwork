@@ -1,294 +1,125 @@
 {% extends "base.html" %}
-{% block title %}Audit log · Lightwork{% endblock %}
+{% block title %}Activity log · Lightwork{% endblock %}
 {% block content %}
   <style>
-    /* Detail cell: labeled fields instead of a raw JSON dump; the chain
-       material (hash/sig) folds away behind the signature badge. */
     .aud-detail { display: flex; flex-direction: column; gap: 2px; max-width: 46rem; }
-    .aud-obligation .aud-k { color: var(--accent); }
-    .aud-obligation .aud-v { font-weight: 600; }
-    .aud-obligation-link { text-decoration: underline dotted; }
     .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }
-    .aud-k { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-mono, monospace); }
+    .aud-k { color: var(--muted); font-size: var(--text-sm); }
     .aud-v { font-size: var(--text-sm); word-break: break-word; min-width: 0; }
-    .aud-v code { font-size: var(--text-xs); white-space: pre-wrap; word-break: break-all; }
-    .aud-sig { margin-top: 2px; }
-    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-xs); list-style-position: inside; }
-    .aud-sig summary:hover { color: var(--text); }
-    .aud-sig[open] summary { margin-bottom: 4px; }
-    .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); }
-    .aud-custody-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
-    .aud-custody-metric { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--surface-1) 78%, transparent); }
-    .aud-custody-metric strong { display: block; margin-top: var(--space-1); }
-    .aud-custody-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+    .aud-obligation .aud-k { color: var(--accent); }
+    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-sm); }
+    .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); font-family: var(--font-mono, monospace); }
+    .aud-filters { display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; }
+    .aud-filters label { display: flex; flex-direction: column; gap: .25rem; }
+    .aud-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
+    .aud-metric { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+    .aud-metric strong { display: block; margin-top: var(--space-1); }
+    .aud-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-3); }
+    .aud-links { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+    .aud-nowrap { white-space: nowrap; }
   </style>
 
   {% from "_hero.html" import hero, state %}
-  {% call hero('Governance', 'Audit',
-               subtitle='The operating record',
-               lede='The tenant-scoped operating record captured by instrumented
-                     workflows. Filter the loaded tail or search a complete day.
-                     <a href="/audit/binder">Audit binder (evidence pack)
-                     →</a>') %}
+  {% call hero('Governance', 'Activity log',
+               subtitle='Everything that happened, in order',
+               lede='Everything Lightwork and its assistants did, in the order it happened. Filter by date,
+                     kind of event or person, and download it when an auditor asks.') %}
     {{ state('Current state',
-             'Ed25519 signing enabled' if audit_signing_enabled else 'Unsigned local log',
-             badge='signing enabled' if audit_signing_enabled else 'signing disabled',
+             'Tamper-evident: on' if audit_signing_enabled else 'Tamper-evident: off',
+             badge='Protected' if audit_signing_enabled else 'Not protected',
              badge_class='ok' if audit_signing_enabled else 'warn',
-             copy='Showing at most the last ' ~ n ~ ' events. The Audit Binder
-                   verifies available day files, cross-day anchors, signature
-                   state, and export identity; local signing alone does not
-                   prove complete instrumentation or independent custody.') }}
+             copy=('Each entry is sealed so later changes can be detected.' if audit_signing_enabled
+                   else 'Entries are kept but not sealed. Turn on tamper-evident records on the Compliance page.')) }}
+    <div class="aud-links">
+      <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a>
+      {% if not audit_signing_enabled %}<a class="btn btn--ghost" href="/compliance">Turn on tamper-evident records</a>{% endif %}
+    </div>
   {% endcall %}
 
   {% if audit_read_report and audit_read_report.failures %}
-  <p role="alert">Audit records could only be read partially or were unreadable.
-    This view is incomplete. Check the source files and encryption keys before
-    using an export as evidence.</p>
+  <p role="alert">Some entries could not be read. This view is incomplete. Run “Check the log has not been changed” below before using it as evidence.</p>
   {% endif %}
 
-  <section class="panel" aria-labelledby="audit-custody-title">
-    <div class="aud-custody-actions">
-      <div style="flex: 1 1 32rem;">
-        <div class="muted" style="font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em;">Audit protection</div>
-        <h2 id="audit-custody-title">Unified audit custody</h2>
-        <p>Check audit protection for this workspace, including saved checkpoints,
-          immutable storage, signatures, and security-event delivery. This check
-          does not change settings or automatically seal daily records.</p>
-      </div>
-      <button class="btn" id="audit-custody-refresh" type="button">Refresh custody status</button>
-    </div>
-    <p id="audit-custody-status" role="status" aria-live="polite" class="muted">Custody status has not loaded.</p>
-    <div class="aud-custody-grid" aria-label="Unified audit custody readiness">
-      <div class="aud-custody-metric"><span class="muted">Availability</span><strong id="audit-custody-enabled">—</strong></div>
-      <div class="aud-custody-metric"><span class="muted">Checkpoint</span><strong id="audit-custody-checkpoint">—</strong></div>
-      <div class="aud-custody-metric"><span class="muted">Immutable storage</span><strong id="audit-custody-worm">—</strong></div>
-      <div class="aud-custody-metric"><span class="muted">Security-event delivery</span><strong id="audit-custody-siem">—</strong></div>
-      <div class="aud-custody-metric"><span class="muted">Independent production proof</span><strong id="audit-custody-proof">Not verified</strong></div>
-    </div>
-    <p class="muted" style="margin-top: var(--space-3);">Local readiness does not verify independent key storage, external immutable storage, security-system integration, recovery, scale, or customer acceptance.</p>
-  </section>
-
-  <script>
-    (function () {
-      const refresh = document.getElementById('audit-custody-refresh');
-      const status = document.getElementById('audit-custody-status');
-      const enabled = document.getElementById('audit-custody-enabled');
-      const checkpoint = document.getElementById('audit-custody-checkpoint');
-      const worm = document.getElementById('audit-custody-worm');
-      const siem = document.getElementById('audit-custody-siem');
-      const proof = document.getElementById('audit-custody-proof');
-      function yesNo(value, yes, no) { return value === true ? yes : no; }
-      async function loadCustody() {
-        refresh.disabled = true;
-        status.style.color = 'var(--muted)';
-        status.textContent = 'Checking exact-tenant custody readiness…';
-        try {
-          const response = await fetch('/api/v1/audit/unified/status', {
-            headers: { 'Accept': 'application/json' },
-            credentials: 'same-origin'
-          });
-          if (!response.ok) {
-            const body = await response.json().catch(function () { return {}; });
-            throw new Error(body.detail || ('HTTP ' + response.status));
-          }
-          const body = await response.json();
-          const custody = body && typeof body.custody === 'object' ? body.custody : {};
-          const ready = custody.ready === true;
-          enabled.textContent = ready ? 'Ready' : (custody.enabled === true ? 'Not ready' : 'Disabled');
-          checkpoint.textContent = yesNo(custody.checkpoint_enabled, 'Enabled', 'Disabled');
-          worm.textContent = custody.worm_enabled === true ? ('Enabled · ' + String(custody.worm_provider || 'configured')) : 'Disabled';
-          siem.textContent = custody.siem_enabled === true ? 'At least once' : 'Disabled';
-          const productionProof = custody.independent_operation_verified === true &&
-            custody.off_host_key_custody_verified === true &&
-            custody.s3_object_lock_acceptance_verified === true &&
-            custody.siem_acceptance_verified === true &&
-            custody.live_customer_acceptance_verified === true;
-          proof.textContent = productionProof ? 'Verified' : 'Not verified';
-          status.textContent = ready
-            ? 'Local custody composition is configuration-ready; external acceptance remains separate.'
-            : (body.enabled === true ? 'Unified audit is enabled, but custody is disabled or not ready.' : 'Unified audit projection and custody are disabled for this tenant.');
-        } catch (error) {
-          status.style.color = 'var(--danger)';
-          status.textContent = 'Custody readiness unavailable: ' + String(error && error.message ? error.message : error);
-          enabled.textContent = checkpoint.textContent = worm.textContent = siem.textContent = 'Unavailable';
-          proof.textContent = 'Not verified';
-        } finally {
-          refresh.disabled = false;
-        }
-      }
-      refresh.addEventListener('click', loadCustody);
-      loadCustody();
-    })();
-  </script>
-
-  <div class="panel">
-    <form method="get" action="/audit" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
-      <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">lines</div>
-        <input type="number" name="n" value="{{ n }}" min="1" max="1000"
-               style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
-      </label>
-      <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">day (YYYY-MM-DD)</div>
-        <input type="text" name="day" value="{{ day or '' }}" placeholder="today"
-               style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
-      </label>
-      <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">kind</div>
-        <select name="kind"
-                style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
-          <option value="">(all)</option>
-          {% for k in kinds %}
-          <option value="{{ k }}"{% if k == kind %} selected{% endif %}>{{ k }}</option>
-          {% endfor %}
+  <section class="panel" aria-labelledby="aud-filter-title">
+    <h2 id="aud-filter-title">Find activity</h2>
+    <form method="get" action="/audit" class="aud-filters" id="aud-filter">
+      <label for="aud-when">Dates
+        <select id="aud-when" class="select">
+          <option value="today"{% if not day and not since and not until %} selected{% endif %}>Today</option>
+          <option value="day"{% if day and not since and not until %} selected{% endif %}>One day</option>
+          <option value="range"{% if since or until %} selected{% endif %}>A range of days</option>
         </select>
       </label>
-      <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
-        load
-      </button>
-    </form>
-  </div>
-
-  <div class="panel">
-    <form id="audit-search" style="display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
-      <label style="flex: 1 1 300px;">
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">search (text)</div>
-        <input type="text" id="audit-pattern" placeholder="shield_block"
-               style="width: 100%; padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+      <label for="aud-day" data-aud-when="day">Day
+        <input type="date" id="aud-day" name="day" value="{{ day or '' }}" class="input">
       </label>
-      <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">day</div>
-        <input type="text" id="audit-search-day" value="{{ day or '' }}" placeholder="today"
-               style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+      <label for="aud-since" data-aud-when="range">From
+        <input type="date" id="aud-since" name="since" value="{{ since or '' }}" class="input">
       </label>
-      <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--brand); color: var(--brand-fg); border: 0; border-radius: var(--radius-md); cursor: pointer;">
-        search
-      </button>
+      <label for="aud-until" data-aud-when="range">To
+        <input type="date" id="aud-until" name="until" value="{{ until or '' }}" class="input">
+      </label>
+      <label for="aud-kind">Kind of event
+        <select id="aud-kind" name="kind" class="select">
+          <option value="">All kinds</option>
+          {% for k in kinds %}<option value="{{ k }}"{% if k == kind %} selected{% endif %}>{{ kind_label(k) }}</option>{% endfor %}
+        </select>
+      </label>
+      <label for="aud-person">Person
+        <select id="aud-person" name="person" class="select">
+          <option value="">Everyone</option>
+          {% for p in people %}<option value="{{ p.value }}"{% if p.value == person %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label for="aud-q">Contains words
+        <input type="search" id="aud-q" name="q" value="{{ q }}" class="input" placeholder="For example: invoice">
+      </label>
+      <label for="aud-n">Show up to
+        <select id="aud-n" name="n" class="select">
+          {% for opt in [50, 200, 500, 1000] %}<option value="{{ opt }}"{% if opt == n %} selected{% endif %}>{{ opt }} entries</option>{% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn btn--primary">Show</button>
+      <a class="btn btn--ghost" href="/audit">Clear</a>
     </form>
-    <p id="audit-search-msg" role="status" aria-live="polite" class="muted" style="margin-top: 0.5rem; min-height: 1em; font-size: 0.85rem;"></p>
-    <pre id="audit-search-results" tabindex="0" aria-label="Search results" style="white-space: pre-wrap; margin: 0; max-height: 360px; overflow-y: auto; font-size: 0.8rem;"></pre>
-  </div>
-
-  <script>
-    (function() {
-      const form = document.getElementById('audit-search');
-      const pat = document.getElementById('audit-pattern');
-      const day = document.getElementById('audit-search-day');
-      const msg = document.getElementById('audit-search-msg');
-      const out = document.getElementById('audit-search-results');
-      const btn = form.querySelector('button[type="submit"]');
-      form.addEventListener('submit', async function(ev) {
-        ev.preventDefault();
-        const p = pat.value.trim();
-        if (!p) { msg.textContent = 'Pattern required.'; return; }
-        if (btn) btn.disabled = true;
-        msg.style.color = 'var(--muted)';
-        msg.textContent = 'Searching…';
-        out.textContent = '';
-        const url = new URL('/api/v1/audit/grep', window.location.origin);
-        url.searchParams.set('pattern', p);
-        if (day.value.trim()) url.searchParams.set('day', day.value.trim());
-        try {
-          const r = await fetch(url.toString());
-          if (!r.ok) {
-            const j = await r.json().catch(() => ({}));
-            msg.style.color = 'var(--danger)';
-            msg.textContent = j.detail || ('HTTP ' + r.status);
-            return;
-          }
-          const data = await r.json();
-          const events = data.events || [];
-          const total = Number.isFinite(data.total_matches) ? data.total_matches : events.length;
-          const scanned = Number.isFinite(data.scanned) ? data.scanned : null;
-          const scopeDay = data.scope && data.scope.day ? data.scope.day : (day.value.trim() || 'today');
-          msg.textContent = total + ' match(es) across ' +
-            (scanned === null ? 'the selected audit day' : scanned + ' scanned event(s)') +
-            ' for ' + scopeDay + (data.truncated ? '; showing the first ' + events.length : '') + '.';
-          // Chain material (hash/sig/key ids) stays out of the on-screen
-          // dump — the signed chain is verified server-side, not by eye.
-          const CHAIN_KEYS = ['hash', 'prev_hash', 'sig', 'key_id'];
-          out.textContent = events.map(e => {
-            const shown = {};
-            Object.keys(e).forEach(k => {
-              if (CHAIN_KEYS.indexOf(k) === -1) shown[k] = e[k];
-            });
-            return JSON.stringify(shown);
-          }).join('\n');
-        } catch (e) {
-          msg.style.color = 'var(--danger)';
-          msg.textContent = String(e);
-        } finally {
-          if (btn) btn.disabled = false;
-        }
-      });
-    })();
-  </script>
+  </section>
 
   <div class="panel">
     {% if events %}
-      <div style="display: flex; gap: var(--space-3); align-items: end; margin-bottom: var(--space-3); flex-wrap: wrap;">
-        <label style="flex: 1 1 280px;">
-          <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">filter shown events (instant)</div>
-          <input type="text" id="audit-quick" placeholder="type to filter — kind, agent, case, subject, any field"
-                 style="width: 100%; padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
-        </label>
-        <span class="muted" id="audit-quick-count" role="status" aria-live="polite" style="font-size: var(--text-sm); padding-bottom: 0.5rem;"></span>
-      </div>
       <table id="audit-table">
+        <caption class="sr-only">Activity, newest last</caption>
         <thead>
-          <tr><th scope="col">ts</th><th scope="col">kind</th><th scope="col">agent</th><th scope="col">goal</th><th scope="col">detail</th></tr>
+          <tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Who</th><th scope="col">Task</th><th scope="col">Details</th></tr>
         </thead>
         <tbody>
         {% for ev in events %}
           <tr>
-            <td class="muted" style="white-space: nowrap;">{{ ev.get('ts') | datetime }}</td>
-            <td><code>{{ ev.kind }}</code></td>
-            <td class="muted">{{ ev.agent or '-' }}</td>
-            <td class="muted">{{ ev.goal_id if ev.goal_id is not none else '-' }}</td>
+            <td class="muted aud-nowrap">{{ ev.get('ts') | datetime }}</td>
+            <td>{{ kind_label(ev.kind) }}</td>
+            <td>{{ event_who(ev) }}</td>
+            <td>{% if ev.goal_id is not none %}<a href="/chat/goal/{{ ev.goal_id }}">Task {{ ev.goal_id }}</a>{% else %}—{% endif %}</td>
             <td>
-              {% set keep = ['v', 'ts', 'kind', 'agent', 'goal_id'] %}
-              {% set chain_keys = ['hash', 'prev_hash', 'sig', 'key_id'] %}
-              {% set payload = {} %}
-              {% set chain = {} %}
-              {% for k, v in ev.items() if k not in keep %}
-                {% if k in chain_keys %}{% set _ = chain.update({k: v}) %}
-                {% else %}{% set _ = payload.update({k: v}) %}{% endif %}
-              {% endfor %}
-              {% if payload or chain %}
+              {% set rows = event_details(ev) %}
+              {% if rows or ev.get('hash') %}
                 <div class="aud-detail">
-                  {% for k, v in payload.items() %}
-                  {% if k in ['obligation_id', 'regulation', 'article', 'obligations_checked'] %}
-                  {# Compiled regulatory obligations (maverick.regulatory_compiler):
-                     the clause a denial was decided under, or the obligations a
-                     tool call was checked against. Linked to the console that
-                     explains them. #}
-                  <div class="aud-kv aud-obligation">
-                    <span class="aud-k">{{ k }}</span>
-                    <span class="aud-v">{% if k == 'obligation_id' %}<a href="/compliance/obligations" class="aud-obligation-link" title="Open Regulatory Obligations">{{ v }}</a>{% elif v is string or v is number or v is boolean %}{{ v }}{% else %}{{ v | join(', ') if v is iterable and v is not string else v }}{% endif %}</span>
+                  {% for key, label, text in rows %}
+                  <div class="aud-kv{% if key in ['obligation_id', 'regulation', 'article', 'obligations_checked'] %} aud-obligation{% endif %}">
+                    <span class="aud-k">{{ label }}</span>
+                    <span class="aud-v">{% if key == 'obligation_id' %}<a href="/compliance/obligations">{{ text }}</a>{% else %}{{ text }}{% endif %}</span>
                   </div>
-                  {% else %}
-                  <div class="aud-kv">
-                    <span class="aud-k">{{ k }}</span>
-                    <span class="aud-v">{% if v is string or v is number or v is boolean %}{{ v }}{% else %}<code>{{ v | tojson(indent=2) }}</code>{% endif %}</span>
-                  </div>
-                  {% endif %}
                   {% endfor %}
-                  {% if chain %}
+                  {% if ev.get('hash') or ev.get('sig') %}
                   <details class="aud-sig">
-                    <summary>🔏 Verification detail{% if not chain.prev_hash %} · genesis{% endif %}</summary>
-                    {% for k in chain_keys if k in chain %}
-                    <div class="aud-kv">
-                      <span class="aud-k">{{ k }}</span>
-                      <span class="aud-v"><code class="aud-hash">{{ chain[k] if chain[k] else '— genesis (first link in the chain) —' }}</code></span>
-                    </div>
+                    <summary>How this entry is protected{% if not ev.get('prev_hash') %} (first entry){% endif %}</summary>
+                    <p class="muted">Each entry carries a fingerprint that includes the one before it, so a change anywhere breaks the chain.</p>
+                    {% for key, label in [('hash', 'Fingerprint'), ('prev_hash', 'Previous fingerprint'), ('sig', 'Signature'), ('key_id', 'Signing key')] if ev.get(key) %}
+                    <div class="aud-kv"><span class="aud-k">{{ label }}</span><span class="aud-v aud-hash">{{ ev.get(key) }}</span></div>
                     {% endfor %}
                   </details>
                   {% endif %}
                 </div>
               {% else %}
-                <span class="muted">-</span>
+                <span class="muted">—</span>
               {% endif %}
             </td>
           </tr>
@@ -296,34 +127,211 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">
-        No instrumented activity was recorded for this day. An empty view does
-        not prove that no action occurred; verify instrumentation coverage and
-        custody in the Audit Binder before relying on completeness.
-      </p>
+      <p class="muted">Nothing was recorded for these dates and filters.</p>
+      <p class="aud-links"><button type="button" class="btn btn--ghost" id="aud-pick">Pick other dates</button>
+        <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a></p>
     {% endif %}
   </div>
-<script>
-  // Instant filter over the loaded events — matches any text in the row
-  // (kind, agent, goal, every detail field). Complements the server-side
-  // day/kind loaders above without another round trip.
+
+  <section class="panel" aria-labelledby="aud-protect-title">
+    <h2 id="aud-protect-title">Protect and share the log</h2>
+    <p class="muted">These use the dates chosen above (today if none are chosen).</p>
+    <div class="aud-actions">
+      <button type="button" class="btn btn--primary" id="aud-check">Check the log has not been changed</button>
+      <label for="aud-format" class="sr-only">Download format</label>
+      <select id="aud-format" class="select">
+        <option value="csv">Spreadsheet</option>
+        <option value="json">For security tools (standard)</option>
+        <option value="cef">For security tools (ArcSight)</option>
+      </select>
+      <button type="button" class="btn btn--ghost" id="aud-download">Download</button>
+      {% if can_admin %}<button type="button" class="btn btn--ghost" id="aud-forward" hidden>Send to your security monitoring system</button>{% endif %}
+    </div>
+    <div id="aud-action-result" role="status" aria-live="polite"></div>
+
+    <div class="aud-grid" aria-label="Protection status">
+      <div class="aud-metric"><span class="muted">Protection</span><strong id="audit-custody-enabled">—</strong></div>
+      <div class="aud-metric"><span class="muted">Daily checkpoints</span><strong id="audit-custody-checkpoint">—</strong></div>
+      <div class="aud-metric"><span class="muted">Write-once copies</span><strong id="audit-custody-worm">—</strong></div>
+      <div class="aud-metric"><span class="muted">Security monitoring</span><strong id="audit-custody-siem">—</strong></div>
+    </div>
+    <p id="audit-custody-status" role="status" aria-live="polite" class="muted">Loading protection status.</p>
+    <button class="btn btn--ghost" id="audit-custody-refresh" type="button">Refresh protection status</button>
+
+    {% if can_admin %}
+    <details>
+      <summary>More protection (administrators)</summary>
+      <div class="aud-actions">
+        <button type="button" class="btn btn--ghost" id="aud-seal">Encrypt older days</button>
+        <button type="button" class="btn btn--ghost" id="aud-worm-push">Copy older days to write-once storage</button>
+        <button type="button" class="btn btn--ghost" id="aud-worm-check">Check write-once copies</button>
+        <button type="button" class="btn btn--ghost" id="aud-proof">Download a signed proof bundle</button>
+        <button type="button" class="btn btn--ghost" id="aud-proof-key">Show the key checkers need</button>
+        {% if can_global_admin %}<button type="button" class="btn btn--danger" id="aud-rotate">Make a new signing key</button>{% endif %}
+      </div>
+      <p class="muted">A proof bundle lets someone outside your company confirm what Lightwork did. Give them the key separately, for example by email.</p>
+    </details>
+    {% endif %}
+  </section>
+
+  <script>
   (function () {
-    const input = document.getElementById('audit-quick');
-    const count = document.getElementById('audit-quick-count');
-    const table = document.getElementById('audit-table');
-    if (!input || !table) return;
-    const rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
-    function apply() {
-      const q = input.value.trim().toLowerCase();
-      let shown = 0;
-      rows.forEach(function (tr) {
-        const hit = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
-        tr.style.display = hit ? '' : 'none';
-        if (hit) shown++;
-      });
-      count.textContent = q ? (shown + ' of ' + rows.length + ' events') : '';
+    'use strict';
+    function $(id) { return document.getElementById(id); }
+    var result = $('aud-action-result');
+    function show(lines) {
+      result.textContent = '';
+      lines.forEach(function (t) { var p = document.createElement('p'); p.textContent = t; result.appendChild(p); });
     }
-    input.addEventListener('input', apply);
+    function range() {
+      var when = $('aud-when') ? $('aud-when').value : 'today';
+      if (when === 'range') return { since: $('aud-since').value || null, until: $('aud-until').value || null };
+      if (when === 'day' && $('aud-day').value) return { since: $('aud-day').value, until: $('aud-day').value };
+      var today = new Date().toISOString().slice(0, 10);
+      return { since: today, until: today };
+    }
+    async function call(method, url, body, action) {
+      try {
+        var r = await fetch(url, { method: method, credentials: 'same-origin',
+          headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          show([([403, 409, 422, 502, 503].indexOf(r.status) >= 0 && typeof j.detail === 'string' && j.detail.length < 300)
+            ? j.detail : window.mvErrorText(r, action)]);
+          return null;
+        }
+        return j;
+      } catch (e) { show([window.mvErrorText(e, action)]); return null; }
+    }
+    function wire(id, fn) {
+      var b = $(id);
+      if (!b) return;
+      b.addEventListener('click', async function () { b.disabled = true; try { await fn(); } finally { b.disabled = false; } });
+    }
+    function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+    // Date choice: show only the fields for the chosen option.
+    var when = $('aud-when');
+    function syncWhen() {
+      Array.prototype.forEach.call(document.querySelectorAll('[data-aud-when]'), function (lab) {
+        var on = lab.getAttribute('data-aud-when') === when.value;
+        lab.hidden = !on;
+        var input = lab.querySelector('input');
+        if (input) input.disabled = !on;
+      });
+    }
+    if (when) { when.addEventListener('change', syncWhen); syncWhen(); }
+    var pick = $('aud-pick');
+    if (pick) pick.addEventListener('click', function () { when.value = 'day'; syncWhen(); $('aud-day').focus(); });
+
+    wire('aud-check', async function () {
+      show(['Checking…']);
+      var d = await call('POST', '/api/v1/audit/check', range(), 'check the log');
+      if (!d) return;
+      var lines = [];
+      if (!d.days_checked) lines.push('There is nothing recorded for these dates to check.');
+      else if (d.intact) lines.push('All ' + plural(d.days_checked, 'day', 'days') + ' checked: nothing has been changed.');
+      else if (d.problems.length) lines = ['Some entries were changed or could not be confirmed:'].concat(d.problems);
+      if (d.unsigned_days) lines.push(plural(d.unsigned_days, 'day was', 'days were') + ' recorded before tamper-evident records were turned on, so they cannot be checked.');
+      if (d.removed_by_policy) lines.push(plural(d.removed_by_policy, 'older day was', 'older days were') + ' deleted by your record-keeping policy; that deletion is itself recorded.');
+      show(lines);
+    });
+    wire('aud-download', async function () {
+      var r = range();
+      var url = new URL('/api/v1/audit/download', window.location.origin);
+      url.searchParams.set('format', $('aud-format').value);
+      if (r.since) url.searchParams.set('since', r.since);
+      if (r.until) url.searchParams.set('until', r.until);
+      var ok = await window.mvConfirm('Download the activity for these dates? The file can contain personal information, so store it safely.', { okText: 'Download' });
+      if (ok) { window.location.href = url.pathname + url.search; show(['Your download has started.']); }
+    });
+    wire('aud-forward', async function () {
+      if (!(await window.mvConfirm('Send the activity for these dates to your security monitoring system?', { okText: 'Send' }))) return;
+      var d = await call('POST', '/api/v1/audit/forward', range(), 'send the activity');
+      if (d) show(['Sent ' + plural(d.sent, 'entry', 'entries') + '.']);
+    });
+    wire('aud-seal', async function () {
+      var p = await call('POST', '/api/v1/audit/seal', { preview: true }, 'check which days can be encrypted');
+      if (!p) return;
+      if (!p.days) { show(['All older days are already encrypted.']); return; }
+      if (!(await window.mvConfirm('Encrypt ' + plural(p.days, 'older day', 'older days') + ' of the log? They stay readable here and can still be checked.', { okText: 'Encrypt' }))) return;
+      var d = await call('POST', '/api/v1/audit/seal', { preview: false }, 'encrypt older days');
+      if (d) show(['Encrypted ' + plural(d.days, 'day', 'days') + '.']);
+    });
+    wire('aud-worm-push', async function () {
+      var p = await call('POST', '/api/v1/audit/write-once/push', { preview: true }, 'check which days can be copied');
+      if (!p) return;
+      if (!p.days) { show(['All older days are already copied.']); return; }
+      if (!(await window.mvConfirm('Copy ' + plural(p.days, 'older day', 'older days') + ' to write-once storage? Copies there cannot be changed or deleted, even by administrators.', { okText: 'Copy' }))) return;
+      var d = await call('POST', '/api/v1/audit/write-once/push', { preview: false }, 'copy older days');
+      if (d) show(['Copied ' + plural(d.days, 'day', 'days') + '.' + (d.failed ? ' ' + plural(d.failed, 'day', 'days') + ' could not be copied; try again later.' : '')]);
+    });
+    wire('aud-worm-check', async function () {
+      var d = await call('GET', '/api/v1/audit/write-once/check', null, 'check the write-once copies');
+      if (!d) return;
+      show([d.not_copied.length ? d.copied + ' of ' + d.days + ' older days are safely copied. Not copied yet: ' + d.not_copied.join(', ') + '.'
+        : 'All ' + plural(d.days, 'older day is', 'older days are') + ' safely copied.']);
+    });
+    wire('aud-rotate', async function () {
+      if (!(await window.mvConfirm('Make a new signing key? New entries are signed with it; older entries can still be checked with the old key.', { okText: 'Make new key' }))) return;
+      var d = await call('POST', '/api/v1/audit/rotate-key', {}, 'make a new signing key');
+      if (d) show(['A new signing key is ready. It is used after Lightwork restarts.']);
+    });
+    wire('aud-proof', async function () {
+      if (!(await window.mvConfirm('Build and download a signed proof bundle of what Lightwork did?', { okText: 'Download' }))) return;
+      try {
+        var r = await fetch('/api/v1/audit/proof-bundle', { method: 'POST', credentials: 'same-origin' });
+        if (!r.ok) { var j = await r.json().catch(function () { return {}; }); show([r.status === 409 && j.detail ? j.detail : window.mvErrorText(r, 'build the proof bundle')]); return; }
+        var blob = await r.blob();
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'lightwork-proof.json';
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        show(['Proof bundle downloaded. Give the checker the key separately.']);
+      } catch (e) { show([window.mvErrorText(e, 'build the proof bundle')]); }
+    });
+    wire('aud-proof-key', async function () {
+      var d = await call('GET', '/api/v1/audit/proof-key', null, 'show the key');
+      if (!d) return;
+      show(['Give this key to whoever checks your proof bundle:', d.key]);
+      var copy = document.createElement('button');
+      copy.type = 'button'; copy.className = 'btn btn--ghost'; copy.textContent = 'Copy key';
+      copy.addEventListener('click', function () { window.mvCopy(d.key); });
+      result.appendChild(copy);
+    });
+
+    // Protection status.
+    var refresh = $('audit-custody-refresh');
+    async function loadCustody() {
+      refresh.disabled = true;
+      var status = $('audit-custody-status');
+      status.textContent = 'Checking…';
+      try {
+        var response = await fetch('/api/v1/audit/unified/status', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' });
+        if (!response.ok) throw response;
+        var body = await response.json();
+        var c = body && typeof body.custody === 'object' ? body.custody : {};
+        $('audit-custody-enabled').textContent = c.ready === true ? 'Ready' : (c.enabled === true ? 'Being set up' : 'Off');
+        $('audit-custody-checkpoint').textContent = c.checkpoint_enabled === true ? 'On' : 'Off';
+        $('audit-custody-worm').textContent = c.worm_enabled === true ? 'On' : 'Off';
+        $('audit-custody-siem').textContent = c.siem_enabled === true ? 'Connected' : 'Not connected';
+        status.textContent = c.ready === true ? 'Extra protection is set up for this workspace.' :
+          'Extra protection is not set up for this workspace. Your administrator can set it up during installation.';
+      } catch (error) {
+        status.textContent = window.mvErrorText(error, 'load the protection status');
+        ['audit-custody-enabled', 'audit-custody-checkpoint', 'audit-custody-worm', 'audit-custody-siem'].forEach(function (id) { $(id).textContent = '—'; });
+      } finally { refresh.disabled = false; }
+    }
+    refresh.addEventListener('click', loadCustody);
+    loadCustody();
+    call('GET', '/api/v1/audit/actions', null, 'load the options').then(function (d) {
+      if (!d) { result.textContent = ''; return; }
+      var fwd = $('aud-forward');
+      if (fwd) fwd.hidden = !d.security_system_connected;
+      if (!d.download_allowed) {
+        Array.prototype.forEach.call($('aud-format').options, function (o) { if (o.value !== 'csv') o.disabled = true; });
+      }
+    });
   })();
-</script>
+  </script>
 {% endblock %}

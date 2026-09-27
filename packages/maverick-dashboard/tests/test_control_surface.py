@@ -193,7 +193,7 @@ def test_audit_page_renders(monkeypatch, tmp_path: Path):
     client = _client()
     r = client.get("/audit")
     assert r.status_code == 200
-    assert "audit log" in r.text.lower()
+    assert "activity log" in r.text.lower()
 
 
 def test_plugins_page_renders(monkeypatch):

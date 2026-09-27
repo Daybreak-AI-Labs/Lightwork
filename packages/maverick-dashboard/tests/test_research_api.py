@@ -455,10 +455,22 @@ def test_research_page_asset_and_visible_navigation_are_customer_reachable(clien
     assert 'src="/static/lightwork-research.js"' in page.text
     assert 'src="/static/lightwork-research-workspace.js"' in page.text
     assert 'src="/static/lightwork-candidate-promotions.js"' in page.text
+    assert 'src="/static/lightwork-research-plain.js"' in page.text
+    from test_support.plain_language import developer_terms, visible_text
+    assert developer_terms(page.text) == []
+    text = visible_text(page.text)
+    for banned in ("SHA-256", "Unix seconds", "bytes", "Dataset ID", "Run ID", "Seed", "Evaluator ID"):
+        assert banned not in text, banned
+    for label in ("Dataset name", "License or contract document", "What it may be used for",
+                  "Time limit", "Storage limit", "Code project"):
+        assert label in text, label
+    assert 'type="file" data-fingerprint-for="license_evidence_sha256"' in page.text
+    plain = customer.get("/static/lightwork-research-plain.js")
+    assert plain.status_code == 200 and "/api/v1/research-files/fingerprint" in plain.text
     asset = customer.get("/static/lightwork-research.js")
     assert asset.status_code == 200
     assert "application/javascript" in asset.headers["content-type"]
-    assert "exact source review" in asset.text
+    assert "could not be opened for review" in asset.text
     workspace_asset = customer.get("/static/lightwork-research-workspace.js")
     assert workspace_asset.status_code == 200
     assert "blocked before data access" in workspace_asset.text

@@ -19,6 +19,7 @@
   .lrn__moat { --glass-tint: var(--brand-subtle); border: 1px solid var(--brand-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5); }
   .lrn__moat strong { color: var(--brand); }
   .lrn__enable-note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
+  .lrn__actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
 </style>
 
 {% from "_hero.html" import hero, state %}
@@ -42,12 +43,12 @@
 <div class="lrn">
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
-      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">Loading…</span></span>
   </div>
 
   {% if not learning_can_manage %}
   <p class="notice" role="note">
-    Read only: changing deployment-wide learning controls requires a global administrator.
+    View only: only an administrator can change learning settings.
   </p>
   {% endif %}
 
@@ -61,7 +62,7 @@
     </div>
     <div class="panel viz-card viz-card--wide">
       <h2>Accumulated judgement</h2>
-      <p class="viz-sub">Read-only, from your Operating Record and learning stores — scoped to you.</p>
+      <p class="viz-sub">From your Operating Record and what Lightwork has learned. Only your own work is counted.</p>
       <div id="bd-acc"></div>
     </div>
   </div>
@@ -102,8 +103,8 @@
         if (!r.ok) {
           var b = await r.json().catch(function () { return {}; });
           msg.textContent = r.status === 403
-            ? 'Only an administrator can change this — ask yours to flip it.'
-            : (b.detail || ('Could not update learning posture (HTTP ' + r.status + '). Try again.'));
+            ? 'Only an administrator can change this. Ask your administrator.'
+            : window.mvErrorText(r, 'change learning');
           delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false; return;
         }
         location.reload();   // re-render with the new on/off state
@@ -126,19 +127,20 @@
       </ul>
       <p class="lrn__enable-note" id="lrn-switches-msg" role="status" aria-live="polite" style="margin-top: var(--space-2);"></p>
 
-      <h3 class="lrn__section-h" id="lrn-detail-h" style="margin-top: var(--space-4);">Everything the learning loop runs</h3>
-      <p class="lrn__section-sub">These fine-grained core components are distinct from the feature switches above. Governed learning
-        is on by default; the “Turn core learning on/off” button controls these components together.</p>
+      <details style="margin-top: var(--space-4);">
+      <summary id="lrn-detail-h">Show every part of the learning loop</summary>
+      <p class="lrn__section-sub">The “Turn core learning on/off” button above switches these parts together.</p>
       <ul class="lrn__comp" aria-labelledby="lrn-detail-h">
         {% for c in snap.components %}
         <li class="lrn__row" data-on="{{ 'true' if c.on else 'false' }}">
-          <span class="badge {{ 'active' if c.on else '' }}">{{ 'on' if c.on else 'off' }}</span>
+          <span class="badge {{ 'active' if c.on else '' }}">{{ 'On' if c.on else 'Off' }}</span>
           <div class="lrn__row-main">
             <div class="lrn__row-label">{{ c.label }}</div>
           </div>
         </li>
         {% endfor %}
       </ul>
+      </details>
       <p class="lrn__enable-note">Once outcome tracking is on, every human sign-off on a deliverable
         automatically becomes feedback your workforce learns from — see
         <a href="/workforce">Workforce</a> for what your teams have delivered, and
@@ -190,11 +192,11 @@
           throw new Error('Could not reach the server — check your connection and try again.');
         }
         if (r.status === 403) {
-          throw new Error('Only an administrator can change this — ask yours to flip it.');
+          throw new Error('Only an administrator can change this. Ask your administrator.');
         }
         if (!r.ok) {
           var body = await r.json().catch(function () { return {}; });
-          throw new Error(body.detail || ('Could not update “' + sw.label + '” (HTTP ' + r.status + '). Try again.'));
+          throw new Error(window.mvErrorText(r, 'change “' + sw.label + '”'));
         }
         location.reload();   // re-render the whole page with the new state
       } catch (e) {
@@ -209,7 +211,7 @@
       li.setAttribute('data-on', sw.enabled ? 'true' : 'false');
       var badge = document.createElement('span');
       badge.className = 'badge' + (sw.enabled ? ' active' : '');
-      badge.textContent = sw.enabled ? 'on' : 'off';
+      badge.textContent = sw.enabled ? 'On' : 'Off';
       var main = document.createElement('div');
       main.className = 'lrn__row-main';
       var label = document.createElement('div');
@@ -262,27 +264,170 @@
         list.appendChild(row(sw));
       });
       if (!list.children.length) {
-        msg.textContent = 'This server reported no switchable systems.';
+        msg.textContent = 'There are no learning systems to switch here.';
       }
     }).catch(function () {
-      msg.textContent = 'Could not load the system switches — reload to try again.';
+      msg.textContent = 'Could not load the learning switches. Refresh the page to try again.';
     });
   })();
   </script>
+
+  {% if learning_can_manage %}
+  <section aria-labelledby="lrn-run-h">
+    <div class="section-head"><h2 id="lrn-run-h" class="lrn__section-h">Run learning now</h2></div>
+    <div class="panel">
+      <p class="lrn__section-sub">Lightwork usually learns overnight. Use these to run it now, check the result, or go back.</p>
+      <h3 class="lrn__section-h">Learn from recent work</h3>
+      <p class="lrn__section-sub">Reviews recently finished tasks, writes lessons from repeated problems and turns repeated successes into skills.
+        A saved point is made first, so you can go back.</p>
+      <div class="lrn__actions">
+        <button type="button" class="btn btn--ghost" id="lrn-dream-preview">Preview what would change</button>
+        <button type="button" class="btn btn--primary" id="lrn-dream-run">Learn now</button>
+      </div>
+      <div id="lrn-dream-result" role="status" aria-live="polite"></div>
+
+      <h3 class="lrn__section-h">Go back to a saved point</h3>
+      <p class="lrn__section-sub">Undo everything learned since a saved point. Saved points are made before each learning run.</p>
+      <div class="lrn__actions">
+        <label for="lrn-snapshot">Saved point</label>
+        <select id="lrn-snapshot" class="select"><option value="">Loading…</option></select>
+        <button type="button" class="btn btn--danger" id="lrn-rollback">Go back to this point</button>
+      </div>
+
+      <h3 class="lrn__section-h">Check whether anything useful was lost</h3>
+      <p class="lrn__section-sub">Compares past tasks against the saved point above: which ones Lightwork now has a lesson for, and which ones it lost.
+        Nothing is re-run and no AI is used.</p>
+      <div class="lrn__actions">
+        <label><input type="checkbox" id="lrn-hs-all"> Include tasks that went well</label>
+        <label><input type="checkbox" id="lrn-hs-record"> Keep the result in the activity log</label>
+        <button type="button" class="btn btn--ghost" id="lrn-hindsight">Check now</button>
+      </div>
+      <div id="lrn-hindsight-result" role="status" aria-live="polite"></div>
+
+      <h3 class="lrn__section-h">Prove learning helps</h3>
+      <p class="lrn__section-sub">Choose a results file from your test run: the same tasks scored once with learning paused and once with it on.
+        Lightwork tells you whether learning made a real difference.</p>
+      <div class="lrn__actions">
+        <label for="lrn-prove-file">Results file</label>
+        <input type="file" id="lrn-prove-file" class="input" accept=".json,application/json">
+        <button type="button" class="btn btn--ghost" id="lrn-prove">Check the results</button>
+      </div>
+      <div id="lrn-prove-result" role="status" aria-live="polite"></div>
+    </div>
+  </section>
+  <script>
+  (function () {
+    function $(id) { return document.getElementById(id); }
+    function show(id, lines) {
+      var box = $(id); box.textContent = '';
+      lines.forEach(function (t, i) { var p = document.createElement(i ? 'p' : 'p'); p.textContent = t; box.appendChild(p); });
+    }
+    async function call(method, url, body, action, target) {
+      try {
+        var r = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          var text = ([404, 409, 422, 503].indexOf(r.status) >= 0 && typeof j.detail === 'string' && j.detail.length < 300)
+            ? j.detail : window.mvErrorText(r, action);
+          if (target) show(target, [text]); else window.mvToast(text, { error: true });
+          return null;
+        }
+        return j;
+      } catch (e) { var t = window.mvErrorText(e, action); if (target) show(target, [t]); else window.mvToast(t, { error: true }); return null; }
+    }
+    function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+    function dreamLines(d) {
+      var head = d.preview ? 'If Lightwork learned now, it would:' : 'Done. Lightwork:';
+      return [head,
+        '• review ' + plural(d.tasks_reviewed, 'finished task', 'finished tasks') + ' and ' + plural(d.failures_reviewed, 'problem', 'problems'),
+        '• write ' + plural(d.lessons_written, 'lesson', 'lessons') + ' and learn ' + plural(d.skills_learned, 'skill', 'skills'),
+        '• retire ' + plural(d.skills_retired, 'skill', 'skills') + ' that stopped working and tidy ' + plural(d.notes_tidied, 'old note', 'old notes')]
+        .concat(d.paused ? ['Learning is paused while its checks recover, so nothing new was kept.'] : []);
+    }
+    async function loadSnapshots() {
+      var sel = $('lrn-snapshot');
+      var d = await call('GET', '/api/v1/learning/snapshots', null, 'load the saved points');
+      sel.textContent = '';
+      var list = (d && d.snapshots) || [];
+      if (!list.length) {
+        var o = document.createElement('option'); o.value = ''; o.textContent = 'No saved points yet'; sel.appendChild(o);
+      }
+      list.forEach(function (s) { var o = document.createElement('option'); o.value = s.value; o.textContent = s.label; sel.appendChild(o); });
+    }
+    $('lrn-dream-preview').addEventListener('click', async function (ev) {
+      ev.target.disabled = true;
+      show('lrn-dream-result', ['Working it out…']);
+      var d = await call('POST', '/api/v1/learning/dream', { preview: true }, 'preview learning', 'lrn-dream-result');
+      ev.target.disabled = false;
+      if (d) show('lrn-dream-result', dreamLines(d));
+    });
+    $('lrn-dream-run').addEventListener('click', async function (ev) {
+      if (!(await mvConfirm('Learn from recent work now? A saved point is made first so you can go back.', { okText: 'Learn now' }))) return;
+      ev.target.disabled = true;
+      show('lrn-dream-result', ['Learning…']);
+      var d = await call('POST', '/api/v1/learning/dream', { preview: false }, 'run learning', 'lrn-dream-result');
+      ev.target.disabled = false;
+      if (d) { show('lrn-dream-result', dreamLines(d)); loadSnapshots(); }
+    });
+    $('lrn-rollback').addEventListener('click', async function (ev) {
+      var sel = $('lrn-snapshot');
+      if (!sel.value) { window.mvToast('There is no saved point to go back to yet.', { error: true }); return; }
+      var label = sel.options[sel.selectedIndex].textContent;
+      if (!(await mvConfirm('Go back to the saved point from ' + label + '? Everything learned after it is removed.', { okText: 'Go back' }))) return;
+      ev.target.disabled = true;
+      var d = await call('POST', '/api/v1/learning/rollback', { snapshot: sel.value }, 'go back to the saved point');
+      ev.target.disabled = false;
+      if (d) window.mvToast('Restored what Lightwork knew at ' + label + '.');
+    });
+    $('lrn-hindsight').addEventListener('click', async function (ev) {
+      ev.target.disabled = true;
+      var d = await call('POST', '/api/v1/learning/hindsight', { snapshot: $('lrn-snapshot').value || null,
+        all_tasks: $('lrn-hs-all').checked, record: $('lrn-hs-record').checked }, 'check past tasks', 'lrn-hindsight-result');
+      ev.target.disabled = false;
+      if (!d) return;
+      var lines = ['Compared ' + plural(d.tasks, 'past task', 'past tasks') + ' with ' + d.compared_with + ': ' +
+        d.covered_before + ' had a lesson then, ' + d.covered_now + ' have one now.'];
+      lines.push(d.lost.length ? 'Lessons lost for: ' + d.lost.join('; ') : 'Nothing useful was lost.');
+      if (d.gained.length) lines.push('New lessons for: ' + d.gained.join('; '));
+      if (d.recorded) lines.push('Kept in the activity log.');
+      show('lrn-hindsight-result', lines);
+    });
+    $('lrn-prove').addEventListener('click', async function (ev) {
+      var input = $('lrn-prove-file');
+      var file = input.files && input.files[0];
+      if (!file) { show('lrn-prove-result', ['Choose a results file first.']); return; }
+      var data;
+      try { data = JSON.parse(await file.text()); } catch (e) { data = null; }
+      if (!data || !Array.isArray(data.baseline) || !Array.isArray(data.treatment)) {
+        show('lrn-prove-result', ['That file is not a results file Lightwork can read.']); return;
+      }
+      ev.target.disabled = true;
+      var d = await call('POST', '/api/v1/learning/prove', { baseline: data.baseline, treatment: data.treatment }, 'check the results', 'lrn-prove-result');
+      ev.target.disabled = false;
+      if (!d) return;
+      var verdict = d.verdict === 'improved' ? 'Learning made a real improvement.' :
+        d.verdict === 'worse' ? 'Learning made results worse.' : 'There is no clear difference yet.';
+      show('lrn-prove-result', [verdict, 'Across ' + plural(d.tasks, 'task', 'tasks') + ': average score ' +
+        Math.round(d.before * 100) + '% with learning paused and ' + Math.round(d.after * 100) + '% with it on. ' +
+        d.better + ' got better, ' + d.worse + ' got worse, ' + d.same + ' stayed the same.']);
+    });
+    loadSnapshots();
+  })();
+  </script>
+  {% endif %}
 
   {% if snap.flow_autonomy %}
   <section aria-labelledby="lrn-auto-h">
     <div class="section-head"><h2 id="lrn-auto-h" class="lrn__section-h">Autonomous workflow self-improvement</h2></div>
     <div class="panel">
       <p class="lrn__section-sub" style="margin-bottom: var(--space-3);">
-        Kept separate from the button above on purpose: this lets your automations improve their own
-        <em>live</em> workflows — a heavier step than passive learning, so it’s its own opt-in.
-        Each rewrite is measured against real outcomes and versioned, so a change that hurts is undone.</p>
+        This lets your workflows improve themselves while they run, so it is a separate choice.
+        Each change is measured against real results and saved as a new version, so a change that hurts can be undone.</p>
       {% if not snap.flow_autonomy.engine_on %}
-      <p class="lrn__section-sub">Turn the flow engine on first — it runs your automations end to end,
-        and these self-improvement options unlock once it’s running.</p>
+      <p class="lrn__section-sub">Turn on workflows first. These options appear once workflows are running.</p>
       <button type="button" class="btn btn--primary" id="lrn-flows-on"
-              {% if not learning_can_manage %}disabled aria-disabled="true"{% endif %}>Turn on the flow engine</button>
+              {% if not learning_can_manage %}disabled aria-disabled="true"{% endif %}>Turn on workflows</button>
       <span class="lrn__enable-note" id="lrn-flows-msg" role="status" aria-live="polite"></span>
       <script>
       (function () {
@@ -295,8 +440,8 @@
           btn.dataset.inFlight = 'true';
           var msg = document.getElementById('lrn-flows-msg');
           if (!(await mvConfirm(
-            'Turn on the flow engine for this deployment? Scheduled and triggered workflows may begin running.',
-            { okText: 'Turn on engine' }
+            'Turn on workflows? Scheduled and triggered workflows may start running.',
+            { okText: 'Turn on workflows' }
           ))) { delete btn.dataset.inFlight; return; }
           btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Turning on…';
           fetch('/api/v1/features/switches', {
@@ -304,11 +449,11 @@
             body: JSON.stringify({ section: 'flows', enabled: true }),
           }).then(function (r) {
             if (r.status === 403) {
-              throw new Error('Only an administrator can turn this on — ask yours to flip it.');
+              throw new Error('Only an administrator can turn this on. Ask your administrator.');
             }
             if (!r.ok) {
               return r.json().catch(function () { return {}; }).then(function (body) {
-                throw new Error(body.detail || ('Could not turn the flow engine on (HTTP ' + r.status + '). Try again.'));
+                throw new Error(window.mvErrorText(r, 'turn on workflows'));
               });
             }
             location.reload(); return null;
@@ -326,15 +471,15 @@
         <button type="button" class="btn" id="lrn-auto-evolve" data-on="{{ 'true' if snap.flow_autonomy.auto_evolve else 'false' }}"
                 aria-pressed="{{ 'true' if snap.flow_autonomy.auto_evolve else 'false' }}"
                 {% if not learning_can_manage %}disabled aria-disabled="true"{% endif %}>
-          {{ '✓ Auto-revert regressions is ON' if snap.flow_autonomy.auto_evolve else 'Turn on auto-revert regressions' }}
+          {{ 'Automatic undo is on: turn it off' if snap.flow_autonomy.auto_evolve else 'Turn on automatic undo' }}
         </button>
-        <span class="lrn__enable-note" style="margin-top:0;">Undo a self-rewrite the loop measures as a clear regression — the safety net.</span>
+        <span class="lrn__enable-note" style="margin-top:0;">Automatically undo a workflow change that makes results clearly worse. This is the safety net.</span>
         <button type="button" class="btn" id="lrn-auto-apply" data-on="{{ 'true' if snap.flow_autonomy.auto_apply else 'false' }}"
                 aria-pressed="{{ 'true' if snap.flow_autonomy.auto_apply else 'false' }}"
                 {% if not learning_can_manage or not snap.flow_autonomy.auto_evolve %}disabled aria-disabled="true"{% endif %}>
-          {{ '✓ Auto-apply improvements is ON' if snap.flow_autonomy.auto_apply else 'Turn on auto-apply improvements' }}
+          {{ 'Automatic improvements are on: turn them off' if snap.flow_autonomy.auto_apply else 'Turn on automatic improvements' }}
         </button>
-        <span class="lrn__enable-note" style="margin-top:0;">Apply a proven improvement forward without a human. Needs auto-revert on (its safety net).</span>
+        <span class="lrn__enable-note" style="margin-top:0;">Apply a proven improvement without waiting for a person. Needs automatic undo on first.</span>
         <span class="lrn__enable-note" id="lrn-auto-msg" aria-live="polite" style="margin-top:0;"></span>
       </div>
       <script>
@@ -354,12 +499,12 @@
               prompt = next
                 ? 'Enable automatic application of proven workflow improvements? Future accepted changes may be deployed without another human click.'
                 : 'Disable automatic application of workflow improvements? Existing deployed changes remain, while future accepted changes will wait for a human.';
-              okText = next ? 'Enable auto-apply' : 'Disable auto-apply';
+              okText = next ? 'Turn on' : 'Turn off';
             } else {
               prompt = next
                 ? 'Enable automatic rollback of measured workflow regressions? The deployment may revert a harmful self-improvement without another human click.'
                 : 'Disable automatic rollback of workflow regressions? Deployed self-improvements will lose this automatic safety net.';
-              okText = next ? 'Enable auto-revert' : 'Disable auto-revert';
+              okText = next ? 'Turn on' : 'Turn off';
             }
             if (!(await mvConfirm(prompt, { okText: okText }))) { delete btn.dataset.inFlight; return; }
             var body = {}; body[field] = next;
@@ -372,8 +517,8 @@
               if (!r.ok) {
                 var b = await r.json().catch(function () { return {}; });
                 msg.textContent = r.status === 403
-                  ? 'Only an administrator can change this — ask yours to flip it.'
-                  : (b.detail || ('Could not update workflow autonomy (HTTP ' + r.status + '). Try again.'));
+                  ? 'Only an administrator can change this. Ask your administrator.'
+                  : window.mvErrorText(r, 'change this setting');
                 delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false; return;
               }
               location.reload();
@@ -394,28 +539,26 @@
 
   {% if snap.dgm %}
   <section aria-labelledby="lrn-dgm-h">
-    <div class="section-head"><h2 id="lrn-dgm-h" class="lrn__section-h">DGM code-evolution research</h2></div>
+    <div class="section-head"><h2 id="lrn-dgm-h" class="lrn__section-h">Experimental: let Lightwork try improving its own code</h2></div>
     <div class="panel">
       <p class="lrn__section-sub" style="margin-bottom: var(--space-3);">
-        Separate from governed learning and <strong>off by default</strong>. When armed, DGM may propose,
-        sandbox-evaluate, and archive bounded code candidates. It cannot deploy or adopt code.</p>
+        Separate from everyday learning and <strong>off unless you turn it on</strong>. When on, Lightwork may try
+        small changes to its own code in a safe practice area and keep the results for review. It can never install them.</p>
       <p style="margin:0 0 var(--space-3);">
         <span class="badge {{ 'active' if snap.dgm.state == 'ready' else '' }}">
-          {{ 'ready for operator-run cycles' if snap.dgm.state == 'ready' else ('armed but blocked' if snap.dgm.state == 'blocked' else 'off') }}
+          {{ 'On and ready' if snap.dgm.state == 'ready' else ('On, but something is blocking it' if snap.dgm.state == 'blocked' else 'Off') }}
         </span>
       </p>
       {% if snap.dgm.blockers %}
-      <ul class="muted" style="font-size: var(--text-sm); margin-top:0;">
-        {% for blocker in snap.dgm.blockers %}<li>{{ blocker.message }}</li>{% endfor %}
-      </ul>
+      <p class="muted" style="font-size: var(--text-sm); margin-top:0;">{{ snap.dgm.blockers | length }} setting{{ '' if snap.dgm.blockers | length == 1 else 's' }} outside this page must be changed first. Ask your IT administrator.</p>
       {% endif %}
       <button type="button" class="btn" id="lrn-dgm"
               data-on="{{ 'true' if snap.dgm.requested else 'false' }}"
               {% if snap.dgm.control_managed or not learning_can_manage %}disabled aria-disabled="true"{% endif %}>
-        {{ 'Turn DGM research off' if snap.dgm.requested else 'Turn DGM research on' }}
+        {{ 'Turn this off' if snap.dgm.requested else 'Turn this on' }}
       </button>
       {% if snap.dgm.control_managed %}
-      <span class="lrn__enable-note">Managed by higher-precedence deployment policy (<code>{{ snap.dgm.managed_by }}</code>).</span>
+      <span class="lrn__enable-note">This is set by your IT administrator and cannot be changed here.</span>
       {% endif %}
       <span class="lrn__enable-note" id="lrn-dgm-msg" aria-live="polite"></span>
       <script>
@@ -430,9 +573,9 @@
           var msg = document.getElementById('lrn-dgm-msg');
           var next = btn.getAttribute('data-on') !== 'true';
           var prompt = next
-            ? 'Enable research-only DGM for this deployment? It may propose and sandbox-evaluate code, but cannot deploy it.'
-            : 'Disable research-only DGM for this deployment? New research cycles will be blocked; archived candidates and evidence are retained.';
-          if (!(await mvConfirm(prompt, { okText: next ? 'Enable research' : 'Disable research' }))) {
+            ? 'Let Lightwork try changes to its own code in a safe practice area? It can never install them.'
+            : 'Stop these experiments? Results so far are kept.';
+          if (!(await mvConfirm(prompt, { okText: next ? 'Turn on' : 'Turn off' }))) {
             delete btn.dataset.inFlight; return;
           }
           btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Applying…';
@@ -446,7 +589,7 @@
             });
             if (!r.ok) {
               var body = await r.json().catch(function () { return {}; });
-              msg.textContent = body.detail || ('Could not update DGM control (HTTP ' + r.status + '). Try again.');
+              msg.textContent = window.mvErrorText(r, 'change this setting');
               delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false; return;
             }
             location.reload();
@@ -481,7 +624,7 @@
     k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
       sub: 'approvals: ' + B.fmt(acc.approvals) }));
     k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned,
-      sub: B.fmt(grounded) + ' grounded outcomes' }));
+      sub: B.fmt(grounded) + ' results checked against real outcomes' }));
 
     B.donut(document.getElementById('bd-systems'), {
       segments: [
@@ -498,9 +641,9 @@
       { label: 'Human decisions', value: acc.human_decisions || 0 },
       { label: 'Approvals', value: acc.approvals || 0 },
       { label: 'Learned capabilities', value: learned },
-      { label: 'Grounded outcomes', value: grounded }];
+      { label: 'Results checked against real outcomes', value: grounded }];
     if ((acc.flow_self_improvements || 0) > 0) {
-      rows.push({ label: 'Flow self-improvements',
+      rows.push({ label: 'Workflow self-improvements',
                   value: acc.flow_self_improvements, cls: 'info' });
     }
     var max = 1;

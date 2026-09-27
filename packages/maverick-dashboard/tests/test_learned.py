@@ -45,19 +45,21 @@ def test_learned_panel_renders_ledger_entries(monkeypatch, tmp_path):
          "name": "web_scrape", "source": "catalog", "outcome": "failed"},
     ])
     text = _client().get("/learned").text
-    assert "learned capabilities" in text.lower()
-    assert "send_sms" in text
-    assert "web_scrape" in text
+    assert "learned skills and tools" in text.lower()
+    assert "Send sms" in text
+    assert "Web scrape" in text
     assert "send an sms" in text
-    assert "acquired" in text and "failed" in text
+    assert "Added" in text and "Failed" in text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(text) == []
 
 
 def test_learned_page_renders_empty(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/learned").text
-    assert "Nothing learned yet" in text
-    assert "No generated tools" in text
-    assert "No self-harness guidance learned" in text
+    assert "Nothing learned yet" in text and "Turn on self-learning" in text
+    assert "No tools written yet" in text
+    assert "No lessons learned yet" in text
     # Reached from the Learning page (one nav entry per job: /learned left the
     # sidebar; the link lives on /learning).
     assert 'href="/learned"' in _client().get("/learning").text
@@ -76,9 +78,9 @@ def test_learned_page_has_no_admin_config_copy(monkeypatch, tmp_path):
     assert "learned.ndjson" not in text and "generated_tools/" not in text
     # The shared hero renders with a real fact from context...
     assert "hero-statebox" in text
-    assert "self-harness off" in text
+    assert "Self-coaching off" in text
     # ...and the OFF note routes users to the in-app switch.
-    assert "Self-harness is OFF" in text
+    assert "Self-coaching is off" in text
     assert 'href="/learning"' in text
 
 
@@ -102,8 +104,8 @@ def test_harness_guidance_renders_on_page_and_api(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _seed_harness(monkeypatch, tmp_path, enabled=True)
     text = _client().get("/learned").text
-    assert "self-harness guidance" in text.lower()
-    assert "claude-x" in text
+    assert "Lessons Lightwork taught itself" in text
+    assert 'data-model="claude-x"' in text and "Remove this lesson" in text
     assert "verify the export precondition before acting" in text
     # API mirrors the page.
     body = _client().get("/api/v1/learned").json()
@@ -134,9 +136,9 @@ def test_harness_view_shows_recent_rate_and_pending_corpus(monkeypatch, tmp_path
         "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
     text = _client().get("/learned").text
     assert "75% success" in text                       # lifetime rate unchanged
-    assert "recent 1✓/3✗ (25%)" in text                # the recency signal
-    assert "harvested corpus candidate" in text        # staged ground truth visible
-    assert 'class="pc-resolve"' in text                # ...and resolvable in-page
+    assert "lately 1 went well, 3 did not (25%)" in text   # the recency signal
+    assert "suggested test case" in text               # staged ground truth visible
+    assert "pc-resolve" in text and "Keep as a test case" in text  # ...resolvable in-page
     body = _client().get("/api/v1/learned").json()
     rec = body["harness"][0]["provenance"][0]
     assert rec["recent_rate"] == 0.25 and body["pending_corpus"] == {"m1": 1}
@@ -186,8 +188,8 @@ def test_pending_corpus_details_are_admin_only(monkeypatch, tmp_path):
     assert viewer_body["pending_corpus"] == {"m1": 1}
     assert viewer_body["pending_items"] == {}
     viewer_page = _client().get("/learned", headers=_as("lowpriv")).text
-    assert "harvested corpus candidate" in viewer_page
-    assert 'class="pc-resolve"' not in viewer_page
+    assert "suggested test case" in viewer_page
+    assert "Keep as a test case" not in viewer_page
     assert "SECRET: acquisition target payroll" not in viewer_page
     assert "confidential spreadsheet row 17" not in viewer_page
 
@@ -250,7 +252,7 @@ def test_harness_view_shows_provenance_and_conflicts(monkeypatch, tmp_path):
         "learned_at": 1700000000.0, "updated_at": 1700000000.0}}, store)
     text = _client().get("/learned").text
     assert "timeout: slow export" in text          # per-line provenance rendered
-    assert "possible conflict" in text             # conflict badge rendered
+    assert "may contradict each other" in text     # conflict badge rendered
     body = _client().get("/api/v1/learned").json()
     h = body["harness"][0]
     assert h["provenance"] and h["conflicts"]
@@ -288,9 +290,10 @@ def test_harness_view_shows_efficacy_canary_and_domain(monkeypatch, tmp_path):
     assert by_text["check inputs first"]["canary"] is True
     assert by_text["reconcile before posting"]["domain"] == "finance"
     text = _client().get("/learned").text
-    assert "canary" in text                          # probation badge rendered
+    assert "On trial" in text                        # probation badge rendered
+    assert "Decide lessons on trial now" in text
     assert "75% success" in text                     # outcome counters rendered
-    assert "finance" in text                          # department tag rendered
+    assert "Finance" in text                          # department tag rendered
 
 
 def test_harness_guidance_shows_off_note_when_disabled(monkeypatch, tmp_path):
@@ -302,7 +305,7 @@ def test_harness_guidance_shows_off_note_when_disabled(monkeypatch, tmp_path):
     assert body["harness_enabled"] is False
     assert body["harness"][0]["model_id"] == "claude-x"
     text = _client().get("/learned").text
-    assert "Self-harness is OFF" in text
+    assert "Self-coaching is off" in text
 
 
 def test_generated_tools_list_renders(monkeypatch, tmp_path):
@@ -310,7 +313,7 @@ def test_generated_tools_list_renders(monkeypatch, tmp_path):
     (gen / "send_sms.py").write_text("# tool\n", encoding="utf-8")
     (gen / ".staging_x.py").write_text("# hidden\n", encoding="utf-8")
     text = _client().get("/learned").text
-    assert "send_sms.py" in text
+    assert 'data-name="send_sms.py"' in text and "Send sms" in text
     # Dot/underscore-prefixed staging files are not listed.
     assert ".staging_x.py" not in text
     # API shape mirrors the page.

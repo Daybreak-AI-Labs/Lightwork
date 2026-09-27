@@ -100,8 +100,8 @@ test('disabled execution keeps recovery and exact-source review available withou
   assert.equal(ui.document.getElementById('research-review-choice').options.length, 2);
   assert.equal(ui.document.getElementById('research-dispatch').disabled, true);
   assert.equal(ui.document.querySelectorAll('[data-research-job-cancel]').length, 1);
-  assert.match(ui.document.getElementById('research-jobs').textContent, /Evaluation: failed \(0 passed, 1 failed\)/);
-  assert.match(ui.document.getElementById('research-jobs').textContent, /Next action: <img/);
+  assert.match(ui.document.getElementById('research-jobs').textContent, /Result: Failed \(0 passed, 1 failed\)/);
+  assert.match(ui.document.getElementById('research-jobs').textContent, /Next step: <img/);
   assert.equal(ui.document.querySelector('#research-jobs img'), null);
   ui.dom.window.close();
 });
@@ -189,7 +189,7 @@ test('unavailable settings storage and wrong-context overviews fail closed', asy
       settings:{settings_sha256:'', enabled:false, valid:false, writable:false, source:'unavailable'}}));
     assert.equal(ui.document.getElementById('research-settings-save').disabled, true);
     assert.equal(ui.document.querySelector('#research-settings-form [name="enable"]').disabled, true);
-    assert.match(ui.document.getElementById('research-settings-readiness').textContent, /unavailable/);
+    assert.match(ui.document.getElementById('research-settings-readiness').textContent, /cannot be saved right now/);
     ui.dom.window.close();
   });
   await t.test('operator-owned settings', async () => {
@@ -201,12 +201,12 @@ test('unavailable settings storage and wrong-context overviews fail closed', asy
           scratch_bytes:16777216, pids:32, cpus:0.5}},
     }));
     assert.equal(ui.document.getElementById('research-settings-save').disabled, true);
-    assert.match(ui.document.getElementById('research-settings-readiness').textContent, /read-only/);
+    assert.match(ui.document.getElementById('research-settings-readiness').textContent, /managed by your IT team and cannot be changed here/);
     ui.dom.window.close();
   });
   await t.test('wrong context', async () => {
     const ui = await fixture(async () => overview({context:'0'.repeat(64)}));
-    assert.match(ui.document.getElementById('research-status').textContent, /account or workspace changed/i);
+    assert.match(ui.document.getElementById('research-status').textContent, /switched account or workspace/i);
     assert.equal(ui.document.getElementById('research-submit-button').disabled, true);
     ui.dom.window.close();
   });
@@ -296,7 +296,7 @@ test('invalid replacement files clear an earlier valid submission selection', as
   await settle();
   assert.equal(ui.document.getElementById('research-submit-button').disabled, true);
   assert.equal(form.elements.entrypoint.options.length, 1);
-  assert.match(ui.document.getElementById('research-files').textContent, /No source/);
+  assert.match(ui.document.getElementById('research-files').textContent, /No files chosen/);
   form.dispatchEvent(new ui.window.Event('submit', {bubbles:true, cancelable:true}));
   await settle();
   assert.equal(submissions, 0);
@@ -392,7 +392,7 @@ test('a delayed exact-source response cannot attach to a different review choice
   await settle();
   assert.equal(ui.document.getElementById('research-review-detail').textContent, '');
   assert.equal(ui.document.getElementById('research-dispatch').disabled, true);
-  assert.match(ui.document.getElementById('research-status').textContent, /could not be verified/);
+  assert.match(ui.document.getElementById('research-status').textContent, /could not be opened for review/);
   ui.dom.window.close();
 });
 
@@ -424,7 +424,7 @@ test('an administrator keeps the exact cross-user evaluation result after dispat
   await settle();
   const detail = ui.document.getElementById('research-review-detail').textContent;
   assert.match(detail, /1 passed · 0 failed/);
-  assert.match(detail, /completed · code 0/);
+  assert.match(detail, /finished normally/);
   assert.match(detail, /Share the reviewed result/);
   assert.match(detail, /print\("ok"\)/);
   assert.equal(ui.document.getElementById('research-dispatch').disabled, true);
@@ -460,10 +460,10 @@ test('a completed cross-user run remains visible when the follow-up refresh fail
   await settle();
   const detail = ui.document.getElementById('research-review-detail').textContent;
   assert.match(detail, /0 passed · 1 failed/);
-  assert.match(detail, /nonzero_exit · code 7/);
+  assert.match(detail, /stopped with a problem \(nonzero exit\)/);
   assert.match(detail, /Inspect the exact failed output/);
   assert.match(detail, /print\("durable"\)/);
   assert.match(ui.document.getElementById('research-status').textContent,
-    /run finished.*result remains below/i);
+    /program finished.*result is shown below/i);
   ui.dom.window.close();
 });

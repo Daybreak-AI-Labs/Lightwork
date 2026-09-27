@@ -37,9 +37,8 @@ def test_audit_page_has_instant_filter():
     from maverick.audit import record
     record("TOOL_CALL", agent="pia-analyst", goal_id=1, tool="email")
     html = client.get("/audit").text
-    assert 'id="audit-quick"' in html
-    assert 'id="audit-quick-count"' in html
-    assert 'id="audit-table"' in html
+    assert 'id="aud-q"' in html and 'id="aud-kind"' in html and 'id="aud-person"' in html
+    assert 'id="audit-table"' in html and "Pia analyst" in html
 
 
 def test_settings_capabilities_carry_descriptions():
