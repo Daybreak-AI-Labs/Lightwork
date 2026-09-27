@@ -820,8 +820,8 @@ the text received so far. A line that opens a quoted value for a named secret
 the Shield output scan: if a later part is blocked, the preview is withdrawn
 and the chat page clears it. When the model stops at its output limit, the
 cut-off tail is never shown, because it may end partway through a credential.
-Text in scripts that do not separate words with spaces (Chinese, Japanese)
-previews only at line breaks.
+In scripts that do not separate words with spaces (Chinese, Japanese,
+Korean), each character counts as a complete token.
 
 A plain chat answer, reached with no tool use, no code block, and no edit
 block, is handed to the person without the self-verifier's second model round

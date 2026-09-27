@@ -1454,6 +1454,20 @@ def _strip_final_marker(text: str) -> str:
     return text[end:].lstrip() if end is not None else text
 
 
+def _token_boundary(text: str, limit: int) -> int:
+    """The end of the last complete token before ``limit``: a whitespace
+    position, or just after a CJK / full-width character (those scripts do not
+    separate words with spaces, and a credential is never written in them).
+    0 when there is none."""
+    for i in range(min(limit, len(text)) - 1, -1, -1):
+        c = text[i]
+        if c in " \n\t":
+            return i
+        if ord(c) >= 0x2E80:
+            return i + 1
+    return 0
+
+
 class _ReplayedDecision(Exception):
     """A production twin's answer to a human approval gate (no human asked)."""
 
@@ -1543,8 +1557,7 @@ class _PartialAnswerStream:
             return
         if holdback:
             # Only whole tokens that ended before the held-back tail.
-            cut = max(visible.rfind(c, 0, max(0, len(visible) - holdback)) for c in " \n\t")
-            visible = visible[:cut] if cut > 0 else ""
+            visible = visible[:_token_boundary(visible, len(visible) - holdback)]
         # A marker cut mid-word ("FI", "FINAL") is not an answer yet.
         if not visible.strip() or visible == self._shown or "FINAL:".startswith(visible.strip()):
             return

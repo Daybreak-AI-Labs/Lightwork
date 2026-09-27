@@ -441,3 +441,12 @@ def test_failover_attempt_starts_a_fresh_preview():
     stream.finish()
     assert world.writes[-1] == "second model answer "
     assert _attempt_delta(None) is None and _attempt_delta(print) is print
+
+
+def test_text_without_spaces_previews_at_character_boundaries():
+    world = _Recorder()
+    stream = _PartialAnswerStream(world, 1)
+    answer = "这是一个很长的回答，" * 30                        # no spaces at all
+    stream(answer + "密钥是 sk-ant-api03-" + "B" * 20)             # key still being written
+    assert world.writes and answer.startswith(world.writes[-1].rstrip())
+    assert "sk-ant" not in world.writes[-1]
