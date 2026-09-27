@@ -230,6 +230,7 @@ _DEFAULT_RISK: dict[str, str] = {
     "zoom": "high",
     # low: read-only / pure lookups
     "read_file": "low",
+    "read_attachment": "low",
     "list_dir": "low",
     "list_specialists": "low",
     "repo_map": "low",

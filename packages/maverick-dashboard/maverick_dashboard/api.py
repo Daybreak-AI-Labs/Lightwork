@@ -5202,14 +5202,21 @@ async def download_goal_attachment(
         if fetched is None:
             raise HTTPException(status_code=410, detail="attachment bytes not on this host")
         path = fetched
-    return FileResponse(
-        path,
-        media_type=match.mime or "application/octet-stream",
-        headers={
-            "Content-Disposition": _attachment_content_disposition(match.filename),
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+    from maverick.attachments import is_sealed_file, read_bytes
+    headers = {
+        "Content-Disposition": _attachment_content_disposition(match.filename),
+        "X-Content-Type-Options": "nosniff",
+    }
+    media_type = match.mime or "application/octet-stream"
+    if not await run_in_threadpool(is_sealed_file, path):
+        return FileResponse(path, media_type=media_type, headers=headers)
+    try:
+        # GCM authenticates the whole (size-capped) blob before any byte is
+        # released, so a sealed attachment is decrypted in full, never streamed.
+        content = await run_in_threadpool(read_bytes, path)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="attachment could not be opened here") from exc
+    return Response(content=content, media_type=media_type, headers=headers)
 
 
 @router.get("/facts", response_model=dict[str, str])

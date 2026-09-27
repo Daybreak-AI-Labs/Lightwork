@@ -606,7 +606,7 @@ CORE_TOOL_NAMES = frozenset({
     # repo understanding
     "repo_map", "dep_graph",
     # interaction + attachments
-    "ask_user", "list_attachments",
+    "ask_user", "list_attachments", "read_attachment",
     # web / docs / media basics
     "http_fetch", "web_search", "read_pdf", "view_image",
     # memory + run introspection
@@ -721,7 +721,7 @@ def base_registry(
     check calls ``base_tool_names``.
     """
     from .ask_user import ask_user
-    from .attachments import list_attachments_tool
+    from .attachments import list_attachments_tool, read_attachment_tool
     from .fs import list_dir, read_file, write_file
     from .repo_map import repo_map
     from .shell import shell
@@ -753,6 +753,7 @@ def base_registry(
     reg.register(shell(sandbox))
     reg.register(ask_user(world, goal_id=goal_id))
     reg.register(list_attachments_tool(world, goal_id))
+    reg.register(read_attachment_tool(world, goal_id))
     reg.register(repo_map(sandbox))
     # Wave 10 (B1): surgical exact-match editor. OpenHands' biggest
     # single contribution to SWE-bench scores — eliminates ~30% of
