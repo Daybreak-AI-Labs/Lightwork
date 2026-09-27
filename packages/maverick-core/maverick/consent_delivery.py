@@ -2448,6 +2448,29 @@ class ConsentDeliveryStore:
                 "keys": [dict(key) for key in keys],
             }
 
+    def list_destinations(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List one tenant's destinations and key-ID metadata, newest first."""
+
+        self._require_enabled()
+        tenant = self._tenant(tenant_id)
+        bounded = _positive_int(limit, "limit", maximum=_MAX_AUDIT_LIMIT)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT destination_id FROM delivery_destinations WHERE tenant=? "
+                "ORDER BY created_at DESC,destination_id LIMIT ?",
+                (tenant, bounded + 1),
+            ).fetchall()
+        items = [
+            self.destination(tenant, str(row["destination_id"]))
+            for row in rows[:bounded]
+        ]
+        return {"items": items, "truncated": len(rows) > bounded}
+
     def message(self, tenant_id: str, message_id: str) -> dict[str, Any]:
         """Read safe queue metadata without returning the consent payload."""
 

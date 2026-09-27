@@ -3780,7 +3780,12 @@ async def consent_delivery_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_delivery.html",
-        {"consent_delivery_enabled": consent_delivery.enabled()},
+        {
+            "consent_delivery_enabled": consent_delivery.enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+            "consent_can_operate": has_global_permission(request, "operate"),
+        },
     )
 
 

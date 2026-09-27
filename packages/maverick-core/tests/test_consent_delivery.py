@@ -1158,3 +1158,22 @@ def test_default_transport_rechecks_private_fetch_override_before_network(
             timeout_seconds=5,
             max_response_bytes=128,
         )
+
+
+def test_list_destinations_is_tenant_scoped_and_bounded(tmp_path: Path) -> None:
+    store = _store(tmp_path / "delivery.sqlite3")
+    _enroll(store, destination="destination-a")
+    _enroll(store, destination="destination-b")
+    _enroll(store, tenant="tenant-b", destination="other")
+
+    listed = store.list_destinations("tenant-a")
+    assert {item["destination_id"] for item in listed["items"]} == {
+        "destination-a",
+        "destination-b",
+    }
+    assert listed["truncated"] is False
+    assert listed["items"][0]["keys"][0]["key_id"] == "key-1"
+    assert store.list_destinations("tenant-a", limit=1)["truncated"] is True
+    assert [
+        item["destination_id"] for item in store.list_destinations("tenant-b")["items"]
+    ] == ["other"]

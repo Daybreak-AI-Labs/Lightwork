@@ -37,14 +37,39 @@ def isolated_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config.reset_config_cache()
 
 
-def test_delivery_page_exposes_safe_operations_and_external_warning() -> None:
+def test_delivery_page_lists_destinations_and_confirms_external_sends(isolated_page: Path) -> None:
+    from maverick import config
+
+    from test_support.plain_language import developer_terms
+
+    isolated_page.write_text(
+        "[consent_preferences]\nenable = true\n"
+        "[consent_preferences.delivery]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
     response = client.get("/consent/delivery")
     assert response.status_code == 200
-    assert "Consent Delivery" in response.text
-    assert "External side effect" in response.text
-    assert "key ID" in response.text
-    assert "Dead letters" in response.text
-    assert "/api/v1/consent/delivery" in response.text
+    page = response.text
+    assert "Send Choices to Other Systems" in page
+    assert "/api/v1/consent/delivery" in page
+    # Records load on open, with a button per row.
+    for host in ("cd-destination-table", "cd-dead-table", "cd-history-table", "cd-ambiguous-table"):
+        assert f'id="{host}"' in page
+    assert '"/destinations?limit=500"' in page
+    for label in ("Add a destination", "Change signing key", "Stop sending", "Try again",
+                  "Check again", "Prepare updates", "Send now", "Delete old records"):
+        assert label in page
+    # External calls and irreversible changes are confirmed in plain words.
+    assert "over the internet" in page
+    assert page.count("CW.confirm(") >= 5
+    assert "window.confirm" not in page
+    # Nothing to type that a person cannot know: no IDs, digests or seconds.
+    for typed in ("Destination ID", "Message SHA-256", "Retention seconds", "Expected destination revision",
+                  "Destination IDs (comma separated)"):
+        assert typed not in page
+    assert 'data-auto-reference name="idempotency_key"' in page
+    assert developer_terms(page) == []
 
 
 def test_delivery_page_reports_disabled_gate(
