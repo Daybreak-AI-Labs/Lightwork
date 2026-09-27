@@ -39,6 +39,7 @@
   var downloadReport = document.getElementById("download-startup-report");
   var reportStatus = document.getElementById("startup-report-status");
   var reportPreview = document.getElementById("startup-report");
+  var supportDetails = document.getElementById("support-details");
   var startupReport = null;
 
   function invoke(command) {
@@ -48,7 +49,7 @@
 
   function refreshDetails() {
     return invoke("dashboard_diagnostics").then(function (text) {
-      if (diagnostics) diagnostics.textContent = text;
+      if (diagnostics) diagnostics.textContent = text || "No startup messages were recorded.";
     }, function (error) {
       if (diagnostics) diagnostics.textContent = String(error);
     });
@@ -57,13 +58,14 @@
   if (prepareReport && downloadReport && reportStatus && reportPreview) {
     prepareReport.addEventListener("click", function () {
       startupReport = null; prepareReport.disabled = true; downloadReport.disabled = true;
-      reportPreview.textContent = ""; reportPreview.hidden = true; reportStatus.textContent = "Preparing startup facts…";
+      reportPreview.textContent = ""; reportPreview.hidden = true; reportStatus.textContent = "Creating your support report…";
+      if (supportDetails) supportDetails.open = true;
       invoke("startup_support_report").then(function (report) {
         if (!report || report.schema !== "lightwork.startup-support.v1") throw new Error("The startup report could not be verified.");
         startupReport = JSON.stringify(report, null, 2); reportPreview.textContent = startupReport; reportPreview.hidden = false;
-        downloadReport.disabled = false; reportStatus.textContent = "Review the startup report, then download it if you want to share it.";
+        downloadReport.disabled = false; reportStatus.textContent = "Your support report is ready. Select Download report under Details for support, then send the file to your support contact.";
       }).catch(function () {
-        startupReport = null; reportStatus.textContent = "Startup report unavailable. You can retry or review the existing startup details.";
+        startupReport = null; reportStatus.textContent = "The support report couldn't be created. Try again, or copy the startup messages under Details for support instead.";
       }).finally(function () { prepareReport.disabled = false; });
     });
     downloadReport.addEventListener("click", function () {
@@ -71,7 +73,7 @@
       var url = URL.createObjectURL(new Blob([startupReport], {type: "application/json"}));
       var link = document.createElement("a"); link.href = url; link.download = "Lightwork-startup-support.json"; link.click();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-      reportStatus.textContent = "Startup report downloaded. Nothing was sent automatically.";
+      reportStatus.textContent = "Support report downloaded. Send the file to your support contact. Nothing was sent automatically.";
     });
   }
 
@@ -84,7 +86,7 @@
     connected = true;
     phase = "connected";
     cancelProbes();
-    setStatus("Connected — loading…");
+    setStatus("Opening your workspace…");
     window.location.replace(DASH + "/");
   }
 
@@ -109,7 +111,7 @@
     var controller = new AbortController();
     var finished = false;
     activeProbe = controller;
-    if (phase !== "trouble") setStatus("Waiting for the dashboard…");
+    if (phase !== "trouble") setStatus("Opening your workspace…");
     function finish(success) {
       if (finished) return;
       finished = true;
@@ -135,7 +137,7 @@
   function showTrouble() {
     phase = "trouble";
     if (trouble) trouble.style.display = "block";
-    setStatus("Still waiting for the dashboard…");
+    setStatus("Still starting…");
   }
 
   // --- trouble-card controls ---
@@ -152,7 +154,7 @@
       var current = generation;
       watch(current);
       if (trouble) trouble.style.display = "none";
-      setStatus("Retrying…");
+      setStatus("Trying again…");
       try {
         await invoke("retry_dashboard");
         if (current !== generation || phase === "stopped") return;
@@ -162,7 +164,7 @@
         if (current !== generation || phase === "stopped") return;
         if (diagnostics) diagnostics.textContent = String(error);
         showTrouble();
-        setStatus("Lightwork could not start. Review startup details, then try again.");
+        setStatus("Lightwork could not start. Select Try again, or create a support report.");
         probeTimer = setTimeout(probe, SLOW_MS);
       } finally {
         retryPending = false;
@@ -178,7 +180,7 @@
   var copied = document.getElementById("copied");
   if (copy) {
     copy.addEventListener("click", function () {
-      var cmd = diagnostics ? diagnostics.textContent : "No startup details available.";
+      var cmd = diagnostics ? diagnostics.textContent : "No startup messages available.";
       var flash = function (message) {
         if (!copied) return;
         copied.textContent = message || "Copied";
@@ -199,13 +201,23 @@
         ta.select();
         try {
           if (document.execCommand("copy")) flash();
-          else flash("Could not copy. Select the details above.");
+          else flash("Could not copy. Use Save instead.");
         } catch (e) {
-          flash("Could not copy. Select the details above.");
+          flash("Could not copy. Use Save instead.");
         } finally {
           document.body.removeChild(ta);
         }
       }
+    });
+  }
+
+  var save = document.getElementById("save-details");
+  if (save) {
+    save.addEventListener("click", function () {
+      var text = diagnostics ? diagnostics.textContent : "";
+      var url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      var link = document.createElement("a"); link.href = url; link.download = "Lightwork-startup-messages.txt"; link.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     });
   }
 
@@ -214,7 +226,7 @@
     phase = "stopped";
     cancelProbes();
   });
-  setStatus("Starting the Lightwork engine…");
+  setStatus("Starting Lightwork…");
   watch(generation);
   probe();
 })();

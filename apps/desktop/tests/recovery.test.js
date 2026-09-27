@@ -60,7 +60,19 @@ test('hung readiness fetches hit the overall deadline, abort, and allow retry', 
   assert.ok(signals.every(signal => signal.aborted)); assert.equal(timers.size, 0);
   assert.equal(h.get('enter-recovery').disabled, false);
   assert.equal(h.get('leave-recovery').disabled, false);
-  assert.match(h.get('status').textContent, /mode change was acknowledged/);
+  assert.match(h.get('status').textContent, /switched modes, but your workspace isn't answering yet/);
   assert.match(h.get('details').textContent, /60 seconds/);
   assert.equal(h.destinations.length, 0);
+});
+
+test('recovery page speaks plainly and offers a copy button for support details', async () => {
+  const h = harness(async () => { throw new Error('private fixture reason'); });
+  await h.get('enter-recovery').listeners.click();
+  assert.match(h.get('status').textContent, /couldn't switch modes\. Nothing was changed/);
+  assert.doesNotMatch(h.get('status').textContent, /private fixture/);
+  await h.get('details-copy').listeners.click();
+  assert.match(h.get('details-copied').textContent, /Couldn't copy/);
+  const page = fs.readFileSync(path.join(__dirname, '../ui/recovery.html'), 'utf8');
+  assert.match(page, /Details for support/);
+  assert.doesNotMatch(page, /external stores|Separately managed/);
 });

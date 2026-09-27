@@ -358,8 +358,11 @@ let visible = true, status = '', result = '';
 global.document = {readyState:'complete',get cookie(){throw Error('cookie access forbidden')},
   querySelector(selector){assert.ok(['#maintenance-status','#maintenance-recovery-result'].includes(selector));
     return {getClientRects:()=>visible?[{}]:[],textContent:selector==='#maintenance-status'?status:result}}};
-status = 'Lightwork could not complete that step. Open Troubleshooting details for the reason, then check again or contact your administrator.';
+status = 'Lightwork could not complete that step. Open Details for support to see why, then try again or contact your administrator.';
 assert.equal(inspect(), 'visible_refusal');
+status = 'Lightwork could not complete that step. The approval code has expired or was already used. Get a new code in Workspace recovery mode and paste it again.';
+assert.equal(inspect(), 'visible_refusal');
+status = 'Lightwork could not complete that step. Open Details for support to see why, then try again or contact your administrator.';
 visible = false; assert.equal(inspect(), 'pending'); visible = true;
 status = 'private arbitrary error'; result = 'An unfinished installation is blocking normal workspace startup. private';
 assert.equal(inspect(), 'incomplete');

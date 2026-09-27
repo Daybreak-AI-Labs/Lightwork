@@ -54,7 +54,7 @@ test('desktop update review is keyboard reachable, authorization-bound and singl
   expect(await page.evaluate(()=>window.__maintenanceCalls.filter(call=>call.command==='install_desktop_update').length)).toBe(1);
   await page.evaluate(()=>window.__finishMaintenance());
   await expect(page.locator('#update-review')).toBeHidden();await expect(page.locator('#check-update')).toBeEnabled();
-  await page.getByText('Troubleshooting details',{exact:true}).click();await expect(page.locator('#maintenance-details')).toContainText('no installer was invoked');
+  await page.getByText('Details for support',{exact:true}).click();await expect(page.locator('#maintenance-details')).toContainText('no installer was invoked');
   await fits(page);
 });
 
@@ -72,7 +72,7 @@ test('desktop repair remains guided when recovery state is unavailable and needs
 test('desktop unfinished finalization keeps the exact reviewed operation selectable without starting it',async({page})=>{
   await page.setViewportSize({width:320,height:740});
   await openMaintenance(page,{status:{version:'1.0.0',updates_configured:true,recovery:{incomplete:true,recovery_points:[{id:'synthetic-point',old_version:'1.0.0',new_version:'1.0.1',status:'upgraded',pending_finalization:true}]}},review:null});
-  await expect(page.locator('#maintenance-status')).toContainText('unfinished reviewed installation');
+  await expect(page.locator('#maintenance-status')).toContainText('unfinished update is stopping your workspace');
   await expect(page.locator('#check-update')).toBeDisabled();await expect(page.locator('#repair-install')).toBeDisabled();
   await expect(page.locator('#resume-maintenance')).toBeDisabled();
   await page.locator('#maintenance-incomplete').selectOption('synthetic-point');await expect(page.locator('#resume-maintenance')).toBeEnabled();
@@ -80,7 +80,7 @@ test('desktop unfinished finalization keeps the exact reviewed operation selecta
   await page.locator('#resume-maintenance').focus();await page.keyboard.press('Enter');
   expect(await page.evaluate(()=>window.__maintenanceCalls.at(-1))).toEqual({command:'resume_desktop_maintenance',args:{id:'synthetic-point',confirm:true}});
   await page.evaluate(()=>window.__finishMaintenance());await expect(page.locator('#maintenance-status')).toContainText('could not complete');await fits(page);
-  await page.getByText('Troubleshooting details',{exact:true}).click();await expect(page.locator('#maintenance-logs')).toBeDisabled();
+  await page.getByText('Details for support',{exact:true}).click();await expect(page.locator('#maintenance-logs')).toBeDisabled();
   await page.locator('#maintenance-log-point').selectOption('synthetic-point');await page.locator('#maintenance-logs').focus();await page.keyboard.press('Enter');
   await expect(page.locator('#maintenance-details')).toContainText('Synthetic local installation log');await expect(page.locator('#maintenance-details script')).toHaveCount(0);
   expect(await page.evaluate(()=>window.__maintenanceCalls.at(-1))).toEqual({command:'desktop_maintenance_logs',args:{id:'synthetic-point'}});

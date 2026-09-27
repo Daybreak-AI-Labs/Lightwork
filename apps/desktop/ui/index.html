@@ -5,114 +5,91 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lightwork</title>
     <style>
+      /* Same colours and buttons as the Lightwork dashboard (dark theme). */
       :root {
-        --bg: #0b0e14;
-        --bg-soft: #11151f;
-        --card: #161b27;
-        --line: #232a39;
-        --text: #e8ebf2;
-        --muted: #9aa4b2;
-        --accent: #f5a623;
-        --accent-soft: rgba(245, 166, 35, 0.16);
-        --danger: #e5534b;
+        color-scheme: dark;
+        --bg: #04050a;
+        --panel: #0b0e15;
+        --sunken: #070910;
+        --border: #1b2130;
+        --border-strong: #2a3246;
+        --text: #eef1f7;
+        --muted: #8e97ac;
+        --brand: #3d8bff;
+        --accent: #3ddc97;
+        --danger: #ff6b6b;
+        --grad: linear-gradient(90deg, #2f7cff 0%, #8b5cf6 52%, #ff8a2b 100%);
       }
       * { box-sizing: border-box; }
       html, body {
-        height: 100%;
+        min-height: 100%;
         margin: 0;
-        background:
-          radial-gradient(1200px 600px at 50% -10%, #141a27 0%, var(--bg) 60%);
+        background: var(--bg);
         color: var(--text);
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-family: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         -webkit-font-smoothing: antialiased;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        user-select: none;
       }
-      .stage { text-align: center; max-width: 30rem; padding: 1.5rem; }
+      body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+      .stage { text-align: center; width: 100%; max-width: 34rem; padding: 1.5rem 1rem; }
 
-      /* Brand mark: a glowing ring that spins, with the Lightwork monogram. */
-      .ring {
-        position: relative;
-        width: 86px; height: 86px;
-        margin: 0 auto 1.4rem;
-      }
+      /* Brand mark: a spinning ring in the dashboard's gradient. */
+      .ring { position: relative; width: 86px; height: 86px; margin: 0 auto 1.4rem; }
       .ring .spin {
-        position: absolute; inset: 0;
-        border-radius: 50%;
-        background: conic-gradient(from 0deg, var(--accent) 0deg, rgba(245,166,35,0) 130deg);
+        position: absolute; inset: 0; border-radius: 50%;
+        background: conic-gradient(from 0deg, #2f7cff 0deg, #8b5cf6 70deg, #ff8a2b 120deg, rgba(255, 138, 43, 0) 150deg);
         -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
                 mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
         animation: spin 1.05s linear infinite;
       }
       .ring .core {
-        position: absolute; inset: 12px;
-        border-radius: 50%;
-        background: var(--card);
-        border: 1px solid var(--line);
+        position: absolute; inset: 12px; border-radius: 50%;
+        background: var(--panel); border: 1px solid var(--border);
         display: flex; align-items: center; justify-content: center;
-        font-weight: 800; font-size: 1.6rem; color: var(--accent);
-        letter-spacing: -0.04em;
-        box-shadow: inset 0 0 24px rgba(245,166,35,0.08);
+        font-weight: 700; font-size: 1.6rem; color: var(--text); letter-spacing: -0.04em;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
 
-      h1 { font-size: 1.35rem; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-      .tag { font-size: 0.82rem; color: var(--muted); margin: 0.3rem 0 1.4rem; }
+      h1 { font-size: 1.4rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+      .tag { font-size: 0.85rem; color: var(--muted); margin: 0.3rem 0 1.4rem; }
 
-      #status {
-        font-size: 0.9rem; color: var(--text);
-        min-height: 1.2rem;
-        display: inline-flex; align-items: center; gap: 0.5rem;
-      }
-      #status .live {
-        width: 7px; height: 7px; border-radius: 50%;
-        background: var(--accent); flex: 0 0 auto;
-        animation: pulse 1.2s ease-in-out infinite;
-      }
+      #status { font-size: 0.92rem; min-height: 1.2rem; display: inline-flex; align-items: center; gap: 0.5rem; }
+      #status .live { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex: 0 0 auto; animation: pulse 1.2s ease-in-out infinite; }
       @keyframes pulse { 50% { opacity: 0.3; } }
-      code {
-        background: var(--bg-soft); border: 1px solid var(--line);
-        padding: 0.12rem 0.4rem; border-radius: 5px; font-size: 0.86em;
-        user-select: text;
-      }
 
-      /* Trouble card — only shown if the dashboard never answers. */
+      /* Shown only when the workspace does not open. */
       #trouble {
-        display: none;
-        margin-top: 1.6rem;
-        text-align: left;
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 1.1rem 1.2rem;
+        display: none; margin-top: 1.6rem; text-align: left;
+        background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+        padding: 1.2rem 1.25rem; position: relative; overflow: hidden;
       }
-      #trouble h2 {
-        font-size: 0.98rem; margin: 0 0 0.5rem;
-        display: flex; align-items: center; gap: 0.5rem;
-      }
-      #trouble h2::before {
-        content: ""; width: 9px; height: 9px; border-radius: 50%;
-        background: var(--danger); flex: 0 0 auto;
-      }
-      #trouble p { font-size: 0.85rem; color: var(--muted); line-height: 1.55; margin: 0.35rem 0; }
-      #trouble ol { font-size: 0.85rem; color: var(--muted); line-height: 1.6; margin: 0.5rem 0 0.2rem; padding-left: 1.2rem; }
-      .row { display: flex; gap: 0.6rem; margin-top: 0.95rem; flex-wrap: wrap; }
+      #trouble::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--grad); }
+      #trouble h2 { font-size: 1.05rem; font-weight: 600; margin: 0 0 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+      #trouble h2::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); flex: 0 0 auto; }
+      #trouble p, #trouble li { font-size: 0.88rem; color: var(--muted); line-height: 1.55; }
+      #trouble p { margin: 0.4rem 0; }
+      .row { display: flex; gap: 0.6rem; margin-top: 0.95rem; flex-wrap: wrap; align-items: center; }
       button {
-        font: inherit; font-size: 0.85rem; font-weight: 550;
-        border-radius: 8px; padding: 0.5rem 0.9rem; cursor: pointer;
-        border: 1px solid var(--line); background: var(--bg-soft); color: var(--text);
+        font: inherit; font-size: 0.88rem; font-weight: 600;
+        border-radius: 8px; padding: 0.55rem 0.95rem; cursor: pointer;
+        border: 1px solid var(--border-strong); background: var(--sunken); color: var(--text);
         transition: background 0.12s, border-color 0.12s;
       }
-      button:hover { background: #1b2230; border-color: #2c3547; }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #1a1205; }
-      button.primary:hover { background: #ffb734; }
-      #copied { font-size: 0.78rem; color: var(--accent); margin-left: 0.2rem; opacity: 0; transition: opacity 0.2s; }
-      details { margin-top: 1rem; }
-      summary { cursor: pointer; }
-      summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-      #diagnostics, #startup-report { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 0.78rem; }
+      button:hover { background: #121726; border-color: #3a4560; }
+      button.primary { background: var(--text); border-color: transparent; color: var(--bg); }
+      button.primary:hover { background: #d6dae3; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      button:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+      #copied { font-size: 0.8rem; color: var(--accent); opacity: 0; transition: opacity 0.2s; }
+      details { margin-top: 1.1rem; border-top: 1px solid var(--border); padding-top: 0.8rem; }
+      summary { cursor: pointer; font-size: 0.88rem; color: var(--text); }
+      h3 { font-size: 0.9rem; font-weight: 600; margin: 1rem 0 0.2rem; }
+      pre {
+        max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+        user-select: text; font-size: 0.78rem; background: var(--sunken); border: 1px solid var(--border);
+        border-radius: 8px; padding: 0.6rem 0.7rem; color: var(--muted);
+        font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+      }
+      [hidden] { display: none !important; }
 
       @media (prefers-reduced-motion: reduce) {
         .ring .spin { animation: none; opacity: 0.85; }
@@ -130,35 +107,35 @@
       <p class="tag">Your Lightwork workspace</p>
 
       <p id="status" role="status" aria-live="polite">
-        <span class="live"></span><span id="status-text">Starting&hellip;</span>
+        <span class="live"></span><span id="status-text">Starting Lightwork&hellip;</span>
       </p>
 
-      <section id="trouble" role="alert">
-        <h2>Couldn&rsquo;t reach the dashboard</h2>
-        <p>
-          Lightwork is taking longer than expected to open. Try again to restart
-          a failed launch. If it still cannot start, review the startup details.
-        </p>
+      <section id="trouble" role="alert" aria-labelledby="trouble-title">
+        <h2 id="trouble-title">Lightwork didn&rsquo;t open</h2>
+        <p>Your workspace is taking longer than usual to start. Select <strong>Try again</strong>.</p>
+        <p>If it still doesn&rsquo;t open, select <strong>Create a support report</strong> and send the saved file to your support contact.</p>
         <div class="row">
           <button class="primary" id="retry" type="button">Try again</button>
+          <button id="prepare-startup-report" type="button">Create a support report</button>
         </div>
-        <details>
-          <summary>Startup details</summary>
-          <p>If Lightwork is missing, use the Lightwork installer to install it on this computer.</p>
-          <pre id="diagnostics">Select Refresh details to view the latest startup output.</pre>
-          <div class="row">
-          <button id="refresh-details" type="button">Refresh details</button>
-          <button id="copy" type="button">Copy details</button>
-          <span id="copied" aria-live="polite">Copied</span>
-          </div>
-        </details>
-        <details>
-          <summary>Prepare a startup support report</summary>
-          <p>This report includes the app version and startup state. Account data, configuration, local paths and logs are excluded. Full diagnostics are available from Help after sign-in.</p>
-          <button id="prepare-startup-report" type="button">Prepare startup report</button>
-          <p id="startup-report-status" role="status" aria-live="polite">No report has been prepared.</p>
+        <p id="startup-report-status" role="status" aria-live="polite"></p>
+        <details id="support-details">
+          <summary>Details for support</summary>
+          <h3>Support report</h3>
+          <p>The report lists the app version and what happened during startup. It doesn&rsquo;t include your account, settings, files or logs, and nothing is sent automatically.</p>
           <pre id="startup-report" hidden></pre>
-          <button id="download-startup-report" type="button" disabled>Download startup report</button>
+          <div class="row">
+            <button id="download-startup-report" type="button" disabled>Download report</button>
+          </div>
+          <h3>Startup messages</h3>
+          <p>If Lightwork was removed from this computer, run the Lightwork installer again.</p>
+          <pre id="diagnostics">Select Show startup messages to see the latest ones.</pre>
+          <div class="row">
+            <button id="refresh-details" type="button">Show startup messages</button>
+            <button id="copy" type="button">Copy</button>
+            <button id="save-details" type="button">Save</button>
+            <span id="copied" aria-live="polite">Copied</span>
+          </div>
         </details>
       </section>
     </main>

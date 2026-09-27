@@ -10,7 +10,8 @@ function splash(copyResult, invoke) {
   const handlers = {};
   const nodes = Object.fromEntries(
     ["status-text", "trouble", "retry", "copy", "copied", "diagnostics", "refresh-details",
-      "prepare-startup-report", "download-startup-report", "startup-report-status", "startup-report"].map((id) => [id, {
+      "prepare-startup-report", "download-startup-report", "startup-report-status", "startup-report",
+      "support-details", "save-details"].map((id) => [id, {
       style: {},
       textContent: id === "copied" ? "Copied" : "",
       addEventListener(name, handler) { handlers[`${id}:${name}`] = handler; },
@@ -140,4 +141,19 @@ test("failed startup report refresh invalidates the old download and hides raw e
   app.handlers["download-startup-report:click"]();
   assert.equal(app.downloads.length, 0);
   assert.equal(app.nodes["prepare-startup-report"].disabled, false);
+});
+
+test("creating a support report opens the support details and saving startup messages downloads text", async () => {
+  const app = splash(() => true, async (command) => command === "dashboard_diagnostics" ? "Synthetic startup output" : { schema: "lightwork.startup-support.v1" });
+  app.handlers["prepare-startup-report:click"]();
+  assert.equal(app.nodes["support-details"].open, true);
+  await new Promise(setImmediate);
+  assert.match(app.nodes["startup-report-status"].textContent, /support report is ready/);
+  await app.handlers["refresh-details:click"]();
+  app.handlers["save-details:click"]();
+  assert.deepEqual(app.downloads, ["Lightwork-startup-messages.txt"]);
+  assert.equal(await app.blobs[0].text(), "Synthetic startup output");
+  const page = fs.readFileSync(path.join(__dirname, "../ui/index.html"), "utf8");
+  assert.match(page, /Details for support/);
+  assert.doesNotMatch(page, /reach the dashboard|Refresh details/);
 });
