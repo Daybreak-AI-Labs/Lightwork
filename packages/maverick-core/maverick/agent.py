@@ -2834,7 +2834,8 @@ class Agent:
             # until it happened to return.
             from .immune import twin
             output = await self._await_wall_clock_guarded(
-                lambda: twin.dispatch(self.ctx.goal_id, name, args, self.tools.run),
+                lambda: twin.dispatch(self.ctx.goal_id, name, args,
+                                       lambda: self.tools.run(name, args)),
                 in_flight_note="mid-tool-execution")
             # From this point onward the connector returned normally and may
             # already have committed an external mutation.  Keep that fact
