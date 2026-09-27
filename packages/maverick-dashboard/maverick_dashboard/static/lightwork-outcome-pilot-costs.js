@@ -34,7 +34,7 @@
       if (allocation.source) {
         details.append(node('p', 'Source net cost: ' + allocation.source.currency + ' ' + allocation.source.net_cost + '. Unallocated: ' + allocation.unallocated_cost + '. ' + allocation.note));
         allocation.allocated.forEach(share => details.append(node('p', 'Case ' + share.case_id + ': ' + allocation.currency + ' ' + share.amount)));
-        const evidence = node('details'); evidence.append(node('summary', 'Source, corrections and allocation history')); const pre = node('pre', JSON.stringify(allocation,null,2)); pre.style.whiteSpace='pre-wrap'; evidence.append(pre); details.append(evidence);
+        const evidence = node('details'); evidence.append(node('summary', 'Technical details: source, corrections and allocation history')); const pre = node('pre', JSON.stringify(allocation,null,2)); pre.style.whiteSpace='pre-wrap'; evidence.append(pre); details.append(evidence);
       }
       panel.append(details);
     });
@@ -61,7 +61,7 @@
       if(!selected)return;
       sourceDetails.append(node('p',selected.provider+' · '+selected.source_account_id+' · '+selected.source_record_id+' · '+selected.period_start+' to '+selected.period_end));
       sourceDetails.append(node('p','Net admitted amount: '+selected.currency+' '+selected.net_cost+' including '+selected.correction_count+' corrections.'));
-      const evidence=node('details');evidence.append(node('summary','Review source citations and correction evidence'));const pre=node('pre',JSON.stringify(selected,null,2));pre.style.whiteSpace='pre-wrap';evidence.append(pre);sourceDetails.append(evidence);
+      const evidence=node('details');evidence.append(node('summary','Technical details: source citations and correction evidence'));const pre=node('pre',JSON.stringify(selected,null,2));pre.style.whiteSpace='pre-wrap';evidence.append(pre);sourceDetails.append(evidence);
       const prior=(costs.allocations||[]).find(row=>row.source&&row.source.id===selected.id);
       if(prior){shares.forEach(({case:c,input})=>{const share=prior.shares.find(s=>s.case_id===c.id);input.value=share?String(share.basis_points/100):'0';});note.value=prior.note;}
     }
