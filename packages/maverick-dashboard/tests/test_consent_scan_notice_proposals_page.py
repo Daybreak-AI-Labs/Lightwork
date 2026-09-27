@@ -174,8 +174,11 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
         == "/consent/scan-notice-proposals"
     )
     templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    assert 'href="/consent/scan-notice-proposals"' in (
+    assert '{% include "_consent_nav.html" %}' in (
         templates / "consent_preferences.html"
+    ).read_text(encoding="utf-8")
+    assert "('/consent/scan-notice-proposals'," in (
+        templates / "_consent_nav.html"
     ).read_text(encoding="utf-8")
     assert 'href="/consent/scan-notice-proposals"' in (
         templates / "consent_scan_inventory.html"

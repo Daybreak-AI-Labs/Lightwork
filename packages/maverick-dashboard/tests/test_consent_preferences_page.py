@@ -88,6 +88,8 @@ def test_consent_page_lists_records_with_row_buttons_and_no_typed_plumbing(
                   "Check consent", "Linked accounts", "Publish new version"):
         assert label in page
     assert '/profiles?limit=500' in page and '/trackers?limit=500' in page
+    # The privacy register's totals (a command-line-only view before) show here.
+    assert 'call("/posture")' in page and 'id="cp-posture"' in page
     # Versions, fingerprints and request references are carried, never typed.
     assert '<input type="hidden" name="version">' in page
     assert '<input type="hidden" name="expected_current_version">' in page
