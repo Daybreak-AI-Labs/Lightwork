@@ -6,12 +6,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import code_actions_api, immune_actions_api, learning_actions_api
+from . import audit_actions_api, code_actions_api, immune_actions_api, learning_actions_api
 
 api_router = APIRouter()
 api_router.include_router(code_actions_api.router)
 api_router.include_router(immune_actions_api.router)
 api_router.include_router(learning_actions_api.router)
+api_router.include_router(audit_actions_api.router)
 
 asset_router = APIRouter()
 asset_router.include_router(code_actions_api.asset_router)

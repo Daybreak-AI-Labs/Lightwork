@@ -5483,12 +5483,17 @@ def safe_audit_day(day: str | None) -> str | None:
 
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
-    """Tail of the local audit log."""
+    """The activity log: recent events for a day or a date range, filtered by
+    kind of event, person and text, shown as a readable table."""
     # Gate on ``audit`` to match the ``/api/v1/audit/tail`` twin -- otherwise a
     # view-only caller reads the full audit log via the HTML page despite the
     # API denying them.
     require_permission(request, "audit")
+    from collections import deque
+
     from maverick.audit import default_audit_log
+
+    from . import audit_actions_api as _audit_plain
 
     try:
         n = max(1, min(int(request.query_params.get("n") or 200), 1000))
@@ -5501,18 +5506,45 @@ async def audit_page(request: Request) -> HTMLResponse:
             status_code=400,
             detail="Invalid audit day. Enter a real date in YYYY-MM-DD format.",
         )
+    since = safe_audit_day(request.query_params.get("since"))
+    until = safe_audit_day(request.query_params.get("until"))
     audit_log = default_audit_log()
     from maverick.audit.segments import ReadReport
 
     read_report = ReadReport()
-    events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
-    # Distinct kinds in this tail (for the filter dropdown), computed before
-    # filtering so every available kind stays selectable; then optionally
-    # narrow to one kind (e.g. shield_block, tool_call).
-    kinds = sorted({str(e.get("kind")) for e in events if e.get("kind")})
+    if since or until:
+        from maverick.audit.export import iter_audit_events
+
+        def _window() -> list[dict]:
+            kept: deque = deque(maxlen=5000)
+            for scanned, e in enumerate(iter_audit_events(since=since, until=until,
+                                                          report=read_report)):
+                if scanned >= 200_000:
+                    break
+                kept.append(e)
+            return list(kept)
+
+        events = await run_in_threadpool(_window)
+    else:
+        events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
+    # Distinct kinds and people in the window (for the filter dropdowns),
+    # computed before filtering so every choice stays selectable.
+    kinds = sorted({str(e.get("kind")) for e in events if e.get("kind")},
+                   key=_audit_plain.kind_label)
+    people = sorted({_audit_plain.event_person(e) for e in events} - {""})
     kind = (request.query_params.get("kind") or "").strip()
+    person = (request.query_params.get("person") or "").strip()
+    q = (request.query_params.get("q") or "").strip()[:200]
     if kind:
         events = [e for e in events if e.get("kind") == kind]
+    if person:
+        events = [e for e in events if _audit_plain.event_person(e) == person]
+    if q:
+        needle = q.lower()
+        events = [e for e in events if needle in json.dumps(e, default=str).lower()
+                  or needle in _audit_plain.kind_label(e.get("kind")).lower()]
+    if since or until:
+        events = events[-n:]
     return templates.TemplateResponse(
         request,
         "audit.html",
@@ -5520,10 +5552,18 @@ async def audit_page(request: Request) -> HTMLResponse:
             "events": events,
             "n": n,
             "day": day,
+            "since": since,
+            "until": until,
             "kind": kind,
             "kinds": kinds,
+            "person": person,
+            "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
+            "q": q,
+            "can_admin": has_permission(request, "admin"),
+            "can_global_admin": has_global_permission(request, "admin"),
             "audit_signing_enabled": bool(audit_log.signing_enabled),
             "audit_read_report": read_report.as_dict(),
+            **_audit_plain.page_helpers(),
         },
     )
 
@@ -5554,8 +5594,11 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
     b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    from .audit_actions_api import kind_label
+
     return templates.TemplateResponse(
-        request, "audit_binder.html", {"b": b, "days": b["window_days"]}
+        request, "audit_binder.html",
+        {"b": b, "days": b["window_days"], "kind_label": kind_label},
     )
 
 

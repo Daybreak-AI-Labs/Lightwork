@@ -65,4 +65,4 @@ def test_skill_source_input_has_accessible_name(monkeypatch, tmp_path):
 def test_audit_search_button_disables_during_search(monkeypatch, tmp_path):
     client, _ = _setup_all(monkeypatch, tmp_path)
     r = client.get("/audit")
-    assert "btn.disabled = true" in r.text
+    assert "b.disabled = true" in r.text
