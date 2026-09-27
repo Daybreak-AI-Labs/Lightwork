@@ -1183,6 +1183,9 @@ app.include_router(_trust_page_router)
 from .third_party_page_assets import router as _third_party_page_assets  # noqa: E402
 
 app.include_router(_third_party_page_assets)
+from .trc_setup_api import router as _trc_setup_router  # noqa: E402
+
+app.include_router(_trc_setup_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -6388,6 +6391,8 @@ async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
                 trc_continuous_evidence_enabled_for_page()
             ),
             "acm_module_status": module_status("/compliance/continuous-evidence"),
+            "trc_can_admin": has_global_permission(request, "admin"),
+            "trc_can_audit": has_global_permission(request, "audit"),
         },
     )
 
