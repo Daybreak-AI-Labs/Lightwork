@@ -4025,7 +4025,9 @@ async def privacy_rights_consumer_delivery_page(request: Request) -> HTMLRespons
         {
             "privacy_rights_consumer_delivery_enabled": (
                 privacy_rights_consumer_delivery_enabled_for_page()
-            )
+            ),
+            "can_admin": has_global_permission(request, "admin"),
+            "can_audit": has_global_permission(request, "audit"),
         },
     )
 

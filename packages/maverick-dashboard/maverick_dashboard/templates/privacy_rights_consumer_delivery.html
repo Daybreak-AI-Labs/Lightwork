@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Privacy Rights Consumer Delivery - Lightwork{% endblock %}
+{% block title %}Send People Their Data · Lightwork{% endblock %}
 {% block content %}
 <style>
   .prcd-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -15,32 +15,55 @@
   @media (max-width:900px) { .prcd-grid { grid-template-columns:1fr; } }
 </style>
 
-<h1>Privacy Rights Consumer Delivery</h1>
-<p>Authorize a short-lived, one-time download of the response package for a closed privacy-rights case.</p>
-<div class="prcd-warning">
-  <strong>A raw consumer capability appears only in the first mint response.
-    Copy it immediately; Lightwork stores only its digest and cannot replay it.</strong>
-  This surface never accepts a tenant, actor, consumer subject, object locator,
-  object credential, or encryption-key value. It exposes no consumer redeem,
-  server-grant claim, object-byte, network, provider-write, or list operation.
-</div>
-
-<section class="panel" aria-labelledby="prcd-production-heading">
-  <h2 id="prcd-production-heading">Delivery requirements</h2>
-  <p>Delivery requires a closed case, the approved response package, and independent verification of the recipient. Lightwork checks the encrypted package and recipient authorization before creating access and again before download.</p>
-  <p><strong>Recipient verification is required:</strong> access creation remains unavailable
-    until this installation can independently verify the intended recipient.
-    Approval of the case or response package does not prove the recipient's identity.</p>
-</section>
+{% from "_hero.html" import hero %}
+{{ hero('Privacy', 'Send people their data',
+        subtitle='One-time download codes for answered privacy requests',
+        lede='When a privacy request is closed and its response file is recorded, create a
+              short-lived, one-time download code for the person. The code is shown once:
+              copy it and send it to them securely.') }}
+<details class="panel">
+  <summary>About this page&rsquo;s safeguards</summary>
+  <ul>
+    <li>Codes are only created for closed requests, and only after the person has signed in again to prove who they are.</li>
+    <li>Lightwork keeps only a fingerprint of each code, so it can never show a code a second time.</li>
+    <li>Each code works once, expires after a few minutes, and can be revoked at any time.</li>
+  </ul>
+</details>
 
 {% from "_module_gate.html" import module_gate %}
 {% if not privacy_rights_consumer_delivery_enabled %}
-{{ module_gate('privacy_automation.rights_consumer_delivery', 'Privacy-rights consumer delivery',
-               detail='Consumer-facing delivery of rights responses stays
-                       safely off until it is on; turning it on also brings on
-                       the rights orchestration it depends on -- have your
-                       privacy owner review both first.') }}
+{{ module_gate('privacy_automation.rights_consumer_delivery', 'Sending people their data',
+               detail='Create one-time download codes for answered privacy requests. Turning this on also turns on privacy request handling.',
+               can_activate=can_admin) }}
 {% else %}
+<div id="prcd-app" data-can-admin="{{ 'true' if can_admin else 'false' }}" data-can-audit="{{ 'true' if can_audit else 'false' }}">
+  <p id="prcd-ready" class="muted" role="status" aria-live="polite">Checking whether download codes can be created…</p>
+  <p id="prcd-status" class="muted" role="status" aria-live="polite"></p>
+
+  <div class="section-head"><h2>Answered requests</h2></div>
+  <div class="panel" id="prcd-packages"><p class="muted">Loading…</p></div>
+
+  <section class="panel" id="prcd-link-box" hidden aria-labelledby="prcd-link-title">
+    <h2 id="prcd-link-title">Your one-time download code</h2>
+    <p><strong>This code is shown once.</strong> Copy it now and send it to the person securely. They enter it in your privacy portal to download their data. It expires soon and works once.</p>
+    <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center;">
+      <label for="prcd-link" class="sr-only">Download code</label>
+      <input id="prcd-link" class="input" readonly style="flex:1 1 24rem;">
+      <button type="button" class="btn btn--primary" id="prcd-copy">Copy code</button>
+      <button type="button" class="btn btn--ghost" id="prcd-done">I have copied it</button>
+    </div>
+  </section>
+
+  {% if can_admin or can_audit %}
+  <div class="panel" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+    {% if can_admin %}<button type="button" class="btn btn--ghost" id="prcd-purge">Delete expired code records</button>{% endif %}
+    {% if can_audit %}<button type="button" class="btn btn--ghost" id="prcd-integrity">Check records are intact</button>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<details class="panel" id="prcd-technical">
+<summary>Technical details: advanced operations</summary>
 <p><button class="btn" id="prcd-load-status" type="button">Check availability</button></p>
 <div class="prcd-grid">
   <section class="panel prcd-stack">
@@ -174,5 +197,8 @@
   updateConfirmation();
 }());
 </script>
+</details>
+<script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-privacy-rights-consumer-delivery.js" defer></script>
 {% endif %}
 {% endblock %}
