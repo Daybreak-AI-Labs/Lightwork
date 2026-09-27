@@ -876,3 +876,18 @@ test('held reading positions are recorded with plain fields and exact checkpoint
     h.dom.window.close();
   }
 });
+
+test('the private approval code has a Copy code button and an empty code is explained', async () => {
+  const h = await harness(async () => ({}));
+  const copied = [], toasts = [];
+  h.dom.window.mvCopy = text => copied.push(text);
+  h.dom.window.mvToast = (text, opts) => toasts.push([text, opts]);
+  const button = h.dom.window.document.getElementById('wrec-installation-code-copy');
+  assert.equal(button.textContent, 'Copy code');
+  button.click();
+  assert.deepEqual(copied, []);
+  assert.match(toasts[0][0], /no approval code yet/);
+  h.get('installation-code').value = '  code-123  ';
+  button.click();
+  assert.deepEqual(copied, ['code-123']);
+});

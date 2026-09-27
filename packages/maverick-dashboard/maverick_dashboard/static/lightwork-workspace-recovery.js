@@ -731,4 +731,11 @@
     say("The selected installation point was retired. A signed retirement receipt has been kept.");
   });
   action(async function () { await load(); say("Review coverage and keep a separate recovery key copy before relying on snapshots."); });
+  // Copy the private approval code for the desktop app's Install & updates.
+  var copyCode = document.getElementById("wrec-installation-code-copy");
+  if (copyCode) copyCode.addEventListener("click", function () {
+    var code = get("installation-code").value.trim();
+    if (!code) { window.mvToast("There is no approval code yet. Review an update above first.", {error: true}); return; }
+    window.mvCopy(code);
+  });
 })();
