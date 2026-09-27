@@ -41,16 +41,17 @@
     try { value = await response.json(); } catch (_) { value = null; }
     if (!response.ok) {
       const detail = value && typeof value.detail === 'string' && value.detail.length <= 512 ? value.detail : '';
-      const error = new Error(response.status === 409 ? (detail || 'This research record changed. Refresh and review it again.') :
-        response.status === 403 ? 'Your current account cannot perform that research action.' :
-        response.status === 422 ? (detail || 'Review the governed research fields and try again.') :
-        response.status === 404 ? 'This research record is not available in the current workspace.' :
-        (detail || 'Governed research is temporarily unavailable.'));
+      const plain = detail && !/[_{}\[\]]|sha|revision|manifest/i.test(detail) ? detail : '';
+      const error = new Error(response.status === 409 ? (plain || 'Someone changed this. Refresh and check it again.') :
+        response.status === 403 ? 'You do not have permission to do this. Ask an administrator.' :
+        response.status === 422 ? (plain || 'Some details need fixing. Check what you entered and try again.') :
+        response.status === 404 ? 'That item is not available in this workspace.' :
+        'The research lab is not available right now. Try again in a minute.');
       error.status = response.status;
       throw error;
     }
     if (value && value.context && value.context !== context) {
-      throw new Error('The account or workspace changed. Reload this page.');
+      throw new Error('You switched account or workspace. Reload this page.');
     }
     return value;
   }
@@ -94,7 +95,7 @@
         typeof value.registry.can_review !== 'boolean' || !Array.isArray(value.governed_runs) ||
         value.governed_runs.some(row => !validRun(row)) || !value.governed_execution ||
         typeof value.governed_execution.available !== 'boolean') {
-      throw new Error('The governed research overview could not be verified. Refresh before taking action.');
+      throw new Error('The research lab could not be loaded correctly. Refresh the page.');
     }
     return value;
   }
@@ -137,7 +138,55 @@
   }
 
   function refLabel(reference) {
-    return `${reference.asset_id} · ${reference.version} · ${reference.manifest_sha256.slice(0, 12)}…`;
+    return `${human(reference.asset_id)} · version ${String(reference.version).replace(/^v/, '')}`;
+  }
+
+  function human(value) {
+    return window.mvHuman ? window.mvHuman(value) : String(value || '').replace(/[_-]+/g, ' ');
+  }
+
+  function when(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toLocaleString() : '';
+  }
+
+  function technical(item, rows) {
+    const details = element('details', undefined, 'research-advanced');
+    details.appendChild(element('summary', 'Technical details (for auditors)'));
+    rows.filter(row => row[1] !== undefined && row[1] !== null && row[1] !== '').forEach(([label, value]) => details.appendChild(element('p', `${label}: ${value}`, 'muted')));
+    item.appendChild(details);
+  }
+
+  const REASONS = [['no_longer_licensed', 'The license ended'], ['consent_withdrawn', 'Consent was withdrawn'],
+    ['data_quality', 'The data is wrong or poor quality'], ['security_concern', 'A security concern'],
+    ['operator_cancelled', 'No longer needed'], ['other', 'Another reason']];
+
+  function reasonSelect() {
+    const select = element('select'); select.className = 'input'; select.required = true;
+    select.appendChild(new Option('Choose a reason', ''));
+    REASONS.forEach(([value, label]) => select.appendChild(new Option(label, value)));
+    return select;
+  }
+
+  // The supporting document is chosen as a file; the server records its fingerprint.
+  function evidenceFile(labelText) {
+    const label = element('label', labelText);
+    const file = element('input'); file.type = 'file'; file.className = 'input'; file.required = true;
+    const state = element('span', '', 'muted');
+    const holder = {value: '', pending: null};
+    file.addEventListener('change', () => {
+      holder.value = '';
+      const chosen = file.files && file.files[0];
+      if (!chosen) return;
+      state.textContent = `Reading ${chosen.name}…`;
+      holder.pending = fetch('/api/v1/research-files/fingerprint', {method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/octet-stream'}, body:chosen})
+        .then(response => { if (!response.ok) throw response; return response.json(); })
+        .then(body => { holder.value = body.fingerprint; state.textContent = `Ready: ${chosen.name}`; })
+        .catch(error => { state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.'; });
+    });
+    label.append(file, state);
+    return {label, holder};
   }
 
   function replaceOptions(select, assets, {multiple = true, blank = ''} = {}) {
@@ -152,20 +201,24 @@
     });
   }
 
+  function decisionsAvailable() {
+    return (workspace?.registry?.data_use_decisions?.items || []).length > 0;
+  }
+
   function renderSelectors() {
     replaceOptions(byId('research-dataset-form').elements.parent_datasets, workspace.registry.datasets);
     replaceOptions(byId('research-model-form').elements.dataset_lineage, workspace.registry.datasets);
     replaceOptions(byId('research-model-form').elements.model_lineage, workspace.registry.models);
     renderRunSelectors();
     const decisionSelect = byId('research-dataset-form').elements.data_use_decision_choice;
-    decisionSelect.replaceChildren(new Option('Choose an authorized allow decision or enter one below', ''));
+    decisionSelect.replaceChildren(new Option(decisionsAvailable() ? 'Choose an approved use' : 'No approved uses yet', ''));
     const decisions = workspace.registry.data_use_decisions?.items || [];
     decisions.forEach(decision => {
       if (!identifier(decision.decision_id) || !sha(decision.decision_sha256) ||
           !identifier(decision.asset_id) || !['analyze', 'export', 'read', 'train'].includes(decision.action) ||
           !Array.isArray(decision.purpose_codes)) return;
       decisionSelect.appendChild(new Option(
-        `${decision.asset_id} · ${decision.action} · ${decision.decision_id}`,
+        `${human(decision.asset_id)} · ${human(decision.action)} · for ${decision.purpose_codes.map(human).join(', ') || 'any purpose'}`,
         JSON.stringify(decision),
       ));
     });
@@ -201,51 +254,51 @@
 
   function assetActions(item, asset) {
     const actions = element('div', undefined, 'research-actions');
-    actions.appendChild(actionButton('View revocation impact', async () => {
+    actions.appendChild(actionButton('What depends on this?', async () => {
       const ref = asset.reference;
       const value = await api(`/registry/${encodeURIComponent(ref.kind)}/${encodeURIComponent(ref.asset_id)}/${encodeURIComponent(ref.version)}/impact?manifest_sha256=${encodeURIComponent(ref.manifest_sha256)}`);
-      if (!validImpact(value)) throw new Error('The derivative impact response could not be verified.');
+      if (!validImpact(value)) throw new Error('The list of what depends on this could not be loaded. Try again.');
       renderImpact(value);
     }));
     if (workspace.registry.can_review && asset.state === 'draft') {
-      actions.appendChild(actionButton('Approve version', async () => {
+      actions.appendChild(actionButton('Approve', async () => {
+        const ok = window.mvConfirm ? await window.mvConfirm('Approve this version for use in experiments?', {okText: 'Approve'}) : true;
+        if (!ok) return;
         await api('/registry/approve', 'POST', {context, confirm:true,
           reference:asset.reference, expected_revision:asset.revision});
-        message('Registry version approved after current rights and lineage checks.');
+        message('Approved.');
         await refresh();
       }, 'btn btn--primary'));
     }
     item.appendChild(actions);
     if (workspace.registry.can_review && asset.state === 'approved') {
       const details = element('details', undefined, 'research-advanced');
-      details.appendChild(element('summary', 'Revoke this version'));
+      details.appendChild(element('summary', 'Stop using this version'));
       const form = element('form', undefined, 'research-form');
-      const reasonLabel = element('label', 'Reason code');
-      const reason = element('input');
-      reason.className = 'input'; reason.name = 'reason_code'; reason.required = true;
-      reason.pattern = '[a-z][a-z0-9_.-]{0,63}'; reason.maxLength = 64;
+      const reasonLabel = element('label', 'Why');
+      const reason = reasonSelect();
       reasonLabel.appendChild(reason);
-      const evidenceLabel = element('label', 'Evidence SHA-256');
-      const evidence = element('input');
-      evidence.className = 'input'; evidence.name = 'evidence_sha256'; evidence.required = true;
-      evidence.pattern = '[a-f0-9]{64}'; evidence.maxLength = 64;
-      evidenceLabel.appendChild(evidence);
+      const evidence = evidenceFile('Supporting document');
       const confirmLabel = element('label', undefined, 'check');
       const confirm = element('input'); confirm.type = 'checkbox'; confirm.required = true;
-      confirmLabel.append(confirm, document.createTextNode('I reviewed the affected future use and derivatives.'));
-      const submit = element('button', 'Revoke version', 'btn'); submit.type = 'submit';
-      form.append(reasonLabel, evidenceLabel, confirmLabel, submit);
+      confirmLabel.append(confirm, document.createTextNode('I checked what depends on this version.'));
+      const submit = element('button', 'Stop using this version', 'btn btn--danger'); submit.type = 'submit';
+      form.append(reasonLabel, evidence.label, confirmLabel, submit);
       form.addEventListener('submit', event => {
         event.preventDefault();
         if (!form.reportValidity()) return;
         act(async () => {
+          if (evidence.holder.pending) await evidence.holder.pending;
+          if (!evidence.holder.value) throw new Error('Choose the supporting document again.');
+          const ok = window.mvConfirm ? await window.mvConfirm('Stop using this version? Anything made from it is listed so it can be retired or rebuilt.', {okText: 'Stop using it'}) : true;
+          if (!ok) return;
           const impact = await api(`/registry/${encodeURIComponent(asset.kind)}/${encodeURIComponent(asset.reference.asset_id)}/${encodeURIComponent(asset.reference.version)}/impact?manifest_sha256=${encodeURIComponent(asset.reference.manifest_sha256)}`);
-          if (!validImpact(impact)) throw new Error('The derivative impact response could not be verified.');
+          if (!validImpact(impact)) throw new Error('The list of what depends on this could not be loaded. Try again.');
           renderImpact(impact);
           await api('/registry/revoke', 'POST', {context, confirm:true, reference:asset.reference,
             expected_revision:asset.revision, reason_code:reason.value.trim(),
-            evidence_sha256:evidence.value.trim()});
-          message('Registry version revoked. Future admission is blocked; affected derivatives are listed below.');
+            evidence_sha256:evidence.holder.value});
+          message('This version can no longer be used. Anything made from it is listed below.');
           await refresh();
         });
       });
@@ -258,37 +311,40 @@
     const list = byId('research-registry-items');
     list.replaceChildren();
     const assets = [...workspace.registry.datasets, ...workspace.registry.models];
-    if (!assets.length) list.appendChild(element('li', 'No governed dataset or model versions yet.'));
+    if (!assets.length) list.appendChild(element('li', 'No datasets or models yet. Add one above.'));
+    const STATE = {draft: 'Waiting for approval', approved: 'Approved', revoked: 'No longer used'};
+    const ELIGIBLE = {eligible: 'Ready to use', blocked: 'Blocked', unavailable: 'Not available', awaiting_approval: 'Waiting for approval', revoked: 'No longer used'};
     assets.forEach(asset => {
       const item = element('li', undefined, 'research-item');
-      item.appendChild(element('strong', `${asset.kind === 'dataset' ? 'Dataset' : 'Model'} · ${asset.reference.asset_id} · ${asset.reference.version}`));
-      const badge = element('span', asset.state, 'research-badge'); badge.dataset.state = asset.state;
+      item.appendChild(element('strong', `${asset.kind === 'dataset' ? 'Dataset' : 'Model'}: ${refLabel(asset.reference)}`));
+      const badge = element('span', STATE[asset.state] || human(asset.state), 'research-badge'); badge.dataset.state = asset.state;
       item.append(' ', badge);
-      if (asset.provenance_kind === 'synthetic') item.append(' ', element('span', 'Synthetic fixture', 'research-badge'));
-      item.appendChild(element('p', `Source: ${asset.source_ref}`));
-      item.appendChild(element('p', `Manifest: ${asset.reference.manifest_sha256}`, 'muted'));
-      item.appendChild(element('p', `License: ${asset.license_id} · Allowed purposes: ${asset.allowed_purposes.join(', ')}`));
-      item.appendChild(element('p', `Usage constraints: ${asset.usage_constraints.join('; ')}`));
-      item.appendChild(element('p', `Current use eligibility: ${asset.eligibility.state.replaceAll('_', ' ')}${asset.eligibility.detail ? ` · ${asset.eligibility.detail}` : ''}`));
+      if (asset.provenance_kind === 'synthetic') item.append(' ', element('span', 'Generated test data', 'research-badge'));
+      item.appendChild(element('p', `From: ${asset.source_ref}`));
+      item.appendChild(element('p', `License: ${human(asset.license_id)} · May be used for: ${asset.allowed_purposes.map(human).join(', ')}`));
+      item.appendChild(element('p', `Rules: ${asset.usage_constraints.map(human).join('; ')}`));
+      item.appendChild(element('p', `Can it be used now: ${ELIGIBLE[asset.eligibility.state] || human(asset.eligibility.state)}${asset.eligibility.detail ? ` · ${asset.eligibility.detail}` : ''}`));
+      const rows = [['Record fingerprint', asset.reference.manifest_sha256]];
       if (asset.kind === 'dataset') {
-        item.appendChild(element('p', `Content SHA-256: ${asset.content_sha256}`));
-        item.appendChild(element('p', `Data-use decision: ${asset.data_use_decision_id} · ${asset.data_use_action}`));
-        if (asset.consent_record_id) item.appendChild(element('p', `Consent record: ${asset.consent_record_id}`));
-        appendLineage(item, 'Parent datasets', asset.parent_datasets);
+        item.appendChild(element('p', `Allowed action: ${human(asset.data_use_action)}`));
+        appendLineage(item, 'Made from', asset.parent_datasets);
         if (asset.synthetic_provenance) {
-          item.appendChild(element('p', `Synthetic generator: ${asset.synthetic_provenance.generator_id} ${asset.synthetic_provenance.generator_version} · seed ${asset.synthetic_provenance.seed}`));
+          item.appendChild(element('p', `Generated by: ${human(asset.synthetic_provenance.generator_id)} version ${asset.synthetic_provenance.generator_version}`));
         }
+        rows.push(['Data file fingerprint', asset.content_sha256], ['Data-use record', asset.data_use_decision_id],
+          ['Consent record', asset.consent_record_id], ['Generator starting number', asset.synthetic_provenance?.seed]);
       } else {
-        item.appendChild(element('p', `Artifact SHA-256: ${asset.artifact_sha256}`));
-        const revision = asset.immutable_provider_revision ||
-          `unpinnable; observed ${asset.observed_from}–${asset.observed_until}`;
-        item.appendChild(element('p', `Provider identity: ${asset.provider_model_identity} · ${revision}`));
-        if (asset.reproducibility_limitation) item.appendChild(element('p', `Reproducibility limit: ${asset.reproducibility_limitation}`));
-        appendLineage(item, 'Dataset lineage', asset.dataset_lineage);
-        appendLineage(item, 'Model lineage', asset.model_lineage);
+        const exact = asset.immutable_provider_revision ? `version ${asset.immutable_provider_revision}` :
+          `no exact version; used ${when(asset.observed_from)} to ${when(asset.observed_until)}`;
+        item.appendChild(element('p', `AI model: ${asset.provider_model_identity} · ${exact}`));
+        if (asset.reproducibility_limitation) item.appendChild(element('p', `Results may differ because: ${asset.reproducibility_limitation}`));
+        appendLineage(item, 'Built from datasets', asset.dataset_lineage);
+        appendLineage(item, 'Built from models', asset.model_lineage);
+        rows.push(['Model file fingerprint', asset.artifact_sha256]);
       }
-      if (asset.approval) item.appendChild(element('p', `Approved by ${asset.approval.approved_by}`, 'muted'));
-      if (asset.revocation) item.appendChild(element('p', `Revoked: ${asset.revocation.reason_code}`, 'error'));
+      if (asset.approval) item.appendChild(element('p', `Approved by ${String(asset.approval.approved_by || '').replace(/^user:/, '')}`, 'muted'));
+      if (asset.revocation) item.appendChild(element('p', `No longer used: ${human(asset.revocation.reason_code)}`, 'error'));
+      technical(item, rows);
       assetActions(item, asset);
       list.appendChild(item);
     });
@@ -297,35 +353,36 @@
   function renderImpact(value) {
     const host = byId('research-impact');
     host.replaceChildren();
-    host.appendChild(element('h4', 'Current derivative impact'));
-    host.appendChild(element('p', `${value.derivatives.length} affected derivative version${value.derivatives.length === 1 ? '' : 's'}.`));
+    host.appendChild(element('h4', 'What depends on it'));
+    host.appendChild(element('p', `${value.derivatives.length} version${value.derivatives.length === 1 ? '' : 's'} made from it.`));
+    const ACTION = {invalidate_dataset: 'stop using this dataset', retire_or_retrain_model: 'retire or retrain this model'};
     const list = element('ul', undefined, 'research-lineage');
     value.derivatives.forEach(row => list.appendChild(element('li',
-      `${row.reference.kind} ${row.reference.asset_id} ${row.reference.version}: ${row.required_action.replaceAll('_', ' ')}`)));
+      `${row.reference.kind === 'model' ? 'Model' : 'Dataset'} ${refLabel(row.reference)}: ${ACTION[row.required_action] || human(row.required_action)}`)));
     host.appendChild(list);
-    host.appendChild(element('p', 'Deleting or excluding raw data does not prove that learned weight influence was removed. Affected models must be retired, reviewed, or retrained.', 'muted'));
+    host.appendChild(element('p', 'Deleting the original data does not remove what a model already learned from it. Models made from it must be retired, reviewed or retrained.', 'muted'));
   }
 
   function money(summary) {
     const values = Object.entries(summary.effective_amounts || {});
-    const known = values.length ? values.map(([currency, amount]) => `${currency} ${amount}`).join(', ') : 'no recorded amount';
-    return `${known}${summary.incomplete ? ' · incomplete cost evidence' : ' · cost evidence complete for recorded attempts'}`;
+    const known = values.length ? values.map(([currency, amount]) => `${currency} ${amount}`).join(', ') : 'nothing recorded';
+    return `${known}${summary.incomplete ? ' · some costs are not known yet (provider report pending)' : ' · all costs recorded'}`;
   }
 
   function renderAttempt(run, attempt, item) {
     const details = element('details', undefined, 'research-costs');
-    details.appendChild(element('summary', `Attempt ${attempt.number} · ${attempt.status} · ${attempt.costs.length} cost event${attempt.costs.length === 1 ? '' : 's'}`));
-    if (!attempt.costs.length) details.appendChild(element('p', 'No resource cost events recorded for this attempt.', 'muted'));
+    details.appendChild(element('summary', `Attempt ${attempt.number} · ${human(attempt.status)} · ${attempt.costs.length} cost${attempt.costs.length === 1 ? '' : 's'}`));
+    if (!attempt.costs.length) details.appendChild(element('p', 'No costs recorded for this attempt.', 'muted'));
     attempt.costs.forEach(event => {
       const cost = event.cost;
-      const known = cost.amount === null ? `unknown: ${cost.incomplete_reason}` : `${cost.currency} ${cost.amount}`;
-      details.appendChild(element('p', `${cost.category} · ${cost.basis} · ${known} · evidence ${cost.evidence_sha256}`));
+      const known = cost.amount === null ? `not known yet (${human(cost.incomplete_reason)})` : `${cost.currency} ${cost.amount}`;
+      details.appendChild(element('p', `${human(cost.category)} · ${human(cost.basis)} · ${known}`));
     });
     if (attempt.metrics.length) {
-      appendLineage(details, 'Metrics', attempt.metrics.map(metric => ({
-        asset_id: `${metric.name}=${metric.value}`, version: metric.evaluator_version,
-        manifest_sha256: metric.lineage_sha256,
-      })));
+      details.appendChild(element('p', 'Results', 'muted'));
+      const list = element('ul', undefined, 'research-lineage');
+      attempt.metrics.forEach(metric => list.appendChild(element('li', `${human(metric.name)}: ${metric.value}`)));
+      details.appendChild(list);
     }
     item.appendChild(details);
   }
@@ -335,7 +392,7 @@
     const button = actionButton(label, async () => {
       await api(`/governed-runs/${encodeURIComponent(run.run_id)}/${suffix}`, 'POST',
         {context, confirm:true, expected_revision:run.revision});
-      message(`${label} completed for ${run.run_id}.`);
+      message(`${label}: done.`);
       await refresh();
     }, className);
     if (suffix === 'start' && !workspace.governed_execution.available) {
@@ -348,25 +405,29 @@
 
   function cancellationForm(run) {
     const details = element('details', undefined, 'research-advanced');
-    details.appendChild(element('summary', 'Cancel before dispatch'));
+    details.appendChild(element('summary', 'Cancel before it starts'));
     const form = element('form', undefined, 'research-form');
-    const reason = element('input'); reason.className = 'input'; reason.required = true;
-    reason.pattern = '[a-z][a-z0-9_.-]{0,63}'; reason.placeholder = 'operator_cancelled';
-    const evidence = element('input'); evidence.className = 'input'; evidence.required = true;
-    evidence.pattern = '[a-f0-9]{64}'; evidence.placeholder = 'Cancellation evidence SHA-256';
+    const reasonLabel = element('label', 'Why');
+    const reason = reasonSelect();
+    reasonLabel.appendChild(reason);
+    const evidence = evidenceFile('Supporting document (for example the request to cancel)');
     const confirmLabel = element('label', undefined, 'check');
     const confirm = element('input'); confirm.type = 'checkbox'; confirm.required = true;
-    confirmLabel.append(confirm, document.createTextNode('Cancel this exact pre-dispatch attempt.'));
-    const submit = element('button', 'Cancel run', 'btn'); submit.type = 'submit';
-    form.append(reason, evidence, confirmLabel, submit);
+    confirmLabel.append(confirm, document.createTextNode('Cancel this run before it starts.'));
+    const submit = element('button', 'Cancel run', 'btn btn--danger'); submit.type = 'submit';
+    form.append(reasonLabel, evidence.label, confirmLabel, submit);
     form.addEventListener('submit', event => {
       event.preventDefault();
       if (!form.reportValidity()) return;
       act(async () => {
+        if (evidence.holder.pending) await evidence.holder.pending;
+        if (!evidence.holder.value) throw new Error('Choose the supporting document again.');
+        const ok = window.mvConfirm ? await window.mvConfirm('Cancel this run?', {okText: 'Cancel run'}) : true;
+        if (!ok) return;
         await api(`/governed-runs/${encodeURIComponent(run.run_id)}/cancel`, 'POST', {context,
           confirm:true, expected_revision:run.revision, reason_code:reason.value.trim(),
-          evidence_sha256:evidence.value.trim()});
-        message(`Run ${run.run_id} cancelled before dispatch.`);
+          evidence_sha256:evidence.holder.value});
+        message('Run cancelled before it started.');
         await refresh();
       });
     });
@@ -377,23 +438,25 @@
   function renderRuns() {
     const list = byId('research-governed-runs');
     list.replaceChildren();
-    if (!workspace.governed_runs.length) list.appendChild(element('li', 'No governed runs yet.'));
+    if (!workspace.governed_runs.length) list.appendChild(element('li', 'No runs yet. Queue one above.'));
     workspace.governed_runs.forEach(run => {
       const item = element('li', undefined, 'research-item');
-      item.appendChild(element('strong', run.run_id));
-      const badge = element('span', run.status.replaceAll('_', ' '), 'research-badge');
+      item.appendChild(element('strong', `${human(run.manifest.experiment_id)} (${human(run.manifest.action)} for ${human(run.manifest.purpose).toLowerCase()})`));
+      const badge = element('span', human(run.status), 'research-badge');
       badge.dataset.state = run.status; item.append(' ', badge);
-      item.appendChild(element('p', `Experiment: ${run.manifest.experiment_id} ${run.manifest.experiment_version} · ${run.manifest.action} for ${run.manifest.purpose}`));
-      item.appendChild(element('p', `Seed ${run.manifest.seed} · code ${run.manifest.code_revision} · environment ${run.manifest.environment_id} ${run.manifest.environment_version}`));
       const caps = run.manifest.resource_caps;
-      item.appendChild(element('p', `Caps: ${caps.max_wall_seconds}s · ${caps.max_provider_calls} provider calls · ${caps.currency} ${caps.max_cost} · ${caps.max_storage_bytes} storage bytes`));
-      item.appendChild(element('p', `Effective cost: ${money(run.cost_summary)}`));
+      const minutes = Math.round(Number(caps.max_wall_seconds) / 60);
+      const mb = Math.round(Number(caps.max_storage_bytes) / 1048576);
+      item.appendChild(element('p', `Limits: ${minutes >= 1 ? minutes + ' minutes' : caps.max_wall_seconds + ' seconds'} · ${caps.max_provider_calls} AI calls · ${caps.currency} ${caps.max_cost} · ${mb} MB storage`));
+      item.appendChild(element('p', `Cost so far: ${money(run.cost_summary)}`));
+      technical(item, [['Run', run.run_id], ['Code version', run.manifest.code_revision],
+        ['Setup', `${run.manifest.environment_id} ${run.manifest.environment_version}`], ['Starting number', run.manifest.seed]]);
       run.attempts.forEach(attempt => renderAttempt(run, attempt, item));
       const actions = element('div', undefined, 'research-actions');
       runAction(actions, run, 'Queue run', 'queue', run.status === 'planned', 'btn btn--primary');
       runAction(actions, run, 'Start run', 'start', run.status === 'queued', 'btn btn--primary');
-      runAction(actions, run, 'Retry failed run', 'retry', run.status === 'failed');
-      if (run.status !== 'planned') actions.appendChild(actionButton('Export deterministic evidence',
+      runAction(actions, run, 'Try again', 'retry', run.status === 'failed');
+      if (run.status !== 'planned') actions.appendChild(actionButton('Download run record',
         () => downloadRun(run.run_id)));
       item.appendChild(actions);
       if (['planned', 'queued'].includes(run.status)) item.appendChild(cancellationForm(run));
@@ -407,34 +470,34 @@
     if (!response.ok) {
       let detail = '';
       try { detail = (await response.json()).detail || ''; } catch (_) { detail = ''; }
-      throw new Error(detail || 'The deterministic evidence export is unavailable.');
+      throw new Error('The run record is not available right now.');
     }
     const bytes = await boundedBytes(response, 2200000);
     let evidence;
     try { evidence = JSON.parse(new TextDecoder().decode(bytes)); }
-    catch (_) { throw new Error('The evidence export was not valid JSON.'); }
+    catch (_) { throw new Error('The run record could not be read. Try again.'); }
     if (!evidence || evidence.schema !== 'lightwork.research-run-export.v1' ||
         evidence.run?.run_id !== runId || !evidence.cost_summary ||
         evidence.data_statement?.contains_raw_customer_data !== false ||
         evidence.projection_statement?.contains_authority_credentials !== false ||
         evidence.projection_statement?.contains_resource_cost_source_locations !== false) {
-      throw new Error('The evidence export did not match this exact safe run projection.');
+      throw new Error('The run record did not match this run. Try again.');
     }
     const blob = new Blob([bytes], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const link = element('a'); link.href = url; link.download = `research-run-${runId}.json`;
     document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
-    message(`Deterministic evidence exported for ${runId}.`);
+    message('Run record downloaded.');
   }
 
   async function boundedBytes(response, maximum) {
     const declared = Number(response.headers?.get?.('content-length'));
     if (Number.isFinite(declared) && declared > maximum) {
-      throw new Error('The evidence export exceeded its size boundary.');
+      throw new Error('The run record is too large to download here.');
     }
     if (!response.body?.getReader) {
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > maximum) throw new Error('The evidence export exceeded its size boundary.');
+      if (bytes.byteLength > maximum) throw new Error('The run record is too large to download here.');
       return bytes;
     }
     const reader = response.body.getReader();
@@ -446,7 +509,7 @@
       length += value.byteLength;
       if (length > maximum) {
         await reader.cancel();
-        throw new Error('The evidence export exceeded its size boundary.');
+        throw new Error('The run record is too large to download here.');
       }
       chunks.push(value);
     }
@@ -463,16 +526,14 @@
     renderRuns();
     const execution = workspace.governed_execution;
     byId('research-materialization-state').textContent = execution.available ?
-      'Trusted materialization adapter configured.' :
-      'Execution adapter unavailable. Plans can be reviewed and queued; start is blocked before data access.';
-    const dataUseState = workspace.registry.data_use_decisions?.state || 'unavailable';
+      'Runs can start.' :
+      'Runs can be planned and queued, but cannot start yet: starting is blocked before data access until an administrator connects where the data lives.';
     byId('research-registry-authority-state').textContent =
-      `Data-use decision picker: ${dataUseState.replaceAll('_', ' ')}. ` +
+      (decisionsAvailable() ? 'Approved data uses: available. ' : 'Approved data uses: none yet. ') +
       (workspace.registry.consent_authority_available ?
-        'Consent-bound dataset checks are configured.' :
-        'Consent-bound dataset approval is unavailable until a trusted consent authority adapter is configured. ') +
-      'Signed training receipts are verified against server trust policy when used.';
-    message(`Loaded ${workspace.registry.datasets.length} dataset version${workspace.registry.datasets.length === 1 ? '' : 's'}, ${workspace.registry.models.length} model version${workspace.registry.models.length === 1 ? '' : 's'}, and ${workspace.governed_runs.length} governed run${workspace.governed_runs.length === 1 ? '' : 's'}.`);
+        'Consent checks: ready.' :
+        'Consent checks: not set up, so datasets that need consent cannot be approved yet.');
+    message(`${workspace.registry.datasets.length} dataset${workspace.registry.datasets.length === 1 ? '' : 's'}, ${workspace.registry.models.length} model${workspace.registry.models.length === 1 ? '' : 's'} and ${workspace.governed_runs.length} run${workspace.governed_runs.length === 1 ? '' : 's'}.`);
     syncConditionalFields();
   }
 
@@ -484,7 +545,7 @@
     if (busy) return;
     setBusy(true);
     try { await work(); }
-    catch (error) { message(error.message || 'Governed research action failed.', true); }
+    catch (error) { message(error.message || 'Something went wrong. Please try again.', true); }
     finally { setBusy(false); }
   }
 
@@ -566,7 +627,7 @@
     act(async () => {
       await api('/registry/datasets', 'POST', payload);
       form.reset(); syncConditionalFields();
-      message('Immutable dataset version registered as a draft for separate review.');
+      message('Dataset added. It is waiting for approval.');
       await refresh();
     });
   });
@@ -602,7 +663,7 @@
     act(async () => {
       await api('/registry/models', 'POST', payload);
       form.reset(); syncConditionalFields();
-      message('Immutable model version registered as a draft for separate review.');
+      message('Model added. It is waiting for approval.');
       await refresh();
     });
   });
@@ -634,7 +695,7 @@
       form.elements.max_wall_seconds.value = '300'; form.elements.max_provider_calls.value = '0';
       form.elements.max_storage_bytes.value = '104857600'; form.elements.max_cost.value = '0';
       form.elements.currency.value = 'USD';
-      message('Governed run planned and queued after current rights checks.');
+      message('Run queued.');
       await refresh();
     });
   });

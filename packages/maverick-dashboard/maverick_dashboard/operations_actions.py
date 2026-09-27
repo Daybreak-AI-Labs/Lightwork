@@ -9,19 +9,26 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
 
-from . import audit_actions_api, code_actions_api, immune_actions_api, learning_actions_api
+from . import (
+    audit_actions_api,
+    code_actions_api,
+    immune_actions_api,
+    learning_actions_api,
+    research_actions_api,
+)
 
 api_router = APIRouter()
 api_router.include_router(code_actions_api.router)
 api_router.include_router(immune_actions_api.router)
 api_router.include_router(learning_actions_api.router)
 api_router.include_router(audit_actions_api.router)
+api_router.include_router(research_actions_api.router)
 
 asset_router = APIRouter()
 asset_router.include_router(code_actions_api.asset_router)
 
 # Page scripts for these pages, each on an explicit route (no directory mount).
-_ASSETS = ("lightwork-security-hunt.js",)
+_ASSETS = ("lightwork-security-hunt.js", "lightwork-research-plain.js")
 
 
 def _asset(name: str):

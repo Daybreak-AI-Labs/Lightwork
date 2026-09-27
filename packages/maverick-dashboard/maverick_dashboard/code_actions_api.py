@@ -104,6 +104,17 @@ def _refuse_unapproved(world, p: dict) -> None:
 
 router = APIRouter(tags=["code-actions"])
 
+@router.get("/code/heads")
+async def repo_heads(request: Request) -> dict:
+    """Each code project's latest version, for pickers (Research lab runs)."""
+    require_permission(request, "operate")
+    from maverick.codebase import vault
+    if not vault.enabled():
+        return {"repos": []}
+    repos = await run_in_threadpool(vault.list_repos)
+    return {"repos": [{"name": r.name, "head": r.head} for r in repos if r.head]}
+
+
 @router.post("/code/repos", status_code=201)
 async def add_repo(request: Request, body: RepoIn) -> dict:
     require_permission(request, "admin")
