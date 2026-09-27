@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}All settings · Lightwork{% endblock %}
+{% block content %}
+  {% from "_hero.html" import hero, state %}
+  <link rel="stylesheet" href="/static/lightwork-settings-all.css">
+  {% call hero('Settings', 'All settings',
+               subtitle='Every product setting in one place',
+               lede='Change how Lightwork works without editing files or running the installer.
+                     Each setting shows its current value and where that value comes from.') %}
+    {{ state('Changed on this page',
+             changed_count ~ ' of ' ~ setting_count ~ ' settings',
+             badge='Using your installer and default values' if changed_count == 0 else 'Changed here',
+             badge_class='idle' if changed_count == 0 else 'ok',
+             copy='Reset puts a setting back to its default. Settings marked as affecting safety ask you to confirm first.') }}
+  {% endcall %}
+
+  <p><a class="btn btn--ghost" href="/settings">Back to Settings</a></p>
+
+  <section class="settings-all-index panel" aria-labelledby="settings-all-find">
+    <h2 id="settings-all-find">Find a setting</h2>
+    <div class="settings-all-filters">
+      <label class="settings-all-field" for="settings-all-search">Search by name or description
+        <input class="input" id="settings-all-search" type="search" maxlength="100"
+               placeholder="Safety, retention, alerts…" aria-controls="settings-all-groups">
+      </label>
+      <label class="settings-all-field" for="settings-all-group">Show
+        <select class="select" id="settings-all-group" aria-controls="settings-all-groups">
+          <option value="">All groups</option>
+          {% for g in groups %}<option value="{{ g.slug }}">{{ g.name }}</option>{% endfor %}
+          <option value="modules">Modules</option>
+        </select>
+      </label>
+      <label class="settings-all-check" for="settings-all-changed">
+        <input type="checkbox" id="settings-all-changed"> Only settings changed here
+      </label>
+    </div>
+    <p class="muted" id="settings-all-filter-status" role="status" aria-live="polite"></p>
+  </section>
+
+  <details class="panel settings-all-about">
+    <summary>What can't be changed here</summary>
+    <p class="muted">
+      Sign-in and single sign-on, how workspaces are kept apart, encryption keys, where Lightwork
+      stores its files, and payment service keys are set by whoever runs your server. They protect
+      this page itself, so they can only be changed there. A setting marked
+      &ldquo;Set by your server's deployment settings&rdquo; is fixed in the same way.
+    </p>
+    <p class="muted">
+      AI service keys, models, the spending cap per task, features, abilities, connections and
+      channels have their own sections on the <a href="/settings">Settings</a> page and their own pages.
+    </p>
+  </details>
+
+  <div class="panel" role="status" aria-live="polite" id="settings-all-status" hidden></div>
+
+  <div id="settings-all-groups">
+  {% for g in groups %}
+  <section class="settings-all-group" data-group="{{ g.slug }}" aria-labelledby="group-{{ g.slug }}">
+    <div class="section-head"><h2 id="group-{{ g.slug }}">{{ g.name }}</h2></div>
+    <div class="panel">
+      <p class="muted settings-all-lead">{{ g.intro }}</p>
+      {% for s in g.settings %}
+      {% set cid = 'sa-' ~ s.id | replace('.', '-') %}
+      <div class="settings-all-row" data-setting-id="{{ s.id }}" data-control="{{ s.control }}"
+           data-source="{{ s.source }}" data-warning="{{ s.warning }}"
+           data-search="{{ (s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ g.name) | lower }}">
+        <div class="settings-all-about-row">
+          {% if s.control in ['multiselect', 'toggle', 'rate'] %}
+          <span class="settings-all-label" id="{{ cid }}-label">{{ s.label }}</span>
+          {% else %}
+          <label class="settings-all-label" id="{{ cid }}-label" for="{{ cid }}">{{ s.label }}</label>
+          {% endif %}
+          <p class="muted settings-all-help" id="{{ cid }}-help">{{ s.help }}</p>
+          <p class="settings-all-meta">
+            <span>Now: <strong data-value-text>{{ s.value_text }}</strong></span>
+            <span class="badge {{ 'ok' if s.source == 'here' else ('warn' if s.source == 'deployment' else 'idle') }}"
+                  data-source-text>{{ s.source_text }}</span>
+            <span class="muted">Default: {{ s.default_text }}</span>
+            {% if s.restart %}<span class="badge warn">Takes effect after a restart</span>{% endif %}
+            {% if s.warning %}<span class="badge blocked">Affects safety</span>{% endif %}
+          </p>
+          {% if s.warning %}<p class="muted settings-all-warning">{{ s.warning_lead }} {{ s.warning }}</p>{% endif %}
+        </div>
+        <div class="settings-all-control">
+          {% if s.locked %}
+            <p class="muted">Set by your server's deployment settings, so it can't be changed here.</p>
+          {% elif s.control == 'toggle' %}
+            <label class="settings-all-switch" for="{{ cid }}">
+              <input type="checkbox" role="switch" id="{{ cid }}" data-input
+                     aria-labelledby="{{ cid }}-label" aria-describedby="{{ cid }}-help"
+                     {% if s.value is sameas true %}checked{% endif %}>
+              <span>On</span>
+            </label>
+          {% elif s.control == 'select' %}
+            <select class="select" id="{{ cid }}" data-input aria-describedby="{{ cid }}-help">
+              {% for c in s.choices %}
+              <option value="{{ c.value }}" {% if c.value == s.value %}selected{% endif %}>{{ c.label }}</option>
+              {% endfor %}
+            </select>
+          {% elif s.control == 'multiselect' %}
+            <fieldset class="settings-all-choices" aria-labelledby="{{ cid }}-label" aria-describedby="{{ cid }}-help">
+              {% for c in s.choices %}
+              <label for="{{ cid }}-{{ loop.index }}">
+                <input type="checkbox" id="{{ cid }}-{{ loop.index }}" data-choice value="{{ c.value }}"
+                       {% if c.value in (s.value or []) %}checked{% endif %}> {{ c.label }}
+              </label>
+              {% endfor %}
+            </fieldset>
+          {% elif s.control == 'number' %}
+            <div class="settings-all-number">
+              <input class="input" type="number" id="{{ cid }}" data-input inputmode="decimal"
+                     aria-describedby="{{ cid }}-help {{ cid }}-unit"
+                     {% if s.minimum is not none %}min="{{ s.minimum }}"{% endif %}
+                     {% if s.maximum is not none %}max="{{ s.maximum }}"{% endif %}
+                     step="{{ s.step }}"
+                     value="{{ '' if s.value is none else s.value }}"
+                     {% if s.optional %}placeholder="No limit"{% endif %}>
+              <span class="muted" id="{{ cid }}-unit">{{ s.unit }}</span>
+            </div>
+          {% elif s.control == 'rate' %}
+            <div class="settings-all-number">
+              <label for="{{ cid }}-count" class="sr-only">{{ s.label }}: how many</label>
+              <input class="input" type="number" id="{{ cid }}-count" data-rate-count min="1" max="100000" step="1"
+                     value="{{ s.rate_count }}" placeholder="No limit" aria-describedby="{{ cid }}-help">
+              <label for="{{ cid }}-period" class="sr-only">{{ s.label }}: how often</label>
+              <select class="select" id="{{ cid }}-period" data-rate-period>
+                {% for p in s.periods %}
+                <option value="{{ p.value }}" {% if p.value == s.rate_seconds %}selected{% endif %}>{{ p.label }}</option>
+                {% endfor %}
+                {% if s.rate_seconds not in [60, 3600, 86400] %}
+                <option value="{{ s.rate_seconds }}" selected>Every {{ s.rate_seconds }} seconds</option>
+                {% endif %}
+              </select>
+            </div>
+          {% elif s.control == 'text' %}
+            <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
+                   value="{{ s.value or '' }}" aria-describedby="{{ cid }}-help">
+          {% elif s.control == 'list' %}
+            <div class="settings-all-list" data-list>
+              <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label">
+                {% for item in s.value %}
+                <li><label class="sr-only" for="{{ cid }}-item-{{ loop.index }}">Address {{ loop.index }}</label>
+                  <input class="input" type="url" id="{{ cid }}-item-{{ loop.index }}" data-list-item value="{{ item }}" maxlength="{{ s.max_length }}">
+                  <button class="btn btn--ghost" type="button" data-list-remove>Remove</button></li>
+                {% endfor %}
+              </ul>
+              <button class="btn btn--ghost" type="button" data-list-add id="{{ cid }}"
+                      aria-describedby="{{ cid }}-help">Add an address</button>
+            </div>
+          {% elif s.control == 'secret' %}
+            <div class="settings-all-secret">
+              <span class="badge {{ 'ok' if s.is_set else 'idle' }}" data-secret-state>{{ 'Set' if s.is_set else 'Not set' }}</span>
+              <button class="btn btn--ghost" type="button" data-secret-replace aria-controls="{{ cid }}">{{ 'Replace' if s.is_set else 'Add' }}</button>
+              <input class="input" type="password" id="{{ cid }}" data-input autocomplete="new-password"
+                     maxlength="{{ s.max_length }}" hidden aria-labelledby="{{ cid }}-label" aria-describedby="{{ cid }}-help">
+            </div>
+          {% endif %}
+          {% if not s.locked %}
+          <div class="settings-all-actions">
+            <button class="btn btn--primary" type="button" data-save>Save</button>
+            <button class="btn btn--ghost" type="button" data-reset>Reset to default</button>
+          </div>
+          {% endif %}
+          <p class="muted settings-all-row-status" role="status" aria-live="polite" data-row-status></p>
+        </div>
+      </div>
+      {% endfor %}
+      <p class="settings-all-group-actions">
+        <button class="btn btn--primary" type="button" data-save-group="{{ g.slug }}">Save changes in {{ g.name }}</button>
+        <button class="btn btn--ghost" type="button" data-reset-group="{{ g.slug }}">Reset all in {{ g.name }}</button>
+      </p>
+    </div>
+  </section>
+  {% endfor %}
+
+  <section class="settings-all-group" data-group="modules" aria-labelledby="group-modules">
+    <div class="section-head"><h2 id="group-modules">Modules</h2></div>
+    <div class="panel">
+      <p class="muted settings-all-lead">Turn whole parts of Lightwork on or off. Turning one on also turns on the parts it needs.</p>
+      {% if not modules %}
+      <p class="muted">No modules can be switched from here.</p>
+      {% endif %}
+      {% for m in modules %}
+      <div class="settings-all-row" data-module="{{ m.section }}"
+           data-search="{{ (m.label ~ ' module ' ~ m.needs | join(' ')) | lower }}" data-source="{{ 'here' }}">
+        <div class="settings-all-about-row">
+          <span class="settings-all-label" id="mod-{{ loop.index }}-label">{{ m.label }}</span>
+          {% if m.needs %}<p class="muted settings-all-help" id="mod-{{ loop.index }}-help">Also turns on: {{ m.needs | join(', ') }}</p>{% endif %}
+          <p class="settings-all-meta">
+            <span>Now: <strong data-value-text>{% if m.enabled is none %}Unknown{% elif m.enabled %}On{% else %}Off{% endif %}</strong></span>
+          </p>
+        </div>
+        <div class="settings-all-control">
+          <label class="settings-all-switch" for="mod-{{ loop.index }}">
+            <input type="checkbox" role="switch" id="mod-{{ loop.index }}" data-module-toggle
+                   aria-labelledby="mod-{{ loop.index }}-label"
+                   {% if m.needs %}aria-describedby="mod-{{ loop.index }}-help"{% endif %}
+                   {% if m.enabled %}checked{% endif %} {% if m.enabled is none %}disabled{% endif %}>
+            <span>On</span>
+          </label>
+          <p class="muted settings-all-row-status" role="status" aria-live="polite" data-row-status></p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  </div>
+
+  <p class="muted" id="settings-all-empty" hidden>No settings match. Clear the search to see every setting.</p>
+  <script src="/static/lightwork-settings-all.js" defer></script>
+{% endblock %}
