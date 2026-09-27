@@ -4325,7 +4325,7 @@ async def _governance_extensions_page_data(
         data["vendor_items"] = list(listing.get("items") or [])[:20]
     except Exception as exc:
         data["vendor_error"] = (
-            "Select a company or tenant before loading AI vendor assessments."
+            "Choose a workspace first to see supplier reviews."
             if "tenant" in str(exc).lower()
             else "AI vendor assessments are temporarily unavailable."
         )
@@ -4487,8 +4487,8 @@ async def _ai_inventory_page_data(
         except Exception as exc:
             if "active tenant" in str(exc).lower():
                 error = (
-                    "Select a company or tenant before loading discovered AI "
-                    "assets. No inventory records were read."
+                    "Choose a workspace first to see discovered AI systems. "
+                    "Nothing was read."
                 )
             else:
                 error = "AI inventory records are temporarily unavailable."
@@ -4580,12 +4580,12 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
                 == "AI evidence gateway records require an explicit tenant scope"
             ):
                 error = (
-                    "Select a company or tenant before loading evidence. "
-                    "No records were read."
+                    "Choose a workspace first to see evidence. "
+                    "Nothing was read."
                 )
                 error_action = (
-                    "Set [client] id in the Lightwork configuration or set "
-                    "MAVERICK_TENANT, then restart the dashboard."
+                    "Pick a workspace from the workspace menu, then reload this "
+                    "page. If there is no workspace to pick, ask an administrator."
                 )
             else:
                 error = (
@@ -4735,6 +4735,10 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "model_risk_assets": assets[:500],
             "model_risk_errors": model_risk_errors,
             "ai_vendor_items": extensions_data["vendor_items"],
+            "ai_vendor_questions": [
+                {"id": question.id, "section": question.section, "text": question.text}
+                for question in ai_vendor_risk.AI_VENDOR_QUESTIONS
+            ],
             "ai_vendor_error": extensions_data["vendor_error"],
             "drift_monitoring_enabled": extensions_data["drift_enabled"],
             "drift_monitoring_items": extensions_data["drift_items"],

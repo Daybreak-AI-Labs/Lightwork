@@ -72,13 +72,13 @@ def test_other_global_or_executable_deployments_have_the_same_safety_contract():
     roles = _source("roles.html")
 
     assert "let actionInFlight = false" in assurance
-    assert "Activate policy pack “${target}” on the global channel?" in assurance
-    assert "Every subscribed tenant may receive this governed version" in assurance
-    assert "Policy-pack ${action} failed (HTTP ${response.status}). Try again." in assurance
+    assert "Turn on policy pack “${target}” for all workspaces?" in assurance
+    assert "Every workspace that uses this pack may move to this version" in assurance
     assert 'snapshotButton.dataset.inFlight === "true"' in assurance
-    assert "Publish the governed portfolio-risk snapshot" in assurance
-    assert "Snapshot publication failed (HTTP ${response.status}). Try again." in assurance
+    assert "Save the overall AI risk report" in assurance
     assert "Could not reach the server — check your connection and try again." in assurance
+    # Failures are plain sentences, never status codes.
+    assert "(HTTP ${" not in assurance
 
     assert 'if (form.dataset.inFlight === "true") return null;' in governance
     assert 'delete form.dataset.inFlight' in governance

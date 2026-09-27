@@ -206,8 +206,8 @@ def test_assurance_page_renders_inventory_policy_state_and_bounded_admin_actions
     page = response.text
     assert 'id="ai-inventory-panel"' in page
     assert "AWS Bedrock" in page
-    assert "immutable_provider_revision" in page
-    assert "AIR-complete" in page
+    assert "Pinned to one provider version" in page
+    assert "immutable_provider_revision" not in page
     assert 'data-inventory-connector="bedrock"' in page
     assert '"/api/v1/security/assurance/ai-inventory/connectors/"' in page
 
@@ -239,10 +239,10 @@ def test_assurance_page_keeps_inventory_and_policy_mutations_admin_only(
 
     assert response.status_code == 200
     page = response.text
-    assert "Read-only connector status" in page
+    assert "Connected accounts" in page
     assert "Provider model" in page
-    assert "Read-only governed state" in page
-    assert "example-controls" in page
+    assert "Prepared packs" in page
+    assert "Example controls" in page  # pack names are shown as words
     assert "data-inventory-connector" not in page
     assert "data-policy-action" not in page
     assert "/ai-inventory/connectors/" not in page
@@ -270,8 +270,8 @@ def test_policy_partial_read_keeps_available_state_and_withholds_mutations(
     assert response.status_code == 200
     page = response.text
     assert "Select a tenant to view policy-pack subscriptions." in page
-    assert "Available governed records are shown below" in page
-    assert "example-controls" in page
+    assert "What could be loaded is shown below" in page
+    assert "Example controls" in page  # pack names are shown as words
     assert "data-policy-action" not in page
     assert "/policy-packs/catalog/" not in page
 
@@ -290,8 +290,7 @@ def test_policy_truncated_read_window_withholds_revision_based_actions(
 
     assert response.status_code == 200
     page = response.text
-    assert "Administrator actions are withheld" in page
-    assert "bounded read window" in page
+    assert "Changes are paused because one of the lists is too long" in page
     assert "data-policy-action" not in page
     assert "/policy-packs/catalog/" not in page
 
@@ -352,3 +351,25 @@ def test_red_team_form_handler_renders_when_evidence_gateway_is_off(monkeypatch)
     assert "expected_revision" in page
     assert "/api/v1/security/assurance/gateway/demo-seed" not in page
     assert "/api/v1/security/assurance/gateway/assurance-packet" not in page
+
+
+def test_assurance_page_sections_speak_plainly(monkeypatch):
+    import re
+
+    _patch_enabled_surfaces(monkeypatch)
+    page = client.get("/security/assurance").text
+    main = page.split('<main id="content"', 1)[1].split("</main>", 1)[0]
+    own = main.split('id="governance-operations-panel"', 1)[0]
+    visible = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>", " ", own)
+    assert not re.search(
+        r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|revision|"
+        r"idempoten\w*)\b|/api/v1|HTTP \d{3}|\[ai_inventory\]|\[policy_packs\]",
+        visible,
+        re.IGNORECASE,
+    ), visible
+    scripts = "".join(re.findall(r"<script>([\s\S]*?)</script>", page.split('id="governance-operations-panel"', 1)[0]))
+    assert "window.prompt" not in scripts and "window.confirm(" not in scripts
+    # Pickers replace typed identifiers and JSON.
+    assert 'name="asset_id" required pattern="MAA-' not in page
+    assert "Aggregate samples JSON" not in page
+    assert "source:id" not in page

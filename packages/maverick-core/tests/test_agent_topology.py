@@ -171,6 +171,12 @@ def test_sync_promotes_mcp_servers_to_safe_governed_inventory(_configured):
     assert "C:/tenant/raw" not in serialised
 
 
+def test_agent_names_lists_configured_agents(_configured):
+    names = topology.agent_names()
+    assert "risk_agent" in names
+    assert names == sorted(names)
+
+
 def test_unknown_agent_and_unsupported_blast_kind_fail_honestly(_configured):
     missing = topology.agent_view("missing_agent")
     assert missing == {
@@ -197,3 +203,5 @@ def test_feature_gate_is_strict(tmp_path):
     assert topology.enabled() is False
     with pytest.raises(topology.AgentTopologyConfigError, match="requires"):
         topology.agent_view("risk_agent")
+    with pytest.raises(topology.AgentTopologyConfigError, match="requires"):
+        topology.agent_names()

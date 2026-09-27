@@ -346,6 +346,13 @@ def _agent_projection(
     )
 
 
+def agent_names() -> list[str]:
+    """Names of the configured agents whose topology can be viewed."""
+
+    _require_enabled()
+    return sorted(_profiles())
+
+
 def agent_view(agent_name: str) -> dict[str, Any]:
     """Return everything one configured agent can reach, transitively."""
 
@@ -501,6 +508,7 @@ __all__ = [
     "AgentTopologyConfigError",
     "AgentTopologyError",
     "AgentTopologyStateError",
+    "agent_names",
     "agent_view",
     "blast_radius",
     "enabled",

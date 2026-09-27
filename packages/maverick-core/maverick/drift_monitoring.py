@@ -772,6 +772,16 @@ class DriftMonitoringService:
             raise DriftMonitoringStateError("drift baseline schema is invalid")
         return row
 
+    def list_baselines(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Captured baselines in this workspace, for pickers (read-only)."""
+
+        bound = _integer(limit, "limit", 1, _MAX_BASELINES)
+        return [
+            row
+            for row in self._baselines.list(limit=bound)
+            if isinstance(row, dict) and row.get("schema") == BASELINE_SCHEMA
+        ]
+
     def evaluate(  # noqa: C901 - one explicit, auditable multi-signal decision boundary
         self,
         baseline_id: str,
@@ -985,6 +995,10 @@ def evaluate(baseline_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.evaluate(baseline_id, **kwargs)
 
 
+def list_baselines(*, limit: int = 200) -> list[dict[str, Any]]:
+    return _DEFAULT.list_baselines(limit=limit)
+
+
 def live_service() -> DriftMonitoringService:  # pragma: no cover - live wiring
     return DriftMonitoringService(alert_sink=_live_alert_sink)
 
@@ -1002,6 +1016,7 @@ __all__ = [
     "enabled",
     "evaluate",
     "get_drift_config",
+    "list_baselines",
     "kl_divergence",
     "live_service",
     "population_stability_index",

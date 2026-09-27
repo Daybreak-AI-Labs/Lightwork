@@ -272,6 +272,11 @@ def test_drift_lifecycle_over_http_stays_aggregate_only(monkeypatch):
     assert "feature_samples" not in baseline
     assert "features" not in baseline
 
+    listed = _ok(client.get(f"{base}/baselines"))
+    assert [row["id"] for row in listed["items"]] == [baseline["id"]]
+    assert "features" not in listed["items"][0]
+    assert listed["items"][0]["monitored"]["feature_names"] == ["score"]
+
     fetched = _ok(client.get(f"{base}/baselines/{baseline['id']}"))
     assert fetched["id"] == baseline["id"]
     assert client.get(f"{base}/baselines/MDB-missing").status_code == 404
@@ -342,6 +347,8 @@ def test_agent_topology_routes_wire_permissions_and_error_mapping(monkeypatch):
     monkeypatch.setattr(topo, "sync_mcp_inventory", sync)
 
     base = "/api/v1/security/assurance/agent-topology"
+    monkeypatch.setattr(topo, "agent_names", lambda: ["planner", "reviewer"])
+    assert _ok(client.get(f"{base}/agents")) == {"items": ["planner", "reviewer"], "count": 2}
     view = _ok(client.get(f"{base}/agents/planner"))
     assert view["agent"] == "planner"
     radius = _ok(client.get(f"{base}/blast-radius/tool/web_fetch"))
@@ -374,7 +381,7 @@ def test_assurance_page_renders_new_panels_and_gates_admin_actions(monkeypatch):
     page = client.get("/security/assurance")
     assert page.status_code == 200
     text = page.text
-    assert "Vendor, drift &amp; agent assurance" in text
+    assert "Suppliers, drift and agent reach" in text
     assert 'id="drift-baseline-create"' in text
     assert 'id="ai-vendor-create"' in text
 
@@ -494,7 +501,7 @@ def test_ai_incident_clocks_surface_on_api_and_page():
     ).status_code == 403
     page = client.get("/security/assurance")
     assert page.status_code == 200
-    assert "Enable AI incident reporting" in page.text
+    assert "Serious-incident reporting is turned off" in page.text
 
     _reset_config_with("\n[ai_incident_reporting]\nenable = true\n")
 
@@ -558,6 +565,6 @@ def test_ai_incident_clocks_surface_on_api_and_page():
 
     page = client.get("/security/assurance")
     assert page.status_code == 200
-    assert "Serious-incident clocks (EU AI Act Art. 73)" in page.text
+    assert "Serious-incident deadlines" in page.text
     assert declared["id"] in page.text
-    assert "d left" in page.text
+    assert " days left" in page.text
