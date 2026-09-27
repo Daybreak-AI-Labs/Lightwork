@@ -10,7 +10,6 @@ STATIC = Path(__file__).parents[1] / "maverick_dashboard" / "static"
 
 FAIL_CLOSED_TEMPLATES = (
     "agents.html",
-    "ai_cloud_agent_governance.html",
     "compliance_scope_actions.html",
     "compliance_scoping.html",
     "consent_delivery.html",

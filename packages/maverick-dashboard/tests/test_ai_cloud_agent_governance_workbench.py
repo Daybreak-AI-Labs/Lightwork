@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -47,32 +48,47 @@ def environment(monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def test_workbench_exposes_only_governed_bounded_operations(environment) -> None:
-    client, _state, _template_dir = environment
+def test_workbench_lists_records_with_row_actions_in_plain_language(environment) -> None:
+    client, _state, template_dir = environment
     response = client.get("/assurance/cloud-agents")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store, max-age=0"
     page = response.text
-    assert "Managed-cloud AI agent governance" in page
-    assert "Adapter acceptance is not proof" in page
-    assert "/api/v1/assurance/cloud-agents" in page
-    for operation in (
-        "inventory",
-        "integrity",
-        "evaluate",
-        "prepare",
-        "intent-get",
-        "dispatch",
-        "reconcile",
-        "framework-review",
-        "framework-attest",
-        "framework-activate",
-    ):
-        assert f'value="{operation}"' in page
-    assert "cag-confirm" in page
-    assert "textContent" in page
-    assert "provider-bindings" not in page
-    assert "inventory-sync" not in page
+    assert "Cloud AI agents" in page
+    assert 'data-api="/api/v1/assurance/cloud-agents"' in page
+    for table in ("cag-agents", "cag-checks", "cag-changes", "cag-reviews"):
+        assert f'id="{table}"' in page
+    for label in ("Check records haven", "Run the check", "Confirm what happened",
+                  "Give the second approval", "Technical details"):
+        assert label in page
+    # No operation console, typed references or JSON boxes remain.
+    assert "cag-operation" not in page and "cag-path-values" not in page
+    assert "<textarea" not in page
+    text = _visible_text(page)
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+    script = (template_dir.parent / "static" / "lightwork-ai-cloud-agent-governance.js").read_text(
+        encoding="utf-8"
+    )
+    for path in ('"/inventory?limit=500"', '"/policy-evaluations"', '"/enforcement-intents"',
+                 '"/databricks/framework"', '"/policies"'):
+        assert path in script
+    for unsafe in (".innerHTML", ".outerHTML", "insertAdjacentHTML", "eval(", "window.confirm("):
+        assert unsafe not in script
+    assert "window.mvConfirm" in script and "crypto.subtle.digest" in script
+
+
+_BANNED = re.compile(
+    r"\b(tenant|principals?|payload|endpoint|schema|uuid|sha-?256|digest|"
+    r"idempoten\w*|revision|json|yaml|toml|adapter|intent|reconcil\w*|attest\w*)\b"
+    r"|\[[a-z_]+\]|/api/v1|HTTP \d{3}",
+    re.IGNORECASE,
+)
+
+
+def _visible_text(html: str) -> str:
+    main = html.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    main = re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL | re.IGNORECASE)
+    return re.sub(r"<[^>]+>", " ", main)
 
 
 def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) -> None:
@@ -80,7 +96,7 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
     state["enabled"] = False
     disabled = client.get("/assurance/cloud-agents")
     assert disabled.status_code == 200
-    assert "Cloud-agent governance disabled" in disabled.text
+    assert "Cloud AI agents are turned off" in disabled.text
     monkeypatch_target = workbench._tenant_id
     workbench._tenant_id = lambda: ""
     try:
@@ -88,7 +104,7 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
     finally:
         workbench._tenant_id = monkeypatch_target
     assert unavailable.status_code == 200
-    assert "Workspace setup unavailable" in unavailable.text
+    assert "This page isn't ready yet" in unavailable.text
     template = (template_dir / "ai_cloud_agent_governance.html").read_text(encoding="utf-8")
     for unsafe in (".innerHTML", ".outerHTML", "insertAdjacentHTML", "eval("):
         assert unsafe not in template
