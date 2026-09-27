@@ -1,15 +1,22 @@
 {% extends "base.html" %}
-{% block title %}404 · Lightwork{% endblock %}
+{% block title %}Page not found · Lightwork{% endblock %}
 {% block content %}
   <div class="panel" style="text-align: center; padding: 3rem 1.5rem;">
-    <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">404</h1>
+    <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Page not found</h1>
     <p class="muted" style="max-width: 480px; margin: 0 auto 1.5rem;">
-      Nothing at <code>{{ path or request.url.path }}</code>.
+      We couldn't find that page. It may have moved, or the link may be out of date.
     </p>
-    <p>
-      <a href="/" style="color: var(--accent);">Go to the overview</a>
-      &nbsp;·&nbsp;
-      <a href="/chat" style="color: var(--accent);">Start a goal</a>
+    <p style="display: flex; gap: var(--space-3); justify-content: center; flex-wrap: wrap;">
+      <a class="btn btn--primary" href="/">Go to the overview</a>
+      <a class="btn" href="/chat">Start a task</a>
+      <button class="btn btn--ghost" type="button" id="nf-find">Find a page</button>
     </p>
   </div>
+  <script>
+    (function () {
+      var b = document.getElementById('nf-find'), open = document.getElementById('navfinder-open');
+      if (!open) { b.hidden = true; return; }
+      b.addEventListener('click', function () { open.click(); });
+    })();
+  </script>
 {% endblock %}

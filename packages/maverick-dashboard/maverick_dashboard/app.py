@@ -2259,7 +2259,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             ),
         )
         if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
-            message = "Enter a real audit date in YYYY-MM-DD format, then try again."
+            message = "That date isn’t valid. Pick a day from the calendar, then try again."
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -2393,10 +2393,9 @@ async def runtime_policy_exception_handler(
 async def flow_payload_exception_handler(request: Request, exc: FlowPayloadError):
     """Expose a recovery action without leaking private payload or key details."""
     message = (
-        "Workflow data could not be saved or loaded safely. Ask an administrator "
-        "to check storage limits and restore the complete checkpoint with its key "
-        "before retrying. If recovery is unavailable, review the original inputs "
-        "and any prior effects before creating a replacement run."
+        "We couldn't open this workflow's saved progress. Ask your administrator "
+        "to restore it, or start the workflow again after checking what it already "
+        "did in other apps."
     )
     headers = {"Cache-Control": "no-store"}
     if _wants_html(request):

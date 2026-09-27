@@ -1,18 +1,23 @@
 {% extends "base.html" %}
-{% block title %}{{ status }} · Lightwork{% endblock %}
+{% block title %}{{ title }} · Lightwork{% endblock %}
 {% block content %}
   <section class="panel" style="text-align: center; padding: 3rem 1.5rem;" aria-labelledby="request-error-title">
-    <div class="badge warn" style="margin-bottom: var(--space-3);">{{ status }}</div>
     <h1 id="request-error-title" style="font-size: 1.4rem; margin-bottom: .75rem;">{{ title }}</h1>
     <p class="muted" style="max-width: 36rem; margin: 0 auto 1.5rem;">{{ message }}</p>
-    <details class="muted" style="font-size: var(--text-sm);">
-      <summary>Support details</summary>
-      <p>Page: <code>{{ path }}</code></p>
-    </details>
     <div style="display: flex; justify-content: center; gap: var(--space-3); flex-wrap: wrap; margin-top: 1.5rem;">
-      <a class="btn primary" href="{{ path }}">Reload this page</a>
-      <a class="btn" href="/workspace/tenant">Choose workspace</a>
+      <a class="btn btn--primary" href="{{ path }}">Reload this page</a>
+      {% if status == 403 %}<a class="btn" href="/workspace/tenant">Choose a workspace</a>{% endif %}
       <a class="btn" href="/">Back to home</a>
     </div>
+    <details class="muted" style="font-size: var(--text-sm); margin-top: var(--space-4);">
+      <summary>Support details</summary>
+      <p>Page: {{ path }} · Reference: {{ status }}</p>
+      <button type="button" class="btn btn--ghost" data-copy-support="Page {{ path }}, reference {{ status }}">Copy support details</button>
+    </details>
   </section>
+  <script>
+    document.querySelectorAll('[data-copy-support]').forEach(function (b) {
+      b.addEventListener('click', function () { if (window.mvCopy) mvCopy(b.getAttribute('data-copy-support')); });
+    });
+  </script>
 {% endblock %}

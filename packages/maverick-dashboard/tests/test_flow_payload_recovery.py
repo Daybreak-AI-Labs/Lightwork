@@ -45,7 +45,7 @@ def test_owner_receives_safe_recovery_response_for_missing_checkpoint(client, mo
     response = client.get(f"/api/v1/flows/runs/{run.run_id}")
     assert response.status_code == 409
     assert response.json()["code"] == "flow_data_unavailable"
-    assert "restore the complete checkpoint" in response.json()["detail"]
+    assert "couldn't open this workflow's saved progress" in response.json()["detail"]
     assert response.headers["Cache-Control"] == "no-store"
     assert str(path) not in response.text and "rows" not in response.text
     history = client.get("/api/v1/flows/runs")
