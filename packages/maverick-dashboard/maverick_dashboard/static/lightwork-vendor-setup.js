@@ -3,8 +3,19 @@
   'use strict';
   var el = function (id) { return document.getElementById('vs-' + id); };
   if (!el('panel')) return;
-  var state = null, context = null, busy = false, locked = false, draft = null;
-  function ownerLabel(owner) { return owner.startsWith('user:') ? owner.slice(5) : owner; }
+  var state = null, context = null, busy = false, locked = false, draft = null, names = {};
+  // People are shown by name from the workspace member list; a sign-in handle
+  // is shown only when no name is known.
+  function ownerLabel(owner) {
+    if (names[owner]) return names[owner];
+    if (!owner.startsWith('user:')) return owner;
+    var handle = owner.slice(5);
+    return handle.indexOf('@') > 0 || /^[A-Za-z][A-Za-z .'-]{0,60}$/.test(handle) ? handle : 'A workspace member';
+  }
+  function connectionLabel(name) {
+    var words = String(name).replace(/[_-]+/g, ' ').trim();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
   function controls() {
     var blocked = !state || !state.readiness || state.readiness.deployment.supported !== true;
     ['ticket', 'document', 'confirm'].forEach(function (id) { el(id).disabled = busy || locked || blocked; });
@@ -90,7 +101,7 @@
       var select = el(name), placeholder = document.createElement('option');
       placeholder.value = ''; placeholder.textContent = name === 'ticket' ? 'Choose Jira connection' : 'Uploaded evidence only'; select.replaceChildren(placeholder);
       data.connections.filter(function (row) { return row.connector === (name === 'ticket' ? 'jira' : 'gdrive') && row.has_token; }).forEach(function (row) {
-        var option = document.createElement('option'); option.value = row.name; option.textContent = row.name; select.appendChild(option);
+        var option = document.createElement('option'); option.value = row.name; option.textContent = connectionLabel(row.name); select.appendChild(option);
       });
       select.value = data.binding[name + '_connection'] || '';
     });
@@ -148,5 +159,9 @@
     var doc = state.connections.find(function (row) { return row.name === el('document').value; });
     call('PUT', '', Object.assign(reviewed(), {ticket: ticket.name, ticket_revision: ticket.revision, document: doc ? doc.name : '', document_revision: doc ? doc.revision : '', expected_revision: state.revision, resource_owner: el('resource-owner').value}));
   });
-  call('GET');
+  fetch('/api/v1/choices/people', {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { (d && d.people || []).forEach(function (p) { if (p && typeof p.value === 'string' && typeof p.label === 'string') names[p.value] = p.label; }); })
+    .catch(function () { return null; })
+    .then(function () { call('GET'); });
 }());

@@ -9,6 +9,7 @@
   .tpc-row { border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--space-3); margin-bottom:var(--space-2); }
   .tpc-fieldset { border:0; margin:0; padding:0; min-width:0; }
   .tpc-checks { display:grid; gap:.25rem; }
+  .tpc-admin-actions { margin-top:var(--space-3); }
   .tpc-checks label { display:flex; gap:.4rem; align-items:center; }
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
@@ -107,7 +108,7 @@
 
     <details class="panel">
       <summary><strong>Administrator tools</strong></summary>
-      <div class="tpc-actions" style="margin-top:var(--space-3)">
+      <div class="tpc-actions tpc-admin-actions">
         <button class="btn" id="tpc-verify-integrity" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Check records haven't been changed</button>
         <button class="btn" id="tpc-retention-due" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Show contracts due for deletion</button>
         <button class="btn" id="tpc-recovery-preflight" type="button"{% if not contracts_can_admin %} disabled{% endif %}>Check backup readiness</button>

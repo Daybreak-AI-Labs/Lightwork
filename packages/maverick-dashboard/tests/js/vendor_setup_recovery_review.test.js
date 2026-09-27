@@ -18,7 +18,7 @@ async function fixture(t,intercept){
   const w=dom.window,calls=[],uncaught=[],el=id=>w.document.getElementById('vs-'+id);
   w.addEventListener('error',event=>uncaught.push(event.message));
   t.after(()=>assert.deepEqual(uncaught,[]));
-  w.fetch=async(url,options)=>{calls.push({url,options});const value=await intercept(options);
+  w.fetch=async(url,options)=>{if(String(url).includes('/api/v1/choices/people'))return new Response(JSON.stringify({people:[{value:'user:other',label:'Olive Other'}]}),{headers:{'Content-Type':'application/json'}});calls.push({url,options});const value=await intercept(options);
     return value instanceof Response?value:new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});};
   w.eval(fs.readFileSync(path.join(folder,'static/lightwork-vendor-setup.js'),'utf8'));
   const settle=async()=>{for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));};
