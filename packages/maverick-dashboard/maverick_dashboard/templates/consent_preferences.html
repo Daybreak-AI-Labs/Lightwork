@@ -304,10 +304,18 @@
       var list=$("cp-vendor-suggestions");list.replaceChildren();vendors().forEach(function(v){if(v.value==="all")return;var o=document.createElement("option");o.value=CW.human(v.value);list.appendChild(o);});
     }
     async function loadNotices(){
-      // The notice register is optional; without it the document picker remains.
-      try{var body=await call("/notices");state.notices=Array.isArray(body.notices)?body.notices:[];}
-      catch(_error){state.notices=[];}
-      CW.fill($("cp-notice-select"),state.notices.filter(function(n){return /^[0-9a-f]{64}$/.test(n.text_sha256||"");}).map(function(n){return {value:n.text_sha256,label:"Version "+n.version+(n.published_at?" · published "+CW.when(n.published_at):"")};}),state.notices.length?"Choose a published privacy notice":"No published notices yet. Choose the document below instead.");
+      // Two optional sources: the privacy notice register and the notices used
+      // by the published banner (so the policy matches what people see).
+      var options=[];
+      try{var body=await call("/notices");(Array.isArray(body.notices)?body.notices:[]).forEach(function(n){if(/^[0-9a-f]{64}$/.test(n.text_sha256||""))options.push({value:n.text_sha256,label:"Privacy notice version "+n.version+(n.published_at?" · published "+CW.when(n.published_at):"")});});}
+      catch(_error){/* register not in use */}
+      try{
+        var publishing=CW.client("/api/v1/consent/publishing"),list=await publishing("/catalog/notices?limit=50");
+        for(var i=0;i<(list.items||[]).length;i++){var item=list.items[i],detail=await publishing("/catalog/notices/"+encodeURIComponent(item.resource_id)+"/versions/"+item.version);
+          var digest=detail.payload&&detail.payload.document_sha256;if(/^[0-9a-f]{64}$/.test(digest||""))options.push({value:digest,label:"Banner notice “"+CW.human(item.resource_id)+"” · version "+item.version});}
+      }catch(_error){/* banner publishing not in use */}
+      state.notices=options;
+      CW.fill($("cp-notice-select"),options,options.length?"Choose a published privacy notice":"No published notices yet. Choose the document below instead.");
     }
     async function refresh(){
       CW.say(status,"Loading…");

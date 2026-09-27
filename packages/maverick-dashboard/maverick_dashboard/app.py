@@ -3802,7 +3802,11 @@ async def consent_public_clients_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_public_clients.html",
-        {"consent_public_clients_enabled": _enabled()},
+        {
+            "consent_public_clients_enabled": _enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
