@@ -185,6 +185,39 @@ async def status(request: Request, response: Response) -> dict[str, Any]:
     return result
 
 
+@router.get("/assets")
+async def list_assets(request: Request, response: Response) -> dict[str, Any]:
+    """Every logo and icon version with its review state, newest first."""
+
+    require_permission(request, "view")
+    _private(response)
+    _tenant, _actor_ref, store = _store(request)
+    items = await _call(store.list_assets, limit=200)
+    return {"items": [asdict(item) for item in items]}
+
+
+@router.get("/domains")
+async def list_domains(request: Request, response: Response) -> dict[str, Any]:
+    """Every custom web address claim with its state, newest first."""
+
+    require_permission(request, "view")
+    _private(response)
+    _tenant, _actor_ref, store = _store(request)
+    items = await _call(store.list_domains, limit=200)
+    return {"items": [asdict(item) for item in items]}
+
+
+@router.get("/projections")
+async def list_projections(request: Request, response: Response) -> dict[str, Any]:
+    """The brand shown on each website, with its revision."""
+
+    require_permission(request, "view")
+    _private(response)
+    _tenant, _actor_ref, store = _store(request)
+    items = await _call(store.list_projections, limit=200)
+    return {"items": [asdict(item) for item in items]}
+
+
 @router.post("/assets/{asset_id}/versions", status_code=201)
 async def propose_asset(
     asset_id: IdPath, body: AssetProposalIn, request: Request, response: Response

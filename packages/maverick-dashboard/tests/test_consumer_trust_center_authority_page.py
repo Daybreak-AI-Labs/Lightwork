@@ -39,37 +39,35 @@ def page_client() -> TestClient:
 
 
 def test_page_exposes_full_four_eyes_authority_workbench(page_client) -> None:
+    from test_support.plain_language import developer_terms
+
     response = page_client.get("/consent/trust-center-authority")
     assert response.status_code == 200
     page = response.text
-    assert "Consumer Trust Center Authority" in page
-    assert "two other, distinct approvers" in page
-    assert "never accepts raw identity, credentials" in page
+    assert "Trust Center Access" in page
+    assert "two approvals from people other than the one who asked" in page
     assert "/api/v1/consent/trust-center-authority" in page
-    for operation in (
-        "context-create",
-        "context-get",
-        "context-revise",
-        "context-revoke",
-        "rights-context-prepare",
-        "grant-propose",
-        "grant-approve",
-        "grant-revoke",
-        "rights-propose",
-        "rights-approve",
-        "rights-revoke",
-        "history",
-        "export-create",
-        "export-get",
-        "export-verify",
-        "retention-due",
-        "retention-purge",
-        "integrity",
-    ):
-        assert f'value="{operation}"' in page
+    # Records are lists with row buttons; the four-eyes steps are buttons.
+    for host in ("tca-contexts", "tca-access", "tcb-assets", "tcb-domains", "tcb-projections"):
+        assert f'id="{host}"' in page
+    for label in ("Connect a person", "Ask for access", "Link a privacy request", "Approve",
+                  "Disconnect", "Download record", "Upload a logo", "Make live",
+                  "Add a web address", "Check address", "Go live", "Show the brand on a website"):
+        assert label in page
+    for route in ("/overview", "/privacy-rights-contexts/prepare", "/capability-grants",
+                  "/rights-authorizations/for-case", "/assets", "/domains", "/projections"):
+        assert route in page
+    # No operation dropdown, JSON boxes or typed references remain.
+    for typed in ('id="tca-operation"', 'id="tca-path-values"', 'id="tca-body"',
+                  "Strict JSON", "Path/query values", "Closed path values",
+                  "Strict request JSON", 'type="checkbox" id="tca-confirm"'):
+        assert typed not in page
+    assert 'type="file" name="file" accept="image/png,image/jpeg"' in page
+    assert page.count("CW.confirm(") >= 7
     assert 'credentials: "same-origin"' in page
     assert 'cache: "no-store"' in page
     assert "textContent" in page
+    assert developer_terms(page) == []
 
 
 def test_page_fails_closed_and_template_uses_safe_ephemeral_dom(page_client) -> None:

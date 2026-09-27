@@ -336,3 +336,48 @@ def test_config_is_nested_strict_and_bounded():
         TrustCenterBrandingConfig.from_mapping(
             {"consent_preferences": {"trust_center": {"branding": {"url": "x"}}}}
         )
+
+
+def test_lists_show_current_assets_domains_and_projections(tmp_path):
+    clock = Clock()
+    deployment = DeploymentAuthority(clock)
+    store = make_store(tmp_path, clock=clock, deployment=deployment)
+    assert store.list_assets() == () and store.list_domains() == ()
+    active = activate_logo(store)
+    pending = store.propose_asset(
+        "primary-logo",
+        expected_version=1,
+        asset_kind="logo",
+        media_type="image/png",
+        content=PNG_1X1,
+        actor_ref="uploader",
+    )
+    listed = {(item.asset_version, item.state) for item in store.list_assets()}
+    assert listed == {(1, "active"), (2, "pending_review")}
+    claim, _token = store.challenge_domain(
+        "brand-domain", "brand.example.com", expected_claim_version=0, actor_ref="domain-admin"
+    )
+    assert [(item.host, item.claim_version) for item in store.list_domains()] == [
+        ("brand.example.com", claim.claim_version)
+    ]
+    store.bind_projection(
+        "property-a",
+        "client-a",
+        asset_id="primary-logo",
+        asset_version=1,
+        domain_claim_id=None,
+        domain_claim_version=None,
+        expected_projection_revision=0,
+        actor_ref="publisher",
+    )
+    projections = store.list_projections()
+    assert [(item.property_id, item.state) for item in projections] == [("property-a", "active")]
+    rejected = store.review_asset(
+        "primary-logo",
+        2,
+        expected_authority_revision=pending.authority_revision,
+        actor_ref="reviewer",
+        approve=False,
+    )
+    store.purge_assets(before=rejected.retained_until, limit=10)
+    assert [item.asset_version for item in store.list_assets()] == [active.asset_version]

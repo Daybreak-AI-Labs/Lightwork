@@ -3865,6 +3865,15 @@ async def consent_scan_notice_proposals_page(request: Request) -> HTMLResponse:
     )
 
 
+def _trust_center_branding_enabled() -> bool:
+    try:
+        from .trust_center_branding_api import trust_center_branding_enabled
+
+        return trust_center_branding_enabled() is True
+    except Exception:
+        return False
+
+
 @app.get("/consent/trust-center-authority", response_class=HTMLResponse)
 async def consumer_trust_center_authority_page(request: Request) -> HTMLResponse:
     """Digest-only Trust Center context and four-eyes authority workbench."""
@@ -3880,7 +3889,10 @@ async def consumer_trust_center_authority_page(request: Request) -> HTMLResponse
         {
             "consumer_trust_center_authority_enabled": (
                 consumer_trust_center_authority_enabled_for_page()
-            )
+            ),
+            "trust_center_branding_enabled": _trust_center_branding_enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
         },
     )
 

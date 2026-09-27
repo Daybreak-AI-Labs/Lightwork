@@ -1366,6 +1366,22 @@ class PrivacyRightsOrchestrationStore:
             payload, digest_value = self._get_case_row(connection, tenant, case)
             return self._case(payload, digest_value)
 
+    def list_cases(self, tenant_id: str, *, limit: int = 100) -> tuple[RightsCase, ...]:
+        """Newest-first, integrity-checked cases of one tenant (read-only)."""
+
+        tenant = _tenant(tenant_id)
+        bounded_limit = _integer(limit, "limit", 1, _MAX_LIST)
+        self._actor()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM rights_cases WHERE tenant_id=? ORDER BY case_id DESC LIMIT ?",
+                (tenant, bounded_limit),
+            ).fetchall()
+            return tuple(
+                self._case(self._payload(row, "rights case"), row["integrity_sha256"])
+                for row in rows
+            )
+
     def get_task(self, tenant_id: str, task_id: str) -> SourceTask:
         """Return one tenant-bound source task for worker authority revalidation."""
 

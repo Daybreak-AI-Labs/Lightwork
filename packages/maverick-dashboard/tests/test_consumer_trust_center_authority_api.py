@@ -1104,3 +1104,138 @@ def test_default_authority_fails_closed_without_server_resolvers(
     response = client.get(f"{API}/contexts/{CONTEXT}")
     assert response.status_code == 503
     assert response.json() == {"detail": "Trust Center authority is unavailable"}
+
+
+def test_overview_lists_every_record_with_the_viewers_role_and_no_digests(
+    environment,
+) -> None:
+    client, _database, state = environment
+    created = _create(client)
+    proposed = client.post(
+        f"{API}/contexts/{CONTEXT}/capability-grants",
+        headers={"X-Test-Subject": "overview-requestor"},
+        json={
+            "capability": "consent_history",
+            "expected_context_revision": created["revision"],
+            "valid_until": NOW + 4_000,
+            "idempotency_key": "overview-propose",
+        },
+    )
+    assert proposed.status_code == 201, proposed.text
+    approved = client.post(
+        f"{API}/capability-grants/{proposed.json()['grant_ref']}/approve",
+        headers={"X-Test-Subject": "overview-approver"},
+        json={
+            "expected_revision": 1,
+            "expected_context_revision": created["revision"] + 1,
+            "idempotency_key": "overview-approve-one",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    as_requestor = client.get(f"{API}/overview", headers={"X-Test-Subject": "overview-requestor"})
+    assert as_requestor.status_code == 200, as_requestor.text
+    body = as_requestor.json()
+    assert [item["context_ref"] for item in body["contexts"]] == [CONTEXT]
+    assert body["contexts"][0]["revision"] == created["revision"] + 2
+    grant = body["grants"][0]
+    assert grant["capability"] == "consent_history"
+    assert grant["status"] == "first_approved"
+    assert grant["approval_count"] == 1
+    assert grant["requested_by_me"] is True and grant["approved_by_me"] is False
+    as_approver = client.get(
+        f"{API}/overview", headers={"X-Test-Subject": "overview-approver"}
+    ).json()
+    assert as_approver["grants"][0]["approved_by_me"] is True
+    assert as_approver["grants"][0]["requested_by_me"] is False
+    assert "sha256" not in json.dumps(body)
+    assert ("tenant", "view") in state["permission_calls"]
+
+
+def test_rights_request_is_chosen_from_a_list_and_pinned_on_the_server(
+    environment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick_dashboard import privacy_rights_orchestration_api as rights_api
+
+    client, _database, _state = environment
+    created = _create(client)
+    _grant, context_revision = _activate_capability(
+        client, "rights_cases", created["revision"], "pick-case"
+    )
+
+    class _NotFound(Exception):
+        pass
+
+    case = SimpleNamespace(
+        case_id="case-7",
+        rights=("access", "deletion"),
+        status="open",
+        created_at=NOW - 100,
+        retained_until=NOW + 50_000,
+        integrity_sha256=_digest("case-7-record"),
+    )
+
+    class _Cases:
+        def list_cases(self, tenant_id, *, limit):
+            assert tenant_id == TENANT
+            return (case,)
+
+        def get_case(self, tenant_id, case_id):
+            if case_id != "case-7":
+                raise _NotFound(case_id)
+            return case
+
+    monkeypatch.setattr(
+        rights_api, "_ops", lambda: SimpleNamespace(PrivacyRightsNotFound=_NotFound)
+    )
+    client.app.state.privacy_rights_orchestration_store_factory = (
+        lambda **_kwargs: _Cases()
+    )
+    try:
+        listed = client.get(f"{API}/rights-cases")
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["items"] == [
+            {
+                "case_id": "case-7",
+                "rights": ["access", "deletion"],
+                "status": "open",
+                "created_at": NOW - 100,
+                "retained_until": NOW + 50_000,
+            }
+        ]
+        proposed = client.post(
+            f"{API}/contexts/{CONTEXT}/rights-authorizations/for-case",
+            headers={"X-Test-Subject": "case-requestor"},
+            json={
+                "case_id": "case-7",
+                "expected_context_revision": context_revision,
+                "valid_until": NOW + 3_000,
+                "idempotency_key": "case-for-context",
+            },
+        )
+        assert proposed.status_code == 201, proposed.text
+        assert proposed.json()["expected_case_sha256"] == _digest("case-7-record")
+        missing = client.post(
+            f"{API}/contexts/{CONTEXT}/rights-authorizations/for-case",
+            json={
+                "case_id": "case-unknown",
+                "expected_context_revision": context_revision + 1,
+                "valid_until": NOW + 3_000,
+                "idempotency_key": "case-missing",
+            },
+        )
+        assert missing.status_code == 404
+        forged = client.post(
+            f"{API}/contexts/{CONTEXT}/rights-authorizations/for-case",
+            json={
+                "case_id": "case-7",
+                "expected_case_sha256": "0" * 64,
+                "expected_context_revision": context_revision + 1,
+                "valid_until": NOW + 3_000,
+                "idempotency_key": "case-forged",
+            },
+        )
+        assert forged.status_code == 422
+    finally:
+        del client.app.state.privacy_rights_orchestration_store_factory

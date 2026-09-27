@@ -145,6 +145,15 @@ class RightsAuthorizationProposalIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class RightsCaseAuthorizationIn(_StrictModel):
+    """Choose a privacy request; its fingerprint is read on the server."""
+
+    case_id: OpaqueId
+    expected_context_revision: int = Field(ge=1, le=2_147_483_647)
+    valid_until: float | int = Field(gt=0, lt=100_000_000_000.0)
+    idempotency_key: IdempotencyKey
+
+
 class ExportCreateIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
@@ -1126,6 +1135,180 @@ def create_consumer_trust_center_authority_router(  # noqa: C901, PLR0915
         payload = dict(result)
         payload["valid"] = True
         return _safe(payload)
+
+    def _labels(tenant: str) -> dict[str, str]:
+        """Readable website and person references for stored digests (best effort)."""
+
+        labels: dict[str, str] = {}
+        try:
+            from .consent_public_admin_api import _enabled as public_enabled
+            from .consent_public_admin_api import _registry
+
+            if not public_enabled():
+                return labels
+            listed = _registry().list_profile_bindings(tenant, limit=500)
+        except Exception:
+            return labels
+        for item in listed.get("items", []):
+            for key in ("property_id", "profile_id"):
+                value = item.get(key)
+                if isinstance(value, str) and _CLOSED_TEXT_RE.fullmatch(value):
+                    labels[hashlib.sha256(value.encode("utf-8")).hexdigest()] = value
+        return labels
+
+    @router.get("/overview")
+    async def overview(request: Request, response: Response) -> dict[str, Any]:
+        """Every context, grant and rights authorization, with the viewer's role."""
+
+        require_permission(request, "view")
+        _private(response)
+        ops, trust_center, tenant, store = authority(request)
+        lister = getattr(store, "list_authority", None)
+        if not callable(lister):
+            raise HTTPException(status_code=503, detail="Trust Center authority is unavailable")
+        listed = await call(ops, trust_center, lister, tenant, limit=100)
+        me = hashlib.sha256(_principal(request, tenant).encode("utf-8")).hexdigest()
+        labels = await run_in_threadpool(_labels, tenant)
+
+        def contexts(item: Any) -> dict[str, Any]:
+            return {
+                "context_ref": item.context_ref,
+                "property_label": labels.get(item.property_sha256),
+                "profile_label": labels.get(item.profile_sha256),
+                "status": item.status,
+                "valid_until": item.valid_until,
+                "retained_until": item.retained_until,
+                "publication_history_limit": item.publication_history_limit,
+                "receipt_limit": item.receipt_limit,
+                "revision": item.revision,
+                "created_at": item.created_at,
+            }
+
+        def child(item: Any, ref_field: str, extra: dict[str, Any]) -> dict[str, Any]:
+            approvals = [
+                value
+                for value in (item.approved_by_sha256, item.second_approved_by_sha256)
+                if value
+            ]
+            return {
+                ref_field: getattr(item, ref_field),
+                "context_ref": item.context_ref,
+                "status": item.status,
+                "valid_until": item.valid_until,
+                "revision": item.revision,
+                "created_at": item.created_at,
+                "approval_count": len(approvals),
+                "requested_by_me": item.requested_by_sha256 == me,
+                "approved_by_me": me in approvals,
+                **extra,
+            }
+
+        return _safe(
+            {
+                "contexts": [contexts(item) for item in listed["contexts"]],
+                "grants": [
+                    child(item, "grant_ref", {"capability": item.capability})
+                    for item in listed["grants"]
+                ],
+                "rights_authorizations": [
+                    child(item, "authorization_ref", {"case_id": item.case_id})
+                    for item in listed["rights_authorizations"]
+                ],
+            }
+        )
+
+    def _rights_store(request: Request, tenant: str):
+        from . import privacy_rights_orchestration_api as rights_api
+
+        rights_ops = rights_api._ops()
+        principal = rights_api._principal(request, tenant)
+        factory = getattr(request.app.state, "privacy_rights_orchestration_store_factory", None)
+        try:
+            store = (
+                factory(
+                    tenant_id=tenant,
+                    principal_ref=principal,
+                    principal_resolver=lambda: principal,
+                    request=request,
+                )
+                if callable(factory)
+                else rights_api._default_store_for(tenant, principal)
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="privacy requests are unavailable"
+            ) from exc
+        return rights_ops, store
+
+    async def _rights_call(rights_ops, function, *args, **kwargs):
+        try:
+            return await run_in_threadpool(function, *args, **kwargs)
+        except rights_ops.PrivacyRightsNotFound as exc:
+            raise HTTPException(status_code=404, detail="privacy request not found") from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="privacy requests are unavailable"
+            ) from exc
+
+    @router.get("/rights-cases")
+    async def rights_cases(request: Request, response: Response) -> dict[str, Any]:
+        """Open privacy requests a person's Trust Center access can be tied to."""
+
+        require_permission(request, "view")
+        _private(response)
+        tenant = _tenant_id()
+        rights_ops, store = _rights_store(request, tenant)
+        cases = await _rights_call(rights_ops, store.list_cases, tenant, limit=200)
+        return _safe(
+            {
+                "items": [
+                    {
+                        "case_id": case.case_id,
+                        "rights": list(case.rights),
+                        "status": case.status,
+                        "created_at": case.created_at,
+                        "retained_until": case.retained_until,
+                    }
+                    for case in cases
+                ]
+            }
+        )
+
+    @router.post(
+        "/contexts/{context_ref}/rights-authorizations/for-case",
+        status_code=201,
+    )
+    async def propose_rights_authorization_for_case(
+        request: Request,
+        response: Response,
+        context_ref: ObjectPath,
+        body: RightsCaseAuthorizationIn,
+    ):
+        """Propose access to one chosen request, pinning its current fingerprint."""
+
+        require_permission(request, "operate")
+        _private(response)
+        tenant = _tenant_id()
+        rights_ops, rights_store = _rights_store(request, tenant)
+        case = await _rights_call(rights_ops, rights_store.get_case, tenant, body.case_id)
+        ops, trust_center, tenant, store = authority(request)
+        return _safe(
+            _expect(
+                await call(
+                    ops,
+                    trust_center,
+                    store.propose_rights_authorization,
+                    tenant,
+                    context_ref,
+                    body.case_id,
+                    case.integrity_sha256,
+                    expected_context_revision=body.expected_context_revision,
+                    valid_until=body.valid_until,
+                    idempotency_key=body.idempotency_key,
+                ),
+                ops.RightsCaseAuthorizationAuthority,
+            )
+        )
 
     return router
 
