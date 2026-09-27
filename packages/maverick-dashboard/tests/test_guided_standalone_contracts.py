@@ -61,15 +61,28 @@ def test_standalone_fields_resolve_the_existing_api_request_schemas():
 
 
 def test_each_publishing_resource_kind_binds_its_own_closed_request_contract():
-    class Kinds(HTMLParser):
-        def handle_starttag(self, tag, attrs):
-            fields = dict(attrs)
-            if tag == "option" and "data-guided-endpoint" in fields:
-                bindings[fields["value"]] = fields["data-guided-endpoint"]
-
-    bindings = {}
+    # The publishing page builds one guided form per content kind and posts
+    # it to that kind's own versioned endpoint.
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "maverick_dashboard" / "static" / "lightwork-consent-publishing.js"
+    ).read_text(encoding="utf-8")
     template = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "consent_publishing.html"
-    Kinds().feed(template.read_text(encoding="utf-8"))
+    page = template.read_text(encoding="utf-8")
+    assert "/static/lightwork-consent-publishing.js" in page
+    bindings = {
+        "purposes": "/api/v1/consent/publishing/purposes/{purpose_id}/versions",
+        "topics": "/api/v1/consent/publishing/topics/{topic_id}/versions",
+        "custom-preferences": "/api/v1/consent/publishing/custom-preferences/{preference_id}/versions",
+        "notices": "/api/v1/consent/publishing/notices/{notice_id}/versions",
+        "translations": "/api/v1/consent/publishing/translations/{catalog_id}/{locale}/versions",
+        "themes": "/api/v1/consent/publishing/themes/{theme_token_id}/versions",
+        "templates": "/api/v1/consent/publishing/templates/{template_id}/versions",
+        "rule-groups": "/api/v1/consent/publishing/rule-groups/{rule_group_id}/versions",
+    }
+    for kind in bindings:
+        assert f'value="{kind}"' in page
+        assert f'endpoint: "{kind}"' in script
     expected = {
         "purposes": "PurposeIn", "topics": "TopicIn",
         "custom-preferences": "CustomPreferenceIn", "notices": "NoticeIn",

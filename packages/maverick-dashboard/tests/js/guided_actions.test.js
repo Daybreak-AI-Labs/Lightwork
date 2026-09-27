@@ -212,7 +212,7 @@ test("standalone variant edits preserve review evidence and explicit false value
 });
 
 async function publishingFixture(schemas,options={}) {
-  const html=fs.readFileSync(path.join(repo,"packages/maverick-dashboard/maverick_dashboard/templates/consent_publishing.html"),"utf8");
+  const html=fs.readFileSync(path.join(__dirname,"fixtures/guided_publishing_form.html"),"utf8");
   const dom=new JSDOM(html,{url:"https://lightwork.test",runScripts:"outside-only"}),w=dom.window,d=w.document,calls=[];
   d.querySelector(".feature-gated-workbench").disabled=false;
   const form=d.getElementById("cpp-resource"),kind=form.elements.kind,raw=form.elements.payload;

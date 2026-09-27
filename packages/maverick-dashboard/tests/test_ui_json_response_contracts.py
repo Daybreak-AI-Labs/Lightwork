@@ -47,10 +47,9 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
 
     for name in FAIL_CLOSED_TEMPLATES:
         source = (TEMPLATES / name).read_text(encoding="utf-8")
-        if name == "privacy_data_discovery.html":
-            source += (STATIC / "lightwork-privacy-data-discovery.js").read_text(
-                encoding="utf-8"
-            )
+        # A page's own client may live in a static script it loads.
+        for script in re.findall(r'src="/static/(lightwork-[a-z-]+\.js)"', source):
+            source += (STATIC / script).read_text(encoding="utf-8")
         assert "Request failed: the server returned an invalid JSON response." in source, name
         assert swallowed_json.search(source) is None, name
         assert raw_body_fallback.search(source) is None, name

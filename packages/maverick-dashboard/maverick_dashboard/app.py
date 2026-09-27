@@ -3750,7 +3750,10 @@ async def consent_publishing_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_publishing.html",
-        {"consent_publishing_enabled": enabled},
+        {
+            "consent_publishing_enabled": enabled,
+            "consent_can_admin": has_global_permission(request, "admin"),
+        },
     )
 
 
@@ -10053,6 +10056,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-consent-picker.js")
 @app.get("/static/lightwork-consent-workbench.js")
 @app.get("/static/lightwork-consent-workbench.css")
+@app.get("/static/lightwork-consent-publishing.js")
 @app.get("/static/lightwork-markdown.js")
 @app.get("/static/lightwork-draft-recovery.css")
 async def in_app_ui_asset(request: Request) -> FileResponse:
