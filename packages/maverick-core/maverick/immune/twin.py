@@ -121,13 +121,15 @@ def replaying(replay: Replay) -> Iterator[Replay]:
 
 
 async def dispatch(goal_id: int, tool: str, args: dict,
-                   run: Callable[[str, dict], Awaitable[str]]) -> str:
+                   run: Callable[[], Awaitable[str]]) -> str:
     """The agent's tool execution, routed through the twin: replay when one is
-    active, otherwise run live and record when recording is on."""
+    active, otherwise ``run()`` live and record when recording is on. ``run``
+    is a thunk so the registry call stays visible at the gated dispatch site
+    (``maverick.dispatch_contract``)."""
     replay = _ACTIVE.get()
     if replay is not None and tool not in LIVE_IN_TWIN:
         return replay.serve(tool, args)
-    output = await run(tool, args)
+    output = await run()
     if replay is None and tool not in LIVE_IN_TWIN and recording_enabled():
         try:
             record(goal_id, tool, args, output if isinstance(output, str) else str(output))

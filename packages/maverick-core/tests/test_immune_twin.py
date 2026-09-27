@@ -31,15 +31,15 @@ def _live(calls):
 
 def test_recording_is_off_by_default():
     calls: list = []
-    asyncio.run(twin.dispatch(7, "web_search", {"q": "a"}, _live(calls)))
+    asyncio.run(_d(twin, 7, "web_search", {"q": "a"}, _live(calls)))
     assert calls and not twin.recording_path(7).exists()
 
 
 def test_record_then_replay_serves_production_results_in_order(recording_on):
     calls: list = []
     for q in ("a", "a", "b"):
-        asyncio.run(twin.dispatch(7, "web_search", {"q": q}, _live(calls)))
-    asyncio.run(twin.dispatch(7, "spawn_subagent", {"role": "r"}, _live(calls)))
+        asyncio.run(_d(twin, 7, "web_search", {"q": q}, _live(calls)))
+    asyncio.run(_d(twin, 7, "spawn_subagent", {"role": "r"}, _live(calls)))
     recorded = twin.load(7)
     assert [r["tool"] for r in recorded] == ["web_search"] * 3  # coordination not recorded
 
@@ -51,11 +51,11 @@ def test_record_then_replay_serves_production_results_in_order(recording_on):
             run = _live(live_during_replay)
             # spawned agents run in their own tasks; the replay must follow them
             return await asyncio.gather(
-                twin.dispatch(99, "web_search", {"q": "a"}, run),
-                twin.dispatch(99, "web_search", {"q": "a"}, run),
-                twin.dispatch(99, "web_search", {"q": "b"}, run),
-                twin.dispatch(99, "email", {"to": "x"}, run),        # never happened
-                twin.dispatch(99, "spawn_subagent", {"role": "r"}, run),  # coordination
+                _d(twin, 99, "web_search", {"q": "a"}, run),
+                _d(twin, 99, "web_search", {"q": "a"}, run),
+                _d(twin, 99, "web_search", {"q": "b"}, run),
+                _d(twin, 99, "email", {"to": "x"}, run),        # never happened
+                _d(twin, 99, "spawn_subagent", {"role": "r"}, run),  # coordination
             )
 
     out = asyncio.run(_twin_run())
@@ -69,13 +69,13 @@ def test_record_then_replay_serves_production_results_in_order(recording_on):
 
 def test_ask_user_is_replayed_not_sent(recording_on):
     calls: list = []
-    asyncio.run(twin.dispatch(3, "ask_user", {"q": "dates?"}, _live(calls)))
+    asyncio.run(_d(twin, 3, "ask_user", {"q": "dates?"}, _live(calls)))
     replay = twin.Replay(twin.load(3))
     after: list = []
 
     async def _go():
         with twin.replaying(replay):
-            return await twin.dispatch(4, "ask_user", {"q": "dates?"}, _live(after))
+            return await _d(twin, 4, "ask_user", {"q": "dates?"}, _live(after))
 
     assert asyncio.run(_go()) == "ask_user:dates?:live1" and after == []
 
@@ -83,7 +83,7 @@ def test_ask_user_is_replayed_not_sent(recording_on):
 def test_sealed_recording_hides_output_and_is_bound_to_the_goal(recording_on, monkeypatch):
     pytest.importorskip("cryptography")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    asyncio.run(twin.dispatch(5, "sql_query", {"q": "payroll"}, _live([])))
+    asyncio.run(_d(twin, 5, "sql_query", {"q": "payroll"}, _live([])))
     raw = twin.recording_path(5).read_text()
     assert "payroll" not in raw and "sealed" in raw
     assert twin.load(5)[0]["output"] == "sql_query:payroll:live1"
@@ -97,18 +97,18 @@ def test_recording_failure_never_breaks_the_call(recording_on, monkeypatch):
     def boom(*a, **k):
         raise OSError("disk full")
     monkeypatch.setattr(twin, "record", boom)
-    assert asyncio.run(twin.dispatch(1, "web_search", {"q": "z"}, _live([]))).endswith("live1")
+    assert asyncio.run(_d(twin, 1, "web_search", {"q": "z"}, _live([]))).endswith("live1")
 
 
 def test_replay_goal_runs_a_faithful_twin_and_ledgers_counts_only(recording_on, tmp_path):
     from maverick.world_model import WorldModel
     world = WorldModel(tmp_path / "world.db")
     gid = world.create_goal("Reconcile March AP", "vendor ledger vs bank", domain="finance")
-    asyncio.run(twin.dispatch(gid, "sql_query", {"q": "ap"}, _live([])))
+    asyncio.run(_d(twin, gid, "sql_query", {"q": "ap"}, _live([])))
 
     def run(twin_gid):
         # the runner executes inside the replay context
-        return asyncio.run(twin.dispatch(twin_gid, "sql_query", {"q": "ap"}, _live([])))
+        return asyncio.run(_d(twin, twin_gid, "sql_query", {"q": "ap"}, _live([])))
 
     report = twin.replay_goal(world, gid, run)
     twin_goal = world.get_goal(report["twin_goal"])
@@ -145,3 +145,7 @@ async def test_agent_tool_execution_routes_through_the_twin(recording_on, tmp_pa
     with twin.replaying(twin.Replay(twin.load(ctx.goal_id))):
         assert "pong1" in await agent._run_tool("ping", {})
     assert hits == [1]  # the replayed call did not execute the tool
+
+
+def _d(twin, goal_id, tool, args, run):
+    return twin.dispatch(goal_id, tool, args, lambda: run(tool, args))

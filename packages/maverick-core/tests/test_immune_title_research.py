@@ -3,12 +3,20 @@ governed research runs, so they are recorded as the research happens."""
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
+from pathlib import Path
 
 import pytest
 from maverick.immune import title
 
-from .test_research_runs import TENANT, _dataset, _plan, services  # noqa: F401
+# Reuse the research-run fixtures by path: several packages ship a ``tests``
+# package, so a package-relative sibling import is ambiguous in the full suite.
+_spec = importlib.util.spec_from_file_location(
+    "_immune_research_run_fixtures", Path(__file__).with_name("test_research_runs.py"))
+_rr = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_rr)
+TENANT, _dataset, _plan, services = _rr.TENANT, _rr._dataset, _rr._plan, _rr.services
 
 
 def _dossier(**extra):
@@ -18,7 +26,7 @@ def _dossier(**extra):
             "coverage": {"examined": 1, "total": 1}, **extra}
 
 
-def test_planning_decisions_become_framed_gates_and_inputs(services):  # noqa: F811
+def test_planning_decisions_become_framed_gates_and_inputs(services):
     registry, runs, state = services
     planned = _plan(runs, _dataset(registry, state))
     queued = runs.queue(TENANT, "user:researcher", planned["run_id"],
@@ -46,7 +54,7 @@ def test_planning_decisions_become_framed_gates_and_inputs(services):  # noqa: F
         title.add_research_runs(early, [run], ["assay-design"]))
 
 
-def test_tampered_run_history_is_refused(services):  # noqa: F811
+def test_tampered_run_history_is_refused(services):
     registry, runs, state = services
     run = runs.inspect(TENANT, "user:researcher",
                        _plan(runs, _dataset(registry, state))["run_id"])
@@ -60,7 +68,7 @@ def test_tampered_run_history_is_refused(services):  # noqa: F811
         title.research_run_evidence(forged)
 
 
-def test_cli_adds_research_runs_to_a_dossier(services, tmp_path):  # noqa: F811
+def test_cli_adds_research_runs_to_a_dossier(services, tmp_path):
     from click.testing import CliRunner
     from maverick.cli import main
     registry, runs, state = services

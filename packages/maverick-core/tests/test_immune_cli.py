@@ -81,7 +81,7 @@ def test_twin_replay_list_and_awareness(tmp_path, monkeypatch):
 
     async def live(tool, args):
         return "rows=12"
-    asyncio.run(twin.dispatch(gid, "sql_query", {"q": "gl"}, live))
+    asyncio.run(_d(twin, gid, "sql_query", {"q": "gl"}, live))
     world.close()
 
     monkeypatch.setattr(cli_mod, "_require_llm_key", lambda *a, **k: "k")
@@ -92,7 +92,7 @@ def test_twin_replay_list_and_awareness(tmp_path, monkeypatch):
         async def agent():  # stands in for the swarm's tool call
             async def never(tool, args):
                 raise AssertionError("a twin must not execute tools")
-            return await twin.dispatch(goal_id, "sql_query", {"q": "gl"}, never)
+            return await _d(twin, goal_id, "sql_query", {"q": "gl"}, never)
         seen.append(asyncio.run(agent()))
         return "done"
     monkeypatch.setattr(runner, "run_goal_in_thread", fake_run)
@@ -107,3 +107,7 @@ def test_twin_replay_list_and_awareness(tmp_path, monkeypatch):
     s.write_text(json.dumps({"watched": [False] * 40, "unwatched": [True] * 20 + [False] * 20}))
     gap = json.loads(_run("awareness", str(s)).output)
     assert gap["significant"] and gap["gap"] == 0.5
+
+
+def _d(twin, goal_id, tool, args, run):
+    return twin.dispatch(goal_id, tool, args, lambda: run(tool, args))
