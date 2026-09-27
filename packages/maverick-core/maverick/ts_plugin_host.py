@@ -45,7 +45,13 @@ from pathlib import Path
 from typing import Any
 
 from .connector_attempts import ConnectorAttempt, ConnectorResult, current_invocation
-from .owned_process import OwnedProcess, ProcessOutputLimit, run_owned, run_sync
+from .owned_process import (
+    OwnedProcess,
+    ProcessCleanupError,
+    ProcessOutputLimit,
+    run_owned,
+    run_sync,
+)
 from .tools import Tool, scrub_child_env
 
 log = logging.getLogger(__name__)
@@ -249,8 +255,14 @@ class _PluginChild:
                     text = "ERROR: ts plugin did not confirm completion. " + text
                 text += "\nOutcome unknown; reconcile before any new invocation."
             return self._result(text, rid, dispatched=effect != "not_started", unknown=unknown, failed=failed)
-        except (TsPluginError, OSError, TimeoutError, ProcessOutputLimit, _ChildDied) as exc:
-            self.close()  # A late reply cannot be accepted for the next request.
+        except (TsPluginError, OSError, TimeoutError, ProcessOutputLimit, _ChildDied,
+                ProcessCleanupError) as exc:
+            try:
+                self.close()  # A late reply cannot be accepted for the next request.
+            except ProcessCleanupError:
+                # A descendant outlived cleanup. Report it as a tool error with
+                # its dispatch state, never as an exception out of the tool.
+                log.error("ts plugin child cleanup incomplete")
             # Join the writer before deciding "not dispatched": it may have
             # started concurrently with the failure on the reading side.
             dispatched = write is not None and write.started.is_set()
@@ -258,6 +270,8 @@ class _PluginChild:
                 reason = "child crashed or closed its output"
             elif isinstance(exc, TimeoutError):
                 reason = "call timed out"
+            elif isinstance(exc, ProcessCleanupError):
+                reason = "previous child could not be cleaned up"
             elif isinstance(exc, (TsPluginError, ProcessOutputLimit)):
                 reason = str(exc)
             else:

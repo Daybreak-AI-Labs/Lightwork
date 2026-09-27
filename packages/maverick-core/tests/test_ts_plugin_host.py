@@ -186,3 +186,23 @@ def test_plugin_file_change_after_manifest_is_blocked(fake_cmd):
     out = by_name["echo"].fn({"text": "hi"})
     assert out.startswith("ERROR:")
     assert "changed after manifest discovery" in out
+
+
+
+def test_a_cleanup_failure_is_a_tool_error_not_an_exception(monkeypatch):
+    """A child whose descendant outlives cleanup is reported with its dispatch
+    state, never raised out of the tool."""
+    from maverick import ts_plugin_host as host
+    from maverick.owned_process import ProcessCleanupError
+
+    child = host._PluginChild.__new__(host._PluginChild)
+    child.call_timeout, child._lock, child._buffer, child._proc = 5.0, __import__("threading").Lock(), bytearray(), None
+    child.protocol = "v1"
+
+    def failed_cleanup(*a, **k):
+        raise ProcessCleanupError("owned child cleanup incomplete")
+    monkeypatch.setattr(child, "_ensure_started", failed_cleanup, raising=False)
+    monkeypatch.setattr(child, "close", failed_cleanup)
+    result = child.call("tool", {})
+    text = result if isinstance(result, str) else str(getattr(result, "text", result))
+    assert "ERROR" in text and "not dispatched" in text

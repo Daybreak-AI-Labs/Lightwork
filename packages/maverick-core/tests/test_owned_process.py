@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sys
 import threading
 import time
@@ -273,3 +274,19 @@ async def test_cleanup_reporting_failure_cannot_replace_original_stop(monkeypatc
         )
     assert caught.value is original and original.cleanup_incomplete
     _assert_reaped(children)
+
+
+@pytest.mark.skipif(sys.platform != "linux" or shutil.which("setsid") is None,
+                    reason="setsid escape is a Linux process-group behaviour")
+def test_a_descendant_that_escapes_the_group_with_our_pipe_does_not_turn_success_into_timeout():
+    import asyncio
+    import threading
+    import time
+
+    from maverick.owned_process import run_owned
+    start = time.monotonic()
+    result = asyncio.run(run_owned(["sh", "-c", "setsid sleep 78 &"], input="",
+                                   deadline=time.monotonic() + 6,
+                                   env={"PATH": os.environ["PATH"]}))
+    assert result.returncode == 0 and time.monotonic() - start < 3
+    assert not [t for t in threading.enumerate() if t.name.startswith("owned-child")]

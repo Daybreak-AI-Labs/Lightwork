@@ -158,6 +158,7 @@ class OwnedProcess:
                 self._job = None
             elif os.name != "nt":
                 _reap_process_group(self.proc)
+                _kill_pipe_holders(self.proc)
             if self.proc.poll() is None:
                 self.proc.kill()
             self._tree_stopped = True
@@ -200,6 +201,43 @@ class OwnedProcess:
         while not self._reaped() and time.monotonic() < deadline:
             await asyncio.sleep(0.005)
         self._finish_close()
+
+
+def _kill_pipe_holders(proc: subprocess.Popen) -> None:
+    """Kill any other process still holding this child's output pipes (Linux).
+
+    Group containment ends at ``setsid``: a descendant that started its own
+    session escapes ``killpg`` and, if it keeps stdout or stderr open, the pipe
+    never reaches EOF -- a finished child then reads as a timeout and its
+    reader threads leak. Such a process can be found exactly: it holds our
+    pipe. (One that closed its pipes has no lineage left to find; run
+    untrusted commands in a container sandbox for that.) Best effort: no
+    /proc means nothing to scan."""
+    targets = set()
+    for pipe in (proc.stdout, proc.stderr):
+        try:
+            targets.add(f"pipe:[{os.fstat(pipe.fileno()).st_ino}]")
+        except (AttributeError, OSError, ValueError):
+            continue
+    if not targets or not os.path.isdir("/proc"):
+        return
+    me = os.getpid()
+    try:
+        pids = [int(p) for p in os.listdir("/proc") if p.isdigit() and int(p) != me]
+    except OSError:
+        return
+    for pid in pids:
+        try:
+            fds = os.listdir(f"/proc/{pid}/fd")
+        except OSError:
+            continue  # gone, or not ours to inspect
+        for fd in fds:
+            try:
+                if os.readlink(f"/proc/{pid}/fd/{fd}") in targets:
+                    os.kill(pid, 9)
+                    break
+            except OSError:
+                continue
 
 
 async def _join_cleanup(child: OwnedProcess) -> None:
