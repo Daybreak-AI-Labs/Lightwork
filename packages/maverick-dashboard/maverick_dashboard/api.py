@@ -10944,6 +10944,18 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Consent application scanning",
         "requires": ("consent_preferences",),
     },
+    "consent_preferences.publishing.web_settings": {
+        "label": "Website banner settings",
+        "requires": ("consent_preferences", "consent_preferences.publishing"),
+    },
+    "consent_preferences.profile_data.custom_index": {
+        "label": "Find people by preference",
+        "requires": ("consent_preferences", "consent_preferences.profile_data"),
+    },
+    "consent_preferences.global_opt_out": {
+        "label": "Global opt-out",
+        "requires": ("consent_preferences",),
+    },
     "consent_preferences.scanner.notice_proposals": {
         "label": "Scan notice proposals",
         "requires": ("consent_preferences", "consent_preferences.scanner"),

@@ -293,7 +293,7 @@
           }
           return what + 'Something went wrong. Please try again.';
         }
-        if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check the highlighted fields and try again.';
+        if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check what you entered and try again.';
         if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
         if (status === 403) return what + 'You do not have permission to do this. Ask an administrator.';
         if (status === 404) return what + 'That item no longer exists. Refresh the page to see the latest.';

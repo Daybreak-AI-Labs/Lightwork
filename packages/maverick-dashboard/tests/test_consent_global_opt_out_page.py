@@ -171,3 +171,26 @@ def test_workbench_lists_set_ups_with_row_buttons_and_speaks_plainly(client: Tes
     for typed in ("Public client ID", "Unix timestamp", "Expected record revision", "Configuration ID"):
         assert typed not in page_html
     assert developer_terms(page_html) == []
+
+
+def test_turned_off_feature_shows_the_standard_banner(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_module_switch_enabled", lambda _loaded, _section: False)
+    off = client.get(ROUTE).text
+    assert 'data-module-gate="consent_preferences.global_opt_out"' in off
+    assert "Global opt-out is turned off." in off
+    monkeypatch.setattr(api, "_module_switch_enabled", lambda _loaded, _section: True)
+    assert "data-module-gate=" not in client.get(ROUTE).text
+
+
+def test_global_opt_out_switch_is_registered_and_writable() -> None:
+    from maverick_dashboard import api, settings_store
+
+    for section in ("consent_preferences.global_opt_out",
+                    "consent_preferences.profile_data.custom_index",
+                    "consent_preferences.publishing.web_settings"):
+        assert section in api._MODULE_SWITCHES
+        assert section in settings_store.MODULE_ENABLE_PATHS
+        for parent in api._MODULE_SWITCHES[section]["requires"]:
+            assert parent in settings_store.MODULE_ENABLE_PATHS

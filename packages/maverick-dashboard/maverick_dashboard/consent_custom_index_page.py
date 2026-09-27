@@ -74,6 +74,7 @@ def create_consent_custom_index_page_router(
                 "csp_style_nonce": style_nonce,
                 "custom_index_can_admin": has_permission(request, "admin"),
                 "custom_index_can_audit": has_permission(request, "audit"),
+                "module_off": _module_off('consent_preferences.profile_data.custom_index'),
             },
         )
         for name, value in _HEADERS.items():
@@ -89,3 +90,15 @@ def create_consent_custom_index_page_router(
 
 
 __all__ = ["create_consent_custom_index_page_router"]
+
+
+def _module_off(section: str) -> bool:
+    """Whether this feature's on/off switch chain is off, so the page shows
+    the standard turned-off banner (with Turn on for administrators)."""
+    try:
+        from maverick.config import load_config
+
+        from .api import _module_switch_enabled
+        return not _module_switch_enabled(load_config() or {}, section)
+    except Exception:  # noqa: BLE001 -- the page's own status line still reports
+        return False
