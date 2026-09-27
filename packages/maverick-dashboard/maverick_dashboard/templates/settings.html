@@ -268,7 +268,9 @@
       apply on the next run. There is no automatic task limit on a new installation.
       Existing configured limits remain in force until you change them.
     </p>
-    <p>Configured task limits are <strong>{{ 'enabled' if task_limits_enabled else 'disabled' }}</strong>.</p>
+    <p>Configured task limits are <strong>{{ 'enabled' if task_limits_enabled else 'disabled' }}</strong>.
+      To limit what the whole workspace or each person spends per day or month, use
+      <a href="/spending-limits">Spending limits</a>.</p>
     <form method="post" action="/settings/budget"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       <label style="display: flex; flex-direction: column; gap: var(--space-1); min-width: 14rem;">

@@ -727,3 +727,123 @@ def users_remove_suites(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 
+
+
+# -- Spending limits ---------------------------------------------------------
+
+_LIMIT_SAVED = {
+    "workspace": "Workspace limit saved.",
+    "workspace_cleared": "The workspace no longer has a spending limit.",
+    "default": "Limit for everyone saved.",
+    "default_cleared": "People without their own limit can now spend without a limit.",
+    "person": "Personal limit saved.",
+    "person_cleared": "Personal limit removed.",
+}
+_LIMIT_ERRORS = {
+    "amount": "Enter the limit as an amount in dollars, more than $0.",
+    "period": "Choose how often the limit resets.",
+    "person": "Choose a person.",
+    "full": "There are too many personal limits to add another.",
+    "unreadable": "The saved spending limits could not be read. Please try again.",
+}
+
+
+@router.get("/spending-limits", response_class=HTMLResponse)
+def spending_limits_page(request: Request, saved: str = "", error: str = "") -> HTMLResponse:
+    """Admin: workspace and per-person spending limits (none by default)."""
+    auth.require_permission(request, "admin")
+    from maverick import spending_limits
+    from maverick.paths import current_tenant_id
+    from maverick.quotas import UsageLedger
+
+    from . import rbac
+    people = set(rbac.list_users())
+    try:
+        people |= set(UsageLedger()._load())
+    except Exception:  # noqa: BLE001 -- spend history is a convenience here
+        pass
+    people.discard("")
+    load_error = ""
+    try:
+        view = spending_limits.overview(sorted(people))
+    except Exception:  # noqa: BLE001 -- show a plain message, never a trace
+        load_error = ("The saved spending limits could not be read, so paid work is "
+                      "paused. Save the limits below again to repair them.")
+        view = {"workspace": None, "default": None, "people": [],
+                "workspace_today": 0.0, "workspace_month": 0.0}
+    organization_cap = 0.0
+    try:
+        from maverick.tenant.registry import get_tenant
+        record = get_tenant(current_tenant_id() or "")
+        organization_cap = float(record.max_daily_dollars) if record else 0.0
+    except Exception:  # noqa: BLE001 -- the organization cap is informational here
+        pass
+    return _app().templates.TemplateResponse(request, "spending_limits.html", {
+        "view": view,
+        "periods": [(p, spending_limits.PERIOD_LABELS[p]) for p in spending_limits.PERIODS],
+        "workspace_periods": [(p, spending_limits.PERIOD_LABELS[p])
+                              for p in spending_limits.WORKSPACE_PERIODS],
+        "period_labels": spending_limits.PERIOD_LABELS,
+        "organization_cap": organization_cap,
+        "saved": _LIMIT_SAVED.get(saved, ""),
+        "error": _LIMIT_ERRORS.get(error, ""),
+        "load_error": load_error,
+    })
+
+
+def _limit_redirect(saved: str = "", error: str = "") -> RedirectResponse:
+    from urllib.parse import urlencode
+    query = urlencode({"saved": saved} if saved else {"error": error})
+    return RedirectResponse(f"/spending-limits?{query}", status_code=303)
+
+
+@router.post("/spending-limits/workspace")
+def spending_limits_workspace(request: Request, choice: str = Form("none"),
+                              amount: str = Form(""), period: str = Form("month")) -> RedirectResponse:
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import spending_limits
+    actor = auth.caller_principal(request) or "local"
+    try:
+        if choice == "none":
+            spending_limits.clear_workspace_limit(actor=actor)
+            return _limit_redirect("workspace_cleared")
+        spending_limits.set_workspace_limit(amount, period, actor=actor)
+    except spending_limits.SpendingLimitError as exc:
+        return _limit_redirect(error=exc.code)
+    return _limit_redirect("workspace")
+
+
+@router.post("/spending-limits/default")
+def spending_limits_default(request: Request, choice: str = Form("none"),
+                            amount: str = Form(""), period: str = Form("month")) -> RedirectResponse:
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import spending_limits
+    actor = auth.caller_principal(request) or "local"
+    try:
+        if choice == "none":
+            spending_limits.clear_default_limit(actor=actor)
+            return _limit_redirect("default_cleared")
+        spending_limits.set_default_limit(amount, period, actor=actor)
+    except spending_limits.SpendingLimitError as exc:
+        return _limit_redirect(error=exc.code)
+    return _limit_redirect("default")
+
+
+@router.post("/spending-limits/person")
+def spending_limits_person(request: Request, principal: str = Form(""),
+                           amount: str = Form(""), period: str = Form("month"),
+                           action: str = Form("save")) -> RedirectResponse:
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import spending_limits
+    actor = auth.caller_principal(request) or "local"
+    try:
+        if action == "remove":
+            spending_limits.clear_user_limit(principal, actor=actor)
+            return _limit_redirect("person_cleared")
+        spending_limits.set_user_limit(principal, amount, period, actor=actor)
+    except spending_limits.SpendingLimitError as exc:
+        return _limit_redirect(error=exc.code)
+    return _limit_redirect("person")

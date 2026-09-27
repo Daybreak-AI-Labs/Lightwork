@@ -182,7 +182,7 @@
     "preferences": 3,
     "learning": 54,
     "sqlite_domain": 78,
-    "configuration": 56,
+    "configuration": 57,
     "read_projection": 15,
     "coordinator": 1,
     "audit": 22,
@@ -23652,6 +23652,37 @@
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
       "source_sites": []
+    },
+    {
+      "path": "packages/maverick-core/maverick/spending_limits.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/spending_limits.py",
+      "purpose": "administrator-set workspace and per-person spending limits (one JSON file per workspace)",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 82,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('spending-limits.json')"
+        },
+        {
+          "line": 162,
+          "function": "_save",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 174,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(document, sort_keys=True, allow_nan=False))"
+        }
+      ]
     }
   ]
 }

@@ -4761,6 +4761,16 @@ def pick_advanced() -> dict[str, Any]:
             "(chargeback / cost governance across runs, beyond the per-run budget).",
             default=False,
         ),
+        "spending_workspace_monthly": _q_text(
+            "Monthly spending limit for the whole workspace, in dollars "
+            "(0 = no limit; you can change it any time in Admin > Spending limits)",
+            default="0",
+        ),
+        "spending_person_monthly": _q_text(
+            "Monthly spending limit for each person, in dollars "
+            "(0 = no limit; you can set different limits per person in the dashboard)",
+            default="0",
+        ),
         "tenant_by_user": _q_confirm(
             "Isolate each user into their own tenant? Per-user cross-session memory "
             "is kept separate — recommended for multi-user servers.",
@@ -7701,6 +7711,21 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         # dimension. The kernel also reads MAVERICK_QUOTA_* env overrides.
         lines.append("max_dollars_per_day = 25.0")
         lines.append("max_tokens_per_day = 5000000")
+    _workspace_limit = _safe_float(advanced.get("spending_workspace_monthly") or 0, default=0.0)
+    _person_limit = _safe_float(advanced.get("spending_person_monthly") or 0, default=0.0)
+    _workspace_limit = _workspace_limit if math.isfinite(_workspace_limit) else 0.0
+    _person_limit = _person_limit if math.isfinite(_person_limit) else 0.0
+    if _workspace_limit > 0 or _person_limit > 0:
+        # Starting limits; administrators change them in the dashboard
+        # (Admin > Spending limits), which then takes precedence.
+        lines.append("")
+        lines.append("[spending_limits]")
+        if _workspace_limit > 0:
+            lines.append(f"workspace_dollars = {_workspace_limit:.2f}")
+            lines.append('workspace_period = "month"')
+        if _person_limit > 0:
+            lines.append(f"default_user_dollars = {_person_limit:.2f}")
+            lines.append('default_user_period = "month"')
     if advanced.get("tenant_by_user"):
         lines.append("")
         lines.append("[tenancy]")
@@ -9293,7 +9318,8 @@ _STANDARD_GOVERNANCE: dict[str, Any] = {
     "calibration_enforce": True,  # confidence calibration gate
     "fairness_monitor": True,
     "audit_sign": True,  # Ed25519-signed audit chain
-    "enforce_quotas": True,  # per-principal daily spend/token caps
+    # No spending caps by default: administrators set workspace and
+    # per-person limits in the dashboard (Admin > Spending limits).
 }
 _REGULATED_GOVERNANCE: dict[str, Any] = {
     **_STANDARD_GOVERNANCE,
@@ -9336,7 +9362,7 @@ DEFAULT_GOVERNANCE_PROFILE = "essentials"
 # imports these so the two front ends show the SAME menu and cannot drift.
 GOVERNANCE_CHOICES: list[str] = [
     "essentials - small business: learn + improve, stay out of my way (a gym, a studio, a shop)",
-    "standard   - growing company: + budgets enforced, signed audit trail "
+    "standard   - growing company: + signed audit trail, fairness and memory checks "
     "(a manufacturer, an agency)",
     "regulated  - bank / clinic / government: + human sign-off, immutable audit, long retention",
 ]

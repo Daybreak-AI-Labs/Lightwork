@@ -1132,6 +1132,7 @@ def reserve(
     organization_budget=None,
 ) -> Reservation | None:
     """Admit both organization and provider authorities before one dispatch."""
+    from . import spending_limits
     from .budget import BudgetExceeded
     from .tenant import provider_admission as organization
 
@@ -1139,6 +1140,9 @@ def reserve(
     name = _canon(provider)
     if not name or not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,192}", identity):
         raise ProviderAccountingUnavailable
+    # Administrator-set workspace and per-person limits (none by default).
+    spending_limits.admit(organization_budget or organization.current_budget(),
+                          projected_dollars)
     try:
         handle = organization.reserve_call(name, identity, _amount(projected_dollars),
                                            projection_known=projection_known,

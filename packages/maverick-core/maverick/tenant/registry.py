@@ -75,10 +75,10 @@ BILLING_CURRENT = "current"
 BILLING_PAST_DUE = "past_due"
 _BILLING_STATUSES = frozenset({BILLING_CURRENT, BILLING_PAST_DUE})
 
-# A newly provisioned tenant must start with a real spend boundary.  ``0``
-# remains the explicit representation of unlimited for backwards compatibility,
-# but callers now have to choose it rather than receiving it by omission.
-DEFAULT_TENANT_DAILY_DOLLARS = 5.0
+# A newly provisioned tenant has no daily spend cap unless one is chosen
+# (``0`` means no cap). Administrators set workspace and per-person limits in
+# Admin > Spending limits (maverick.spending_limits) or a daily cap here.
+DEFAULT_TENANT_DAILY_DOLLARS = 0.0
 
 # Upper bound on each per-tenant feature-override list. A control-plane roster
 # edited by an operator should never carry an unbounded blob; a plan has only a
@@ -412,10 +412,8 @@ def create_tenant(
     tenant_id: str, *, plan: str = "free", display_name: str = "",
     max_daily_dollars: float = DEFAULT_TENANT_DAILY_DOLLARS,
 ) -> TenantRecord:
-    """Provision a tenant + its workspace with a bounded default spend cap.
-
-    Passing ``max_daily_dollars=0`` is the explicit opt-in to an unlimited
-    tenant. Raises :class:`ValueError` if the tenant already exists.
+    """Provision a tenant + its workspace. No daily spend cap by default;
+    pass ``max_daily_dollars`` to set one. Raises :class:`ValueError` if the tenant already exists.
     """
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
@@ -748,8 +746,7 @@ def tenant_over_quota(tenant_id: str | None) -> str | None:
     daily-spend cap, else None.
 
     The cap is ``max_daily_dollars`` on the tenant's roster record. New tenants
-    receive :data:`DEFAULT_TENANT_DAILY_DOLLARS`; ``0`` is reserved for an
-    explicit unlimited choice. An unprovisioned tenant or no roster still means
+    receive :data:`DEFAULT_TENANT_DAILY_DOLLARS` (no cap); ``0`` means no cap. An unprovisioned tenant or no roster still means
     "no cap" for compatibility with single-tenant operation.
     """
     tid = _lookup_id(tenant_id)

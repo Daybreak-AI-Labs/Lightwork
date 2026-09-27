@@ -28,11 +28,11 @@ def _isolate(monkeypatch, tmp_path):
 @pytest.mark.parametrize("bad", ["nan", "inf", "-inf"])
 def test_tenant_quota_rejects_non_finite(bad):
     from maverick.tenant import registry as tr
-    tr.create_tenant("acme")
+    tr.create_tenant("acme", max_daily_dollars=5.0)
     res = CliRunner().invoke(main, ["tenant", "quota", "acme", "--", bad])
     assert res.exit_code == 2, res.output
     assert "finite" in res.output
-    assert tr.get_tenant("acme").max_daily_dollars == 5.0  # bounded default unchanged
+    assert tr.get_tenant("acme").max_daily_dollars == 5.0  # existing cap unchanged
 
 
 # ---- audit redaction: depth-64 guard ---------------------------------------

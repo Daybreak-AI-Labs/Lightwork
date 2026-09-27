@@ -150,6 +150,11 @@ def bind_budget(budget, principal, scope=None):
     return budget._organization_scope
 
 
+def current_budget():
+    """The run budget bound by :func:`run_scope`, if any."""
+    return _CURRENT.get()
+
+
 @contextmanager
 def run_scope(budget, principal):
     bind_budget(budget, principal)

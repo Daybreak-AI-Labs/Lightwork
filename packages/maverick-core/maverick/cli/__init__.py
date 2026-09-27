@@ -3126,9 +3126,9 @@ def tenant() -> None:
 @click.option(
     "--max-daily-dollars",
     type=float,
-    default=5.0,
+    default=0.0,
     show_default=True,
-    help="Per-tenant daily spend cap (USD); explicitly pass 0 for unlimited.",
+    help="Per-tenant daily spend cap (USD); 0 (the default) means no cap.",
 )
 def tenant_create(tenant_id: str, plan: str, display_name: str,
                   max_daily_dollars: float) -> None:
@@ -3181,8 +3181,8 @@ def _dashboard_public_url() -> str:
 @click.option("--plan", default="free", help="Plan name (free/pro/enterprise/...).")
 @click.option("--name", "display_name", default="", help="Human display name.")
 @click.option(
-    "--max-daily-dollars", type=float, default=5.0, show_default=True,
-    help="Per-tenant daily spend cap (USD); explicitly pass 0 for unlimited.")
+    "--max-daily-dollars", type=float, default=0.0, show_default=True,
+    help="Per-tenant daily spend cap (USD); 0 (the default) means no cap.")
 @click.option("--role", default="admin", show_default=True,
               help="RBAC role granted by the invite (admin/operator/auditor/viewer).")
 @click.option("--base-url", "base_url", default=None,

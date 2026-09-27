@@ -28,9 +28,9 @@ def test_empty_state(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/tenants").text
     assert "No workspaces yet" in text
-    assert "enter 0 only for unlimited" in text
+    assert "leave at 0 for no limit" in text
     assert 'name="max_daily_dollars"' in text
-    assert 'value="5"' in text
+    assert 'value="0"' in text
 
 
 def test_lists_provisioned_tenants(monkeypatch, tmp_path):

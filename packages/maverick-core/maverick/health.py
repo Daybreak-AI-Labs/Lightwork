@@ -932,7 +932,19 @@ def _launch_row(ok: bool, label: str, detail: str = "", fix: str = "") -> bool:
 
 
 def _launch_check_cost_caps() -> bool:
-    """[quotas] enforce = true with at least one non-zero cap."""
+    """A workspace or everyone spending limit (Admin > Spending limits), or
+    [quotas] enforce = true with at least one non-zero cap."""
+    try:
+        from . import spending_limits
+        limits = spending_limits.load()
+    except Exception as e:  # noqa: BLE001 - a go-live gate never aborts
+        return _launch_row(False, "cost caps", f"spending limits unreadable: {e}",
+                           "save the limits again in Admin > Spending limits")
+    set_limits = [f"{name} ${limit['amount']:g} {spending_limits.PERIOD_LABELS[limit['period']]}"
+                  for name, limit in (("workspace", limits["workspace"]),
+                                      ("everyone", limits["default"])) if limit]
+    if set_limits:
+        return _launch_row(True, "cost caps", "spending limits: " + ", ".join(set_limits))
     try:
         from .quotas import _quota_config
         cfg = _quota_config()
@@ -942,8 +954,9 @@ def _launch_check_cost_caps() -> bool:
     dollars = float(cfg.get("max_dollars_per_day", 0) or 0)
     tokens = float(cfg.get("max_tokens_per_day", 0) or 0)
     if not cfg.get("enforce"):
-        return _launch_row(False, "cost caps", "[quotas] enforce is off",
-                           "set [quotas] enforce = true (or MAVERICK_QUOTA_ENFORCE=1)")
+        return _launch_row(False, "cost caps", "no spending limit is set",
+                           "set a workspace or everyone limit in Admin > Spending limits "
+                           "(or [quotas] enforce = true)")
     if dollars <= 0 and tokens <= 0:
         return _launch_row(False, "cost caps",
                            "enforcement on but every cap is 0 (unlimited)",

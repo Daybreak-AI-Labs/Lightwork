@@ -59,6 +59,7 @@ KNOWN_SECTIONS = frozenset({
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
     "privacy_automation", "privacy_ops", "provider_failover", "providers", "queue", "quotas",
+    "spending_limits",
     "rate_limits", "reflexion",
     "tech_risk_compliance", "third_party_management",
     "repl", "harness_refine", "session_tree",

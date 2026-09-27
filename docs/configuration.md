@@ -21,7 +21,7 @@ type = "desktop"       # desktop | docker | vps | phone
 # the self-learning/self-improvement lifecycle; the level sets the governance
 # posture around it:
 #   essentials  small business (a gym, a studio) — learning, no ceremony
-#   standard    growing company — + signed audit trail, enforced daily quotas
+#   standard    growing company — + signed audit trail (no spending caps)
 #   regulated   bank/clinic/government — + human sign-off (Ed25519) for
 #               code/weights promotions, WORM audit export, long retention
 # A label for humans + dashboards: the wizard expands it into the concrete
@@ -723,6 +723,34 @@ max_concurrent_model_calls = 16 # model calls in flight per goal (0 = unbounded,
 `MAVERICK_MAX_TOTAL_SPAWNS` and `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` override
 these. The per-call fan-out cap and the goal's budget still apply at any size.
 
+## Spending limits
+
+There is no spending limit by default. An administrator sets limits in the
+dashboard under **Admin > Spending limits**, for the workspace they are in:
+
+- **Whole workspace:** the most everyone together may spend per day or month.
+- **Everyone:** a limit each person gets on their own, per task, day or month.
+- **A named person:** replaces the limit for everyone for that person.
+
+When a limit is reached, new work is refused and running work stops before its
+next paid step, with a plain message naming the limit. Every change is recorded
+in the audit trail (`spending_limits_changed`). The installer's advanced step
+can seed starting limits; what an administrator saves in the dashboard wins:
+
+```toml
+[spending_limits]
+workspace_dollars = 500.0       # 0 or unset = no workspace limit
+workspace_period = "month"      # "day" or "month"
+default_user_dollars = 50.0     # 0 or unset = no limit for each person
+default_user_period = "month"   # "task", "day" or "month"
+```
+
+Spend is counted from the usage ledger plus runs still going in the dashboard
+process. Runs in separate worker processes are counted once they settle, so
+several of them running at once can pass a limit by what they spend before
+settling. A workspace provisioned on **Workspaces** can also carry a daily cap;
+whichever limit is reached first applies. New workspaces have no daily cap.
+
 ## Go-live check
 
 `maverick launch-check` verifies the deliberate production switches are on and
@@ -730,7 +758,8 @@ exits non-zero if any is off, so a deploy pipeline can gate on it. It is
 distinct from `maverick doctor` (which checks whether the install *works*). Each
 row reads real config/env:
 
-- `[quotas] enforce = true` with at least one non-zero cap (cost governance);
+- a workspace or everyone limit in **Admin > Spending limits**, or
+  `[quotas] enforce = true` with at least one non-zero cap (cost governance);
 - `[tenancy] by_user = true` (per-user tenant isolation);
 - a license trust anchor present (`[license] publisher_pubkeys` /
   `MAVERICK_LICENSE_PUBKEYS`);

@@ -198,6 +198,9 @@ class EventKind:
     # not a silent edit. payload: tenant, field ("plan"|"quota"), old, new.
     TENANT_PLAN_CHANGED = "tenant_plan_changed"
     TENANT_QUOTA_CHANGED = "tenant_quota_changed"
+    # An administrator changed the workspace or per-person spending limits.
+    # payload: actor, workspace, default, people (count of personal limits).
+    SPENDING_LIMITS_CHANGED = "spending_limits_changed"
     # Deployment-global tenant/workspace control-plane decisions. These are
     # deliberately separate from tenant-local work so provisioning and a
     # caller changing the active confidentiality boundary cannot disappear

@@ -1128,6 +1128,14 @@ PAGES: tuple[dict, ...] = (
         "default": "admin",
     },
     {
+        "path": "/spending-limits",
+        "label": "Spending limits",
+        "group": "Admin",
+        "icon": "spend",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
         "path": "/tenants",
         "label": "Workspaces",
         "group": "Admin",

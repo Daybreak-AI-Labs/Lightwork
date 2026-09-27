@@ -728,7 +728,7 @@ class TenantCreateIn(BaseModel):
     max_daily_dollars: float = Field(
         DEFAULT_TENANT_DAILY_DOLLARS,
         ge=0.0,
-        description="Daily USD spend cap; 0 explicitly selects unlimited.",
+        description="Daily USD spend cap; 0 (the default) means no cap.",
     )
 
 

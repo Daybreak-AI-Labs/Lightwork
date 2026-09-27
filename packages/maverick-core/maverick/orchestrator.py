@@ -1253,6 +1253,9 @@ class _QuotaUsageSettlement:
             )
             if acknowledged and self.scope:
                 acknowledge_budget(self.budget, self.principal, self.scope)
+            if acknowledged:
+                from .spending_limits import mark_recorded
+                mark_recorded(self.budget)
             if self.world is not None and self.episode_id is not None:
                 from . import checkpoint
                 if checkpoint.enabled():
@@ -1514,6 +1517,16 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             "principal quota policy unavailable: "
             f"{_safe_exception_text(exc, fallback='quota lookup failed')}"
         )
+    if not _quota_reason:
+        # Administrator-set workspace and per-person limits (none by default).
+        try:
+            from .spending_limits import start_refusal
+            _quota_reason = start_refusal(principal)
+        except Exception as exc:
+            _quota_reason = (
+                "The spending limits could not be read, so new work is paused "
+                f"({_safe_exception_text(exc, fallback='limits unreadable')})."
+            )
     if _quota_reason:
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_quota_reason}")
         log.warning("goal #%s refused: %s", goal_id, _quota_reason)

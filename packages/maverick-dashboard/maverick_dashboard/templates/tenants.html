@@ -61,9 +61,9 @@
           <option value="enterprise">Enterprise</option>
         </select>
       </label>
-      <label>Daily spend limit ($/day; enter 0 only for unlimited)
+      <label>Daily spending limit in dollars (leave at 0 for no limit)
         <input class="input" name="max_daily_dollars" type="number" min="0"
-               step="0.01" value="5" required>
+               step="0.01" value="0" required>
       </label>
       <div><button type="submit" class="btn btn--primary">Create workspace</button></div>
     </form>
@@ -85,7 +85,7 @@
             id: String(f.get('id') || '').trim(),
             display_name: String(f.get('display_name') || '').trim(),
             plan: String(f.get('plan') || 'free'),
-            max_daily_dollars: Number(f.get('max_daily_dollars') || 5),
+            max_daily_dollars: Number(f.get('max_daily_dollars') || 0),
           }),
         });
         if (!r.ok) {
