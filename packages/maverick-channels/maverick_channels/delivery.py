@@ -26,6 +26,15 @@ MAX_TEXT_CHARS = 1_000_000
 MAX_CHUNKS = 512
 MAX_ATTACHMENTS = 10
 RETENTION_SECONDS = 30 * 24 * 3600
+# A delivered, compacted receipt is kept as a deduplication tombstone this long
+# (well past any provider's redelivery window; the world's processed-message
+# claim that also guards re-execution keeps 30 days), then removed so intake
+# capacity is not consumed forever by messages long since answered.
+TOMBSTONE_SECONDS = 90 * 24 * 3600
+# An execution claim with no recorded outcome after this long belongs to a
+# process that died mid-handler: surface it as unknown, never re-run it.
+STALE_CLAIM_SECONDS = 24 * 3600
+_INTERNAL_ERROR_REPLY = "⚠ An internal error occurred."
 _ACTIVE = contextvars.ContextVar("channel_delivery", default=None)
 
 
@@ -164,12 +173,26 @@ class DeliveryJournal:
                 cursor = cursors.get(cursor_id)
         rows, next_cursor = [], cursor["cursor"]
         for position, record_id in self.store.iter_record_ids(start_after=next_cursor, limit=limit):
-            row = self.get(record_id)
+            row = self._surface_stale_claim(self.get(record_id))
             next_cursor = position
             if (row and not row.get("restore_hold") and row["channel"] == channel and row["account_sha256"] == _digest(account)
                     and (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
                 rows.append(row)
         return rows, (cursors, cursor, next_cursor)
+
+    def _surface_stale_claim(self, row):
+        from maverick.privacy_ops import RecordConflict
+
+        if (row and not row.get("restore_hold") and row["execution"] == "execution_started_unconfirmed"
+                and row["updated_at"] < time.time() - STALE_CLAIM_SECONDS):
+            try:
+                return self.change(row, execution="execution_unknown", delivery="ready",
+                                   reply=asdict(Reply(_INTERNAL_ERROR_REPLY)),
+                                   reason="Execution began but its process stopped before recording a result; "
+                                          "review before retrying")
+            except RecordConflict:
+                return self.get(row["id"])
+        return row
 
     def finish_recovery_window(self, checkpoint):
         from maverick.privacy_ops import RecordConflict
@@ -251,7 +274,17 @@ class DeliveryJournal:
                 claimed = self.change(row, execution="execution_started_unconfirmed")
             except RecordConflict:
                 return None
-            if legacy or not world.mark_message_processed("delivery:" + row["channel"], row["id"]):
+            marked = False
+            if not legacy:
+                try:
+                    marked = world.mark_message_processed("delivery:" + row["channel"], row["id"])
+                except Exception:
+                    # The handler has not run. Hand the receipt back to recovery;
+                    # if the mark did land, the next claim finds it and records
+                    # the message as unknown instead of running it twice.
+                    self.change(claimed, execution="received")
+                    raise
+            if legacy or not marked:
                 self.change(claimed, execution="execution_unknown", reason="Prior execution claim has no confirmed result")
                 return None
             return claimed
@@ -299,7 +332,12 @@ class DeliveryJournal:
                 or row["delivery"] != "delivered"):
             return False
         if row.get("compacted") and row.get("cleanup_pending") == []:
-            return False
+            if row["updated_at"] > now - TOMBSTONE_SECONDS:
+                return False
+            try:
+                return bool(self.store.delete(row["id"], expected_revision=row["revision"]))
+            except RecordConflict:
+                return False
         if ("cleanup_pending" not in row and not row.get("compacted")
                 and row["updated_at"] > now - RETENTION_SECONDS):
             return False
@@ -326,6 +364,34 @@ async def admit_message(msg, *, external_id, account, authorize, route=None, jou
         raise PermissionError("Channel sender authorization changed")
     journal = journal or DeliveryJournal()
     return await asyncio.to_thread(journal.admit, msg, external_id=external_id, account=account, route=route)
+
+
+async def _execute_claimed(channel, inbound, claimed, *, journal, authorize):
+    """Run the handler for a claimed receipt and record its outcome. Every exit
+    records one: a result, or ``execution_unknown`` with a reply to the sender."""
+    try:
+        if not authorize():
+            raise PermissionError("Channel sender authorization changed")
+        _assert_work_allowed()
+        reply = as_reply(await channel.handler(inbound))
+        if len(reply.text) > MAX_TEXT_CHARS or len(reply.attachments) > MAX_ATTACHMENTS:
+            raise ValueError("Channel reply exceeds durable outbox bound")
+        return await asyncio.to_thread(journal.change, claimed, execution="completed", delivery="ready",
+                                       reply=asdict(reply))
+    except asyncio.CancelledError:
+        # Recorded synchronously: a second cancellation cannot interrupt it,
+        # and the receipt must not stay "started" with no outcome.
+        try:
+            journal.change(claimed, execution="execution_unknown", delivery="ready",
+                           reply=asdict(Reply(_INTERNAL_ERROR_REPLY)),
+                           reason="Execution was cancelled before a result was stored; review before retrying")
+        except Exception:  # noqa: BLE001 -- recovery surfaces it once stale
+            pass
+        raise
+    except Exception:
+        return await asyncio.to_thread(journal.change, claimed, execution="execution_unknown", delivery="ready",
+                                       reply=asdict(Reply(_INTERNAL_ERROR_REPLY)),
+                                       reason="Execution began without a confirmed stored result; review before retrying")
 
 
 async def process_message(channel, msg, *, external_id, account, authorize, send, route=None,
@@ -375,18 +441,7 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
             raise PermissionError("Channel sender authorization changed")
     claimed = await asyncio.to_thread(journal.claim_execution, row)
     if claimed:
-        try:
-            if not authorize():
-                raise PermissionError("Channel sender authorization changed")
-            _assert_work_allowed()
-            reply = as_reply(await channel.handler(inbound))
-            if len(reply.text) > MAX_TEXT_CHARS or len(reply.attachments) > MAX_ATTACHMENTS:
-                raise ValueError("Channel reply exceeds durable outbox bound")
-            row = await asyncio.to_thread(journal.change, claimed, execution="completed", delivery="ready", reply=asdict(reply))
-        except Exception:
-            row = await asyncio.to_thread(journal.change, claimed, execution="execution_unknown", delivery="ready",
-                                          reply=asdict(Reply("⚠ An internal error occurred.")),
-                                          reason="Execution began without a confirmed stored result; review before retrying")
+        row = await _execute_claimed(channel, inbound, claimed, journal=journal, authorize=authorize)
     else:
         row = await asyncio.to_thread(journal.get, row["id"])
     if not row.get("reply") or row["delivery"] == "delivered":

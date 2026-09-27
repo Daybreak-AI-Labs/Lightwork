@@ -134,7 +134,9 @@ def test_signal_blocked_agent_does_not_block_rpc_stderr_or_owned_shutdown(monkey
         assert proc.terminated and channel._reader_task.done() and channel._stderr_task.done() and channel._worker.task.done()
         assert not channel._pending_rpc
         row = DeliveryJournal().store.list(limit=1)[0]
-        assert row["execution"] == "execution_started_unconfirmed"
+        # Cancelled mid-handler at shutdown: recorded as unknown (never re-run)
+        # with a reply for the sender, not left "started" with no outcome.
+        assert row["execution"] == "execution_unknown" and row["delivery"] == "ready"
     asyncio.run(run())
 
 
