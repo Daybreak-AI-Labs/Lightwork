@@ -340,6 +340,9 @@ class KnowledgeAccessService:
         ] = OrderedDict()
         self._cache_lock = threading.RLock()
         self._lexical: OrderedDict[str, LexicalProjection] = OrderedDict()
+        # Which source each projection was derived from, so revoking one source
+        # evicts only its derived terms instead of every tenant's cache.
+        self._lexical_owner: dict[str, tuple] = {}
 
     def bind_actor_authority(
         self,
@@ -410,7 +413,13 @@ class KnowledgeAccessService:
             self._cache.pop(key, None)
             # Derived lexical terms can contain source words too. Revocation
             # evicts them along with the rendering, never just its permission.
-            self._lexical.clear()
+            if any(identity not in self._lexical_owner for identity in self._lexical):
+                self._lexical.clear()  # an untracked projection: fail safe
+                self._lexical_owner.clear()
+                return
+            for identity in [i for i, owner in self._lexical_owner.items() if owner == key]:
+                self._lexical.pop(identity, None)
+                self._lexical_owner.pop(identity, None)
 
     def _deny_applying_retirement(
         self,
@@ -879,9 +888,13 @@ class KnowledgeAccessService:
                 if projection is None:
                     projection = LexicalProjection.from_item(identity, item)
                     self._lexical[identity] = projection
+                    ref = item["reference"]
+                    self._lexical_owner[identity] = (canonical_tenant_id(tenant), *(
+                        ref[field] for field in ("kind", "asset_id", "version", "manifest_sha256")))
                 self._lexical.move_to_end(projection.identity)
                 while len(self._lexical) > self.cache_capacity:
-                    self._lexical.popitem(last=False)
+                    evicted, _ = self._lexical.popitem(last=False)
+                    self._lexical_owner.pop(evicted, None)
             projections.append(projection)
             items.append(item)
         ranked = rank(query, projections)

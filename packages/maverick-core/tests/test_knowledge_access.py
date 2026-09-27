@@ -1762,3 +1762,41 @@ def test_malformed_retention_hold_fails_closed_before_projection(access):
     assert saved is not None
     with pytest.raises(KnowledgeRequestConflict, match="retention hold is malformed"):
         service.get_request("tenant-a", request["id"])
+
+
+def test_revoking_one_source_keeps_other_sources_lexical_projections(access):
+    service, registry, rights, _calls = access
+    _dataset(registry, rights, "tenant-a", "policy-kept")
+    _dataset(registry, rights, "tenant-a", "policy-revoked")
+    _dataset(registry, rights, "tenant-b", "policy-other-tenant")
+    service.search("tenant-a", "user:reader", query="policy", purpose=PURPOSE)
+    service.search("tenant-b", "user:reader", query="policy", purpose=PURPOSE)
+    before = dict(service._lexical)
+    assert len(before) == 3
+
+    rights[("tenant-a", "policy-revoked")]["allowed"] = False
+    result = service.search("tenant-a", "user:reader", query="policy", purpose=PURPOSE)
+
+    assert [item["reference"]["asset_id"] for item in result["items"]] == ["policy-kept"]
+    assert result["omitted_ineligible"] == 1
+    # Only the revoked source's derived terms go; the others are the same objects.
+    survivors = {identity: service._lexical[identity] for identity in service._lexical}
+    assert len(survivors) == 2
+    for identity, projection in survivors.items():
+        assert before[identity] is projection
+    assert not any("policy-revoked" in str(owner) for owner in service._lexical_owner.values())
+
+
+def test_untracked_lexical_projection_makes_revocation_clear_everything(access):
+    service, registry, rights, _calls = access
+    _dataset(registry, rights, "tenant-a", "policy-kept")
+    _dataset(registry, rights, "tenant-a", "policy-revoked")
+    service.search("tenant-a", "user:reader", query="policy", purpose=PURPOSE)
+    service._lexical_owner.pop(next(iter(service._lexical)))
+
+    rights[("tenant-a", "policy-revoked")]["allowed"] = False
+    service.search("tenant-a", "user:reader", query="policy", purpose=PURPOSE)
+
+    # The fail-safe cleared the stale set; only the re-derived survivor is back.
+    assert len(service._lexical) == 1
+    assert set(service._lexical) == set(service._lexical_owner)
