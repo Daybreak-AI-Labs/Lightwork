@@ -33,6 +33,18 @@ _HEADERS = {
 }
 
 
+def _default_sdk_version() -> str:
+    """The banner code version this server ships, offered as the default."""
+    import re
+
+    try:
+        from maverick import __version__
+    except ImportError:  # pragma: no cover - kernel always exports it
+        return "1.0.0"
+    version = str(__version__)
+    return version if re.fullmatch(r"\d{1,6}\.\d{1,6}\.\d{1,6}", version) else "1.0.0"
+
+
 def _tenant_selected() -> None:
     from maverick.paths import current_tenant_id_strict
 
@@ -74,6 +86,7 @@ def create_consent_web_publish_settings_page_router(
                 "csp_style_nonce": style_nonce,
                 "publish_settings_can_admin": has_permission(request, "admin"),
                 "publish_settings_can_audit": has_permission(request, "audit"),
+                "publish_settings_sdk_version": _default_sdk_version(),
             },
         )
         for name, value in _HEADERS.items():
