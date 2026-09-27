@@ -344,3 +344,11 @@ def test_actual_runner_keeps_fresh_lifecycle_and_does_not_claim_pool_savings(tmp
     assert [call[1] for call in daemon].count("version") == 2
     assert [call[1] for call in daemon].count("run") == 2
     assert not any(call[1] == "image" for call in daemon)
+
+
+@pytest.mark.parametrize("reported", ["sha256:" + "a" * 64, "b" * 64])
+def test_both_engine_image_id_forms_pin_the_image(monkeypatch, reported):
+    from types import SimpleNamespace
+    monkeypatch.setattr(pool.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=reported + "\n"))
+    assert pool._image_digest("podman", "python:3.12") == reported

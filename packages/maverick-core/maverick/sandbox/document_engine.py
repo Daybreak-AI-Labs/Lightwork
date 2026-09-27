@@ -229,12 +229,32 @@ def image_ocr(request):
     return {"engine": "Tesseract", "text": text.strip()}
 
 
+# A plain workspace image is the one file a document may name.
+_TEX_IMAGE = re.compile(r"\\includegraphics\s*(?:\[[^\]\n]{0,200}\])?\s*\{([A-Za-z0-9_][A-Za-z0-9_./-]{0,200})\}")
+# TeX can rename or synthesise any command (\csname, catcodes, ^^ escapes,
+# @-internals), so a list of forbidden names is never complete. Refuse the
+# renaming machinery itself, and any command whose name reaches files or
+# processes.
+_TEX_OUTSIDE = re.compile(
+    r"\^\^|\\(?:csname|catcode|scantokens|endlinechar|makeatletter|string)\b"
+    r"|\\[A-Za-z]*@"
+    r"|\\[A-Za-z]*(?:input|include|read|open|write|file|immediate|shellesc|pipe|special)"
+    r"|\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*shellesc", re.IGNORECASE)
+
+
+def _tex_reaches_outside(source: str) -> bool:
+    def image(match):
+        path = match.group(1)
+        return "" if ".." not in path.split("/") else match.group(0)
+    return bool(_TEX_OUTSIDE.search(_TEX_IMAGE.sub(image, source)))
+
+
 def latex(request):
     engine = request["engine"]
     if engine not in {"tectonic", "pdflatex"}:
         raise ValueError("Unsupported TeX engine")
     source = Path(request["input_name"]).read_text(encoding="utf-8")
-    if re.search(r"\\(?:input|include|openin|openout|write18|immediate|usepackage\s*\{shellesc)\b", source):
+    if _tex_reaches_outside(source):
         raise ValueError("TeX external file/process directives require a separately reviewed artifact job")
     # Engine-level restrictions supplement the isolated workspace/network policy.
     os.environ.update(openin_any="p", openout_any="p", shell_escape="f")

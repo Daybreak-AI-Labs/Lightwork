@@ -28,7 +28,9 @@ log = logging.getLogger(__name__)
 POOL_MAX = 2
 POOL_TTL_SECONDS = 600.0
 _TRUE = {"1", "true", "yes", "on"}
-_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+# Docker reports "sha256:<hex>", Podman the bare 64-hex ID; each engine is
+# handed back exactly the form it reported.
+_DIGEST = re.compile(r"(?:sha256:)?[0-9a-f]{64}\Z")
 # Reviewed schemas, deliberately not inferred from current dataclass fields:
 # adding a backend field requires a new eligibility/policy decision.
 _COMMON_STATE = frozenset({
