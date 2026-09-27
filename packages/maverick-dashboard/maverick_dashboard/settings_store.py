@@ -1160,6 +1160,14 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "third_party_management.lifecycle",
     "third_party_management.lifecycle.portal",
     "vendor_management",
+    "control_plane",
+    "eu_conformity",
+    "ai_literacy",
+    "policy_packs",
+    "evidence_gateway",
+    "drift_monitoring",
+    "ai_incident_reporting",
+    "privacy_automation.drop_management",
 })
 
 # Top-level tables the module paths live under; _dump is an allowlist, so a

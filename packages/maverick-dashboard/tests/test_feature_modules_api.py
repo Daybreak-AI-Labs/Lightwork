@@ -332,3 +332,51 @@ def test_previously_switchless_workbenches_carry_turn_on_banners(monkeypatch):
     assert 'data-module-gate="ai_entity_tasks"' not in client.get("/ai-entity-tasks").text
     # The others stay off and keep their own banner.
     assert 'data-module-gate="governed_document_vault"' in client.get("/administration/document-vault").text
+
+
+# The governance modules the terminal installer used to be the only way to
+# turn on. Each flips a boolean ``enable`` gate, and turning it on must make
+# the kernel module's OWN enabled() check pass (its parent chain included).
+_KERNEL_GATES = {
+    "control_plane": lambda: __import__("maverick.config", fromlist=["x"]).get_control_plane()["enable"],
+    "eu_conformity": lambda: __import__("maverick.eu_conformity", fromlist=["x"]).enabled(),
+    "ai_literacy": lambda: __import__("maverick.ai_literacy", fromlist=["x"]).enabled(),
+    "policy_packs": lambda: __import__("maverick.policy_packs", fromlist=["x"]).enabled(),
+    "evidence_gateway": lambda: __import__("maverick.ai_evidence_gateway", fromlist=["x"]).enabled(),
+    "drift_monitoring": lambda: __import__("maverick.drift_monitoring", fromlist=["x"]).enabled(),
+    "ai_incident_reporting": lambda: __import__("maverick.ai_incident_reporting", fromlist=["x"]).enabled(),
+    "privacy_automation.drop_management": lambda: __import__(
+        "maverick.privacy_drop_management", fromlist=["x"]).enabled(),
+}
+
+
+@pytest.mark.parametrize("section", sorted(_KERNEL_GATES))
+def test_new_module_switches_turn_the_kernel_gate_on_and_off(section, monkeypatch):
+    from maverick import config
+
+    for name in ("MAVERICK_CONTROL_PLANE", "MAVERICK_EVIDENCE_GATEWAY"):
+        monkeypatch.delenv(name, raising=False)
+    assert _module(section)["enabled"] is False
+    config.reset_config_cache()
+    assert _KERNEL_GATES[section]() is False
+
+    r = client.post("/api/v1/features/modules", json={"section": section, "enabled": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is True
+    config.reset_config_cache()
+    assert _KERNEL_GATES[section]() is True
+
+    r = client.post("/api/v1/features/modules", json={"section": section, "enabled": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is False
+    config.reset_config_cache()
+    assert _KERNEL_GATES[section]() is False
+
+
+def test_new_module_switches_are_admin_only(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:olive", "operator")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:olive")
+    r = client.post("/api/v1/features/modules", json={"section": "policy_packs", "enabled": True})
+    assert r.status_code == 403

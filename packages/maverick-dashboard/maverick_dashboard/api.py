@@ -11154,6 +11154,40 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "AI vendor onboarding",
         "requires": ("connections", "vendor_management", "evidence_graph", "model_risk_assurance", "ai_vendor_risk"),
     },
+    # Each gate below is a boolean ``enable`` at this exact path, and each
+    # "requires" chain mirrors the kernel module's own enabled() check.
+    "control_plane": {  # config.get_control_plane
+        "label": "Agent control",
+        "requires": (),
+    },
+    "eu_conformity": {  # eu_conformity.enabled
+        "label": "EU AI Act conformity",
+        "requires": (),
+    },
+    "ai_literacy": {  # ai_literacy.enabled
+        "label": "AI literacy register",
+        "requires": (),
+    },
+    "policy_packs": {  # policy_packs.enabled
+        "label": "Policy packs",
+        "requires": (),
+    },
+    "evidence_gateway": {  # ai_evidence_gateway.enabled
+        "label": "AI evidence gateway",
+        "requires": (),
+    },
+    "drift_monitoring": {  # drift_monitoring.enabled -> model_risk_assurance.enabled
+        "label": "Model drift monitoring",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_incident_reporting": {  # ai_incident_reporting.enabled -> model_risk_assurance
+        "label": "AI incident reporting",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "privacy_automation.drop_management": {  # privacy_drop_management.enabled
+        "label": "Data broker deletion requests",
+        "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
+    },
 }
 
 
