@@ -106,7 +106,7 @@ def test_question_roi_verdicts_and_rating_impact():
     assert all(r["verdict"] == "unproven" for r in others)
     # The board page carries the panel.
     page = client.get("/privacy/board").text
-    assert "Question ROI" in page and "first-pass acceptance" in page
+    assert "Which questions matter" in page and "Drafts accepted first time" in page
 
 
 # --- audit binder -----------------------------------------------------------

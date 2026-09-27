@@ -4072,10 +4072,12 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
     from .auth import has_global_permission
 
     if current_tenant_id_strict() is None:
-        from fastapi.responses import RedirectResponse
-
-        # Choose a workspace first, then come straight back here.
-        return RedirectResponse("/workspace/tenant?next=/privacy/data-discovery", status_code=303)
+        # Browsers get the workspace picker from the shared handler (which also
+        # sets up a first workspace for a signed-in administrator).
+        raise HTTPException(
+            status_code=409,
+            detail="select an active tenant before using privacy data discovery",
+        )
     if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
         raise HTTPException(
             status_code=404,
