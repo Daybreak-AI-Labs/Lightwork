@@ -225,8 +225,8 @@ def test_a_secret_is_never_shown_before_it_can_be_redacted():
     the redactor cannot recognise (AKIA... one char short, a DSN before '@')."""
     world = _Recorder()
     stream = _PartialAnswerStream(world, 1)
-    text = ("Use this key AKIAIOSFODNN7EXAMPLE and the DSN "
-            "postgres://admin:hunter2secretpw@db.internal/prod for the job. ")
+    text = ("Use this key AKIAIOSFODNN7EXAMPLE and the DSN "  # pragma: allowlist secret
+            "postgres://admin:hunter2secretpw@db.internal/prod for the job. ")  # pragma: allowlist secret
     for i in range(len(text)):
         stream(text[i])
         stream._last_flush = float("-inf")                     # flush every delta
