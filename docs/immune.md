@@ -86,6 +86,19 @@ check, partial or unknown search coverage, or inputs committed after the first
 idea. `seal` signs the dossier with the audit identity. `verify` checks it
 offline, including any priority commitments the holder chooses to open.
 
+Governed research runs feed the dossier directly. The run ledger already
+records, hash-chained, which named user planned each attempt and when.
+`maverick immune title research DOSSIER RUN_EXPORT... --element E -o OUT` does
+three things:
+- verifies each run's manifest digest and event chain;
+- turns every planning decision into a `framed` gate, with the event digest
+  as evidence;
+- adds the pinned code, environment, dataset and model digests as inputs
+  committed at the first plan.
+
+Execution events are not conception. The claim elements a plan shaped
+(`--element`) are the caller's assertion; nothing infers them.
+
 The dossier is evidence for counsel, not a legal opinion on inventorship.
 
 ## Production twin

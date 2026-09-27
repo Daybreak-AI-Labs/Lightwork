@@ -146,6 +146,25 @@ def title_verify(sealed, pubkey) -> None:
     click.echo("dossier verifies")
 
 
+@title_group.command("research")
+@click.argument("dossier", type=click.Path(exists=True, dir_okay=False))
+@click.argument("runs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--element", "elements", multiple=True,
+              help="A claim element these runs' planning decisions shaped (repeatable).")
+@click.option("-o", "--out", type=click.Path(dir_okay=False), required=True)
+def title_research(dossier, runs, elements, out) -> None:
+    """Add governed research runs (their exports) to a dossier: every planning
+    decision becomes a conception gate, every pinned input a commitment."""
+    from ..immune import title
+    try:
+        merged = title.add_research_runs(_load(dossier), [_load(r) for r in runs], list(elements))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise click.ClickException(f"cannot use research run: {exc}") from exc
+    Path(out).write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
+    added = len(merged["gates"]) - len(_load(dossier).get("gates", []))
+    click.echo(f"{added} conception gate(s) added -> {out}")
+
+
 @immune_group.command("rules")
 @click.argument("rules_file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--candidate", type=click.Path(exists=True, dir_okay=False),

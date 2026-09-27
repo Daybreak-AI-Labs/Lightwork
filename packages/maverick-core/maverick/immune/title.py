@@ -77,6 +77,71 @@ def problems(dossier: dict) -> list[str]:
     return out
 
 
+def _sha(obj: object) -> str:
+    return hashlib.sha256(_ledger.canonical(obj)).hexdigest()
+
+
+def research_run_evidence(run: dict, elements: list[str] = ()) -> dict:
+    """Inputs and conception gates read from a governed research run.
+
+    ``run`` is a run record (``ResearchRuns.inspect``) or its export. The run
+    ledger already records, hash-chained, which named user planned each
+    attempt and when; every ``planned`` event becomes a ``framed`` gate, and the
+    plan's code, environment, datasets and model become inputs committed at
+    the first plan. Execution events (queued, running, finished) are not
+    conception and are not mapped. ``elements`` -- the claim elements those
+    plans shaped -- is the caller's assertion; nothing infers it.
+    """
+    run = run.get("run", run)
+    manifest = run["manifest"]
+    if _sha(manifest) != run["manifest_sha256"]:
+        raise ValueError(f"run {run['run_id']}: manifest does not match its digest")
+    gates = []
+    for attempt in run["attempts"]:
+        previous = None
+        for event in attempt["events"]:
+            body = {k: v for k, v in event.items() if k != "event_sha256"}
+            if event["previous_event_sha256"] != previous or _sha(body) != event["event_sha256"]:
+                raise ValueError(f"run {run['run_id']}: event history does not verify")
+            previous = event["event_sha256"]
+            if event["state"] == "planned":
+                gates.append({
+                    "id": f"research:{run['run_id']}:{attempt['number']}:plan",
+                    "human": event["actor"], "decision": "framed",
+                    "elements": list(elements), "at": event["recorded_at"],
+                    "evidence": event["event_sha256"]})
+    if not gates:
+        raise ValueError(f"run {run['run_id']}: no planning decision recorded")
+    inputs = [
+        {"name": f"code:{manifest['code_revision']}", "sha256": manifest["code_sha256"]},
+        {"name": f"environment:{manifest['environment_id']}@{manifest['environment_version']}",
+         "sha256": manifest["environment_sha256"]},
+        *({"name": f"{r['kind']}:{r['asset_id']}@{r['version']}", "sha256": r["manifest_sha256"]}
+          for r in [*manifest["dataset_refs"], *filter(None, [manifest["model_ref"]])]),
+    ]
+    return {"inputs": inputs, "inputs_committed_at": min(g["at"] for g in gates),
+            "gates": gates}
+
+
+def add_research_runs(dossier: dict, runs: list[dict], elements: list[str] = ()) -> dict:
+    """``dossier`` with each run's inputs and gates merged in (by id, so adding
+    a run twice is a no-op). ``inputs_committed_at`` becomes the LATEST input
+    commitment: an idea predating any input is then reported by
+    :func:`problems`."""
+    out = {**dossier, "inputs": list(dossier.get("inputs", [])),
+           "gates": list(dossier.get("gates", []))}
+    committed = [dossier["inputs_committed_at"]] if "inputs_committed_at" in dossier else []
+    for run in runs:
+        ev = research_run_evidence(run, elements)
+        out["inputs"] += [i for i in ev["inputs"] if i not in out["inputs"]]
+        known = {g["id"] for g in out["gates"]}
+        out["gates"] += [g for g in ev["gates"] if g["id"] not in known]
+        committed.append(ev["inputs_committed_at"])
+    if committed:
+        out["inputs_committed_at"] = max(committed)
+    return out
+
+
 def seal(dossier: dict) -> dict:
     """Sign the dossier with the deployment's audit identity."""
     from ..audit.signing import sign_detached_digest
