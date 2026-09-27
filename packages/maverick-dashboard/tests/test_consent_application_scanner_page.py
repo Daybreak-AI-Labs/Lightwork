@@ -64,27 +64,26 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Mobile and connected-app manifest analysis" in response.text
-    assert "Manifest evidence is not live-device proof" in response.text
-    assert "never automatic tracker or legal classifications" in response.text
-    assert "Binary APK AXML" in response.text
-    assert "Authorization follows the active tenant" in response.text
-    assert 'id="cas-operations" disabled' in response.text
-    assert 'data-copilot-page="/consent/application-scans"' in response.text
-    assert "/static/lightwork-consent-application-scanner.css" in response.text
-    assert "/static/lightwork-consent-application-scanner.js" in response.text
+    page = response.text
+    assert "App Tracking Checks" in page
+    assert 'id="cas-operations" disabled' in page
+    assert 'data-copilot-page="/consent/application-scans"' in page
+    assert "/static/lightwork-consent-workbench.js" in page
+    assert "/static/lightwork-consent-application-scanner.js" in page
+    # Apps and results are lists with row buttons; nothing is typed that a
+    # person cannot know.
+    assert 'id="cas-apps"' in page and 'id="cas-scans"' in page
+    for label in ("Add an app", "Check files", "Save review", "Delete expired results",
+                  "Check that records are intact", "About this page’s safeguards"):
+        assert label in page
+    for typed in ("Application ID", "Expected application revision", "Scan ID",
+                  "Expected scan revision", "Review note code", "Operation output"):
+        assert typed not in page
+    assert '<select class="select" name="review_note_code" required>' in page
+    assert 'data-module-gate="consent_preferences.application_scanner"' in page
+    from test_support.plain_language import developer_terms
 
-    css = (PACKAGE / "static" / "lightwork-consent-application-scanner.css").read_text(
-        encoding="utf-8"
-    )
-    for required in (
-        "backdrop-filter: blur(24px)",
-        ":focus-visible",
-        "prefers-reduced-motion",
-        "forced-colors",
-        "color-mix",
-    ):
-        assert required in css
+    assert developer_terms(page) == []
 
 
 def test_forms_expose_no_tenant_actor_or_raw_authority_selector(client: TestClient) -> None:
@@ -112,6 +111,14 @@ def test_forms_expose_no_tenant_actor_or_raw_authority_selector(client: TestClie
         "decision",
         "review_note_code",
     }.issubset(controls)
+    hidden = {
+        attrs.get("name")
+        for tag, attrs in parser.tags
+        if tag == "input" and attrs.get("type") == "hidden"
+    }
+    # Identifiers and versions ride along from the chosen row, never typed.
+    assert {"application_id", "expected_application_revision", "scan_id",
+            "expected_revision"} <= hidden
     for selector in controls:
         for forbidden in (
             "tenant_id",
@@ -140,6 +147,9 @@ def test_bounded_script_has_no_browser_persistence_or_html_injection() -> None:
         "tenant_id",
         "actor",
         "principal",
+        "HTTP ",
+        "JSON.stringify(value, null, 2)",
+        "window.confirm",
     ):
         assert forbidden not in source
     for required in (
@@ -158,6 +168,8 @@ def test_bounded_script_has_no_browser_persistence_or_html_injection() -> None:
         "encodeURIComponent",
         "operations.disabled = true",
         'call("/readiness", undefined, [503])',
+        "CW.confirm(",
+        'window.mvForm("Remove "',
     ):
         assert required in source
 

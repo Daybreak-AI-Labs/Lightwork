@@ -39,20 +39,32 @@ def page_client() -> TestClient:
 
 
 def test_operator_page_renders_full_safe_contract(page_client: TestClient) -> None:
+    from test_support.plain_language import developer_terms
+
     response = page_client.get("/compliance/policy-links")
     assert response.status_code == 200
-    assert "Policy Publication Links" in response.text
-    assert "Four eyes" in response.text
-    assert "Choose the published version" in response.text
-    assert "Schedule publication" in response.text
-    assert "Process or retry scheduled work" in response.text
-    assert "Audit, access, retention, integrity" in response.text
-    assert "not live customer" in response.text
-    assert "Production use still requires encrypted storage" in response.text
-    assert "performs no outbound network call" in response.text
-    assert 'type="password"' in response.text
-    assert "/api/v1/policy-publication-links" in response.text
-    assert "textContent" in response.text
+    page = response.text
+    assert "Policy Links" in page
+    assert "Two other people" in page
+    # Policies, links and scheduled changes load as lists with row buttons.
+    for host in ("ppl-policies", "ppl-links", "ppl-jobs"):
+        assert f'id="{host}"' in page
+    for label in ("Write a policy", "Create a link", "Publish a version", "Schedule an end",
+                  "New access code", "Turn off", "Run scheduled changes now",
+                  "Show change history", "Check that records are intact"):
+        assert label in page
+    assert "Access code (shown once)" in page and "Copy access code" in page
+    assert 'type="datetime-local"' in page
+    # Nothing a person cannot know is typed: no IDs, versions, tokens or times.
+    for typed in ("Policy ID", "Stable link ID", "Job ID", "lease token", "pointer revision",
+                  "Unix time", "Rationale SHA-256", "Claim bounded batch", "Apply leased job",
+                  'type="password"'):
+        assert typed not in page
+    assert "/api/v1/policy-publication-links" in page
+    assert "textContent" in page
+    assert page.count("CW.confirm(") >= 4
+    assert "window.confirm" not in page
+    assert "Production" not in page or "encrypted" in page
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"
@@ -61,6 +73,7 @@ def test_operator_page_renders_full_safe_contract(page_client: TestClient) -> No
     ).read_text(encoding="utf-8")
     assert ".innerHTML" not in template
     assert "tenant_id" not in template
+    assert developer_terms(page) == []
 
 
 def test_operator_page_explains_disabled_gate(page_client: TestClient) -> None:
@@ -71,7 +84,7 @@ def test_operator_page_explains_disabled_gate(page_client: TestClient) -> None:
     assert response.status_code == 200
     assert 'data-module-gate="tech_risk_compliance.policy_publication_links"' in response.text
     assert "[tech_risk_compliance.policy_publication_links] enable = true" not in response.text
-    assert "live customer" in response.text
+    assert 'id="ppl-root" data-feature-enabled="false"' in response.text
 
 
 def test_main_dashboard_mounts_only_the_public_retrieval_auth_exemption(

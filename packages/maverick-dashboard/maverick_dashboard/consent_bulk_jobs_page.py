@@ -69,6 +69,8 @@ def create_consent_bulk_jobs_page_router(
                 detail="consent bulk-job workbench unavailable",
             )
         style_nonce = secrets.token_urlsafe(18)
+        from .api import module_activation_enabled
+
         response = templates.TemplateResponse(
             request,
             "consent_bulk_jobs.html",
@@ -78,6 +80,7 @@ def create_consent_bulk_jobs_page_router(
                 "csp_style_nonce": style_nonce,
                 "bulk_jobs_can_audit": has_global_permission(request, "audit"),
                 "bulk_jobs_can_admin": has_global_permission(request, "admin"),
+                "bulk_jobs_enabled": module_activation_enabled("consent_preferences.bulk_jobs"),
             },
         )
         for name, value in _HEADERS.items():

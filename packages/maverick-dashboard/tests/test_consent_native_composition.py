@@ -317,3 +317,68 @@ def test_environment_receipt_keys_are_tenant_and_revision_separated(
     assert len(first.public_key_hex) == 64
     assert len({first.public_key_hex, second.public_key_hex, rotated.public_key_hex}) == 3
     assert len(first.sign(b"receipt")) == 64
+
+
+def test_application_and_device_lists_are_tenant_bound_and_carry_no_key_material(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    settings = _settings()
+    authority = _authority(tenant="alpha", application_ref="mobile-alpha")
+    registry = NativeConsentDeviceRegistry(tmp_path / "alpha" / "registry.db")
+    beta_registry = NativeConsentDeviceRegistry(tmp_path / "beta" / "registry.db")
+    directory = composition.NativeApplicationDirectory(tmp_path / "global" / "directory.db")
+    directory.register_new(
+        authority,
+        registry=registry,
+        settings=settings,
+        public_key_hex=_public_key(),
+        expected_revision=0,
+    )
+    directory.register_new(
+        _authority(tenant="beta", application_ref="mobile-beta"),
+        registry=beta_registry,
+        settings=settings,
+        public_key_hex=_public_key(),
+        expected_revision=0,
+    )
+    listed = composition.list_native_applications(
+        directory, registry, tenant_id="alpha", limit=10
+    )
+    assert [item["application_ref"] for item in listed["items"]] == ["mobile-alpha"]
+    row = listed["items"][0]
+    assert row["application_id"] == "com.example.alpha"
+    assert row["directory_revision"] == 1
+    assert not any("sha256" in key or "public_key" in key for key in row)
+
+    assert composition.list_native_devices(registry, application_ref="mobile-alpha") == {
+        "items": [],
+        "truncated": False,
+    }
+    app = FastAPI()
+    app.state.consent_native_attestation_verifier = _Verifier()
+    injected = composition._InjectedAttestationVerifier(app)
+    multiplexer = composition._RegistryMultiplexer(
+        directory, injected, composition._BoundedRateLimiter()
+    )
+    monkeypatch.setattr(composition, "settings_for_tenant", lambda _tenant: settings)
+    monkeypatch.setattr(composition, "_registry_for", lambda _tenant, _settings: registry)
+    material = b"external-attestation-list"
+    device = multiplexer.enroll_device(
+        _evidence(authority, public_key_hex=_public_key(), nonce="nonce-list", material=material),
+        verifier=injected,
+        attestation_material=material,
+        sdk_version=1,
+    )
+    devices = composition.list_native_devices(registry, application_ref="mobile-alpha")
+    assert [item["device_id"] for item in devices["items"]] == [device.device_id]
+    assert devices["items"][0]["revision"] == device.revision
+    assert devices["items"][0]["status"] == "active"
+    assert not any(
+        key in devices["items"][0]
+        for key in ("public_key_hex", "install_subject_sha256", "attestation_evidence_sha256")
+    )
+    assert composition.list_native_devices(beta_registry, application_ref="mobile-alpha") == {
+        "items": [],
+        "truncated": False,
+    }

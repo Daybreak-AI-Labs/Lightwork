@@ -134,6 +134,46 @@ def test_admin_routes_derive_tenant_and_principal_and_preserve_exact_cas(monkeyp
     assert permissions == ["admin", "admin", "admin", "admin", "view", "audit"]
 
 
+def test_list_routes_are_audit_gated_and_tenant_derived(monkeypatch) -> None:
+    application, calls, permissions = _admin_app(monkeypatch)
+
+    def applications(**kwargs):
+        calls["applications"] = kwargs
+        return {"items": [{"application_ref": "mobile-prod", "directory_revision": 1}]}
+
+    def devices(**kwargs):
+        calls["devices"] = kwargs
+        return {"items": [{"device_id": "device-one", "revision": 2, "status": "active"}]}
+
+    application.state.consent_native_admin_applications = applications
+    application.state.consent_native_admin_devices = devices
+    client = TestClient(application)
+
+    listed = client.get("/api/v1/consent/native/applications?tenant_id=attacker")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"][0]["application_ref"] == "mobile-prod"
+    assert listed.headers["cache-control"].startswith("no-store")
+    assert calls["applications"]["tenant_id"] == "tenant-alpha"
+
+    device_rows = client.get("/api/v1/consent/native/applications/mobile-prod/devices")
+    assert device_rows.status_code == 200, device_rows.text
+    assert device_rows.json()["items"][0]["revision"] == 2
+    assert calls["devices"]["application_ref"] == "mobile-prod"
+    assert calls["devices"]["tenant_id"] == "tenant-alpha"
+    assert client.get(
+        "/api/v1/consent/native/applications/..%2Fother/devices"
+    ).status_code in {404, 422}
+    assert permissions == ["audit", "audit"]
+
+
+def test_list_routes_require_an_active_workspace(monkeypatch) -> None:
+    application, _calls, _permissions = _admin_app(monkeypatch)
+    application.state.consent_native_admin_applications = lambda **_kwargs: {"items": []}
+    monkeypatch.setattr(native_api, "current_tenant_id_strict", lambda: None)
+    response = TestClient(application).get("/api/v1/consent/native/applications")
+    assert response.status_code == 409
+
+
 def test_public_receipt_keys_are_discoverable_without_ambient_authority(
     monkeypatch,
 ) -> None:

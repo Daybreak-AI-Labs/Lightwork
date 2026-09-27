@@ -3888,7 +3888,11 @@ async def consent_scan_inventory_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_scan_inventory.html",
-        {"consent_scan_inventory_enabled": _enabled()},
+        {
+            "consent_scan_inventory_enabled": _enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -3904,8 +3908,20 @@ async def consent_scan_notice_proposals_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_scan_notice_proposals.html",
-        {"consent_scan_notice_proposals_enabled": (scan_notice_proposals_enabled_for_page())},
+        {
+            "consent_scan_notice_proposals_enabled": (scan_notice_proposals_enabled_for_page()),
+            "consent_can_admin": has_global_permission(request, "admin"),
+        },
     )
+
+
+def _trust_center_branding_enabled() -> bool:
+    try:
+        from .trust_center_branding_api import trust_center_branding_enabled
+
+        return trust_center_branding_enabled() is True
+    except Exception:
+        return False
 
 
 @app.get("/consent/trust-center-authority", response_class=HTMLResponse)
@@ -3923,7 +3939,10 @@ async def consumer_trust_center_authority_page(request: Request) -> HTMLResponse
         {
             "consumer_trust_center_authority_enabled": (
                 consumer_trust_center_authority_enabled_for_page()
-            )
+            ),
+            "trust_center_branding_enabled": _trust_center_branding_enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
         },
     )
 
@@ -3944,6 +3963,14 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
     compiler = section.get("compiler") if isinstance(section, Mapping) else None
     from maverick.compliance_catalog import module_status
 
+    try:
+        # Requests pick a project from the person's own projects.
+        projects = [
+            {"value": f"project-{item['id']}", "label": str(item.get("name") or "")}
+            for item in _world().list_projects(owner=goal_owner_filter(request))
+        ]
+    except Exception:
+        projects = []
     return templates.TemplateResponse(
         request,
         "data_use_governance.html",
@@ -3953,6 +3980,8 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
                 isinstance(compiler, Mapping) and compiler.get("enable") is True
             ),
             "acm_module_status": module_status("/data-use"),
+            "data_use_projects": projects,
+            "data_use_can_admin": has_global_permission(request, "admin"),
         },
     )
 
@@ -3986,6 +4015,7 @@ async def data_use_providers_page(request: Request) -> HTMLResponse:
             ),
             "data_use_snowflake_enabled": provider_enabled("snowflake"),
             "data_use_databricks_enabled": provider_enabled("databricks"),
+            "data_use_can_admin": has_global_permission(request, "admin"),
         },
     )
 
@@ -6315,7 +6345,11 @@ async def policy_publication_links_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "policy_publication_links.html",
-        {"policy_publication_links_enabled": policy_publication_links.enabled()},
+        {
+            "policy_publication_links_enabled": policy_publication_links.enabled(),
+            "policy_links_can_admin": has_global_permission(request, "admin"),
+            "policy_links_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 

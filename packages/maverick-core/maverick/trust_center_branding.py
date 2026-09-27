@@ -2327,6 +2327,66 @@ class TrustCenterBrandingStore:
             raise BrandingIntegrityError("branding_asset_content_invalid")
         return PublicBrandAsset(projection=projection, content=content)
 
+    def list_assets(self, *, limit: int = 200) -> tuple[AssetAuthority, ...]:
+        """Every logo/icon version with its current review state (read-only)."""
+
+        bounded = _positive_int(limit, "limit", 1, 500)
+        with self._connect() as connection:
+            self._verify_meta(connection)
+            # Versions whose image was deleted after retention are not listed.
+            heads = connection.execute(
+                "SELECT h.asset_id,h.asset_version FROM trust_brand_asset_heads h "
+                "JOIN trust_brand_asset_blobs b "
+                "ON b.asset_id=h.asset_id AND b.asset_version=h.asset_version "
+                "ORDER BY h.updated_at DESC,h.asset_id,h.asset_version DESC LIMIT ?",
+                (bounded,),
+            ).fetchall()
+            return tuple(
+                self._asset_result(
+                    *self._asset_rows(connection, str(row["asset_id"]), int(row["asset_version"]))
+                )
+                for row in heads
+            )
+
+    def list_domains(self, *, limit: int = 200) -> tuple[DomainAuthority, ...]:
+        """Every custom-domain claim version with its current state (read-only)."""
+
+        bounded = _positive_int(limit, "limit", 1, 500)
+        with self._connect() as connection:
+            self._verify_meta(connection)
+            heads = connection.execute(
+                "SELECT claim_id,claim_version FROM trust_brand_domain_heads "
+                "ORDER BY updated_at DESC,claim_id,claim_version DESC LIMIT ?",
+                (bounded,),
+            ).fetchall()
+            return tuple(
+                self._domain_result(
+                    *self._domain_rows(connection, str(row["claim_id"]), int(row["claim_version"]))
+                )
+                for row in heads
+            )
+
+    def list_projections(self, *, limit: int = 200) -> tuple[BrandProjection, ...]:
+        """The current brand projection of each website (read-only)."""
+
+        bounded = _positive_int(limit, "limit", 1, 500)
+        with self._connect() as connection:
+            self._verify_meta(connection)
+            heads = connection.execute(
+                "SELECT * FROM trust_brand_projection_heads ORDER BY updated_at DESC LIMIT ?",
+                (bounded,),
+            ).fetchall()
+            items = []
+            for head in heads:
+                row = connection.execute(
+                    "SELECT * FROM trust_brand_projections WHERE projection_id=?",
+                    (head["projection_id"],),
+                ).fetchone()
+                if row is None:
+                    raise BrandingIntegrityError("branding_projection_missing")
+                items.append(self._projection_from_row(row, state=str(head["state"])))
+            return tuple(items)
+
     def status(self) -> dict[str, object]:
         with self._connect() as connection:
             self._verify_meta(connection)

@@ -582,3 +582,46 @@ def test_provider_audit_post_write_failure_recovers_on_exact_retry_without_remut
         composition.authority_id,
         composition.authority_id,
     ]
+
+
+def test_row_filter_choices_match_the_adapter_digest_and_stay_in_the_workspace(
+    isolated_provider_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    from maverick import data_use_policy_compiler as compiler
+    from maverick import data_use_provider_adapters as adapters
+
+    governance = "/api/v1/data-use"
+    assert client.put(
+        f"{governance}/assets/customers",
+        json={"asset_type": "table", "catalog_binding_sha256": _digest("c"),
+              "expected_revision": 0, "idempotency_key": "asset-1"},
+    ).status_code == 200
+    assert client.put(
+        f"{governance}/assets/customers/fields/country",
+        json={"data_type": "string", "nullable": False, "catalog_binding_sha256": _digest("c"),
+              "expected_revision": 0, "idempotency_key": "field-1"},
+    ).status_code == 200
+    row_filter = {"op": "in", "field": "country", "values": ["FR", "DE"]}
+    created = client.post(
+        f"{governance}/policies/eu-only/versions",
+        json={"version": 1, "expected_current_version": 0, "expected_revision": 0,
+              "idempotency_key": "policy-1",
+              "document": {"scope": {"asset_ids": ["customers"]}, "conditions": {},
+                           "controls": [{"control_id": "eu", "effect": "row_filter",
+                                         "field_ids": [], "row_filter": row_filter}]}},
+    )
+    assert created.status_code == 201, created.text
+    listed = client.get(f"{API}/row-filters")
+    assert listed.status_code == 200, listed.text
+    items = listed.json()["items"]
+    expected = adapters._sha256(
+        compiler.normalize_row_filter_ast(row_filter, {"country": "string"})
+    )
+    assert [item["row_filter_sha256"] for item in items] == [expected]
+    assert items[0]["asset_id"] == "customers"
+    assert items[0]["policy_id"] == "eu-only"
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    assert client.get(f"{API}/row-filters").json()["items"] == []

@@ -500,3 +500,94 @@ def test_dead_letter_replay_diff_audit_retention_and_status_routes(environment) 
     )
     assert purged["classifications_deleted"] == 0
     assert purged["audit_events_deleted"] == 0
+
+
+def _two_person_client() -> TestClient:
+    from types import SimpleNamespace
+
+    from fastapi import Request
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def principal(request: Request, call_next):
+        request.state.principal = SimpleNamespace(sub=request.headers.get("x-test-user", "alice"))
+        return await call_next(request)
+
+    app.include_router(consent_scan_inventory_api.router, prefix="/api/v1")
+    return TestClient(app, headers={"Origin": "http://testserver"})
+
+
+def test_scan_now_runs_the_worker_protocol_without_exposing_lease_tokens(environment) -> None:
+    client, _inventory, scanner, _tracker, _clock, _config = environment
+    missing = client.post(f"{API}/properties/primary-web/scan-now")
+    assert missing.status_code in {404, 409}
+    _seed_authority(client)
+    scan_report, _finding = _report("primary-web", label="now")
+    scanner.outcomes.append(scan_report)
+    ran = client.post(f"{API}/properties/primary-web/scan-now")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    assert body["property_scanned"] is True
+    assert body["outcomes"][0]["succeeded"] is True
+    assert body["outcomes"][0]["report_id"]
+    assert "lease" not in json.dumps(body)
+    assert len(scanner.calls) == 1
+    # Nothing else is due, so running due scans does nothing more.
+    idle = _ok(client.post(f"{API}/jobs/run-due", json={"limit": 5}))
+    assert idle["outcomes"] == []
+    assert len(scanner.calls) == 1
+
+
+def test_registry_review_needs_a_different_signed_in_approver(environment) -> None:
+    client, _inventory, scanner, _tracker, _clock, _config = environment
+    _seed_authority(client)
+    scan_report, finding = _report("primary-web", label="two-person")
+    scanner.outcomes.append(scan_report)
+    ran = _ok(client.post(f"{API}/properties/primary-web/scan-now"))
+    report_id = ran["outcomes"][0]["report_id"]
+    people = _two_person_client()
+    requested = people.post(
+        f"{API}/properties/primary-web/discoveries/{finding.tracker_key}/review-requests",
+        headers={"x-test-user": "alice"},
+        json={
+            "classification": "analytics",
+            "registry_action": "approved",
+            "report_id": report_id,
+            "valid_until": NOW + 86_400,
+            "expected_version": 0,
+            "tracker_id": "tracker-analytics",
+            "vendor_id": "vendor-analytics",
+            "purpose_ids": ["analytics"],
+            "authority_expected_revision": 0,
+        },
+    )
+    assert requested.status_code == 201, requested.text
+    request_id = requested.json()["request_id"]
+    assert "proposer_sha256" not in requested.text
+    listed = people.get(f"{API}/review-requests", headers={"x-test-user": "alice"}).json()
+    assert listed["items"][0]["requested_by_me"] is True
+    assert people.get(
+        f"{API}/review-requests", headers={"x-test-user": "bob"}
+    ).json()["items"][0]["requested_by_me"] is False
+
+    self_approval = people.post(
+        f"{API}/review-requests/{request_id}/approve", headers={"x-test-user": "alice"}
+    )
+    assert self_approval.status_code == 409
+    approved = people.post(
+        f"{API}/review-requests/{request_id}/approve", headers={"x-test-user": "bob"}
+    )
+    assert approved.status_code == 200, approved.text
+    review = approved.json()
+    assert review["second_reviewer_independently_authenticated_by_api"] is True
+    assert review["reviewer_sha256"] != review["second_reviewer_sha256"]
+    assert review["evidence_sha256"] == finding.evidence_sha256
+    again = people.post(
+        f"{API}/review-requests/{request_id}/approve", headers={"x-test-user": "carol"}
+    )
+    assert again.status_code == 409
+    assert people.get(
+        f"{API}/review-requests", headers={"x-test-user": "bob"}
+    ).json()["items"][0]["status"] == "approved"
+
