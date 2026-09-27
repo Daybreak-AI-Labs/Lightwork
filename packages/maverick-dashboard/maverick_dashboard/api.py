@@ -10912,6 +10912,14 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Consent analytics",
         "requires": ("consent_preferences",),
     },
+    "consent_preferences.application_scanner": {
+        "label": "App tracking checks",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.bulk_jobs": {
+        "label": "Bulk consent changes",
+        "requires": ("consent_preferences",),
+    },
     "consent_preferences.delivery": {
         "label": "Consent delivery",
         "requires": ("consent_preferences",),

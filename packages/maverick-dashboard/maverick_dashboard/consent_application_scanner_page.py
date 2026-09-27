@@ -61,6 +61,8 @@ def create_consent_application_scanner_page_router(
         if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
             raise HTTPException(status_code=404, detail="workbench unavailable")
         style_nonce = secrets.token_urlsafe(24)
+        from .api import module_activation_enabled
+
         response = templates.TemplateResponse(
             request,
             "consent_application_scanner.html",
@@ -68,6 +70,9 @@ def create_consent_application_scanner_page_router(
                 "api_base": "/api/v1/consent/application-scans",
                 "application_scanner_can_admin": has_permission(request, "admin"),
                 "application_scanner_can_audit": has_permission(request, "audit"),
+                "application_scanner_enabled": module_activation_enabled(
+                    "consent_preferences.application_scanner"
+                ),
                 "csp_style_nonce": style_nonce,
             },
         )

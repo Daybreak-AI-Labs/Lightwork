@@ -993,6 +993,8 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "assessment_evidence_autopopulation",
     "consent_preferences",
     "consent_preferences.analytics",
+    "consent_preferences.application_scanner",
+    "consent_preferences.bulk_jobs",
     "consent_preferences.delivery",
     "consent_preferences.experiments",
     "consent_preferences.native_sdk",
