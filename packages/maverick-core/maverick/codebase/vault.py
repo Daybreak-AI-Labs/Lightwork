@@ -28,7 +28,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ..file_lock import atomic_write_bytes, atomic_write_text, cross_process_lock
-from ..git_safety import git_env_without_user_config, git_metadata_may_execute_filters
+from ..git_safety import git_env_without_user_config
 from ..paths import data_dir
 
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
@@ -71,13 +71,37 @@ def _seal(data: bytes, context: str) -> bytes:
 
 
 def _unseal(data: bytes, context: str) -> bytes:
-    from ..crypto_at_rest import is_bound, unseal_bound
-    return unseal_bound(data, context) if is_bound(data) else data
+    from ..crypto_at_rest import is_bound, strict_at_rest, unseal_bound
+    if is_bound(data):
+        return unseal_bound(data, context)
+    if strict_at_rest():
+        raise VaultError("refusing unsealed vault data while strict at-rest encryption is on")
+    return data
 
 
-def _git(args: list[str], cwd: Path | None = None, *, token_env: str | None = None,
-         timeout: int = _GIT_TIMEOUT) -> str:
+# Every host-side git call runs with these on top of git_safety's scrubbed
+# environment: repository hooks, external diff drivers and textconv can never run,
+# whatever a working tree or its metadata says.
+_HARDEN = {"core.hooksPath": os.devnull, "diff.external": "", "core.fsmonitor": "false",
+           "protocol.ext.allow": "never"}
+
+
+def _env(token_env: str | None, extra: dict[str, str] | None = None) -> dict[str, str]:
     env = git_env_without_user_config()
+    n = int(env.get("GIT_CONFIG_COUNT", "0"))
+    for i, (k, v) in enumerate(_HARDEN.items(), start=n):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    env["GIT_CONFIG_COUNT"] = str(n + len(_HARDEN))
+    env.update(extra or {})
+    return env
+
+
+def _git(args: list[str], cwd: Path | None = None, *, git_dir: Path | None = None,
+         work_tree: Path | None = None, token_env: str | None = None,
+         env: dict[str, str] | None = None, timeout: int = _GIT_TIMEOUT) -> str:
+    prefix = ([f"--git-dir={git_dir}"] if git_dir else []) + \
+             ([f"--work-tree={work_tree}"] if work_tree else [])
+    run_env = _env(token_env, env)
     askpass = None
     try:
         if token_env:
@@ -88,9 +112,10 @@ def _git(args: list[str], cwd: Path | None = None, *, token_env: str | None = No
             with os.fdopen(fd, "w") as fh:
                 fh.write('#!/bin/sh\nprintf "%s\\n" "$LW_GIT_TOKEN"\n')
             os.chmod(askpass, stat.S_IRWXU)
-            env.update({"GIT_ASKPASS": askpass, "LW_GIT_TOKEN": token})
-        done = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True,
-                              text=True, timeout=timeout, check=False)
+            run_env.update({"GIT_ASKPASS": askpass, "LW_GIT_TOKEN": token})
+        done = subprocess.run(["git", *prefix, *args], cwd=cwd, env=run_env,
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise VaultError(f"git {args[0]} failed: {type(exc).__name__}") from exc
     finally:
@@ -146,13 +171,19 @@ def _bundle_path(name: str) -> Path:
     return _root(name, "vault.bundle")
 
 
-def _store_bundle(name: str, repo_dir: Path) -> str:
-    """Seal every ref of ``repo_dir`` into the vault; returns the default head."""
+def _store_bundle(name: str, host: Path, default_branch: str) -> str:
+    """Seal every branch and tag of the host-owned bare repository ``host``."""
     with tempfile.TemporaryDirectory(prefix="lw-bundle-") as tmp:
         out = Path(tmp) / "b.bundle"
-        _git(["bundle", "create", str(out), "--all"], cwd=repo_dir)
+        _git(["bundle", "create", str(out), "--branches", "--tags"], git_dir=host)
         atomic_write_bytes(_bundle_path(name), _seal(out.read_bytes(), _context(name)))
-    return _git(["rev-parse", "HEAD"], cwd=repo_dir).strip()
+    return _git(["rev-parse", "--verify", f"refs/heads/{default_branch}"], git_dir=host).strip()
+
+
+def _private_tmp(prefix: str) -> Path:
+    tmp = Path(tempfile.mkdtemp(prefix=prefix))
+    os.chmod(tmp, stat.S_IRWXU)
+    return tmp
 
 
 def register(name: str, source: str, *, default_branch: str | None = None,
@@ -167,14 +198,16 @@ def register(name: str, source: str, *, default_branch: str | None = None,
     with cross_process_lock(_registry_path(), strict=True):
         if name in _load():
             raise VaultError(f"{name!r} is already registered")
-        with tempfile.TemporaryDirectory(prefix="lw-import-") as tmp:
-            work = Path(tmp) / "work"
-            _git(["init", "-q", str(work)])
-            _git(["fetch", "-q", source, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
-                 cwd=work, token_env=token_env)
+        tmp = _private_tmp("lw-import-")
+        try:
+            host = tmp / "host.git"
+            _git(["init", "-q", "--bare", str(host)])
+            _git(["fetch", "-q", source, "+refs/heads/*:refs/heads/*",
+                  "+refs/tags/*:refs/tags/*"], git_dir=host, token_env=token_env)
             branch = default_branch or _remote_default(source, token_env) or "main"
-            _git(["checkout", "-q", branch], cwd=work)
-            head = _store_bundle(name, work)
+            head = _store_bundle(name, host, branch)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
         repo = Repo(name, source, branch, test_command, protect, token_env, head, time.time())
         registry = _load()
         registry[name] = asdict(repo)
@@ -202,45 +235,104 @@ def update_registry(name: str, **changes) -> Repo:
 
 
 @contextmanager
-def checkout(name: str) -> Iterator[Path]:
-    """A private plaintext working copy on the default branch, with every vault
-    ref as a local branch. Removed on exit; nothing else holds plaintext."""
+def host_repo(name: str) -> Iterator[Path]:
+    """The vault opened as a private, host-owned BARE repository. Only the host
+    runs git in it; working trees handed to agents are separate clones, so no
+    file an agent can write is ever read as git metadata by the host."""
     repo = get(name)
-    tmp = Path(tempfile.mkdtemp(prefix="lw-code-"))
-    os.chmod(tmp, stat.S_IRWXU)
+    tmp = _private_tmp("lw-code-")
     try:
+        host = tmp / "host.git"
+        _git(["init", "-q", "--bare", str(host)])
         bundle = tmp / "in.bundle"
         bundle.write_bytes(_unseal(_bundle_path(name).read_bytes(), _context(name)))
-        work = tmp / name
-        _git(["init", "-q", str(work)])
-        _git(["fetch", "-q", str(bundle), "+refs/*:refs/*"], cwd=work)
+        _git(["fetch", "-q", str(bundle), "+refs/heads/*:refs/heads/*",
+              "+refs/tags/*:refs/tags/*"], git_dir=host)
         bundle.unlink()
-        _git(["checkout", "-q", repo.default_branch], cwd=work)
-        yield work
+        _git(["symbolic-ref", "HEAD", f"refs/heads/{repo.default_branch}"], git_dir=host)
+        yield host
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def commit_back(name: str, work: Path) -> str:
-    """Seal the working copy's refs back into the vault (callers hold the lock)."""
-    if git_metadata_may_execute_filters(work):
-        raise VaultError("working copy carries git filter/hook metadata; refusing to store it")
-    head = _store_bundle(name, work)
+def clone_work(host: Path, dest: Path, branch: str) -> Path:
+    """A working copy of ``branch`` from the host repository (its own .git)."""
+    _git(["clone", "-q", "--no-hardlinks", "--branch", branch, str(host), str(dest)])
+    return dest
+
+
+@contextmanager
+def checkout(name: str) -> Iterator[Path]:
+    """A private plaintext working copy of the default branch, removed on exit."""
+    repo = get(name)
+    with host_repo(name) as host:
+        yield clone_work(host, host.parent / name, repo.default_branch)
+
+
+def commit_back(name: str, host: Path) -> str:
+    """Seal the host repository's refs back into the vault (callers hold the lock)."""
+    head = _store_bundle(name, host, get(name).default_branch)
     update_registry(name, head=head, updated_at=time.time())
     return head
 
 
-def sync(name: str) -> Repo:
-    """Fetch new commits from the source into the vault. Lightwork branches that
-    the source does not have are kept."""
+def _is_ancestor(host: Path, a: str, b: str) -> bool:
+    try:
+        _git(["merge-base", "--is-ancestor", a, b], git_dir=host)
+        return True
+    except VaultError:
+        return False
+
+
+def sync(name: str) -> dict:
+    """Bring upstream commits into the vault without losing vault-only work.
+
+    Upstream branches are fetched as ``refs/remotes/upstream/*``. A vault branch
+    behind upstream fast-forwards; one ahead (approved merges not pushed yet) is
+    kept; a diverged default branch gets upstream merged in (a conflict changes
+    nothing and is reported); other diverged branches keep the vault's version and
+    are reported. New upstream branches and tags are added."""
     repo = get(name)
-    with cross_process_lock(_bundle_path(name), strict=True), checkout(name) as work:
-        _git(["checkout", "-q", "--detach"], cwd=work)
-        _git(["fetch", "-q", repo.source, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
-             cwd=work, token_env=repo.token_env)
-        _git(["checkout", "-q", repo.default_branch], cwd=work)
-        commit_back(name, work)
-    return get(name)
+    report: dict[str, list[str]] = {"fast_forwarded": [], "added": [], "kept_ahead": [],
+                                    "merged": [], "diverged_kept": []}
+    with cross_process_lock(_bundle_path(name), strict=True), host_repo(name) as host:
+        _git(["fetch", "-q", repo.source, "+refs/heads/*:refs/remotes/upstream/*",
+              "+refs/tags/*:refs/tags/*"], git_dir=host, token_env=repo.token_env)
+        upstream = _git(["for-each-ref", "--format=%(refname:strip=3)",
+                         "refs/remotes/upstream/"], git_dir=host).split()
+        for branch in upstream:
+            up, local = f"refs/remotes/upstream/{branch}", f"refs/heads/{branch}"
+            try:
+                _git(["rev-parse", "--verify", "-q", local], git_dir=host)
+            except VaultError:
+                _git(["update-ref", local, up], git_dir=host)
+                report["added"].append(branch)
+                continue
+            if _is_ancestor(host, up, local):
+                if _git(["rev-parse", local], git_dir=host) != _git(["rev-parse", up], git_dir=host):
+                    report["kept_ahead"].append(branch)
+            elif _is_ancestor(host, local, up):
+                _git(["update-ref", local, up], git_dir=host)
+                report["fast_forwarded"].append(branch)
+            elif branch == repo.default_branch:
+                work = clone_work(host, host.parent / "sync-work", branch)
+                _git(["fetch", "-q", str(host), f"{up}:refs/remotes/upstream/{branch}"], cwd=work)
+                try:
+                    _git(["-c", "user.name=Lightwork", "-c", "user.email=lightwork@localhost",
+                          "merge", "-q", "--no-ff", "--no-edit",
+                          f"refs/remotes/upstream/{branch}"], cwd=work)
+                except VaultError as exc:
+                    raise VaultError(f"upstream {branch} conflicts with vault-only merges; "
+                                     "nothing was changed") from exc
+                _git(["fetch", "-q", str(work), f"+refs/heads/{branch}:{local}"], git_dir=host)
+                report["merged"].append(branch)
+            else:
+                report["diverged_kept"].append(branch)
+        for ref in _git(["for-each-ref", "--format=%(refname)", "refs/remotes/"],
+                        git_dir=host).split():
+            _git(["update-ref", "-d", ref], git_dir=host)
+        commit_back(name, host)
+    return report
 
 
 def export(name: str, dest: Path) -> Path:
@@ -253,5 +345,6 @@ def export(name: str, dest: Path) -> Path:
     return dest
 
 
-__all__ = ["PROTECT", "Repo", "VaultError", "checkout", "commit_back", "enabled", "export",
-           "get", "list_repos", "register", "sync", "update_registry"]
+__all__ = ["PROTECT", "Repo", "VaultError", "checkout", "clone_work", "commit_back",
+           "enabled", "export", "get", "host_repo", "list_repos", "register", "sync",
+           "update_registry"]

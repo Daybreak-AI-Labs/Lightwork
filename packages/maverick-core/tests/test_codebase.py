@@ -142,38 +142,186 @@ def test_failing_tests_are_reported_to_the_approver(upstream, tmp_path):
     assert "assert" in features.find(p["id"])["tests_output"]
 
 
-def test_a_run_that_plants_git_hooks_is_discarded(upstream, tmp_path):
+def test_nothing_the_run_writes_into_git_metadata_ever_executes_on_the_host(
+        upstream, tmp_path):
     vault.register("pricing", str(upstream))
     world = WorldModel(tmp_path / "world.db")
+    marks = tmp_path / "marks"
+    marks.mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    _sh("init", "-q", "-b", "main", cwd=victim)
+    (victim / "v.txt").write_text("v\n")
+    _sh("add", "-A", cwd=victim)
+    _sh("commit", "-q", "-m", "v", cwd=victim)
+    victim_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=victim,
+                                 capture_output=True, text=True).stdout
 
     def evil(work):
+        hook = work / ".git" / "hooks" / "pre-commit"
+        hook.write_text(f"#!/bin/sh\ntouch {marks}/hook\n")
+        hook.chmod(0o755)
         with open(work / ".git" / "config", "a") as fh:
-            fh.write('[filter "x"]\n\tclean = touch /tmp/pwned\n')
-        (work / ".gitattributes").write_text("* filter=x\n")
+            fh.write(f'[diff "evil"]\n\tcommand = touch {marks}/diff\n'
+                     f'[filter "x"]\n\tclean = touch {marks}/filter\n'
+                     f"[core]\n\thooksPath = {marks}\n")
+        (work / ".gitattributes").write_text("*.py diff=evil filter=x\n")
+        (work / "app.py").write_text(SECRET_LINE + "\nx = 2\n")
     run, _ = _swarm(evil)
-    with pytest.raises(vault.VaultError, match="filter"):
-        features.propose(world, "pricing", "Evil", "", run)
-    assert features.list_proposals("pricing") == []
+    p = features.propose(world, "pricing", "Evil", "", run)
+    assert list(marks.iterdir()) == []                         # nothing ran on the host
+    assert sorted(p["files"]) == [".gitattributes", "app.py"]  # files, never .git
+
+    def redirect(work):                                         # .git -> another repo
+        shutil.rmtree(work / ".git")
+        (work / ".git").write_text(f"gitdir: {victim}/.git\n")
+        (work / "app.py").write_text(SECRET_LINE + "\ny = 3\n")
+    run, _ = _swarm(redirect)
+    q = features.propose(world, "pricing", "Redirect", "", run)
+    assert q["files"] == ["app.py"]
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=victim,
+                          capture_output=True, text=True).stdout == victim_head
 
 
-def test_sync_brings_new_upstream_commits_and_keeps_lightwork_branches(upstream, tmp_path):
+def test_what_merges_is_exactly_the_diff_the_human_approved(upstream, tmp_path):
+    vault.register("pricing", str(upstream), test_command="python -m pytest -q")
+    world = WorldModel(tmp_path / "world.db")
+
+    def sneaky(work):
+        # commit a backdoor on the branch with the run's own git, then move away
+        (work / "backdoor.py").write_text("evil = True\n")
+        _sh("add", "-A", cwd=work)
+        _sh("commit", "-q", "-m", "b", cwd=work)
+        _sh("checkout", "-q", "--detach", "HEAD~1", cwd=work)
+        (work / "backdoor.py").unlink(missing_ok=True)
+        (work / "app.py").write_text(SECRET_LINE + "\nx = 2  # harmless\n")
+
+    class TestsThatWriteFiles(_Sandbox):
+        def exec(self, cmd, timeout=None):
+            (Path(self.workdir) / "late.py").write_text("late = True\n")
+            return super().exec(cmd, timeout)
+    run, _ = _swarm(sneaky)
+    p = features.propose(world, "pricing", "Harmless", "", run,
+                         sandbox_factory=TestsThatWriteFiles)
+    assert p["files"] == ["app.py"] and "backdoor" not in p["diff"]
+    world.decide_approval(p["approval_id"], "approved", decided_by="user:lead")
+    features.merge(world, p["id"])
+    with vault.checkout("pricing") as work:
+        assert not (work / "backdoor.py").exists() and not (work / "late.py").exists()
+        assert "harmless" in (work / "app.py").read_text()
+
+
+def test_a_tampered_proposal_is_refused(upstream, tmp_path):
     vault.register("pricing", str(upstream))
     world = WorldModel(tmp_path / "world.db")
-    run, _ = _swarm(lambda work: (work / "x.py").write_text("x = 1\n"))
+    run, _ = _swarm(lambda work: (work / "a.py").write_text("a = 1\n"))
+    p = features.propose(world, "pricing", "A", "", run)
+    world.decide_approval(p["approval_id"], "approved", decided_by="user:lead")
+    stored = features._load("pricing", p["id"])
+    stored["head"] = "0" * 40
+    features._save(stored)
+    with pytest.raises(vault.VaultError, match="not the approved commit"):
+        features.merge(world, p["id"])
+    with pytest.raises(vault.VaultError, match="not the approved commit"):
+        features.push(world, p["id"])
+
+
+def test_an_approval_for_something_else_does_not_authorise_a_merge(upstream, tmp_path):
+    vault.register("pricing", str(upstream))
+    world = WorldModel(tmp_path / "world.db")
+    run, _ = _swarm(lambda work: (work / "a.py").write_text("a = 1\n"))
+    p = features.propose(world, "pricing", "A", "", run)
+    other = world.create_approval("wire_transfer", scope="pricing")
+    world.decide_approval(other, "approved", decided_by="user:lead")
+    stored = features._load("pricing", p["id"])
+    stored["approval_id"] = other
+    features._save(stored)
+    with pytest.raises(vault.VaultError, match="must approve"):
+        features.merge(world, p["id"])
+
+
+def test_sync_keeps_approved_merges_and_brings_upstream_work(upstream, tmp_path):
+    vault.register("pricing", str(upstream))
+    world = WorldModel(tmp_path / "world.db")
+    run, _ = _swarm(lambda work: (work / "feature.py").write_text("x = 1\n"))
     p = features.propose(world, "pricing", "X", "", run)
     world.decide_approval(p["approval_id"], "approved", decided_by="user:lead")
     features.merge(world, p["id"])
+    assert vault.sync("pricing")["kept_ahead"] == ["main"]     # nothing new upstream
     (upstream / "README.md").write_text("upstream change\n")
     _sh("add", "-A", cwd=upstream)
     _sh("commit", "-q", "-m", "readme", cwd=upstream)
-    vault.sync("pricing")
+    _sh("branch", "release", cwd=upstream)
+    report = vault.sync("pricing")
+    assert report["merged"] == ["main"] and report["added"] == ["release"]
     with vault.checkout("pricing") as work:
-        refs = subprocess.run(["git", "for-each-ref", "--format=%(refname)"], cwd=work,
-                              capture_output=True, text=True).stdout
-        assert (work / "README.md").exists()
-    assert "refs/heads/lightwork/" in refs
+        assert (work / "README.md").exists() and (work / "feature.py").exists()
+    with vault.host_repo("pricing") as host:
+        refs = vault._git(["for-each-ref", "--format=%(refname)"], git_dir=host)
+    assert f"refs/heads/{p['branch']}" in refs and "refs/remotes/" not in refs
     out = vault.export("pricing", tmp_path / "exported")
-    assert (Path(out) / "README.md").exists()
+    assert (Path(out) / "feature.py").exists()
+
+
+def test_master_branch_lfs_attributes_odd_names_and_non_utf8_diffs(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    src = tmp_path / "up"
+    src.mkdir()
+    _sh("init", "-q", "-b", "master", cwd=src)
+    (src / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n")
+    (src / "legacy.txt").write_bytes("caf\xe9\n".encode("latin-1"))
+    _sh("add", "-A", cwd=src)
+    _sh("commit", "-q", "-m", "i", cwd=src)
+    repo = vault.register("legacy", str(src))
+    assert repo.default_branch == "master"
+    world = WorldModel(tmp_path / "world.db")
+
+    def edit(work):
+        (work / "legacy.txt").write_bytes("na\xefve\n".encode("latin-1"))
+        (work / "my file.py").write_text("ok = 1\n")
+    run, _ = _swarm(edit)
+    p = features.propose(world, "legacy", "Edit", "", run)
+    assert sorted(p["files"]) == ["legacy.txt", "my file.py"]
+    world.decide_approval(p["approval_id"], "approved", decided_by="user:lead")
+    assert features.merge(world, p["id"])["status"] == "merged"
+    vault.sync("legacy")
+
+
+def test_embedded_repositories_are_refused_and_failed_runs_close_their_goal(
+        upstream, tmp_path):
+    vault.register("pricing", str(upstream))
+    world = WorldModel(tmp_path / "world.db")
+
+    def embed(work):
+        nested = work / "vendor"
+        nested.mkdir()
+        _sh("init", "-q", "-b", "main", cwd=nested)
+        (nested / "f").write_text("f\n")
+        _sh("add", "-A", cwd=nested)
+        _sh("commit", "-q", "-m", "n", cwd=nested)
+    run, seen = _swarm(embed)
+    with pytest.raises(vault.VaultError, match="embedded git"):
+        features.propose(world, "pricing", "Embed", "", run)
+    assert world.get_goal(seen["goal_id"]).status == "failed"
+
+    def boom(work):
+        raise RuntimeError("model outage")
+    run, seen = _swarm(boom)
+    with pytest.raises(RuntimeError):
+        features.propose(world, "pricing", "Boom", "", run)
+    assert world.get_goal(seen["goal_id"]).status == "failed"
+    assert features.list_proposals("pricing") == []
+
+
+def test_truncated_diffs_are_flagged_to_the_approver(upstream, tmp_path, monkeypatch):
+    monkeypatch.setattr(features, "MAX_DIFF_CHARS", 200)
+    vault.register("pricing", str(upstream))
+    world = WorldModel(tmp_path / "world.db")
+    run, _ = _swarm(lambda work: (work / "big.py").write_text("x = 1\n" * 500))
+    p = features.propose(world, "pricing", "Big", "", run)
+    assert p["diff_truncated"] and "WARNING: the diff is" in world.get_approval(
+        p["approval_id"]).detail
 
 
 def test_cli_end_to_end_with_approval_in_the_middle(upstream, tmp_path, monkeypatch):

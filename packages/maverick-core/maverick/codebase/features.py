@@ -25,7 +25,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..file_lock import atomic_write_bytes, cross_process_lock
-from ..git_safety import git_metadata_may_execute_filters
 from . import vault
 from .vault import VaultError, _git
 
@@ -99,6 +98,35 @@ def run_tests(repo: vault.Repo, work: Path, sandbox_factory=None) -> dict | None
             "passed": result.exit_code == 0, "output": output[-MAX_TEST_OUTPUT_CHARS:]}
 
 
+_IDENTITY = {"GIT_AUTHOR_NAME": "Lightwork", "GIT_AUTHOR_EMAIL": "lightwork@localhost",
+             "GIT_COMMITTER_NAME": "Lightwork", "GIT_COMMITTER_EMAIL": "lightwork@localhost"}
+
+
+def _host_commit(host: Path, work: Path, base: str, branch: str, message: str) -> str:
+    """Commit the FILES of ``work`` on top of ``base`` using only host-owned git.
+
+    The agent's working tree may contain anything, including its own ``.git``
+    (hooks, config, a ``gitdir:`` pointer elsewhere). None of it is read as git
+    metadata: the index lives in the host repository, git never tracks a path
+    named ``.git``, and plumbing (read-tree, add, write-tree, commit-tree,
+    update-ref) runs no hooks. Returns the new commit, or ``base`` when the tree
+    is unchanged. The branch ref is pinned to exactly that commit."""
+    env = {**_IDENTITY, "GIT_INDEX_FILE": str(host / "lw-index")}
+    _git(["read-tree", base], git_dir=host, env=env)
+    _git(["add", "-A", "--", "."], git_dir=host, work_tree=work, cwd=work, env=env)
+    tree = _git(["write-tree"], git_dir=host, env=env).strip()
+    if tree == _git(["rev-parse", f"{base}^{{tree}}"], git_dir=host).strip():
+        return base
+    added_links = [line for line in _git(["diff-tree", "-r", "--no-renames", base, tree],
+                                         git_dir=host).splitlines()
+                   if line.split(" ")[1:2] == ["160000"] and not line.startswith(":160000")]
+    if added_links:
+        raise VaultError("the change adds embedded git repositories; refused")
+    commit = _git(["commit-tree", tree, "-p", base, "-m", message], git_dir=host, env=env).strip()
+    _git(["update-ref", f"refs/heads/{branch}", commit], git_dir=host)
+    return commit
+
+
 def propose(world, name: str, title: str, description: str, run: Runner, *,
             reviewer: Reviewer | None = None, sandbox_factory=None) -> dict:
     """Run a feature swarm and park its change for human approval."""
@@ -106,35 +134,46 @@ def propose(world, name: str, title: str, description: str, run: Runner, *,
     repo = vault.get(name)
     pid = secrets.token_hex(8)
     branch = f"lightwork/{_slug(title)}-{pid[:6]}"
-    with vault.checkout(name) as work:
-        base = _git(["rev-parse", "HEAD"], cwd=work).strip()
-        _git(["checkout", "-q", "-b", branch], cwd=work)
-        goal_id = world.create_goal(f"[{name}] {title}", _brief(repo, title, description))
-        with labelled_run({f"code:{name}"}, mode=repo.protect):
-            run(goal_id, work)
-        if git_metadata_may_execute_filters(work):
-            raise VaultError("the run left git filter/hook metadata; change discarded")
-        _git(["add", "-A"], cwd=work)
-        if _git(["status", "--porcelain"], cwd=work).strip():
-            _git(["-c", "user.name=Lightwork", "-c", "user.email=lightwork@localhost",
-                  "commit", "-q", "-m", f"{title}\n\nLightwork proposal {pid} (goal #{goal_id})"],
-                 cwd=work)
-        head = _git(["rev-parse", "HEAD"], cwd=work).strip()
-        changed = head != base
-        diff = _git(["diff", f"{base}..{head}"], cwd=work) if changed else ""
-        files = _git(["diff", "--name-only", f"{base}..{head}"], cwd=work).split() if changed else []
-        tests = run_tests(repo, work, sandbox_factory) if changed else None
-        bundle = b""
-        if changed:
-            with tempfile.TemporaryDirectory(prefix="lw-prop-") as tmp:
-                out = Path(tmp) / "p.bundle"
-                _git(["bundle", "create", str(out), f"{base}..{branch}"], cwd=work)
-                bundle = out.read_bytes()
+    goal_id = None
+    try:
+        with vault.host_repo(name) as host:
+            base = _git(["rev-parse", "--verify", f"refs/heads/{repo.default_branch}"],
+                        git_dir=host).strip()
+            work = vault.clone_work(host, host.parent / "work", repo.default_branch)
+            _git(["checkout", "-q", "-b", branch], cwd=work)
+            goal_id = world.create_goal(f"[{name}] {title}", _brief(repo, title, description))
+            with labelled_run({f"code:{name}"}, mode=repo.protect):
+                run(goal_id, work)
+            head = _host_commit(host, work, base, branch,
+                                f"{title}\n\nLightwork proposal {pid} (goal #{goal_id})")
+            changed = head != base
+            diff = files = None
+            bundle = b""
+            if changed:
+                diff = _git(["diff", "--no-ext-diff", "--no-textconv", base, head], git_dir=host)
+                files = [f for f in _git(["diff", "--name-only", "-z", base, head],
+                                         git_dir=host).split("\0") if f]
+                # Bundle the pinned commit BEFORE any repository code (tests) runs.
+                with tempfile.TemporaryDirectory(prefix="lw-prop-") as tmp:
+                    out = Path(tmp) / "p.bundle"
+                    _git(["bundle", "create", str(out), f"{base}..refs/heads/{branch}"],
+                         git_dir=host)
+                    bundle = out.read_bytes()
+            tests = run_tests(repo, work, sandbox_factory) if changed else None
+    except BaseException as exc:
+        if goal_id is not None:
+            try:
+                world.set_goal_status(goal_id, "failed",
+                                      result=f"feature proposal failed: {type(exc).__name__}")
+            except Exception:  # noqa: BLE001 -- the original error is what matters
+                pass
+        raise
+    diff, files = diff or "", files or []
     review = reviewer(f"{title}\n\n{description}", diff) if (reviewer and diff) else None
     proposal = {
         "id": pid, "repo": name, "title": title, "goal_id": goal_id, "branch": branch,
         "base": base, "head": head, "files": files, "diff": diff[:MAX_DIFF_CHARS],
-        "diff_truncated": len(diff) > MAX_DIFF_CHARS,
+        "diff_truncated": len(diff) > MAX_DIFF_CHARS, "diff_chars": len(diff),
         "tests": None if tests is None else {k: v for k, v in tests.items() if k != "output"},
         "tests_output": None if tests is None else tests["output"],
         "review": review, "status": "empty" if not changed else "pending",
@@ -154,13 +193,20 @@ def _approval_detail(p: dict) -> str:
     tests = p["tests"]
     review = p["review"]
     lines = [f"Merge Lightwork proposal {p['id']} into {p['repo']}: {p['title']}",
-             f"Branch {p['branch']} from {p['base'][:12]}; {len(p['files'])} file(s) changed.",
+             f"Branch {p['branch']} at {p['head'][:12]} from {p['base'][:12]}; "
+             f"{len(p['files'])} file(s) changed.",
              "Tests: " + ("not configured" if tests is None else
                           f"{'PASSED' if tests['passed'] else 'FAILED'} (`{tests['command']}`)"),
              "Independent review: " + ("not run" if review is None else
                                        ("approves" if review.get("approves") else "objects")
                                        + f" ({review.get('blockers', 0)} blocker(s))")]
+    if p.get("diff_truncated"):
+        lines.append(f"WARNING: the diff is {p['diff_chars']} characters; review and the stored "
+                     f"copy cover only the first {MAX_DIFF_CHARS}. Inspect the branch in full "
+                     "before approving.")
     lines += [f"  {f}" for f in p["files"][:40]]
+    if len(p["files"]) > 40:
+        lines.append(f"  ... and {len(p['files']) - 40} more file(s)")
     lines.append(f"Inspect: maverick code show {p['id']}")
     return "\n".join(lines)
 
@@ -174,20 +220,26 @@ def status(world, p: dict) -> str:
 
 
 def _require_approved(world, p: dict) -> None:
-    """The approval itself must be approved -- not merely the proposal's state."""
+    """The approval itself must be an approved codebase_merge for this repository
+    -- not merely the proposal's recorded state."""
     appr = world.get_approval(p["approval_id"]) if p["approval_id"] else None
-    if appr is None or appr.status != "approved":
+    if (appr is None or appr.status != "approved" or appr.action != "codebase_merge"
+            or appr.scope != p["repo"]):
         raise VaultError(f"proposal {p['id']} is {status(world, p)}; "
                          "a human must approve it first")
 
 
-def _fetch_proposal(p: dict, work: Path) -> None:
+def _fetch_proposal(p: dict, host: Path) -> None:
+    """Load the proposal's branch into ``host`` and prove it is the approved commit."""
     raw = (_proposal_dir(p["repo"]) / f"{p['id']}.bundle").read_bytes()
     with tempfile.TemporaryDirectory(prefix="lw-prop-") as tmp:
         b = Path(tmp) / "p.bundle"
         b.write_bytes(vault._unseal(raw, f"codebase/{p['repo']}/proposal-bundle/{p['id']}"))
         _git(["fetch", "-q", str(b), f"+refs/heads/{p['branch']}:refs/heads/{p['branch']}"],
-             cwd=work)
+             git_dir=host)
+    tip = _git(["rev-parse", "--verify", f"refs/heads/{p['branch']}"], git_dir=host).strip()
+    if tip != p["head"]:
+        raise VaultError(f"proposal {p['id']} branch is not the approved commit; refused")
 
 
 def merge(world, pid: str) -> dict:
@@ -197,18 +249,24 @@ def merge(world, pid: str) -> dict:
     _require_approved(world, p)
     if p["status"] == "merged":
         raise VaultError(f"proposal {pid} is already merged")
+    repo = vault.get(p["repo"])
     with cross_process_lock(vault._bundle_path(p["repo"]), strict=True), \
-            vault.checkout(p["repo"]) as work:
-        _fetch_proposal(p, work)
+            vault.host_repo(p["repo"]) as host:
+        _fetch_proposal(p, host)
+        work = vault.clone_work(host, host.parent / "merge-work", repo.default_branch)
+        _git(["fetch", "-q", str(host), f"refs/heads/{p['branch']}:refs/heads/{p['branch']}"],
+             cwd=work)
         try:
-            _git(["-c", "user.name=Lightwork", "-c", "user.email=lightwork@localhost",
-                  "merge", "-q", "--no-ff", p["branch"], "-m",
-                  f"Merge Lightwork proposal {pid}: {p['title']}"], cwd=work)
+            _git(["merge", "-q", "--no-ff", p["branch"], "-m",
+                  f"Merge Lightwork proposal {pid}: {p['title']}"], cwd=work, env=_IDENTITY)
         except VaultError:
             p["status"] = "conflict"
             _save(p)
             raise VaultError(f"proposal {pid} no longer merges cleanly; request it again") from None
-        vault.commit_back(p["repo"], work)
+        _git(["fetch", "-q", str(work),
+              f"+refs/heads/{repo.default_branch}:refs/heads/{repo.default_branch}"],
+             git_dir=host)
+        vault.commit_back(p["repo"], host)
     p.update(status="merged", merged_at=time.time())
     _save(p)
     return p
@@ -223,21 +281,23 @@ def settle(world) -> list[dict]:
             try:
                 merge(world, p["id"])
                 out.append({"id": p["id"], "repo": p["repo"], "outcome": "merged"})
-            except VaultError as exc:
-                out.append({"id": p["id"], "repo": p["repo"], "outcome": str(exc)})
+            except Exception as exc:  # noqa: BLE001 -- one bad proposal never stops the rest
+                out.append({"id": p["id"], "repo": p["repo"],
+                            "outcome": str(exc) if isinstance(exc, VaultError)
+                            else f"error: {type(exc).__name__}"})
     return out
 
 
 def push(world, pid: str) -> str:
-    """Push an APPROVED proposal's branch to the repository's source remote, for a
-    pull request there. Returns the branch name."""
+    """Push an APPROVED proposal's branch (the approved commit, verified) to the
+    repository's source remote, for a pull request there. Returns the branch."""
     p = find(pid)
     _require_approved(world, p)
     repo = vault.get(p["repo"])
-    with vault.checkout(p["repo"]) as work:
-        _fetch_proposal(p, work)
+    with vault.host_repo(p["repo"]) as host:
+        _fetch_proposal(p, host)
         _git(["push", "-q", repo.source, f"refs/heads/{p['branch']}:refs/heads/{p['branch']}"],
-             cwd=work, token_env=repo.token_env)
+             git_dir=host, token_env=repo.token_env)
     return p["branch"]
 
 

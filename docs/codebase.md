@@ -35,27 +35,41 @@ maverick code export payments ./payments   # plaintext clone for the owner
   variable (`--token-env`), read at use time and handed to git through a
   short-lived askpass helper, never argv or a persisted URL. A source URL
   containing credentials is refused.
-- **Git hardening.** Git runs without user or system config, fsmonitor, or
-  inherited secrets. A run that leaves git filter or hook metadata in the
-  working copy is discarded, not stored.
+- **Git hardening.** The host never runs git in a directory an agent can
+  write. The vault opens as a private, host-owned bare repository; agents get a
+  separate clone. After a run, the change is committed from the working tree's
+  files with host-owned plumbing (`read-tree`, `add`, `write-tree`,
+  `commit-tree`, `update-ref`), so the run's own `.git` (hooks, config, a
+  `gitdir:` pointer) is never read. Every host git call also disables hooks,
+  external diff drivers and fsmonitor. A change that adds an embedded git
+  repository is refused.
 
 ## A feature request, end to end
 
 1. A private working copy on a new `lightwork/<title>-<id>` branch.
 2. A goal runs the governed swarm with that working copy as its sandbox
-   workdir, under the run's labels.
-3. The change is committed on the branch. The repository's test command runs
-   through the sandbox.
-4. The independent reviewer reads the diff. It uses a cross-family model where
-   possible.
+   workdir, under the run's labels. If the run fails, the goal is marked
+   `failed` and nothing is proposed.
+3. The host commits the working tree's files and pins the branch to that exact
+   commit. It bundles the branch before any repository code (tests) runs. The
+   repository's test command then runs through the sandbox.
+4. The independent reviewer reads the diff of that pinned commit. It uses a
+   cross-family model where possible.
 5. The sealed proposal (diff, tests, review, branch bundle) parks a
-   `codebase_merge` approval, which states the test result and the review
-   verdict. A change the swarm did not make produces an `empty` proposal and
-   no approval.
-6. `merge` requires the approval to be approved. The merge is `--no-ff`, so it
-   is one reviewable commit. A merge that no longer applies cleanly leaves the
-   vault untouched and marks the proposal `conflict`. `push` also requires the
-   approval.
+   `codebase_merge` approval, which states the test result, the review verdict
+   and, when the diff is too large to store whole, a warning. A change the swarm
+   did not make produces an `empty` proposal and no approval.
+6. `merge` and `push` require that approval to be an approved `codebase_merge`
+   for this repository. Both verify the branch is the approved commit. Merges
+   are `--no-ff`, so each is one reviewable commit. A merge that no longer
+   applies cleanly leaves the vault untouched and marks the proposal
+   `conflict`.
+7. `sync` fetches upstream as `upstream/*` and never overwrites vault work:
+   - a branch behind upstream fast-forwards;
+   - a branch ahead of upstream (approved merges not pushed yet) is kept;
+   - a diverged default branch has upstream merged in, and a conflict changes
+     nothing;
+   - new upstream branches and tags are added.
 
 ## Dashboard
 
