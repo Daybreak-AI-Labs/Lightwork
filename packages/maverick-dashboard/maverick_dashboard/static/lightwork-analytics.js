@@ -51,18 +51,24 @@
   // Hand-drawn horizontal bar chart for {label: count}.
   function barsSVG(counts, w, color, textColor) {
     const labels = Object.keys(counts).sort();
-    if (!labels.length) return '<span class="muted">no goals</span>';
+    if (!labels.length) return '<span class="muted">No tasks yet</span>';
     const max = Math.max(...labels.map((k) => counts[k])) || 1;
     const rowH = 18;
     const rows = labels.map((k, i) => {
       const bw = Math.max(2, (w - 110) * (counts[k] / max));
       const y = i * rowH;
-      return '<text x="0" y="' + (y + 12) + '" font-size="10" fill="' + textColor + '">' + esc(k) + "</text>" +
+      return '<text x="0" y="' + (y + 12) + '" font-size="10" fill="' + textColor + '">' + esc(String(k).replace(/_/g, " ")) + "</text>" +
         '<rect x="70" y="' + (y + 3) + '" width="' + bw.toFixed(1) + '" height="10" rx="2" fill="' + color + '"></rect>' +
         '<text x="' + (74 + bw).toFixed(1) + '" y="' + (y + 12) + '" font-size="10" fill="' + textColor + '">' + counts[k] + "</text>";
     }).join("");
-    return '<svg width="' + w + '" height="' + (labels.length * rowH) + '" role="img" aria-label="goals by status: ' +
+    return '<svg width="' + w + '" height="' + (labels.length * rowH) + '" role="img" aria-label="tasks by status: ' +
       labels.map((k) => esc(k) + " " + counts[k]).join(", ") + '">' + rows + "</svg>";
+  }
+
+  // Fetch failures from another site come back as a TypeError; say it plainly.
+  function plain(e) {
+    if (e && e.name === "TypeError") return "Blocked — this page is not allowed to read your Lightwork data.";
+    return (e && e.message) || "Could not load this right now.";
   }
 
   class LightworkAnalytics extends HTMLElement {
@@ -81,8 +87,8 @@
         ".err { color: #f85149; }" +
         "</style>" +
         '<section><h2>Total spend</h2><div id="spend" class="muted">loading…</div></section>' +
-        '<section><h2>Episode cost trend</h2><div id="trend" class="muted">loading…</div></section>' +
-        '<section style="margin-bottom:0"><h2>Goals by status</h2><div id="goals" class="muted">loading…</div></section>';
+        '<section><h2>Cost per task, over time</h2><div id="trend" class="muted">loading…</div></section>' +
+        '<section style="margin-bottom:0"><h2>Tasks by status</h2><div id="goals" class="muted">loading…</div></section>';
       this._load(root);
     }
 
@@ -92,7 +98,12 @@
       const token = this.getAttribute("token");
       if (token) headers.Authorization = "Bearer " + token;
       return fetch(base + path, { headers }).then((r) => {
-        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (!r.ok) {
+          const e = new Error(r.status === 401 || r.status === 403
+            ? "Sign-in needed — ask your administrator for an access key."
+            : "Could not load this right now.");
+          throw e;
+        }
         return r.json();
       });
     }
@@ -106,14 +117,15 @@
       this._fetch("/api/v1/spend").then((data) => {
         const total = data.total || {};
         put("spend", "$" + Number(total.dollars || 0).toFixed(4) +
-          ' <span class="muted">(' + (Number(total.runs) || 0) + " episodes)</span>");
+          ' <span class="muted">(' + (Number(total.runs) || 0) + " tasks)</span>");
         const costs = (data.episodes || [])
           .map((e) => Number(e.cost_dollars || 0))
           .reverse(); // API returns newest first; plot oldest -> newest
         put("trend", sparklineSVG(costs, 360, 42, "#3fb950"));
       }).catch((e) => {
-        put("spend", "spend: " + esc(e.message), true);
-        put("trend", "trend: " + esc(e.message), true);
+        const msg = plain(e);
+        put("spend", esc(msg), true);
+        put("trend", esc(msg), true);
       });
       this._fetch("/api/v1/goals?limit=100").then((goals) => {
         const counts = {};
@@ -123,7 +135,7 @@
         });
         put("goals", barsSVG(counts, 360, "#3fb950", "#9aa3ad"));
       }).catch((e) => {
-        put("goals", "goals: " + esc(e.message), true);
+        put("goals", esc(plain(e)), true);
       });
     }
   }
