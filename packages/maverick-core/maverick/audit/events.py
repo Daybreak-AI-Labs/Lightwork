@@ -201,6 +201,11 @@ class EventKind:
     # An administrator changed the workspace or per-person spending limits.
     # payload: actor, workspace, default, people (count of personal limits).
     SPENDING_LIMITS_CHANGED = "spending_limits_changed"
+    # An administrator changed one product setting on the dashboard's All
+    # settings page. One row per setting. payload: actor, section, key, old,
+    # new (secrets are recorded only as "set"/"not set", never their value),
+    # confirmed (True when the change weakened a protection and was confirmed).
+    SETTING_CHANGED = "setting_changed"
     # Deployment-global tenant/workspace control-plane decisions. These are
     # deliberately separate from tenant-local work so provisioning and a
     # caller changing the active confidentiality boundary cannot disappear

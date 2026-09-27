@@ -426,19 +426,19 @@ def _dump_value(lines: list[str], val: dict) -> None:
 
 
 def _dump_selector_sections(lines: list[str], data: dict) -> None:
-    """Emit the single-key selector tables the dashboard owns: [dashboard]
-    active_tenant (set_active_tenant) and [sandbox] backend
-    (set_sandbox_backend). _dump is an allowlist serializer, so a key missing
-    here would be silently dropped by the next save."""
-    dash = data.get("dashboard") or {}
-    if dash.get("active_tenant"):
-        lines.append("[dashboard]")
-        lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
-        lines.append("")
-    sandbox = data.get("sandbox") or {}
-    if sandbox.get("backend"):
-        lines.append("[sandbox]")
-        lines.append(f"backend = {_toml_str(sandbox['backend'])}")
+    """Emit the [dashboard] and [sandbox] tables the dashboard owns:
+    active_tenant (set_active_tenant), backend (set_sandbox_backend) and the
+    catalog keys the All settings page writes (compress, timeout). _dump is an
+    allowlist serializer, so a key missing here would be silently dropped by
+    the next save."""
+    for section in ("dashboard", "sandbox"):
+        tbl = data.get(section) or {}
+        keys = [k for k in sorted(tbl) if tbl[k] is not None and tbl[k] != ""]
+        if not keys:
+            continue
+        lines.append(f"[{section}]")
+        for k in keys:
+            lines.append(f"{k} = {_toml_value(tbl[k])}")
         lines.append("")
 
 
@@ -478,7 +478,7 @@ def _dump(data: dict) -> str:
                     "research_execution", "models", "catalogs",
                     *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
-                    *SWITCHABLE_SECTIONS)):
+                    *SWITCHABLE_SECTIONS, *_catalog_generic_sections())):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
@@ -499,9 +499,12 @@ def _dump(data: dict) -> str:
     # [webhooks] secret -- the signing key the Settings page manages. Sealed
     # before persistence and never logged or re-displayed.
     whk = data.get("webhooks") or {}
-    if whk.get("secret"):
+    if whk.get("secret") or whk.get("outbound"):
         lines.append("[webhooks]")
-        lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
+        if whk.get("outbound"):
+            lines.append(f"outbound = {_toml_value(list(whk['outbound']))}")
+        if whk.get("secret"):
+            lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
         lines.append("")
     for name in sorted(data.get("providers") or {}):
         pcfg = data["providers"][name] or {}
@@ -1203,6 +1206,87 @@ def set_module_enables(paths, enabled: bool) -> None:
                 node = child
             node["enable"] = bool(enabled)
         _write(data)
+
+
+# Tables with their own serializer above; every other catalog table goes
+# through the generic allowlisted loop in _dump.
+_CATALOG_SPECIAL_SECTIONS = frozenset({"dashboard", "sandbox", "webhooks"})
+
+
+def _catalog_generic_sections() -> tuple[str, ...]:
+    from .settings_catalog import CATALOG_TOP_SECTIONS
+
+    return tuple(s for s in CATALOG_TOP_SECTIONS if s not in _CATALOG_SPECIAL_SECTIONS)
+
+
+#: Marker for "remove this key from the dashboard overlay".
+REMOVE = object()
+
+
+def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str, ...], object]:
+    """Write All-settings values to the overlay in ONE locked save.
+
+    ``changes`` maps a catalog key path (``("safety", "profile")``) to its
+    already-validated value, or :data:`REMOVE` to drop the dashboard value so
+    the installer's choice (or the default) applies again. Only paths in the
+    settings catalog are writable. Secret values are sealed with the
+    deployment key before they are stored. Returns the previous raw overlay
+    value of each path (``REMOVE`` when absent) so a caller can undo the save
+    if the change cannot be recorded in the audit trail.
+    """
+    from .settings_catalog import SETTINGS
+
+    by_path = {s.path: s for s in SETTINGS}
+    if not isinstance(changes, dict) or not changes:
+        raise ValueError("no settings given")
+    for path in changes:
+        if path not in by_path:
+            raise ValueError("unknown setting")
+    previous: dict[tuple[str, ...], object] = {}
+    with _locked():
+        data = _load_overlay_for_update()
+        for path, value in changes.items():
+            node = data
+            for part in path[:-1]:
+                child = node.get(part)
+                if child is None:
+                    child = {}
+                    node[part] = child
+                if not isinstance(child, dict):
+                    raise SecuritySuiteConfigUnavailable(
+                        "dashboard settings are unreadable; settings were not changed"
+                    )
+                node = child
+            key = path[-1]
+            previous[path] = node.get(key, REMOVE)
+            if value is REMOVE or value is None:
+                node.pop(key, None)
+            elif by_path[path].secret:
+                node[key] = _seal_global_secret(value)
+            else:
+                node[key] = value
+        _prune_empty_tables(data, {path[0] for path in changes})
+        _write(data)
+    config.reset_config_cache()
+    return previous
+
+
+def _prune_empty_tables(data: dict, tops: set[str]) -> None:
+    """Drop tables a reset emptied, so the overlay stays minimal."""
+    def prune(node: dict) -> None:
+        for key in list(node):
+            child = node[key]
+            if isinstance(child, dict):
+                prune(child)
+                if not child:
+                    node.pop(key)
+
+    for top in tops:
+        table = data.get(top)
+        if isinstance(table, dict):
+            prune(table)
+            if not table:
+                data.pop(top, None)
 
 
 SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
