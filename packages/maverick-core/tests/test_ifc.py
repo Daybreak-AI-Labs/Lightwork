@@ -179,11 +179,63 @@ def test_real_tools_are_classified_as_sources_and_sinks():
 
 
 def test_code_execution_is_a_sink_only_when_the_sandbox_has_egress(monkeypatch):
+    import maverick.sandbox as sandbox
     from maverick.immune import network as n
-    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {"allow_network": False}})
-    assert n.EXTERNAL not in n.classify("shell")
-    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {"allow_network": True}})
-    assert n.EXTERNAL in n.classify("shell") and n.EXTERNAL in n.classify("notebook_exec")
+    monkeypatch.setattr(sandbox, "container_backend_required", lambda: False)
+    for cfg, egress in (
+            ({}, True),                                            # local: the host's network
+            ({"backend": "docker"}, False),
+            ({"backend": "docker", "allow_network": True}, True),
+            ({"backend": "firecracker"}, False),
+            ({"backend": "firecracker", "network": "egress-allow"}, True),
+            ({"backend": "ep:vendor"}, True)):                     # unknown: assume egress
+        monkeypatch.setattr(config, "load_config", lambda cfg=cfg: {"sandbox": cfg})
+        for tool in ("shell", "notebook_exec", "code_exec"):
+            assert (n.EXTERNAL in n.classify(tool)) is egress, (cfg, tool)
+    assert n.EXTERNAL not in n.classify("wasm_run")                # WASI: no network
+    monkeypatch.setattr(sandbox, "container_backend_required", lambda: True)
+    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {}})
+    assert n.EXTERNAL not in n.classify("shell")                   # local upgraded to a container
+
+
+def test_restored_or_starting_labels_make_explicit_scope_act_as_context():
+    first = _tracker(scope="explicit")
+    first.resume(goal_id=11, conversation_id=None)
+    first.observe_output("a", "sql_query", PAYROLL)
+    again = _tracker(scope="explicit")
+    again.resume(goal_id=11, conversation_id=None)
+    assert again.decide("a", "email", {"to": "x@y.z", "body": PAYROLL}) is not None
+    code = _tracker(scope="explicit", base_labels=frozenset({"code:api"}))
+    assert code.decide("a", "email", {"to": "x@y.z", "body": "def f(): ..."}) is not None
+
+
+def test_a_scan_budget_ending_exactly_at_the_limit_is_unknowable(monkeypatch):
+    monkeypatch.setattr(ifc, "_MAX_SCAN_CHARS", 100)
+    t = _tracker(scope="explicit")
+    t.observe_output("a", "sql_query", PAYROLL)
+    assert t.decide("a", "email", {"a": "x" * 100, "b": PAYROLL}) is not None
+
+
+def test_destinations_are_found_in_real_argument_shapes_and_unknown_ones_are_never_granted():
+    import json
+    assert "channel_id" in ifc.destination({"channel_id": "C1", "content": "hi"})
+    assert "base_url" in ifc.destination({"base_url": "https://api.x", "path": "/v1"})
+    body = {"personalizations": [{"to": [{"email": "cfo@corp.com"}]}]}
+    assert "cfo@corp.com" in ifc.destination({"path": "/v3/mail/send", "body": json.dumps(body)})
+    assert ifc.destination({"q": "payroll 1017 Dana"}) == ""          # query text is data
+    t = _tracker(mode="approve")
+    t.observe_output("a", "sql_query", PAYROLL)
+    d = t.decide("a", "web_search", {"q": "x"})
+    t.grant(d)
+    assert not t.granted(t.decide("a", "web_search", {"q": "x"}))    # asked every time
+    assert ifc.display_destination('url="https://x/p?d=1017"') == 'url="https://x/p?…"'
+
+
+def test_mcp_server_names_with_separators_do_not_collide():
+    t = _tracker()
+    t.observe_output("a", "mcp_corp__read_crm", "customer record " * 10)
+    assert t.decide("a", "mcp_corp__evil__send", {"x": 1}) is not None
+    assert t.decide("a", "mcp_corp__update", {"x": 1}) is None
 
 
 def test_grants_are_per_destination_and_literal_copies_ask_again():

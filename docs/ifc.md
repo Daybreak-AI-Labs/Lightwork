@@ -43,7 +43,10 @@ to a destination chosen in the call: `email`, `gmail`, `sendgrid`, `mailgun`,
 `twilio`, `notify`, `calendar`, `teams`, `slack_bot`, `discord_bot`,
 `telegram`, `twitter`, `github_issues`, `http_fetch`, `openapi_runner`,
 `git_advanced`, `web_search`, `browser`, public-data connectors and `mcp_*`.
-`shell` and `notebook_exec` count only when `[sandbox] allow_network` is on. A
+`websocket`, `ses` and `sns` send too. `shell`, `notebook_exec` and
+`code_exec` count when the sandbox can reach the network: always on the
+default `local` backend (it runs on the host), and on a container backend only
+with `[sandbox] allow_network` (firecracker: `network`). `wasm_run` never does. A
 tool can be both a source and a sink (`gmail`). A remote MCP server is not
 tainted by its own output: labels from `mcp_<server>__*` are ignored on calls
 back to that server. What happens depends on the mode:
@@ -52,7 +55,7 @@ back to that server. What happens depends on the mode:
 |---|---|
 | `off` | No tracking. |
 | `audit` (default) | Record an `ifc_flow` audit row and allow. |
-| `approve` | A human approves through the consent path, shown the destination; auto-approve modes count as denial. A grant covers that sink, that destination and those labels for the rest of the run. A new destination, a new label, or a literal copy the approver was not told about asks again. |
+| `approve` | A human approves through the consent path, shown the destination (URL query strings elided); auto-approve modes count as denial. A grant covers that sink, that destination and those labels for the rest of the run. A new destination, a new label, or a literal copy the approver was not told about asks again, and so does every call whose destination cannot be identified from its arguments (search queries are data, not a destination). |
 | `block` | Refuse. The agent is told not to route the data through another external tool. |
 
 `scope = "explicit"` acts only when the labelled data appears literally in the
@@ -62,7 +65,9 @@ witness: sensitive outputs are fingerprinted, and any copied span of 47 or
 more characters (compared case-folded, URL-decoded and whitespace-normalised)
 is reported as an explicit flow. When a scan cap makes that unknowable (output
 past 1M characters, arguments nested deeper than 32 levels or longer than 1M
-characters, 200k fingerprints held), `explicit` scope acts as `context` does.
+characters, 200k fingerprints held), and for labels a run starts with (a
+repository, or an earlier run's data, which carry no fingerprints here),
+`explicit` scope acts as `context` does.
 
 ```toml
 [ifc]

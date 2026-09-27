@@ -5,6 +5,14 @@ import pytest
 from maverick.immune import network as n
 
 
+@pytest.fixture(autouse=True)
+def _container_sandbox(monkeypatch):
+    """Model `shell` as a pure state-changing tool: a container sandbox with no
+    network. (On the default `local` backend it can also reach outside.)"""
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda: {"sandbox": {"backend": "docker"}})
+
+
 def _g(agents, flows=()):
     return n.load_graph({"agents": agents, "flows": [list(f) for f in flows]})
 

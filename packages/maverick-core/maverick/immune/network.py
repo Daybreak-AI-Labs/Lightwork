@@ -37,20 +37,40 @@ _SENSITIVE = frozenset({
 # call (query strings count).
 _EXTERNAL = frozenset({
     "email", "notify", "calendar", "http_fetch", "web_search", "web_archive",
-    "browser", "computer", "teams", "gmail", "sendgrid", "mailgun", "twilio",
+    "browser", "computer", "websocket", "teams", "gmail", "sendgrid", "mailgun",
+    "twilio", "ses", "sns",
     "slack_bot", "discord_bot", "telegram", "twitter", "github_issues",
     "openapi_runner", "git_advanced",
 })
 # Code execution reaches outside only when the sandbox allows egress.
-_SANDBOXED = frozenset({"shell", "notebook_exec"})
+# (``wasm_run`` is WASI with no network: never a sink.)
+_SANDBOXED = frozenset({"shell", "notebook_exec", "code_exec"})
+_ISOLATED_BACKENDS = frozenset({"docker", "podman", "gvisor", "kubernetes", "k8s",
+                                "devcontainer", "modal", "ssh"})
 
 
 def _sandbox_egress() -> bool:
+    """Whether sandboxed code can reach the network. ``local`` runs on the host
+    with its full network; firecracker uses ``network``; the container backends
+    honour ``allow_network``; anything unknown is assumed to have egress."""
     try:
         from ..config import load_config
-        v = ((load_config() or {}).get("sandbox") or {}).get("allow_network", False)
+        cfg = (load_config() or {}).get("sandbox") or {}
     except Exception:  # noqa: BLE001 -- unreadable config: assume egress (conservative)
         return True
+    backend = str(cfg.get("backend") or "local").strip().lower()
+    if backend == "local":
+        try:
+            from ..sandbox import container_backend_required
+            if container_backend_required():
+                backend = "docker"  # build_sandbox upgrades local to a container here
+        except Exception:  # noqa: BLE001 -- unknown: keep the host (egress) answer
+            pass
+    if backend == "firecracker":
+        return str(cfg.get("network", "egress-deny")).strip().lower() != "egress-deny"
+    if backend not in _ISOLATED_BACKENDS:
+        return True
+    v = cfg.get("allow_network", False)
     return v is True or str(v).strip().lower() in ("1", "true", "yes", "on")
 
 

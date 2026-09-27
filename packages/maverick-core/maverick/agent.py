@@ -2736,7 +2736,7 @@ class Agent:
                 copied = " The data appears literally in the call."
             else:
                 copied = " The call is too large to rule out that it carries the data literally."
-            to = decision.destination[:300]
+            to = ifc.display_destination(decision.destination)
             try:
                 from .safety.consent import require_consent
                 verdict = await asyncio.to_thread(

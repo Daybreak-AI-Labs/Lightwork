@@ -298,9 +298,9 @@ def _encode_for_disk(data: bytes, path: Path) -> bytes:
 
 def _decode_stored(raw: bytes, path: Path, expected_sha256: str | None = None) -> bytes:
     """Plaintext of stored bytes. A file that merely STARTS with the sealed-blob
-    magic but does not open is plaintext when encryption is off, or when its own
-    digest is the expected one (a legacy upload whose content begins that way)."""
-    from .crypto_at_rest import EncryptionUnavailable, at_rest_enabled, is_bound, unseal_bound
+    magic but does not open is plaintext only when its own digest is the
+    expected one (an upload whose content begins that way)."""
+    from .crypto_at_rest import EncryptionUnavailable, is_bound, unseal_bound
     if not is_bound(raw):
         return raw
     try:
@@ -308,9 +308,11 @@ def _decode_stored(raw: bytes, path: Path, expected_sha256: str | None = None) -
     except EncryptionUnavailable:
         # Stored names are "<sha256[:16]>-<filename>": that prefix is the digest
         # of the plaintext, so it identifies a legacy upload when none is given.
+        # Whether or not encryption is on now, only bytes that ARE the stored
+        # plaintext are returned: a sealed blob that will not open is refused,
+        # never handed on as if it were the file.
         expected = expected_sha256 or path.name.split("-", 1)[0]
-        if not at_rest_enabled() or (
-                len(expected) >= 16 and hashlib.sha256(raw).hexdigest().startswith(expected)):
+        if len(expected) >= 16 and hashlib.sha256(raw).hexdigest().startswith(expected):
             return raw
         raise
 

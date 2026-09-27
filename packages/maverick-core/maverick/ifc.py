@@ -24,8 +24,9 @@ Enforcement
     labels for the rest of the run, and a later call that copies the data
     literally asks again unless the grant saw that too); ``block``.
     ``scope = "explicit"`` only acts when the labelled data itself appears in the
-    outgoing arguments -- and when that cannot be ruled out (a scan cap was hit)
-    it acts as ``context`` does. A remote MCP server is not tainted by its own
+    outgoing arguments -- and when that cannot be ruled out (a scan cap was hit,
+    or the labels came from a repository or an earlier run and so have no
+    fingerprints) it acts as ``context`` does. A remote MCP server is not tainted by its own
     output: labels from ``mcp_<server>__*`` are ignored on calls to that server.
 Persistence
     Labels outlive the run: they are kept per goal and per conversation, so a
@@ -98,30 +99,61 @@ def _is_sink(tool: str) -> bool:
     return EXTERNAL in classify(tool)
 
 
+# Argument names that say where a call sends. Query text is deliberately not a
+# destination: it is where exfiltrated data sits, and a search engine is one.
 _DEST_KEYS = frozenset({
     "to", "cc", "bcc", "recipient", "recipients", "email", "address", "phone", "number",
     "url", "uri", "endpoint", "host", "domain", "webhook", "channel", "chat_id", "room",
-    "repo", "repository", "remote", "bucket", "path", "query", "q",
+    "repo", "repository", "remote", "bucket", "channel_id", "user_id", "username",
 })
+_DEST_SUFFIXES = ("_url", "_uri", "_email", "_address", "_phone", "_number", "_webhook")
+
+
+def _dest_parts(value: object, prefix: str, depth: int, out: list[str]) -> None:
+    if depth > 6 or len(out) > 32:
+        return
+    if isinstance(value, str) and value[:1] in "{[" and depth:
+        try:
+            value = json.loads(value)  # REST connectors pass the body as JSON text
+        except ValueError:
+            return
+    if isinstance(value, dict):
+        for key in sorted(str(k) for k in value):
+            v = value[key]
+            path = f"{prefix}.{key}" if prefix else key
+            k = key.casefold()
+            if (k in _DEST_KEYS or k.endswith(_DEST_SUFFIXES)) and not isinstance(v, (dict, list)):
+                out.append(f"{path}={json.dumps(v, sort_keys=True, default=str)[:512]}")
+            else:
+                _dest_parts(v, path, depth + 1, out)
+    elif isinstance(value, list):
+        for i, v in enumerate(value[:32]):
+            _dest_parts(v, f"{prefix}[{i}]", depth + 1, out)
 
 
 def destination(args: object) -> str:
-    """Where a call sends, from its conventional argument names (sorted, bounded).
-    A grant is for one destination: approving a send to finance@ is not approval
-    to send the same data anywhere else."""
-    if not isinstance(args, dict):
-        return ""
-    parts = []
-    for key in sorted(str(k) for k in args):
-        if key.casefold() in _DEST_KEYS:
-            v = args[key]
-            parts.append(f"{key}={json.dumps(v, sort_keys=True, default=str)[:512]}")
-    return "&".join(parts)[:2048]
+    """Where a call sends, from its conventional argument names at any depth
+    (sorted, bounded). A grant is for one destination: approving a send to
+    finance@ is not approval to send the same data anywhere else. ``""`` means
+    the destination could not be identified, and such a call is never covered
+    by a grant."""
+    out: list[str] = []
+    _dest_parts(args, "", 0, out)
+    return "&".join(out)[:2048]
+
+
+def display_destination(dest: str) -> str:
+    """``dest`` for a human prompt: URL query strings and fragments (where data
+    rides) are elided."""
+    return re.sub(r"[?#][^\"&\s]*", "?…", dest)[:300]
 
 
 def _mcp_server(tool: str) -> str | None:
-    m = re.match(r"mcp_(.+?)__", tool)
-    return m.group(1) if m else None
+    # Remote tool names cannot contain "__" (mcp_tools); server names can, so
+    # the server is everything before the LAST separator.
+    if not tool.startswith("mcp_") or "__" not in tool[4:]:
+        return None
+    return tool[4:].rsplit("__", 1)[0]
 
 
 def stricter(a: str, b: str) -> str:
@@ -160,6 +192,9 @@ class FlowTracker:
             raise ValueError(f"ifc mode must be one of {MODES}")
         if self.scope not in ("context", "explicit"):
             raise ValueError("ifc scope must be 'context' or 'explicit'")
+        # Labels a run starts with (a repository, an earlier run's data) have no
+        # fingerprints here, so a literal copy of that data cannot be ruled out.
+        self._saturated = bool(self.base_labels)
 
     # -- labels ------------------------------------------------------------
     def labels(self, agent: str) -> frozenset[str]:
@@ -224,8 +259,8 @@ class FlowTracker:
         budget = _MAX_SCAN_CHARS
         try:
             for value in _strings(args):
-                if len(value) > budget:
-                    unknowable = True
+                if len(value) >= budget:
+                    unknowable = True  # this string or those after it go unscanned
                 text = _norm(value[:budget])
                 budget -= len(text)
                 fps.update(_fp(text[i:i + _WINDOW])
@@ -257,6 +292,8 @@ class FlowTracker:
     def granted(self, decision: Decision) -> bool:
         """A grant covers the same sink and destination, no new labels, and no
         literal copy the approver was not told about."""
+        if not decision.destination:
+            return False  # an unidentified destination is asked about every time
         with self._lock:
             return any(t == decision.tool and d == decision.destination
                        and decision.labels <= ls and decision.explicit <= ex
@@ -289,6 +326,8 @@ class FlowTracker:
             prior |= _load(key)
         with self._lock:
             self.base_labels = frozenset(self.base_labels | prior)
+            if prior:
+                self._saturated = True  # restored labels carry no fingerprints
             known = prior | set(self.base_labels)
             for agent_labels in self._agents.values():
                 known |= agent_labels

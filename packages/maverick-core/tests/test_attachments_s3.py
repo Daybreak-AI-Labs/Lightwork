@@ -314,3 +314,13 @@ def test_plaintext_that_starts_with_the_seal_magic_stays_readable(monkeypatch, t
     forged.write_bytes(data)  # digest prefix does not match: not a legacy upload
     with pytest.raises(att.AttachmentRejected):
         att.read_bytes(forged)
+
+
+def test_a_sealed_file_that_will_not_open_is_refused_even_with_encryption_off(monkeypatch, tmp_path):
+    from maverick.paths import tenant_scope
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    with tenant_scope(tenant="acme"):
+        st = att.store(5, "q.txt", "text/plain", b"acme only", root=tmp_path)
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    with tenant_scope(tenant="beta"), pytest.raises(att.AttachmentRejected):
+        att.read_bytes(st.path)
