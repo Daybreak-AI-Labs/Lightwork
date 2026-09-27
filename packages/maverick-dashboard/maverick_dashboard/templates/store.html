@@ -73,9 +73,9 @@
     </div>
     <p id="st-none" class="muted" hidden>No skills match. Try other words.</p>
   {% else %}
-    <div class="panel">
-      <p><strong>No skills to show</strong></p>
-      <p class="muted">The catalog is empty or couldn't be reached. Try again in a minute{% if catalog_admin %}, or
+    <div class="mv-empty">
+      <p class="mv-empty__title">No skills to show</p>
+      <p class="mv-empty__body">The catalog is empty or couldn't be reached. Try again in a minute{% if catalog_admin %}, or
         add your organization's own catalog below{% endif %}.</p>
       <p class="st-actions"><a class="btn btn--primary" href="/store">Try again</a>
         <a class="btn" href="/skills">Create your own skill</a></p>
