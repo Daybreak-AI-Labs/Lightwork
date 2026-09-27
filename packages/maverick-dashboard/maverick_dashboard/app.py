@@ -3197,8 +3197,14 @@ async def workflow_readiness_page(request: Request) -> HTMLResponse:
     from .workflow_readiness import for_request
 
     require_permission(request, "view")
-    if config.config_source_errors(include_tenant=True) or config.get_features().get("workflow_readiness") is not True:
-        raise HTTPException(403, "Workflow readiness is disabled in Settings or configuration is unavailable.")
+    unavailable = bool(config.config_source_errors(include_tenant=True))
+    if unavailable or config.get_features().get("workflow_readiness") is not True:
+        # Friendly turned-off page (still 403) instead of a bare error.
+        return templates.TemplateResponse(
+            request, "workflow_readiness.html",
+            {"capabilities": [], "disabled": True, "unavailable": unavailable,
+             "can_turn_on": has_permission(request, "admin")},
+            status_code=403, headers={"Cache-Control": "private, no-store"})
     return templates.TemplateResponse(request, "workflow_readiness.html", {"capabilities": for_request(request)},
                                       headers={"Cache-Control": "private, no-store"})
 
@@ -5599,6 +5605,7 @@ async def discovery_page(request: Request) -> HTMLResponse:
 @app.get("/simulate", response_class=HTMLResponse)
 async def simulate_page(request: Request) -> HTMLResponse:
     """Dry-run a proposed action: its risk + whether it would be gated, no run."""
+    from . import simulate_choices
     from .control_plane import simulate_action
 
     surface = request.query_params.get("surface") or ""
@@ -5613,6 +5620,9 @@ async def simulate_page(request: Request) -> HTMLResponse:
             "action": action,
             "target": target,
             "result": result,
+            "plain": simulate_choices.explain(result),
+            "surfaces": simulate_choices.SURFACES,
+            "action_groups": simulate_choices.action_groups(),
             "research_component": "tabular",
             "research_result": None,
             "research_error": None,
@@ -5643,13 +5653,19 @@ async def simulate_research_page(
         )
     except HTTPException as exc:
         status_code = exc.status_code
-        research_error = str(exc.detail)
-    except ValueError as exc:
+        research_error = (
+            "Sign in with your own named account to run a practice study."
+            if exc.status_code in (401, 403)
+            else "The practice study could not start. Please try again."
+        )
+    except ValueError:
         status_code = 400
-        research_error = str(exc)
+        research_error = "Choose a study type from the list and try again."
     except ResearchSimulationError:
         status_code = 503
-        research_error = "The isolated research simulator is unavailable."
+        research_error = "Practice studies are not available right now."
+    from . import simulate_choices
+
     return templates.TemplateResponse(
         request,
         "simulate.html",
@@ -5658,6 +5674,9 @@ async def simulate_research_page(
             "action": "",
             "target": "",
             "result": None,
+            "plain": None,
+            "surfaces": simulate_choices.SURFACES,
+            "action_groups": simulate_choices.action_groups(),
             "research_component": component,
             "research_result": research_result,
             "research_error": research_error,

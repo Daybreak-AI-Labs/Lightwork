@@ -3,55 +3,58 @@ from __future__ import annotations
 
 CATALOG = (
     {"name": "Reviewed task delivery", "stage": "available", "feature": "guided_onboarding", "href": "/start", "permission": "operate",
-     "scope": "Guidance from setup through a current human-approved deliverable.",
-     "limit": "Specialist availability and a completed task do not establish customer success. Provider setup and a real reviewed result are required."},
+     "scope": "Step-by-step help from first setup to a finished piece of work that a person has approved.",
+     "limit": "A finished task is not proof the result is right for your business. Connect an AI provider and review a real result first."},
     {"name": "Action Center", "stage": "available", "feature": "action_center", "href": "/action-center", "permission": "operate",
-     "scope": "Your permitted approvals, sign-offs, assessments and assigned project reviews, with private read and snooze choices.",
-     "limit": "Unavailable and bounded sources are disclosed. Snoozing does not pause work or extend a deadline."},
+     "scope": "Everything waiting for you in one place: approvals, sign-offs, assessments and reviews. Mark items read or snooze them.",
+     "limit": "Snoozing only hides an item for you. It does not pause the work or move its deadline."},
     {"name": "Editor recovery", "stage": "available", "feature": "draft_recovery", "href": "/workflow-builder", "permission": "operate",
-     "scope": "Encrypted account/workspace recovery for supported agent, workflow and guided editors.",
-     "limit": "Credentials and attachments are excluded. Restoring a draft never runs or publishes it. It is not a full workspace backup."},
+     "scope": "Get back unsaved work in the agent, workflow and guided editors after a browser crash or closed tab.",
+     "limit": "Passwords, keys and attachments are not kept. Restoring a draft never runs or publishes it, and it is not a full backup."},
     {"name": "Business record search", "stage": "available", "feature": "record_search", "href": None, "permission": "view",
-     "scope": "Use the page finder to search permitted record names, references and version metadata.",
-     "limit": "Document bodies are excluded. Coverage, source failures, pagination and changed search snapshots are explicit."},
+     "how": "Use the search box at the top of any page.",
+     "scope": "Find records you are allowed to see by name or reference from the search box at the top of every page.",
+     "limit": "The text inside documents is not searched. The results tell you when a source could not be searched."},
     {"name": "Vendor evidence and renewal", "stage": "live_validation", "feature": None, "href": "/third-party/vendor-onboarding", "permission": "operate", "suite": "privacy",
-     "scope": "Multiple supported documents, native Google Docs export, PDF page citations, missing/conflicting facts, reviewed Jira proposals and evidence renewal differences.",
-     "limit": "Parsing is bounded. Samples are synthetic. Actual Drive/Jira access, approved writes, external confirmation and customer acceptance need live evidence."},
+     "scope": "Read vendor documents (including Google Docs and PDFs), point out missing or conflicting facts, suggest Jira tickets for you to approve, and compare evidence at renewal.",
+     "limit": "Try it with your own Google Drive and Jira accounts and a real vendor before relying on it. The built-in examples are made up."},
     {"name": "Privacy discovery setup", "stage": "live_validation", "feature": None, "href": "/privacy/data-discovery", "permission": "operate", "suite": "privacy",
-     "scope": "Saved connection selection, exact credential version binding, evidence-key setup/rotation and explicit source access checks.",
-     "limit": "A saved connection or public service readiness check does not prove access to a private source. Provider scopes and actual source access are required."},
+     "scope": "Choose a saved connection for each data source, keep its key up to date, and check that Lightwork can reach it.",
+     "limit": "A saved connection does not prove Lightwork can read a private source. Run the access check on each real source."},
     {"name": "Consent publication", "stage": "live_validation", "feature": None, "href": "/consent/publishing", "permission": "operate", "suite": "privacy",
-     "scope": "Choose saved property/content versions, inspect consent changes and retain corrected form inputs.",
-     "limit": "Publication still requires its governed review, current consent state and connected delivery configuration. Local tests do not prove a live property deployment."},
+     "scope": "Pick the website and wording to publish, see what changes for visitors, and keep your edits if something needs fixing.",
+     "limit": "Publishing still needs its review and a connected website. Check the live site after you publish."},
     {"name": "External delivery reconciliation", "stage": "live_validation", "feature": None, "href": "/security/governance", "permission": "admin", "suite": "security",
-     "scope": "Compare a held GRC delivery against its attempted payload and target, then record a fresh verified match or keep it held with a note.",
-     "limit": "Comparison is read-only. A timeout never justifies an automatic resend. A real provider match remains deployment-specific."},
+     "scope": "When a send to your compliance system is on hold, compare what was sent with what arrived, then confirm it or keep it on hold with a note.",
+     "limit": "Comparing never re-sends anything. Lightwork never re-sends automatically after a timeout. Check with your compliance system's owner."},
     {"name": "Project team review", "stage": "available", "feature": "project_reviews", "href": "/project-reviews", "permission": "view",
-     "scope": "Owners share selected fixed task results with named workspace reviewers and retain comments, decisions, due dates and revocable membership.",
-     "limit": "Requires named accounts and a selected workspace. Packet review does not execute, edit or sign off the live task."},
+     "scope": "Share finished task results with named colleagues and keep their comments, decisions and due dates. You can remove a reviewer at any time.",
+     "limit": "Reviewers need their own sign-in and a workspace. Reviewing never changes or signs off the task itself."},
     {"name": "Local workspace recovery", "stage": "bounded", "feature": "workspace_recovery", "href": "/workspace/recovery", "permission": "admin",
-     "scope": "Signed snapshots, archive comparisons, saved restore-test evidence, retained-key decryption checks and reviewed restore in isolated local recovery mode.",
-     "limit": "Live restore refuses changed spending, protected action history or databases until reconciliation. Temporary tests cover supported local formats; external stores, shared key services and production recovery need separate verification."},
+     "scope": "Save protected copies of this workspace, compare them, test a restore, and restore safely on this computer.",
+     "limit": "A restore stops if spending or approval history has changed since the copy was made. Copies kept on other systems need a separate check."},
     {"name": "Workflow pilot measurement", "stage": "preview", "feature": "outcome_measurement", "href": "/outcome-pilots", "permission": "operate",
-     "scope": "Frozen case plans, attributed baseline/effort/correction/cost observations and current accepted/rejected outcomes, with all planned cases retained.",
-     "limit": "Provider invoice authenticity and model-training isolation are not established by this page. Observed customer baselines and a controlled held-out pilot remain required."},
+     "scope": "Plan a trial, record how long work took before and after, the corrections needed and the cost, and see which results were accepted.",
+     "limit": "This page does not check your AI provider's bill. Compare against real work you measured before the trial."},
     {"name": "Runtime accounting receipts", "stage": "bounded", "feature": None, "href": "/billing", "permission": "view",
-     "scope": "Durable local usage receipts and safe retry accounting for SQLite checkpointed runs, with a private Billing trail.",
-     "limit": "Internal quota accounting is not a provider invoice. Legacy ambiguous usage and spend never persisted before process loss require external reconciliation."},
+     "scope": "Lightwork keeps its own record of what each task used and what it cost, including tasks that were retried.",
+     "limit": "This is not your AI provider's bill. Some older usage recorded before a crash may be missing, so compare with your provider's statement."},
     {"name": "Windows customer application", "stage": "release_candidate", "feature": None, "href": None, "permission": "view",
-     "scope": "Packaged runtime with in-app setup, update, repair and guarded recovery, built and inspected as a local installer candidate.",
-     "limit": "Recognized publisher signing and clean-machine installation, repair, upgrade and rollback acceptance remain release requirements."},
+     "how": "Ask your administrator for the Windows installer.",
+     "scope": "A Windows app with built-in setup, updates, repair and recovery.",
+     "limit": "It is still being tested on fresh computers before its general release."},
     {"name": "Learning and improvement", "stage": "experimental", "feature": None, "href": "/oversight", "permission": "view",
-     "scope": "Governed learning, review and rollback machinery with local and synthetic evaluation evidence.",
-     "limit": "A passing synthetic benchmark does not establish improvement on held-out customer work. Keep evaluation contamination, budget caps and promotion review in scope."},
+     "scope": "Lightwork learns from reviewed work, lets you check what it learned, and lets you undo it.",
+     "limit": "Good results on practice tests do not guarantee better results on your work. Keep spending limits and reviews in place."},
     {"name": "Watch and spatial companion surfaces", "stage": "prototype", "feature": None, "href": None, "permission": "view",
-     "scope": "Repository scaffolds for selected companion views.",
-     "limit": "These require platform toolchains, device builds and on-device usability validation. They are not accepted customer releases."},
+     "how": "Not available to install yet.",
+     "scope": "Early designs for smartwatch and headset views.",
+     "limit": "These are not released and cannot be installed yet."},
 )
 
-LABELS = {"available": "Available in app", "live_validation": "Live validation required",
-    "bounded": "Available within stated limits", "preview": "Preview", "release_candidate": "Release candidate",
-    "experimental": "Experimental", "prototype": "Prototype"}
+LABELS = {"available": "Ready to use", "live_validation": "Needs a real-world check",
+    "bounded": "Ready, with limits", "preview": "Early preview", "release_candidate": "Almost ready",
+    "experimental": "Experimental", "prototype": "In design"}
 
 
 def supplier_setup_readiness(state):
@@ -89,14 +92,16 @@ def for_request(request):
         if not suite_allowed(request, record.get("suite")):
             continue
         row = {**record, "stage_label": LABELS[record["stage"]]}
-        row["configuration"] = "Enabled" if record["feature"] and features.get(record["feature"]) is True else (
-            "Disabled in Settings" if record["feature"] else "Module-specific setup")
+        row["configuration"] = "Turned on" if record["feature"] and features.get(record["feature"]) is True else (
+            "Turned off in Settings" if record["feature"] else "Set up inside the page")
         if record["href"] == "/third-party/vendor-onboarding":
             from maverick.vendor_onboarding import deployment_readiness
 
             profile = deployment_readiness()
-            row["configuration"] = "Open workflow to review owner and Jira setup" if profile["supported"] else profile["message"]
+            row["configuration"] = "Open the page to choose an owner and connect Jira" if profile["supported"] else profile["message"]
         row["can_open"] = bool(record["href"] and has_permission(request, record["permission"])
                                and (not record["feature"] or features.get(record["feature"]) is True))
+        row["can_turn_on"] = bool(record["feature"] and features.get(record["feature"]) is not True
+                                  and has_permission(request, "admin"))
         rows.append(row)
     return rows
