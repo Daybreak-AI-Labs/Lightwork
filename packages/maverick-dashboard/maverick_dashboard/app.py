@@ -1177,6 +1177,9 @@ app.include_router(_privacy_actions_router)
 from .ui_choices_api import router as _ui_choices_router  # noqa: E402
 
 app.include_router(_ui_choices_router)
+from .trust_page_api import router as _trust_page_router  # noqa: E402
+
+app.include_router(_trust_page_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -5547,9 +5550,24 @@ def replay_page(request: Request) -> HTMLResponse:
 async def trust_page(request: Request) -> HTMLResponse:
     """Agent Trust Plane: the cross-agent permission graph -- every external
     agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
-    from .control_plane import trust_overview
+    from .control_plane import _discover_tools, trust_overview
+    from .trust_page_api import managed_ids
+    from .ui_choices_api import work_area_choices
 
-    return templates.TemplateResponse(request, "trust.html", trust_overview())
+    context = trust_overview()
+    managed = managed_ids()
+    for agent in context.get("agents", []):
+        agent["managed"] = agent["id"] in managed
+    tools = sorted({t["name"] for t in (_discover_tools().get("entries") or [])}
+                   | {name for a in context.get("agents", []) for name in a["allow_tools"] + a["deny_tools"]
+                      if name != "*"})
+    context.update({
+        "tool_choices": [[name, _idfmt.humanize(name)] for name in tools],
+        "area_choices": work_area_choices(
+            _world(), [s for a in context.get("agents", []) for s in a["data_scopes"]]),
+        "can_admin": has_permission(request, "admin"),
+    })
+    return templates.TemplateResponse(request, "trust.html", context)
 
 
 @app.get("/external-agents", response_class=HTMLResponse)

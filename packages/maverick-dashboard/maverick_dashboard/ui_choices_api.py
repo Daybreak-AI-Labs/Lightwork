@@ -43,6 +43,44 @@ def people_choices() -> list[dict]:
     return rows[:_LIMIT]
 
 
+def work_area_choices(world, extra=()) -> dict:
+    """Work areas (the specialist area a task ran in) for a selector: the
+    areas in ``extra`` and recent tasks first, then every enabled specialist
+    area grouped by department. ``{"recent": [[value, label]...],
+    "groups": [{"label", "options": [[value, label]...]}]}``."""
+    from .identity_format import humanize
+
+    recent: dict[str, str] = {}
+    for value in extra or ():
+        if value:
+            recent[value] = humanize(value)
+    try:
+        for goal in world.list_goals(limit=500, order="desc"):
+            domain = getattr(goal, "domain", "") or ""
+            if domain and domain not in recent and len(recent) < 60:
+                recent[domain] = humanize(domain)
+    except Exception:
+        pass
+    groups = []
+    try:
+        from maverick.departments import list_departments
+        from maverick.domain import SUITE_PREFIXES
+
+        def label(name: str) -> str:
+            for prefix in SUITE_PREFIXES:
+                if name.startswith(prefix) and len(name) > len(prefix):
+                    return humanize(name[len(prefix):])
+            return humanize(name)
+
+        for dept in list_departments():
+            groups.append({"label": dept.title,
+                           "options": [[m, label(m)] for m in dept.members if m not in recent]})
+    except Exception:
+        groups = []
+    return {"recent": [[k, v] for k, v in sorted(recent.items(), key=lambda kv: kv[1].lower())],
+            "groups": groups}
+
+
 @router.get("/people")
 async def list_people(request: Request) -> dict:
     require_permission(request, "operate")

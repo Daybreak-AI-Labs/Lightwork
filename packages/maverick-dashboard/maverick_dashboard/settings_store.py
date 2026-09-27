@@ -475,7 +475,7 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
-                    "research_execution",
+                    "research_execution", "agent_trust",
                     *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
                     *SWITCHABLE_SECTIONS)):
@@ -963,6 +963,14 @@ SWITCHABLE_SECTIONS: tuple[str, ...] = (
     "rehearsal", "flows", "threat_hunt", "env_hunt", "entity_graph",
     "shoring",
 )
+
+
+def set_agent_trust_enforce(enforced: bool) -> None:
+    """Overlay ``[agent_trust] enforce`` (block outside agents not on the list)."""
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault("agent_trust", {})["enforce"] = bool(enforced)
+        _write(data)
 
 
 def set_section_enable(section: str, enabled: bool) -> None:

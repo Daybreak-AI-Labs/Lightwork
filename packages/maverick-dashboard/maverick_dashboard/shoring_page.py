@@ -47,38 +47,9 @@ def _people() -> list[dict]:
 
 
 def _department_choices(world, functions) -> dict:
-    """Work areas a function can be measured against: the areas recent tasks
-    ran in first, then every enabled specialist area grouped by department."""
-    from .identity_format import humanize
+    from .ui_choices_api import work_area_choices
 
-    recent: dict[str, str] = {}
-    for f in functions or []:
-        if f.get("department"):
-            recent[f["department"]] = humanize(f["department"])
-    try:
-        for goal in world.list_goals(limit=500, order="desc"):
-            domain = getattr(goal, "domain", "") or ""
-            if domain and domain not in recent and len(recent) < 60:
-                recent[domain] = humanize(domain)
-    except Exception:
-        pass
-    groups = []
-    try:
-        from maverick.departments import list_departments
-        from maverick.domain import SUITE_PREFIXES
-
-        def label(name: str) -> str:
-            for prefix in SUITE_PREFIXES:
-                if name.startswith(prefix) and len(name) > len(prefix):
-                    return humanize(name[len(prefix):])
-            return humanize(name)
-
-        for dept in list_departments():
-            groups.append({"label": dept.title,
-                           "options": [[m, label(m)] for m in dept.members if m not in recent]})
-    except Exception:
-        groups = []
-    return {"recent": sorted(recent.items(), key=lambda kv: kv[1].lower()), "groups": groups}
+    return work_area_choices(world, [f.get("department") for f in functions or []])
 
 
 def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
