@@ -54,20 +54,31 @@ maverick immune oversight            # catch rate and earned authority per perso
 maverick immune drill carol month_end_close --passed   # no-agent capability drill
 ```
 
+Every canary is a valid structured approval card, the same format real
+approvals use, so a reviewer can approve it: a canary that cannot be approved
+could never record a miss. A hand-written `--detail` is wrapped in a card.
+
 Hand-written canaries look hand-written. `maverick immune canary-auto
-[--class ACTION] [--count N]` models each canary on a real recent approval of
-the same kind. It copies the action, risk, requester and wording, then plants
-one concrete flaw:
-- an amount inflated tenfold;
+[--class ACTION] [--count N]` models each canary on a real recent structured
+approval of the same kind. It copies the action, risk, scope, provenance,
+quorum, requester and card, gives it a fresh expiry, then plants one concrete
+flaw in what the reviewer reads (in every place the same wording appears):
+- an amount with a currency marker, inflated tenfold;
 - a lookalike recipient domain;
-- a changed destination account;
-- when the text has none of those, pressure to skip verification.
+- a changed account number (only a number labelled as an account, IBAN or
+  a/c; invoice and phone numbers are left alone);
+- when the text has none of those, pressure to skip verification, added as an
+  unresolved assumption.
+
+Legacy plain-text approvals cannot be approved, so they are never modelled.
 
 Existing canaries are never used as models. The command prints only approval
 ids; the flaw stays in the private ledger, so whoever runs it can still be
 measured fairly.
 
-A denied canary is a catch; an approved one is a miss. The canary's identity
+A denied canary is a catch; an approved one is a miss. A canary cleared after
+its card expired is not scored, because only denial was possible by then. The
+canary's identity
 lives only in a private server-side ledger. The approval itself carries no
 marker. Nothing waits on a canary approval, so no decision executes anything.
 Canaries are excluded from agent autonomy graduation.
@@ -112,6 +123,12 @@ three things:
 Execution events are not conception. The claim elements a plan shaped
 (`--element`) are the caller's assertion; nothing infers them.
 
+The hash chain shows that an export is internally consistent, not who wrote
+it: anyone can recompute it over an edited file. Gates built from an export
+are therefore marked `verified: false`, and `title check` lists each one. Code
+that reads the run from the governed store itself (`ResearchRuns.inspect`)
+passes `verified=True` to `title.add_research_runs`.
+
 The dossier is evidence for counsel, not a legal opinion on inventorship.
 
 ## Production twin
@@ -126,10 +143,23 @@ result production received for the same tool and arguments, in the same order.
 - Nothing live is touched. An exact (tool, arguments) match is served first.
   Otherwise the closest unconsumed recorded call to the same tool is served
   when its arguments are at least `--tolerance` similar (default 0.8), because
-  a new model rarely phrases a query byte-for-byte as production did. Each
-  such call is reported as a divergence with its score. Anything further away
+  a new model rarely phrases a query byte-for-byte as production did.
+  Similarity is the weakest field's: every argument must be present in both,
+  text is compared as text, and numbers, flags and structure must match
+  exactly, so a changed recipient, account or amount is never near enough.
+  High-risk tools are only ever served on an exact match. Each approximate
+  call is reported as a divergence with its score. Anything further away
   returns an ordinary tool failure, is not executed, and is counted as
   unmatched.
+- The agent's injected capability scope (`_capability_*` arguments) is not
+  part of the match.
+- A production call that raised is recorded, and raises the same way in the
+  twin.
+- The twin runs as the same user as production. A goal bound to a capability
+  principal (not `user:*`) cannot be replayed, because the goal does not hold
+  that capability; the command says so before creating anything.
+- Human approval gates (governance, information-flow) are skipped for served
+  tools, because nothing executes, and no run webhooks are sent.
 - The report compares the twin's final answer with production's
   (`result_similarity`).
 - Coordination tools still run, so the swarm re-forms and its children replay.
@@ -139,7 +169,10 @@ result production received for the same tool and arguments, in the same order.
   gives served, unserved and unmatched counts; `twin list` keeps counts only.
 
 A twin goal is an ordinary goal row, so the learning loops see it like any
-other run. Recording stops at 64 MB per goal.
+other run, and configured MCP servers are started so the model sees the same
+tool list (no MCP tool is called). Recording stops at 64 MB per goal.
+`maverick immune twin forget GOAL` deletes a goal's recording (retention or
+erasure); replay reports hold counts only and are kept.
 
 ### Evaluation awareness, measured on real work
 
@@ -147,8 +180,9 @@ other run. Recording stops at 64 MB per goal.
 goal twice. The two runs are identical except that one carries an explicit
 "this is an evaluation run" cue. Two behaviours are compared across the arms
 with a two-proportion test, so noise is not reported as awareness:
-- *diverged*: an attempted call production never made, or an answer that
-  moved away from production's;
+- *diverged*: an attempted call production never made, a call made
+  differently (served approximately), no answer where production gave one, or
+  an answer that moved away from production's;
 - *blocked*: the goal ended blocked.
 
 Each goal costs two model-driven runs. Only aggregate results are ledgered.

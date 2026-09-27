@@ -121,7 +121,17 @@ def test_canary_auto_prints_ids_but_never_the_flaw(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
     monkeypatch.setattr(config, "get_immune", lambda: {"canaries": True, "twin_record": False})
     db = tmp_path / "w.db"
-    WorldModel(db).create_approval("stripe_payout", detail="Pay $1,200.00 to ops@acme.com")
+    import time
+
+    from maverick.approval_cards import build_approval_card, encode_approval_detail
+    summary = "Pay $1,200.00 to ops@acme.com"
+    WorldModel(db).create_approval("stripe_payout", detail=encode_approval_detail(
+        build_approval_card(
+            action="stripe_payout", summary=summary, target_label="acme", target={},
+            parameters={}, parameter_summary=[summary], actor="agent:ap", workspace="default",
+            role="operator", authority_versions={}, input_versions={}, credential_versions={},
+            budget={}, expires_at=time.time() + 600, known_effects=["Moves money."],
+            unresolved_assumptions=[], before="Unpaid.", after="Paid.", irreversible=True)))
     monkeypatch.setattr(groups, "open_world", lambda *a, **k: WorldModel(db))
     out = _run("canary-auto", "--count", "2")
     assert out.exit_code == 0, out.output
@@ -133,3 +143,56 @@ def test_canary_auto_prints_ids_but_never_the_flaw(tmp_path, monkeypatch):
 
 def test_awareness_requires_exactly_one_source():
     assert _run("awareness").exit_code != 0
+
+
+def test_malformed_inputs_are_clean_errors_not_tracebacks(tmp_path):
+    bad = tmp_path / "list.json"
+    bad.write_text("[1, 2]")
+    empty = tmp_path / "empty.json"
+    empty.write_text("{}")
+    sealed = tmp_path / "sealed.json"
+    sealed.write_text(json.dumps({"dossier": {}}))
+    for args in (("title", "check", str(bad)), ("title", "check", str(empty)),
+                 ("title", "verify", str(sealed)),
+                 ("title", "research", str(empty), str(bad), "-o", str(tmp_path / "o.json")),
+                 ("awareness", "--goals", ",")):
+        out = _run(*args)
+        assert out.exit_code != 0 and not isinstance(out.exception, (KeyError, TypeError,
+                                                                     AttributeError,
+                                                                     ZeroDivisionError)), (
+            args, out.output, out.exception)
+
+
+def test_oversight_report_strips_terminal_control_from_the_class(tmp_path, monkeypatch):
+    import maverick.cli._immune_groups as groups
+    from maverick.immune import oversight
+    monkeypatch.setattr(oversight, "score", lambda world, kind="canary": {
+        ("alice", "pay\rments"): oversight.Stats(caught=1)})
+    monkeypatch.setattr(groups, "open_world", lambda *a, **k: None)
+    out = _run("oversight")
+    assert out.exit_code == 0 and "\r" not in out.output
+
+
+def test_twin_forget_deletes_a_recording(tmp_path, monkeypatch):
+    import asyncio
+
+    from maverick.immune import twin
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(config, "get_immune", lambda: {"canaries": False, "twin_record": True})
+
+    async def live():
+        return "out"
+    asyncio.run(twin.dispatch(9, "web_search", {"q": "x"}, live))
+    assert twin.load(9)
+    assert "deleted" in _run("twin", "forget", "9").output
+    assert twin.load(9) == [] and "not found" in _run("twin", "forget", "9").output
+
+
+def test_a_pack_with_no_allowlist_can_call_every_tool(monkeypatch):
+    from maverick import domain
+    from maverick.capability import Capability
+    from maverick.immune import network as n
+    monkeypatch.setattr(domain, "domain_capability", lambda *a, **k: Capability(principal="agent:custom"))
+    tools = n.runtime_tools(type("P", (), {"name": "custom"})())
+    assert {"read_file", "email", "http_fetch"} <= tools

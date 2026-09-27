@@ -124,3 +124,35 @@ def test_client_never_injects_html():
     from maverick.a11y_audit import audit_file
     assert audit_file(TEMPLATES / "immune.html") == []
     assert audit_file(TEMPLATES / "code.html") == []
+
+
+def test_canaries_are_valid_cards_a_reviewer_can_approve(client, monkeypatch, tmp_path):
+    """A canary nobody can approve can never record a miss."""
+    import random
+    import time
+
+    from maverick import config
+    from maverick.approval_cards import build_approval_card, encode_approval_detail
+    from maverick.immune import oversight
+    from maverick_dashboard import app as dash_app
+    monkeypatch.setattr(config, "get_immune", lambda: {"canaries": True, "twin_record": False})
+    world = dash_app._world()
+    world.create_approval("wire-funds", risk="high", detail=encode_approval_detail(
+        build_approval_card(
+            action="wire-funds", summary="Pay $10,000.00 to ops@acme.com", target_label="acme",
+            target={"v": "acme"}, parameters={"n": 1}, parameter_summary=["Pay once"],
+            actor="user:alice", workspace="default", role="operator", authority_versions={},
+            input_versions={}, credential_versions={}, budget={}, expires_at=time.time() + 600,
+            known_effects=["Moves money."], unresolved_assumptions=[], before="Unpaid.",
+            after="Paid.", irreversible=True)))
+    generated = oversight.generate_canary(world, rng=random.Random(0))["approval_id"]
+    manual = oversight.seed_canary(world, action="wire-funds", detail="Pay $500.00 to acct 12345678",
+                                   decision_class="payments", flaw="acct changed")
+    rows = {r["id"]: r for r in client.get("/api/v1/approvals").json()["approvals"]}
+    for cid in (generated, manual):
+        row = rows[cid]
+        assert row["approval_card_status"] == "current", row
+        response = client.post(f"/api/v1/approvals/{cid}/approve", headers={
+            "X-Lightwork-Approval-Binding": row["approval_card"]["binding_sha256"]})
+        assert response.status_code in (200, 204), response.text[:300]
+    assert sum(s.missed for s in oversight.score(world).values()) == 2

@@ -23461,7 +23461,7 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 36,
+          "line": 39,
           "function": "ledger_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'oversight.jsonl')"
@@ -23480,13 +23480,19 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 39,
+          "line": 48,
           "function": "recording_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'twin', f'{int(goal_id)}.jsonl')"
         },
         {
-          "line": 182,
+          "line": 102,
+          "function": "forget",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 286,
           "function": "replays_path",
           "kind": "data_dir",
           "expression": "data_dir('immune', 'twin', 'replays.jsonl')"

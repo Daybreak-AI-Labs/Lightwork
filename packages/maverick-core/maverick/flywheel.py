@@ -81,10 +81,17 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         steps, failure_threshold=failure_threshold, min_support=min_support,
         top_k=top_k, outcome_fn=outcome_fn)
 
+    # Learned-state writes are audited like every other learning loop
+    # (dreaming, self-harness): a LEARNING_UPDATE row right after EACH write,
+    # so a later failure cannot leave an earlier write unaudited.
+    from .audit import EventKind, record
+
     rails = negative_knowledge.mine(classes)
     guard_store = guardrails or negative_knowledge.shared()
     check_learning_halt("flywheel", "guardrail_persistence")
     guard_store.update(rails)
+    record(EventKind.LEARNING_UPDATE, agent="flywheel", store="guardrails",
+           episodes=n_eps, written=len(rails))
 
     mem_store = memory or procedural_memory.shared()
     mems = procedural_memory.consolidate(
@@ -92,12 +99,8 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         outcome_fn=outcome_fn)
     check_learning_halt("flywheel", "procedural_memory_persistence")
     mem_store.update(mems)
-
-    # Learned-state writes are audited like every other learning loop
-    # (dreaming, self-harness): one LEARNING_UPDATE row per turn.
-    from .audit import EventKind, record
-    record(EventKind.LEARNING_UPDATE, agent="flywheel", episodes=n_eps,
-           guardrails_written=len(rails), memories_written=len(mems))
+    record(EventKind.LEARNING_UPDATE, agent="flywheel", store="procedural_memory",
+           episodes=n_eps, written=len(mems))
 
     hyps = operations_scientist.propose(classes, mems, top_k=top_k)
     sims: tuple = ()

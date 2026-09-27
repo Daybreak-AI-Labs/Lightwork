@@ -348,6 +348,9 @@ def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
     is configured, so this stays free for users who haven't opted in.
     """
     try:
+        from .immune import twin
+        if twin.active():
+            return  # a production twin replay is not a run anyone subscribed to
         from .webhooks import fire
         fire(event, payload)
     except Exception as e:  # pragma: no cover -- webhooks never block a run

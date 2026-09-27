@@ -96,19 +96,41 @@ def test_signed_record_verifies_and_detects_tampering(world):
     assert not o.verify_record(rec, pub)
 
 
+def _card(action, summary, *, after="Paid.", effects=("Moves money.",)):
+    import time
+
+    from maverick.approval_cards import build_approval_card, encode_approval_detail
+    return encode_approval_detail(build_approval_card(
+        action=action, summary=summary, target_label=action, target={"a": action},
+        parameters={"s": summary}, parameter_summary=[summary], actor="agent:ap_clerk",
+        workspace="default", role="operator", authority_versions={}, input_versions={},
+        credential_versions={}, budget={}, expires_at=time.time() + 3600,
+        known_effects=list(effects), unresolved_assumptions=[], before="Unpaid.",
+        after=after, irreversible=True))
+
+
 def test_generated_canary_copies_a_real_approval_and_plants_one_flaw(world, monkeypatch):
     import random
+
+    from maverick.approval_cards import decode_approval_detail
     monkeypatch.setattr(o, "canaries_enabled", lambda: True)
     real = world.create_approval(
-        "stripe_payout", risk="high", requested_by="agent:ap_clerk",
-        detail="Pay invoice INV-7 $4,250.00 to vendor ops@acme.com, account 12345678")
-    world.create_approval("email", detail="Send weekly digest")  # other class
+        "stripe_payout", risk="high", requested_by="agent:ap_clerk", scope="vendor:acme",
+        provenance="agent", approvals_required=2,
+        detail=_card("stripe_payout",
+                     "Pay invoice INV-7 $4,250.00 to vendor ops@acme.com, account 12345678"))
+    world.create_approval("email", detail=_card("email", "Send weekly digest"))  # other class
+    world.create_approval("stripe_payout", detail="legacy plain text")  # unapprovable: skipped
     out = o.generate_canary(world, decision_class="stripe_payout", rng=random.Random(3))
-    canary = world.get_approval(out["approval_id"])
+    canary, source = world.get_approval(out["approval_id"]), world.get_approval(real)
     assert out["modelled_on"] == real and out["decision_class"] == "stripe_payout"
-    assert (canary.action, canary.risk, canary.requested_by) == (
-        "stripe_payout", "high", "agent:ap_clerk")
-    assert canary.detail != world.get_approval(real).detail
+    assert (canary.action, canary.risk, canary.requested_by, canary.scope, canary.provenance,
+            canary.approvals_required) == ("stripe_payout", "high", "agent:ap_clerk",
+                                           "vendor:acme", "agent", 2)
+    card, orig = decode_approval_detail(canary.detail), decode_approval_detail(source.detail)
+    assert card is not None and card["summary"] != orig["summary"]      # valid, and flawed
+    assert card["parameters"]["summary"] == [card["summary"]]           # flawed consistently
+    assert card["binding_sha256"] != orig["binding_sha256"]
     assert out["flaw"] in {"amount inflated tenfold", "destination account changed"} \
         or out["flaw"].startswith("recipient domain swapped")
     assert out["approval_id"] in o.canary_ids()
@@ -119,10 +141,51 @@ def test_generated_canary_copies_a_real_approval_and_plants_one_flaw(world, monk
 
 def test_generated_canary_falls_back_to_urgency_and_needs_real_history(world, monkeypatch):
     import random
+
+    from maverick.approval_cards import decode_approval_detail
     monkeypatch.setattr(o, "canaries_enabled", lambda: True)
     with pytest.raises(LookupError):
         o.generate_canary(world, decision_class="wire")
     world.create_approval("deploy", detail="Deploy build 42 to production")
+    with pytest.raises(LookupError):
+        o.generate_canary(world)                     # plain-text history only
+    world.create_approval("deploy", detail=_card("deploy", "Deploy build 42 to production",
+                                                 after="Build 42 is live."))
     out = o.generate_canary(world, rng=random.Random(1))
     assert out["flaw"] == "urgency and verification-bypass pressure"
-    assert "skip the usual verification" in world.get_approval(out["approval_id"]).detail
+    card = decode_approval_detail(world.get_approval(out["approval_id"]).detail)
+    assert any("skip the usual verification" in a
+               for a in card["consequences"]["unresolved_assumptions"])
+
+
+@pytest.mark.parametrize("text", [
+    "Upgrade Python 3.12 and set the fee to 12.50% for 2,000 units",
+    "Refund $0.50 on invoice 123456789 and call 5551234567",
+])
+def test_no_fake_flaws_in_versions_rates_invoices_or_phones(text):
+    import random
+    rng = random.Random(0)
+    assert o._inflate(text, rng) is None and o._reroute(text, rng) is None
+
+
+def test_email_pattern_is_linear_on_hostile_text():
+    import time
+    t = time.perf_counter()
+    assert o._lookalike("a." * 20_000 + "x", None) is None
+    assert time.perf_counter() - t < 1.0
+
+
+def test_plain_text_canary_is_wrapped_in_a_valid_card(world):
+    from maverick.approval_cards import decode_approval_detail
+    cid = _canary(world)
+    card = decode_approval_detail(world.get_approval(cid).detail)
+    assert card["summary"] == "Vendor bank details changed 2h ago"
+
+
+def test_canaries_cleared_after_expiry_are_not_scored(world, monkeypatch):
+    import time
+    cid = _canary(world)
+    real_time = time.time
+    monkeypatch.setattr(time, "time", lambda: real_time() + 2 * o._DEFAULT_TTL)
+    world.decide_approval(cid, "denied", decided_by="alice")
+    assert o.score(world) == {}

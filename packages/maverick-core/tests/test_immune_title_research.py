@@ -42,16 +42,40 @@ def test_planning_decisions_become_framed_gates_and_inputs(services):
     names = [i["name"] for i in ev["inputs"]]
     assert names[0].startswith("code:") and "dataset:dataset-one@v1" in names
 
-    dossier = title.add_research_runs(_dossier(), [{"run": run}], ["assay-design"])
+    # read from the governed store itself: verified
+    dossier = title.add_research_runs(_dossier(), [{"run": run}], ["assay-design"], verified=True)
     assert title.problems(dossier) == []
-    assert title.add_research_runs(dossier, [run], ["assay-design"]) == dossier  # idempotent
+    assert title.add_research_runs(dossier, [run], ["assay-design"],
+                                   verified=True) == dossier  # idempotent
     # without the caller's element assertion, nothing is inferred
-    assert title.problems(title.add_research_runs(_dossier(), [run])) == [
+    assert title.problems(title.add_research_runs(_dossier(), [run], verified=True)) == [
         "claim element without human conception: assay-design"]
     # an idea recorded before the run's inputs were pinned is reported
     early = _dossier(priority=[{"commitment": "c", "at": plan_event["recorded_at"] - 1}])
     assert "inputs were committed after the first recorded idea" in title.problems(
         title.add_research_runs(early, [run], ["assay-design"]))
+
+
+def test_an_export_with_recomputed_digests_is_reported_unverified(services):
+    import hashlib
+
+    from maverick.immune import _ledger
+    registry, runs, state = services
+    run = copy.deepcopy(runs.inspect(TENANT, "user:researcher",
+                                     _plan(runs, _dataset(registry, state))["run_id"]))
+    event = run["attempts"][0]["events"][0]
+    event["actor"] = "user:mallory"
+    body = {k: v for k, v in event.items() if k != "event_sha256"}
+    event["event_sha256"] = hashlib.sha256(_ledger.canonical(body)).hexdigest()
+    for later in run["attempts"][0]["events"][1:]:  # re-chain whatever follows
+        later["previous_event_sha256"] = event["event_sha256"]
+        body = {k: v for k, v in later.items() if k != "event_sha256"}
+        later["event_sha256"] = event = hashlib.sha256(_ledger.canonical(body)).hexdigest()
+    dossier = title.add_research_runs(_dossier(), [run], ["assay-design"])  # an export
+    (gate,) = dossier["gates"]
+    assert gate["human"] == "user:mallory" and gate["verified"] is False
+    assert title.problems(dossier) == [
+        f"conception gate rests on an unverified research export: {gate['id']}"]
 
 
 def test_tampered_run_history_is_refused(services):
@@ -81,4 +105,5 @@ def test_cli_adds_research_runs_to_a_dossier(services, tmp_path):
                                     "--element", "assay-design", "-o", str(out)])
     assert res.exit_code == 0, res.output
     assert "1 conception gate(s) added" in res.output
-    assert CliRunner().invoke(main, ["immune", "title", "check", str(out)]).exit_code == 0
+    check = CliRunner().invoke(main, ["immune", "title", "check", str(out)])
+    assert check.exit_code == 1 and "unverified research export" in check.output

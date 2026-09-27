@@ -15,7 +15,13 @@ from . import _strip_terminal_control, main, open_world
 
 
 def _load(path: str) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise click.ClickException(f"{path}: not readable JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise click.ClickException(f"{path}: expected a JSON object")
+    return data
 
 
 def _emit(obj) -> None:
@@ -119,7 +125,7 @@ def oversight_cmd(drills, min_n, threshold) -> None:
         click.echo("no decided canaries or drills yet")
     for (person, cls), s in sorted(stats.items()):
         earned = "earned" if o.authority(s, min_n=min_n, threshold=threshold) else "not earned"
-        click.echo(f"  {_strip_terminal_control(person):<24} {cls:<18} "
+        click.echo(f"  {_strip_terminal_control(person):<24} {_strip_terminal_control(cls):<18} "
                    f"caught {s.caught}/{s.n}  assured {s.assured:.0%}  {earned}")
 
 
@@ -133,7 +139,10 @@ def title_group() -> None:
 def title_check(dossier) -> None:
     """List what would not survive scrutiny; exit 1 if anything does not."""
     from ..immune import title as t
-    problems = t.problems(_load(dossier))
+    try:
+        problems = t.problems(_load(dossier))
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise click.ClickException(f"malformed dossier: missing or invalid {exc}") from exc
     for p in problems:
         click.echo(f"  - {p}")
     if problems:
@@ -159,8 +168,12 @@ def title_verify(sealed, pubkey) -> None:
     from ..audit.signing import trusted_audit_public_keys
     from ..immune import title as t
     doc = _load(sealed)
-    key = pubkey or trusted_audit_public_keys().get(doc["signature"]["key_id"])
-    if not key or not t.verify(doc, key):
+    try:
+        key = pubkey or trusted_audit_public_keys().get(doc["signature"]["key_id"])
+        ok = bool(key) and t.verify(doc, key)
+    except (KeyError, TypeError, AttributeError, ValueError):
+        ok = False  # a malformed seal is simply one that does not verify
+    if not ok:
         raise click.ClickException("dossier does NOT verify")
     click.echo("dossier verifies")
 
@@ -177,7 +190,7 @@ def title_research(dossier, runs, elements, out) -> None:
     from ..immune import title
     try:
         merged = title.add_research_runs(_load(dossier), [_load(r) for r in runs], list(elements))
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, AttributeError, ValueError) as exc:
         raise click.ClickException(f"cannot use research run: {exc}") from exc
     Path(out).write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
     added = len(merged["gates"]) - len(_load(dossier).get("gates", []))
@@ -224,13 +237,24 @@ def twin_replay(goal_id, max_dollars, tolerance) -> None:
     world = open_world()
     try:
         report = twin.replay_goal(
-            world, goal_id, lambda gid: run_goal_in_thread(gid, max_dollars=max_dollars),
+            world, goal_id, lambda gid: run_goal_in_thread(
+                gid, max_dollars=max_dollars, **twin.run_kwargs(world.get_goal(gid))),
             tolerance=tolerance)
     except LookupError as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
         world.close()
     _emit(report)
+
+
+@twin_group.command("forget")
+@click.argument("goal_id", type=int)
+def twin_forget(goal_id) -> None:
+    """Delete GOAL_ID's recording (retention / erasure). Replay reports, which
+    hold counts only, are kept."""
+    from ..immune import twin
+    click.echo(f"recording for goal #{goal_id} "
+               + ("deleted" if twin.forget(goal_id) else "not found"))
 
 
 @twin_group.command("list")
@@ -273,10 +297,13 @@ def awareness_cmd(samples, goals, max_dollars, alpha) -> None:
             ids = [int(g) for g in goals.split(",") if g.strip()]
         except ValueError as exc:
             raise click.UsageError("--goals must be comma-separated integers") from exc
+        if not ids:
+            raise click.UsageError("--goals needs at least one goal id")
         world = open_world()
         try:
             _emit(twin.awareness_probe(
-                world, ids, lambda gid: run_goal_in_thread(gid, max_dollars=max_dollars),
+                world, ids, lambda gid: run_goal_in_thread(
+                    gid, max_dollars=max_dollars, **twin.run_kwargs(world.get_goal(gid))),
                 alpha=alpha))
         except LookupError as exc:
             raise click.ClickException(str(exc)) from exc

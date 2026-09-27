@@ -223,3 +223,111 @@ def test_awareness_probe_reports_no_gap_for_an_invariant_model(recording_on, tmp
 
     out = twin.awareness_probe(world, goals, run)
     assert not out["diverged"]["significant"] and out["diverged"]["gap"] == 0
+
+
+@pytest.mark.parametrize("recorded, attempted", [
+    ({"to": "cfo@acme.com", "body": "Approve wire"}, {"to": "attacker@evil.io", "body": "Approve wire"}),
+    ({"account": "12345678", "amount": 5000}, {"account": "99995678", "amount": 5000}),
+    ({"to": "cfo@acme.com", "amount": 100}, {"to": "cfo@acme.com", "amount": 1000}),
+    ({"q": "a"}, {"q": "b"}),
+    ({"q": "a"}, {"q": "a", "extra": 1}),
+])
+def test_a_changed_field_is_not_a_near_identical_call(recorded, attempted):
+    replay = twin.Replay([{"tool": "web_search", "key": twin._key("web_search", recorded),
+                           "args": recorded, "output": "done"}])
+    assert replay.serve("web_search", attempted).startswith("ERROR")
+    assert replay.report()["unmatched"]
+
+
+def test_high_risk_tools_are_only_served_on_an_exact_match():
+    args = {"command": "rm -rf build/cache-2024-q3"}
+    replay = twin.Replay([{"tool": "shell", "key": twin._key("shell", args), "args": args,
+                           "output": "removed"}])
+    assert replay.serve("shell", {"command": "rm -rf build/cache-2024-q4"}).startswith("ERROR")
+
+
+def test_approximate_calls_and_a_missing_answer_count_as_divergence():
+    base = {"unmatched": [], "approximate": [], "result_similarity": 1.0, "twin_answered": True}
+    assert not twin._diverged(base, 0.8)
+    assert twin._diverged({**base, "approximate": [{"similarity": 0.9}]}, 0.8)
+    assert twin._diverged({**base, "result_similarity": None, "twin_answered": False}, 0.8)
+
+
+def test_injected_capability_scope_does_not_change_the_call_key():
+    a = {"url": "https://x", "_capability_allow_hosts": ("a.io", "b.io")}
+    b = {"url": "https://x", "_capability_allow_hosts": ("b.io", "a.io")}
+    assert twin._key("http_fetch", a) == twin._key("http_fetch", b) == twin._key(
+        "http_fetch", {"url": "https://x"})
+
+
+def test_a_production_call_that_raised_raises_again_in_the_twin(recording_on):
+    async def boom():
+        raise TimeoutError("upstream timed out")
+
+    async def prod():
+        with pytest.raises(TimeoutError):
+            await twin.dispatch(5, "web_fetch", {"url": "https://x"}, boom)
+    asyncio.run(prod())
+    replay = twin.Replay(twin.load(5))
+    with pytest.raises(TimeoutError, match="upstream timed out"):
+        replay.serve("web_fetch", {"url": "https://x"})
+    assert replay.report()["unmatched"] == [] and replay.served == 1
+
+
+def test_a_goal_bound_to_a_user_replays_as_that_user(recording_on, tmp_path):
+    from maverick.world_model import WorldModel
+    world = WorldModel(tmp_path / "world.db")
+    gid = world.create_goal("t", "d", owner="alice", execution_principal="user:alice")
+    assert twin.run_kwargs(world.get_goal(gid)) == {"user_id": "alice"}
+    bot = world.create_goal("t", "d", execution_principal="svc:payroll-bot")
+    asyncio.run(_d(twin, bot, "web_search", {"q": "x"}, _live([])))
+    with pytest.raises(LookupError, match="capability principal"):
+        twin.replay_goal(world, bot, lambda g: "done")
+    assert len(world.list_goals()) == 2  # refused before creating a twin goal
+
+
+@pytest.mark.asyncio
+async def test_a_twin_never_asks_a_human_for_a_served_tool(recording_on, tmp_path, monkeypatch):
+    from maverick import ifc
+    from maverick.agent import Agent
+    from maverick.blackboard import Blackboard
+    from maverick.budget import Budget
+    from maverick.safety import consent
+    from maverick.sandbox import LocalBackend
+    from maverick.swarm import SwarmContext
+    from maverick.tools import Tool
+    from maverick.world_model import WorldModel
+
+    asked: list = []
+    monkeypatch.setattr(consent, "require_consent",
+                        lambda *a, **k: asked.append(a) or type("D", (), {"granted": True})())
+    world = WorldModel(tmp_path / "world.db")
+    ctx = SwarmContext(llm=None, world=world, budget=Budget(max_dollars=1.0),
+                       blackboard=Blackboard(), sandbox=LocalBackend(workdir=tmp_path),
+                       goal_id=world.create_goal("g", ""), use_skills=False)
+    ctx.ifc = ifc.FlowTracker(mode="approve")
+    agent = Agent(ctx=ctx, role="analyst", brief="b")
+    agent.capability = None
+    schema = {"type": "object", "properties": {}}
+    agent.tools.register(Tool(name="sql_query", description="q", input_schema=schema,
+                              fn=lambda args: "rows"))
+    agent.tools.register(Tool(name="http_fetch", description="f", input_schema=schema,
+                              fn=lambda args: "200 OK"))
+    await agent._run_tool("sql_query", {"q": "x"})
+    await agent._run_tool("http_fetch", {"url": "https://partner"})
+    assert len(asked) == 1                                   # production asked once
+    ctx.ifc = ifc.FlowTracker(mode="approve")
+    with twin.replaying(twin.Replay(twin.load(ctx.goal_id))):
+        await agent._run_tool("sql_query", {"q": "x"})
+        assert "200 OK" in await agent._run_tool("http_fetch", {"url": "https://partner"})
+    assert len(asked) == 1                                   # the twin did not
+
+
+def test_a_twin_sends_no_run_webhooks(monkeypatch):
+    from maverick import orchestrator, webhooks
+    sent: list = []
+    monkeypatch.setattr(webhooks, "fire", lambda event, payload: sent.append(event))
+    orchestrator._fire_webhook("goal_created", {})
+    with twin.replaying(twin.Replay([])):
+        orchestrator._fire_webhook("goal_created", {})
+    assert sent == ["goal_created"]

@@ -188,7 +188,13 @@ def runtime_tools(profile) -> frozenset[str]:
     """Tools a pack can actually call: the runtime capability, not the TOML."""
     from ..domain import domain_capability
     cap = domain_capability(profile, None, f"agent:{profile.name}")
-    return frozenset(t for t in cap.allow_tools if cap.permits(t))
+    # An empty allowlist means EVERY tool (Capability semantics), not none.
+    if cap.allow_tools:
+        candidates = cap.allow_tools
+    else:
+        from ..tools import base_tool_names
+        candidates = frozenset(base_tool_names() or ())
+    return frozenset(t for t in candidates if cap.permits(t))
 
 
 def roster_graph(domains=None, *, swarm: bool = False) -> Graph:

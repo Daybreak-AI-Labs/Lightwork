@@ -71,6 +71,8 @@ def problems(dossier: dict) -> list[str]:
     elif cov["examined"] < cov["total"]:
         out.append(f"search coverage {cov['examined']}/{cov['total']} "
                    f"({cov['examined'] / cov['total']:.0%})")
+    out += [f"conception gate rests on an unverified research export: {g['id']}"
+            for g in dossier.get("gates", []) if g.get("verified") is False]
     first = min((p["at"] for p in dossier.get("priority", [])), default=None)
     if first is not None and dossier.get("inputs_committed_at", float("inf")) > first:
         out.append("inputs were committed after the first recorded idea")
@@ -81,7 +83,8 @@ def _sha(obj: object) -> str:
     return hashlib.sha256(_ledger.canonical(obj)).hexdigest()
 
 
-def research_run_evidence(run: dict, elements: list[str] = ()) -> dict:
+def research_run_evidence(run: dict, elements: list[str] = (), *,
+                          verified: bool = False) -> dict:
     """Inputs and conception gates read from a governed research run.
 
     ``run`` is a run record (``ResearchRuns.inspect``) or its export. The run
@@ -91,6 +94,12 @@ def research_run_evidence(run: dict, elements: list[str] = ()) -> dict:
     the first plan. Execution events (queued, running, finished) are not
     conception and are not mapped. ``elements`` -- the claim elements those
     plans shaped -- is the caller's assertion; nothing infers it.
+
+    The hash chain proves the history is internally consistent, not who wrote
+    it: anyone can recompute it over an edited export. Gates are therefore
+    marked ``verified`` only when the caller read ``run`` from the governed
+    store itself (``ResearchRuns.inspect``); :func:`problems` reports every
+    gate that rests on an export alone.
     """
     run = run.get("run", run)
     manifest = run["manifest"]
@@ -109,7 +118,7 @@ def research_run_evidence(run: dict, elements: list[str] = ()) -> dict:
                     "id": f"research:{run['run_id']}:{attempt['number']}:plan",
                     "human": event["actor"], "decision": "framed",
                     "elements": list(elements), "at": event["recorded_at"],
-                    "evidence": event["event_sha256"]})
+                    "evidence": event["event_sha256"], "verified": bool(verified)})
     if not gates:
         raise ValueError(f"run {run['run_id']}: no planning decision recorded")
     inputs = [
@@ -123,7 +132,8 @@ def research_run_evidence(run: dict, elements: list[str] = ()) -> dict:
             "gates": gates}
 
 
-def add_research_runs(dossier: dict, runs: list[dict], elements: list[str] = ()) -> dict:
+def add_research_runs(dossier: dict, runs: list[dict], elements: list[str] = (), *,
+                      verified: bool = False) -> dict:
     """``dossier`` with each run's inputs and gates merged in (by id, so adding
     a run twice is a no-op). ``inputs_committed_at`` becomes the LATEST input
     commitment: an idea predating any input is then reported by
@@ -132,7 +142,7 @@ def add_research_runs(dossier: dict, runs: list[dict], elements: list[str] = ())
            "gates": list(dossier.get("gates", []))}
     committed = [dossier["inputs_committed_at"]] if "inputs_committed_at" in dossier else []
     for run in runs:
-        ev = research_run_evidence(run, elements)
+        ev = research_run_evidence(run, elements, verified=verified)
         out["inputs"] += [i for i in ev["inputs"] if i not in out["inputs"]]
         known = {g["id"] for g in out["gates"]}
         out["gates"] += [g for g in ev["gates"] if g["id"] not in known]

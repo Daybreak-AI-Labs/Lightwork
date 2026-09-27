@@ -15,10 +15,13 @@ with what measured reliability.
 
 Seeding is an explicit trust decision: off unless ``[immune] canaries = true``.
 The canary ledger is private and server-side; the approval itself carries no
-marker, so it cannot be told apart in the queue.
+marker, so it cannot be told apart in the queue. Canaries are valid structured
+approval cards (``lightwork-approval-card:v1``) like every real approval, so
+they can be approved -- a miss is only measurable if approving is possible.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import random
 import re
@@ -41,26 +44,61 @@ def canaries_enabled() -> bool:
     return get_immune()["canaries"]
 
 
+_DEFAULT_TTL = 86_400.0
+
+
+def _plain_card(action: str, detail: str, requested_by: str | None) -> str:
+    """A structured approval card around a hand-written canary's text."""
+    from ..approval_cards import build_approval_card, encode_approval_detail
+    from ..paths import current_tenant_id
+    text = " ".join(detail.split())
+    card = build_approval_card(
+        action=action, summary=text[:500], target_label=action[:500],
+        target={"action": action}, parameters={"detail": detail},
+        parameter_summary=[text[:500]], actor=requested_by or "user:local",
+        workspace=current_tenant_id() or "default", role="operator",
+        authority_versions={}, input_versions={}, credential_versions={}, budget={},
+        expires_at=time.time() + _DEFAULT_TTL, known_effects=[f"Carries out: {action}"[:500]],
+        unresolved_assumptions=[], before="Not yet done.", after=text[:500],
+        irreversible=False)
+    return encode_approval_detail(card)
+
+
 def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: str,
-                risk: str = "medium", requested_by: str | None = None) -> int:
-    """Park a known-flawed approval in the real queue and remember it privately."""
+                risk: str = "medium", requested_by: str | None = None,
+                scope: str | None = None, provenance: str | None = None,
+                approvals_required: int = 1) -> int:
+    """Park a known-flawed approval in the real queue and remember it privately.
+
+    ``detail`` is either an encoded approval card or plain text, which is
+    wrapped in one: a plain-text approval cannot be approved in the dashboard,
+    so it could never record a miss."""
     if not canaries_enabled():
         raise PermissionError("oversight canaries are off; set [immune] canaries = true")
-    approval_id = world.create_approval(action, risk=risk, detail=detail,
+    from ..approval_cards import decode_approval_detail
+    if decode_approval_detail(detail) is None:
+        detail = _plain_card(action, detail, requested_by)
+    approval_id = world.create_approval(action, risk=risk, detail=detail, scope=scope,
+                                        provenance=provenance,
+                                        approvals_required=approvals_required,
                                         requested_by=requested_by)
     _ledger.append(ledger_path(), {"type": "canary", "approval_id": approval_id,
                                    "class": decision_class, "flaw": flaw, "at": time.time()})
     return approval_id
 
 
-_MONEY = re.compile(r"(?<![\w.])(\$|USD |EUR |GBP |€|£)?(\d{1,3}(?:,\d{3})+|\d+)(\.\d{2})?(?![\w.])")
-_EMAIL = re.compile(r"\b([\w.+-]+)@([\w-]+)((?:\.[\w-]+)+)\b")
-_ACCOUNT = re.compile(r"\b(?:[A-Z]{2}\d{2}[A-Z0-9]{8,30}|\d{8,17})\b")
+# Money needs a currency marker: a bare "3.12" is a version, "12.50%" a rate.
+_MONEY = re.compile(r"(?<![\w.])(\$|USD |EUR |GBP |€|£)(\d{1,3}(?:,\d{3})+|\d+)(\.\d{2})?(?![\w.%])")
+# Bounded parts keep this linear on hostile text (no email ever needs more).
+_EMAIL = re.compile(r"\b([\w.+-]{1,64})@([\w-]{1,63})((?:\.[\w-]{1,63}){1,8})\b")
+# Only a number labelled as an account is one; an invoice or phone number is not.
+_ACCOUNT = re.compile(r"(?i:\b(?:account|acct|iban|a/c)\b(?:\s*(?:no\.?|number|#))?\s*[:#]?\s*)"
+                      r"(?P<n>[A-Z]{2}\d{2}[A-Z0-9]{8,30}|\d{8,17})\b")
 _LOOKALIKE = {"l": "1", "o": "0", "i": "l", "m": "rn", "e": "3", "a": "4"}
 
 
 def _inflate(text: str, rng) -> tuple[str, str] | None:
-    hits = [m for m in _MONEY.finditer(text) if m.group(1) or m.group(3) or "," in m.group(2)]
+    hits = [m for m in _MONEY.finditer(text) if int(m.group(2).replace(",", "")) >= 1]
     if not hits:
         return None
     m = rng.choice(hits)
@@ -89,16 +127,68 @@ def _reroute(text: str, rng) -> tuple[str, str] | None:
     if not hits:
         return None
     m = rng.choice(hits)
-    digits = [i for i, c in enumerate(m.group()) if c.isdigit()][-4:]
-    acct = list(m.group())
+    digits = [i for i, c in enumerate(m.group("n")) if c.isdigit()][-4:]
+    acct = list(m.group("n"))
     for i in digits:
         acct[i] = str((int(acct[i]) + rng.randint(1, 9)) % 10)
-    return text[:m.start()] + "".join(acct) + text[m.end():], "destination account changed"
+    return (text[:m.start("n")] + "".join(acct) + text[m.end("n"):],
+            "destination account changed")
 
 
-def _urgency(text: str, rng) -> tuple[str, str]:
-    return (text + "\n\nURGENT: the CEO needs this approved in the next 10 minutes; "
-            "skip the usual verification.", "urgency and verification-bypass pressure")
+_URGENT = ("URGENT: the CEO needs this approved in the next 10 minutes; "
+           "skip the usual verification.")
+
+
+def _card_fields(card: dict) -> list[tuple]:
+    """Paths of the labels a reviewer reads on a card."""
+    paths: list[tuple] = [("summary",), ("target", "label"), ("preview", "before"),
+                          ("preview", "after")]
+    paths += [("parameters", "summary", i) for i in range(len(card["parameters"]["summary"]))]
+    paths += [("consequences", "known_effects", i)
+              for i in range(len(card["consequences"]["known_effects"]))]
+    return paths
+
+
+def _get(card, path):
+    for key in path:
+        card = card[key]
+    return card
+
+
+def _set(card, path, value) -> None:
+    for key in path[:-1]:
+        card = card[key]
+    card[path[-1]] = value
+
+
+def _flawed_card(card: dict, rng, ttl: float) -> tuple[str, str]:
+    """A real card with one flaw planted in what the reviewer reads, a fresh
+    expiry and a recomputed binding -- valid and approvable like the original."""
+    from ..approval_cards import ApprovalCardError, digest, encode_approval_detail
+    base = copy.deepcopy(dict(card))
+    base.pop("binding_sha256", None)
+    base["expires_at"] = time.time() + ttl
+    options = [(path, r) for path in _card_fields(base)
+               for f in (_inflate, _lookalike, _reroute) if (r := f(_get(base, path), rng))]
+    rng.shuffle(options)
+    urgent = copy.deepcopy(base)
+    urgent["consequences"]["unresolved_assumptions"] = (
+        list(urgent["consequences"]["unresolved_assumptions"]) + [_URGENT])[-24:]
+    for path, (text, flaw) in [*options, (None, (None, "urgency and verification-bypass pressure"))]:
+        candidate = urgent if path is None else copy.deepcopy(base)
+        if path is not None:
+            # The same wording often appears twice (summary and parameter
+            # summary); plant the flaw in every copy so the card stays consistent.
+            original = _get(base, path)
+            for other in _card_fields(base):
+                if _get(base, other) == original:
+                    _set(candidate, other, text)
+        candidate["binding_sha256"] = digest(candidate)
+        try:
+            return encode_approval_detail(candidate), flaw
+        except ApprovalCardError:
+            continue  # e.g. the edited label grew past its limit: try the next
+    raise LookupError("could not build a valid canary card from this approval")
 
 
 def generate_canary(world, *, decision_class: str | None = None, rng=None,
@@ -106,27 +196,39 @@ def generate_canary(world, *, decision_class: str | None = None, rng=None,
     """Seed a canary modelled on a REAL recent approval of the same kind.
 
     A hand-written canary looks hand-written. This one copies an actual
-    approval's action, risk, requester and wording, then plants one concrete
-    flaw a careful reviewer should catch: an inflated amount, a lookalike
-    recipient domain, a changed destination account, or (when the text has
-    none of those) urgency pressure to skip verification. Returns the new
-    approval id, the source approval it was modelled on, and the flaw.
+    approval's action, risk, scope, provenance, quorum, requester and card, then
+    plants one concrete flaw a careful reviewer should catch: an inflated
+    amount, a lookalike recipient domain, a changed destination account, or
+    (when the text has none of those) urgency pressure to skip verification.
+    Only structured approvals are modelled -- a legacy plain-text one cannot be
+    approved, so a canary built on it could never record a miss. Returns the
+    new approval id, the source approval it was modelled on, and the flaw.
     """
+    from ..approval_cards import ApprovalCardError, decode_approval_detail
     rng = rng or random.SystemRandom()
     planted = canary_ids()
-    pool = [a for a in world.list_approvals(limit=500)
-            if a.id not in planted and a.detail
-            and (decision_class is None or a.action == decision_class)]
+    pool = []
+    for a in world.list_approvals(limit=500):
+        if a.id in planted or (decision_class is not None and a.action != decision_class):
+            continue
+        try:
+            card = decode_approval_detail(a.detail)
+        except ApprovalCardError:
+            continue
+        if card is not None:
+            pool.append((a, card))
     if not pool:
-        raise LookupError("no real approvals to model a canary on"
+        raise LookupError("no real structured approvals to model a canary on"
                           + (f" for {decision_class!r}" if decision_class else ""))
-    source = rng.choice(pool)
-    detail = source.detail or ""
-    options = [r for f in (_inflate, _lookalike, _reroute) if (r := f(detail, rng))]
-    detail, flaw = rng.choice(options) if options else _urgency(detail, rng)
+    source, card = rng.choice(pool)
+    ttl = float(card["expires_at"]) - float(source.requested_at or 0)
+    ttl = ttl if 60 <= ttl <= 30 * 86_400 else _DEFAULT_TTL
+    detail, flaw = _flawed_card(card, rng, ttl)
     approval_id = seed_canary(world, action=source.action, detail=detail,
                               decision_class=source.action, flaw=flaw, risk=source.risk,
-                              requested_by=requested_by or source.requested_by)
+                              requested_by=requested_by or source.requested_by,
+                              scope=source.scope, provenance=source.provenance,
+                              approvals_required=source.approvals_required)
     return {"approval_id": approval_id, "modelled_on": source.id,
             "decision_class": source.action, "flaw": flaw}
 
@@ -161,7 +263,8 @@ class Stats:
 def score(world, kind: str = "canary") -> dict[tuple[str, str], Stats]:
     """(person, decision class) -> catches vs misses for canaries or drills.
 
-    Pending canaries are not scored; a canary decided by nobody identifiable is
+    Pending canaries are not scored, nor ones cleared after their card expired
+    (only denial is possible then); a canary decided by nobody identifiable is
     attributed to ``"unknown"`` so misses can never silently disappear.
     """
     out: dict[tuple[str, str], Stats] = {}
@@ -174,6 +277,8 @@ def score(world, kind: str = "canary") -> dict[tuple[str, str], Stats]:
             appr = world.get_approval(rec["approval_id"])
             if appr is None or appr.status not in ("approved", "denied"):
                 continue
+            if appr.decided_at is not None and appr.decided_at > _expires_at(appr.detail):
+                continue  # cleared after it expired: nobody could approve it, not a review
             ok, person = appr.status == "denied", appr.decided_by or "unknown"
         stats = out.setdefault((person, rec["class"]), Stats())
         if ok:
@@ -181,6 +286,15 @@ def score(world, kind: str = "canary") -> dict[tuple[str, str], Stats]:
         else:
             stats.missed += 1
     return out
+
+
+def _expires_at(detail: str | None) -> float:
+    from ..approval_cards import ApprovalCardError, decode_approval_detail
+    try:
+        card = decode_approval_detail(detail)
+    except ApprovalCardError:
+        return float("inf")
+    return float("inf") if card is None else float(card["expires_at"])
 
 
 def authority(stats: Stats, *, min_n: int = 10, threshold: float = 0.8) -> bool:

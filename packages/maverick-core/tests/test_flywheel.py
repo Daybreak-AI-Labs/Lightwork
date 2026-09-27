@@ -114,12 +114,20 @@ def test_maybe_run_noop_when_disabled(monkeypatch):
     assert rep.n_episodes == 0 and not rep.acted
 
 
-def test_run_once_audits_its_learned_writes(tmp_path, monkeypatch):
+def test_run_once_audits_each_learned_write_as_it_happens(tmp_path, monkeypatch):
     import maverick.audit as audit
     rows = []
     monkeypatch.setattr(audit, "record", lambda kind, **kw: rows.append((kind, kw)))
     rep = flywheel.run_once(_corpus(), guardrails=nk.GuardrailRegistry(path=tmp_path / "g.json"),
                             memory=pm.MemoryStore(path=tmp_path / "m.json"))
-    ((kind, kw),) = rows
-    assert kind == audit.EventKind.LEARNING_UPDATE and kw["agent"] == "flywheel"
-    assert (kw["guardrails_written"], kw["memories_written"]) == (len(rep.guardrails), len(rep.memories))
+    assert [(k, kw["agent"], kw["store"], kw["written"]) for k, kw in rows] == [
+        (audit.EventKind.LEARNING_UPDATE, "flywheel", "guardrails", len(rep.guardrails)),
+        (audit.EventKind.LEARNING_UPDATE, "flywheel", "procedural_memory", len(rep.memories))]
+
+    rows.clear()
+    broken = pm.MemoryStore(path=tmp_path / "m2.json")
+    monkeypatch.setattr(broken, "update", lambda mems: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(OSError):
+        flywheel.run_once(_corpus(), guardrails=nk.GuardrailRegistry(path=tmp_path / "g2.json"),
+                          memory=broken)
+    assert [kw["store"] for _, kw in rows] == ["guardrails"]  # the earlier write is on record

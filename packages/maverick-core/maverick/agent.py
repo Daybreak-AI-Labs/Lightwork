@@ -2704,6 +2704,9 @@ class Agent:
                        tracker=tracker)
             return None
         if decision.mode == "approve":
+            from .immune import twin
+            if twin.serving(name):  # recorded result, nothing leaves: never ping a human
+                return None
             granted = False
             if not decision.explicit:
                 copied = ""
@@ -2929,6 +2932,11 @@ class Agent:
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
+        from .immune import twin as _twin
+        if _twin.serving(name):
+            # A production twin serves the recorded result; nothing executes,
+            # so there is nothing for a human to approve.
+            return None, _gov.compliance_profiles
         import asyncio as _asyncio
         granted = False
         try:
