@@ -128,7 +128,7 @@ def test_high_impact_learning_workforce_and_agent_actions_confirm():
     agents = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
     assert "This changes the deployment-wide learning posture" in learning
     assert "Enable automatic application of proven workflow improvements?" in learning
-    assert "Scheduled and triggered workflows may begin running" in learning
+    assert "Scheduled and triggered workflows may start running" in learning
     assert "This creates an operational fleet and its specialists" in workforce
     assert "This creates an operational fleet and its specialists" in agents
     assert "Its saved authority and workflow become available to operators" in agents

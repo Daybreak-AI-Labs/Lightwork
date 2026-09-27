@@ -51,6 +51,12 @@ PAGE_SCRIPTS = {
 }
 
 
+# Pages rebuilt for non-technical readers fail closed with plain wording.
+PLAIN_INVALID_JSON = {
+    "ekko.html": "Lightwork sent back a reply this page could not read. Try again.",
+}
+
+
 def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
     swallowed_json = re.compile(
         r"catch\s*\([^)]*\)\s*\{\s*(?:body|payload|result)\s*=\s*\{\s*\}",
@@ -64,7 +70,9 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
         loaded = re.findall(r'src="/static/(lightwork-[a-z-]+\.js)"', source)
         for script in dict.fromkeys([*loaded, *PAGE_SCRIPTS.get(name, ())]):
             source += (STATIC / script).read_text(encoding="utf-8")
-        assert "Request failed: the server returned an invalid JSON response." in source, name
+        assert PLAIN_INVALID_JSON.get(
+            name, "Request failed: the server returned an invalid JSON response."
+        ) in source, name
         assert swallowed_json.search(source) is None, name
         assert raw_body_fallback.search(source) is None, name
 
