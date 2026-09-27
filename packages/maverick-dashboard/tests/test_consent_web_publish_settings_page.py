@@ -60,16 +60,12 @@ def test_page_is_store_free_liquid_glass_and_candid(client: TestClient) -> None:
     ):
         assert directive in csp
     for text in (
-        "Website SDK publish settings",
-        "Property and publication revisions, digests",
-        "nonce values are never accepted, stored, or projected",
-        "Publication drift, withdrawal, or a non-web property",
-        "do not prove browser behavior",
+        "Website Banner Settings",
+        "About this page’s safeguards",
+        "never asks for or stores your site’s one-time security codes",
+        "stop being used until you save them again",
     ):
         assert text in response.text
-    assert "backdrop-filter: blur(24px)" in response.text
-    assert "prefers-reduced-motion" in response.text
-    assert "forced-colors" in response.text
     assert 'id="publish-settings-operations" disabled' in response.text
 
 
@@ -86,9 +82,13 @@ def test_page_has_all_named_closed_settings_and_no_authority_inputs(
         for name in ("id", "name")
         if isinstance((value := attrs.get(name)), str)
     }
+    # Region rows for asking again are added by the page script.
+    source = (PACKAGE / "static" / "lightwork-consent-publish-settings.js").read_text(
+        encoding="utf-8"
+    )
+    assert 'whereSelect.name = "geolocation_reconsent"' in source
     assert {
         "sdk_version",
-        "geolocation_reconsent",
         "analytics_tracking_enabled",
         "analytics_category_assignments",
         "common_trackers",
@@ -142,11 +142,12 @@ def test_page_server_renders_exact_role_controls(
         for _tag, attrs in parser.tags
         if isinstance(attrs.get("id"), str)
     }
-    for fieldset in (
+    for control in (
         "publish-settings-create-controls",
-        "publish-settings-lifecycle-controls",
+        "publish-settings-new",
+        "publish-settings-withdraw",
     ):
-        assert ("disabled" in by_id[fieldset]) is admin_disabled
+        assert ("disabled" in by_id[control]) is admin_disabled
     assert (
         "disabled" in by_id["publish-settings-audit-controls"]
     ) is audit_disabled
@@ -213,3 +214,25 @@ def test_page_assets_are_packaged() -> None:
         selected = PACKAGE / relative
         assert selected.is_file()
         assert selected.stat().st_size > 100
+
+
+def test_page_lists_versions_with_row_buttons_and_speaks_plainly(client: TestClient) -> None:
+    from test_support.plain_language import developer_terms
+
+    page_html = client.get(ROUTE).text
+    source = (PACKAGE / "static" / "lightwork-consent-publish-settings.js").read_text(
+        encoding="utf-8"
+    )
+    # The website is chosen from a list; versions load as rows with buttons.
+    assert '<select class="select" id="publish-settings-property-id">' in page_html
+    assert 'id="publish-settings-versions-table"' in page_html
+    for label in ('"Make live"', '"Go back to this"', "New settings", "Turn settings off"):
+        assert label in page_html + source
+    # Revisions and request references are carried, never typed.
+    assert 'type="hidden" id="publish-settings-expected-revision"' in page_html
+    assert 'name="idempotency_key" data-auto-reference' in page_html
+    for typed in ("Web property reference", "Settings version reference", "SDK version</label>",
+                  "google_analytics=analytics", "US=365", "SameSite"):
+        assert typed not in page_html
+    assert source.count("CW.confirm(") >= 1 and "lifecycle(button" in source
+    assert developer_terms(page_html) == []

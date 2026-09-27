@@ -251,6 +251,17 @@ async def enroll_destination(
     )
 
 
+@router.get("/destinations")
+async def destinations(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Read-only list of the active workspace's destinations for the page."""
+    require_global_permission(request, "audit")
+    ops, tenant, store = _authority()
+    return await _call(ops, store.list_destinations, tenant, limit=limit)
+
+
 @router.get("/destinations/{destination_id}")
 async def destination(request: Request, destination_id: str) -> dict[str, Any]:
     require_global_permission(request, "audit")

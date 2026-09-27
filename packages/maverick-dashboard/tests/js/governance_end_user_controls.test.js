@@ -9,18 +9,31 @@ const editor = require("../../maverick_dashboard/static/lightwork-consent-policy
 
 test("an unavailable consent editor visibly blocks policy publication while other consent tools remain usable", async () => {
   const html=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/templates/consent_preferences.html"),"utf8");
+  const helper=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-consent-workbench.js"),"utf8");
   const script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];
   const dom=new JSDOM(html,{url:"https://lightwork.test",runScripts:"outside-only"});
   const w=dom.window,d=w.document,calls=[];
-  w.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({profiles:[]})};};
+  Object.defineProperty(w,"crypto",{value:require("node:crypto").webcrypto});
+  w.TextEncoder=TextEncoder;
+  w.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({profiles:[],policies:[],trackers:[]})};};
+  w.eval(helper);
   assert.doesNotThrow(()=>w.eval(script));await new Promise(resolve=>setImmediate(resolve));
   assert.equal(d.getElementById("cp-policy-controls").disabled,true);
+  assert.equal(d.getElementById("cp-policy-new").disabled,true);
   assert.match(d.getElementById("cp-purpose-error").textContent,/editor could not load/);
   d.getElementById("cp-policy-form").dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));
   assert.equal(calls.some(call=>call.url.endsWith("/policies")),false);
-  d.getElementById("cp-profile-form").dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(calls.some(call=>call.url.endsWith("/profiles")&&call.options.method==="POST"),true);
+  const profile=d.getElementById("cp-profile-form");
+  profile.elements.subject.value="Person@Example.com";
+  profile.dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));
+  for(let i=0;i<20;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  const created=calls.find(call=>call.url.endsWith("/profiles")&&call.options&&call.options.method==="POST");
+  assert.ok(created);
+  const body=JSON.parse(created.options.body);
+  // Only a fingerprint of the normalized identifier leaves the browser.
+  assert.equal(body.subject_sha256,require("node:crypto").createHash("sha256").update("person@example.com").digest("hex"));
+  assert.equal(JSON.stringify(body).includes("example.com"),false);
+  assert.equal(body.identity_kind,"known");
   dom.window.close();
 });
 

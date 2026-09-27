@@ -15,27 +15,24 @@ async function fits(page){
 }
 async function ok(response){expect(response.ok(),await response.text()).toBeTruthy();return response.json();}
 
-test('consent picker reviews exact prior versions and prepares an unsaved next version',async({page,request})=>{
+test('saved consent content is listed and editing prepares the next version without saving',async({page,request})=>{
   const API='/api/v1/consent/publishing';
   for(const version of [1,2])await ok(await request.post(API+'/purposes/browser-analytics/versions',{data:{version,expected_current_version:version-1,
     idempotency_key:'browser-purpose-'+version,title_key:'purpose.title',description_key:'purpose.description',lawful_basis:'consent',required:false,default_choice:version===1?'denied':'granted'}}));
   await page.setViewportSize({width:375,height:812});await page.goto('/consent/publishing');
-  const form=page.locator('#cpp-resource'),picker=form.locator('.cpp-picker').first();
-  await picker.locator('summary').first().click();
-  await picker.getByRole('searchbox').fill('browser-analytics');await picker.getByRole('searchbox').press('Enter');
-  await expect(picker.getByRole('status')).toContainText('1 matching');
-  await picker.getByRole('listbox',{name:'Matching saved records'}).selectOption({index:0});
-  await expect(picker.getByRole('combobox',{name:'Saved version'})).toBeVisible();
-  await picker.getByRole('combobox',{name:'Saved version'}).selectOption({label:'Version 2 · latest'});
-  await expect(picker.getByRole('status')).toContainText('Compared with version 1');
-  await picker.getByRole('combobox',{name:'Saved version'}).selectOption({label:'Version 1'});
-  await expect(picker.getByRole('status')).toContainText('first saved version');
-  let published=0;page.on('request',r=>{if(r.method()==='POST'&&r.url().includes(API))published++;});
-  await picker.getByRole('button',{name:'Prepare next version from this copy'}).click();
-  await expect(form.locator('[name="resource_id"]')).toHaveValue('browser-analytics');
-  const payload=JSON.parse(await form.locator('[name="payload"]').inputValue());
-  expect(payload.version).toBe(3);expect(payload.expected_current_version).toBe(2);expect(payload.default_choice).toBe('denied');
-  expect(published).toBe(0);await fits(page);
+  const table=page.locator('#cpp-resource-table');
+  const row=table.getByRole('row').filter({hasText:'Browser analytics'});
+  await expect(row).toContainText('2');
+  let saved=0;page.on('request',r=>{if(r.method()==='POST'&&r.url().includes(API))saved++;});
+  await row.getByRole('button',{name:'Edit: Browser analytics'}).click();
+  const form=page.locator('#cpp-resource');await expect(form).toBeVisible();
+  await expect(form.locator('[name="resource_name"]')).toHaveValue('Browser analytics');
+  await expect(form.locator('[name="resource_name"]')).toHaveAttribute('readonly','');
+  await expect(form.locator('[name="version"]')).toHaveValue('3');
+  await expect(form.locator('[name="expected_current_version"]')).toHaveValue('2');
+  await expect(form.locator('[name="default_choice"]')).toHaveValue('granted');
+  await expect(form.getByLabel('Legal reason')).toHaveValue('consent');
+  expect(saved).toBe(0);await fits(page);
 });
 
 test('explicit consent publication resolves through an enrolled public client, rejects stale withdrawal and preserves history',async({page,request},info)=>{
@@ -60,29 +57,23 @@ test('explicit consent publication resolves through an enrolled public client, r
   await ok(await request.post('/api/v1/consent/policies',{data:{policy_id:'browser-publish-policy',version:1,
     purposes:{'browser-publish-analytics':'consent'},notice_sha256:notice,effective_at:Date.now()/1000-60}}));
   await page.setViewportSize({width:375,height:900});await page.goto('/consent/publishing');
-  const promotion=page.locator('#cpp-promotion');
-  async function selectProperty(form){
-    const picker=form.locator('.cpp-picker').filter({has:page.getByText('Find a saved website or app',{exact:true})});
-    await picker.locator('summary').first().click();await picker.getByRole('searchbox').fill(property);await picker.getByRole('searchbox').press('Enter');
-    await expect(picker.getByRole('status')).toContainText('1 matching');
-    await picker.getByRole('listbox',{name:'Matching saved records'}).selectOption({index:0});
-    await picker.getByRole('button',{name:'Use selected property',exact:true}).click();
-  }
-  await selectProperty(promotion);
-  const rulePicker=promotion.locator('.cpp-picker').filter({has:page.getByText('Choose a saved rule group and version',{exact:true})});
-  await rulePicker.locator('summary').first().click();await rulePicker.getByRole('searchbox').fill('browser-publish-rules');await rulePicker.getByRole('searchbox').press('Enter');
-  await expect(rulePicker.getByRole('status')).toContainText('1 matching');await rulePicker.getByRole('listbox',{name:'Matching saved records'}).selectOption({index:0});
-  await rulePicker.getByRole('combobox',{name:'Saved version'}).selectOption({label:'Version 1 · latest'});
-  await rulePicker.getByRole('button',{name:'Use selected version',exact:true}).click();
-  // The page generates the request reference; a person no longer types it.
+  const propertyRow=page.locator('#cpp-property-table').getByRole('row').filter({hasText:'Browser publish web'});
+  await propertyRow.getByRole('button',{name:'Preview and publish: Browser publish web'}).click();
+  const promotion=page.locator('#cpp-promotion');await expect(promotion).toBeVisible();
+  await expect(promotion.getByLabel('Display rules to publish')).toHaveValue('browser-publish-rules|1');
+  // The page carries the request reference and revisions; a person never types them.
   expect(await promotion.locator('[name="idempotency_key"]').inputValue()).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{7,}$/);
+  await expect(promotion.locator('[name="expected_publication_revision"]')).toHaveValue('0');
   let publishes=0;page.on('request',req=>{if(req.url().endsWith('/publish'))publishes++;});
-  await promotion.getByRole('button',{name:'Preview exact bundle',exact:true}).click();
-  await expect(page.locator('#cpp-status')).toHaveText('Exact unpublished bundle previewed.');
-  const preview=JSON.parse(await page.locator('#cpp-result').textContent());expect(preview.bundle_sha256).toMatch(/^[a-f0-9]{64}$/);
+  await promotion.getByRole('button',{name:'Preview',exact:true}).click();
+  await expect(page.locator('#cpp-status')).toHaveText('Preview ready. Nothing has been published.');
+  await expect(page.locator('#cpp-preview-result')).toContainText('Synthetic privacy choices');
+  await expect(page.locator('#cpp-preview-result')).toContainText('Synthetic analytics');
   expect(publishes).toBe(0);expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(0);
-  await promotion.getByRole('button',{name:'Publish',exact:true}).click();await expect(page.locator('#cpp-status')).toHaveText('Publication promoted.');
-  const published=JSON.parse(await page.locator('#cpp-result').textContent());expect(publishes).toBe(1);expect(published.bundle_sha256).toBe(preview.bundle_sha256);
+  await promotion.getByRole('button',{name:'Publish',exact:true}).click();
+  await expect(page.locator('#mv-confirm-msg')).toContainText('Publish to Browser publish web?');await page.locator('#mv-confirm-ok').click();
+  await expect(page.locator('#cpp-status')).toHaveText('Published to Browser publish web.');expect(publishes).toBe(1);
+  const published=(await ok(await request.get(API+'/properties/'+property+'/history'))).items[0];expect(published.action).toBe('publish');
   const enrolled=await ok(await request.post('/api/v1/consent/public-clients',{data:{property_id:property,client_kind:'browser',browser_origin:origin,
     jurisdiction:'global',country_code:'US',region_code:'',default_locale:'en-US',rule_group_id:'browser-publish-rules',rule_group_version:1,
     policy_id:'browser-publish-policy',policy_version:1}}));
@@ -92,22 +83,23 @@ test('explicit consent publication resolves through an enrolled public client, r
   const resolved=await ok(await request.get('/api/v1/public/consent/configuration',{headers:publicHeaders}));
   expect(resolved.allowed).toBe(true);expect(resolved.publication.publication_id).toBe(published.publication_id);
   expect(resolved.policy_id).toBe('browser-publish-policy');
-  await promotion.getByRole('button',{name:'Load history',exact:true}).click();await expect(page.locator('#cpp-status')).toHaveText('Immutable publication history loaded.');
-  expect(JSON.parse(await page.locator('#cpp-result').textContent()).items).toHaveLength(1);
-  const withdrawal=page.locator('#cpp-withdraw');await selectProperty(withdrawal);
-  await withdrawal.locator('[name="expected_publication_revision"]').fill('0');const staleKey=await withdrawal.locator('[name="idempotency_key"]').inputValue();expect(staleKey).not.toBe('');
-  await page.locator('#cpp-withdraw-confirm').check();const rejected=page.waitForResponse(response=>response.url().endsWith('/withdraw'));
-  await withdrawal.getByRole('button',{name:'Withdraw active publication',exact:true}).click();expect((await rejected).status()).toBe(409);
-  await expect(page.locator('#cpp-status')).toContainText('revision');await expect(withdrawal.locator('[name="expected_publication_revision"]')).toHaveValue('0');
-  expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(1);
-  await withdrawal.locator('[name="expected_publication_revision"]').fill('1');
-  // Changing the revision is a new operation: the page renews the reference on its own.
-  await expect(withdrawal.locator('[name="idempotency_key"]')).not.toHaveValue(staleKey);
-  await page.locator('#cpp-withdraw-confirm').uncheck();await page.locator('#cpp-withdraw-confirm').check();
-  await withdrawal.getByRole('button',{name:'Withdraw active publication',exact:true}).click();await expect(page.locator('#cpp-status')).toContainText('Active publication withdrawn');
-  const withdrawn=JSON.parse(await page.locator('#cpp-result').textContent());expect(withdrawn.action).toBe('withdraw');expect(withdrawn.source_publication_id).toBe(published.publication_id);
+  await propertyRow.getByRole('button',{name:'History: Browser publish web'}).click();
+  await expect(page.locator('#cpp-history').getByRole('row')).toHaveCount(2);
+  // Someone else publishes after this page loaded: the row's revision is now stale.
+  await ok(await request.post(API+'/properties/'+property+'/publish',{data:{rule_group_id:'browser-publish-rules',rule_group_version:1,
+    expected_property_revision:1,expected_publication_revision:1,idempotency_key:'browser-publish-elsewhere'}}));
+  const rejected=page.waitForResponse(response=>response.url().endsWith('/withdraw'));
+  await propertyRow.getByRole('button',{name:'Withdraw: Browser publish web'}).click();
+  await expect(page.locator('#mv-confirm-msg')).toContainText('Stop showing the banner on Browser publish web?');await page.locator('#mv-confirm-ok').click();
+  expect((await rejected).status()).toBe(409);
+  await expect(page.locator('#cpp-status')).toContainText('changed since you opened it');
+  await expect(page.locator('#cpp-status')).not.toContainText('revision');
+  expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(2);
+  await page.reload();
+  await page.locator('#cpp-property-table').getByRole('button',{name:'Withdraw: Browser publish web'}).click();await page.locator('#mv-confirm-ok').click();
+  await expect(page.locator('#cpp-status')).toHaveText('The banner no longer shows on Browser publish web.');
   expect((await request.get('/api/v1/public/consent/configuration',{headers:publicHeaders})).status()).toBe(409);
-  const history=await ok(await request.get(API+'/properties/'+property+'/history'));expect(history.items.map(item=>item.action)).toEqual(['withdraw','publish']);
+  const history=await ok(await request.get(API+'/properties/'+property+'/history'));expect(history.items.map(item=>item.action)).toEqual(['withdraw','publish','publish']);
   await page.locator('#cpp-status').scrollIntoViewIfNeeded();await info.attach('consent-published-and-withdrawn',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
 });
 
@@ -134,20 +126,26 @@ test('a failed recovery save retries the exact operation and survives a page rel
   await expect(page.locator('#wf-status')).not.toContainText('Drafting');await fits(page);
 });
 
-test('real field validation marks the rejected input and preserves the other enrollment fields',async({page})=>{
-  await page.goto('/consent/publishing');const form=page.locator('#cpp-property');
-  await form.locator('[name="consent_group_id"]').fill('not a valid identifier!');
-  const rejected=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().endsWith('/properties/web-main'));
-  await form.getByRole('button',{name:'Enroll / revise property'}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
-  // The page generated the request reference it sent; a person no longer types it.
+test('a rejected website address is explained plainly and keeps the other fields',async({page})=>{
+  await page.goto('/consent/publishing');
+  await page.getByRole('button',{name:'Add a website or app'}).first().click();
+  const form=page.locator('#cpp-property');await expect(form).toBeVisible();
+  await form.getByLabel('Name').fill('Browser consumer web');await form.getByLabel('Consent group').fill('Browser consumers');
+  await form.locator('[name="web_domains"]').fill('not a valid address!');
+  const rejected=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().endsWith('/properties/browser-consumer-web'));
+  await form.getByRole('button',{name:'Save',exact:true}).click();const rejection=await rejected;expect(rejection.status()).toBe(422);
+  // The page generated the request reference it sent; a person never types it.
   const enrollmentKey=rejection.request().postDataJSON().idempotency_key;expect(enrollmentKey).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:/-]{7,}$/);
-  const field=form.locator('[name="consent_group_id"]');await expect(field).toHaveAttribute('aria-invalid','true');await expect(field).toBeFocused();
-  await expect(form.getByRole('alert')).toContainText(/Consent group/);
-  await expect(form.locator('[name="web_domains"]')).toHaveValue('example.com');
+  await expect(page.locator('#cpp-status')).toContainText('Check the website addresses');
+  await expect(form.locator('[name="web_domains"]')).toHaveAttribute('aria-invalid','true');
+  await expect(form.getByLabel('Consent group')).toHaveValue('Browser consumers');
   // A retry of the same operation keeps the same generated reference.
   await expect(form.locator('[name="idempotency_key"]')).toHaveValue(enrollmentKey);
-  await field.fill('browser-consumer-group');await expect(field).not.toHaveAttribute('aria-invalid','true');
+  await form.locator('[name="web_domains"]').fill('browser-consumer.example.test');
   await expect(form.locator('[name="idempotency_key"]')).not.toHaveValue(enrollmentKey);
+  await form.getByRole('button',{name:'Save',exact:true}).click();
+  await expect(page.locator('#cpp-status')).toHaveText('Saved Browser consumer web.');
+  await expect(page.locator('#cpp-property-table')).toContainText('browser-consumer.example.test');
   await page.setViewportSize({width:320,height:800});await fits(page);
 });
 

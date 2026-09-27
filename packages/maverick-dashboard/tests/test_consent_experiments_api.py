@@ -449,3 +449,68 @@ def test_expired_dedupe_retention_purge_is_explicit_and_idempotent(
     assert _ok(client.get(f"{API}/banner-copy-v1/audit-export"))[
         "pseudonymous_dedupe_record_count"
     ] == 0
+
+
+def test_experiment_list_is_read_only_tenant_scoped_and_needs_operate(
+    environment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    client, _authority, _clock, _holder = environment
+    _create(client)
+    listed = _ok(client.get(API))
+    assert [item["definition"]["experiment_id"] for item in listed["items"]] == ["banner-copy-v1"]
+    assert listed["items"][0]["state"] == "draft" and listed["truncated"] is False
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    assert _ok(client.get(API))["items"] == []
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+
+    asked: list[str] = []
+
+    def deny(_request, permission):
+        asked.append(permission)
+        raise HTTPException(status_code=403, detail="insufficient role for this action")
+
+    monkeypatch.setattr(consent_experiments_api, "require_permission", deny)
+    assert client.get(API).status_code == 403
+    assert client.get(
+        f"{API}/variant-content?property_id=site&rule_group_id=rules&rule_group_version=1"
+    ).status_code == 403
+    assert asked == ["operate", "operate"]
+
+
+def test_variant_layout_fingerprints_match_what_the_public_endpoint_verifies() -> None:
+    from maverick_dashboard import consent_public_api
+
+    messages = {"t": "Your privacy", "b": "Choose élève", "a": "Accept", "r": "Reject", "s": "Save"}
+    bundle = {
+        "rule_group": {"payload": {"rules": [{
+            "rule_id": "global",
+            "locales": ["fr-FR"],
+            "template": {"id": "banner", "version": 2},
+            "translation_catalog_id": "copy",
+            "translation_versions": {"fr-FR": 3},
+        }]}},
+        "resources": [
+            {"resource_kind": "template", "resource_id": "banner", "locale": "", "version": 2,
+             "payload": {"title_key": "t", "body_key": "b",
+                         "actions": {"accept_all": "a", "reject_all": "r", "save_preferences": "s"}}},
+            {"resource_kind": "translation", "resource_id": "copy", "locale": "fr-FR", "version": 3,
+             "payload": {"messages": messages}},
+        ],
+    }
+    items = consent_experiments_api._variant_contents(bundle)
+    assert [item["layout"] for item in items] == ["stacked", "inline", "compact"]
+    contract = SimpleNamespace(public_configuration={
+        "rule": {"locale": "fr-FR"},
+        "configuration": {"template": {"title": "Your privacy", "body": messages["b"],
+                                       "actions": {"accept_all": "Accept", "reject_all": "Reject",
+                                                   "save_preferences": "Save", "close": "x"}}},
+    })
+    for item in items:
+        expected = consent_public_api._sha256(
+            consent_public_api._published_experiment_render(contract, layout=item["layout"])
+        )
+        assert item["content_sha256"] == expected
+        assert item["content_ref"] == "public-layout:" + item["layout"]

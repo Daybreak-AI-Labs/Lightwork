@@ -121,20 +121,17 @@ def test_consent_lifecycle_mutations_are_targeted_single_flight_actions():
     experiments = _source("consent_experiments.html")
     opt_out = _static("lightwork-consent-global-opt-out.js")
 
-    assert 'if(form.dataset.inFlight==="true")return' in experiments
-    assert 'experiment “"+experimentId+"”?' in experiments
-    assert "Eligible subjects may begin receiving its governed variants" in experiments
-    assert "Future assignments will be forced to the control variant" in experiments
-    assert 'button.setAttribute("aria-busy","true")' in experiments
-    assert "delete form.dataset.inFlight" in experiments
-    assert "Could not reach the server — check your connection and try again." in experiments
-    assert "Purge only expired pseudonymous dedupe tokens for this tenant" in experiments
+    # Each lifecycle action is a row button: single-flight through CW.busy and
+    # confirmed with its plain consequence first.
+    assert "CW.busy(button, async function" in experiments
+    assert "Visitors taking part will begin to see the test versions." in experiments
+    assert "Everyone will see the original from now on." in experiments
+    assert "expected_revision: x.revision" in experiments
+    assert "Delete visitor records that are past their keep-until date?" in experiments
 
-    assert 'button.dataset.inFlight === "true"' in opt_out
-    assert "Activate Global Opt-Out configuration “" in opt_out
-    assert "Revoke Global Opt-Out configuration “" in opt_out
-    assert "Update and rebind Global Opt-Out configuration “" in opt_out
-    assert 'button.setAttribute("aria-busy", "true")' in opt_out
-    assert "delete button.dataset.inFlight" in opt_out
-    assert "Could not reach the server — check your connection and try again." in opt_out
-    assert "Purge expired Global Opt-Out retention records for this tenant?" in opt_out
+    # Opt-out set-ups: single-flight row buttons with plain confirmations.
+    assert "return CW.busy(button, async function" in opt_out
+    assert "Switch on opt-out for " in opt_out
+    assert "Switch off opt-out for " in opt_out
+    assert "expected_revision: item.revision" in opt_out
+    assert "Delete opt-out records that are past their keep-until date?" in opt_out

@@ -64,16 +64,11 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
         "style-src 'self' 'nonce-",
     ):
         assert directive in csp
-    assert "Custom data-element indexes" in response.text
-    assert "without saving the original search values" in response.text
-    assert "key reference, key version, retention, and quotas are resolved by the server" in response.text
-    assert "search fails closed" in response.text
+    assert "Find People by Preference" in response.text
+    assert "What you search for is never saved" in response.text
+    assert "searching stops until the question is rebuilt" in response.text
     assert 'id="custom-index-operations" disabled' in response.text
     assert 'data-copilot-page="/consent/custom-indexes"' in response.text
-    assert "backdrop-filter: blur(24px)" in response.text
-    assert ":focus-visible" in response.text
-    assert "prefers-reduced-motion" in response.text
-    assert "forced-colors" in response.text
 
 
 def test_workbench_has_only_closed_fields_and_external_script(client: TestClient) -> None:
@@ -93,14 +88,12 @@ def test_workbench_has_only_closed_fields_and_external_script(client: TestClient
         item.get("src") for item in scripts
     }
     assert forms and all("action" not in form for form in forms)
+    # Answers are rendered as choices by the script; versions ride on rows.
     assert {
         "index_id",
         "element_name",
         "idempotency_key",
-        "expected_revision",
         "value_type",
-        "value",
-        "limit",
         "cursor",
     }.issubset(selectors)
     for selector in selectors:
@@ -147,10 +140,8 @@ def test_workbench_server_renders_exact_role_controls(
     }
     for fieldset in (
         "custom-index-create-controls",
-        "custom-index-load-controls",
-        "custom-index-build-controls",
-        "custom-index-revoke-controls",
         "custom-index-search-controls",
+        "custom-index-new",
     ):
         assert ("disabled" in by_id[fieldset]) is admin_disabled
     assert ("disabled" in by_id["custom-index-audit-controls"]) is audit_disabled
@@ -200,7 +191,7 @@ def test_workbench_rejects_query_material_and_requires_tenant(
 ) -> None:
     response = client.get(f"{ROUTE}?tenant_id=caller-selected")
     assert response.status_code == 404
-    assert "Custom data-element indexes" not in response.text
+    assert "Find People by Preference" not in response.text
 
     def missing_tenant() -> None:
         raise page.HTTPException(
@@ -220,3 +211,19 @@ def test_workbench_assets_are_packaged() -> None:
         selected = PACKAGE / relative
         assert selected.is_file()
         assert selected.stat().st_size > 100
+
+
+def test_workbench_lists_questions_with_row_buttons_and_speaks_plainly(client: TestClient) -> None:
+    from test_support.plain_language import developer_terms
+
+    page_html = client.get(ROUTE).text
+    source = (PACKAGE / "static" / "lightwork-consent-custom-index.js").read_text(encoding="utf-8")
+    assert 'id="custom-index-table"' in page_html
+    for label in ('label: "Search"', '"Build now"', '"Rebuild"', 'label: "Remove"'):
+        assert label in source
+    assert "expected_revision: index.revision" in source
+    assert "CW.confirm(" in source
+    for typed in ("Index reference", "Page size", "After profile", "Opaque value ID",
+                  "idempotency key", "Current version"):
+        assert typed not in page_html
+    assert developer_terms(page_html) == []

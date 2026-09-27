@@ -37,42 +37,39 @@ def test_page_exposes_full_publishing_lifecycle_and_default_off_boundary() -> No
     response = client.get("/consent/publishing")
     assert response.status_code == 200
     page = response.text
-    assert "Consent Publishing" in page
+    assert "Banner and Preference Center" in page
     assert 'data-module-gate="consent_preferences.publishing"' in page
     assert "Consent publishing is turned off." in page
     assert "[consent_preferences.publishing] enable = true" not in page
+    # Everything sits inside the natively disabled workbench while turned off.
+    assert re.search(r'id="cpp-root"[^>]*disabled', page)
     for element in (
+        "cpp-property-table",
         "cpp-property",
+        "cpp-resource-table",
         "cpp-resource",
         "cpp-promotion",
-        "cpp-history",
-        "cpp-rollback",
-        "cpp-withdraw",
-        "cpp-withdraw-confirm",
-        "cpp-withdraw-submit",
+        "cpp-history-panel",
+        "cpp-preview",
+        "cpp-publish",
     ):
-        assert element in page
-    assert "Prior records remain immutable." in page
-    assert 'data-guided-selector="cpp-resource-kind"' in page
-    assert "Save new version" in page
-    assert "Text references connect titles" in page
-    assert "Brand theme" in page
-    assert "contrast-checked hex colors" in page
-    assert "content-free immutable tombstone" in page
-    assert "Public configuration resolution is denied as withdrawn" in page
-    assert "prior publication records remain immutable" in page
-    assert "confirm_withdrawal" in page
-    assert re.search(r'id="cpp-withdraw-submit"[^>]*disabled', page)
-    assert re.search(r'id="cpp-withdraw-confirm"[^>]*required[^>]*disabled', page)
-    script_start = page.index('(function(){"use strict"')
-    operator_script = page[script_start : page.index("</script>", script_start)]
-    assert "innerHTML" not in operator_script
-    assert "result.textContent" in operator_script
-    assert "status.textContent" in operator_script
+        assert f'id="{element}"' in page
+    for kind in ("Uses of data", "Topics", "Extra questions", "Privacy notices",
+                 "Banner designs", "Brand themes", "Languages", "Display rules"):
+        assert f">{kind}</option>" in page
+    script = client.get("/static/lightwork-consent-publishing.js").text
+    assert "innerHTML" not in script
+    # Destructive and public actions confirm with a plain consequence.
+    for phrase in ("Publish to ", "Stop showing the banner on ", "Restore version "):
+        assert phrase in script
+    assert script.count("CW.confirm(") >= 3
+    assert "window.confirm" not in script
 
 
-def test_enabled_page_removes_disabled_banner(isolated_page) -> None:
+def test_enabled_page_removes_disabled_banner_and_speaks_plainly(isolated_page) -> None:
     from maverick import config
+
+    from test_support.plain_language import developer_terms
 
     isolated_page.write_text(
         "[consent_preferences]\nenable = true\n[consent_preferences.publishing]\nenable = true\n",
@@ -81,8 +78,14 @@ def test_enabled_page_removes_disabled_banner(isolated_page) -> None:
     config.reset_config_cache()
     page = client.get("/consent/publishing").text
     assert 'data-module-gate="consent_preferences.publishing"' not in page
-    assert re.search(r'id="cpp-withdraw-submit"[^>]*disabled', page) is None
-    assert re.search(r'id="cpp-withdraw-confirm"[^>]*disabled', page) is None
-    assert "Confirm the destructive withdrawal before continuing." in page
-    assert "confirmation.checked" in page
-    assert "Experience publishing" in client.get("/consent").text
+    assert re.search(r'id="cpp-root"[^>]*disabled', page) is None
+    # Revisions and request references ride in hidden fields from the row.
+    for name in ("expected_revision", "expected_property_revision",
+                 "expected_publication_revision", "expected_current_version"):
+        assert f'<input type="hidden" name="{name}"' in page
+    assert page.count('data-auto-reference name="idempotency_key"') == 2
+    for typed in ("Property ID", "Resource ID", "Target publication ID", "Rule group version",
+                  "Publication details JSON", "hexadecimal"):
+        assert typed not in page
+    assert developer_terms(page) == []
+    assert "Banner and preference center" in client.get("/consent").text

@@ -1,129 +1,330 @@
 {% extends "base.html" %}
-{% block title %}Consent Profile Data - Lightwork{% endblock %}
+{% from "_hero.html" import hero %}
+{% from "_module_gate.html" import module_gate %}
+{% block title %}Preference Questions · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
-<style>
-  .cpd-shell { max-width:1450px; margin:0 auto; padding:var(--space-4); }
-  .cpd-grid { display:grid; grid-template-columns:minmax(20rem,1fr) minmax(26rem,1.4fr);
-              gap:var(--space-4); }
-  .cpd-stack { display:flex; flex-direction:column; gap:var(--space-3); }
-  .cpd-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
-  .cpd-stack textarea { min-height:20rem; font-family:var(--font-mono); }
-  .cpd-output { min-height:28rem; max-height:56rem; overflow:auto; white-space:pre-wrap;
-                word-break:break-word; }
-  .cpd-warning { border:2px solid var(--warn); padding:var(--space-3);
-                 border-radius:8px; background:var(--surface-2); margin:var(--space-3) 0; }
-  .cpd-boundary { border-left:3px solid var(--accent); padding-left:var(--space-3); }
-  .cpd-confirm { display:flex; flex-direction:row !important; gap:var(--space-2) !important;
-                 align-items:flex-start; }
-  .cpd-actions { display:flex; gap:var(--space-2); flex-wrap:wrap; }
-  @media (max-width:900px) { .cpd-grid { grid-template-columns:1fr; } }
-</style>
-
-<div class="cpd-shell">
-  <h1>Consent Profile Data</h1>
-  <p>Define optional preferences people can share and plan when to ask for them. Each catalog and prompt journey is linked to a reviewed consent publication and policy.</p>
-
-  <section class="panel" aria-labelledby="cpd-boundaries-heading">
-    <h2 id="cpd-boundaries-heading">Authority and evidence boundary</h2>
-    <p class="cpd-boundary"><strong>Tenant and actor are server-derived.</strong>
-      This page has no tenant, profile, actor, credential, key-material, raw
-      capability, personal-data, free-text preference, or provider selector.</p>
-    <p class="cpd-boundary"><strong>Local authority only.</strong> The core is
-      provider-neutral and performs no network I/O. This surface does not prove
-      live-traffic operation, browser or mobile deployment, accessibility review,
-      customer acceptance, recovery, concurrency, or production-scale acceptance.</p>
-    <p class="cpd-boundary"><strong>No protected-trait inference.</strong> Values
-      are restricted to published boolean, single-select, and multi-select options.
-      Journey conditions are closed data or trusted purpose signals, never code.</p>
-    {% if consent_profile_data_enabled %}
-    <button class="btn" id="cpd-load-status" type="button">Load status and integrity</button>
-    {% endif %}
-  </section>
-
-  {% from "_module_gate.html" import module_gate %}
-  {% if not consent_profile_data_enabled %}
+{% set pd_on = consent_profile_data_enabled %}
+{% set pd_admin = consent_can_admin if consent_can_admin is defined else true %}
+{% set pd_audit = consent_can_audit if consent_can_audit is defined else true %}
+<div class="governance-workbench">
+  {{ hero('Profile data', 'Preference Questions',
+          lede='Ask people a few extra questions over time, such as how often they want to hear from you, and keep their answers with their consent record.') }}
+  {% include "_consent_nav.html" %}
+  {% if not pd_on %}
   {{ module_gate('consent_preferences.profile_data', 'Consent profile data',
-                 detail='Governs consumer profile data catalogs and journeys --
-                         review who authors and who approves them before
-                         turning it on.') }}
-  {% else %}
-  <p id="cpd-status" role="status" aria-live="polite">No operation running.</p>
-  <div class="cpd-grid">
-    <section class="panel cpd-stack">
-      <h2>Choose an action</h2>
-      <p>Catalog creators and journey authors cannot approve their own versions. Use the current version and reuse the request reference only when retrying the same action.</p>
-      <label>Operation
-        <select id="cpd-operation" data-guided-api="/api/v1/consent/profile-data">
-          <option value="status" data-method="GET" data-path="/status">Status and product boundaries</option>
-          <option value="catalog-create" data-method="POST" data-path="/catalogs">Catalog: create immutable version</option>
-          <option value="catalog-get" data-method="GET" data-path="/catalogs/{catalog_id}/versions/{version}">Catalog: get exact version</option>
-          <option value="catalog-approve" data-method="POST" data-path="/catalogs/{catalog_id}/versions/{version}/approve">Catalog: independent approval</option>
-          <option value="journey-create" data-method="POST" data-path="/journeys">Journey: create immutable version</option>
-          <option value="journey-get" data-method="GET" data-path="/journeys/{journey_id}/versions/{version}">Journey: get exact version</option>
-          <option value="journey-approve" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/approve">Journey: independent approval</option>
-          <option value="journey-activate" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/activate">Journey: activate</option>
-          <option value="journey-pause" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/pause">Journey: pause</option>
-          <option value="journey-kill" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/kill">Journey: kill</option>
-          <option value="journey-rollback" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/rollback">Journey: rollback</option>
-          <option value="integrity" data-method="GET" data-path="/integrity">Verify tenant integrity</option>
-          <option value="retention-purge" data-method="POST" data-path="/retention/purge">Purge expired retained records</option>
-        </select>
-      </label>
-      <label>Record references (JSON)
-        <input class="input" id="cpd-path-values" value="{}" autocomplete="off">
-      </label>
-      <label>Action details (JSON)
-        <textarea class="input" id="cpd-body">{}</textarea>
-      </label>
-      <div class="cpd-warning">
-        <label class="cpd-confirm"><input id="cpd-confirm" type="checkbox">
-          <span>I reviewed the exact publication and policy digests, immutable
-            definitions or stages, independent approval, expected revision,
-            idempotency key, lifecycle effect, and retention consequence.</span>
-        </label>
-      </div>
-      <div class="cpd-actions">
-        <button class="btn btn--primary" id="cpd-submit" type="button">Continue with selected action</button>
-        <button class="btn" id="cpd-example" type="button">Load bounded example</button>
-      </div>
-    </section>
-    <section class="panel">
-      <h2>Result</h2>
-      <pre class="cpd-output" id="cpd-output" aria-live="polite">No request made.</pre>
-    </section>
-  </div>
+                 detail='Lets your banner ask people extra questions. Decide who writes the questions and who approves them first.') }}
   {% endif %}
-</div>
+  <p id="cpd-status" class="muted" role="status" aria-live="polite"></p>
+  <fieldset class="feature-gated-workbench" id="cpd-root" data-can-admin="{{ 'true' if pd_admin else 'false' }}" data-can-audit="{{ 'true' if pd_audit else 'false' }}" data-feature-enabled="{{ 'true' if pd_on else 'false' }}"{% if not pd_on %} disabled aria-disabled="true"{% endif %}>
+    <legend class="sr-only">Preference questions</legend>
 
-{% if consent_profile_data_enabled %}
+    <section class="panel" aria-labelledby="cpd-how-heading">
+      <h2 id="cpd-how-heading">How it works</h2>
+      <ol>
+        <li>Add the questions as “Extra questions” on the Banner and preference center page and publish them.</li>
+        <li>Set up a question set for a website key. A second person approves it.</li>
+        <li>Create an asking plan that decides when and how often to ask. A second person approves it, then you start it.</li>
+      </ol>
+    </section>
+
+    <section class="panel" aria-labelledby="cpd-catalogs-heading">
+      <div class="section-head">
+        <h2 id="cpd-catalogs-heading">Question sets</h2>
+        <button class="btn btn--primary" type="button" id="cpd-catalog-new"{% if not pd_admin %} disabled{% endif %}>Set up questions</button>
+      </div>
+      <div id="cpd-catalogs"><p class="muted">Loading…</p></div>
+      <form id="cpd-catalog" class="cw-editor" hidden novalidate>
+        <fieldset class="cw-form">
+          <legend class="sr-only">Set up questions</legend>
+          <h3 class="cw-wide">Set up questions</h3>
+          <label class="cw-wide">Website key<select class="select" name="credential_id" required></select></label>
+          <label>Region<select class="select" name="jurisdiction"></select></label>
+          <label>Country<select class="select" name="country_code"></select></label>
+          <label>Language<select class="select" name="locale"></select></label>
+          <div class="cw-wide" id="cpd-questions" role="status" aria-live="polite"></div>
+          <label>Keep answers for<select class="select" name="retention_seconds">
+            <option value="7776000">90 days</option><option value="31536000" selected>1 year</option><option value="63072000">2 years</option><option value="157680000">5 years</option>
+          </select></label>
+          <label>Ask again after<select class="select" name="expires_after_seconds">
+            <option value="">Never; answers stay until changed</option><option value="15552000">6 months</option><option value="31536000">1 year</option>
+          </select></label>
+          <input type="hidden" data-auto-reference name="idempotency_key">
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit" id="cpd-catalog-save">Send for approval</button>
+            <button class="btn btn--ghost" type="button" data-cpd-close="cpd-catalog">Cancel</button>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="cpd-journeys-heading">
+      <div class="section-head">
+        <h2 id="cpd-journeys-heading">Asking plans</h2>
+        <button class="btn btn--primary" type="button" id="cpd-journey-new"{% if not pd_admin %} disabled{% endif %}>New asking plan</button>
+      </div>
+      <p class="muted">A plan asks a few questions at a time and never more often than you allow.</p>
+      <div id="cpd-journeys"><p class="muted">Loading…</p></div>
+      <form id="cpd-journey" class="cw-editor" hidden novalidate>
+        <fieldset class="cw-form">
+          <legend class="sr-only">New asking plan</legend>
+          <h3 class="cw-wide">New asking plan</h3>
+          <label class="cw-wide">Question set<select class="select" name="catalog" required></select></label>
+          <div class="cw-wide" id="cpd-steps"></div>
+          <div class="cw-actions"><button class="btn" type="button" id="cpd-step-add">Add a step</button></div>
+          <label>Questions per visit<select class="select" name="max_prompts">
+            <option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option>
+          </select></label>
+          <label>Wait between asks<select class="select" name="cooldown_seconds">
+            <option value="3600">1 hour</option><option value="86400" selected>1 day</option><option value="604800">1 week</option><option value="2592000">30 days</option>
+          </select></label>
+          <label>Ask at most<select class="select" name="frequency_cap">
+            <option value="1">Once</option><option value="3" selected>3 times</option><option value="5">5 times</option><option value="10">10 times</option>
+          </select></label>
+          <label>Within<select class="select" name="frequency_window_seconds">
+            <option value="86400">1 day</option><option value="604800">1 week</option><option value="2592000" selected>30 days</option><option value="7776000">90 days</option>
+          </select></label>
+          <label>Keep the asking history for<select class="select" name="retention_seconds">
+            <option value="2592000">30 days</option><option value="7776000" selected>90 days</option><option value="31536000">1 year</option>
+          </select></label>
+          <input type="hidden" data-auto-reference name="idempotency_key">
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit">Send for approval</button>
+            <button class="btn btn--ghost" type="button" data-cpd-close="cpd-journey">Cancel</button>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="cpd-care-heading">
+      <h2 id="cpd-care-heading">Record care</h2>
+      <div class="cw-actions">
+        <button class="btn" type="button" id="cpd-integrity"{% if not pd_audit %} disabled{% endif %}>Check records are intact</button>
+        <button class="btn" type="button" id="cpd-purge"{% if not pd_admin %} disabled{% endif %}>Delete expired answers</button>
+      </div>
+      <p id="cpd-care-result" class="muted" role="status" aria-live="polite"></p>
+      <details class="governance-details">
+        <summary>About this page’s safeguards</summary>
+        <ul>
+          <li>The person who writes a question set or plan cannot approve it.</li>
+          <li>Answers are limited to the choices you published; people never type free text, and nothing is guessed about them.</li>
+          <li>Question sets are tied to exactly what your banner publishes, so a changed banner needs a new set.</li>
+        </ul>
+      </details>
+    </section>
+  </fieldset>
+</div>
+<script src="/static/lightwork-consent-workbench.js"></script>
 <script>
-(function(){"use strict";
-var API="/api/v1/consent/profile-data",operation=document.getElementById("cpd-operation"),paths=document.getElementById("cpd-path-values"),body=document.getElementById("cpd-body"),status=document.getElementById("cpd-status"),output=document.getElementById("cpd-output"),confirmBox=document.getElementById("cpd-confirm"),REF=/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
-var examples={
-"status":{paths:{},body:{}},
-"catalog-create":{paths:{},body:{catalog_id:"consumer-profile-v1",property_id:"web-main",publication_sha256:"0".repeat(64),bundle_sha256:"0".repeat(64),configuration_sha256:"0".repeat(64),policy_id:"consent-policy",policy_version:1,policy_sha256:"0".repeat(64),definitions:[{preference_id:"required-bool",definition_version:1,label_ref:"required-bool",value_type:"boolean",options:[],required:true,expires_after_seconds:null,retention_seconds:86400}],retention_seconds:86400,expected_latest_version:0,idempotency_key:"replace-catalog-create-key"}},
-"catalog-get":{paths:{catalog_id:"consumer-profile-v1",version:1},body:{}},
-"catalog-approve":{paths:{catalog_id:"consumer-profile-v1",version:1},body:{expected_revision:1,idempotency_key:"replace-catalog-approval-key"}},
-"journey-create":{paths:{},body:{journey_id:"progressive-profile-v1",catalog_id:"consumer-profile-v1",catalog_version:1,stages:[{stage_id:"foundation",priority:10,prompt_label_ref:"foundation",preference_ids:["required-bool"],condition:null}],max_prompts:1,cooldown_seconds:3600,frequency_cap:3,frequency_window_seconds:86400,retention_seconds:86400,expected_latest_version:0,idempotency_key:"replace-journey-create-key"}},
-"journey-get":{paths:{journey_id:"progressive-profile-v1",version:1},body:{}},
-"journey-approve":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:1,idempotency_key:"replace-journey-approval-key"}},
-"journey-activate":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:2,idempotency_key:"replace-journey-activate-key"}},
-"journey-pause":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:3,idempotency_key:"replace-journey-pause-key"}},
-"journey-kill":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:3,idempotency_key:"replace-journey-kill-key"}},
-"journey-rollback":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:3,idempotency_key:"replace-journey-rollback-key"}},
-"integrity":{paths:{},body:{}},
-"retention-purge":{paths:{},body:{before:1800000000,idempotency_key:"replace-profile-purge-key"}}
-};
-function parseObject(raw,label){var value;try{value=JSON.parse(raw);}catch(_error){throw new Error(label+" must be valid JSON.");}if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(label+" must be a JSON object.");return value;}
-function selected(){return operation.options[operation.selectedIndex];}
-function pathFor(template,values){return template.replace(/\{([a-z_]+)\}/g,function(_match,name){var value=values[name];if((typeof value!=="string"&&typeof value!=="number")||!REF.test(String(value)))throw new Error("Path value "+name+" is missing or invalid.");return encodeURIComponent(String(value));});}
-async function request(path,options){var response=await fetch(API+path,Object.assign({credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/json"}},options||{})),payload;try{payload=await response.json();}catch(_error){throw new Error("Request failed: the server returned an invalid JSON response.");}if(!response.ok)throw new Error(payload&&typeof payload.detail==="string"?payload.detail:"Operation failed with HTTP "+response.status+".");return payload;}
-function show(payload,message){output.textContent=JSON.stringify(payload,null,2);status.textContent=message;}
-function fail(error){status.textContent=error instanceof Error?error.message:"Operation failed.";}
-document.getElementById("cpd-load-status").addEventListener("click",async function(){try{show(await request("/status"),"Status and integrity loaded.");}catch(error){fail(error);}});
-document.getElementById("cpd-example").addEventListener("click",function(){var example=examples[operation.value]||examples.status;paths.value=JSON.stringify(example.paths);body.value=JSON.stringify(example.body,null,2);confirmBox.checked=false;status.textContent="Example loaded. Replace the sample record references and use a unique request reference.";});
-document.getElementById("cpd-submit").addEventListener("click",async function(){try{var item=selected(),method=item.dataset.method,path=pathFor(item.dataset.path,parseObject(paths.value,"Path values")),payload=parseObject(body.value,"Request body"),options={method:method};if(method!=="GET"&&!confirmBox.checked)throw new Error("Review and confirm the mutation before submitting.");if(method!=="GET")options.body=JSON.stringify(payload);show(await request(path,options),"Action completed for your workspace.");confirmBox.checked=false;}catch(error){fail(error);}});
+(function () {
+  "use strict";
+  var API = "/api/v1/consent/profile-data";
+  // The page's JSON client: a non-2xx or malformed response is never success.
+  async function request(path, options) {
+    var opts = Object.assign({cache: "no-store"}, options || {});
+    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
+    var response = await fetch(API + path, opts);
+    var body;
+    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
+    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
+    return body;
+  }
+  var CW = window.LightworkConsentWorkbench;
+  if (CW && document.getElementById("cpd-root")) start();
+
+  function start() {
+    var $ = function (id) { return document.getElementById(id); };
+    var root = $("cpd-root"), status = $("cpd-status");
+    var can = {admin: root.dataset.canAdmin === "true", audit: root.dataset.canAudit === "true"};
+    var state = {catalogs: [], journeys: [], keys: [], contract: null};
+    var CATALOG = {pending_approval: ["Waiting for approval", "warn"], published: ["Approved", "ok"]};
+    var JOURNEY = {draft: ["Waiting for approval", "warn"], approved: ["Approved, not started", "info"], active: ["Asking", "ok"], paused: ["Paused", "warn"], killed: ["Stopped", "idle"], rolled_back: ["Rolled back", "idle"]};
+    document.querySelectorAll("[data-cpd-close]").forEach(function (b) { b.addEventListener("click", function () { $(b.dataset.cpdClose).hidden = true; }); });
+    function badge(map, value) { var s = map[value] || [CW.human(value), "idle"]; return CW.badge(s[0], s[1]); }
+    function questions(c) { return (c.definitions || []).map(function (d) { return CW.human(d.preference_id); }).join(", "); }
+    function planFor(j) { return state.catalogs.filter(function (c) { return c.catalog_id === j.catalog_id && c.version === j.catalog_version; })[0]; }
+
+    async function load() {
+      try {
+        var results = await Promise.all([request("/catalogs?limit=500"), request("/journeys?limit=500")]);
+        state.catalogs = results[0].items || []; state.journeys = results[1].items || [];
+      } catch (error) { ["cpd-catalogs", "cpd-journeys"].forEach(function (id) { $(id).replaceChildren(); }); CW.fail(status, error, "load question sets"); return; }
+      CW.table($("cpd-catalogs"), state.catalogs, {
+        label: "Question sets", name: function (c) { return CW.human(c.property_id); },
+        columns: [
+          {label: "Website or app", value: function (c) { return CW.human(c.property_id); }},
+          {label: "Questions", value: questions},
+          {label: "Status", value: function (c) { return badge(CATALOG, c.state); }},
+          {label: "Set up", value: function (c) { return CW.when(c.created_at); }},
+        ],
+        actions: [
+          {label: "Approve", when: function (c) { return can.admin && c.state === "pending_approval"; }, run: function (c, b) { approveCatalog(c, b); }},
+          {label: "Create asking plan", when: function (c) { return can.admin && c.state === "published"; }, run: function (c) { openJourney(c); }},
+        ],
+        empty: {title: "No question sets yet.", body: "Publish extra questions in your banner, then set them up here.", action: can.admin ? {label: "Set up questions", run: function () { openCatalog(); }} : null},
+      });
+      CW.table($("cpd-journeys"), state.journeys, {
+        label: "Asking plans", name: function (j) { return CW.human(j.property_id); },
+        columns: [
+          {label: "Website or app", value: function (j) { return CW.human(j.property_id); }},
+          {label: "Steps", value: function (j) { return (j.stages || []).map(function (s) { return (s.preference_ids || []).map(CW.human).join(" + "); }).join(", then "); }},
+          {label: "Status", value: function (j) { return badge(JOURNEY, j.state); }},
+          {label: "Rules", value: function (j) { return "Up to " + j.max_prompts + " per visit, " + j.frequency_cap + " times per " + Math.round(j.frequency_window_seconds / 86400) + " days"; }},
+        ],
+        actions: [
+          {label: "Approve", when: function (j) { return can.admin && j.state === "draft"; }, run: function (j, b) { journeyAction(j, "approve", b); }},
+          {label: "Start", when: function (j) { return can.admin && (j.state === "approved" || j.state === "paused"); }, run: function (j, b) { journeyAction(j, "activate", b); }},
+          {label: "Pause", when: function (j) { return can.admin && j.state === "active"; }, run: function (j, b) { journeyAction(j, "pause", b); }},
+          {label: "Stop", kind: "danger", when: function (j) { return can.admin && ["approved", "active", "paused"].indexOf(j.state) >= 0; }, run: function (j, b) { journeyAction(j, "kill", b); }},
+          {label: "Roll back", kind: "danger", when: function (j) { return can.admin && ["active", "paused"].indexOf(j.state) >= 0; }, run: function (j, b) { journeyAction(j, "rollback", b); }},
+        ],
+        empty: {title: "No asking plans yet.", body: "After a question set is approved, create a plan to start asking.", action: null},
+      });
+    }
+
+    function approveCatalog(c, button) {
+      CW.busy(button, async function () {
+        if (!(await CW.confirm("Approve the questions for " + CW.human(c.property_id) + "? You cannot approve a set you created yourself.", "Approve"))) return;
+        try { await request("/catalogs/" + encodeURIComponent(c.catalog_id) + "/versions/" + c.version + "/approve", {method: "POST", json: {expected_revision: c.revision, idempotency_key: CW.reference()}}); await load(); CW.say(status, "Question set approved."); }
+        catch (error) { if (error && error.status === 403) CW.say(status, "A different person must approve this question set.", true); else CW.fail(status, error, "approve the question set"); }
+      });
+    }
+    var IMPACT = {approve: ["Approve this asking plan for %s? You cannot approve a plan you created yourself.", "Approve"], activate: ["Start asking people on %s?", "Start"],
+      pause: ["Pause asking on %s? No one will be asked until you start it again.", "Pause"], kill: ["Stop this asking plan on %s? This cannot be undone; you would need a new plan.", "Stop"],
+      rollback: ["Roll back this asking plan on %s? It stops asking and is closed for good.", "Roll back"]};
+    function journeyAction(j, action, button) {
+      CW.busy(button, async function () {
+        if (!(await CW.confirm(IMPACT[action][0].replace("%s", CW.human(j.property_id)), IMPACT[action][1]))) return;
+        try { await request("/journeys/" + encodeURIComponent(j.journey_id) + "/versions/" + j.version + "/" + action, {method: "POST", json: {expected_revision: j.revision, idempotency_key: CW.reference()}}); await load(); CW.say(status, "Asking plan updated."); }
+        catch (error) { if (error && error.status === 403 && action === "approve") CW.say(status, "A different person must approve this plan.", true); else CW.fail(status, error, "update the asking plan"); }
+      });
+    }
+
+    // Question sets
+    var catalogForm = $("cpd-catalog");
+    async function openCatalog() {
+      catalogForm.reset(); delete catalogForm.dataset.defaulted; $("cpd-catalog-save").disabled = false; state.contract = null; $("cpd-questions").replaceChildren();
+      var f = catalogForm.elements;
+      CW.fill(f.jurisdiction, CW.JURISDICTIONS); CW.fill(f.country_code, CW.COUNTRIES); CW.fill(f.locale, CW.LOCALES);
+      CW.open(catalogForm, "[name=credential_id]");
+      try {
+        var keys = await CW.client("/api/v1/consent/public-clients")("?limit=500");
+        state.keys = (keys.items || []).filter(function (k) { return k.status === "active"; });
+        CW.fill(f.credential_id, state.keys.map(function (k) { return {value: k.credential_id, label: CW.human(k.property_id) + " · " + (k.browser_origin || k.target_origin || k.target_bundle_id || "")}; }), state.keys.length ? "Choose a website key" : "Create a website key first");
+      } catch (error) { CW.fail(status, error, "load website keys"); }
+    }
+    $("cpd-catalog-new").addEventListener("click", openCatalog);
+    async function loadContract() {
+      var f = catalogForm.elements, out = $("cpd-questions"); state.contract = null;
+      if (!f.credential_id.value) { out.replaceChildren(); return; }
+      var key = state.keys.filter(function (k) { return k.credential_id === f.credential_id.value; })[0];
+      if (key && !catalogForm.dataset.defaulted) { f.jurisdiction.value = key.jurisdiction; f.country_code.value = key.country_code; f.locale.value = key.default_locale; catalogForm.dataset.defaulted = "1"; }
+      out.replaceChildren(CW.el("p", "muted", "Checking what this website publishes…"));
+      try {
+        var c = await request("/contract?credential_id=" + encodeURIComponent(f.credential_id.value) + "&jurisdiction=" + encodeURIComponent(f.jurisdiction.value) + "&country_code=" + encodeURIComponent(f.country_code.value) + "&locale=" + encodeURIComponent(f.locale.value));
+        state.contract = c;
+        if (!c.questions.length) { CW.say(out, "This banner has no extra questions yet. Add them on the Banner and preference center page and publish again.", true); return; }
+        var existing = state.catalogs.filter(function (x) { return x.catalog_id === c.catalog_id; })[0];
+        out.replaceChildren(CW.el("p", "", existing ? "These questions are already set up for this audience." : "These published questions will be set up:"));
+        var list = CW.el("ul"); c.questions.forEach(function (q) { list.appendChild(CW.el("li", "", q.title + (q.required ? " (required)" : ""))); }); out.appendChild(list);
+        $("cpd-catalog-save").disabled = !!existing;
+      } catch (error) {
+        if (error && error.status === 409) CW.say(out, "This website key no longer matches the published banner or consent policy. Create a new key for it first.", true);
+        else CW.fail(out, error, "check the published questions");
+      }
+    }
+    ["credential_id", "jurisdiction", "country_code", "locale"].forEach(function (n) { catalogForm.elements[n].addEventListener("change", loadContract); });
+    catalogForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      var f = catalogForm.elements, c = state.contract;
+      if (!c || !c.questions.length) { CW.say(status, "Choose a website key whose banner has extra questions.", true); return; }
+      var retention = Number(f.retention_seconds.value), expires = f.expires_after_seconds.value ? Number(f.expires_after_seconds.value) : null;
+      var body = {catalog_id: c.catalog_id, property_id: c.property_id, publication_sha256: c.publication_sha256, bundle_sha256: c.bundle_sha256,
+        configuration_sha256: c.configuration_sha256, policy_id: c.policy_id, policy_version: c.policy_version, policy_sha256: c.policy_sha256,
+        definitions: c.questions.map(function (q) { return {preference_id: q.preference_id, definition_version: q.version, label_ref: q.preference_id, value_type: q.value_type,
+          options: q.option_ids.map(function (o) { return {value_id: o, label_ref: o}; }), required: q.required, expires_after_seconds: expires, retention_seconds: retention}; }),
+        retention_seconds: retention, expected_latest_version: 0, idempotency_key: f.idempotency_key.value || CW.reference()};
+      try { await request("/catalogs", {method: "POST", json: body}); catalogForm.hidden = true; await load(); CW.say(status, "Question set saved. Ask a second person to approve it."); }
+      catch (error) { CW.fail(status, error, "save the question set"); }
+    });
+
+    // Asking plans
+    var journeyForm = $("cpd-journey");
+    var purposes = [];
+    function stepEditor(catalog) {
+      var box = CW.el("fieldset", "cw-form panel"); box.appendChild(CW.el("legend", "", "Step"));
+      var checks = CW.el("div", "cw-checks cw-wide");
+      (catalog.definitions || []).forEach(function (d) {
+        var l = CW.el("label"), i = document.createElement("input"); i.type = "checkbox"; i.name = "step_questions"; i.value = d.preference_id; l.append(i, " " + CW.human(d.preference_id)); checks.appendChild(l);
+      });
+      var ask = CW.el("fieldset", "cw-wide"); ask.append(CW.el("legend", "", "Ask these questions"), checks);
+      var cond = CW.el("label", "", "When"), select = document.createElement("select"); select.className = "select"; select.name = "step_condition";
+      CW.fill(select, [{value: "", label: "Always"}].concat(purposes.map(function (p) { return {value: p, label: "Only if they agreed to " + CW.human(p)}; })));
+      cond.appendChild(select);
+      var remove = CW.el("button", "btn btn--ghost", "Remove step"); remove.type = "button"; remove.addEventListener("click", function () { box.remove(); });
+      box.append(ask, cond, remove);
+      return box;
+    }
+    async function openJourney(catalog) {
+      journeyForm.reset(); $("cpd-steps").replaceChildren();
+      var published = state.catalogs.filter(function (c) { return c.state === "published"; });
+      CW.fill(journeyForm.elements.catalog, published.map(function (c) { return {value: c.catalog_id + "|" + c.version, label: CW.human(c.property_id) + ": " + questions(c)}; }), published.length ? "" : "Approve a question set first");
+      if (catalog) journeyForm.elements.catalog.value = catalog.catalog_id + "|" + catalog.version;
+      CW.open(journeyForm, "[name=catalog]");
+      await paintSteps();
+    }
+    function chosenCatalog() { var v = journeyForm.elements.catalog.value.split("|"); return state.catalogs.filter(function (c) { return c.catalog_id === v[0] && String(c.version) === v[1]; })[0]; }
+    async function paintSteps() {
+      var catalog = chosenCatalog(); $("cpd-steps").replaceChildren(); purposes = [];
+      if (!catalog) return;
+      try {
+        var policies = await CW.client("/api/v1/consent")("/policies?limit=500");
+        var policy = (policies.policies || []).filter(function (p) { return p.policy_id === catalog.policy_id && p.version === catalog.policy_version; })[0];
+        purposes = policy ? Object.keys(policy.purposes || {}) : [];
+      } catch (_error) { purposes = []; }
+      $("cpd-steps").appendChild(stepEditor(catalog));
+    }
+    journeyForm.elements.catalog.addEventListener("change", paintSteps);
+    $("cpd-step-add").addEventListener("click", function () { var c = chosenCatalog(); if (c) $("cpd-steps").appendChild(stepEditor(c)); });
+    $("cpd-journey-new").addEventListener("click", function () { openJourney(null); });
+    journeyForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      var f = journeyForm.elements, catalog = chosenCatalog();
+      if (!catalog) { CW.say(status, "Choose an approved question set.", true); return; }
+      var steps = Array.prototype.map.call(document.querySelectorAll("#cpd-steps > fieldset"), function (box, index) {
+        var ids = Array.prototype.filter.call(box.querySelectorAll("[name=step_questions]"), function (c) { return c.checked; }).map(function (c) { return c.value; });
+        var purpose = box.querySelector("[name=step_condition]").value;
+        return {stage_id: "step-" + (index + 1), priority: Math.max(0, 1000 - index * 10), prompt_label_ref: "step-" + (index + 1), preference_ids: ids,
+          condition: purpose ? {source: "purpose", key: purpose, operator: "equals", value: "grant"} : null};
+      });
+      if (!steps.length || steps.some(function (s) { return !s.preference_ids.length; })) { CW.say(status, "Each step needs at least one question.", true); return; }
+      var journeyId = catalog.catalog_id.replace(/^profile-catalog-/, "profile-journey-");
+      var latest = state.journeys.filter(function (j) { return j.journey_id === journeyId; }).reduce(function (m, j) { return Math.max(m, j.version); }, 0);
+      var body = {journey_id: journeyId, catalog_id: catalog.catalog_id, catalog_version: catalog.version, stages: steps,
+        max_prompts: Number(f.max_prompts.value), cooldown_seconds: Number(f.cooldown_seconds.value), frequency_cap: Number(f.frequency_cap.value),
+        frequency_window_seconds: Number(f.frequency_window_seconds.value), retention_seconds: Number(f.retention_seconds.value),
+        expected_latest_version: latest, idempotency_key: f.idempotency_key.value || CW.reference()};
+      try { await request("/journeys", {method: "POST", json: body}); journeyForm.hidden = true; await load(); CW.say(status, "Asking plan saved. Ask a second person to approve it."); }
+      catch (error) { CW.fail(status, error, "save the asking plan"); }
+    });
+
+    $("cpd-integrity").addEventListener("click", function () {
+      var b = this; CW.busy(b, async function () {
+        try { var r = await request("/integrity"); CW.say($("cpd-care-result"), "Checked " + (r.verified_records || 0) + " records and " + (r.receipts || 0) + " answer receipts. Everything is intact."); }
+        catch (error) { CW.fail($("cpd-care-result"), error, "check the records"); }
+      });
+    });
+    $("cpd-purge").addEventListener("click", function () {
+      var b = this; CW.busy(b, async function () {
+        if (!(await CW.confirm("Delete answers and asking history that are past their keep-until date? This cannot be undone.", "Delete"))) return;
+        try { await request("/retention/purge", {method: "POST", json: {before: Math.floor(Date.now() / 1000), idempotency_key: CW.reference()}}); CW.say($("cpd-care-result"), "Expired answers deleted."); }
+        catch (error) { CW.fail($("cpd-care-result"), error, "delete expired answers"); }
+      });
+    });
+
+    if (root.dataset.featureEnabled === "false") { ["cpd-catalogs", "cpd-journeys"].forEach(function (id) { $(id).replaceChildren(CW.el("p", "muted", "Turn this feature on to use it.")); }); return; }
+    load();
+  }
 })();
 </script>
-{% endif %}
 {% endblock %}

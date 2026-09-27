@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 from maverick.paths import canonical_tenant_id
 from pydantic import BaseModel, ConfigDict, Field
@@ -275,6 +275,99 @@ async def _call(ops: Any, function: Callable[..., Any], *args: Any, **kwargs: An
         ) from exc
 
 
+def published_contract_for_key(
+    tenant_id: str,
+    credential_id: str,
+    *,
+    jurisdiction: str,
+    country_code: str,
+    locale: str,
+) -> dict[str, Any]:
+    """Resolve what one website key currently publishes for one audience.
+
+    Read-only: the same exact-contract facts the public endpoint derives, so a
+    person picks a key, region and language instead of typing digests.
+    Raises ``LookupError`` when the key is unknown and ``ValueError`` when the
+    published banner and the key's consent policy no longer agree.
+    """
+    from . import consent_public_admin_api as admin
+
+    listed = admin._registry().list_clients(tenant_id, limit=500)
+    binding = next(
+        (item for item in listed["items"] if item.get("credential_id") == credential_id),
+        None,
+    )
+    if binding is None or binding.get("status") != "active":
+        raise LookupError("website key not found")
+    configuration = admin._publishing_store(tenant_id).resolve_public_configuration(
+        tenant_id,
+        binding["property_id"],
+        server_origin=binding.get("target_origin") or binding.get("browser_origin"),
+        server_bundle_id=binding.get("target_bundle_id"),
+        server_platform=binding.get("target_platform"),
+        jurisdiction=jurisdiction,
+        country_code=country_code,
+        region_code="",
+        requested_locale=locale,
+    )
+    if not isinstance(configuration, dict) or configuration.get("allowed") is not True:
+        raise ValueError("nothing is published for this audience")
+    publication = configuration["publication"]
+    if publication.get("bundle_sha256") != binding.get("bundle_sha256"):
+        raise ValueError("the key no longer matches the published banner")
+    policy = admin._preference_store(tenant_id).get_active_policy(
+        tenant_id,
+        binding["policy_id"],
+        at=time.time(),
+    )
+    if (
+        not isinstance(policy, dict)
+        or policy.get("version") != binding.get("policy_version")
+        or policy.get("policy_sha256") != binding.get("policy_sha256")
+    ):
+        raise ValueError("the key's consent policy is no longer current")
+    catalog_id, journey_id = public_profile_data_ids(
+        tenant_id=tenant_id,
+        property_id=binding["property_id"],
+        publication_sha256=publication["publication_sha256"],
+        bundle_sha256=publication["bundle_sha256"],
+        configuration_sha256=configuration["configuration_sha256"],
+        policy_id=binding["policy_id"],
+        policy_version=int(binding["policy_version"]),
+        policy_sha256=binding["policy_sha256"],
+    )
+    content = configuration.get("configuration") or {}
+    questions = [
+        {
+            "preference_id": item["id"],
+            "version": item["version"],
+            "title": item.get("title", item["id"]),
+            "value_type": item["value_type"],
+            "required": item["required"],
+            "option_ids": list(item.get("option_ids", [])),
+        }
+        for item in content.get("custom_preferences", [])
+        if isinstance(item, Mapping)
+    ]
+    return {
+        "catalog_id": catalog_id,
+        "journey_id": journey_id,
+        "property_id": binding["property_id"],
+        "publication_sha256": publication["publication_sha256"],
+        "bundle_sha256": publication["bundle_sha256"],
+        "configuration_sha256": configuration["configuration_sha256"],
+        "policy_id": binding["policy_id"],
+        "policy_version": int(binding["policy_version"]),
+        "policy_sha256": binding["policy_sha256"],
+        "purposes": [
+            {"id": item.get("id"), "title": item.get("title", item.get("id"))}
+            for item in content.get("purposes", [])
+            if isinstance(item, Mapping)
+        ],
+        "questions": questions,
+    }
+
+
 def create_consent_profile_data_router(  # noqa: C901 - explicit route assembly
     dependencies: ConsentProfileDataAdminDependencies | None = None,
 ) -> APIRouter:
@@ -344,6 +437,49 @@ def create_consent_profile_data_router(  # noqa: C901 - explicit route assembly
                 "identifiers": "server-derived from the exact published contract",
             },
         }
+
+    @router.get("/catalogs")
+    async def list_catalogs(request: Request, limit: int = Query(100, ge=1, le=500)) -> dict:
+        """Read-only list of the active workspace's catalog versions."""
+        require_permission(request, "operate")
+        ops, tenant, store = authority(request)
+        return _jsonable(await _call(ops, store.list_catalogs, tenant, limit=limit))
+
+    @router.get("/journeys")
+    async def list_journeys(request: Request, limit: int = Query(100, ge=1, le=500)) -> dict:
+        """Read-only list of the active workspace's journey versions."""
+        require_permission(request, "operate")
+        ops, tenant, store = authority(request)
+        return _jsonable(await _call(ops, store.list_journeys, tenant, limit=limit))
+
+    @router.get("/contract")
+    async def contract(
+        request: Request,
+        credential_id: str = Query(..., pattern=_ID_PATTERN),
+        jurisdiction: str = Query("global", pattern=r"^[a-z0-9][a-z0-9-]{0,63}$"),
+        country_code: str = Query("US", pattern=r"^[A-Z]{2}$"),
+        locale: str = Query("en-US", pattern=r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8}){0,3}$"),
+    ) -> dict:
+        """Read-only: the published facts a new catalog or journey must bind to."""
+        require_permission(request, "operate")
+        authority(request)
+        from .consent_public_admin_api import _require_enabled
+
+        _require_enabled()
+        tenant = _tenant_id()
+        try:
+            return await run_in_threadpool(
+                published_contract_for_key,
+                tenant,
+                credential_id,
+                jurisdiction=jurisdiction,
+                country_code=country_code,
+                locale=locale,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="website key not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/catalogs", status_code=201)
     async def create_catalog(request: Request, body: CatalogCreateIn) -> dict[str, Any]:

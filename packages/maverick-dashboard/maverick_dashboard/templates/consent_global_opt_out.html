@@ -1,172 +1,117 @@
 {% extends "base.html" %}
-{% block title %}Global Opt-Out · Lightwork{% endblock %}
-{% block head_extra %}
-<link rel="stylesheet" href="/static/lightwork-consent-global-opt-out.css">
-{% endblock %}
+{% from "_hero.html" import hero %}
+{% block title %}Opt Out Everywhere · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
-<div class="goo-shell" id="global-opt-out-shell"
-      data-api-base="{{ api_base }}" data-copilot-page="/consent/global-opt-out">
-  <header class="goo-hero glass-surface">
-    <div>
-      <p class="eyebrow">Consent application governance</p>
-      <h1>Global Opt-Out</h1>
-      <p class="goo-lead">
-        Publish one versioned mobile and email experience against an exact
-        public client, property, publication, receipt policy, and origin or
-        service authority. Public submission creates a real <code>opt_out</code>
-        privacy-rights request; this control plane retains only result digests.
-      </p>
-    </div>
-    <div class="goo-orb" aria-hidden="true"></div>
-  </header>
+{% set go_admin = global_opt_out_can_admin %}
+{% set go_audit = global_opt_out_can_audit %}
+<div class="governance-workbench" id="global-opt-out-shell"
+     data-api-base="{{ api_base }}" data-copilot-page="/consent/global-opt-out"
+     data-can-admin="{{ 'true' if go_admin else 'false' }}" data-can-audit="{{ 'true' if go_audit else 'false' }}">
+  {{ hero('Consent requests', 'Opt Out Everywhere',
+          lede='Let people opt out of the sale or sharing of their data in one step, from your mobile app or a link in an email. Each request goes to your privacy requests team as an opt-out request.') }}
+  {% include "_consent_nav.html" %}
+  <p id="goo-runtime-status" class="muted" role="status" aria-live="polite">Checking that opt-out requests are available…</p>
+  {% if not go_admin %}<p class="muted">Only an administrator can change opt-out settings.</p>{% endif %}
 
-  <aside class="goo-boundary glass-surface" aria-labelledby="goo-boundary-title">
-    <p class="eyebrow">Closed boundary</p>
-    <h2 id="goo-boundary-title">What this page does—and does not—prove</h2>
-    <ul>
-      <li>The server independently resolves the public client and active publication/policy before every configuration mutation.</li>
-      <li>Public configuration and submit contracts accept no tenant, property, profile, origin, service, or policy selector.</li>
-      <li>Submission stores a case-reference digest and verified signed-result digest, never the raw DSAR case or identity payload.</li>
-      <li>Local workflow tests do not establish live mobile, email, connected-device, or customer-estate acceptance.</li>
-    </ul>
-  </aside>
+  <fieldset class="feature-gated-workbench" id="goo-operations" disabled>
+    <legend class="sr-only">Opt out everywhere</legend>
 
-  <section class="goo-panel glass-surface goo-status" aria-labelledby="goo-status-title">
-    <div>
-      <p class="eyebrow">Availability</p>
-      <h2 id="goo-status-title">Service availability</h2>
-      <p id="goo-runtime-status" role="status" aria-live="polite">
-        Checking configured authority and privacy-rights intake…
-      </p>
-    </div>
-    <button class="btn" id="goo-refresh-status" type="button">Refresh status</button>
-    <details class="goo-span">
-      <summary>Readiness and product boundaries</summary>
-      <pre hidden class="goo-output" id="goo-status-output" tabindex="0"></pre>
-    </details>
-  </section>
-
-  <fieldset class="goo-grid" id="goo-operations" disabled>
-    <legend class="sr-only">Global Opt-Out administrative operations</legend>
-
-    <section class="goo-panel glass-surface goo-config" aria-labelledby="goo-config-title">
-      <p class="eyebrow">Versioned experience</p>
-      <h2 id="goo-config-title">Create or update configuration</h2>
-      <p class="help">Use the safe public-client ID shown by Public Consent Clients. No raw client or profile credential belongs here.</p>
-      <form id="goo-config-form" class="goo-form" autocomplete="off" novalidate>
-        <fieldset{% if not global_opt_out_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <div class="goo-row">
-            <label for="goo-application-ref">Public client ID
-              <input class="input" id="goo-application-ref" name="application_ref" maxlength="128" required>
-            </label>
-            <label for="goo-locale">Locale
-              <input class="input" id="goo-locale" name="locale" value="en-US" maxlength="64" required>
-            </label>
-            <label for="goo-expected-revision">Expected record revision
-              <input class="input" id="goo-expected-revision" name="expected_revision" type="number" min="0" max="2147483647" value="0" required>
-            </label>
-            <label for="goo-idempotency-key" hidden>Request reference (reuse when retrying)
-              <input data-auto-reference class="input" id="goo-idempotency-key" name="idempotency_key" minlength="8" maxlength="192" required>
-            </label>
-          </div>
-
-          <div class="goo-channel-grid">
-            <fieldset class="goo-subpanel">
-              <legend>Mobile experience</legend>
-              <label class="goo-check"><input name="mobile_enabled" type="checkbox" checked> Enabled</label>
-              <label for="goo-mobile-title">Title<input class="input" id="goo-mobile-title" name="mobile_title" value="Your privacy choice" maxlength="2048" required></label>
-              <label for="goo-mobile-body">Body<textarea class="input" id="goo-mobile-body" name="mobile_body" maxlength="2048" required>Submit a Global Opt-Out request for this profile.</textarea></label>
-              <label for="goo-mobile-submit">Submit label<input class="input" id="goo-mobile-submit" name="mobile_submit_label" value="Opt out" maxlength="2048" required></label>
-              <label for="goo-mobile-success">Success message<input class="input" id="goo-mobile-success" name="mobile_success_message" value="Your privacy request was accepted." maxlength="2048" required></label>
-            </fieldset>
-
-            <fieldset class="goo-subpanel">
-              <legend>Email experience</legend>
-              <label class="goo-check"><input name="email_enabled" type="checkbox" checked> Enabled</label>
-              <label for="goo-email-title">Title<input class="input" id="goo-email-title" name="email_title" value="Global Opt-Out request" maxlength="2048" required></label>
-              <label for="goo-email-body">Body<textarea class="input" id="goo-email-body" name="email_body" maxlength="2048" required>Request an opt-out through the verified privacy-rights workflow.</textarea></label>
-              <label for="goo-email-submit">Submit label<input class="input" id="goo-email-submit" name="email_submit_label" value="Submit request" maxlength="2048" required></label>
-              <label for="goo-email-success">Success message<input class="input" id="goo-email-success" name="email_success_message" value="Your privacy request was accepted." maxlength="2048" required></label>
-            </fieldset>
-          </div>
-
-          <div class="goo-channel-grid">
-            <fieldset class="goo-subpanel goo-options" id="goo-device-options">
-              <legend>Supported devices</legend>
-              {% for value, label in [('browser','Browser'),('ios','iOS'),('android','Android'),('fireos','Fire OS'),('connected-tv','Connected TV'),('roku','Roku'),('tizen','Tizen'),('tvos','tvOS'),('webos','webOS')] %}
-              <label class="goo-check"><input name="supported_devices" type="checkbox" value="{{ value }}"{% if value in ['browser','ios','android'] %} checked{% endif %}> {{ label }}</label>
-              {% endfor %}
-            </fieldset>
-            <fieldset class="goo-subpanel goo-options" id="goo-service-options">
-              <legend>Supported services</legend>
-              {% for value, label in [('website','Website'),('mobile-app','Mobile app'),('email','Email'),('connected-tv','Connected TV'),('streaming-service','Streaming service')] %}
-              <label class="goo-check"><input name="supported_services" type="checkbox" value="{{ value }}"{% if value in ['website','mobile-app','email'] %} checked{% endif %}> {{ label }}</label>
-              {% endfor %}
-            </fieldset>
-          </div>
-
-          <label for="goo-expires-at">Optional expiry (Unix timestamp)
-            <input class="input" id="goo-expires-at" name="expires_at" type="number" min="1" step="0.001">
-          </label>
-          <div class="goo-actions">
-            <button class="btn btn--primary" id="goo-create" type="submit">Create draft</button>
-            <button class="btn" id="goo-update" type="button">Update and rebind</button>
-          </div>
-        </fieldset>
-      </form>
-      {% if not global_opt_out_can_admin %}<p class="help">Administrator permission is required to change configuration.</p>{% endif %}
+    <section class="panel" aria-labelledby="goo-list-title">
+      <div class="section-head">
+        <h2 id="goo-list-title">Opt-out set-ups</h2>
+        <button class="btn btn--primary" type="button" id="goo-new"{% if not go_admin %} disabled{% endif %}>Set up opt-out</button>
+      </div>
+      <p class="muted">Each website or app key can have one opt-out set-up. A new set-up starts as a draft until you switch it on.</p>
+      <div id="goo-table"><p class="muted">Loading…</p></div>
+      <div id="goo-history" class="cw-editor" hidden>
+        <h3 id="goo-history-title">History</h3>
+        <div id="goo-history-table"></div>
+      </div>
     </section>
 
-    <section class="goo-panel glass-surface" aria-labelledby="goo-lifecycle-title">
-      <p class="eyebrow">Lifecycle</p>
-      <h2 id="goo-lifecycle-title">Inspect, activate, or revoke</h2>
-      <form id="goo-lifecycle-form" class="goo-form" autocomplete="off" novalidate>
-        <fieldset>
-          <label for="goo-configuration-id">Configuration ID
-            <input class="input" id="goo-configuration-id" name="configuration_id" maxlength="64" required>
+    <section class="panel cw-editor" id="goo-config-panel" hidden aria-labelledby="goo-config-title">
+      <h2 id="goo-config-title">Set up opt-out</h2>
+      <form id="goo-config-form" autocomplete="off" novalidate>
+        <fieldset class="cw-form"{% if not go_admin %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Opt-out details</legend>
+          <label for="goo-application-ref">Website or app key
+            <select class="select" id="goo-application-ref" name="application_ref" required></select>
           </label>
-          <label for="goo-lifecycle-revision">Current version
-            <input class="input" id="goo-lifecycle-revision" name="expected_revision" type="number" min="1" max="2147483647" required>
+          <label for="goo-locale">Language
+            <select class="select" id="goo-locale" name="locale" required></select>
           </label>
-          <label for="goo-lifecycle-key" hidden>Lifecycle idempotency key
-            <input data-auto-reference class="input" id="goo-lifecycle-key" name="idempotency_key" minlength="8" maxlength="192" required>
+          <input type="hidden" id="goo-configuration-id" name="configuration_id">
+          <input type="hidden" id="goo-expected-revision" name="expected_revision" value="0">
+          <input type="hidden" data-auto-reference id="goo-idempotency-key" name="idempotency_key">
+
+          <fieldset>
+            <legend>In your mobile app</legend>
+            <label><input name="mobile_enabled" type="checkbox" checked> Offer opt-out in the app</label>
+            <label for="goo-mobile-title">Heading<input class="input" id="goo-mobile-title" name="mobile_title" value="Your privacy choice" maxlength="2048" required></label>
+            <label for="goo-mobile-body">Message<textarea class="textarea" id="goo-mobile-body" name="mobile_body" maxlength="2048" required>Opt out of the sale or sharing of your personal data.</textarea></label>
+            <label for="goo-mobile-submit">Button text<input class="input" id="goo-mobile-submit" name="mobile_submit_label" value="Opt out" maxlength="2048" required></label>
+            <label for="goo-mobile-success">Message after sending<input class="input" id="goo-mobile-success" name="mobile_success_message" value="Your privacy request was received." maxlength="2048" required></label>
+          </fieldset>
+          <fieldset>
+            <legend>In email</legend>
+            <label><input name="email_enabled" type="checkbox" checked> Offer opt-out from an email link</label>
+            <label for="goo-email-title">Heading<input class="input" id="goo-email-title" name="email_title" value="Opt out of data sharing" maxlength="2048" required></label>
+            <label for="goo-email-body">Message<textarea class="textarea" id="goo-email-body" name="email_body" maxlength="2048" required>Ask us to stop selling or sharing your personal data.</textarea></label>
+            <label for="goo-email-submit">Button text<input class="input" id="goo-email-submit" name="email_submit_label" value="Send request" maxlength="2048" required></label>
+            <label for="goo-email-success">Message after sending<input class="input" id="goo-email-success" name="email_success_message" value="Your privacy request was received." maxlength="2048" required></label>
+          </fieldset>
+
+          <fieldset class="cw-wide">
+            <legend>Devices</legend>
+            <div class="cw-checks">
+              {% for value, label in [('browser','Web browsers'),('ios','iPhone and iPad'),('android','Android'),('fireos','Amazon Fire'),('connected-tv','Smart TVs'),('roku','Roku'),('tizen','Samsung TV'),('tvos','Apple TV'),('webos','LG TV')] %}
+              <label><input name="supported_devices" type="checkbox" value="{{ value }}"{% if value in ['browser','ios','android'] %} checked{% endif %}> {{ label }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <fieldset class="cw-wide">
+            <legend>Services</legend>
+            <div class="cw-checks">
+              {% for value, label in [('website','Website'),('mobile-app','Mobile app'),('email','Email'),('connected-tv','TV app'),('streaming-service','Streaming service')] %}
+              <label><input name="supported_services" type="checkbox" value="{{ value }}"{% if value in ['website','mobile-app','email'] %} checked{% endif %}> {{ label }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <label for="goo-expires-at">Stop offering it after (optional)
+            <input class="input" id="goo-expires-at" name="expires_on" type="date">
           </label>
-          <div class="goo-actions">
-            <button class="btn" id="goo-list" type="button">List</button>
-            <button class="btn" id="goo-load" type="button">Load selected</button>
-            <button class="btn btn--primary" id="goo-activate" type="button"{% if not global_opt_out_can_admin %} disabled{% endif %}>Activate</button>
-            <button class="btn btn--danger" id="goo-revoke" type="button"{% if not global_opt_out_can_admin %} disabled{% endif %}>Revoke</button>
+          <div class="cw-actions">
+            <button class="btn btn--primary" id="goo-save" type="submit">Save</button>
+            <button class="btn btn--ghost" id="goo-cancel" type="button">Cancel</button>
           </div>
         </fieldset>
       </form>
     </section>
 
-    <section class="goo-panel glass-surface" aria-labelledby="goo-audit-title">
-      <p class="eyebrow">Audit and retention</p>
-      <h2 id="goo-audit-title">Verify or maintain</h2>
-      <fieldset{% if not global_opt_out_can_audit %} disabled aria-disabled="true"{% endif %}>
-        <legend class="sr-only">Global Opt-Out audit operations</legend>
-        <div class="goo-actions">
-          <button class="btn" id="goo-history" type="button">Configuration history</button>
-          <button class="btn" id="goo-integrity" type="button">Verify integrity</button>
-          <button class="btn" id="goo-retry-audit" type="button"{% if not global_opt_out_can_admin %} disabled{% endif %}>Retry signed audit</button>
-          <button class="btn" id="goo-purge" type="button"{% if not global_opt_out_can_admin %} disabled{% endif %}>Purge expired retention</button>
-        </div>
+    <section class="panel" aria-labelledby="goo-care-title">
+      <h2 id="goo-care-title">Record care</h2>
+      <fieldset class="cw-actions" id="goo-care-controls"{% if not go_audit %} disabled aria-disabled="true"{% endif %}>
+        <legend class="sr-only">Record care</legend>
+        <button class="btn" id="goo-integrity" type="button">Check records are intact</button>
+        <button class="btn" id="goo-retry-audit" type="button"{% if not go_admin %} disabled{% endif %}>Resend waiting audit entries</button>
+        <button class="btn" id="goo-purge" type="button"{% if not go_admin %} disabled{% endif %}>Delete expired records</button>
       </fieldset>
-      {% if not global_opt_out_can_audit %}<p class="help">Auditor permission is required for history and integrity checks.</p>{% endif %}
-    </section>
-
-    <section class="goo-panel glass-surface goo-result" aria-labelledby="goo-result-title">
-      <p class="eyebrow">Governed result</p>
-      <h2 id="goo-result-title">Operation output</h2>
-      <p id="goo-operation-status" role="status" aria-live="polite">No operation has run.</p>
-      <pre class="goo-output" id="goo-operation-output" tabindex="0"></pre>
+      <p id="goo-operation-status" class="muted" role="status" aria-live="polite"></p>
+      <details class="governance-details">
+        <summary>About this page’s safeguards</summary>
+        <ul>
+          <li>Before every change Lightwork checks that the key, your published banner and your consent policy still match.</li>
+          <li>People cannot pick another workspace, website or policy when they send a request.</li>
+          <li>Lightwork keeps only a fingerprint of each request’s reference and result, never the person’s details.</li>
+        </ul>
+      </details>
     </section>
   </fieldset>
-
-  <noscript><p class="goo-boundary glass-surface">Enable JavaScript to use these controls.</p></noscript>
+  <noscript><p class="muted">Turn on JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-consent-workbench.js" defer></script>
 <script src="/static/lightwork-consent-global-opt-out.js" defer></script>
 {% endblock %}

@@ -145,7 +145,12 @@ def test_dashboard_mounts_page_api_visibility_help_and_consent_link(
         / "templates"
         / "consent_preferences.html"
     ).read_text(encoding="utf-8")
-    assert 'href="/consent/trust-center-authority"' in consent
+    # The consent overview links every consent page through its shared nav.
+    assert '{% include "_consent_nav.html" %}' in consent
+    nav = (
+        Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "_consent_nav.html"
+    ).read_text(encoding="utf-8")
+    assert "('/consent/trust-center-authority'," in nav
     from maverick_dashboard.copilot_context import context_for_page
 
     assert (

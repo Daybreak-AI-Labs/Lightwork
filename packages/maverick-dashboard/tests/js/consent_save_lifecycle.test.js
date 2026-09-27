@@ -80,43 +80,72 @@ test("pending experiment reporting cannot keep confirmed preference controls loc
     assert.ok(f.buttons.every(button=>!button.disabled));assert.equal(f.checkbox.disabled,false);
   }finally{f.dom.window.close();}
 });
-async function policyFixture() {
+async function policyFixture(initial) {
   const source=read("templates/consent_preferences.html");
   const dom=windowFor(source.replace(/\{%[\s\S]*?%\}/g,"").replace(/\{\{[\s\S]*?\}\}/g,""));
-  const w=dom.window,state={current:0,payloads:[]};
+  const w=dom.window,state={current:initial||0,payloads:[],confirm:true,confirms:[]};
   w.document.querySelectorAll("fieldset").forEach(node=>{node.disabled=false;});
+  w.document.querySelectorAll("button").forEach(node=>{node.disabled=false;});
+  w.document.getElementById("cp-root").dataset.canAdmin="true";
+  w.mvConfirm=async message=>{state.confirms.push(message);return state.confirm;};
+  w.mvErrorText=(failure,action)=>"Could not "+action+". status "+failure.status;
   w.fetch=async(url,options)=>{
-    if(url.includes("/policies?"))return response(200,{policies:state.current?[{policy_id:"global-consent",version:state.current}]:[],truncated:false});
+    if(url.includes("/policies?"))return response(200,{policies:state.current?[{policy_id:"global-consent",version:state.current,purposes:{analytics:"consent"},notice_sha256:"a".repeat(64),effective_at:1800000000}]:[],truncated:false});
     if(url.endsWith("/policies")){
       const body=JSON.parse(options.body);state.payloads.push(body);
-      if(body.expected_current_version!==state.current)return response(409,{detail:"policy current version changed"});
+      if((body.expected_current_version||0)!==state.current)return response(409,{detail:"policy current version changed"});
       state.current=body.version;return response(201,body);
     }
-    return response(200,url.includes("profiles?")?{profiles:[]}:{});
+    if(url.endsWith("/notices"))return response(200,{notices:[{version:"2026-01",text_sha256:"a".repeat(64),published_at:1800000000}]});
+    return response(200,url.includes("profiles?")?{profiles:[]}:url.includes("trackers?")?{trackers:[]}:{});
   };
+  w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-policy-editor.js"));
-  w.eval([...source.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1]);
+  w.eval([...source.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1]);
+  await flush();
   const form=w.document.getElementById("cp-policy-form");
-  form.elements.notice_sha256.value="a".repeat(64);form.elements.effective_at.value="1800000000";
-  return {dom,w,state,form,submit(){form.dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));},load(){w.document.getElementById("cp-policy-load").click();}};
+  const rowButton=label=>[...w.document.querySelectorAll("#cp-policy-table button")].find(button=>button.textContent===label);
+  return {dom,w,state,form,rowButton,
+    submit(){form.dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));},
+    fresh(){w.document.getElementById("cp-policy-new").click();form.elements.policy_name.value="Global consent";
+      const notice=w.document.getElementById("cp-notice-select");notice.value="a".repeat(64);notice.dispatchEvent(new w.Event("change"));}};
 }
-test("policy form publishes v1 and v2 with the reviewed current version",async()=>{
+test("a new policy publishes version 1, and its row button publishes version 2 against the version on screen",async()=>{
   const f=await policyFixture();
   try{
-    f.submit();await flush();assert.equal(f.state.payloads.length,0);
-    f.load();await flush();f.submit();await flush();f.submit();await flush();
-    assert.deepEqual(f.state.payloads.map(body=>[body.version,body.expected_current_version]),[[1,0],[2,1]]);
+    f.w.document.getElementById("cp-policy-new").click();f.submit();await flush();
+    assert.equal(f.state.payloads.length,0,"no name and no notice: nothing is sent");
+    f.fresh();f.submit();await flush();
+    assert.equal(f.state.payloads.length,1);
+    assert.equal(f.state.payloads[0].policy_id,"global-consent");
+    assert.equal(f.state.payloads[0].version,1);
+    assert.equal("expected_current_version" in f.state.payloads[0],false);
+    assert.equal(f.state.payloads[0].notice_sha256,"a".repeat(64));
+    assert.ok(Number.isInteger(f.state.payloads[0].effective_at));
+    assert.match(f.state.confirms[0],/Publish version 1/);
+    f.rowButton("Publish new version").click();f.submit();await flush();
+    assert.deepEqual(f.state.payloads.map(body=>[body.version,body.expected_current_version]),[[1,undefined],[2,1]]);
     assert.equal(f.state.current,2);
   }finally{f.dom.window.close();}
 });
-test("policy conflict preserves the reviewed expectation until explicit reload",async()=>{
+test("a declined confirmation publishes nothing",async()=>{
   const f=await policyFixture();
   try{
-    f.state.current=1;f.load();await flush();f.state.current=2;
-    f.submit();await flush();assert.equal(f.state.current,2);
-    assert.equal(f.form.elements.expected_current_version.value,"1");
-    assert.match(f.w.document.getElementById("cp-status").textContent,/changed.*load the current version/);
-    f.load();await flush();f.submit();await flush();assert.equal(f.state.current,3);
-    assert.equal(f.state.payloads[1].expected_current_version,2);
+    f.state.confirm=false;f.fresh();f.submit();await flush();
+    assert.equal(f.state.payloads.length,0);assert.equal(f.state.current,0);
   }finally{f.dom.window.close();}
+});
+test("a policy changed elsewhere is refused with a plain message and nothing is overwritten",async()=>{
+  const g=await policyFixture(1);
+  try{
+    g.rowButton("Publish new version").click();
+    assert.equal(g.form.elements.expected_current_version.value,"1");
+    g.state.current=2;g.submit();await flush();
+    assert.equal(g.state.current,2);
+    assert.equal(g.state.payloads[0].expected_current_version,1);
+    const status=g.w.document.getElementById("cp-status").textContent;
+    assert.match(status,/Could not publish the policy\. status 409/);
+    assert.doesNotMatch(status,/policy current version changed/);
+    assert.equal(g.form.hidden,false,"the draft stays open for review");
+  }finally{g.dom.window.close();}
 });

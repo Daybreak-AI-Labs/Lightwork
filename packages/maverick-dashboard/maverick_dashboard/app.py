@@ -3723,6 +3723,7 @@ async def consent_preferences_page(request: Request) -> HTMLResponse:
         {
             "consent_preferences_enabled": consent_preferences.enabled(),
             "consent_analytics_enabled": consent_analytics.enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
         },
     )
 
@@ -3749,7 +3750,10 @@ async def consent_publishing_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_publishing.html",
-        {"consent_publishing_enabled": enabled},
+        {
+            "consent_publishing_enabled": enabled,
+            "consent_can_admin": has_global_permission(request, "admin"),
+        },
     )
 
 
@@ -3763,7 +3767,11 @@ async def consent_experiments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_experiments.html",
-        {"consent_experiments_enabled": experiments_enabled_for_page()},
+        {
+            "consent_experiments_enabled": experiments_enabled_for_page(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -3776,7 +3784,12 @@ async def consent_delivery_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_delivery.html",
-        {"consent_delivery_enabled": consent_delivery.enabled()},
+        {
+            "consent_delivery_enabled": consent_delivery.enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+            "consent_can_operate": has_global_permission(request, "operate"),
+        },
     )
 
 
@@ -3789,7 +3802,11 @@ async def consent_public_clients_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_public_clients.html",
-        {"consent_public_clients_enabled": _enabled()},
+        {
+            "consent_public_clients_enabled": _enabled(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -3803,7 +3820,11 @@ async def consent_profile_data_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_profile_data.html",
-        {"consent_profile_data_enabled": profile_data_enabled_for_page()},
+        {
+            "consent_profile_data_enabled": profile_data_enabled_for_page(),
+            "consent_can_admin": has_global_permission(request, "admin"),
+            "consent_can_audit": has_global_permission(request, "audit"),
+        },
     )
 
 
@@ -10050,6 +10071,9 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-project-reviews.js")
 @app.get("/static/lightwork-workspace-members.js")
 @app.get("/static/lightwork-consent-picker.js")
+@app.get("/static/lightwork-consent-workbench.js")
+@app.get("/static/lightwork-consent-workbench.css")
+@app.get("/static/lightwork-consent-publishing.js")
 @app.get("/static/lightwork-markdown.js")
 @app.get("/static/lightwork-draft-recovery.css")
 async def in_app_ui_asset(request: Request) -> FileResponse:
