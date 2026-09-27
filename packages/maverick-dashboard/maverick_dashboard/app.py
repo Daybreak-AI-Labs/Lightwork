@@ -3894,6 +3894,14 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
     compiler = section.get("compiler") if isinstance(section, Mapping) else None
     from maverick.compliance_catalog import module_status
 
+    try:
+        # Requests pick a project from the person's own projects.
+        projects = [
+            {"value": f"project-{item['id']}", "label": str(item.get("name") or "")}
+            for item in _world().list_projects(owner=goal_owner_filter(request))
+        ]
+    except Exception:
+        projects = []
     return templates.TemplateResponse(
         request,
         "data_use_governance.html",
@@ -3903,6 +3911,8 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
                 isinstance(compiler, Mapping) and compiler.get("enable") is True
             ),
             "acm_module_status": module_status("/data-use"),
+            "data_use_projects": projects,
+            "data_use_can_admin": has_global_permission(request, "admin"),
         },
     )
 
