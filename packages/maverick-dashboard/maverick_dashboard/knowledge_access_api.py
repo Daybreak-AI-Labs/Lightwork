@@ -337,6 +337,30 @@ async def _call(function, *args, **kwargs):
         raise HTTPException(503, "Governed knowledge access is unavailable") from exc
 
 
+def _registry_purposes(registry, tenant: str) -> list[str]:
+    purposes: set[str] = set()
+    for row in registry.list(tenant, kind="dataset", limit=250):
+        manifest = row.get("manifest") if isinstance(row, dict) else None
+        if not isinstance(manifest, dict) or row.get("state") != "approved":
+            continue
+        for purpose in manifest.get("allowed_purposes") or ():
+            if isinstance(purpose, str) and purpose:
+                purposes.add(purpose)
+    return sorted(purposes)
+
+
+@router.get("/purposes")
+async def purposes(request: Request, response: Response):
+    """The uses your approved sources allow, for the search picker.
+
+    Read-only and bound to the caller's workspace like every other read here;
+    each search still rechecks the purpose against the exact source version.
+    """
+    tenant, _actor, _context = _binding(request, response)
+    codes = await _call(_registry_purposes, _service(request).registry, tenant)
+    return {"items": [{"code": code} for code in codes], "count": len(codes)}
+
+
 @router.post("/search")
 async def search(payload: SearchIn, request: Request, response: Response):
     tenant, actor, context = _binding(request, response, payload)
@@ -554,6 +578,12 @@ async def knowledge_access_page(request: Request, response: Response):
     tenant, actor, context = _binding(request, response)
     from .app import templates
 
+    try:
+        purpose_codes = await run_in_threadpool(
+            _registry_purposes, _service(request).registry, tenant
+        )
+    except Exception:  # noqa: BLE001 - the picker falls back to an empty state
+        purpose_codes = []
     nonce = secrets.token_urlsafe(18)
     page = templates.TemplateResponse(
         request,
@@ -563,6 +593,7 @@ async def knowledge_access_page(request: Request, response: Response):
             "knowledge_tenant": tenant,
             "knowledge_actor": actor,
             "knowledge_can_review": has_global_permission(request, "admin"),
+            "knowledge_purposes": purpose_codes,
             "knowledge_api_base": API_BASE,
             "csp_style_nonce": nonce,
         },

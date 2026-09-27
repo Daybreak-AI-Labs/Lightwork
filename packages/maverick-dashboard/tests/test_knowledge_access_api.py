@@ -251,8 +251,17 @@ def test_page_assets_navigation_and_customer_language(customer):
     page = client.get("/knowledge-access")
     assert page.status_code == 200, page.text
     assert "Find knowledge you can use now" in page.text
-    assert "does not grant permission to train" in page.text
-    assert "does not erase its influence from learned weights" in page.text
+    assert "does not mean it may be used to train AI models" in page.text
+    assert "does not remove what AI models already learned from it" in page.text
+    assert 'id="ka-purpose"' in page.text and "<select" in page.text
+    assert client.get("/static/lightwork-knowledge-library.js").status_code == 200
+    main = page.text.split('<main id="content"', 1)[1].split("</main>", 1)[0]
+    visible = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>", " ", main)
+    assert not re.search(
+        r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|idempoten\w*|json)\b|/api/v1",
+        visible,
+        re.IGNORECASE,
+    ), visible
     assert 'data-tenant="knowledge-a"' in page.text
     assert f'data-actor="{OWNER}"' in page.text
     assert re.search(r"style-src 'self' 'nonce-[A-Za-z0-9_-]+'", page.headers["content-security-policy"])
@@ -531,3 +540,13 @@ def test_feature_gate_and_request_byte_boundary_fail_closed(customer, monkeypatc
     )
     assert disabled.status_code == 404
     assert "bounded-source" not in disabled.text
+
+
+def test_purpose_picker_lists_only_this_workspaces_approved_uses(customer):
+    client, _service, registry, rights = customer
+    _dataset(registry, rights, "knowledge-a", "policy-handbook")
+    listed = client.get(BASE + "/purposes")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == [{"code": PURPOSE}]
+    _select(client, "knowledge-b")
+    assert client.get(BASE + "/purposes").json()["items"] == []

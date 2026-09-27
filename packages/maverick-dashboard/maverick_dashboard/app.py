@@ -10054,6 +10054,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-draft-recovery.css")
 @app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")
+@app.get("/static/lightwork-knowledge-library.js")
 async def in_app_ui_asset(request: Request) -> FileResponse:
     """Serve only the explicitly registered in-app form assets."""
     name = request.url.path.rsplit("/", 1)[-1]
