@@ -3,6 +3,15 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% from "_integration_readiness.html" import integration_readiness %}
+  {% set group_titles = {'tools': 'Tools', 'channels': 'Chat Apps', 'skills': 'Skills', 'personas': 'Agent Personalities'} %}
+  {% set state_words = {
+       'loaded': 'Running',
+       'not_configured': 'Turned off',
+       'runtime_disabled': 'Can\'t run in this setup',
+       'policy_error': 'Couldn\'t be checked',
+       'policy_denied': 'Blocked by your organization',
+       'import_failed': 'Couldn\'t start',
+       'invalid_contract': 'Doesn\'t work with this version of Lightwork'} %}
   {% set ns = namespace(total=0, configured=0, loaded=0, failures=0) %}
   {% for label, items in groups.items() %}
     {% for p in items %}
@@ -13,123 +22,123 @@
     {% endfor %}
   {% endfor %}
   {% call hero('Workforce capability', 'Plugins',
-               subtitle='Extensions, managed in-app',
-               lede='Extend Lightwork with installed plugins — extra tools,
-                     channels, and integrations packaged for one-step install,
-                     switched on and off right here.') %}
+               subtitle='Add-ons for Lightwork',
+               lede='Plugins add extra tools, chat apps, skills and agent
+                     personalities. Install one, turn it on, and check that it
+                     started.') %}
     {% if error %}
-      {{ state('Current state', 'Plugin discovery unavailable',
-               badge='needs attention', badge_class='warn',
-               copy='The plugin registry could not be read — the details are
-                     shown below.') }}
+      {{ state('Current state', 'Some plugins couldn\'t be checked',
+               badge='Needs attention', badge_class='warn',
+               copy='Lightwork couldn\'t read the list of installed plugins.
+                     Refresh the page; if it keeps happening, the details are below.') }}
     {% else %}
       {{ state('Current state',
-               (ns.loaded ~ ' of ' ~ ns.total ~ ' plugins loaded') if ns.total
+               (ns.loaded ~ ' of ' ~ ns.total ~ ' plugins running') if ns.total
                else 'No plugins installed yet',
-               badge=(ns.failures ~ ' load issue(s)') if ns.failures else ('loaded' if ns.loaded else 'none loaded'),
+               badge=(ns.failures ~ ' couldn\'t start') if ns.failures else ('Running' if ns.loaded else 'None running'),
                badge_class='warn' if ns.failures else ('ok' if ns.loaded else 'idle'),
-               copy='A loaded plugin has started successfully in Lightwork.
-                     Its external connections still need to be tested.') }}
+               copy='Running means the plugin started inside Lightwork. Any outside
+                     service it connects to still needs its own test.') }}
     {% endif %}
   {% endcall %}
 
   {% if error %}
-    <div class="panel">
-      <p style="color: var(--danger);">{{ error }}</p>
+    <div class="panel" role="alert">
+      <p>Some plugins couldn't be checked. Refresh the page to try again.</p>
+      <details><summary>Technical details</summary><p class="muted plg-tech">{{ error }}</p></details>
     </div>
   {% endif %}
 
   <div class="panel">
-    <p class="muted" style="margin: 0;">
-      Review whether each plugin is installed, enabled, allowed by your organization,
-      and able to start. Changes apply from the next run; startup is checked immediately.
+    <p class="muted plg-flush">
+      Changes apply from the next task. Whether each plugin starts is checked straight away.
       {% if allowlist_active %}
-        Your organization's allowlist selects which plugins are configured;
-        dashboard toggles override that baseline.
+        Your organization chose which plugins are on; switching one on or off here
+        overrides that choice until you press Use default.
       {% else %}
-        Installed plugins are enabled by default unless they are turned off here.
+        Installed plugins are on unless you turn them off here.
       {% endif %}
     </p>
   </div>
   <p id="plugin-mutation-status" class="muted" role="status" aria-live="polite"></p>
 
   {% for label, items in groups.items() %}
-    <h2 style="margin-top: 2rem;">{{ label }}</h2>
+    {% set title = group_titles.get(label, label | humanize) %}
+    <div class="section-head"><h2>{{ title }}</h2></div>
     <div class="panel">
       {% if items %}
         <table>
           <thead>
             <tr>
-              <th scope="col">name</th>
-              <th scope="col">Package details</th>
-              <th scope="col">Installation</th>
-              <th scope="col">Setup</th>
-              <th scope="col">policy</th>
-              <th scope="col">load check</th>
-              <th scope="col">readiness</th>
-              <th scope="col">action</th>
+              <th scope="col">Plugin</th>
+              <th scope="col">Installed</th>
+              <th scope="col">Switched On</th>
+              <th scope="col">Allowed</th>
+              <th scope="col">Started</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
           {% for p in items %}
+            {% set pname = p.name | humanize %}
             <tr>
-              <td><code>{{ p.name }}</code></td>
-              <td class="muted" style="font-size: 0.8rem;">
-                <details><summary>Package details</summary>
-                  {{ p.module }}
-                  {% if p.distribution %}<br><span>{{ p.distribution }}</span>{% endif %}
+              <td>{{ pname }}
+                <details class="plg-tech"><summary>Technical details</summary>
+                  <p class="muted">{{ p.name }} · {{ p.module }}{% if p.distribution %} · {{ p.distribution }}{% endif %}</p>
                 </details>
               </td>
               <td>
-                <span class="badge active">
-                  {{ 'discovered' if p.discovered else 'not discovered' }}
+                <span class="badge {{ 'active' if p.discovered else 'blocked' }}">
+                  {{ 'Yes' if p.discovered else 'Missing' }}
                 </span>
               </td>
               <td>
                 <span class="badge {{ 'active' if p.configured else 'blocked' }}">
-                  {{ 'configured' if p.configured else 'not configured' }}
+                  {{ 'On' if p.configured else 'Off' }}
                 </span>
-                {% if p.forced %}<span class="muted" style="font-size: 0.72rem;">(set here)</span>{% endif %}
+                {% if p.forced %}<span class="muted plg-small">(changed here)</span>{% endif %}
               </td>
               <td>
                 {% if not p.configured %}
-                  <span class="badge">not evaluated</span>
+                  <span class="badge">Not checked while off</span>
                 {% else %}
                   <span class="badge {{ 'active' if p.allowed else 'blocked' }}">
-                    {{ 'allowed' if p.allowed else 'denied' }}
+                    {{ 'Allowed' if p.allowed else 'Blocked' }}
                   </span>
                 {% endif %}
               </td>
               <td>
                 <span class="badge {{ 'active' if p.loaded else 'blocked' }}">
-                  {{ 'loaded' if p.loaded else p.state | replace('_', ' ') }}
+                  {{ state_words.get(p.state, p.state | humanize) }}
                 </span>
                 {% if p.load_error and p.configured %}
-                  <details class="muted" style="font-size: var(--text-sm); margin-top: var(--space-1);">
-                    <summary>Startup error details</summary>
-                    <p>{{ p.load_error }}</p>
+                  <details class="muted plg-small">
+                    <summary>Why it didn't start</summary>
+                    <p class="plg-tech">{{ p.load_error }}</p>
                   </details>
                 {% endif %}
               </td>
               <td>{{ integration_readiness(p.readiness) }}</td>
               <td>
-                <form method="post" action="/plugins/toggle" data-plugin-mutation
-                      style="display: inline-flex; gap: var(--space-2);">
+                <form method="post" action="/plugins/toggle" data-plugin-mutation class="plg-actions">
                   <input type="hidden" name="name" value="{{ p.name }}" />
                   {% if p.configured %}
                   <button type="submit" name="action" value="disable" class="btn btn--ghost"
                           data-plugin-action="disable" data-plugin-target="{{ p.name }}"
-                          aria-label="Disable {{ p.name }} plugin">Disable</button>
+                          data-plugin-label="{{ pname }}"
+                          aria-label="Turn off {{ pname }}">Turn off</button>
                   {% else %}
                   <button type="submit" name="action" value="enable" class="btn btn--primary"
                           data-plugin-action="enable" data-plugin-target="{{ p.name }}"
-                          aria-label="Enable {{ p.name }} plugin">Enable</button>
+                          data-plugin-label="{{ pname }}"
+                          aria-label="Turn on {{ pname }}">Turn on</button>
                   {% endif %}
                   {% if p.forced %}
                   <button type="submit" name="action" value="reset" class="btn btn--ghost"
                           data-plugin-action="reset" data-plugin-target="{{ p.name }}"
-                          aria-label="Reset {{ p.name }} plugin"
-                          title="Revert to the organization default">Reset</button>
+                          data-plugin-label="{{ pname }}"
+                          aria-label="Use your organization's default for {{ pname }}">Use default</button>
                   {% endif %}
                 </form>
               </td>
@@ -138,35 +147,37 @@
           </tbody>
         </table>
       {% else %}
-        <p class="muted">No {{ label }} plugins installed.</p>
+        <p class="muted plg-flush">No {{ title | lower }} plugins installed.
+          {% if installable %}Install one from the list below.{% endif %}</p>
+        {% if installable %}<p><a class="btn" href="#install">Go to Install a Plugin</a></p>{% endif %}
       {% endif %}
     </div>
   {% endfor %}
 
-  <h2 style="margin-top: 2rem;">Install a plugin</h2>
+  <div class="section-head"><h2 id="install">Install a Plugin</h2></div>
   <div class="panel">
     {% if installable %}
       <p class="muted">
-        Plugin packages approved by your administrator — one-click install, then
-        enable from the list above.
+        Plugins your administrator approved. Install one, then turn it on in the list above.
         {% if not install_enabled %}
-          <strong>In-app installation is off:</strong> ask your administrator to
-          switch it on to use these buttons.
+          <strong>Installing from this page is switched off.</strong>
+          {% if plugins_can_admin %}Turn it on under Administration below.{% else %}Ask your administrator to turn it on.{% endif %}
         {% endif %}
       </p>
       <table>
-        <thead><tr><th scope="col">package</th><th scope="col">action</th></tr></thead>
+        <thead><tr><th scope="col">Plugin</th><th scope="col">Action</th></tr></thead>
         <tbody>
         {% for pkg in installable %}
+          {% set plabel = pkg | humanize %}
           <tr>
-            <td><code>{{ pkg }}</code></td>
+            <td>{{ plabel }}</td>
             <td>
-              <form method="post" action="/plugins/install" data-plugin-mutation
-                    style="display: inline;">
+              <form method="post" action="/plugins/install" data-plugin-mutation class="plg-actions">
                 <input type="hidden" name="name" value="{{ pkg }}" />
                 <button type="submit" class="btn btn--primary"
                         data-plugin-action="install" data-plugin-target="{{ pkg }}"
-                        aria-label="Install approved plugin package {{ pkg }}"
+                        data-plugin-label="{{ plabel }}"
+                        aria-label="Install {{ plabel }}"
                         {% if not install_enabled %}disabled{% endif %}>Install</button>
               </form>
             </td>
@@ -174,73 +185,83 @@
         {% endfor %}
         </tbody>
       </table>
-      <p class="muted" style="font-size: 0.85rem; margin-top: var(--space-3); margin-bottom: 0;">
-        After installation, enable the plugin and review its startup result above.
-        Only packages approved by your administrator can be installed here.
-      </p>
     {% else %}
-      <p class="muted" style="margin-bottom: 0;">
-        Plugins add new tools, channels, skills and personas. No plugin
-        packages are approved for in-app installation yet
-        {%- if plugins_can_admin %} — approve some below to offer them as
-        one-click installs.
-        {%- else %} — your administrator manages the approved list and the
-        install switch, right on this page.
+      <p class="muted plg-flush">
+        No plugins are approved for installing here yet.
+        {%- if plugins_can_admin %} Approve one under Administration below.
+        {%- else %} Your administrator chooses which ones can be installed.
         {%- endif %}
       </p>
+      {% if plugins_can_admin %}<p><a class="btn btn--primary" href="#plg-admin">Approve a plugin</a></p>{% endif %}
     {% endif %}
   </div>
 
   {% if plugins_can_admin %}
-  <h2 style="margin-top: 2rem;">Administration</h2>
+  <div class="section-head"><h2 id="plg-admin">Administration</h2></div>
   <div class="panel">
-    <h3 style="margin-top: 0;">Approved packages</h3>
+    <h3 class="plg-flush">Approved Plugins</h3>
     <p class="muted">
-      The one-click installer offers exactly these packages — never free-text
-      input. Approve only packages you have vetted; saving replaces the whole
-      list, and an empty list turns in-app installation into a dead end again.
+      Only plugins on this list can be installed from this page. Approve only
+      plugins you trust: installing one runs its own setup on this computer.
     </p>
-    <form method="post" action="/plugins/approvals" data-plugin-mutation>
-      <label class="muted" for="plg-approvals" style="display:block; margin-bottom: var(--space-1);">
-        Package names, one per line (letters, digits, dots, dashes — no
-        versions or URLs):
+    <form method="post" action="/plugins/approvals" data-plugin-mutation class="plg-approvals">
+      {% if installable %}
+      <fieldset class="plg-list">
+        <legend>Keep on the list (untick to remove)</legend>
+        {% for pkg in installable %}
+        <label class="plg-check"><input type="checkbox" name="names" value="{{ pkg }}" checked data-plugin-approved />
+          {{ pkg | humanize }}</label>
+        {% endfor %}
+      </fieldset>
+      {% endif %}
+      <label class="plg-field" for="plg-add">Add a plugin by its package name
+        <input id="plg-add" class="input" type="text" name="names" maxlength="100" autocomplete="off"
+               spellcheck="false" placeholder="e.g. acme-weather-tools" data-plugin-new
+               aria-describedby="plg-add-help" />
       </label>
-      <textarea id="plg-approvals" name="names" rows="4" class="input"
-                style="width: 100%; max-width: 32rem; font-family: ui-monospace, monospace;"
-                spellcheck="false">{{ installable | join('\n') }}</textarea>
-      <div style="margin-top: var(--space-2);">
+      <span id="plg-add-help" class="muted plg-small">Use the name the plugin's maker gives for installing it: letters, numbers, dots and dashes only.</span>
+      <div>
         <button type="submit" class="btn btn--primary"
                 data-plugin-action="replace-approvals"
-                data-plugin-target="approved package list">Save approved list</button>
+                data-plugin-target="approved list">Save approved list</button>
       </div>
     </form>
 
-    <h3 style="margin-top: var(--space-5);">Install switch</h3>
+    <h3 class="plg-gap">Installing From This Page</h3>
     {% if install_env_forced_off %}
-    <p class="muted" style="margin-bottom: 0;">
-      In-app installation is <strong>pinned off by this server's environment</strong>
-      (<code>MAVERICK_ALLOW_PLUGIN_INSTALL</code>) and cannot be enabled from
-      here — remove that override to manage it in-app.
+    <p class="muted plg-flush">
+      Installing is <strong>locked off by this server's setup</strong>, so it can't be
+      turned on here. Ask whoever runs the server to unlock it.
     </p>
     {% else %}
     <p class="muted">
-      {% if install_enabled %}In-app installation is <strong>on</strong>: the
-      approved packages above show an Install button for administrators.
-      {% else %}In-app installation is <strong>off</strong>: approved packages
-      are listed but cannot be installed until you turn this on.{% endif %}
+      {% if install_enabled %}Installing is <strong>on</strong>: approved plugins show an
+      Install button for administrators.
+      {% else %}Installing is <strong>off</strong>: approved plugins are listed but can't
+      be installed until you turn this on.{% endif %}
     </p>
-    <form method="post" action="/plugins/install-switch" data-plugin-mutation
-          style="display:inline;">
+    <form method="post" action="/plugins/install-switch" data-plugin-mutation class="plg-actions">
       <input type="hidden" name="enabled" value="{{ 'off' if install_enabled else 'on' }}" />
       <button type="submit" class="btn {{ 'btn--ghost' if install_enabled else 'btn--primary' }}"
               data-plugin-action="{{ 'install-switch-off' if install_enabled else 'install-switch-on' }}"
-              data-plugin-target="in-app plugin installation">
-        {{ 'Turn in-app installation off' if install_enabled else 'Turn in-app installation on' }}
+              data-plugin-target="installing from this page">
+        {{ 'Turn installing off' if install_enabled else 'Turn installing on' }}
       </button>
     </form>
     {% endif %}
   </div>
   {% endif %}
+  <style>
+    .plg-flush { margin: 0; }
+    .plg-gap { margin-top: var(--space-5); }
+    .plg-small { font-size: var(--text-sm); }
+    .plg-tech { overflow-wrap: anywhere; font-size: var(--text-sm); }
+    .plg-actions { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; }
+    .plg-approvals { display: flex; flex-direction: column; gap: var(--space-2); max-width: 32rem; }
+    .plg-list { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+    .plg-check { display: flex; align-items: center; gap: var(--space-2); }
+    .plg-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  </style>
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-plugins.js" defer></script>

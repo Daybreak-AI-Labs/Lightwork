@@ -6437,7 +6437,9 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
 
 
 @app.post("/plugins/approvals")
-async def plugins_approvals(request: Request, names: str = Form("")) -> RedirectResponse:
+async def plugins_approvals(
+    request: Request, names: list[str] = Form([])  # ticked boxes plus one new name
+) -> RedirectResponse:
     """Replace the pre-approved install allowlist from the Plugins page.
 
     The allowlist decides WHAT the one-click installer may ever pull, so it is
@@ -6449,7 +6451,7 @@ async def plugins_approvals(request: Request, names: str = Form("")) -> Redirect
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
-    parsed = [p for chunk in names.replace(",", "\n").splitlines() for p in chunk.split()]
+    parsed = [p for value in names for chunk in value.replace(",", "\n").splitlines() for p in chunk.split()]
     try:
         await run_in_threadpool(settings_store.set_installable_plugins, parsed)
     except ValueError as exc:

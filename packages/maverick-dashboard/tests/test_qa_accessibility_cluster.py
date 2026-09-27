@@ -54,9 +54,10 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "plugins.html",
             (
-                'aria-label="Disable {{ p.name }} plugin"',
-                'aria-label="Enable {{ p.name }} plugin"',
-                'aria-label="Reset {{ p.name }} plugin"',
+                'aria-label="Turn off {{ pname }}"',
+                'aria-label="Turn on {{ pname }}"',
+                'aria-label="Use your organization\'s default for {{ pname }}"',
+                'aria-label="Install {{ plabel }}"',
             ),
         ),
         ("mcp.html", ('aria-label="Test {{ label }}"', 'aria-label="Remove {{ label }}"')),

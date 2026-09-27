@@ -47,7 +47,10 @@ def test_page_shows_install_section_when_allowlisted(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.plugins.installable_plugins", lambda: ["acme-maverick-tools"])
     t = client.get("/plugins").text
     assert "acme-maverick-tools" in t
-    assert "Install a plugin" in t
+    assert "Install a Plugin" in t
+    # Approvals are a checklist of the current list plus one new-name field.
+    assert 'type="checkbox" name="names" value="acme-maverick-tools" checked' in t
+    assert "<textarea" not in t
 
 
 def _isolate_config(tmp_path, monkeypatch):
@@ -92,7 +95,8 @@ def test_env_falsy_force_disables_despite_config(tmp_path, monkeypatch):
     assert called == []
     # And the page tells the admin the environment pinned it off.
     t = client.get("/plugins").text
-    assert "pinned off by this server" in t
+    assert "locked off by this server" in t
+    assert "MAVERICK_ALLOW_PLUGIN_INSTALL" not in t
 
 
 def test_approvals_endpoint_writes_the_allowlist(tmp_path, monkeypatch):
@@ -117,6 +121,29 @@ def test_approvals_endpoint_writes_the_allowlist(tmp_path, monkeypatch):
     r = client.post("/plugins/approvals", data={"names": ""}, follow_redirects=False)
     assert r.status_code == 303
     assert installable_plugins() == []
+
+
+def test_approvals_accept_ticked_boxes_plus_one_new_name(tmp_path, monkeypatch):
+    """The page posts one `names` value per ticked box plus the new name;
+    unticked names drop off the list, and an unsafe new name is refused."""
+    _isolate_config(tmp_path, monkeypatch)
+    r = client.post(
+        "/plugins/approvals",
+        data={"names": ["acme-maverick-tools", "globex-channel", ""]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    from maverick.plugins import installable_plugins
+
+    assert installable_plugins() == ["acme-maverick-tools", "globex-channel"]
+    r = client.post("/plugins/approvals", data={"names": ["globex-channel", "bad;rm"]},
+                    follow_redirects=False)
+    assert r.status_code == 400
+    assert installable_plugins() == ["acme-maverick-tools", "globex-channel"]
+    r = client.post("/plugins/approvals", data={"names": ["globex-channel"]},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert installable_plugins() == ["globex-channel"]
 
 
 def test_approvals_and_switch_require_admin(tmp_path, monkeypatch):

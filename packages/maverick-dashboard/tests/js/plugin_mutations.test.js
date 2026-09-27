@@ -51,29 +51,43 @@ function statusNode() {
 test("every plugin control confirmation names its exact target and impact", () => {
   const api = client();
   const cases = [
-    ["enable", "weather", "Enable plugin “weather”", "import and execute"],
-    ["disable", "weather", "Disable plugin “weather”", "stop being configured"],
-    ["reset", "weather", "Reset plugin “weather”", "override will be removed"],
-    ["install", "acme-weather", "Install approved package “acme-weather”", "third-party install hooks"],
-    ["install-switch-on", "", "Turn in-app plugin installation on", "current approved list"],
-    ["install-switch-off", "", "Turn in-app plugin installation off", "installations will be blocked"],
+    ["enable", "weather", "Turn on “weather”", "start running this plugin"],
+    ["disable", "weather", "Turn off “weather”", "stop working"],
+    ["reset", "weather", "default for “weather”", "choice made on this page will be removed"],
+    ["install", "acme-weather", "Install “acme-weather”", "own setup on this computer"],
+    ["install-switch-on", "", "Turn installing on", "any plugin on the approved list"],
+    ["install-switch-off", "", "Turn installing off", "No new plugins can be installed"],
   ];
   for (const [action, target, expectedTarget, expectedImpact] of cases) {
     const prompt = api.confirmationFor(form(), new Control(action, target));
     assert.match(prompt, new RegExp(expectedTarget));
     assert.match(prompt, new RegExp(expectedImpact));
+    assert.doesNotMatch(prompt, /HTTP|package|plugin-/);
   }
+  const labelled = new Control("enable", "acme_weather");
+  labelled.attributes["data-plugin-label"] = "Acme weather";
+  assert.match(api.confirmationFor(form(), labelled), /Turn on “Acme weather”/);
   const replacement = api.confirmationFor(
     form("alpha.plugin\nbeta-plugin"),
     new Control("replace-approvals", "approved package list"),
   );
   assert.match(replacement, /alpha\.plugin, beta-plugin/);
-  assert.match(replacement, /Only these 2 package\(s\) will remain eligible/);
+  assert.match(replacement, /Only these 2 plugin\(s\) can be installed/);
   const clearing = api.confirmationFor(
     form(""),
     new Control("replace-approvals", "approved package list"),
   );
-  assert.match(clearing, /clears the list and blocks every new/);
+  assert.match(clearing, /empties the list/);
+});
+
+test("the approved list is the ticked boxes plus the one new name", () => {
+  const api = client();
+  const box = (value, checked) => ({ value, checked });
+  const fakeForm = {
+    querySelectorAll: () => [box("alpha", true), box("beta", false), box("gamma", true)],
+    querySelector: () => ({ value: " delta , alpha " }),
+  };
+  assert.deepEqual([...api.approvedFrom(fakeForm)], ["alpha", "gamma", "delta"]);
 });
 
 test("network failure is single-flight, actionable, and restores controls", async () => {
@@ -98,6 +112,7 @@ test("network failure is single-flight, actionable, and restores controls", asyn
   });
   const targetForm = form();
   const first = controller.submit(targetForm, submitter);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(submitter.disabled, true);
   assert.equal(submitter.getAttribute("aria-busy"), "true");
   assert.equal(targetForm.dataset.inFlight, "true");
@@ -106,8 +121,8 @@ test("network failure is single-flight, actionable, and restores controls", asyn
   release();
   const result = await first;
   assert.equal(result.reason, "failed");
-  assert.match(status.textContent, /Could not reach the server/);
-  assert.match(status.textContent, /check your connection and try again/);
+  assert.match(status.textContent, /could not be reached/);
+  assert.match(status.textContent, /Check your connection and try again/);
   assert.equal(status.attributes.role, "alert");
   assert.equal(submitter.disabled, false);
   assert.equal(alreadyDisabled.disabled, true);
@@ -115,7 +130,7 @@ test("network failure is single-flight, actionable, and restores controls", asyn
   assert.equal(targetForm.dataset.inFlight, undefined);
 });
 
-test("server rejection surfaces its detail and remains retryable", async () => {
+test("server rejection is a plain sentence and remains retryable", async () => {
   const api = client();
   const submitter = new Control("install", "acme-weather");
   const status = statusNode();
@@ -139,7 +154,8 @@ test("server rejection surfaces its detail and remains retryable", async () => {
   const targetForm = form();
   const first = await controller.submit(targetForm, submitter);
   assert.equal(first.reason, "failed");
-  assert.match(status.textContent, /Plugin installation is disabled by policy/);
+  assert.match(status.textContent, /installing may be switched off/);
+  assert.doesNotMatch(status.textContent, /403|HTTP|policy/);
   assert.equal(submitter.disabled, false);
   assert.equal(submitter.getAttribute("aria-busy"), null);
   const retry = await controller.submit(targetForm, submitter);
@@ -159,7 +175,7 @@ test("cancel sends nothing and success reloads after restoring state", async () 
       requests += 1;
       return { ok: true, status: 200, headers: { get: () => "text/html" } };
     },
-    confirmChange: () => accepted,
+    confirmChange: async () => accepted,
     controls: () => [submitter],
     statusNode: status,
     payloadFor: () => "payload",
@@ -169,6 +185,7 @@ test("cancel sends nothing and success reloads after restoring state", async () 
   const cancelled = await controller.submit(targetForm, submitter);
   assert.equal(cancelled.reason, "cancelled");
   assert.equal(requests, 0);
+  assert.equal(targetForm.dataset.inFlight, undefined);
   accepted = true;
   const saved = await controller.submit(targetForm, submitter);
   assert.equal(saved.ok, true);
