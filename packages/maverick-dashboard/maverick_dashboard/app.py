@@ -6403,7 +6403,7 @@ def oversight_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/run-tree", response_class=HTMLResponse)
-async def run_tree_page(request: Request) -> HTMLResponse:
+def run_tree_page(request: Request) -> HTMLResponse:
     """Counterfactual review: the runs that were forked, and their branches.
 
     Read-only. Forking happens on the run itself; this is where a reviewer

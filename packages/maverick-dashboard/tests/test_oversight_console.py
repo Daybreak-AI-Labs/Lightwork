@@ -120,8 +120,9 @@ def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
     assert 'data-action="approve"' in text
     assert 'data-action="deny"' in text
     assert "/api/v1/approvals/" in text
-    # Governance REQUIRE_HUMAN holds are labelled (EU AI Act Art 14).
-    assert "Art 14" in text
+    # Governance REQUIRE_HUMAN holds are labelled with the EU AI Act's
+    # human-oversight requirement (Article 14), in plain words.
+    assert "human-oversight requirement" in text
 
 
 def test_pending_exact_operation_renders_current_and_actionable_inline(
