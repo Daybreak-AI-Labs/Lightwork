@@ -66,6 +66,9 @@ KNOWN_SECTIONS = frozenset({
     "kms", "knowledge",
     "langchain", "latency", "license", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "mcp_sidecar", "memory",
+    # [mcp]: the tool server's limits and switches (maverick_mcp.settings),
+    # [replay]: recording run traces (replay/trace.py); both on All settings.
+    "mcp", "replay",
     "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
     "paper_review",
     "obsidian", "operations_scientist",

@@ -73,6 +73,10 @@ ROLE_MODELS: dict[str, str] = {
     "translator":      MODEL_SONNET,
     "coding":          MODEL_SONNET,
     "reviewer":        MODEL_OPUS,
+    # The cascaded shield's deeper check (safety/shield_judge.py) and the
+    # cheap first try of cascaded model routing (routing.py, [models] cascade).
+    "shield_judge":    MODEL_HAIKU,
+    "cascade_draft":   MODEL_HAIKU,
 }
 
 
@@ -632,6 +636,16 @@ def offline_model_for_role(
 def model_for_role(role: str) -> str:
     """Resolve the live model route and enforce the admin hard allow-list."""
     return _apply_allowed_model_policy(_resolve_model_for_role(role))
+
+
+def _note_bandit(provider: str, model_id: str, error: object, dollars: object) -> None:
+    """Credit a finished call to the routing bandit ([routing] bandit)."""
+    try:
+        from .cost.router_v3 import note_call
+
+        note_call(provider, model_id, success=not error, dollars=float(dollars or 0.0))
+    except Exception:  # pragma: no cover -- learning never fails a call
+        logging.getLogger(__name__).debug("routing bandit update skipped", exc_info=True)
 
 
 def _canonical_spec(spec: str) -> str:
@@ -2035,6 +2049,7 @@ class LLM:
                             latency_ms=_dt_ms, dollars=_spent, error=_err)
             except Exception:  # pragma: no cover -- never fail on stats
                 pass
+            _note_bandit(provider, model_id, _err, _spent)
             _feed_circuit(provider, _err)
             try:
                 from .observability import record_metric as _rm
@@ -2257,6 +2272,7 @@ class LLM:
                             latency_ms=_dt_ms, dollars=_spent, error=_err)
             except Exception:  # pragma: no cover
                 pass
+            _note_bandit(provider, model_id, _err, _spent)
             _feed_circuit(provider, _err)
             try:
                 from .observability import record_metric as _rm

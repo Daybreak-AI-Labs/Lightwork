@@ -27,6 +27,13 @@ dependencies = [
     "pywhispercpp>=1.5",
 ]
 
+[project.optional-dependencies]
+# Task questions on the Insights page (spend, tasks and tokens by day, status
+# or task) run on DuckDB through maverick.duckdb_analytics. Optional: without
+# it the page says plainly that the add-on is not installed. The config knob
+# is [analytics] task_questions (Settings > All settings; on by default).
+duckdb = ["duckdb>=0.9"]
+
 [project.urls]
 Homepage = "https://github.com/Daybreak-AI-Labs/Lightwork"
 

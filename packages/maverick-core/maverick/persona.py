@@ -6,7 +6,7 @@ changing its capabilities or safety surface. Read from [persona] in
 
     [persona]
     name = "Atlas"
-    style = "concise"   # concise | thorough | friendly | formal | playful
+    style = "concise"   # concise | thorough | verbose | friendly | formal | playful
     addendum = "Always cite sources with URLs."
 
 All three keys are optional. Empty persona = generic assistant
@@ -29,6 +29,9 @@ _warned_styles: set[str] = set()
 STYLES = {
     "concise":  "Be brief. Skip filler words. Trim qualifications.",
     "thorough": "Provide context and trade-offs. Don't oversimplify.",
+    # The dashboard's "Explains its reasoning" choice.
+    "verbose":  "Explain your reasoning step by step and show how you reached "
+                "each conclusion.",
     "friendly": "Be warm and conversational. Use a human tone.",
     "formal":   "Use formal, professional language. No colloquialisms.",
     "playful":  "Be witty and lively. Lean into wordplay when it fits.",

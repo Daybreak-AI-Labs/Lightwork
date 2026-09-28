@@ -24,7 +24,6 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from .._envparse import env_int
 from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
 from ..retry import async_retry, sync_retry
@@ -35,7 +34,14 @@ log = logging.getLogger(__name__)
 # OpenAI Chat Completions hard limit on the `tools` array. Requests with more
 # are rejected with a 400 ("Invalid 'tools': array too long"). Overridable for
 # providers/gateways with a different ceiling.
-_OPENAI_MAX_TOOLS = max(1, env_int("MAVERICK_OPENAI_MAX_TOOLS", 128))
+def _max_tools_setting() -> int:
+    """``[models] openai_max_tools`` read at startup (env ``MAVERICK_OPENAI_MAX_TOOLS`` wins)."""
+    from ..env_setting import env_or_config_int
+
+    return max(1, env_or_config_int("MAVERICK_OPENAI_MAX_TOOLS", "models", "openai_max_tools", 128))
+
+
+_OPENAI_MAX_TOOLS = _max_tools_setting()
 
 
 # Models that require max_completion_tokens instead of max_tokens.

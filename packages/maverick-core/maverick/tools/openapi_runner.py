@@ -98,8 +98,25 @@ _spec_cache: dict[str, dict] = {}
 # this many bytes off the wire, then stop. Specs are larger than call replies
 # (the call result is sliced to 3000 chars anyway), so give specs more room.
 # Both are env-overridable for the rare legitimately-huge spec.
-_SPEC_MAX_BYTES = int(os.getenv("MAVERICK_OPENAPI_SPEC_MAX_BYTES") or 10_000_000)
-_CALL_MAX_BYTES = int(os.getenv("MAVERICK_OPENAPI_CALL_MAX_BYTES") or 1_000_000)
+# Also settings ([tools] openapi_spec_max_bytes / openapi_call_max_bytes) read
+# once at startup; the environment still wins (and still fails loudly when it
+# is not a number, as before).
+def _limit_setting(env: str, key: str, default: int) -> int:
+    from ..env_setting import env_or_config
+
+    raw = os.getenv(env)
+    if raw:
+        return int(raw)
+    try:
+        return int(env_or_config(env, "tools", key) or default)
+    except ValueError:
+        return default
+
+
+_SPEC_MAX_BYTES = _limit_setting("MAVERICK_OPENAPI_SPEC_MAX_BYTES", "openapi_spec_max_bytes",
+                                 10_000_000)
+_CALL_MAX_BYTES = _limit_setting("MAVERICK_OPENAPI_CALL_MAX_BYTES", "openapi_call_max_bytes",
+                                 1_000_000)
 
 
 def _stream_text(client: Any, method: str, url: str, max_bytes: int,

@@ -15,10 +15,13 @@ page (dashboard overlay) > the installer's config.toml > the built-in default.
 Deliberately NOT in the catalog:
 
 * Developer / operations plumbing with no business meaning: ``[langchain]``,
-  ``[coding]``, ``[local_runtime]`` (serving engines). Programs the product
-  never starts itself (``python -m`` helpers) have nothing to change here:
-  ``[perf]`` profiling, ``[ebpf_monitor]``, ``[model_proxy]`` (its key is kept
-  out of the product's settings on purpose) and ``[tui] keys``. The research
+  ``[coding]``, ``[local_runtime]`` (serving engines). Profiling
+  (``[perf.profiling]``), the kernel activity monitor (``[ebpf_monitor]``) and
+  the model proxy (``[model_proxy]``) ARE here (settings_catalog_runtime): the
+  dashboard starts them with itself when they are on
+  (``background_programs``). Only the model proxy's AI service key stays on the
+  server (``MAVERICK_PROXY_KEY``), on purpose: a key kept in the settings would
+  be loaded into the agent process the proxy protects it from. The research
   rungs (``[self_modify]`` files and tests, ``[adapter_rung]``,
   ``[emergent_protocol]``/``[emergent_codec]``) are in
   settings_catalog_learning.py, off by default and confirmed before they widen;
@@ -65,12 +68,12 @@ an AI service, a department) with the ``columns`` described by
 incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
-out, so the page never offers a control that changes nothing: ``[safety]``
-quorum keys, ``cascade`` and ``shield_rate_limit``,
-``[shield] probe_model`` and update addresses, ``[models] cascade``,
-``[routing] bandit``, ``[energy]``, ``[voice]`` only-mode and voice unlock
-(their modules are not called by any run path yet; see
-``settings_catalog_runtime``).
+out, so the page never offers a control that changes nothing: ``[voice]
+biometric_unlock`` (voice unlock needs a speaker-recognition model this
+product does not ship; see ``settings_catalog_runtime``). ``[energy]``,
+``[memory] learning_cache``, ``[tools] speculative``, ``[director] profiles``,
+``[logging] crash_only_fsync`` and ``[tui] keys`` are used by the running
+product and are in ``settings_catalog_runtime``.
 """
 from __future__ import annotations
 

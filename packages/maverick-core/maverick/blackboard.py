@@ -180,7 +180,7 @@ class Blackboard:
                 self._world.append_event(self._goal_id, agent, kind, mirror_content)
             except Exception:
                 pass
-        # Replayable trace (opt-in via MAVERICK_TRACE_DIR): one JSONL line per
+        # Replayable trace (opt-in via MAVERICK_TRACE_DIR / [replay] record): one JSONL line per
         # post so a run can be reconstructed/replayed offline. Best-effort.
         tw = getattr(self, "_trace", None)
         if tw is not None:

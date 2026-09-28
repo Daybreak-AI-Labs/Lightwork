@@ -83,6 +83,13 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_scan_chars",
         "decode_hidden",
         "supply_chain_pinning",
+        # Second-opinion scan, scan limit per task, and approvals for
+        # protected settings (All settings).
+        "cascade",
+        "shield_rate_limit",
+        "quorum_required",
+        "quorum_protected_keys",
+        "quorum_ttl_days",
     },
     "sandbox": {
         "backend",
@@ -116,6 +123,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # Per-tool address rules (sandbox/network_policy.py) and the cluster
         # settings file (sandbox/__init__.py), both on the All settings page.
         "tool",
+        # The work area's no-network rule (sandbox/network_policy.py).
+        "network_policy",
         "kubeconfig",
         "long_command_timeout",
         "firecracker_strict",
@@ -215,7 +224,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_suites",
         "active_tenant",
     },
-    "analytics": {"mcp_client_language"},
+    "analytics": {"mcp_client_language", "task_questions"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
     # fall back to defaults.
@@ -692,7 +701,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "cross_run_pool",
         "warm",
     },
-    "analytics": {"mcp_client_language"},
+    "analytics": {"mcp_client_language", "task_questions"},
     "self_learning": {
         "preflight",
         "create_tools",

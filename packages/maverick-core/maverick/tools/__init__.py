@@ -485,6 +485,36 @@ class ToolRegistry:
             self._anthropic_cache = [t.to_anthropic() for t in self.exposed()]
         return self._anthropic_cache
 
+    def cache_namespace(self) -> str:
+        """The tool-output cache scope of this registry's calls: the active
+        tenant and the principal, so two users never share a read result."""
+        from ..paths import current_tenant_id
+
+        return (
+            f"tenant={current_tenant_id() or '<shared>'}\0"
+            f"principal={self._principal or '<anonymous>'}"
+        )
+
+    def speculate_reads(self, predictions, *, budget_guard=None):
+        """Pre-run predicted repeat reads so their results wait in the cache.
+
+        Only tools this registry would run right now for this principal (ACL,
+        current MCP binding, no refused ambient credentials) are offered to
+        :func:`maverick.speculative_tools.speculate`, under the same cache
+        scope and principal a real call uses. When the model then asks, the
+        call still passes every gate in the agent and in :meth:`run`; only the
+        side-effect-free read itself has already happened. Never raises.
+        """
+        from ..speculative_tools import speculate
+
+        allowed = [
+            (name, args) for name, args in predictions
+            if self._tool_access_error(name) is None
+            and _ambient_credential_denial(name, self._principal) is None
+        ]
+        return speculate(self, allowed, namespace=self.cache_namespace(),
+                         principal=self._principal, budget_guard=budget_guard)
+
     def _tool_access_error(self, name: str) -> str | None:
         """Check current authorization before touching a lazy executor."""
         if name not in self._tools:
@@ -543,12 +573,7 @@ class ToolRegistry:
                 # invoking the function) and include both tenant and principal
                 # so two users or clients cannot share a credential-bearing
                 # read result merely because the tool arguments match.
-                from ..paths import current_tenant_id
-
-                _cache_namespace = (
-                    f"tenant={current_tenant_id() or '<shared>'}\0"
-                    f"principal={self._principal or '<anonymous>'}"
-                )
+                _cache_namespace = self.cache_namespace()
                 try:
                     from ..cache.tool import get_cached, store_cached
                 except ImportError:  # pragma: no cover
@@ -1486,6 +1511,7 @@ def base_registry(
     )
     if not _skip_tool_acl:
         _apply_containment(reg)
+        _apply_network_posture(reg)
     _apply_deferred_loading(reg)
 
     # Route every compatible external connector write through the durable,
@@ -1589,6 +1615,18 @@ def _apply_containment(reg: ToolRegistry) -> None:
     profile = active_profile()
     if profile is not None:
         apply(profile, registry=reg, sandbox_env={})
+
+
+def _apply_network_posture(reg: ToolRegistry) -> None:
+    """``[security] network_policy``: remove the web tools the posture blocks,
+    unioned into the ACL so existing denials are kept (as containment does)."""
+    from ..sandbox.network_policy import denied_tools
+
+    blocked = denied_tools()
+    if blocked:
+        reg.set_acl(allowed=set(getattr(reg, "_acl_allowed", set()) or set()),
+                    denied=set(getattr(reg, "_acl_denied", set()) or set()) | set(blocked),
+                    max_risk=getattr(reg, "_acl_max_risk", None))
 
 
 def _apply_tool_acl_unless_skipped(

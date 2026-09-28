@@ -72,19 +72,20 @@ _REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 # 25 MiB per file, 100 MiB per goal. Tunable via env so a VPS deployment
 # can raise the cap without a code change.
-def _env_int(name: str, default: int) -> int:
+def _env_int(name: str, default: int, key: str) -> int:
     # A non-numeric value used to raise ValueError at import time, killing the
     # attachment path with an opaque traceback instead of using the default.
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
+    # ``[attachments] <key>`` is the same limit as a setting, read once at
+    # startup; the environment still wins.
+    from .env_setting import env_or_config_int
+
+    return env_or_config_int(name, "attachments", key, default)
 
 
 # 100 MiB per file / 500 MiB per goal: sized for audio and video now that
 # every media kind is accepted (a 25 MiB cap rejected most recordings).
-MAX_FILE_BYTES = _env_int("MAVERICK_ATTACH_MAX_FILE_BYTES", 100 * 1024 * 1024)
-MAX_GOAL_BYTES = _env_int("MAVERICK_ATTACH_MAX_GOAL_BYTES", 500 * 1024 * 1024)
+MAX_FILE_BYTES = _env_int("MAVERICK_ATTACH_MAX_FILE_BYTES", 100 * 1024 * 1024, "max_file_bytes")
+MAX_GOAL_BYTES = _env_int("MAVERICK_ATTACH_MAX_GOAL_BYTES", 500 * 1024 * 1024, "max_goal_bytes")
 
 # Office / OpenDocument packages are ZIP containers, so they need BOTH a
 # mime allowlist entry AND a structural exemption from the archive deny

@@ -739,6 +739,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("red-team schedule dispatcher not started")
         try:
+            from maverick_dashboard.shield_update_scheduler import (
+                start_shield_update_scheduler,
+            )
+
+            await run_in_threadpool(start_shield_update_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("shared threat rules check not started")
+        try:
             from maverick_dashboard.ai_inventory_scheduler import (
                 start_ai_inventory_scheduler,
             )
@@ -760,6 +768,14 @@ async def _lifespan(app: FastAPI):
             await run_in_threadpool(start_identity_governance_scheduler)
         except Exception:  # pragma: no cover - never block startup
             log.exception("identity-governance scheduler not started")
+        try:
+            # Profiling, the kernel activity monitor and the model proxy, each
+            # only when its setting is on (All settings); stopped at shutdown.
+            from maverick_dashboard.background_programs import start_enabled
+
+            await run_in_threadpool(start_enabled)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("background programs not started")
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
         # Connected-entitlement auto-refresh: a deployment with [license] api_url
@@ -7387,7 +7403,11 @@ def _permissions_snapshot() -> dict:
         for n, c in (cfg.get("channels") or {}).items()
     ]
     sec = cfg.get("security") or {}
-    snap["network"] = sec.get("network_policy") or "open"
+    # The enforced network posture ([security] network_policy), normalized, so
+    # the page never shows a label the kernel does not apply.
+    from maverick.sandbox.network_policy import network_posture
+
+    snap["network"] = network_posture(cfg)
 
     try:
         from maverick.runtime_overrides import denied_tools as _overlay
@@ -10022,8 +10042,19 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
+            "voice_only": _voice_only_mode(),
         },
     )
+
+
+def _voice_only_mode() -> bool:
+    """``[voice] only_mode``: the finished result is read aloud on arrival."""
+    try:
+        from maverick.voice_only import voice_only_enabled
+
+        return voice_only_enabled()
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return False
 
 
 def _withheld_event_markers() -> list[str]:

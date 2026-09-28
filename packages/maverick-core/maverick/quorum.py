@@ -28,9 +28,12 @@ Pieces:
   ``status`` reports ``"expired"`` for stale proposals; ``prune`` deletes
   them. The clock is injectable so expiry is unit-testable.
 
-Opt-in and default-OFF in effect: nothing consults this module unless the
-config-write path calls :func:`apply_gate`, and the default policy only
-exists once a caller asks for it. ``policy_from_config()`` reads ``[safety]
+Opt-in and default-OFF in effect: the dashboard's settings save flow
+(``maverick_dashboard.settings_quorum``) consults :func:`configured_policy`,
+which is None until an operator sets a quorum of 2 or more; then a save that
+touches a protected setting becomes an approval request (the dashboard's
+Approvals, N distinct approvers, never the requester) and applies only once
+approved. ``policy_from_config()`` reads ``[safety]
 quorum_required`` / ``quorum_protected_keys`` (env
 ``MAVERICK_QUORUM_REQUIRED`` wins for the count), fail-soft. Stdlib-only.
 """
@@ -161,6 +164,27 @@ def policy_from_config() -> QuorumPolicy:
     except (TypeError, ValueError):
         ttl = DEFAULT_TTL_DAYS
     return QuorumPolicy(required=required, protected_keys=protected, ttl_days=ttl)
+
+
+def configured_policy() -> QuorumPolicy | None:
+    """The policy the settings save flow enforces, or None when it is off.
+
+    On only when an operator set a quorum (``MAVERICK_QUORUM_REQUIRED`` or
+    ``[safety] quorum_required``) of at least 2: one approver who could be
+    the person asking adds nothing, and an unset quorum keeps today's
+    behaviour (a protected setting saves at once).
+    """
+    raw: object = os.environ.get("MAVERICK_QUORUM_REQUIRED", "").strip() or None
+    if raw is None:
+        try:
+            from .config import load_config
+            raw = ((load_config() or {}).get("safety") or {}).get("quorum_required")
+        except Exception:
+            return None
+    if raw is None or isinstance(raw, bool) or not str(raw).strip():
+        return None
+    policy = policy_from_config()
+    return policy if policy.required >= 2 else None
 
 
 def _default_path() -> Path:
@@ -387,5 +411,5 @@ __all__ = [
     "DEFAULT_PROTECTED_KEYS", "DEFAULT_REQUIRED", "DEFAULT_TTL_DAYS",
     "PENDING", "APPROVED", "EXPIRED",
     "propose", "approve", "status", "prune",
-    "is_protected", "apply_gate", "policy_from_config",
+    "is_protected", "apply_gate", "policy_from_config", "configured_policy",
 ]

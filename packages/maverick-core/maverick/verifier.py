@@ -40,8 +40,26 @@ log = logging.getLogger(__name__)
 
 # Default disagreement entropy threshold. Above this, fan out to more
 # proposers; below, accept the single answer. Tunable via env.
-DISAGREEMENT_HIGH = float(os.environ.get("MAVERICK_DISAGREEMENT_HIGH", "0.5"))
-VERIFIER_CONFIDENCE_ACCEPT = float(os.environ.get("MAVERICK_VERIFIER_CONFIDENCE", "0.75"))
+# Both are also settings ([verification] disagreement_high /
+# confidence_accept) read once at startup; the environment still wins.
+def _threshold_settings() -> tuple[float, float]:
+    from .env_setting import env_or_config
+
+    def _number(env: str, key: str, default: float) -> float:
+        # An unreadable environment value still fails loudly, as it always did.
+        raw = os.environ.get(env)
+        if raw is not None and raw.strip():
+            return float(raw)
+        try:
+            return float(env_or_config(env, "verification", key, str(default)) or default)
+        except ValueError:
+            return default
+
+    return (_number("MAVERICK_DISAGREEMENT_HIGH", "disagreement_high", 0.5),
+            _number("MAVERICK_VERIFIER_CONFIDENCE", "confidence_accept", 0.75))
+
+
+DISAGREEMENT_HIGH, VERIFIER_CONFIDENCE_ACCEPT = _threshold_settings()
 
 
 VERIFIER_SYSTEM = """You are an independent verifier reviewing another agent's answer to a goal.

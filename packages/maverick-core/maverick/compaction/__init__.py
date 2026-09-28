@@ -39,18 +39,24 @@ from typing import Protocol, runtime_checkable
 
 
 # Tunables.
-def _env_int(name: str, default: int) -> int:
+def _env_int(name: str, default: int, key: str = "") -> int:
     # A non-numeric env value used to raise ValueError at import, killing the
     # compaction path with an opaque traceback instead of using the default.
+    # With ``key`` the value may also come from ``[compaction] <key>`` (read
+    # once at startup); the environment still wins.
+    if key:
+        from ..env_setting import env_or_config_int
+
+        return env_or_config_int(name, "compaction", key, default)
     try:
         return int(os.environ.get(name, default))
     except (TypeError, ValueError):
         return default
 
 
-MAX_TOOL_OUTPUT_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOOL_BYTES", 2 * 1024)
-KEEP_RECENT_TURNS = _env_int("MAVERICK_COMPACT_KEEP_RECENT", 4)
-DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10)
+MAX_TOOL_OUTPUT_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOOL_BYTES", 2 * 1024, "max_tool_bytes")
+KEEP_RECENT_TURNS = _env_int("MAVERICK_COMPACT_KEEP_RECENT", 4, "keep_recent")
+DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10, "digest_every")
 # Ceiling on the WHOLE live window. The per-block pass above only trims
 # content behind keep_recent, so a few results at the per-result cap
 # (agent._MAX_TOOL_RESULT_BYTES, default 100 KB) can still ride inside the
@@ -58,7 +64,7 @@ DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10)
 # into the recent window, oldest first — sparing the first message (the
 # brief) and the last (the freshest results the model must act on). ~200 KB
 # chars (~50k tokens). 0 disables.
-MAX_TOTAL_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOTAL_BYTES", 200_000)
+MAX_TOTAL_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOTAL_BYTES", 200_000, "max_total_bytes")
 
 
 def _block_size(block: dict) -> int:
