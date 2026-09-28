@@ -13,12 +13,20 @@ Designed to be reactive: the user starts an agent in one terminal, runs
 This is the open-source equivalent of Devin's "watch over my shoulder"
 UI -- without a paid VM. The plumbing is just the SQLite world model,
 which agents write to as they progress.
+
+Keys (in a terminal): the power-user keymap (:mod:`maverick.keymap`,
+``[tui.keys]`` / ``MAVERICK_TUI_KEYS``) is loaded when the monitor starts --
+quit, refresh now, move through the plan tree, open or close a step, and
+pause or resume following the run. Ctrl-C always quits. When the input is
+not a terminal the monitor just refreshes, as before.
 """
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .world_model import Goal, WorldModel
@@ -120,11 +128,140 @@ def _fmt_event(ev) -> str:
     return f"[dim]{_fmt_duration(age)} ago[/dim] [{ev.agent}] {ev.kind}: {(ev.content or '')[:120]}"
 
 
-def render(state: MonitorState) -> str:
+@dataclass
+class MonitorKeys:
+    """What the pressed keys have done to the live view (pure state).
+
+    ``bindings`` is the effective keymap (action -> key); :meth:`press` maps a
+    decoded key name to its action and applies it. ``focus`` is the index of
+    the focused plan-tree step, ``expanded`` the steps opened to show their
+    details, and ``follow`` whether the view keeps refreshing.
+    """
+
+    bindings: dict[str, str]
+    follow: bool = True
+    focus: int | None = None
+    expanded: set[int] = field(default_factory=set)
+
+    def press(self, key: str, steps: int) -> str | None:
+        from . import keymap
+
+        action = keymap.handle_key(key, bindings=self.bindings)
+        if action == "focus_next" and steps:
+            self.focus = 0 if self.focus is None else min(steps - 1, self.focus + 1)
+        elif action == "focus_prev" and steps:
+            self.focus = 0 if self.focus is None else max(0, self.focus - 1)
+        elif action == "expand" and self.focus is not None:
+            self.expanded.add(self.focus)
+        elif action == "collapse" and self.focus is not None:
+            self.expanded.discard(self.focus)
+        elif action == "toggle_follow":
+            self.follow = not self.follow
+        return action
+
+    def footer(self) -> str:
+        b = self.bindings
+        state = "following the run" if self.follow else "paused"
+        return (f"[dim]{b['quit']} quit · {b['refresh']} refresh · {b['focus_prev']}/"
+                f"{b['focus_next']} move · {b['expand']} open · {b['collapse']} close · "
+                f"{b['toggle_follow']} pause or follow ({state})[/dim]")
+
+
+# Escape sequences terminals send for the named keys the keymap knows.
+_SEQUENCES = {
+    "\x1b[A": "up", "\x1b[B": "down", "\x1b[C": "right", "\x1b[D": "left",
+    "\x1bOA": "up", "\x1bOB": "down", "\x1bOC": "right", "\x1bOD": "left",
+    "\x1bOP": "f1", "\x1bOQ": "f2", "\x1bOR": "f3", "\x1bOS": "f4",
+    "\x1b[15~": "f5", "\x1b[17~": "f6", "\x1b[18~": "f7", "\x1b[19~": "f8",
+    "\x1b[20~": "f9", "\x1b[21~": "f10", "\x1b[23~": "f11", "\x1b[24~": "f12",
+    "\x1b": "esc", "\r": "enter", "\n": "enter", "\t": "tab",
+}
+# Windows console: a special key arrives as a prefix character then a code.
+_WINDOWS_KEYS = {"H": "up", "P": "down", "K": "left", "M": "right",
+                 **{chr(0x3A + i): f"f{i}" for i in range(1, 11)},
+                 "\x85": "f11", "\x86": "f12"}
+
+
+def decode_key(data: str) -> str | None:
+    """The keymap name of one key read from a terminal, or None."""
+    if not data:
+        return None
+    if data in _SEQUENCES:
+        return _SEQUENCES[data]
+    if len(data) == 2 and data[0] in ("\x00", "\xe0"):
+        return _WINDOWS_KEYS.get(data[1])
+    if len(data) == 1 and data.isprintable():
+        return data.lower()
+    return None
+
+
+class _KeyReader:
+    """Read single keys from the terminal without waiting for Enter.
+
+    Only when standard input is a terminal; otherwise :meth:`read` just waits,
+    so piped or scripted use behaves exactly as before.
+    """
+
+    def __init__(self, stream=None) -> None:
+        self._stream = stream if stream is not None else sys.stdin
+        self._saved = None
+        try:
+            self._tty = bool(self._stream.isatty())
+        except Exception:
+            self._tty = False
+
+    def __enter__(self) -> _KeyReader:
+        if self._tty and os.name != "nt":
+            try:
+                import termios
+                import tty
+
+                fd = self._stream.fileno()
+                self._saved = termios.tcgetattr(fd)
+                tty.setcbreak(fd)
+            except Exception:  # pragma: no cover -- an odd terminal stays line-mode
+                self._tty = False
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        if self._saved is not None:
+            import termios
+
+            termios.tcsetattr(self._stream.fileno(), termios.TCSADRAIN, self._saved)
+            self._saved = None
+
+    def read(self, timeout: float) -> str | None:
+        if not self._tty:
+            time.sleep(timeout)
+            return None
+        if os.name == "nt":  # pragma: no cover -- Windows console
+            import msvcrt
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if msvcrt.kbhit():
+                    first = msvcrt.getwch()
+                    if first in ("\x00", "\xe0"):
+                        return decode_key(first + msvcrt.getwch())
+                    return decode_key(first)
+                time.sleep(0.05)
+            return None
+        import select
+
+        fd = self._stream.fileno()
+        ready, _, _ = select.select([fd], [], [], timeout)
+        if not ready:
+            return None
+        return decode_key(os.read(fd, 32).decode("utf-8", "replace"))
+
+
+def render(state: MonitorState, keys: MonitorKeys | None = None) -> str:
     """Render a MonitorState to a rich-formatted string.
 
     Returns plain text with rich-tag markup. Callers decide how to
-    display (Console.print, file, websocket, etc).
+    display (Console.print, file, websocket, etc). With ``keys`` the focused
+    plan step is marked, opened steps show their details, and a key guide is
+    added at the bottom.
     """
     parts: list[str] = []
     goal = state.goal
@@ -141,9 +278,13 @@ def render(state: MonitorState) -> str:
 
     if state.children:
         parts.append("[bold]Plan tree[/bold]")
-        for c in state.children:
+        for index, c in enumerate(state.children):
             cc = _status_color(c.status)
-            parts.append(f"  ├─ [{cc}]{c.status:>11}[/{cc}]  #{c.id} {c.title[:80]}")
+            mark = "▸" if keys is not None and keys.focus == index else "├─"
+            parts.append(f"  {mark} [{cc}]{c.status:>11}[/{cc}]  #{c.id} {c.title[:80]}")
+            if keys is not None and index in keys.expanded:
+                detail = (getattr(c, "result", None) or c.description or "").strip()
+                parts.append(f"      [dim]{(detail or 'No details yet.')[:300]}[/dim]")
         parts.append("")
 
     if state.episodes:
@@ -166,6 +307,8 @@ def render(state: MonitorState) -> str:
     parts.append(
         f"[dim]Cumulative spend on this DB: ${state.total_dollars:.2f}[/dim]"
     )
+    if keys is not None:
+        parts.append(keys.footer())
     return "\n".join(parts)
 
 
@@ -205,15 +348,13 @@ def monitor_loop(
         if _mouse:
             tui_mouse.write_enable(_sys.stdout)
         try:
-            with Live(render(state), console=console, refresh_per_second=2) as live:
+            from . import keymap
+
+            view = MonitorKeys(keymap.resolve())
+            with _KeyReader() as reader, Live(render(state, view), console=console,
+                                              refresh_per_second=2) as live:
                 try:
-                    while True:
-                        time.sleep(interval_seconds)
-                        state = snapshot(world, goal_id)
-                        if state is None:
-                            live.update("[red]Goal not found.[/red]")
-                            continue
-                        live.update(render(state))
+                    _run_live(live, reader, view, world, goal_id, state, interval_seconds)
                 except KeyboardInterrupt:
                     pass
         finally:
@@ -222,6 +363,24 @@ def monitor_loop(
         return 0
     finally:
         world.close()
+
+
+def _run_live(live, reader, view: MonitorKeys, world, goal_id, state, interval: float) -> None:
+    """Refresh the live view and apply pressed keys until the quit key."""
+    while True:
+        action = None
+        key = reader.read(interval)
+        if key is not None:
+            action = view.press(key, len(state.children) if state is not None else 0)
+            if action == "quit":
+                return
+        if view.follow or action == "refresh":
+            fresh = snapshot(world, goal_id)
+            if fresh is None:
+                live.update("[red]Goal not found.[/red]")
+                continue
+            state = fresh
+        live.update(render(state, view))
 
 
 def _monitor_loop_plain(

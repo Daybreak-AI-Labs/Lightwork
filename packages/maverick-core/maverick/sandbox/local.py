@@ -95,13 +95,15 @@ def container_user_args(allow_root: bool = False) -> list[str]:
 
 
 def _contained(env: dict) -> dict:
-    """Containment mode with no network: point the proxy variables that host
-    programs honour at a dead end (best effort; the tool ACL and container
-    backends carry the hard guarantee)."""
+    """Containment mode with no network, or a network policy that keeps the
+    work area offline: point the proxy variables that host programs honour at
+    a dead end (best effort; the tool ACL and container backends carry the
+    hard guarantee)."""
     from ..containment import active_profile, assert_no_network_env
+    from .network_policy import work_area_offline
 
     profile = active_profile()
-    if profile is not None and profile.no_network:
+    if (profile is not None and profile.no_network) or work_area_offline():
         return assert_no_network_env(env)
     return env
 

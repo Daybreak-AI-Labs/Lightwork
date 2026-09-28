@@ -3755,7 +3755,7 @@ def diag_health(goal_id: int) -> None:
 @click.argument("trace_file", type=click.Path(exists=True))
 @click.option("--kind", default=None, help="Only show events of this kind.")
 def diag_replay(trace_file: str, kind: str | None) -> None:
-    """Read a replayable run trace (written when MAVERICK_TRACE_DIR is set)."""
+    """Read a replayable run trace (written when MAVERICK_TRACE_DIR or [replay] record is set)."""
     from ..replay.trace import read_trace
     events = read_trace(trace_file)
     shown = 0
@@ -3863,6 +3863,33 @@ def mcp_registry_list(ctx) -> None:
             click.echo(f"  {s.name}  (stdio)  {argstr}")
 
 
+def _apply_director(profile: str, outcome: str, description: str,
+                    max_dollars: float | None) -> tuple[str, str, float | None]:
+    """Director mode for this process's one run (:mod:`maverick.director_mode`).
+
+    The profile's consent mode and review checkpoints apply to this process
+    only (it runs this one goal); its budget multiple is applied to the
+    requested or configured cap and then clamped to the configured cap, so a
+    profile can never raise spending past what the deployment allows.
+    """
+    from ..director_mode import UnknownProfileError, direct
+    from ..runner import clamp_task_limit, configured_max_dollars
+
+    try:
+        run = direct(outcome, profile=profile, base_max_dollars=max_dollars)
+    except (UnknownProfileError, ValueError) as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(2)
+    for name, value in run.env_overrides.items():
+        if value:
+            os.environ[name] = value
+    extra = f"\n\n{description}" if description else ""
+    capped = clamp_task_limit(run.max_dollars, configured_max_dollars())
+    click.echo(f"[director {profile}] consent={run.consent_mode} "
+               f"checkpoint={run.checkpoint} max_dollars={capped}")
+    return run.goal_title, run.goal_description + extra, capped
+
+
 def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
     """Export the coding-mode / best-of-N env flags that ``coding_mode.from_env()``
     reads everywhere. ``--best-of-n`` only takes effect under ``--coding-mode``,
@@ -3913,13 +3940,18 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
                    "the preference pairs DPO needs (pair with [telemetry] "
                    "donate_min_entropy = 0 to capture them). Non-clean runs are "
                    "kept, not fatal, in repeat mode.")
+@click.option("--director", "director_profile", default=None,
+              type=click.Choice(["supervised", "semi", "autonomous"]),
+              help="Director mode: TITLE is an outcome, run plan-first under this "
+                   "autonomy profile (consent, review checkpoints and budget from "
+                   "[director.profiles], clamped to the configured spend cap).")
 @click.pass_context
 @_humane_errors
 def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat,
+    repeat, director_profile,
 ) -> None:
     """Start a new goal and run the swarm."""
     # Coding-mode flags propagate via env so coding_mode.from_env()
@@ -3959,6 +3991,9 @@ def start(
     elif not title:
         click.echo("ERROR: pass TITLE or --template <name>", err=True)
         sys.exit(2)
+    if director_profile:
+        title, description, max_dollars = _apply_director(
+            director_profile, title, description, max_dollars)
 
     if dry_cost:
         # Forecast from past priced runs and exit — no goal created, no run.

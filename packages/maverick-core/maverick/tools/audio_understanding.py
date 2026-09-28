@@ -11,7 +11,7 @@ Seams: the embedders are **injected** (``audio_embed(bytes) -> vector``,
 ``text_embed(labels) -> vectors``) so the ranking math is testable offline.
 The default adapters lazy-load transformers' ClapModel behind the ``[clap]``
 extra (``python -m pip install -e './packages/maverick-core[clap]'``); model name comes from
-``MAVERICK_CLAP_MODEL`` (default ``laion/clap-htsat-unfused``). Nothing is
+``[models] clap`` / ``MAVERICK_CLAP_MODEL`` (default ``laion/clap-htsat-unfused``). Nothing is
 downloaded until a default adapter is actually called.
 
 ops:
@@ -166,9 +166,17 @@ def _load_clap():
                 "CLAP audio understanding needs transformers + torch. "
                 "Run: python -m pip install -e './packages/maverick-core[clap]'"
             ) from e
-        name = os.environ.get("MAVERICK_CLAP_MODEL", DEFAULT_CLAP_MODEL)
+        name = clap_model_name()
         _clap = (ClapModel.from_pretrained(name), ClapProcessor.from_pretrained(name))
         return _clap
+
+
+def clap_model_name() -> str:
+    """``[models] clap`` (env ``MAVERICK_CLAP_MODEL`` wins), else the default."""
+    from ..env_setting import env_or_config
+
+    return (env_or_config("MAVERICK_CLAP_MODEL", "models", "clap") or "").strip() \
+        or DEFAULT_CLAP_MODEL
 
 
 def embed_waveform(waveform: list[float], rate: int) -> list[float]:

@@ -230,7 +230,7 @@ def test_actual_composed_dashboard_registers_all_default_components():
             "automation", "security", "finance", "red_team", "ai_inventory", "ai_cost", "identity",
             "entitlements", "voice", "privacy_discovery", "privacy_publication", "ai_governance",
             "consent_scan", "trc_evidence", "data_use_audit", "unified_audit", "third_party_feed",
-            "code_watch", "code_sessions",
+            "code_watch", "code_sessions", "background_programs",
         }
         assert supervisor.phase == "running"
     assert supervisor.phase == "stopped" and not supervisor.errors
@@ -254,7 +254,7 @@ def test_optional_drop_lifespan_joins_the_same_supervisor(monkeypatch, tmp_path)
     with TestClient(app, headers={"Origin": "http://testserver"}):
         supervisor = app.state.lifecycle_supervisor
         assert "drop_management" in supervisor.components
-        assert len(supervisor.components) == 20
+        assert len(supervisor.components) == 21
     assert supervisor.phase == "stopped" and not supervisor.errors
 
 
