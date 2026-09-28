@@ -11,6 +11,15 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def no_store(response):
+    """Keep a page that shows a one-time secret (a set-up link, a connection
+    token) out of the browser cache and back/forward history, so it can't be
+    read again later on a shared computer. Returns the response."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
 def _truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 

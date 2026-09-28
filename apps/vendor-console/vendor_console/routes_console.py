@@ -21,7 +21,7 @@ from .models import (
     Staff,
 )
 from .render import render
-from .util import hash_token
+from .util import hash_token, no_store
 
 router = APIRouter()
 
@@ -113,10 +113,10 @@ def customers_create(request: Request, name: str = Form(...),
                                 serve_token_hash=hash_token(token))
     audit.record(conn, actor=staff.email, action="customer.create",
                  target=name.strip(), detail={"posture": posture})
-    return render(request, "serve_token.html",
-                  {"staff": staff, "customer": store.get_customer(conn, cid),
-                   "token": token, "section": "customers",
-                   "license_url": _license_url(request)})
+    return no_store(render(request, "serve_token.html",
+                           {"staff": staff, "customer": store.get_customer(conn, cid),
+                            "token": token, "section": "customers",
+                            "license_url": _license_url(request)}))
 
 
 @router.get("/customers/{customer_id}")
@@ -148,11 +148,15 @@ def set_customer_details(request: Request, customer_id: int,
     cust = _customer(conn, customer_id)
     if posture not in POSTURES:
         raise HTTPException(status_code=400, detail="invalid environment")
-    store.update_customer(conn, customer_id, primary_contact=primary_contact.strip(),
-                          contact_email=contact_email.strip(), posture=posture,
-                          notes=notes.strip())
+    after = {"primary_contact": primary_contact.strip(),
+             "contact_email": contact_email.strip(), "posture": posture,
+             "notes": notes.strip()}
+    store.update_customer(conn, customer_id, **after)
+    # Before/after for each field that changed, like customer.status's from/to.
+    changed = {k: {"from": getattr(cust, k), "to": v}
+               for k, v in after.items() if getattr(cust, k) != v}
     audit.record(conn, actor=staff.email, action="customer.details", target=cust.name,
-                 detail={"posture": posture})
+                 detail={"posture": posture, "changed": changed})
     return RedirectResponse(f"/customers/{customer_id}?saved=details", status_code=303)
 
 
@@ -192,10 +196,10 @@ def rotate_token(request: Request, customer_id: int, staff: Staff = Depends(requ
     token = "svc_" + secrets.token_urlsafe(24)
     store.update_customer(conn, customer_id, serve_token_hash=hash_token(token))
     audit.record(conn, actor=staff.email, action="customer.token.rotate", target=cust.name)
-    return render(request, "serve_token.html",
-                  {"staff": staff, "customer": store.get_customer(conn, customer_id),
-                   "token": token, "rotated": True, "section": "customers",
-                   "license_url": _license_url(request)})
+    return no_store(render(request, "serve_token.html",
+                           {"staff": staff, "customer": store.get_customer(conn, customer_id),
+                            "token": token, "rotated": True, "section": "customers",
+                            "license_url": _license_url(request)}))
 
 
 @router.post("/customers/{customer_id}/channel")

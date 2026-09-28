@@ -21,7 +21,7 @@ from . import audit, store
 from .auth import require_owner, require_write
 from .models import ROLES, Staff
 from .render import render
-from .util import hash_token
+from .util import hash_token, no_store
 
 router = APIRouter()
 
@@ -64,10 +64,10 @@ def _issue_link(request: Request, staff: Staff, member: Staff, *, reset: bool):
                         expires_at=expires, created_by=staff.email, reset=reset)
     audit.record(conn, actor=staff.email, action="staff.invite", target=member.email,
                  detail={"expires_at": int(expires), "reissued": reset})
-    return render(request, "team_link.html", {
+    return no_store(render(request, "team_link.html", {
         "staff": staff, "section": "team", "member": member, "reissued": reset,
         "days": LINK_HOURS // 24,
-        "link": str(request.base_url).rstrip("/") + "/welcome/" + token})
+        "link": str(request.base_url).rstrip("/") + "/welcome/" + token}))
 
 
 @router.post("/team")

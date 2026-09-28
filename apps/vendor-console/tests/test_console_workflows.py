@@ -180,6 +180,42 @@ def test_admin_edits_customer_status_and_details(admin, app):
     assert "Cedar Valley Bank" not in admin.get("/customers", params={"status": "active"}).text.split("<table>")[1]
 
 
+def test_customer_details_change_is_audited_with_before_and_after(admin, app):
+    conn = app.state.conn
+    cid, token = _customer(admin, app)
+    admin.post(f"/customers/{cid}/details", data={
+        "primary_contact": "Dana", "contact_email": "dana@cvb.example",
+        "posture": "airgapped", "notes": "Renewal in May"})
+    event = next(e for e in audit.recent(conn) if e.action == "customer.details")
+    assert event.detail["changed"] == {
+        "primary_contact": {"from": "", "to": "Dana"},
+        "contact_email": {"from": "c@cvb.example", "to": "dana@cvb.example"},
+        "posture": {"from": "connected", "to": "airgapped"},
+        "notes": {"from": "", "to": "Renewal in May"},
+    }
+    # Saving again with nothing changed records no field changes.
+    admin.post(f"/customers/{cid}/details", data={
+        "primary_contact": "Dana", "contact_email": "dana@cvb.example",
+        "posture": "airgapped", "notes": "Renewal in May"})
+    latest = next(e for e in audit.recent(conn) if e.action == "customer.details")
+    assert latest.detail["changed"] == {}
+    dump = " ".join(r["detail_json"] for r in conn.execute("SELECT detail_json FROM audit"))
+    assert token not in dump and "serve_token" not in dump
+    assert audit.verify_chain(conn)[0]
+
+
+def test_connection_token_pages_are_not_cached(admin, app):
+    r = admin.post("/customers", data={"name": "Birch Credit Union", "posture": "connected"})
+    assert r.status_code == 200 and "svc_" in r.text
+    assert r.headers.get("cache-control") == "no-store"
+    assert r.headers.get("pragma") == "no-cache"
+    cid = store.list_customers(app.state.conn, search="Birch")[0].id
+    rotated = admin.post(f"/customers/{cid}/token")
+    assert rotated.status_code == 200 and "svc_" in rotated.text
+    assert rotated.headers.get("cache-control") == "no-store"
+    assert rotated.headers.get("pragma") == "no-cache"
+
+
 def test_seats_must_be_a_whole_number(admin, app):
     cid, _ = _customer(admin, app)
     r = admin.post(f"/customers/{cid}/licenses", data={"tier": "gold", "seats": "ten"})

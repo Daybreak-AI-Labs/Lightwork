@@ -211,3 +211,141 @@ def test_change_password_needs_sign_in_and_same_origin(app, make_staff, login_co
                data={"current": "password-1234", "password": NEW_PW,  # pragma: allowlist secret
                      "confirm": NEW_PW})
     assert r.status_code == 403
+
+
+# ---- every sign-in stage ends when the account is reset -------------------------
+
+def _enroll_client(app, token):
+    """A browser that used ``token`` and now holds the two-step set-up session."""
+    c = TestClient(app)
+    r = c.post(f"/welcome/{token}", data={"password": NEW_PW, "confirm": NEW_PW},
+               follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/enroll-totp"
+    return c
+
+
+def _member_id(app, email="jane@daybreak.co"):
+    return store.get_staff_by_email(app.state.conn, email)["id"]
+
+
+def test_new_link_ends_an_unfinished_set_up_session(admin, app):
+    _, token, _ = _add(admin, role="admin")
+    leaked = _enroll_client(app, token)
+    sid = _member_id(app)
+    assert admin.post(f"/team/{sid}/link").status_code == 200
+    page = leaked.get("/enroll-totp", follow_redirects=False)
+    assert page.status_code == 303 and page.headers["location"] == "/login"
+    assert store.get_staff_row(app.state.conn, sid)["totp_secret"] == ""
+    # Even with a guessed secret the old session can't finish two-step set-up.
+    store.set_totp(app.state.conn, sid, security.new_totp_secret(), enrolled=False)
+    code = security.totp_now(store.get_staff_row(app.state.conn, sid)["totp_secret"])
+    r = leaked.post("/enroll-totp", data={"code": code}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert not store.get_staff_row(app.state.conn, sid)["totp_enrolled"]
+    assert leaked.get("/customers", follow_redirects=False).status_code == 303
+
+
+def test_new_link_ends_a_set_up_session_started_from_sign_in(admin, app):
+    _, token, _ = _add(admin)
+    _welcome(app, token)
+    leaked = TestClient(app)
+    r = leaked.post("/login", data={"email": "jane@daybreak.co", "password": NEW_PW},
+                    follow_redirects=False)
+    assert r.headers["location"] == "/enroll-totp"
+    admin.post(f"/team/{_member_id(app)}/link")
+    assert leaked.get("/enroll-totp", follow_redirects=False).headers["location"] == "/login"
+
+
+def test_turning_access_off_and_on_ends_a_set_up_session(admin, app):
+    _, token, _ = _add(admin)
+    leaked = _enroll_client(app, token)
+    sid = _member_id(app)
+    store.set_staff_disabled(app.state.conn, sid, True)
+    store.set_staff_disabled(app.state.conn, sid, False)
+    assert leaked.get("/enroll-totp", follow_redirects=False).headers["location"] == "/login"
+
+
+def test_password_change_ends_a_half_finished_sign_in(app, make_staff):
+    sid = make_staff(email="me@daybreak.co", role="support")
+    row = store.get_staff_row(app.state.conn, sid)
+    store.set_totp(app.state.conn, sid, row["totp_secret"], enrolled=True)
+    c = TestClient(app)
+    r = c.post("/login", data={"email": "me@daybreak.co", "password": "password-1234"},  # pragma: allowlist secret
+               follow_redirects=False)
+    assert r.headers["location"] == "/totp"
+    assert c.get("/totp", follow_redirects=False).status_code == 200
+    store.set_password(app.state.conn, sid, security.hash_password(NEW_PW))
+    assert c.get("/totp", follow_redirects=False).headers["location"] == "/login"
+    code = security.totp_now(row["totp_secret"])
+    assert c.post("/totp", data={"code": code}, follow_redirects=False).headers["location"] == "/login"
+
+
+def test_a_link_cannot_reset_an_account_that_finished_setting_up(app, make_staff):
+    sid = make_staff(email="done@daybreak.co", role="viewer")
+    row = store.get_staff_row(app.state.conn, sid)
+    store.set_totp(app.state.conn, sid, row["totp_secret"], enrolled=True)
+    store.create_invite(app.state.conn, staff_id=sid, token_hash=hash_token("left-open"),
+                        expires_at=time.time() + 3600, created_by="owner@daybreak.co")
+    assert store.consume_invite(app.state.conn, hash_token("left-open"),
+                                security.hash_password(NEW_PW)) is None
+    assert _welcome(app, "left-open").status_code == 404
+    after = store.get_staff_row(app.state.conn, sid)
+    assert after["pw_hash"] == row["pw_hash"]
+
+
+def test_finishing_two_step_set_up_retires_open_links(admin, app):
+    _, token, _ = _add(admin)
+    jane = _enroll_client(app, token)
+    sid = _member_id(app)
+    store.create_invite(app.state.conn, staff_id=sid, token_hash=hash_token("still-open"),
+                        expires_at=time.time() + 3600, created_by="owner@daybreak.co")
+    jane.get("/enroll-totp")
+    code = security.totp_now(store.get_staff_row(app.state.conn, sid)["totp_secret"])
+    r = jane.post("/enroll-totp", data={"code": code}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert jane.get("/customers").status_code == 200
+    open_links = app.state.conn.execute(
+        "SELECT COUNT(*) FROM staff_invites WHERE staff_id = ? AND used_at IS NULL",
+        (sid,)).fetchone()[0]
+    assert open_links == 0
+
+
+# ---- one-time secrets are never cached -------------------------------------------
+
+def _assert_no_store(response):
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "no-store"
+    assert response.headers.get("pragma") == "no-cache"
+
+
+def test_set_up_link_pages_are_not_cached(admin, app):
+    _, _, first = _add(admin)
+    _assert_no_store(first)
+    _assert_no_store(admin.post(f"/team/{_member_id(app)}/link"))
+
+
+# ---- the set-up page limit doesn't lock out a shared network ----------------------
+
+def test_stale_link_clicks_do_not_lock_out_a_new_link_on_the_same_network(admin, app):
+    _, token, _ = _add(admin)
+    office = TestClient(app)
+    for _ in range(ratelimit.MAX_FAILS + 1):
+        assert office.get("/welcome/an-old-used-link").status_code in (200, 404)
+    assert "Too many attempts" in office.get("/welcome/an-old-used-link").text
+    fresh = office.get(f"/welcome/{token}")
+    assert fresh.status_code == 200 and "Choose a password" in fresh.text
+    assert _welcome(app, token).status_code == 303
+
+
+def test_guessing_many_links_from_one_address_is_still_limited(admin, app):
+    from vendor_console import routes_auth
+    _, token, _ = _add(admin)
+    guesser = TestClient(app)
+    for i in range(routes_auth.WELCOME_IP_MAX_FAILS):
+        assert guesser.get(f"/welcome/guess-{i}").status_code == 404
+    assert "Too many attempts" in guesser.get("/welcome/guess-new").text
+    assert "Too many attempts" in guesser.get(f"/welcome/{token}").text
+    r = guesser.post(f"/welcome/{token}", data={"password": NEW_PW, "confirm": NEW_PW},
+                     follow_redirects=False)
+    assert "Too many attempts" in r.text
+    assert store.get_staff_by_email(app.state.conn, "jane@daybreak.co")["pw_hash"] == ""

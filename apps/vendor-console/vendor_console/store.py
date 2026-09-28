@@ -104,25 +104,27 @@ def create_invite(conn: sqlite3.Connection, *, staff_id: int, token_hash: str,
 def invite_staff(conn: sqlite3.Connection, token_hash: str,
                  *, now: float | None = None) -> Staff | None:
     """The person a still-usable link belongs to (unused, unexpired, account
-    on), without using it up. None for unknown, used and expired alike."""
+    on, two-step set-up not finished), without using it up. None for unknown, used and expired alike."""
     now = now if now is not None else time.time()
     r = conn.execute(
         "SELECT s.* FROM staff_invites i JOIN staff s ON s.id = i.staff_id "
         "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? "
-        "AND s.disabled = 0", (token_hash, now)).fetchone()
+        "AND s.disabled = 0 AND s.totp_enrolled = 0", (token_hash, now)).fetchone()
     return Staff.from_row(r) if r else None
 
 
 def consume_invite(conn: sqlite3.Connection, token_hash: str, pw_hash: str,
                    *, now: float | None = None) -> Staff | None:
     """Atomically use a link once and set the person's own password. Returns
-    None (changing nothing) for an unknown, used, expired or disabled link."""
+    None (changing nothing) for an unknown, used, expired or disabled link, and
+    for an account that already finished two-step set-up (a link must never
+    reset a finished account's password)."""
     now = now if now is not None else time.time()
     with db.transaction(conn) as tx:
         row = tx.execute(
             "SELECT i.id, i.staff_id FROM staff_invites i JOIN staff s ON s.id = i.staff_id "
             "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? "
-            "AND s.disabled = 0", (token_hash, now)).fetchone()
+            "AND s.disabled = 0 AND s.totp_enrolled = 0", (token_hash, now)).fetchone()
         if row is None:
             return None
         cur = tx.execute("UPDATE staff_invites SET used_at = ? WHERE id = ? AND used_at IS NULL",
@@ -145,9 +147,14 @@ def count_staff(conn: sqlite3.Connection) -> int:
 
 
 def set_totp(conn: sqlite3.Connection, staff_id: int, secret: str, enrolled: bool) -> None:
-    conn.execute("UPDATE staff SET totp_secret = ?, totp_enrolled = ? WHERE id = ?",
-                 (secret, 1 if enrolled else 0, staff_id))
-    conn.commit()
+    """Store the two-step secret. Finishing enrolment also retires every open
+    set-up link for the account, in the same transaction."""
+    with db.transaction(conn) as tx:
+        tx.execute("UPDATE staff SET totp_secret = ?, totp_enrolled = ? WHERE id = ?",
+                   (secret, 1 if enrolled else 0, staff_id))
+        if enrolled:
+            tx.execute("UPDATE staff_invites SET used_at = ? WHERE staff_id = ? "
+                       "AND used_at IS NULL", (time.time(), staff_id))
 
 
 def set_totp_last_step(conn: sqlite3.Connection, staff_id: int, step: int) -> None:
