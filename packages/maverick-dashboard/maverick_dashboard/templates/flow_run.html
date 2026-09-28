@@ -347,7 +347,7 @@
           .catch(function (error) { say(error && error.message ? error.message : plain(error, 'check these answers')); })
           .finally(function () { reviewPending = false; });
       }
-      if (canDecide && !teaching) btn('Approve exact operation', true, function () {
+      if (canDecide && !teaching) btn('Approve', true, function () {
         reviewThenResume('approved');
       });
       // any declared choice verdicts become their own buttons (routed by a switch)
@@ -357,7 +357,7 @@
           reviewThenResume(ch);
         });
       });
-      if (canDecide) btn('Reject / request revision', false, function () {
+      if (canDecide) btn('Reject', false, function () {
         reviewThenResume('rejected');
       });
     }
