@@ -66,14 +66,29 @@ def test_load_graph_rejects_unknown_agents():
         n.load_graph({"agents": {"a": []}, "flows": [["a", "ghost"]]})
 
 
-def test_settings_restores_environment(monkeypatch):
+_DIALS = ("MAVERICK_WORKFORCE_LEVELS", "MAVERICK_WORKFORCE_DATA_GROUNDING")
+
+
+def test_what_if_dials_never_touch_the_process_environment(monkeypatch):
+    """A what-if check passes its dials to the capability builder: the
+    environment every running agent reads is never written."""
+    import os
+
+    from maverick.domain import available_domains
     monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "0")
     monkeypatch.delenv("MAVERICK_WORKFORCE_DATA_GROUNDING", raising=False)
-    import os
-    with n.settings(levels=True, grounding=True):
-        assert os.environ["MAVERICK_WORKFORCE_LEVELS"] == "1"
+    writes: list[str] = []
+    real_putenv, real_unsetenv = os.putenv, os.unsetenv
+    monkeypatch.setattr(os, "putenv", lambda k, v: (writes.append(k), real_putenv(k, v)))
+    monkeypatch.setattr(os, "unsetenv", lambda k: (writes.append(k), real_unsetenv(k)))
+    profile = available_domains()["aero_airworthiness"]
+    assert "calendar" in n.runtime_tools(profile, levels=True, grounding=True)
+    n.roster_graph({"aero_airworthiness": profile}, levels=True, grounding=False)
+    assert not [k for k in writes if k in _DIALS]
     assert os.environ["MAVERICK_WORKFORCE_LEVELS"] == "0"
     assert "MAVERICK_WORKFORCE_DATA_GROUNDING" not in os.environ
+    # The deployment's own dial is untouched: live agents still see levels off.
+    assert "calendar" not in n.runtime_tools(profile)
 
 
 def test_runtime_capability_is_what_gets_audited():
@@ -82,33 +97,35 @@ def test_runtime_capability_is_what_gets_audited():
     from maverick.domain import available_domains
     profile = available_domains()["aero_airworthiness"]
     assert "calendar" not in profile.allow_tools
-    with n.settings(levels=False, grounding=False):
-        assert "calendar" not in n.runtime_tools(profile)
-    with n.settings(levels=True, grounding=False):
-        assert "calendar" in n.runtime_tools(profile)
+    assert "calendar" not in n.runtime_tools(profile, levels=False, grounding=False)
+    assert "calendar" in n.runtime_tools(profile, levels=True, grounding=False)
 
 
 def test_swarm_hub_connects_every_member():
     from maverick.domain import available_domains
     domains = {k: v for k, v in available_domains().items() if k.startswith("aero_")}
-    with n.settings(levels=False, grounding=False):
-        g = n.roster_graph(domains, swarm=True)
+    g = n.roster_graph(domains, swarm=True, levels=False, grounding=False)
     assert n.blast_radius(g)["orchestrator"] == len(domains)
 
 
-def test_pack_audit_reports_runtime_expansion():
+def test_pack_audit_reports_runtime_expansion(monkeypatch):
     from maverick.domain import available_domains
     from maverick.domain_audit import audit_profile
     profile = available_domains()["aero_airworthiness"]
-    with n.settings(levels=False, grounding=False):
-        assert audit_profile(profile).runtime_expansion == []
-    with n.settings(levels=True, grounding=False):
-        assert audit_profile(profile).runtime_expansion == ["calendar", "email", "notify"]
+    # The pack audit reads the deployment's own dials.
+    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", "0")
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "0")
+    assert audit_profile(profile).runtime_expansion == []
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    assert audit_profile(profile).runtime_expansion == ["calendar", "email", "notify"]
 
 
-def test_settings_none_keeps_the_deployment_dial(monkeypatch):
+def test_an_unset_dial_keeps_the_deployment_setting(monkeypatch):
+    from maverick.domain import available_domains
+    profile = available_domains()["aero_airworthiness"]
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    # levels not given: the deployment's "on" applies; given, it wins for this call only.
+    assert "calendar" in n.runtime_tools(profile, grounding=False)
+    assert "calendar" not in n.runtime_tools(profile, levels=False, grounding=False)
     import os
-    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", "1")
-    with n.settings(levels=False):
-        assert os.environ["MAVERICK_WORKFORCE_DATA_GROUNDING"] == "1"
-    assert os.environ["MAVERICK_WORKFORCE_DATA_GROUNDING"] == "1"
+    assert os.environ["MAVERICK_WORKFORCE_LEVELS"] == "1"
