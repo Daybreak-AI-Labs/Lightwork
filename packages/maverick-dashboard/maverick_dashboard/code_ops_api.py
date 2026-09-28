@@ -7,10 +7,11 @@
   markers ``maverick watch`` finds): a supervised background job per
   workspace and project. It re-reads the project only when its latest
   version changes, keeps at most 200 notes, stops by itself after eight
-  hours or three failed reads, and stops when Lightwork shuts down. Starting a
-  task from a note goes through the normal task start (the same permission,
-  spending limits and risk checks as any other task) -- this module never
-  starts one itself.
+  hours or three failed reads, and stops when Lightwork shuts down. Starting
+  work from a note runs it exactly like "Build a change": on a private copy of
+  the code, under the project's own protection (a project set to "code never
+  leaves Lightwork" keeps that policy for the work), with any change waiting
+  for approval -- never as an ordinary task.
 
 Every route needs the workspace ``admin`` permission, like the other Code
 page actions.
@@ -29,7 +30,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from starlette.background import BackgroundTask
@@ -249,6 +250,38 @@ async def watch_stop(name: str, request: Request) -> dict:
     watcher.stop_event.set()
     watcher._end("stopped", "Stopped.")
     return watcher.view()
+
+
+@router.post("/watch/{name}/notes/{note_id}/start", status_code=202)
+async def watch_note_start(name: str, note_id: str, body: ConfirmIn, request: Request,
+                           bg: BackgroundTasks) -> dict:
+    """Start work from one note, on a private copy under the project's protection.
+
+    The note's words come from the server's own reading of the project (the
+    page names the note only by its id), and the work runs through the same
+    governed path as "Build a change" (``code_actions_api._run_feature``):
+    labelled with the project and enforced at its protection, so a project set
+    to "code never leaves Lightwork" keeps that policy for this work."""
+    same_origin(request)
+    require_permission(request, "admin")
+    repo = _repo(name)
+    if not body.confirm:
+        raise HTTPException(422, "Confirm that you want Lightwork to start work on this note.")
+    with _lock:
+        watcher = _watchers.get((_workspace(), name))
+        note = next((dict(n) for n in (watcher.notes if watcher else []) if n["id"] == note_id),
+                    None)
+    if note is None:
+        raise HTTPException(404, "That note was not found. Lightwork may have read the project "
+                                 "again since the page was loaded.")
+    from .code_actions_api import _provider_missing, _run_feature
+    if await run_in_threadpool(_provider_missing):
+        raise HTTPException(503, "Set up an AI provider in Settings before asking Lightwork to "
+                                 "work on a note.")
+    record(request, "code_watch_note_start", installation=False, repo=name, note=note_id,
+           protect=repo.protect)
+    bg.add_task(_run_feature, name, note["title"], note["task"], None)
+    return {"started": True, "repo": name, "protect": repo.protect}
 
 
 def stop_watchers(*, timeout: float, wait: bool = True) -> None:

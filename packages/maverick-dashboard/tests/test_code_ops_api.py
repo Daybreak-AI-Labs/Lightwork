@@ -161,6 +161,38 @@ def test_watch_finds_notes_and_stops_on_request(client, monkeypatch, project):
     assert client.post("/api/v1/code/watch/other/stop", json={}).status_code == 404
 
 
+def test_work_from_a_note_runs_under_the_projects_protection(client, monkeypatch, project):
+    """A note from a project set to "code never leaves Lightwork" starts work
+    through the governed code-change path, labelled with the project and at
+    its protection mode -- never as an ordinary task."""
+    from maverick import ifc
+    from maverick.codebase import features
+    from maverick_dashboard import code_actions_api, code_ops_api
+    monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.2)
+    monkeypatch.setattr(code_actions_api, "_provider_missing", lambda: False)
+    seen_policy = []
+
+    def runner(goal_id, work):
+        seen_policy.append(ifc._RUN_LABELS.get())
+        (work / "app.py").write_text("def f(xs):\n    return xs or []\n")
+
+    monkeypatch.setattr(features, "default_runner", lambda max_dollars=None: runner)
+    monkeypatch.setattr(features, "default_reviewer", lambda: None)
+    client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+    note = _wait(client)["notes"][0]
+    audit = _audit(monkeypatch)
+    url = f"/api/v1/code/watch/website/notes/{note['id']}/start"
+    r = client.post(url, json={"confirm": True})
+    assert r.status_code == 202, r.text
+    assert r.json()["protect"] == "block"
+    assert seen_policy == [(frozenset({"code:website"}), "block")]
+    proposals = features.list_proposals("website")
+    assert len(proposals) == 1 and proposals[0]["status"] == "pending"
+    assert audit[-1] == "code_watch_note_start"
+    assert client.post("/api/v1/code/watch/website/notes/0000/start",
+                       json={"confirm": True}).status_code == 404
+
+
 def test_watch_is_bounded_and_stops_at_shutdown(client, monkeypatch, project):
     from maverick_dashboard import code_ops_api
     monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.2)

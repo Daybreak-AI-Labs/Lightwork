@@ -127,6 +127,22 @@ def test_configured_sources_reject_unbounded_field_maps(field_map, message):
         })
 
 
+def test_field_maps_written_as_entries_by_the_dashboard():
+    feed = {"key": "state-json", "name": "State JSON register", "jurisdiction": "US-X",
+            "url": "https://example.gov/register.json", "format": "json"}
+    sources = finance_scheduler.configured_sources({
+        "federal_register_enable": False,
+        "state_feeds": [{**feed, "field_map": ["items=data.rows", " title = headline "]}],
+    })
+    assert dict(sources[0].field_map) == {"items": "data.rows", "title": "headline"}
+    for bad in (["title"], ["title=a", "title=b"], ["title=a", 3]):
+        with pytest.raises(ValueError, match="must be an object"):
+            finance_scheduler.configured_sources({
+                "federal_register_enable": False,
+                "state_feeds": [{**feed, "field_map": bad}],
+            })
+
+
 def test_tenant_cycle_fetches_enabled_scopes_and_runs_grc(monkeypatch):
     from maverick import config
     from maverick.finance import control_testing, regulatory_change

@@ -358,6 +358,39 @@ def test_team_budgets_are_bound_to_bearers_and_block_before_egress(
     assert gw.list_callers()[0]["team"] == "engineering"
 
 
+def test_team_passwords_set_on_the_dashboard_identify_their_team(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPS_GATEWAY_TOKEN", "ops-env-secret")
+    (tmp_path / "config.toml").write_text(
+        "[llm_gateway]\nenable = true\n"
+        'upstream_url = "https://api.openai.com"\n'
+        'team_tokens = { ops = "OPS_GATEWAY_TOKEN" }\n'
+        "[llm_gateway.team_passwords]\n"
+        'sales = "sales-dashboard-secret-000000000"\n'  # pragma: allowlist secret
+        'ops = "ops-dashboard-secret-0000000000"\n'  # pragma: allowlist secret
+        "[llm_gateway.team_budgets.sales]\nmax_requests = 5\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    settings = gw.get_llm_gateway_config()
+    assert settings["team_password_teams"] == ("ops", "sales")
+    assert "sales-dashboard-secret-000000000" not in repr(settings)
+    assert gw._team_for_token("sales-dashboard-secret-000000000", settings) == "sales"
+    # The environment wins for a team named in both.
+    assert gw._team_for_token("ops-env-secret", settings) == "ops"
+    assert gw._team_for_token("ops-dashboard-secret-0000000000", settings) is None
+    monkeypatch.delenv("OPS_GATEWAY_TOKEN")
+    assert gw._team_for_token("ops-dashboard-secret-0000000000", settings) == "ops"
+    assert gw._team_budget_limits(settings, "sales")["max_requests"] == 5
+
+
+def test_team_passwords_are_validated(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[llm_gateway.team_passwords]\ndefault = \"x\"\n", encoding="utf-8")
+    config.reset_config_cache()
+    with pytest.raises(gw.LLMGatewayConfigError):
+        gw.get_llm_gateway_config()
+
+
 def test_completion_budget_injects_a_reviewed_default_cap(tmp_path):
     (tmp_path / "config.toml").write_text(
         "[llm_gateway]\nenable = true\n"

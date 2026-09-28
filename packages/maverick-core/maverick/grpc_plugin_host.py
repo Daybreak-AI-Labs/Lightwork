@@ -364,7 +364,9 @@ def load_grpc_plugin(
 
 
 def load_configured_grpc_plugins() -> list[Tool]:
-    """Tools from ``[plugins] grpc = [{ target = "...", command = ["..."] }]``.
+    """Tools from ``[plugins] grpc = [{ target = "...", command = ["..."] }]``
+    (or ``program = "/abs/server"`` with ``args = [...]``, as the dashboard
+    writes it).
 
     Listing an entry there is the opt-in; ``command`` is optional (the host
     then spawns the server too). Forgiving like the entry-point loaders in
@@ -388,6 +390,11 @@ def load_configured_grpc_plugins() -> list[Tool]:
     for entry in configured:
         target = entry.get("target") if isinstance(entry, dict) else None
         command = entry.get("command") if isinstance(entry, dict) else None
+        if isinstance(entry, dict) and command is None and entry.get("program"):
+            # The dashboard's form: a program on the server plus its words.
+            program, args = entry.get("program"), entry.get("args", [])
+            command = [program, *args] if isinstance(program, str) \
+                and isinstance(args, list) else [None]
         if not (isinstance(target, str) and target.strip()):
             log.warning("[plugins] grpc entry %r has no target; skipping", entry)
             continue

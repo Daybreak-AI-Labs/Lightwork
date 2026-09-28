@@ -32,7 +32,15 @@
     var control = row.dataset.control;
     var input = row.querySelector('[data-input]');
     if (control === 'toggle') return input ? input.checked : null;
-    if (control === 'select' || control === 'text' || control === 'path') return input ? input.value : null;
+    if (control === 'text' && row.querySelector('[data-segment-at]')) return segmentAddress(row);
+    if (control === 'select' || control === 'text' || control === 'path' || control === 'fingerprint') {
+      return input ? input.value : null;
+    }
+    if (control === 'picks') {
+      return Array.prototype.slice.call(row.querySelectorAll('[data-picks] [data-pick-item]'))
+        .map(function (li) { return li.getAttribute('data-value'); });
+    }
+    if (control === 'document') return row.pendingDocument || null;
     if (control === 'number') {
       if (!input) return null;
       var raw = input.value.trim();
@@ -79,6 +87,7 @@
   }
   function snapshot(row) { return JSON.stringify(read(row)); }
   function changed(row) {
+    if (row.dataset.control === 'document') return !!row.pendingDocument;
     if (row.dataset.control === 'secret') {
       var input = row.querySelector('[data-input]');
       return !!(input && !input.hidden && input.value.trim());
@@ -93,7 +102,26 @@
     var control = row.dataset.control;
     var input = row.querySelector('[data-input]');
     if (control === 'toggle' && input) input.checked = data.value === true;
-    else if ((control === 'select' || control === 'text' || control === 'path') && input) input.value = data.value == null ? '' : String(data.value);
+    else if ((control === 'select' || control === 'text' || control === 'path' || control === 'fingerprint') && input) {
+      input.value = data.value == null ? '' : String(data.value);
+      var at = row.querySelector('[data-segment-at]');
+      if (at) { at.setAttribute('data-at', String(data.segment_at == null ? -1 : data.segment_at)); segmentOptions(row); }
+      var printed = row.querySelector('[data-fingerprint-shown]');
+      if (printed) printed.textContent = data.value_text;
+      var preview = row.querySelector('[data-preview]');
+      if (preview) preview.textContent = '';
+    }
+    else if (control === 'picks') {
+      var chips = row.querySelector('[data-picks] [data-pick-list]');
+      if (chips) {
+        chips.textContent = '';
+        (data.picks || []).forEach(function (p) { addChip(row.querySelector('[data-picks]'), p.value, p.label); });
+      }
+      syncPicks(row);
+    } else if (control === 'document') {
+      row.pendingDocument = null;
+      showDocument(row, data.document);
+    }
     else if (control === 'number' && input) input.value = data.value == null ? '' : String(data.value);
     else if (control === 'multiselect') {
       row.querySelectorAll('[data-choice]').forEach(function (box) {
@@ -169,9 +197,11 @@
   function warningText(list) {
     var lines = list.map(function (item) { return item.label + ': ' + item.warning; });
     var access = list.some(function (item) { return item.kind === 'access'; });
-    var lowers = list.some(function (item) { return item.kind !== 'access'; });
+    var learning = list.some(function (item) { return item.kind === 'learning'; });
+    var lowers = list.some(function (item) { return item.kind !== 'access' && item.kind !== 'learning'; });
     var lead = lowers ? 'This lowers a protection. ' : '';
     if (access) lead += 'This changes how people get into Lightwork. ';
+    if (learning) lead += 'This turns on learning systems. ';
     return lead + lines.join(' ') + ' Do you want to go ahead?';
   }
 
@@ -272,9 +302,14 @@
     if (!target) return;
     var row = target.closest('.settings-all-row');
     if (target.hasAttribute('data-save') && row) {
-      var single = row.dataset.control === 'secret' && !changed(row)
+      var needsNew = row.dataset.control === 'secret' || row.dataset.control === 'document';
+      var single = needsNew && !changed(row)
         ? [] : [{id: row.dataset.settingId, value: read(row)}];
-      if (!single.length) { say(row, 'Choose Replace and enter a value first.'); return; }
+      if (!single.length) {
+        say(row, row.dataset.control === 'document' ? 'Choose the file to import first.'
+          : 'Choose Replace and enter a value first.');
+        return;
+      }
       await commit(single, [row], 'save the setting');
     } else if (target.hasAttribute('data-test') && row) {
       await runCheck(row, target);
@@ -324,13 +359,17 @@
       if (addControl) addControl.focus();
       say(row, 'Removed from the list. Choose Save to keep this change.');
     } else if (target.hasAttribute('data-pick-add') && row) {
-      addPick(row, target.closest('td'));
+      addPick(row, target.closest('td, [data-picks]'));
+      syncPicks(row);
     } else if (target.hasAttribute('data-pick-remove') && row) {
-      var pickCell = target.closest('td');
+      var pickCell = target.closest('td, [data-picks]');
       var pickItem = target.closest('li');
       if (pickItem) pickItem.remove();
+      syncPicks(row);
       var pickSelect = pickCell && pickCell.querySelector('[data-pick-select]');
       if (pickSelect) pickSelect.focus();
+    } else if (target.hasAttribute('data-fingerprint-server') && row) {
+      await fingerprintFrom(row, null, target);
     } else if (target.dataset.resetGroup) {
       var group = target.closest('.settings-all-group');
       var name = group.querySelector('h2') ? group.querySelector('h2').textContent : 'this group';
@@ -581,7 +620,13 @@
     var search = event.target.closest('[data-table-search]');
     if (search) filterChoices(search.closest('.settings-all-row'));
     var pickSearch = event.target.closest('[data-pick-search]');
-    if (pickSearch) filterPick(pickSearch.closest('.settings-all-row'), pickSearch.closest('td'));
+    if (pickSearch) filterPick(pickSearch.closest('.settings-all-row'), pickSearch.closest('td, [data-picks]'));
+    var keySearch = event.target.closest('[data-grid-keysearch]');
+    if (keySearch) filterGridKeys(keySearch.closest('.settings-all-row'));
+    var address = event.target.closest('.settings-all-row[data-control="text"] [data-input]');
+    if (address && address.closest('.settings-all-row').querySelector('[data-segment-at]')) {
+      segmentOptions(address.closest('.settings-all-row'));
+    }
   });
   root.addEventListener('focusin', function (event) {
     var pick = event.target.closest('[data-table-pick], [data-table-search]');
@@ -589,10 +634,16 @@
       filterChoices(pick.closest('.settings-all-row'));
     }
     var cellPick = event.target.closest('[data-pick-search], [data-pick-select]');
-    var cell = cellPick && cellPick.closest('td');
+    var cell = cellPick && cellPick.closest('td, [data-picks]');
     if (cell && !cell.dataset.loaded) {
       cell.dataset.loaded = '1';
       filterPick(cellPick.closest('.settings-all-row'), cell);
+    }
+    var keyPick = event.target.closest('[data-grid-keysearch], [data-grid-newkey]');
+    var keyRow = keyPick && keyPick.closest('.settings-all-row');
+    if (keyRow && keyRow.querySelector('[data-grid-keysearch]') && !keyRow.dataset.keysLoaded) {
+      keyRow.dataset.keysLoaded = '1';
+      filterGridKeys(keyRow);
     }
   });
 
@@ -608,6 +659,12 @@
     return box.gridState;
   }
   function columnFor(row, td) {
+    if (td && td.hasAttribute('data-picks')) {
+      var inline = [];
+      try { inline = JSON.parse(td.getAttribute('data-choices') || '[]'); } catch (ignore) { inline = []; }
+      return {kind: 'picks', label: td.dataset.label || 'Choice', choices: inline,
+              choices_url: td.dataset.choicesUrl || ''};
+    }
     var key = td && td.getAttribute('data-cell');
     return (gridState(row).columns || []).filter(function (c) { return c.key === key; })[0] || null;
   }
@@ -724,6 +781,17 @@
         use.setAttribute('aria-label', 'Use ' + column.label.toLowerCase() + ' ' + where);
         td.appendChild(use);
       }
+    } else if (kind === 'path' || kind === 'program') {
+      // A file on the server: the server checks it when the row is saved.
+      input = document.createElement('input');
+      input.className = 'input';
+      input.type = 'text';
+      input.maxLength = 1024;
+      input.spellcheck = false;
+      input.autocomplete = 'off';
+      input.placeholder = kind === 'program' ? 'Full location of the program on the server'
+        : 'Full location of the file on the server';
+      input.value = value == null ? '' : String(value);
     } else if (kind === 'secret') {
       // A saved password is never sent to the page: leave empty to keep it.
       input = document.createElement('input');
@@ -903,6 +971,186 @@
     var owner = box.closest('.settings-all-row');
     if (owner) buildGrid(owner, gridState(owner));
   });
+
+  // ---- rows named from a long list (people who write from a chat app) ------
+  async function filterGridKeys(row) {
+    var state = gridState(row);
+    var search = row.querySelector('[data-grid-keysearch]');
+    var pick = row.querySelector('[data-grid-newkey]');
+    if (!state || !pick || !state.key_choices_url) return;
+    var words = (search ? search.value : '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    var choices = await columnChoices(row, {choices_url: state.key_choices_url, choices: []});
+    var matches = choices.filter(function (c) {
+      var text = (c.label + ' ' + c.value).toLowerCase();
+      return words.every(function (w) { return text.indexOf(w) !== -1; });
+    });
+    pick.textContent = '';
+    addOption(pick, '', matches.length
+      ? (matches.length > 50 ? 'Showing 50 of ' + matches.length + ': search to narrow' : 'Choose one')
+      : 'Nothing matches that search', true);
+    matches.slice(0, 50).forEach(function (c) { addOption(pick, c.value, c.label, false); });
+  }
+
+  // ---- several choices from a long list -----------------------------------
+  function syncPicks(row) {
+    var empty = row.querySelector('[data-picks-empty]');
+    if (empty) empty.hidden = !!row.querySelector('[data-picks] [data-pick-item]');
+  }
+
+  // ---- an address with one part for each workspace -------------------------
+  function addressParts(text) {
+    var match = /^https:\/\/([^\/?#\s]+)(\/[^?#\s]*)?$/.exec((text || '').trim());
+    if (!match) return null;
+    return {host: match[1], parts: (match[2] || '').split('/').filter(Boolean)};
+  }
+  function segmentOptions(row) {
+    var select = row.querySelector('[data-segment-at]');
+    var input = row.querySelector('[data-input]');
+    if (!select || !input) return;
+    var address = addressParts(input.value);
+    var parts = address ? address.parts : [];
+    var wanted = select.value !== '' ? Number(select.value) : Number(select.getAttribute('data-at'));
+    if (!(wanted >= 0 && wanted <= parts.length)) wanted = parts.length;
+    select.textContent = '';
+    for (var i = 0; i <= parts.length; i += 1) {
+      var label = i === parts.length ? 'At the end of the address'
+        : 'Before “' + parts[i] + '”';
+      addOption(select, String(i), label, i === wanted);
+    }
+  }
+  function segmentAddress(row) {
+    var input = row.querySelector('[data-input]');
+    var select = row.querySelector('[data-segment-at]');
+    var text = input ? input.value.trim() : '';
+    if (!text) return '';
+    var address = addressParts(text);
+    if (!address) return text;  // the server explains what is wrong with it
+    var at = select && select.value !== '' ? Number(select.value) : address.parts.length;
+    var parts = address.parts.slice();
+    parts.splice(Math.min(Math.max(at, 0), parts.length), 0, '{tenant_sha256}');
+    return 'https://' + address.host + '/' + parts.join('/');
+  }
+  root.querySelectorAll('[data-segment-at]').forEach(function (select) {
+    segmentOptions(select.closest('.settings-all-row'));
+    select.addEventListener('change', function () {
+      select.setAttribute('data-at', select.value);
+    });
+  });
+
+  // ---- fingerprints from an uploaded file ----------------------------------
+  async function fingerprintFrom(row, file, button) {
+    var url = API + '/fingerprint?setting_id=' + encodeURIComponent(row.dataset.settingId) +
+      (file ? '' : '&server=true');
+    say(row, file ? 'Working out the fingerprint…' : 'Reading the files on this server…');
+    if (button) button.disabled = true;
+    try {
+      var response = await window.fetch(url, {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/octet-stream', Accept: 'application/json'},
+        body: file || new Blob([])
+      });
+      var data = null;
+      try { data = await response.json(); } catch (ignore) { data = null; }
+      if (!response.ok || !data || !data.fingerprint) {
+        say(row, data && typeof data.message === 'string' ? data.message : errorText(response, 'work out the fingerprint'));
+        return;
+      }
+      row.querySelector('[data-input]').value = data.fingerprint;
+      var printed = row.querySelector('[data-fingerprint-shown]');
+      if (printed) printed.textContent = data.shown;
+      say(row, 'Fingerprint worked out. Choose Save to trust it.');
+    } catch (failure) {
+      say(row, errorText(failure, 'work out the fingerprint'));
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  // ---- documents imported from a file --------------------------------------
+  function showDocument(row, doc) {
+    var text = row.querySelector('[data-document-text]');
+    var items = row.querySelector('[data-document-items]');
+    if (text) text.textContent = doc ? doc.text : 'Nothing imported yet.';
+    if (!items) return;
+    items.textContent = '';
+    ((doc && doc.items) || []).forEach(function (item) {
+      var li = document.createElement('li');
+      li.appendChild(document.createTextNode(item.label + ', fingerprint '));
+      var strong = document.createElement('strong');
+      strong.textContent = item.fingerprint;
+      li.appendChild(strong);
+      items.appendChild(li);
+    });
+  }
+  root.addEventListener('change', async function (event) {
+    var print = event.target.closest('[data-fingerprint-file]');
+    if (print && print.files && print.files.length) {
+      await fingerprintFrom(print.closest('.settings-all-row'), print.files[0], null);
+      print.value = '';
+      return;
+    }
+    var doc = event.target.closest('[data-document-file]');
+    if (doc && doc.files && doc.files.length) {
+      var owner = doc.closest('.settings-all-row');
+      var chosen = doc.files[0];
+      if (chosen.size > 65536) {
+        say(owner, 'That file is too large to be this kind of document.');
+      } else {
+        try {
+          owner.pendingDocument = await chosen.text();
+          say(owner, 'Ready to import “' + chosen.name + '”. Choose Save to check and use it.');
+        } catch (failure) {
+          say(owner, 'That file could not be read. Try again.');
+        }
+      }
+      doc.value = '';
+      return;
+    }
+    var level = event.target.closest('select[data-preview-url]');
+    if (level) await showPreview(level.closest('.settings-all-row'), level);
+  });
+
+  // ---- what saving a choice would also change -------------------------------
+  async function showPreview(row, select) {
+    var box = row.querySelector('[data-preview]');
+    if (!box) return;
+    box.textContent = '';
+    if (!select.value) return;
+    box.textContent = 'Working out what this changes…';
+    try {
+      var response = await window.fetch(select.getAttribute('data-preview-url') + '?value=' +
+        encodeURIComponent(select.value), {cache: 'no-store', credentials: 'same-origin',
+                                          headers: {Accept: 'application/json'}});
+      var data = null;
+      try { data = await response.json(); } catch (ignore) { data = null; }
+      box.textContent = '';
+      if (!response.ok || !data) {
+        box.textContent = data && typeof data.message === 'string' ? data.message : errorText(response, 'work out what this changes');
+        return;
+      }
+      var lead = document.createElement('p');
+      lead.textContent = (data.items || []).length
+        ? 'Saving this also changes:' : 'Saving this changes nothing else: every setting it covers already matches.';
+      box.appendChild(lead);
+      if ((data.items || []).length) {
+        var list = document.createElement('ul');
+        data.items.forEach(function (item) {
+          var li = document.createElement('li');
+          li.textContent = item.label + ': ' + item.now + ' → ' + item.new + (item.lowers ? ' (lowers a protection)' : '');
+          list.appendChild(li);
+        });
+        box.appendChild(list);
+      }
+      if ((data.kept || []).length) {
+        var kept = document.createElement('p');
+        kept.className = 'muted';
+        kept.textContent = 'Left as they are (set by your server): ' + data.kept.join(', ') + '.';
+        box.appendChild(kept);
+      }
+    } catch (failure) {
+      box.textContent = errorText(failure, 'work out what this changes');
+    }
+  }
 
   // ---- module switches -----------------------------------------------------
   root.addEventListener('change', async function (event) {

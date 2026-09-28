@@ -15,15 +15,12 @@ Sign-in, administrator and key rows are also reviewed by
 the person saving (or everyone) out, or leave stored records unreadable, is
 refused until its check passes, and confirmed before anyone is signed out.
 
-Not given a row (see the report in the change that added this module):
-``[client] id`` (it also chooses where the encryption key lives, so changing it
-here would leave every sealed setting and record unreadable),
-``[approval_delegation]`` (a legacy name: the delegation rules it stands for
-are ``[approval] delegation``, which has its own row), the ``[deployment]``
-GPU counts of a training job file (no product path starts such a run yet),
-``[governance] profile`` (applying a level means writing the settings the
-installer derives from it) and the unified-custody security monitoring
-address (it needs a workspace placeholder the page cannot build).
+Not given a row: ``[client] id`` and the ``[deployment]`` GPU counts (the
+reasons are in settings_catalog_structured) and ``[approval_delegation]`` (a
+legacy name: the delegation rules it stands for are ``[approval] delegation``,
+which has its own row). The governance level (applied with the settings it
+stands for) and the unified-custody security monitoring address (with a part
+for each workspace) are in settings_catalog_structured.
 """
 from __future__ import annotations
 

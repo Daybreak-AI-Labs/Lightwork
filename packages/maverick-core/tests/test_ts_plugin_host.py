@@ -172,6 +172,22 @@ def test_load_configured_ts_plugins(fake_cmd, monkeypatch):
     assert by_name["echo"].fn({"text": "cfg"}) == "echo:cfg"
 
 
+def test_load_configured_ts_plugins_reads_the_dashboard_form(fake_cmd, monkeypatch):
+    """The dashboard writes each plugin as a program, a file and extra words."""
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"plugins": {"ts": [
+            {"program": fake_cmd[0], "file": fake_cmd[1], "args": fake_cmd[2:]},
+            {"program": "", "file": "x"},        # malformed: no program
+            {"program": fake_cmd[0], "args": [1]},  # malformed: words must be text
+        ]}},
+    )
+    by_name = _by_name(load_configured_ts_plugins())
+    assert by_name["echo"].fn({"text": "form"}) == "echo:form"
+    assert plugin_host._entry_command({"program": "/bin/node", "file": "", "args": []}) == \
+        ["/bin/node"]
+
+
 def test_load_configured_ts_plugins_default_empty(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
     assert load_configured_ts_plugins() == []

@@ -95,8 +95,9 @@ def _layer_value(setting: catalog.Setting, layer: object) -> tuple[bool, object]
     if setting.key_kind == "entries":
         if not present or not isinstance(value, dict):
             return False, None
+        tables = setting.row_kind in {"grid", "named"}  # rows that are small tables
         rows = {k: v for k, v in value.items()
-                if k not in setting.fixed_keys and not isinstance(v, dict)}
+                if k not in setting.fixed_keys and (tables or not isinstance(v, dict))}
         return (bool(rows), rows or None)
     return present, value
 
@@ -393,13 +394,26 @@ def _model_role_choices() -> list[tuple[str, str]]:
     return [(role, identity_format.humanize(role)) for role in sorted(ROLE_MODELS)]
 
 
+def _structured_sources() -> dict[str, Any]:
+    from .settings_structured_sources import SOURCES
+
+    return SOURCES
+
+
 _ACCESS_SOURCES = {
     "themes": _theme_choices,
     "capability_roles": _capability_role_choices,
     "workspaces": _workspace_choices,
     "model_roles": _model_role_choices,
+    **{name: (lambda name=name: _structured_sources()[name]())
+       for name in ("chat_users", "tts_voices", "voice_languages", "persona_languages",
+                    "gateway_teams", "canary_metrics", "failure_classes",
+                    "regulatory_regimes", "regulatory_domains", "jurisdictions")},
 }
-_LAZY_SOURCES = frozenset({"tools", "tools_any"})
+# Lists too long (or too slow: the voices ask the speech service) to put in
+# the page: loaded when the person searches them.
+_LAZY_SOURCES = frozenset({"tools", "tools_any", "chat_users", "tts_voices"})
+_TOOL_SOURCES = frozenset({"tools", "tools_any"})
 
 
 def _resolved(
@@ -417,8 +431,8 @@ def _resolved(
         return setting
     from . import identity_format
 
-    if setting.choices_from == "tools" and not full:
-        choices = list(TOOL_FAMILIES)
+    if setting.choices_from in _LAZY_SOURCES and not full:
+        choices = list(TOOL_FAMILIES) if setting.choices_from == "tools" else []
     else:
         choices = list(_source_choices(setting.choices_from))
     known = {v for v, _ in choices}
@@ -463,7 +477,8 @@ def _resolved_columns(
         lazy = column.choices_from in _LAZY_SOURCES and not full
         if lazy:
             choices = [c for c in (("*", "Any tool"), *TOOL_FAMILIES)
-                       if column.choices_from == "tools_any" or c[0] != "*"]
+                       if column.choices_from == "tools_any" or c[0] != "*"] \
+                if column.choices_from in _TOOL_SOURCES else []
         else:
             choices = list(_source_choices(column.choices_from))
         known = {v for v, _ in choices}
@@ -533,6 +548,24 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
             {"value": key, "fingerprint": catalog.key_fingerprint(key)}
             for key in (value if isinstance(value, list) else [])
         ]
+    if setting.control == "picks":
+        labels = dict(setting.choices)
+        row["picks"] = [{"value": str(v), "label": labels.get(str(v), str(v))}
+                        for v in (value if isinstance(value, list) and state["known"] else [])]
+        lazy = setting.choices_from in _LAZY_SOURCES
+        row["choices_url"] = f"{API_PATH}/choices/{setting.id}" if lazy else ""
+        if lazy:
+            row["choices"] = []  # long list: the page loads it when needed
+    if setting.control == "document":
+        from . import settings_documents
+
+        row["document"] = settings_documents.summary(setting, value if state["known"] else None)
+    if setting.control == "fingerprint":
+        row["fingerprint_from_server"] = bool(setting.fingerprint_of)
+    if setting.workspace_segment:
+        row["segment_at"] = catalog.workspace_address_parts(value)[1] if state["known"] else -1
+    if setting.preview:
+        row["preview_url"] = f"{API_PATH}/preview/{setting.id}"
     if setting.control == "table":
         if setting.choices_from == "tools":
             row["choices"] = []  # long list: the page loads it when needed
@@ -569,6 +602,9 @@ def _grid_state(setting: catalog.Setting, value: object) -> dict[str, Any]:
         "row_label": setting.row_label,
         "item_label": setting.item_label,
         "rows": _grid_rows(setting, value),
+        # Rows named from a long list: the page searches it when needed.
+        "key_choices_url": (f"{API_PATH}/choices/{setting.id}"
+                            if setting.choices_from in _LAZY_SOURCES else ""),
     }
 
 
@@ -633,8 +669,10 @@ def _form_value(setting: catalog.Setting, value: object) -> object:
     if setting.control == "number" and setting.scale != 1.0 and catalog._is_number(value):
         shown = round(float(value) / setting.scale, 4)
         return int(shown) if shown == int(shown) else shown
-    if setting.control in {"keys", "table", "rules"}:
-        return None  # carried by ``keys`` / ``rows`` / ``grid``
+    if setting.control in {"keys", "table", "rules", "picks", "document"}:
+        return None  # carried by ``keys`` / ``rows`` / ``grid`` / ``picks`` / ``document``
+    if setting.workspace_segment:
+        return catalog.workspace_address_parts(value)[0] if value else ""
     return value
 
 
@@ -800,10 +838,20 @@ def _audit_value(setting: catalog.Setting, value: object) -> object:
         return "set" if value else "not set"
     if setting.control == "keys" and isinstance(value, list):
         return [catalog.key_fingerprint(k) for k in value]
+    if setting.control == "document":
+        from . import settings_documents
+
+        return settings_documents.summary(setting, value)
     secret = _secret_columns(setting)
     if secret and isinstance(value, list):
         return [{k: ("set" if v else "not set") if k in secret else v for k, v in row.items()}
                 if isinstance(row, dict) else row for row in value]
+    if secret and isinstance(value, dict):
+        # Named rows with a password: only whether each row has one.
+        return {name: ("set" if spec else "not set") if setting.scalar else
+                {k: ("set" if v else "not set") if k in secret else v
+                 for k, v in (spec.items() if isinstance(spec, dict) else ())}
+                for name, spec in value.items()}
     return value
 
 
@@ -902,6 +950,10 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         else:
             try:
                 new = catalog.coerce(_resolved(setting, old), item.value)
+                if setting.control == "document":
+                    from . import settings_documents
+
+                    settings_documents.check_replacement(setting, old, new)
             except catalog.SettingError as exc:
                 raise _Refused(400, str(exc)) from exc
             new = _keep_row_secrets(setting, old, new)
@@ -968,6 +1020,7 @@ def _plan_table(
                           else _NEW_GATEWAY_TOOL), **spec}
                 for name, spec in wanted.items()
             }
+        wanted = _keep_named_secrets(setting, before, wanted)
     writes: dict[tuple[str, ...], object] = {}
     if setting.key_kind == "entries":
         for name in here_rows:
@@ -979,8 +1032,50 @@ def _plan_table(
     else:
         overlay = {name: spec for name, spec in wanted.items() if base_rows.get(name) != spec}
         if overlay != here_rows:
-            writes[setting.path] = overlay or None
+            writes[setting.path] = _sealed_named(setting, overlay) or None
     return {**base_rows, **wanted}, writes
+
+
+def _keep_named_secrets(setting: catalog.Setting, before: dict, wanted: dict) -> dict:
+    """A password left empty in a named row keeps that row's saved one; a new
+    row must have one."""
+    keys = _secret_columns(setting)
+    if not keys:
+        return wanted
+    out = {}
+    for name, spec in wanted.items():
+        saved = before.get(name)
+        if setting.scalar:
+            if not spec and not saved:
+                raise _Refused(400, f"{setting.label}: enter the {setting.columns[0].label.lower()} "
+                                    f"for each new {setting.item_label.lower()}.")
+            out[name] = spec or saved
+            continue
+        spec = dict(spec)
+        for key in keys:
+            kept = saved.get(key) if isinstance(saved, dict) else None
+            if not spec.get(key):
+                if not kept:
+                    column = next(c for c in setting.columns if c.key == key)
+                    raise _Refused(400, f"{setting.label}: enter the {column.label.lower()} "
+                                        f"for each new {setting.item_label.lower()}.")
+                spec[key] = kept
+        out[name] = spec
+    return out
+
+
+def _sealed_named(setting: catalog.Setting, rows: dict) -> dict:
+    """Named rows as they are written: every password sealed."""
+    keys = _secret_columns(setting)
+    if not keys:
+        return rows
+    from . import settings_store
+
+    seal = settings_store._seal_global_secret
+    if setting.scalar:
+        return {name: seal(spec) for name, spec in rows.items()}
+    return {name: {k: seal(v) if k in keys and v else v for k, v in spec.items()}
+            for name, spec in rows.items()}
 
 
 def _record(changes: list[dict], actor: str, confirmed: bool,
@@ -1019,10 +1114,16 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
     auth.require_global_permission(request, "admin")
     from maverick.audit import AuditRefused
 
-    from . import settings_store
+    from . import settings_governance_level, settings_store
 
     try:
+        # Choosing a governance level also applies the settings it stands for.
+        body, learning = await run_in_threadpool(
+            settings_governance_level.expand, body, SettingChange)
         writes, changes, weakening, _layers = await run_in_threadpool(_plan, body)
+    except settings_governance_level.Unavailable as exc:
+        return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=409,
+                            headers={"Cache-Control": "no-store"})
     except _Refused as exc:
         # ``message`` is written for people (the page shows it as is).
         return JSONResponse({"detail": exc.message, "message": exc.message},
@@ -1033,7 +1134,7 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
     except settings_access_guard.Refused as exc:
         return JSONResponse({"detail": exc.message, "message": exc.message, "lockout": True},
                             status_code=409, headers={"Cache-Control": "no-store"})
-    weakening = weakening + access
+    weakening = weakening + access + settings_governance_level.confirm_items(learning)
     if weakening and not body.confirm:
         return JSONResponse(
             {"detail": "confirmation required", "confirm": weakening},
@@ -1041,6 +1142,9 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
             headers={"Cache-Control": "no-store"},
         )
     if not writes:
+        if learning:
+            await run_in_threadpool(settings_governance_level.turn_on, learning,
+                                    auth.caller_principal(request) or "local administrator")
         state = await run_in_threadpool(catalog_state)
         return JSONResponse({"changed": [], "restart": False, **state},
                             headers={"Cache-Control": "no-store"})
@@ -1085,6 +1189,15 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
             detail="The change could not be recorded, so it was undone.",
         ) from exc
     await run_in_threadpool(settings_quorum.settle, approved)
+    if learning:
+        try:
+            await run_in_threadpool(settings_governance_level.turn_on, learning, actor)
+        except (RuntimeError, OSError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The settings were saved, but the learning systems for this level "
+                       "could not be turned on. Turn them on from the Learning page.",
+            ) from exc
     state = await run_in_threadpool(catalog_state)
     return JSONResponse(
         {
@@ -1157,6 +1270,63 @@ async def catalog_test(request: Request, body: SettingCheck) -> JSONResponse:
                             headers=headers)
     outcome = await run_in_threadpool(_run_check, setting, body.value)
     return JSONResponse({"ok": outcome.ok, "message": outcome.message}, headers=headers)
+
+
+# ------------------------------------------------------------ fingerprints
+@router.post(API_PATH + "/fingerprint")
+async def catalog_fingerprint(
+    request: Request, setting_id: str, server: bool = False,
+) -> JSONResponse:
+    """Work out a fingerprint for a ``fingerprint`` row, from the uploaded file
+    (the request body, read as it arrives and never kept) or, where the row
+    allows it, from the files installed on this server. Nothing is saved: the
+    page puts the fingerprint in the row and the person saves it."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from . import settings_fingerprints
+
+    headers = {"Cache-Control": "no-store"}
+    setting = catalog.BY_ID.get(setting_id)
+    if setting is None or setting.control != "fingerprint":
+        message = "This setting has no fingerprint to work out."
+        return JSONResponse({"detail": message, "message": message}, status_code=404,
+                            headers=headers)
+    if not _check_allowed():
+        message = "Too many checks in a short time. Wait a minute and try again."
+        return JSONResponse({"detail": message, "message": message}, status_code=429,
+                            headers=headers)
+    try:
+        if server:
+            value = await run_in_threadpool(settings_fingerprints.of_server,
+                                            setting.fingerprint_of)
+        else:
+            value = await settings_fingerprints.of_upload(request.stream())
+    except settings_fingerprints.Refused as exc:
+        return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=400,
+                            headers=headers)
+    return JSONResponse({"fingerprint": value, "shown": settings_fingerprints.shown(value)},
+                        headers=headers)
+
+
+# ---------------------------------------------------------------- previews
+@router.get(API_PATH + "/preview/{setting_id}")
+async def catalog_preview(request: Request, setting_id: str, value: str = "") -> JSONResponse:
+    """What saving ``value`` would also change (nothing is saved)."""
+    auth.require_global_permission(request, "admin")
+    from . import settings_governance_level
+
+    headers = {"Cache-Control": "no-store"}
+    setting = catalog.BY_ID.get(setting_id)
+    if setting is None or setting.preview != "governance_level":
+        message = "This setting has nothing to preview."
+        return JSONResponse({"detail": message, "message": message}, status_code=404,
+                            headers=headers)
+    try:
+        shown = await run_in_threadpool(settings_governance_level.preview, value)
+    except settings_governance_level.Unavailable as exc:
+        return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=409,
+                            headers=headers)
+    return JSONResponse(shown, headers=headers)
 
 
 __all__ = ["router", "catalog_state", "PAGE_PATH", "API_PATH"]

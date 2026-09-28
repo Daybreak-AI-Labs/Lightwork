@@ -323,6 +323,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "budget_window_seconds",
         "default_max_output_tokens",
         # Sealed credentials set on the dashboard (env names above still win).
+        "team_passwords",
         "gateway_token",
         "upstream_token",
         "anthropic_upstream_token",

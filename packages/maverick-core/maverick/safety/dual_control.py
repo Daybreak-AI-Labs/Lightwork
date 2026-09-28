@@ -15,6 +15,11 @@ default (``required = 1`` -> the legacy single approver); opt-in per risk band::
     critical = 3
     default = 1
 
+    # ...or keep one number for everything and raise it for some risk levels
+    # (the dashboard's per-level table; it can only ADD approvers):
+    [security.approvals_required_by_risk]
+    critical = 3
+
 The enforcement lives in ``WorldModel.decide_approval`` (distinctness via the
 ``approval_signoffs`` PK + the self-approval bar); this module only resolves the
 configured quorum at park time.
@@ -50,11 +55,24 @@ def required_approvals(risk: str | None = None) -> int:
     Resolution: ``MAVERICK_APPROVALS_REQUIRED`` env (global) wins; else
     ``[security] approvals_required`` -- an int (applies to all) or a per-risk
     table (``high``/``critical``/... with an optional ``default``). Always >= 1;
-    1 means the legacy single-approver behaviour (no dual control)."""
+    1 means the legacy single-approver behaviour (no dual control).
+
+    ``[security] approvals_required_by_risk`` (a per-risk table) then raises
+    the number for the levels it names: it never lowers it, so a stale row can
+    only ask for more people, never fewer."""
     env = os.environ.get("MAVERICK_APPROVALS_REQUIRED")
     if env is not None and env.strip() != "":
         return _coerce_int(env, 1)
-    val = _security_cfg().get("approvals_required")
+    sec = _security_cfg()
+    base = _base_approvals(sec.get("approvals_required"), risk)
+    by_risk = sec.get("approvals_required_by_risk")
+    r = str(risk or "").strip().lower()
+    if isinstance(by_risk, dict) and r in by_risk:
+        return max(base, _coerce_int(by_risk[r], 1))
+    return base
+
+
+def _base_approvals(val: object, risk: str | None) -> int:
     if isinstance(val, dict):
         r = str(risk or "").strip().lower()
         if r in val:

@@ -43,6 +43,19 @@ def test_required_approvals_env_wins(monkeypatch):
     assert dual_control.required_approvals("high") == 2
 
 
+def test_per_risk_minimums_only_add_approvers(monkeypatch):
+    monkeypatch.delenv("MAVERICK_APPROVALS_REQUIRED", raising=False)
+    monkeypatch.setattr(dual_control, "_security_cfg", lambda: {
+        "approvals_required": 2,
+        "approvals_required_by_risk": {"critical": 4, "low": 1},
+    })
+    assert dual_control.required_approvals("critical") == 4
+    assert dual_control.required_approvals("low") == 2   # never fewer than the base
+    assert dual_control.required_approvals("high") == 2
+    monkeypatch.setenv("MAVERICK_APPROVALS_REQUIRED", "3")
+    assert dual_control.required_approvals("critical") == 3  # the environment still wins
+
+
 def test_allow_self_approval_default_false(monkeypatch):
     monkeypatch.delenv("MAVERICK_ALLOW_SELF_APPROVAL", raising=False)
     monkeypatch.setattr(dual_control, "_security_cfg", dict)

@@ -32,7 +32,8 @@ Deliberately NOT in the catalog:
   ``settings_access_guard``: a change that would lock the person saving (or
   saved records) out is refused until its check passes. Still
   deployment-only by design: ``[client] id`` (it also places the encryption
-  key), ``[deployment] type`` (installer provenance), and the settings that
+  key; see settings_catalog_structured for why and what a safe change needs),
+  ``[deployment] type`` (installer provenance), and the settings that
   name an environment variable or a server program (``*_token_env``,
   ``signal_cli_path``, ``[screening] sdn_path``) until their groups add a
   ``path`` row; the credentials themselves (AI gateway, Stripe, Pushover,
@@ -50,15 +51,23 @@ Deliberately NOT in the catalog:
   setup page), the learning switches, research execution, savings
   assumptions, workspace selection, the security suite's on/off switches.
 * Structured policies that need their module's own page to author safely:
-  privacy notice publishing targets, per-team gateway credentials, and the
-  few governance tables listed in ``settings_catalog_governance``.
+  privacy notice publishing targets and the continuous-evidence collector
+  sources (see ``settings_catalog_structured``). Tool lists, per-person tool
+  rules, per-team gateway passwords and limits, plugin programs, voices,
+  agent independence, rule feeds, the benchmark trusted-keys document, the
+  governance level and pinned fingerprints ARE here, as controls filled in
+  by choosing (settings_catalog_structured).
 
 A ``path`` control names a file or folder on the server; the server checks it
 (settings_paths). A row with ``test`` gets a "Test connection" button whose
 check (settings_tests) is bounded, SSRF-guarded and never repeats a secret.
 
 Controls beyond single values: ``keys`` (trusted publisher keys, added from an
-uploaded or pasted key file and shown only by fingerprint), ``table`` (a list
+uploaded or pasted key file and shown only by fingerprint), ``picks`` (several
+choices from a long list the page searches), ``fingerprint`` (worked out on
+the server from an uploaded file or the installed files, never typed),
+``document`` (a document imported from a file and checked by its own rules,
+settings_documents), ``table`` (a list
 of rows, e.g. usage limits per tool or reviewed tools with a risk level), and
 lists/pickers whose options come from live data (``choices_from``: people,
 tools, models, connected systems) resolved by the page at request time. A
@@ -122,14 +131,20 @@ GROUP_INTROS: dict[str, str] = {
 
 CONTROLS = frozenset({
     "toggle", "select", "number", "text", "list", "secret", "multiselect", "rate",
-    "keys", "table", "rules", "path",
+    "keys", "table", "rules", "path", "picks", "fingerprint", "document",
 })
+# ``picks``: several choices from a long list the page searches (tools, people).
+# ``fingerprint``: a 64-character file fingerprint the server works out from a
+# file the person uploads (the file itself is never kept).
+# ``document``: a document a person imports from a file; ``document`` names
+# the checker in settings_documents that reads, validates and describes it.
+_FINGERPRINT_RE = r"[0-9a-f]{64}"
 
 # ``path`` rows name a file or folder on the server; ``path_kind`` says which.
 PATH_KINDS = frozenset({"file", "folder"})
 
 COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words", "text",
-                          "secret", "color"})
+                          "secret", "color", "path", "program"})
 _COLOR = r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})"
 
 
@@ -144,7 +159,9 @@ class Column:
     for the row: sealed when saved, never shown again, and kept as it is when
     left empty (``rules`` rows are matched by their ``unique`` column), and
     ``color`` a colour chosen with a colour picker (optional ones may be left
-    out). A ``table`` with row kind ``named`` has rows the person names
+    out), ``path`` a file on the server and ``program`` a program on the
+    server Lightwork may run (both checked on the server, settings_paths).
+    A ``table`` with row kind ``named`` has rows the person names
     (``pattern`` checks the name; ``fixed_keys`` are names it may not use).
     """
 
@@ -164,6 +181,9 @@ class Column:
     max_length: int = 128
     max_items: int = 64
     item_error: str = "a listed option"
+    # ``rules`` rows: an empty value is left out of the row (for readers that
+    # refuse an empty value but accept the key being absent).
+    omit_empty: bool = False
 
 
 _NO_PARTIAL = object()
@@ -253,6 +273,21 @@ class Setting:
     # A "Test connection" button: the name of a check in settings_tests that
     # tries the entered (or saved) value and answers in one plain sentence.
     test: str = ""
+    # ``document`` controls: the checker in settings_documents.
+    document: str = ""
+    # ``text`` controls: the page takes a secure web address and Lightwork adds
+    # one path segment per workspace (the kernel's ``{tenant_sha256}``); the
+    # page picks where that part goes among the address's parts.
+    workspace_segment: bool = False
+    # ``table``/``rules`` controls: the most rows the reader accepts (0: the
+    # catalog-wide limit).
+    max_rows: int = 0
+    # ``fingerprint`` controls: besides uploading the file, the server can work
+    # the fingerprint out from what is installed here (settings_fingerprints).
+    fingerprint_of: str = ""
+    # A preview the page shows before saving (``governance_level``: the
+    # settings a governance level changes; settings_governance_level).
+    preview: str = ""
 
     @property
     def id(self) -> str:
@@ -2220,11 +2255,12 @@ from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_learning,
     settings_catalog_privacy,
     settings_catalog_runtime,
+    settings_catalog_structured,
 )
 
 _GROUP_MODULES = (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
                   settings_catalog_privacy, settings_catalog_governance,
-                  settings_catalog_integrations)
+                  settings_catalog_integrations, settings_catalog_structured)
 for _group in _GROUP_MODULES:
     SETTINGS += tuple(_group.entries(S, C, Column))
 
@@ -2372,6 +2408,22 @@ def _coerce_value(setting: Setting, value: object) -> object:  # noqa: C901 - on
         return number
     if control == "path":
         return _coerce_path(setting, value)
+    if control == "picks":
+        return _coerce_picks(setting, value)
+    if control == "fingerprint":
+        text = "" if value is None else value
+        if not isinstance(text, str):
+            raise SettingError(f"{label}: upload the file to work out its fingerprint.")
+        text = text.strip().lower()
+        if text and not re.fullmatch(_FINGERPRINT_RE, text):
+            raise SettingError(f"{label}: upload the file to work out its fingerprint.")
+        return text or None
+    if control == "document":
+        from . import settings_documents
+
+        return settings_documents.coerce(setting, value)
+    if control == "text" and setting.workspace_segment:
+        return _coerce_workspace_address(setting, value)
     if control in {"text", "secret"}:
         if not isinstance(value, str):
             raise SettingError(f"{label}: enter text.")
@@ -2421,6 +2473,83 @@ def _coerce_value(setting: Setting, value: object) -> object:  # noqa: C901 - on
     if control == "rules":
         return _coerce_rules(setting, value)
     raise SettingError(f"{label}: this setting cannot be changed here.")  # pragma: no cover
+
+
+WORKSPACE_SEGMENT = "{tenant_sha256}"
+
+
+def _coerce_workspace_address(setting: Setting, value: object) -> str | None:
+    """A secure address with one part that Lightwork fills in per workspace.
+
+    The page sends the address with the workspace part already placed (the
+    person picks where it goes); an address without one gets it at the end.
+    The result is checked exactly as the kernel checks it before use."""
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise SettingError(f"{setting.label}: enter a secure web address.")
+    text = value.strip()
+    if not text or text == "/" + WORKSPACE_SEGMENT:
+        return None
+    wrong = SettingError(f"{setting.label}: enter a secure web address that starts with "
+                         "https://, with nothing after a ? or #.")
+    if len(text) > setting.max_length or not re.fullmatch(
+            r"https://[^\s\"'<>?#]{1,1800}", text):
+        raise wrong
+    base, _, rest = text[len("https://"):].partition("/")
+    if not base or "{" in base or "}" in base:
+        raise wrong
+    parts = [part for part in rest.split("/") if part]
+    if any(("{" in part or "}" in part) and part != WORKSPACE_SEGMENT for part in parts) \
+            or parts.count(WORKSPACE_SEGMENT) > 1:
+        raise wrong
+    if WORKSPACE_SEGMENT not in parts:
+        parts.append(WORKSPACE_SEGMENT)
+    address = "https://" + base + "/" + "/".join(parts)
+    from maverick.unified_audit_custody import (
+        UnifiedAuditCustodyError,
+        _validate_siem_template,
+    )
+
+    try:
+        _validate_siem_template(address)
+    except UnifiedAuditCustodyError as exc:
+        raise wrong from exc
+    return address
+
+
+def workspace_address_parts(value: object) -> tuple[str, int]:
+    """``(address without the workspace part, parts before it)`` for the page."""
+    text = str(value or "")
+    if not text.startswith("https://") or WORKSPACE_SEGMENT not in text:
+        return text, -1
+    base, _, rest = text[len("https://"):].partition("/")
+    parts = [part for part in rest.split("/") if part]
+    at = parts.index(WORKSPACE_SEGMENT) if WORKSPACE_SEGMENT in parts else len(parts)
+    kept = [part for part in parts if part != WORKSPACE_SEGMENT]
+    return "https://" + base + ("/" + "/".join(kept) if kept else ""), at
+
+
+def workspace_address_shown(value: object) -> str:
+    """The address in plain words, with the workspace part marked."""
+    return str(value or "").replace("/" + WORKSPACE_SEGMENT, "/[workspace]")
+
+
+def _coerce_picks(setting: Setting, value: object) -> list[str] | None:
+    if value is None or value == "":
+        return None if setting.empty_unset else []
+    if not isinstance(value, list) or len(value) > setting.max_items:
+        raise SettingError(f"{setting.label}: choose at most {setting.max_items}.")
+    allowed = {v for v, _ in setting.choices}
+    picked: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or item not in allowed:
+            raise SettingError(f"{setting.label}: choose each one from the list.")
+        if item not in picked:
+            picked.append(item)
+    if not picked and setting.empty_unset:
+        return None
+    return picked
 
 
 def _coerce_path(setting: Setting, value: object) -> str | None:
@@ -2527,8 +2656,9 @@ def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one 
     label = setting.label
     if value is None or value == "":
         return {}
-    if not isinstance(value, list) or len(value) > MAX_TABLE_ROWS:
-        raise SettingError(f"{label}: use at most {MAX_TABLE_ROWS} rows.")
+    most = setting.max_rows or MAX_TABLE_ROWS
+    if not isinstance(value, list) or len(value) > most:
+        raise SettingError(f"{label}: use at most {most} rows.")
     allowed = {v for v, _ in setting.choices}
     out: dict[str, object] = {}
     for row in value:
@@ -2560,8 +2690,11 @@ def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one 
             if name in setting.fixed_keys:
                 raise SettingError(f"{label}: “{name}” is already taken. Choose another name.")
             spec = _grid_spec(setting, row)
-            # An optional column left empty is left out, never stored empty.
-            out[name] = {k: v for k, v in spec.items() if v not in ("", None)}
+            if setting.scalar:
+                out[name] = spec
+            else:
+                # An optional column left empty is left out, never stored empty.
+                out[name] = {k: v for k, v in spec.items() if v not in ("", None)}
         elif setting.row_kind == "risk":
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name) or "__" in name:
                 raise SettingError(
@@ -2625,6 +2758,22 @@ def _coerce_cell(setting: Setting, column: Column, value: object) -> object:  # 
                 raise SettingError(f"{where}: enter a whole number.")
             return int(value)
         return float(value)
+    if kind in {"path", "program"}:
+        # A file on the server (``program``: one Lightwork runs).
+        text = "" if value is None else value
+        if not isinstance(text, str):
+            raise SettingError(f"{where}: enter a location on the server.")
+        text = text.strip()
+        if not text:
+            if column.required:
+                raise SettingError(f"{where}: fill this in for each row.")
+            return ""
+        from . import settings_paths
+
+        try:
+            return settings_paths.check(text, kind="file", program=kind == "program")
+        except settings_paths.PathRefused as exc:
+            raise SettingError(f"{where}: {exc}") from exc
     if kind == "color":
         text = "" if value is None else value
         if not isinstance(text, str) or (text and not re.fullmatch(_COLOR, text.strip())):
@@ -2687,17 +2836,20 @@ def _coerce_rules(setting: Setting, value: object) -> list[dict]:
     label = setting.label
     if value is None or value == "":
         return []
-    if not isinstance(value, list) or len(value) > MAX_TABLE_ROWS:
-        raise SettingError(f"{label}: use at most {MAX_TABLE_ROWS} rows.")
+    most = setting.max_rows or MAX_TABLE_ROWS
+    if not isinstance(value, list) or len(value) > most:
+        raise SettingError(f"{label}: use at most {most} rows.")
     out: list[dict] = []
     for row in value:
         if not isinstance(row, dict):
             raise SettingError(f"{label}: each row needs its values.")
         cells = {c.key: _coerce_cell(setting, c, row.get(c.key)) for c in setting.columns}
+        cells = {c.key: cells[c.key] for c in setting.columns
+                 if not (c.omit_empty and cells[c.key] in ([], "", None))}
         if cells in out:
             raise SettingError(f"{label}: each row must be different.")
         for column in setting.columns:
-            if column.unique and any(r[column.key] == cells[column.key] for r in out):
+            if column.unique and any(r.get(column.key) == cells.get(column.key) for r in out):
                 raise SettingError(
                     f"{label}: each {column.label.lower()} can be listed only once."
                 )
@@ -2736,6 +2888,18 @@ def _acl_loosens(before: dict, after: dict) -> bool:
     return False
 
 
+def _caps_loosen(before: dict, after: object) -> bool:
+    """A row of limits where 0 means "no limit": raising or clearing one loosens."""
+    now = after if isinstance(after, dict) else {}
+    for key, was in before.items():
+        if not _is_number(was) or was <= 0:
+            continue  # there was no limit to loosen
+        new = now.get(key, 0)
+        if not _is_number(new) or new <= 0 or new > was:
+            return True
+    return False
+
+
 def _grid_loosens(setting: Setting, before: dict, after: dict) -> bool:
     mode = setting.weaker
     if mode == "acl":
@@ -2744,7 +2908,18 @@ def _grid_loosens(setting: Setting, before: dict, after: dict) -> bool:
         for name, cap in before.items():
             if name not in after:
                 return True
-            if _is_number(cap) and _is_number(after[name]) and after[name] > cap:
+            if isinstance(cap, dict):
+                if _caps_loosen(cap, after[name]):
+                    return True
+            elif _is_number(cap) and _is_number(after[name]) and after[name] > cap:
+                return True
+        return False
+    if mode == "floor":
+        # A minimum (people who must approve): removing a row or lowering it.
+        for name, floor in before.items():
+            if name not in after:
+                return True
+            if _is_number(floor) and _is_number(after[name]) and after[name] < floor:
                 return True
         return False
     if mode == "add":
@@ -2844,8 +3019,12 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
             if new is None:
                 return old is not None
             return old is not None and float(new) > float(old)
-    if setting.control in {"list", "multiselect", "keys"}:
+    if setting.control in {"list", "multiselect", "keys", "picks"}:
         return _list_loosens(setting, old, new)
+    if setting.control == "document":
+        from . import settings_documents
+
+        return settings_documents.loosens(setting, old, new)
     if setting.control == "table":
         return _table_loosens(setting, old, new)
     if setting.control == "rules":
@@ -2885,7 +3064,7 @@ def _table_loosens(setting: Setting, old: object, new: object) -> bool:
     if setting.row_kind == "grid":
         return _grid_loosens(setting, before, after)
     if setting.row_kind == "named":
-        return False if setting.weaker is None else before != after
+        return False if setting.weaker is None else _grid_loosens(setting, before, after)
     if setting.row_kind == "rate":
         for name, spec in before.items():
             if name not in after:
@@ -2939,9 +3118,7 @@ def cross_checks(effective: dict[str, object]) -> None:
                 f"{high_label[:1].lower() + high_label[1:]}."
             )
     # A group module may refuse its own combinations (``cross_checks``).
-    for group in (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
-                  settings_catalog_privacy, settings_catalog_governance,
-                  settings_catalog_integrations):
+    for group in _GROUP_MODULES:
         check = getattr(group, "cross_checks", None)
         if check is not None:
             check(effective, BY_ID, SettingError)
@@ -2957,6 +3134,25 @@ def lookup(tree: object, path: tuple[str, ...]) -> tuple[bool, object]:
     return True, node
 
 
+def _structured_display(setting: Setting, value: object) -> str | None:
+    """Plain words for the picks, fingerprint, document and address controls."""
+    if setting.control == "picks" and isinstance(value, list):
+        labels = dict(setting.choices)
+        shown = [labels.get(str(v), str(v)) for v in value[:3]]
+        more = f" and {len(value) - 3} more" if len(value) > 3 else ""
+        return ", ".join(shown) + more
+    if setting.control == "fingerprint":
+        text = str(value)
+        return " ".join(text[i:i + 4] for i in range(0, 16, 4)).upper() + " …"
+    if setting.control == "document":
+        from . import settings_documents
+
+        return settings_documents.describe(setting, value)
+    if setting.workspace_segment:
+        return workspace_address_shown(value) + " ([workspace] is each workspace's own part)"
+    return None
+
+
 def display_value(setting: Setting, value: object) -> str:
     """Plain words for a value (never a secret's content)."""
     if setting.secret:
@@ -2969,6 +3165,9 @@ def display_value(setting: Setting, value: object) -> str:
         if setting.control == "select":
             return dict(setting.choices).get("", "Not set")
         return "Not set"
+    structured = _structured_display(setting, value)
+    if structured is not None:
+        return structured
     if setting.control == "toggle":
         return "On" if value is True else "Off"
     if setting.control in {"select", "multiselect"}:
@@ -3029,6 +3228,12 @@ def _assert_consistent() -> None:
                     assert c.choices or c.choices_from, s.id
         if s.row_kind == "grid":
             assert s.choices or s.choices_from, s.id
+        if s.control == "picks":
+            assert s.choices or s.choices_from, s.id
+        assert (s.control == "document") == bool(s.document), s.id
+        assert not s.workspace_segment or s.control == "text", s.id
+        assert not s.fingerprint_of or s.control == "fingerprint", s.id
+        assert not s.preview or s.control == "select", s.id
         if s.key_kind == "entries":
             assert s.control == "table", s.id
         assert s.scale > 0, s.id

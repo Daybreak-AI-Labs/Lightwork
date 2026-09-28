@@ -20,6 +20,9 @@ Two knobs the voice surface was missing:
       fr = { backend = "openai", voice = "alloy" }
       ja = { backend = "elevenlabs", voice = "<ja-voice-id>" }
 
+The dashboard writes a voice picked from a list as ``voice = "openai:alloy"``
+(backend and voice in one value); an explicit ``backend`` still wins.
+
 Resolution order for a speak call: explicit ``voice``/``backend`` args win
 (unchanged behavior) → ``persona`` → ``language`` map → defaults. Pure
 config reading; fail-soft (an unknown persona returns None and the caller
@@ -35,6 +38,20 @@ class VoicePreset:
     backend: str | None = None
     voice: str | None = None
     language: str | None = None
+
+
+_TTS_BACKENDS = ("openai", "elevenlabs")
+
+
+def _preset(name: str, raw: dict, language: str | None) -> VoicePreset:
+    backend = str(raw.get("backend") or "") or None
+    voice = str(raw.get("voice") or "") or None
+    if voice:
+        prefix, sep, rest = voice.partition(":")
+        if sep and prefix in _TTS_BACKENDS and rest:
+            voice = rest
+            backend = backend or prefix
+    return VoicePreset(name=name, backend=backend, voice=voice, language=language)
 
 
 def _voice_cfg() -> dict:
@@ -53,12 +70,7 @@ def get_persona(name: str) -> VoicePreset | None:
     raw = personas.get(str(name).strip())
     if not isinstance(raw, dict):
         return None
-    return VoicePreset(
-        name=str(name).strip(),
-        backend=str(raw.get("backend") or "") or None,
-        voice=str(raw.get("voice") or "") or None,
-        language=str(raw.get("language") or "") or None,
-    )
+    return _preset(str(name).strip(), raw, str(raw.get("language") or "") or None)
 
 
 def list_personas() -> list[VoicePreset]:
@@ -81,12 +93,7 @@ def voice_for_language(language: str) -> VoicePreset | None:
     raw = langs.get(code) or langs.get(code.split("-")[0])
     if not isinstance(raw, dict):
         return None
-    return VoicePreset(
-        name=f"lang:{code}",
-        backend=str(raw.get("backend") or "") or None,
-        voice=str(raw.get("voice") or "") or None,
-        language=code,
-    )
+    return _preset(f"lang:{code}", raw, code)
 
 
 def resolve_speech_args(args: dict) -> dict:
