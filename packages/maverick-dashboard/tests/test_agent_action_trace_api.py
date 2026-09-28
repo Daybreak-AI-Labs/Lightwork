@@ -11,8 +11,23 @@ from maverick_dashboard import agent_action_trace_api as api
 BASE = "/api/v1/security/governance/agent-actions"
 
 
+class _Goal:
+    def __init__(self, owner: str) -> None:
+        self.owner = owner
+
+
+class _World:
+    goals = {7: _Goal("user:alice"), 8: _Goal("user:alice"), 9: _Goal("user:bob")}
+
+    def get_goal(self, goal_id):
+        return self.goals.get(goal_id)
+
+
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from maverick_dashboard import api as dashboard_api
+
+    monkeypatch.setattr(dashboard_api, "_world", _World)
     permissions: list[str] = []
     monkeypatch.setattr(api, "require_permission", lambda _r, p: permissions.append(p))
     monkeypatch.setattr(governed_actions, "_lineage_dir", lambda store_dir=None: tmp_path)
@@ -64,3 +79,21 @@ def test_a_broken_lineage_chain_is_reported(client) -> None:
     path = store / "9.ndjson"
     path.write_text(path.read_text().replace("send_email", "delete_all"))
     assert test_client.get(f"{BASE}/lineage/9").json()["chain"] == "broken"
+
+
+def test_lineage_and_impact_follow_the_task_owner_check(client, monkeypatch) -> None:
+    from maverick_dashboard import auth
+
+    test_client, _, _ = client
+    for goal_id in (7, 9):
+        assert governed_actions.record_tool_lineage(
+            goal_id, "send_email", {"to": "x"}, sources=("hr/salaries.xlsx",), force=True
+        )
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:bob")
+    monkeypatch.setattr(auth, "is_dashboard_admin", lambda principal: False)
+    # Someone else's task looks exactly like a task that does not exist.
+    assert test_client.get(f"{BASE}/lineage/7").status_code == 404
+    assert test_client.get(f"{BASE}/lineage/404").status_code == 404
+    assert test_client.get(f"{BASE}/lineage/9").json()["count"] == 1
+    hits = test_client.get(f"{BASE}/impact", params={"name": "hr/salaries.xlsx"}).json()
+    assert [hit["goal_id"] for hit in hits["items"]] == [9]
