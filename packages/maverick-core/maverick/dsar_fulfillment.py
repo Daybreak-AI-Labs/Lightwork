@@ -447,7 +447,8 @@ def collect_graph_sources(
     through :func:`record_collection_source`. Message bodies and file
     bytes never transit; a fuller export stays the operator's export
     pipeline. The token comes from ``$MAVERICK_GRAPH_TOKEN`` (the
-    platform's Graph convention); tests inject ``fetcher``.
+    platform's Graph convention), else the sealed ``[data_map] graph_token``
+    saved on the All settings page; tests inject ``fetcher``.
     """
 
     _require_enabled()
@@ -459,12 +460,13 @@ def collect_graph_sources(
             "the DSAR subject is not a Microsoft 365 userPrincipalName; "
             "collect this subject's data through the export pipeline instead")
     if fetcher is None:
-        import os
+        from .data_map import graph_token
 
-        token = os.environ.get("MAVERICK_GRAPH_TOKEN", "")
+        token = graph_token()
         if not token:
             raise DsarFulfillmentConfigError(
-                "Graph collection needs a token in $MAVERICK_GRAPH_TOKEN "
+                "Graph collection needs a token in $MAVERICK_GRAPH_TOKEN or the "
+                "Microsoft 365 access key in All settings "
                 "(Mail.ReadBasic.All + Files.Read.All)")
 
         def fetcher(target: str) -> dict[str, Any]:

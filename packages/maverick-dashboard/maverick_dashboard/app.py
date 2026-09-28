@@ -9619,16 +9619,21 @@ async def webhook_github(request: Request, bg: BackgroundTasks) -> JSONResponse:
     """GitHub App webhook -> issue→PR. A labeled/`/maverick`-commented issue
     drives a swarm that clones the repo, fixes it, and opens a PR
     (``maverick.github_app``). HMAC-verified via ``X-Hub-Signature-256`` against
-    ``MAVERICK_GH_APP_WEBHOOK_SECRET`` (fails closed)."""
+    ``MAVERICK_GH_APP_WEBHOOK_SECRET`` or the sealed secret saved in All
+    settings (fails closed)."""
     import json as _json
-    import os as _os
 
-    from maverick.github_app import parse_webhook, process_issue, verify_signature
+    from maverick.github_app import (
+        parse_webhook,
+        process_issue,
+        verify_signature,
+        webhook_secret,
+    )
     from maverick.issue_webhooks import canonical_signature, replay_window_seconds
 
     signature = request.headers.get("X-Hub-Signature-256")
     body = await _read_limited_webhook_body(request)
-    secret = _os.environ.get("MAVERICK_GH_APP_WEBHOOK_SECRET", "")
+    secret = await run_in_threadpool(webhook_secret)
     if not verify_signature(body, signature, secret):
         return JSONResponse({"detail": "invalid signature"}, status_code=401)
     try:
@@ -9671,23 +9676,22 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     replay-dedup on the required ``X-Gitlab-Event-UUID`` delivery id instead
     of a body signature.
     """
-    import os as _os
-
     from maverick.issue_webhooks import (
         build_brief,
+        gitlab_webhook_token,
         parse_issue_event,
         replay_window_seconds,
         verify_gitlab_token,
     )
 
-    secret = _os.environ.get("MAVERICK_GITLAB_WEBHOOK_TOKEN", "").strip()
+    secret = await run_in_threadpool(gitlab_webhook_token)
     if not secret:
         raise HTTPException(
             status_code=401,
             detail=(
                 "GitLab webhooks aren't set up yet — an administrator must "
-                "configure the shared webhook token (the "
-                "MAVERICK_GITLAB_WEBHOOK_TOKEN environment variable)."
+                "set the shared webhook token in Settings > All settings (or "
+                "the MAVERICK_GITLAB_WEBHOOK_TOKEN environment variable)."
             ),
         )
     if not verify_gitlab_token(request.headers.get("X-Gitlab-Token"), secret):

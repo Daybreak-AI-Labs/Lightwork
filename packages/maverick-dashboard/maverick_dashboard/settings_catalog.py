@@ -25,14 +25,14 @@ Deliberately NOT in the catalog:
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
   ``[federation]``, ``[license]``, ``[providers] per_tenant_keys``, the sandbox
-  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the Stripe,
-  GitHub app, GitLab and Pushover credentials (read only from the server's
-  environment),
+  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the
+  Pushover credentials (read only from the server's environment),
   ``[deployment]`` (installer provenance), and every setting that names a
   server file path or an environment variable (``signal_cli_path``,
-  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``,
-  the voice program ``whisper_cpp_bin``). The Obsidian notes folder is the
-  exception: a folder agents read and write, checked to be a folder path.
+  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
+  Exceptions: the Obsidian notes folder (checked to be a folder path), and
+  the voice program and model file, picked by name from the checked lists
+  of Lightwork's own programs and speech model folders.
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, the per-task spending cap, capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
@@ -628,7 +628,7 @@ SETTINGS: tuple[Setting, ...] = (
       "number", "Spending & limits", 25, "maverick.config", minimum=1, maximum=1000,
       integer=True, unit="items"),
     S("billing.stripe", "enable", "Collect payments with Stripe",
-      "Turn usage invoices into real Stripe charges. The Stripe keys are set on the server.",
+      "Turn usage invoices into real Stripe charges with the Stripe keys set below or on the server.",
       "toggle", "Spending & limits", False, "maverick.billing_stripe", env=("MAVERICK_STRIPE_ENABLE",)),
     S("billing.stripe", "bill_metered_usage", "Charge for model usage",
       "Also charge customers for their model usage, not only the platform fee.",

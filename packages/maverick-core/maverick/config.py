@@ -2119,12 +2119,14 @@ def get_billing_stripe() -> dict:
 
     OFF by default: turning real charges on is an explicit operator decision,
     like ``[commerce]``. Also honored via ``MAVERICK_STRIPE_ENABLE=1``. The
-    Stripe secret + webhook signing key are NEVER read from config -- they come
+    Stripe secret + webhook signing key are never returned here -- they come
     from ``MAVERICK_STRIPE_SECRET_KEY`` / ``MAVERICK_STRIPE_WEBHOOK_SECRET`` via
-    the secret provider -- so this section holds only the enable flag, the
-    metered-usage pricing flag (a pricing decision is pending; default off bills
-    the platform fee only), the currency, and the per-plan ``prices`` map of
-    Stripe recurring price ids for the platform subscription fee."""
+    the secret provider, else from the sealed values saved on the All settings
+    page (read only by :mod:`maverick.billing_stripe`) -- so this returns only
+    the enable flag, the metered-usage pricing flag (a pricing decision is
+    pending; default off bills the platform fee only), the currency, and the
+    per-plan ``prices`` map of Stripe recurring price ids for the platform
+    subscription fee."""
     billing = load_config().get("billing", {})
     if not isinstance(billing, dict):
         billing = {}
