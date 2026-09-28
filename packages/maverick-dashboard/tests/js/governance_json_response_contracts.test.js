@@ -196,7 +196,7 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
   const usesText = functionName === "run";
 
   test(`${file} rejects malformed 2xx without exposing its body`, async () => {
-    const secret = `private-response-content-for-${file}`;
+    const secret = `private-response-content-for-${file}`;  // pragma: allowlist secret
     const response = {
       ok: true,
       status: 200,
@@ -234,7 +234,7 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
 // closed on malformed 2xx replies and never echo a response body or a raw
 // server detail.
 test("agents.html rejects malformed 2xx without exposing its body", async () => {
-  const secret = "private-response-content-for-agents";
+  const secret = "private-response-content-for-agents";  // pragma: allowlist secret
   const response = { ok: true, status: 200, ...streamedJsonBody(secret),
     async json() { throw new Error(secret); }, async text() { return secret; } };
   await assert.rejects(harness("agents.html", "call", ["GET", "/probe"]).invoke(response), (error) => {
@@ -256,7 +256,7 @@ test("agents.html turns an error reply into a plain sentence", async () => {
 });
 
 test("redact.html marks malformed 2xx as failed without exposing its body", async () => {
-  const secret = "private-redaction-response-content";
+  const secret = "private-redaction-response-content";  // pragma: allowlist secret
   const client = harness("redact.html", "preview", [null]);
   await client.invoke({
     ok: true,

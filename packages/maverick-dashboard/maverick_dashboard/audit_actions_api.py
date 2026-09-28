@@ -40,7 +40,7 @@ KIND_LABELS: dict[str, str] = {
     "token_exchange": "Sign-in passed to a service", "governance_denied": "Held by a company rule",
     "autonomy_escalated": "Asked for more freedom", "autonomy_gated": "Waited for permission",
     "egress_blocked": "Data not allowed to leave", "consent_prompt": "Asked for consent",
-    "consent_result": "Consent answered", "secret_redacted": "Hid a secret", "erase": "Data erased",
+    "consent_result": "Consent answered", "secret_redacted": "Hid a secret", "erase": "Data erased",  # pragma: allowlist secret
     "trust_receipt_prepared": "Receipt prepared", "trust_receipt_issued": "Receipt issued",
     "retention_purge": "Old records deleted by policy", "halt": "Emergency stop",
     "config_remediated": "Setting fixed automatically", "tenant_plan_changed": "Workspace plan changed",

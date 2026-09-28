@@ -55,6 +55,24 @@ def test_discovery_scan_limits_match_the_api_request_schema():
     import json
     import re
 
+    app = FastAPI()
+    app.include_router(discovery_router, prefix="/api/v1")
+    document = app.openapi()
+    schemas = document["components"]["schemas"]
+    limits = schemas["ScanLimitsIn"]
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "maverick_dashboard" / "static" / "lightwork-privacy-data-discovery.js"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"var DEFAULT_LIMITS = (\{[^}]*\});", script)
+    assert match is not None
+    defaults = json.loads(re.sub(r"(\w+):", r'"\1":', match.group(1)))
+    assert set(defaults) == set(limits["properties"])
+    for key, value in defaults.items():
+        bound = limits["properties"][key]
+        assert bound["minimum"] <= value <= bound["maximum"], key
+
+
 
 def test_each_publishing_resource_kind_binds_its_own_closed_request_contract():
     # The publishing page builds one guided form per content kind and posts

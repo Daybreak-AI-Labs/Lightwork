@@ -123,7 +123,7 @@
     snowflake_metadata: "Snowflake", snowflake: "Snowflake", servicenow_cmdb: "ServiceNow CMDB", microsoft_entra: "Microsoft Entra",
   };
   var CATEGORY = {
-    authentication_secret: "Password or secret key", biometric_identifier: "Biometric data", date_of_birth: "Date of birth",
+    authentication_secret: "Password or secret key", biometric_identifier: "Biometric data", date_of_birth: "Date of birth",  // pragma: allowlist secret
     email_address: "Email address", financial_account: "Bank or financial account", government_identifier: "Government ID number",
     health_information: "Health information", ip_address: "IP address", payment_card: "Payment card number",
     person_name: "Person's name", phone_number: "Phone number", physical_address: "Home or postal address",

@@ -33,7 +33,7 @@ def test_summary_counts_work_and_describes_failures_plainly(client) -> None:
     assert body["failed"] == 1 and body["failed_items"][0]["what"] == "Scheduled task"
     item = body["failed_items"][0]
     assert item["title"] == "Monthly report" and item["problem"] == "It took too long."
-    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in item["detail"]
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in item["detail"]  # pragma: allowlist secret
 
 
 def test_summary_needs_the_admin_permission(client, monkeypatch) -> None:

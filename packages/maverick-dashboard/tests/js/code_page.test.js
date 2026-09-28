@@ -25,7 +25,7 @@ const SUMMARY = {
   repos: [{ name: "website", default_branch: "main", protect: "block", tests: true, updated_at: 1700000000 }],
   proposals: [
     { id: "0123456789abcdef", repo: "website", title: "Add a button", files: 2, tests: true, review: true, status: "approved", approval_id: 7 },
-    { id: "fedcba9876543210", repo: "website", title: "Fix typo", files: 1, tests: false, review: null, status: "pending", approval_id: 8 }
+    { id: "fedcba9876543210", repo: "website", title: "Fix typo", files: 1, tests: false, review: null, status: "pending", approval_id: 8 }  // pragma: allowlist secret
   ]
 };
 
@@ -45,7 +45,7 @@ async function fixture({ confirm = true, reply } = {}) {
     if (url.endsWith("/summary")) return json(SUMMARY);
     if (url.endsWith("/merge")) return json({ merged: true, repo: "website" });
     if (url.includes("/proposals/") && (!options.method || options.method === "GET")) {
-      return json({ id: "fedcba9876543210", repo: "website", title: "Fix typo", status: "pending", approval_id: 8,
+      return json({ id: "fedcba9876543210", repo: "website", title: "Fix typo", status: "pending", approval_id: 8,  // pragma: allowlist secret
         files: ["a.py"], tests: { passed: false }, tests_output: "1 failed", review: null, changes: "-a\n+b", changes_cut_short: false });
     }
     return json({});
