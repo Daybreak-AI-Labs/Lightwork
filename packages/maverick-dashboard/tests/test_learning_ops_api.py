@@ -434,6 +434,20 @@ def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, mo
     assert [r["action"] for r in audit_rows] == ["self_modify_run"]
 
 
+def test_an_exhausted_organisation_allowance_refuses_before_anything_starts(client, monkeypatch, audit_rows):
+    from maverick import budget as budget_mod
+    from maverick.budget import Budget
+
+    def refused(*, task_class=None, **kw):
+        b = Budget(max_dollars=1.0)
+        b._tenant_refusal = "organisation allowance exhausted"
+        return b
+    monkeypatch.setattr(budget_mod, "budget_from_config", refused)
+    r = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
+    assert r.status_code == 409 and "allowance is used up" in r.json()["detail"]
+    assert audit_rows == []
+
+
 def test_stopping_self_modify_tightens_its_own_budget(client, monkeypatch):
     from maverick import self_modify_runner
     from maverick.budget import BudgetExceeded

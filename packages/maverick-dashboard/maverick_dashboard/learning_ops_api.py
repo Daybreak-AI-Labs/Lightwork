@@ -170,6 +170,22 @@ def _choice(value, allowed) -> None:
         raise HTTPException(status_code=422, detail="Choose from the list.")
 
 
+def _budget(task_class: str):
+    """The same config-, dashboard- and organisation-aware spending limit the
+    CLI's runs use (``budget_from_config``). An exhausted organisation
+    allowance refuses before anything starts, like the task run gate."""
+    from maverick.budget import budget_from_config
+    try:
+        budget = budget_from_config(task_class=task_class)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=(
+            "The spending limit for this is not set correctly, so nothing was started.")) from exc
+    if getattr(budget, "_tenant_refusal", None):
+        raise HTTPException(status_code=409, detail=(
+            "Your organisation's spending allowance is used up, so nothing was started."))
+    return budget
+
+
 def _halt_preflight(job: str) -> None:
     from maverick.learning_guard import Halted, check_learning_halt
     try:
@@ -281,9 +297,8 @@ async def clash_check(request: Request, body: ClashIn) -> dict:
     remaining pairs fall back to the wording check."""
     require_global_permission(request, "admin")
     from maverick import self_harness
-    from maverick.budget import budget_from_config
     model = await run_in_threadpool(_offered, body.model_id)
-    budget = budget_from_config(task_class="self_harness")
+    budget = _budget("self_harness")
     await run_in_threadpool(lambda: _record(request, "self_harness_semantic_conflicts", model=model or ""))
 
     def _run(job: jobs.Job) -> dict:
@@ -607,13 +622,8 @@ async def modify_run(request: Request, body: ModifyRunIn) -> dict:
     require_global_permission(request, "admin")
     if not body.confirm:
         raise HTTPException(status_code=422, detail="Confirm the change first.")
-    from maverick.budget import budget_from_config
     from maverick.self_modify_runner import run
-    try:
-        budget = budget_from_config(task_class="self_modify")
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=(
-            "The spending limit for this experiment is not set correctly.")) from exc
+    budget = _budget("self_modify")
     objective = " ".join(body.objective.split())
     await run_in_threadpool(lambda: _record(request, "self_modify_run", cycles=body.cycles,
                                             objective=objective[:300]))
