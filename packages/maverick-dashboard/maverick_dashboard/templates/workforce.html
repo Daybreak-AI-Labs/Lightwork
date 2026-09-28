@@ -374,4 +374,21 @@
       });
     })();
   </script>
+
+  <div class="section-head"><h2 id="fa-autonomy-title">How independently specialists work</h2></div>
+  <section class="panel" aria-labelledby="fa-autonomy-title">
+    <p class="muted" id="fa-autonomy-status" role="status" aria-live="polite">Loading…</p>
+    <div id="fa-autonomy"></div>
+  </section>
+  <style>
+    .fa-scroll { overflow-x: auto; }
+    .fa-inline { list-style: none; padding: 0; margin: var(--space-2) 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .fa-list { margin: var(--space-2) 0; }
+    .fa-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .fa-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
+    .fa-grow { flex: 1 1 18rem; }
+    .fa-technical { margin-top: var(--space-2); }
+  </style>
+  <script src="/static/lightwork-feature-actions.js" defer></script>
+
 {% endblock %}

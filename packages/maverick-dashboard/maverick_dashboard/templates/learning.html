@@ -659,4 +659,39 @@
   B.attach({ board: 'learning', endpoint: '/api/v1/learning', render: render });
 })();
 </script>
+
+  <div class="section-head"><h2 id="fa-flywheel-title">What Lightwork learned from results</h2></div>
+  <section class="panel" aria-labelledby="fa-flywheel-title">
+    <p class="muted" id="fa-flywheel-status" role="status" aria-live="polite">Loading…</p>
+    <div id="fa-flywheel"></div>
+  </section>
+  <div data-fa-needs="installation_admin" hidden>
+    <div class="section-head"><h2 id="fa-lessons-title">Share lessons with another installation</h2></div>
+    <section class="panel" id="fa-lessons" aria-labelledby="fa-lessons-title">
+      <p class="muted">Swap what your agents have learned with another Lightwork installation you trust. Only the lessons are shared, never tasks or customer details, and every lesson you receive is checked before it is used.</p>
+      <div class="fa-row">
+        <label class="fa-field"><span>How many recent lessons</span>
+          <select class="select" id="fa-lessons-count">
+            <option value="10">10</option><option value="25">25</option>
+            <option value="50" selected>50</option><option value="100">100</option>
+          </select></label>
+        <button type="button" class="btn" id="fa-lessons-export">Download lessons to share</button>
+      </div>
+      <label class="fa-field"><span>Add lessons from another installation (choose the file they sent you)</span>
+        <input class="input" type="file" id="fa-lessons-file" accept=".json,application/json"></label>
+      <p class="muted" id="fa-lessons-status" role="status" aria-live="polite"></p>
+      <div id="fa-lessons-out"></div>
+    </section>
+  </div>
+  <style>
+    .fa-scroll { overflow-x: auto; }
+    .fa-inline { list-style: none; padding: 0; margin: var(--space-2) 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .fa-list { margin: var(--space-2) 0; }
+    .fa-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .fa-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
+    .fa-grow { flex: 1 1 18rem; }
+    .fa-technical { margin-top: var(--space-2); }
+  </style>
+  <script src="/static/lightwork-feature-actions.js" defer></script>
+
 {% endblock %}

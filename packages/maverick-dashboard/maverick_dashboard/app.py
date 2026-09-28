@@ -1046,6 +1046,8 @@ from .in_app_routes import router as in_app_router  # noqa: E402
 app.include_router(in_app_router)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
+from .feature_actions_api import router as feature_actions_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
@@ -1061,6 +1063,8 @@ app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
 app.include_router(system_checks_router)
+app.include_router(feature_actions_router)
+app.include_router(feature_actions_page_router)
 app.include_router(channel_check_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)

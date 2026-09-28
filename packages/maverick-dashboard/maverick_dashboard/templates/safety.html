@@ -91,4 +91,23 @@
       </p>
     {% endif %}
   </div>
+
+  <div class="section-head"><h2 id="fa-calibration-title">How well screening is tuned</h2></div>
+  <section class="panel" aria-labelledby="fa-calibration-title">
+    <p class="muted">Tests the screening against a set of known attacks and ordinary messages, so you can see how many attacks each level catches and how often it stops something harmless. Nothing is changed.</p>
+    <p class="fa-row"><button type="button" class="btn btn--primary" id="fa-calibration-run">Test the screening</button></p>
+    <p class="muted" id="fa-calibration-status" role="status" aria-live="polite"></p>
+    <div id="fa-calibration-out"></div>
+  </section>
+  <style>
+    .fa-scroll { overflow-x: auto; }
+    .fa-inline { list-style: none; padding: 0; margin: var(--space-2) 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .fa-list { margin: var(--space-2) 0; }
+    .fa-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .fa-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
+    .fa-grow { flex: 1 1 18rem; }
+    .fa-technical { margin-top: var(--space-2); }
+  </style>
+  <script src="/static/lightwork-feature-actions.js" defer></script>
+
 {% endblock %}
