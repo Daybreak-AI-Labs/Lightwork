@@ -81,6 +81,7 @@ def _live(source: str) -> list[str]:
 # with the value the kernel then reads.
 _WORDS = {
     "persona.addendum": "Always cite your sources.",
+    "persona.user_name": "Chris",
     "providers.anthropic.base_url": "https://gateway.example.com/anthropic",
     "providers.openai_compatible.base_url": "http://localhost:8000/v1",
     "providers.azure.base_url": "https://acme.openai.azure.com",
@@ -99,6 +100,9 @@ _WORDS = {
     "knowledge.path": "/srv/lightwork/index.db",
     "knowledge.revision": "v2",
     "screening.sdn_path": "/srv/lists/sdn.txt",
+    "memory.qdrant_url": "https://qdrant.example.com",
+    "memory.weaviate_url": "https://weaviate.example.com",
+    "observability.otel_endpoint": "https://otel.example.com/v1/traces",
 }
 _LISTS = {
     "models.catalog": ["vllm:my-model"],
@@ -109,6 +113,7 @@ _LISTS = {
     "plugins.ca_revoked": ["0123456789abcdef"],
     "attachments.extra_mime_prefixes": ["application/vnd.visio"],
     "containment.deny_tools": ["github_issues"],
+    "search.ladder": ["anthropic:claude-opus-4-8:0.3"],
 }
 
 
@@ -501,3 +506,178 @@ def test_request_fit_check_follows_the_setting(monkeypatch, audit_rows):
     assert r.status_code == 409
     assert _save([{"id": "context.preflight", "value": "off"}], confirm=True).status_code == 200
     llm._run_preflight("claude-haiku-4-5", "", huge, None, 1000)
+
+
+# (row, value saved, reader call, what the reader returns then, the
+# environment variable and a value that must win over the saved one)
+def _switch_cases():
+    from maverick import budget_receipts, llm, net_concurrency, observability, tool_token
+    from maverick.cache import llm as llm_cache
+    from maverick.orchestrator import _bon_early_exit
+    from maverick.providers import anthropic_provider as ap
+    from maverick.skill import stats
+    from maverick.skills import url_install_allowed
+    from maverick.tools import computer, database_tool, http_fetch, safe_media_args
+    from maverick_channels.base import _max_inbound_chars
+    from maverick_knowledge.parse import _int_env
+    from maverick_shield import builtin_rules, guard
+
+    return [
+        ("search.early_exit", False, _bon_early_exit, False, "MAVERICK_BON_EARLY_EXIT", "1", True),
+        ("cache.llm_responses", True, llm_cache._enabled_via_env, True, "MAVERICK_LLM_CACHE", "0", False),
+        ("skills.decay", False, stats._enabled, False, "MAVERICK_SKILL_DECAY", "1", True),
+        ("skills.allow_url_install", True, url_install_allowed, True,
+         "MAVERICK_ALLOW_SKILL_INSTALL", "0", False),
+        ("tools.fetch_allow_private", True, lambda: http_fetch.is_blocked_host("10.0.0.7"),
+         False, "MAVERICK_FETCH_ALLOW_PRIVATE", "0", True),
+        ("tools.raw_media_args", True, lambda: safe_media_args(["-i", "/etc/passwd"]),
+         ["-i", "/etc/passwd"], "MAVERICK_ALLOW_RAW_MEDIA_ARGS", "0", None),
+        ("tools.database_max_rows", 25, database_tool._max_rows, 25,
+         "MAVERICK_DATABASE_MAX_ROWS", "7", 7),
+        ("tools.net_host_concurrency", 9, net_concurrency._cap, 9,
+         "MAVERICK_NET_HOST_CONCURRENCY", "2", 2),
+        ("budget.receipts", True, budget_receipts.enabled, True, "MAVERICK_BUDGET_RECEIPTS", "0", False),
+        ("capabilities.per_call_token_ttl", 90, tool_token._ttl_seconds, 90.0,
+         "MAVERICK_TOOL_TOKEN_TTL", "12", 12.0),
+        ("cache.anthropic_ttl", "5m", ap._default_cache_ttl, "5m", "MAVERICK_ANTHROPIC_CACHE_TTL", "1h", "1h"),
+        ("cache.anthropic_message_ttl", "1h", ap._msg_cache_ttl, "1h",
+         "MAVERICK_ANTHROPIC_MSG_CACHE_TTL", "5m", "5m"),
+        ("thinking.adaptive_floor", 4096, ap._adaptive_max_tokens_floor, 4096,
+         "MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", "16384", 16384),
+        ("latency.read_timeout", 45, lambda: llm._configured_timeouts({}),
+         {"MAVERICK_LLM_READ_TIMEOUT": "45.0"}, None, None, None),
+        ("observability.otel_exporter", "otlp", observability._otel_enabled, True,
+         "MAVERICK_OTEL_EXPORTER", "otlp", True),
+        ("observability.otel_headers", "x-team=abc", observability._otlp_headers,
+         {"x-team": "abc"}, "MAVERICK_OTEL_HEADERS", "x-env=1", {"x-env": "1"}),
+        ("observability.prometheus_port", 9109, observability._prometheus_enabled, True,
+         None, None, None),
+        ("computer_use.ocr", True, computer._ocr_enabled, True, "MAVERICK_COMPUTER_OCR", "0", False),
+        ("computer_use.require_sandbox", True, computer._host_guard_required, True, None, None, None),
+        ("chat.max_inbound_chars", 5000, _max_inbound_chars, 5000,
+         "MAVERICK_MAX_INBOUND_CHARS", "2000", 2000),
+        ("knowledge.max_pdf_pages", 12, lambda: _int_env("MAVERICK_KNOWLEDGE_MAX_PDF_PAGES", 5000),
+         12, "MAVERICK_KNOWLEDGE_MAX_PDF_PAGES", "3", 3),
+        ("safety.max_scan_chars", 5000, builtin_rules._max_scan_chars, 5000,
+         "MAVERICK_SHIELD_MAX_SCAN_CHARS", "7000", 7000),
+        ("safety.decode_hidden", False, guard._decode_disabled, True,
+         "MAVERICK_SHIELD_NO_DECODE", "0", False),
+    ]
+
+
+def test_former_environment_switches_take_effect_from_the_page(monkeypatch, audit_rows):
+    for setting_id, value, read, expected, env_name, env_value, env_expected in _switch_cases():
+        if env_name:
+            monkeypatch.delenv(env_name, raising=False)
+        setting = catalog.BY_ID[setting_id]
+        sent = value / setting.scale if isinstance(value, (int, float)) \
+            and not isinstance(value, bool) else value
+        r = _save([{"id": setting_id, "value": sent}], confirm=True)
+        assert r.status_code == 200, (setting_id, r.text)
+        assert read() == expected, setting_id
+        if env_name:
+            monkeypatch.setenv(env_name, env_value)
+            if env_expected is not None:
+                assert read() == env_expected, setting_id
+            monkeypatch.delenv(env_name)
+
+
+def test_unset_switches_keep_todays_behaviour():
+    from maverick import budget_receipts, tool_token
+    from maverick.cache import llm as llm_cache
+    from maverick.orchestrator import _bon_early_exit
+    from maverick.providers import anthropic_provider as ap
+    from maverick.skills import url_install_allowed
+    from maverick.tools import database_tool, http_fetch
+    from maverick_shield import guard
+
+    assert _bon_early_exit() is True
+    assert llm_cache._enabled_via_env() is False
+    assert url_install_allowed() is False
+    assert http_fetch.is_blocked_host("10.0.0.7") is True
+    assert database_tool._max_rows() == 1000
+    assert budget_receipts.enabled() is False
+    assert tool_token._ttl_seconds() == 30.0
+    assert ap._adaptive_max_tokens_floor() == 8192
+    assert guard._decode_disabled() is False
+
+
+def test_env_or_config_prefers_the_environment(monkeypatch):
+    from maverick.env_setting import env_or_config, env_or_config_float, env_or_config_int
+
+    assert env_or_config("MAVERICK_MAX_STEPS", "agent", "max_steps") is None
+    assert _save([{"id": "agent.max_steps", "value": 40}], confirm=True).status_code == 200
+    assert env_or_config("MAVERICK_MAX_STEPS", "agent", "max_steps") == "40"
+    assert env_or_config_int("MAVERICK_MAX_STEPS", "agent", "max_steps", 1) == 40
+    monkeypatch.setenv("MAVERICK_MAX_STEPS", "7")
+    assert env_or_config_int("MAVERICK_MAX_STEPS", "agent", "max_steps", 1) == 7
+    monkeypatch.setenv("MAVERICK_MAX_STEPS", "  ")  # blank counts as unset
+    assert env_or_config_float("MAVERICK_MAX_STEPS", "agent", "max_steps", 1.0) == 40.0
+    assert _save([{"id": "agent.parallel_tools", "value": False}]).status_code == 200
+    assert env_or_config("MAVERICK_PARALLEL_TOOLS", "agent", "parallel_tools", "1") == "0"
+
+
+def test_user_name_reaches_every_agent_prompt(audit_rows):
+    from maverick.persona import render_persona_prompt
+
+    assert render_persona_prompt() == ""
+    assert _save([{"id": "persona.user_name", "value": "Chris"}]).status_code == 200
+    assert "likes to be called Chris." in render_persona_prompt()
+
+
+def test_installer_placeholder_name_changes_nothing():
+    from maverick import config
+    from maverick.persona import render_persona_prompt
+
+    config.config_path().parent.mkdir(parents=True, exist_ok=True)
+    config.config_path().write_text('[persona]\nuser_name = "you"\n', encoding="utf-8")
+    config.reset_config_cache()
+    assert render_persona_prompt() == ""
+
+
+def test_shared_tool_results_use_the_redis_store_with_the_same_scope(monkeypatch, audit_rows):
+    from maverick.cache import redis_tool
+    from maverick.cache import tool as tool_cache
+
+    kept: dict = {}
+
+    class FakeRedis:
+        def get(self, key):
+            return kept.get(key)
+
+        def set(self, key, value):
+            kept[key] = value
+
+        def setex(self, key, ttl, value):
+            kept[key] = value
+
+    monkeypatch.setattr(redis_tool.RedisToolCache, "_client", lambda self: FakeRedis())
+    r = _save([{"id": "tools.output_cache", "value": True},
+               {"id": "tools.output_cache_backend", "value": "redis"},
+               {"id": "tools.output_cache_redis_url", "value": "redis://cache.internal:6379/0"}],
+              confirm=True)
+    assert r.status_code == 200, r.text
+
+    class Tool:
+        name = "repo_map"
+        cacheable = True
+
+    monkeypatch.setattr(tool_cache, "cacheable", lambda tool: True)
+    tool_cache.reset()
+    tool_cache.store_cached(Tool(), {"path": "."}, "tree", namespace="user:a")
+    assert len(kept) == 1
+    tool_cache.reset()  # another server: nothing kept locally
+    assert tool_cache.get_cached(Tool(), {"path": "."}, namespace="user:a") == (True, "tree")
+    assert tool_cache.get_cached(Tool(), {"path": "."}, namespace="user:b") == (False, None)
+
+
+def test_software_pins_are_recorded_then_checked(tmp_path, audit_rows):
+    from maverick import supply_chain
+
+    pins = tmp_path / "pins.json"
+    assert supply_chain.startup_check(pins) is None and not pins.exists()
+    r = _save([{"id": "safety.supply_chain_pinning", "value": True}])
+    assert r.status_code == 200, r.text
+    assert supply_chain.startup_check(pins) is None and pins.exists()
+    report = supply_chain.startup_check(pins)
+    assert report is not None and report.ok

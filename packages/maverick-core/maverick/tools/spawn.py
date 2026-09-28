@@ -485,8 +485,11 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
     every sub-task ran.
     """
     from ..compaction import excerpt
-    child_cap = max(200, env_int("MAVERICK_SWARM_CHILD_RESULT_CHARS", 4000))
-    total_cap = max(child_cap, env_int("MAVERICK_SWARM_RESULTS_TOTAL_CHARS", 24_000))
+    from ..env_setting import env_or_config_int
+    child_cap = max(200, env_or_config_int(
+        "MAVERICK_SWARM_CHILD_RESULT_CHARS", "swarm", "child_result_chars", 4000))
+    total_cap = max(child_cap, env_or_config_int(
+        "MAVERICK_SWARM_RESULTS_TOTAL_CHARS", "swarm", "results_total_chars", 24_000))
     parts: list[str] = []
     used = 0
     if dropped_specs:

@@ -15,7 +15,6 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -270,8 +269,12 @@ def configure_logging(
     if _configured:
         return
 
-    level_name = (level or os.environ.get("MAVERICK_LOG_LEVEL", "INFO")).upper()
-    fmt_name = (fmt or os.environ.get("MAVERICK_LOG_FORMAT", "text")).lower()
+    from .env_setting import env_or_config
+
+    level_name = (level or env_or_config("MAVERICK_LOG_LEVEL", "logging", "level", "INFO")
+                  or "INFO").upper()
+    fmt_name = (fmt or env_or_config("MAVERICK_LOG_FORMAT", "logging", "format", "text")
+                or "text").lower()
 
     handler = logging.StreamHandler(stream=sys.stderr)
     if fmt_name == "json":

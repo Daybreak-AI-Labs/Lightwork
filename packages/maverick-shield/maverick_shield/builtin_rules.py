@@ -41,6 +41,13 @@ def _max_scan_chars() -> int:
     fallback shield while still reaching downstream agents.
     """
     raw = os.environ.get("MAVERICK_SHIELD_MAX_SCAN_CHARS")
+    if not raw:
+        try:  # ``[safety] max_scan_chars`` when the kernel is installed
+            from maverick.env_setting import env_or_config
+
+            raw = env_or_config("MAVERICK_SHIELD_MAX_SCAN_CHARS", "safety", "max_scan_chars")
+        except ImportError:  # pragma: no cover -- standalone shield package
+            raw = None
     if raw:
         try:
             parsed = int(raw)

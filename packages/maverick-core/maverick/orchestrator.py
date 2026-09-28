@@ -470,13 +470,15 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
     configured (#432), else falls back to the lexical/embedding linear scan.
     Tunables: ``MAVERICK_AUTO_RECALL_K`` (default 3); min similarity 0.10.
     """
-    if os.environ.get("MAVERICK_AUTO_RECALL", "").strip().lower() not in {
+    from .env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_AUTO_RECALL", "context", "auto_recall") or "").strip().lower() not in {
         "1", "true", "yes", "on",
     }:
         return None
     with _enrich("auto-recall"):
         try:
-            k = max(1, int(os.environ.get("MAVERICK_AUTO_RECALL_K", "3")))
+            k = max(1, int(env_or_config("MAVERICK_AUTO_RECALL_K", "context", "auto_recall_k", "3")))
         except ValueError:
             k = 3
         query = f"{goal.title}\n{goal.description or ''}"
@@ -775,10 +777,12 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
     # the store grows forever (kv_memory, dashboard, MCP all write it). Keep
     # the newest N (get_facts orders newest-first) and cap each value, the
     # same treatment the QA block gets via _QA_MAX_*. Env-tunable.
-    from ._envparse import env_int as _env_int
     from .compaction import excerpt
-    max_facts = max(1, _env_int("MAVERICK_BRIEF_FACTS_MAX", 50))
-    max_val = max(40, _env_int("MAVERICK_BRIEF_FACT_VALUE_CHARS", 300))
+    from .env_setting import env_or_config_int
+    max_facts = max(1, env_or_config_int(
+        "MAVERICK_BRIEF_FACTS_MAX", "context", "brief_facts_max", 50))
+    max_val = max(40, env_or_config_int(
+        "MAVERICK_BRIEF_FACT_VALUE_CHARS", "context", "brief_fact_value_chars", 300))
     omitted = max(0, len(facts) - max_facts)
     fact_lines: list[str] = []
     for k, v in list(facts.items())[:max_facts]:
@@ -2808,6 +2812,14 @@ def _capture_workdir_diff(workdir) -> str:
         return ""
 
 
+def _bon_early_exit() -> bool:
+    """Stop the best-of-N ladder at the first fully passing candidate
+    (``MAVERICK_BON_EARLY_EXIT``, else ``[search] early_exit``; default on)."""
+    from .env_setting import env_or_config
+
+    return env_or_config("MAVERICK_BON_EARLY_EXIT", "search", "early_exit", "1") != "0"
+
+
 async def run_goal_best_of_n(
     llm: LLM,
     world: WorldModel,
@@ -2876,7 +2888,10 @@ async def run_goal_best_of_n(
     default_ladder = ",".join(
         f"{configured_orchestrator_model}:{t}" for t in (0.3, 0.7, 0.95)
     )
-    raw_ladder = os.environ.get("MAVERICK_BON_LADDER", default_ladder)
+    from .env_setting import env_or_config
+
+    raw_ladder = env_or_config("MAVERICK_BON_LADDER", "search", "ladder", default_ladder) \
+        or default_ladder
     ladder: list[tuple[str, float]] = []
     for entry in raw_ladder.split(","):
         if ":" in entry:
@@ -3015,7 +3030,7 @@ async def run_goal_best_of_n(
         if (
             cand.test_result is not None
             and cand.test_result.all_pass
-            and os.environ.get("MAVERICK_BON_EARLY_EXIT", "1") != "0"
+            and _bon_early_exit()
         ):
             # Early exit only when ALL tests genuinely pass. The old
             # `score >= 0.99` fired on a count-pooled partial score too: with a

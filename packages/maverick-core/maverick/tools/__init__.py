@@ -112,7 +112,10 @@ def safe_media_args(raw: Any) -> list[str]:
     ``MAVERICK_ALLOW_RAW_MEDIA_ARGS=1`` (then the list passes verbatim).
     """
     items = [str(a) for a in (raw or [])]
-    if _env_true("MAVERICK_ALLOW_RAW_MEDIA_ARGS"):
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_ALLOW_RAW_MEDIA_ARGS", "tools", "raw_media_args")
+            or "").strip().lower() in ("1", "true", "yes", "on"):
         return items
     safe: list[str] = []
     skip_next = False
@@ -1331,7 +1334,10 @@ def base_registry(
     # ambient host credentials, so they only register when the operator
     # sets MAVERICK_ENABLE_CRED_TOOLS=true. Their names are reserved in
     # AMBIENT_CRED_TOOL_NAMES above -- keep that set in sync with this list.
-    if _env_true("MAVERICK_ENABLE_CRED_TOOLS"):
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_ENABLE_CRED_TOOLS", "tools", "credential_connectors")
+            or "").strip().lower() in ("1", "true", "yes", "on"):
         reg.register(airtable_tool())
         reg.register(asana_tool())
         reg.register(clickup_tool())

@@ -44,4 +44,30 @@ def env_or_config(env_name: str, section: str, key: str,
     return str(value)
 
 
-__all__ = ["env_or_config"]
+def env_or_config_int(env_name: str, section: str, key: str, default: int) -> int:
+    """:func:`env_or_config` as a whole number; unreadable text gives ``default``."""
+    raw = env_or_config(env_name, section, key)
+    if raw is None:
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        try:
+            number = float(str(raw).strip())
+        except ValueError:
+            return default
+        return int(number) if number.is_integer() else default
+
+
+def env_or_config_float(env_name: str, section: str, key: str, default: float) -> float:
+    """:func:`env_or_config` as a number; unreadable text gives ``default``."""
+    raw = env_or_config(env_name, section, key)
+    if raw is None:
+        return default
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        return default
+
+
+__all__ = ["env_or_config", "env_or_config_float", "env_or_config_int"]

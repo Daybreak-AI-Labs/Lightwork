@@ -30,9 +30,25 @@ DEFAULT_MAX_DOCX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 DEFAULT_MAX_PDF_PAGES = 5000
 
 
+# Each cap can also be set as ``[knowledge] <key>`` (the environment wins).
+_CONFIG_KEYS = {
+    "MAVERICK_KNOWLEDGE_MAX_DOC_BYTES": "max_doc_bytes",
+    "MAVERICK_KNOWLEDGE_MAX_DOCX_UNCOMPRESSED_BYTES": "max_docx_uncompressed_bytes",
+    "MAVERICK_KNOWLEDGE_MAX_PDF_PAGES": "max_pdf_pages",
+}
+
+
 def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None and name in _CONFIG_KEYS:
+        try:
+            from maverick.env_setting import env_or_config
+
+            raw = env_or_config(name, "knowledge", _CONFIG_KEYS[name])
+        except ImportError:  # pragma: no cover -- standalone use without the kernel
+            raw = None
     try:
-        return int(os.environ.get(name, str(default)))
+        return int(raw if raw is not None else default)
     except ValueError:
         return default
 

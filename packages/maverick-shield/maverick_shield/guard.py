@@ -88,6 +88,21 @@ def _normalize_config_token(value: Any, default: str) -> str:
     return str(value).strip().lower() or default
 
 
+def _decode_disabled() -> bool:
+    """Skip decoding hidden layers (``MAVERICK_SHIELD_NO_DECODE``, else
+    ``[safety] decode_hidden = false`` when the kernel is installed)."""
+    raw = os.environ.get("MAVERICK_SHIELD_NO_DECODE", "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    try:
+        from maverick.config import load_config
+
+        value = ((load_config() or {}).get("safety") or {}).get("decode_hidden")
+    except Exception:  # standalone shield or unreadable config: keep decoding
+        return False
+    return value is False
+
+
 @dataclass
 class ShieldVerdict:
     allowed: bool
@@ -333,9 +348,7 @@ class Shield:
         payload the literal surface form hid), else ``None``. A pre-pass error
         follows the selected failure policy and retains scan_error. Escape hatch:
         ``MAVERICK_SHIELD_NO_DECODE=1``."""
-        if (not isinstance(text, str)
-                or os.environ.get("MAVERICK_SHIELD_NO_DECODE", "").strip().lower()
-                in {"1", "true", "yes", "on"}):
+        if not isinstance(text, str) or _decode_disabled():
             return None
         failure = None
         try:

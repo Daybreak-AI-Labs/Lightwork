@@ -103,8 +103,15 @@ def _bounded_metric_labels(
         return overflow
 
 
+def _setting(env_name: str, key: str) -> str | None:
+    """The environment variable, else ``[observability] key`` (read at start)."""
+    from .env_setting import env_or_config
+
+    return env_or_config(env_name, "observability", key)
+
+
 def _otel_enabled() -> bool:
-    return bool(os.environ.get("MAVERICK_OTEL_EXPORTER"))
+    return bool(_setting("MAVERICK_OTEL_EXPORTER", "otel_exporter"))
 
 
 def _sentry_dsn() -> str:
@@ -124,7 +131,7 @@ def _sentry_enabled() -> bool:
 
 
 def _prometheus_enabled() -> bool:
-    return bool(os.environ.get("MAVERICK_PROMETHEUS_PORT"))
+    return bool(_setting("MAVERICK_PROMETHEUS_PORT", "prometheus_port"))
 
 
 def _otlp_headers() -> dict[str, str]:
@@ -135,7 +142,7 @@ def _otlp_headers() -> dict[str, str]:
     Returns ``{}`` when unset/blank so the default (no headers) is unchanged.
     Malformed pairs (no ``=``) are skipped rather than crashing init.
     """
-    raw = os.environ.get("MAVERICK_OTEL_HEADERS", "").strip()
+    raw = (_setting("MAVERICK_OTEL_HEADERS", "otel_headers") or "").strip()
     if not raw:
         return {}
     headers: dict[str, str] = {}
@@ -163,7 +170,8 @@ def _initialize() -> None:
             try:
                 import sentry_sdk
                 try:
-                    rate = float(os.environ.get("MAVERICK_SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+                    rate = float(_setting("MAVERICK_SENTRY_TRACES_SAMPLE_RATE",
+                                          "sentry_traces_sample_rate") or "0.1")
                 except ValueError:
                     rate = 0.1
                 sentry_sdk.init(
@@ -196,9 +204,9 @@ def _initialize() -> None:
                     "Install with: python -m pip install -e './packages/maverick-core[observability]'"
                 )
                 return
-            endpoint = os.environ.get(
-                "MAVERICK_OTEL_ENDPOINT", "http://localhost:4318/v1/traces"
-            )
+            endpoint = _setting(
+                "MAVERICK_OTEL_ENDPOINT", "otel_endpoint"
+            ) or "http://localhost:4318/v1/traces"
             headers = _otlp_headers()
             resource = Resource.create({"service.name": "maverick"})
             provider = TracerProvider(resource=resource)
@@ -230,8 +238,8 @@ def _initialize() -> None:
                     "Install with: python -m pip install -e './packages/maverick-core[observability]'"
                 )
                 return
-            port_str = os.environ.get("MAVERICK_PROMETHEUS_PORT", "9100")
-            addr = os.environ.get("MAVERICK_PROMETHEUS_ADDR", "127.0.0.1")
+            port_str = _setting("MAVERICK_PROMETHEUS_PORT", "prometheus_port") or "9100"
+            addr = _setting("MAVERICK_PROMETHEUS_ADDR", "prometheus_addr") or "127.0.0.1"
             try:
                 port = int(port_str)
                 start_http_server(port, addr=addr)

@@ -56,7 +56,10 @@ _DEFAULT_MAX_ROWS = 1000
 
 def _max_rows() -> int:
     try:
-        cap = int(os.environ.get("MAVERICK_DATABASE_MAX_ROWS", "") or _DEFAULT_MAX_ROWS)
+        from ..env_setting import env_or_config
+
+        cap = int(env_or_config("MAVERICK_DATABASE_MAX_ROWS", "tools", "database_max_rows")
+                  or _DEFAULT_MAX_ROWS)
     except ValueError:
         cap = _DEFAULT_MAX_ROWS
     return max(1, cap)

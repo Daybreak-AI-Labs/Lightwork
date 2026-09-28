@@ -37,6 +37,7 @@ import tempfile
 import time
 from typing import Any
 
+from ..env_setting import env_or_config as _env_or_config
 from ..safety.action_evidence import seal_bracketed
 from ..safety.action_gate import (
     ActionPermit,
@@ -145,7 +146,9 @@ def _maybe_seal_capture(b64: str) -> None:
 
 
 def _ocr_enabled() -> bool:
-    return os.environ.get("MAVERICK_COMPUTER_OCR", "").lower() in (
+    from ..env_setting import env_or_config
+
+    return (env_or_config("MAVERICK_COMPUTER_OCR", "computer_use", "ocr") or "").lower() in (
         "1", "true", "yes", "on",
     )
 
@@ -407,7 +410,10 @@ def _host_guard_required() -> bool:
     enterprise mode. With neither set this is False and the guard is a no-op, so
     default behavior is unchanged (kernel rule 1: fail open).
     """
-    if os.environ.get("MAVERICK_COMPUTER_REQUIRE_SANDBOX", "").strip().lower() in _TRUTHY:
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_COMPUTER_REQUIRE_SANDBOX", "computer_use", "require_sandbox")
+            or "").strip().lower() in _TRUTHY:
         return True
     try:
         from ..enterprise import enterprise_enabled
@@ -426,7 +432,10 @@ def _host_drive_allowed() -> bool:
     Lightwork-specific variable is not enough because screenshot and input
     backends read the real ``DISPLAY`` environment variable.
     """
-    if os.environ.get("MAVERICK_COMPUTER_ALLOW_HOST", "").strip().lower() in _TRUTHY:
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_COMPUTER_ALLOW_HOST", "computer_use", "allow_host")
+            or "").strip().lower() in _TRUTHY:
         return True
     display = (os.environ.get("DISPLAY") or "").strip()
     configured_display = (os.environ.get("MAVERICK_COMPUTER_DISPLAY") or "").strip()
@@ -501,7 +510,7 @@ def _computer_approval_context(args: dict[str, Any] | None = None) -> dict[str, 
             os.environ.get("MAVERICK_COMPUTER_DISPLAY") or ""
         ).strip(),
         "host_override": (
-            os.environ.get("MAVERICK_COMPUTER_ALLOW_HOST") or ""
+            _env_or_config("MAVERICK_COMPUTER_ALLOW_HOST", "computer_use", "allow_host") or ""
         ).strip().lower(),
     }
     identity = _foreground_window_identity()

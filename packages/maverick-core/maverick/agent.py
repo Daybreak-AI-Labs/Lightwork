@@ -27,6 +27,7 @@ from . import killswitch
 from ._envparse import env_float, env_int
 from .audit.errors import AuditRefused
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
+from .env_setting import env_or_config as _env_or_config
 from .llm import model_for_role
 from .run_outcome import GoalCancelled, cancellation_message
 from .swarm import SwarmContext
@@ -1682,7 +1683,8 @@ class Agent:
         # shows "most successful solutions resolve in ~25 rounds; long-
         # tail iteration past that has diminishing returns." Allow ops
         # to override globally via MAVERICK_MAX_STEPS, default 25.
-        raw_steps = os.environ.get("MAVERICK_MAX_STEPS")
+        from .env_setting import env_or_config
+        raw_steps = env_or_config("MAVERICK_MAX_STEPS", "agent", "max_steps")
         self.max_steps = int(raw_steps) if raw_steps and raw_steps.strip() else max_steps
         if self.max_steps is not None and (type(self.max_steps) is not int or self.max_steps < 1):
             raise ValueError("MAVERICK_MAX_STEPS / max_steps must be a positive integer")
@@ -5098,7 +5100,7 @@ class Agent:
             # MAVERICK_PARALLEL_TOOLS=0.
             run_parallel = (
                 len(resp.tool_calls) > 1
-                and os.environ.get("MAVERICK_PARALLEL_TOOLS", "1") != "0"
+                and _env_or_config("MAVERICK_PARALLEL_TOOLS", "agent", "parallel_tools", "1") != "0"
                 and all(self._is_parallel_safe(tc.name) for tc in resp.tool_calls)
             )
 

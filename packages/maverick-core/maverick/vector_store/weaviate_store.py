@@ -81,8 +81,11 @@ class WeaviateStore:
             ) from e
         import weaviate
 
-        url = url or os.environ.get("MAVERICK_WEAVIATE_URL")
-        api_key = api_key or os.environ.get("MAVERICK_WEAVIATE_API_KEY")
+        from ..env_setting import env_or_config
+
+        url = url or env_or_config("MAVERICK_WEAVIATE_URL", "memory", "weaviate_url")
+        api_key = api_key or env_or_config(
+            "MAVERICK_WEAVIATE_API_KEY", "memory", "weaviate_api_key")
         self._remote = bool(url)
         # Server-side embedding module (see module docstring). Default to
         # text2vec-transformers; "none" means the caller supplies vectors.

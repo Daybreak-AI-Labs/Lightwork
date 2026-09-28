@@ -653,7 +653,9 @@ def _cross_family_fallback(model: str) -> str | None:
     care about the lockstep risk should warn via
     ``_warn_same_family_verifier``.
     """
-    explicit = os.environ.get("MAVERICK_CROSS_FAMILY_VERIFIER")
+    from .env_setting import env_or_config
+
+    explicit = env_or_config("MAVERICK_CROSS_FAMILY_VERIFIER", "verification", "cross_family_model")
     if explicit:
         return explicit
 

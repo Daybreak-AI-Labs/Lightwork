@@ -1178,6 +1178,9 @@ def get_knowledge() -> dict:
         "url": cfg.get("url", ""),
         # DSN for the pgvector scale backend (falls back to env in build_store).
         "dsn": cfg.get("dsn", ""),
+        # Key for the hosted indexing service (build_embedder falls back to
+        # MAVERICK_EMBED_API_KEY); without it here the documented setting was lost.
+        "api_key": cfg.get("api_key", ""),
     }
 
 

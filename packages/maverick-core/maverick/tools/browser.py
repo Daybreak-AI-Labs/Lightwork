@@ -264,7 +264,9 @@ class _BrowserSession:
                 "&& playwright install chromium"
             ) from e
         self._playwright = sync_playwright().start()
-        headless = os.environ.get("MAVERICK_BROWSER_HEADED", "0") != "1"
+        from ..env_setting import env_or_config
+
+        headless = env_or_config("MAVERICK_BROWSER_HEADED", "tools", "browser_headed", "0") != "1"
         self._browser = self._playwright.chromium.launch(headless=headless)
         self._context = self._browser.new_context(
             user_agent=(

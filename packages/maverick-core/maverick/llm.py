@@ -1394,6 +1394,25 @@ def _provider_config_fingerprint(
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _configured_timeouts(present: dict) -> dict[str, str]:
+    """``[latency] read_timeout`` / ``connect_timeout`` for the provider client,
+    for each timeout the environment does not already set."""
+    try:
+        from .config import load_config
+
+        latency = (load_config() or {}).get("latency") or {}
+    except Exception:  # pragma: no cover -- config never blocks a call
+        return {}
+    out: dict[str, str] = {}
+    for env_name, key in (("MAVERICK_LLM_READ_TIMEOUT", "read_timeout"),
+                          ("MAVERICK_LLM_CONNECT_TIMEOUT", "connect_timeout")):
+        value = latency.get(key) if isinstance(latency, dict) else None
+        if env_name not in present and isinstance(value, (int, float)) \
+                and not isinstance(value, bool) and value > 0:
+            out[env_name] = str(float(value))
+    return out
+
+
 def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
     """Token preflight before an LLM dispatch (roadmap 'token preflight v1').
 
@@ -1722,6 +1741,8 @@ class LLM:
                 "MAVERICK_LLM_READ_TIMEOUT", "MAVERICK_LLM_CONNECT_TIMEOUT",
             ) if name in environment
         }
+        # [latency] read/connect timeouts apply when the environment sets none.
+        common_environment.update(_configured_timeouts(common_environment))
         if provider == "anthropic" and "ANTHROPIC_AUTH_TOKEN" in environment:
             common_environment["ANTHROPIC_AUTH_TOKEN"] = environment["ANTHROPIC_AUTH_TOKEN"]
         if provider not in ("anthropic", "bedrock", "codex_cli"):
@@ -2260,7 +2281,9 @@ class LLM:
         a no-op unless caching is on. When a budget is provided, reserve an
         estimated cache-write cost before sending and let the provider record
         returned usage. Returns whether a warm request was sent; never raises."""
-        if os.environ.get("MAVERICK_CACHE_MESSAGES", "1") == "0":
+        from .env_setting import env_or_config
+
+        if env_or_config("MAVERICK_CACHE_MESSAGES", "cache", "messages", "1") == "0":
             return False
         provider, model_id = _parse_spec(
             require_model_allowed(model or self.model)

@@ -297,8 +297,11 @@ def shell(sandbox) -> Tool:
         timeout_override = None
         if _is_long_running(cmd):
             try:
+                from ..env_setting import env_or_config
+
                 timeout_override = float(
-                    os.environ.get("MAVERICK_LONG_CMD_TIMEOUT", "600")
+                    env_or_config("MAVERICK_LONG_CMD_TIMEOUT", "sandbox",
+                                  "long_command_timeout", "600") or "600"
                 )
             except ValueError:
                 timeout_override = 600.0
