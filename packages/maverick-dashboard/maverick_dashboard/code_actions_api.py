@@ -24,7 +24,31 @@ log = logging.getLogger(__name__)
 ASSET = "lightwork-code.js"
 _PID = re.compile(r"[0-9a-f]{16}\Z")
 _PROTECT = {"block", "approve", "audit"}
-_REMOTE = re.compile(r"(https?|ssh|git)://[^\s@/]+(/\S*)?\Z")
+_REMOTE = re.compile(r"(https?|ssh|git)://([^\s@/]+)(/\S*)?\Z")
+# A web request waits for git; the command line keeps the long limit.
+_WEB_GIT_TIMEOUT = 120
+_INTERNAL_ADDRESS = (
+    "Lightwork cannot copy code from an address inside its own network from the "
+    "dashboard. Use the project's public address, or ask the person who installed "
+    "Lightwork to allow internal code servers."
+)
+
+
+def _public_source(source: str) -> None:
+    """Refuse a code address that points at this server or its private network
+    (for example the cloud's instance-details address)."""
+    from urllib.parse import urlsplit
+
+    from maverick.tools._ssrf import BlockedHost, resolve_pinned_ip
+
+    try:
+        host = urlsplit(source).hostname or ""
+    except ValueError:
+        host = ""
+    try:
+        resolve_pinned_ip(host)
+    except BlockedHost as exc:
+        raise HTTPException(status_code=422, detail=_INTERNAL_ADDRESS) from exc
 
 
 class RepoIn(BaseModel):
@@ -131,12 +155,14 @@ async def add_repo(request: Request, body: RepoIn) -> dict:
             "https://github.com/your-company/your-project."))
     if body.protect not in _PROTECT:
         raise HTTPException(status_code=422, detail="Choose how the code is protected.")
+    await run_in_threadpool(_public_source, source)
     from maverick.config import get_codebase
 
     def _do():
         return vault.register(name, source, default_branch=(body.branch or "").strip() or None,
                               test_command=(body.test_command or "").strip() or None,
-                              protect=body.protect or get_codebase()["default_protect"])
+                              protect=body.protect or get_codebase()["default_protect"],
+                              timeout=_WEB_GIT_TIMEOUT)
     try:
         repo = await run_in_threadpool(_do)
     except vault.VaultError as exc:
@@ -153,11 +179,14 @@ async def sync_repo(request: Request, name: str) -> dict:
     require_permission(request, "admin")
     vault = _vault()
     try:
-        await run_in_threadpool(vault.get, name)
+        repo = await run_in_threadpool(vault.get, name)
     except vault.VaultError as exc:
         raise HTTPException(status_code=404, detail="That code project was not found.") from exc
+    if _REMOTE.fullmatch(repo.source):
+        # Checked again: the address's name may now point somewhere else.
+        await run_in_threadpool(_public_source, repo.source)
     try:
-        report = await run_in_threadpool(vault.sync, name)
+        report = await run_in_threadpool(lambda: vault.sync(name, timeout=_WEB_GIT_TIMEOUT))
     except vault.VaultError as exc:
         conflict = "conflicts" in str(exc)
         raise HTTPException(status_code=409 if conflict else 502, detail=(

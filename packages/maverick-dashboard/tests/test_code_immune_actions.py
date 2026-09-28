@@ -150,6 +150,20 @@ def test_add_repo_takes_only_a_web_address(client, monkeypatch, tmp_path):
         assert "web address" in r.json()["detail"]
 
 
+def test_add_repo_refuses_addresses_inside_the_network(client, monkeypatch):
+    _code_on(monkeypatch)
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    from maverick.codebase import vault
+    started = []
+    monkeypatch.setattr(vault, "register", lambda *a, **k: started.append(a))
+    for source in ("http://169.254.169.254/latest/meta-data", "http://127.0.0.1:8080/x.git",
+                   "git://10.0.0.5/x", "ssh://localhost/srv/x.git", "https://[::1]/x.git"):
+        r = client.post("/api/v1/code/repos", json={"name": "web", "source": source})
+        assert r.status_code == 422, source
+        assert "inside its own network" in r.json()["detail"]
+    assert started == []
+
+
 def test_start_a_change_needs_an_ai_provider(client, monkeypatch, tmp_path):
     _code_on(monkeypatch)
     from maverick.codebase import vault

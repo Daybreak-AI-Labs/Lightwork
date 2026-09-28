@@ -188,8 +188,10 @@ def _private_tmp(prefix: str) -> Path:
 
 def register(name: str, source: str, *, default_branch: str | None = None,
              test_command: str | None = None, protect: str = "block",
-             token_env: str | None = None) -> Repo:
-    """Import a repository (every branch and tag) into the vault."""
+             token_env: str | None = None, timeout: int = _GIT_TIMEOUT) -> Repo:
+    """Import a repository (every branch and tag) into the vault.
+
+    ``timeout`` bounds each network step (the dashboard uses a short one)."""
     if not NAME.fullmatch(name):
         raise VaultError("name: lowercase letters, digits, '.', '_' and '-' (max 64)")
     if protect not in PROTECT:
@@ -203,8 +205,9 @@ def register(name: str, source: str, *, default_branch: str | None = None,
             host = tmp / "host.git"
             _git(["init", "-q", "--bare", str(host)])
             _git(["fetch", "-q", source, "+refs/heads/*:refs/heads/*",
-                  "+refs/tags/*:refs/tags/*"], git_dir=host, token_env=token_env)
-            branch = default_branch or _remote_default(source, token_env) or "main"
+                  "+refs/tags/*:refs/tags/*"], git_dir=host, token_env=token_env,
+                 timeout=timeout)
+            branch = default_branch or _remote_default(source, token_env, timeout) or "main"
             head = _store_bundle(name, host, branch)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -215,9 +218,11 @@ def register(name: str, source: str, *, default_branch: str | None = None,
     return repo
 
 
-def _remote_default(source: str, token_env: str | None) -> str | None:
+def _remote_default(source: str, token_env: str | None,
+                    timeout: int = _GIT_TIMEOUT) -> str | None:
     try:
-        out = _git(["ls-remote", "--symref", source, "HEAD"], token_env=token_env)
+        out = _git(["ls-remote", "--symref", source, "HEAD"], token_env=token_env,
+                   timeout=timeout)
     except VaultError:
         return None
     m = re.search(r"ref: refs/heads/(\S+)\s+HEAD", out)
@@ -296,7 +301,7 @@ def _is_ancestor(host: Path, a: str, b: str) -> bool:
         return False
 
 
-def sync(name: str) -> dict:
+def sync(name: str, *, timeout: int = _GIT_TIMEOUT) -> dict:
     """Bring upstream commits into the vault without losing vault-only work.
 
     Upstream branches are fetched as ``refs/remotes/upstream/*``. A vault branch
@@ -309,7 +314,8 @@ def sync(name: str) -> dict:
                                     "merged": [], "diverged_kept": []}
     with cross_process_lock(_bundle_path(name), strict=True), host_repo(name) as host:
         _git(["fetch", "-q", repo.source, "+refs/heads/*:refs/remotes/upstream/*",
-              "+refs/tags/*:refs/tags/*"], git_dir=host, token_env=repo.token_env)
+              "+refs/tags/*:refs/tags/*"], git_dir=host, token_env=repo.token_env,
+             timeout=timeout)
         upstream = _git(["for-each-ref", "--format=%(refname:strip=3)",
                          "refs/remotes/upstream/"], git_dir=host).split()
         for branch in upstream:
