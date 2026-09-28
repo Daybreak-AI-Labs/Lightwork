@@ -185,14 +185,16 @@ class RequestExecutions:
     def _finish(self, key, handle, marker, *, result=None, error=None):
         # Marker completion corresponds to actual worker/coroutine exit, never
         # to a cancelled asyncio wrapper or the moment a stop was requested.
+        # The id is released before anyone waiting is woken: a reply sent on
+        # the marker must never race a client's next request reusing that id.
+        with self._lock:
+            self._entries.pop(key, None)
+            self._threaded.pop(key, None)
         handle.finished.set()
         if error is None:
             marker.set_result(result)
         else:
             marker.set_exception(error)
-        with self._lock:
-            self._entries.pop(key, None)
-            self._threaded.pop(key, None)
 
     def submit(self, owner: str, request_id: object, function, *, quota_owner: str | None = None, handle: ExecutionHandle | None = None):
         key, handle, marker = self._admit(owner, request_id, quota_owner, handle, threaded=True)

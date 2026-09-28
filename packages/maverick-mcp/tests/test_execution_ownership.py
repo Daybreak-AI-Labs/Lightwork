@@ -635,3 +635,29 @@ def test_one_owner_cannot_hold_every_worker():
         asyncio.run(main())
     finally:
         release.set()
+
+
+def test_a_finished_request_id_is_free_before_its_result_is_delivered():
+    # A reply is sent as soon as the result arrives; the client may then reuse
+    # the id at once (JSON-RPC ids only need to be unique while in flight).
+    pool = RequestExecutions(workers=1)
+    reused, go = [], threading.Event()
+    try:
+        _handle, marker = pool.submit("owner", 1, lambda: go.wait(5) and "done")
+
+        def reuse(_completed):
+            try:
+                reused.append(pool.submit("owner", 1, lambda: "again")[1])
+            except Exception as exc:  # noqa: BLE001 -- recorded for the assertion
+                reused.append(exc)
+
+        marker.add_done_callback(reuse)  # registered while the work still runs
+        go.set()
+        assert marker.result(timeout=5) == "done"
+        deadline = time.monotonic() + 5
+        while not reused and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(reused) == 1 and not isinstance(reused[0], Exception), reused
+        assert reused[0].result(timeout=5) == "again"
+    finally:
+        pool.shutdown()
