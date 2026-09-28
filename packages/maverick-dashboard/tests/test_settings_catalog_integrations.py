@@ -88,6 +88,14 @@ VALUES: dict[str, tuple[object, object]] = {
     "data_map.graph_token": ("sample-graph-token", "sample-graph-token"),  # pragma: allowlist secret
     "voice.whisper_cpp_bin": ("whisper-cli", "whisper-cli"),
     "voice.whisper_cpp_model": ("ggml-custom.bin", "ggml-custom.bin"),
+    # finance operating profile
+    "finance.framework": ("ifrs", "ifrs"),
+    "finance.materiality": (50000, 50000),
+    "finance.automation.default": ("approve", "approve"),
+    "finance.automation.*": ([{"name": "send_invoice", "level": "straight_through"}],
+                             {"send_invoice": "straight_through"}),
+    "finance.sod.mode": ("warn", "warn"),
+    "finance.approvals.timeout": ("fail_closed", "fail_closed"),
 }
 
 # id -> a value the server must refuse
@@ -147,6 +155,13 @@ INVALID: dict[str, object] = {
     "data_map.graph_token": "",
     "voice.whisper_cpp_bin": "/usr/bin/python3",
     "voice.whisper_cpp_model": "ggml-escape.bin",
+    # finance operating profile (a payment below approve is a hard floor)
+    "finance.framework": "local_gaap",
+    "finance.materiality": 0,
+    "finance.automation.default": "autopilot",
+    "finance.automation.*": [{"name": "release_payment", "level": "straight_through"}],
+    "finance.sod.mode": "block",
+    "finance.approvals.timeout": "fail_open",
 }
 
 # id -> (value first set without confirmation or None, the loosening value)
@@ -176,6 +191,13 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "attachments.audio_max_bytes": (None, 512),
     "voice.whisper_cpp_bin": (None, "whisper-cli"),
     "voice.whisper_cpp_model": (None, "ggml-custom.bin"),
+    # finance operating profile
+    "finance.framework": (None, "ifrs"),
+    "finance.materiality": (50000, 100000),
+    "finance.automation.default": ("draft", "straight_through"),
+    "finance.automation.*": (None, [{"name": "send_invoice", "level": "approve"}]),
+    "finance.sod.mode": ("enforce", "warn"),
+    "finance.approvals.timeout": ("fail_closed", ""),
 }
 
 

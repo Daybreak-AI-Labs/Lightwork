@@ -470,4 +470,122 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           unit="MB", weaker="higher", env=("MAVERICK_AUDIO_MAX_BYTES",),
           warning="Larger sound files will be accepted, which uses more of this server's "
                   "memory."),
+    ) + _finance_profile_rows(S, C)
+
+
+# ------------------------------------------------ finance operating profile
+# The Finance Operating Profile (maverick.finance.profile, finance-agent-suite
+# §3.8). Values match the installer's finance step. Every row takes effect only
+# while finance operations are turned on.
+_FINANCE_SUBGROUP = "How agents handle finance work"
+_LEVELS = (("draft", "Prepare only: a person carries it out"),
+           ("approve", "Act after a person approves"),
+           ("auto_threshold", "Act alone under the approval limit"),
+           ("straight_through", "Act alone"))
+_ALWAYS_A_PERSON = ("Payments, journal postings, payroll, bank-detail and supplier-record "
+                    "changes, period close, chart-of-accounts changes, tax payments and "
+                    "filings always wait for a person, whatever is chosen here.")
+
+
+def _finance_actions() -> tuple[tuple[str, str], ...]:
+    from maverick.finance.profile import FINANCE_ACTIONS
+
+    return tuple(sorted(FINANCE_ACTIONS.items(), key=lambda item: item[1]))
+
+
+def _finance_profile_rows(S, C) -> tuple:
+    return (
+        S("finance", "framework", "Accounting framework",
+          "The accounting standards your books follow. Lightwork adds that framework's rules "
+          "to agent actions: under US GAAP, reversing an impairment write-down or revaluing "
+          "an asset upward is refused; under IFRS, those wait for a person and LIFO stock "
+          "costing is refused. Posting, period close and accounting-policy changes wait for "
+          "a person under both. Applies while finance operations are turned on.",
+          "select", "Finance", "", "maverick.finance.profile", subgroup="Rules",
+          choices=(("", "Not set"), ("us_gaap", "US GAAP"), ("ifrs", "IFRS")),
+          weaker="change",
+          warning="Different accounting rules will apply: some agent actions that were "
+                  "refused may go ahead once a person approves them.",
+          aliases="gaap ifrs accounting standards"),
+        S("finance", "materiality", "Materiality",
+          "The amount at which a finance matter is significant. An unusual payment pattern "
+          "that adds up to this much or more needs a second, independent reviewer before "
+          "its case can close, and agents never act alone on an amount this large. Leave "
+          "empty for no materiality. Applies while finance operations are turned on.",
+          "number", "Finance", None, "maverick.finance.profile", subgroup=_FINANCE_SUBGROUP,
+          minimum=1, maximum=1000000000, unit="dollars", weaker="higher",
+          warning="Fewer unusual payment patterns will need a second reviewer, and agents "
+                  "may act alone on larger amounts.",
+          aliases="materiality flux review threshold"),
+        S("finance.automation", "default", "How far agents go on finance actions",
+          "What agents may do on finance actions such as approving expenses or sending "
+          "invoices. Act alone under the approval limit uses the lower of Pause payments "
+          "above and Materiality; with neither set, each action waits for a person. "
+          + _ALWAYS_A_PERSON + " Applies while finance operations are turned on.",
+          "select", "Finance", "", "maverick.finance.profile", subgroup=_FINANCE_SUBGROUP,
+          choices=(("", "Not set: only the approval limits and rules apply"), *_LEVELS),
+          weaker=True, order=("draft", "approve", "auto_threshold", "straight_through", ""),
+          warning="Agents will be able to do more on finance actions without a person.",
+          aliases="automation level ladder draft approve straight through"),
+        S("finance.automation", "*", "Finance actions with their own level",
+          "Give one finance action its own level instead of the one above. "
+          + _ALWAYS_A_PERSON + " Applies while finance operations are turned on.",
+          "table", "Finance", {}, "maverick.finance.profile", subgroup=_FINANCE_SUBGROUP,
+          key_kind="entries", fixed_keys=("default",), row_kind="grid",
+          choices=_finance_actions(), scalar=True,
+          columns=(C("level", "How far agents go", "select", choices=_LEVELS,
+                     required=True),),
+          row_label="Finance action", item_label="Action", add_label="Add an action",
+          empty_text="Every finance action uses the level above.", weaker="change",
+          warning="The actions you changed will follow their new level; a looser level "
+                  "lets agents do more without a person.",
+          aliases="automation per action class"),
+        S("finance.sod", "mode", "When one agent could do incompatible finance duties",
+          "Recording, approving, moving money and reconciling must not sit with one agent. "
+          "When an agent about to act holds an incompatible duty, Lightwork can block the "
+          "action, or record the conflict and ask a person to approve it instead. A "
+          "conflict on a payment, posting or other always-approved action is blocked "
+          "either way. Applies while finance operations are turned on.",
+          "select", "Finance", "", "maverick.finance.profile", subgroup=_FINANCE_SUBGROUP,
+          choices=(("", "Not checked when an action runs"), ("enforce", "Block the action"),
+                   ("warn", "Record it and ask a person")),
+          weaker=True,
+          order=("enforce", "warn", ""),
+          warning="Actions by an agent holding incompatible finance duties will no "
+                  "longer be blocked.",
+          aliases="segregation of duties sod"),
+        S("finance.approvals", "timeout", "When nobody answers a finance approval",
+          "What happens to a finance action when nobody decides on the Approvals page "
+          "within the approval wait (Safety, Approvals). Lightwork refuses the action and "
+          "takes the request off the page; an automatic approval setting or an earlier "
+          "remember this approval never counts. Refusing is the only choice because a "
+          "finance action must never go ahead without a person's decision. Applies while "
+          "finance operations are turned on.",
+          "select", "Finance", "", "maverick.finance.profile", subgroup=_FINANCE_SUBGROUP,
+          choices=(("", "Not set: the general approval rules apply"),
+                   ("fail_closed", "Refuse the action")),
+          weaker=True,
+          order=("fail_closed", ""),
+          warning="Finance approvals will follow the general approval rules again: an "
+                  "earlier remember this approval can let them run, and unanswered "
+                  "requests stay on the Approvals page.",
+          aliases="approval timeout fail closed"),
     )
+
+
+def cross_checks(effective: dict, by_id: dict, error: type[Exception]) -> None:
+    """Refuse finance levels the kernel would refuse to build (hard floors)."""
+    from maverick.finance.profile import HARD_FLOOR_ACTIONS
+
+    rows = effective.get("finance.automation.*")
+    lowered = sorted(
+        action for action, level in (rows if isinstance(rows, dict) else {}).items()
+        if action in HARD_FLOOR_ACTIONS and level in {"auto_threshold", "straight_through"}
+    )
+    if lowered:
+        setting = by_id["finance.automation.*"]
+        label = dict(setting.choices).get(lowered[0], lowered[0])
+        raise error(
+            f"{setting.label}: “{label}” always waits for a person, so choose prepare "
+            "only or act after a person approves."
+        )
