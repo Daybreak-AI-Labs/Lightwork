@@ -138,11 +138,13 @@
         No readable events are available in this tail. The audit read is
         incomplete; this does not establish that no activity was recorded.
         {% else %}
-        No instrumented activity was recorded for this day. An empty view does
-        not prove that no action occurred; verify instrumentation coverage and
-        custody in the Audit Binder before relying on completeness.
+        Nothing was recorded for these dates and filters. An empty list does not
+        prove that nothing happened; check what is recorded, and how it is kept,
+        in the audit binder before relying on it being complete.
         {% endif %}
       </p>
+      <p class="aud-links"><button type="button" class="btn btn--ghost" id="aud-pick">Pick other dates</button>
+        <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a></p>
     {% endif %}
   </div>
 

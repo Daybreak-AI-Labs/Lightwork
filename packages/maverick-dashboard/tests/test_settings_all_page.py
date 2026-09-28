@@ -159,7 +159,11 @@ def test_existing_overlay_settings_survive_a_catalog_save(audit_rows):
     from maverick import config
     from maverick_dashboard import settings_store
 
-    settings_store.set_webhooks_secret("keep-me-secret")  # pragma: allowlist secret
+    # The signing secret is saved through its reviewed change, like the Settings card.
+    reviewed = client.get("/settings/webhooks").json()["expected_generation"]
+    assert client.post("/settings/webhooks", data={
+        "secret": "keep-me-secret", "expected_generation": reviewed,  # pragma: allowlist secret
+    }).status_code == 200
     settings_store.set_sandbox_backend("docker")
     settings_store.set_toggle("features", "skills", False)
     assert _save([{"id": "sandbox.timeout", "value": 90},

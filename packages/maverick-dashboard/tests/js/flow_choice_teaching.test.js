@@ -77,7 +77,7 @@ test("teaching displays exact observations, tools and JSON arguments as literal 
 for (const [route, tool] of [["0", "approve_case"], ["1", "queue_review"]]) {
   test(`Choose ${tool} submits only route:${route}, empty inputs and the current approval binding`, async () => {
     const snapshot = run(), ui = fixture(snapshot);
-    assert.deepEqual(ui.buttons().map(button => button.textContent), ["Choose approve_case", "Choose queue_review", "Reject / request revision"]);
+    assert.deepEqual(ui.buttons().map(button => button.textContent), ["Choose approve_case", "Choose queue_review", "Reject"]);
     await ui.click("Choose " + tool);
     assert.deepEqual(ui.calls, [{ url: "/api/v1/flows/runs/run%2Fteaching/resume", method: "POST",
       body: { decision: "route:" + route, inputs: {}, approval_binding_sha256: snapshot.approval_binding_sha256 } }]);
@@ -88,7 +88,7 @@ for (const [route, tool] of [["0", "approve_case"], ["1", "queue_review"]]) {
 
 test("Reject submits a rejection, never a route or fabricated example", async () => {
   const snapshot = run(), ui = fixture(snapshot);
-  await ui.click("Reject / request revision");
+  await ui.click("Reject");
   assert.equal(ui.calls[0].body.decision, "rejected");
   assert.deepEqual(Object.keys(ui.calls[0].body).sort(), ["approval_binding_sha256", "decision", "inputs"]);
   assert.equal(ui.messages.at(-1), "Rejected.");
@@ -138,8 +138,8 @@ test("ordinary approval retains its generic approval button", async () => {
   const snapshot = run(); snapshot.cursor = "approval_1_0"; snapshot.human.choices = [];
   delete snapshot.teaching_review;
   const ui = fixture(snapshot);
-  assert.deepEqual(ui.buttons().map(button => button.textContent), ["Approve exact operation", "Reject / request revision"]);
-  await ui.click("Approve exact operation");
+  assert.deepEqual(ui.buttons().map(button => button.textContent), ["Approve", "Reject"]);
+  await ui.click("Approve");
   assert.equal(ui.calls[0].body.decision, "approved");
 });
 

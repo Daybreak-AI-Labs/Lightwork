@@ -1,5 +1,5 @@
-"""Settings in plain language: readable model names and setting sources, a
-button that makes the webhook secret, a switch for automatic model lists, the
+"""Settings in plain language: readable model names and setting sources, the
+reviewed webhook secret form, a switch for automatic model lists, the
 task-limit choice, and the Maintenance tab's installation checks."""
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def test_settings_page_reads_as_plain_language(client, monkeypatch):
     # Where the OpenAI key came from, in words.
     assert "set on the computer running Lightwork" in text
     # Buttons for everything the page describes.
-    for label in ("Test connection", "Make a secret", "Check readiness", "Run health check",
+    for label in ("Test connection", "Refresh status", "Apply change", "Check readiness", "Run health check",
                   "Check installation settings", "Show license", "Show background work",
                   "Check encryption", "Check services"):
         assert label in text, label
@@ -85,29 +85,15 @@ def test_model_label_and_source_label():
     assert unique_slug("123", set(), fallback="workspace") == "workspace-123"
 
 
-def test_generate_webhook_secret_saves_and_shows_once(client):
-    r = client.post("/settings/webhooks/generate")
-    assert r.status_code == 200
-    secret = r.json()["secret"]
-    assert len(secret) >= 32
-    assert r.headers.get("cache-control") == "no-store"
+def test_webhook_secret_changes_only_through_the_reviewed_form(client):
+    # The one-click generator bypassed the reviewed change (current owner and
+    # generation); the Settings card now saves a secret only after review.
+    assert client.post("/settings/webhooks/generate").status_code in {404, 405}
     from maverick.webhooks import inbound_secret
-    assert inbound_secret() == secret
+    assert inbound_secret() is None
     page = client.get("/settings").text
-    assert secret not in page and "Make a new secret" in page
-
-
-def test_generate_webhook_secret_is_admin_only_and_same_origin(client, monkeypatch):
-    assert TestClient(client.app).post("/settings/webhooks/generate").status_code == 403
-    _as_viewer(monkeypatch)
-    assert client.post("/settings/webhooks/generate").status_code == 403
-
-
-def test_generate_webhook_secret_refused_when_set_on_the_computer(client, monkeypatch):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "env-secret")  # pragma: allowlist secret
-    assert client.post("/settings/webhooks/generate").status_code == 409
-    text = visible_text(client.get("/settings").text)
-    assert "set on the computer running Lightwork" in text and "Make a secret" not in text
+    assert 'id="wh-form"' in page and 'id="webhook-generate"' not in page
+    assert "Make a secret" not in visible_text(page)
 
 
 def test_model_discovery_switch(client, monkeypatch):
