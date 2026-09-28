@@ -82,20 +82,30 @@ async def task_checkpoints(request: Request, goal_id: int) -> dict:
     return {"goal_id": goal_id, "steps": steps}
 
 
+_RUNNING = frozenset({"active", "running"})
+# Statuses a worker may start from (the queue claims these).
+_WAITING = frozenset({"pending", "queued"})
+
+
 @router.post("/{goal_id}/rewind")
 async def rewind_task(request: Request, goal_id: int, body: RewindIn) -> dict:
     """Go back to a saved step, on the task itself or as a new copy.
 
     A task that is still running is refused: going back under a live run would
-    race the worker that is writing its steps."""
+    race the worker that is writing its steps. A task waiting to run is refused
+    too when going back on the task itself, because a worker may pick it up at
+    any moment while its steps are being cut back."""
     require_permission(request, "operate")
     from maverick.checkpoint import rewind
 
     from .api import _request_actor
 
     world, goal = _goal(request, goal_id)
-    if getattr(goal, "status", "") in ("active", "running"):
-        raise HTTPException(status_code=409, detail="stop the task before going back to an earlier step")
+    status = getattr(goal, "status", "")
+    if status in _RUNNING or (not body.as_copy and status in _WAITING):
+        raise HTTPException(
+            status_code=409,
+            detail="This task is running or waiting to run. Stop it before going back to an earlier step.")
     actor = _request_actor(request)
     result = await run_in_threadpool(rewind, world, goal_id, body.to_step, fork=body.as_copy)
     if not result.ok:

@@ -179,3 +179,26 @@ def test_branch_pages_read_plainly_and_offer_the_controls():
     steps = client.get(f"/goals/{gid}/trajectory").text
     assert developer_terms(steps) == []
     assert "Branch from here" in steps and "Step-by-step history" in steps
+
+
+@pytest.mark.parametrize("status", ["pending", "queued", "active", "running"])
+def test_rewind_refuses_a_task_a_worker_may_start(monkeypatch, status):
+    """A waiting task can be picked up by a worker at any moment: going back
+    under it would race that run, so it is refused like a running one."""
+    import maverick.checkpoint as checkpoint
+    from maverick.world_model import open_world
+
+    calls: list[int] = []
+
+    def fake_rewind(world, goal_id, to_step, fork=False):  # pragma: no cover - must not run
+        calls.append(goal_id)
+        raise AssertionError("rewind must not run for a task a worker may start")
+
+    monkeypatch.setattr(checkpoint, "rewind", fake_rewind)
+    world = open_world()
+    gid = world.create_goal("waiting to run", "")
+    world.set_goal_status(gid, status)
+    r = client.post(f"/api/v1/run-tree/{gid}/rewind", json={"to_step": 1, "as_copy": False})
+    assert r.status_code == 409
+    assert "waiting" in r.json()["detail"] or "running" in r.json()["detail"]
+    assert calls == []
