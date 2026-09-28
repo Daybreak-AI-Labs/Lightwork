@@ -211,7 +211,7 @@ def test_complete_top_level_initial_data_can_be_used_without_input_wrapper(nativ
     "not JSON", "[1,2]", '{"x":1,"x":2}', '{"value":NaN}',
     '{"truncated":true,"preview":"partial"}', '{"pending":true,"body":{"id":"A"}}',
     '{"nested":{"complete":false}}', '{"dry_run":true}',
-    '{"password":"ordinary"}', '{"value":"***redacted***"}',
+    '{"password":"ordinary"}', '{"value":"***redacted***"}',  # pragma: allowlist secret
     json.dumps({"value": "x" * 17000}),
 ], ids=["text", "array", "duplicate", "nan", "truncated", "pending", "incomplete",
         "preview", "credential", "redacted", "oversized"])

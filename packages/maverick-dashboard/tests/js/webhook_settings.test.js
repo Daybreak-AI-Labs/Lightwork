@@ -16,7 +16,7 @@ async function harness(handler) {
   dom.window.fetch = async (url, init = {}) => { calls.push({ url, init }); return handler(url, init, calls); };
   dom.window.eval(source); await tick(); await tick();
   const get = name => dom.window.document.getElementById('wh-' + name);
-  function enter(secret = 'synthetic-ui-key') {
+  function enter(secret = 'synthetic-ui-key') { // pragma: allowlist secret
     get('secret').value = secret; get('secret').dispatchEvent(new dom.window.Event('input'));
     get('confirm').checked = true; get('confirm').dispatchEvent(new dom.window.Event('change'));
   }

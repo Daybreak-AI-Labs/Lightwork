@@ -235,7 +235,7 @@ def test_unreadable_source_is_unavailable_not_unconfigured():
     http = client()
     # Native dashboard authentication fails closed before the service runs.
     assert http.get("/settings/webhooks").status_code == 401
-    assert http.post("/settings/webhooks", data={"secret": "synthetic-key"}).status_code == 401
+    assert http.post("/settings/webhooks", data={"secret": "synthetic-key"}).status_code == 401  # pragma: allowlist secret
     with pytest.raises(WebhookSettingsUnavailable):
         state(principal="local-operator", authorize=lambda: None)
     assert path.read_bytes() == before

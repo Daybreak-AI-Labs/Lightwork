@@ -44,7 +44,7 @@ def test_lineage_wizard_preserves_separate_enable_policy_issuer_and_key_revocati
     assert settings["action_recipe_lineage"] is enabled
     assert settings["require_action_recipe_lineage"] is required
     assert settings["action_evidence_issuer"] == ("customer-workspace:production" if enabled else "")
-    assert settings["action_evidence_revoked_keys"] == (["0123456789abcdef", "fedcba9876543210"] if enabled else [])
+    assert settings["action_evidence_revoked_keys"] == (["0123456789abcdef", "fedcba9876543210"] if enabled else [])  # pragma: allowlist secret
     assert settings["action_recipes"] is False and settings["action_episode_capture"] is False
     selected = [p for p, d in prompts if "Enable signed reviewed evidence" in p and d is False]
     assert len(selected) == 1
