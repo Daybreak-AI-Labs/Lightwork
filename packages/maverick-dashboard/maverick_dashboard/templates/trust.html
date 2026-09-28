@@ -250,7 +250,9 @@
       { okText: on ? "Turn off" : "Turn on" });
     if (!ok) return;
     try {
-      var r = await fetch("/api/v1/trust/enforcement", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ enforced: !on }) });
+      // Turning blocking off lowers a protection; the server refuses it
+      // unless the request carries the confirmation given just above.
+      var r = await fetch("/api/v1/trust/enforcement", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ enforced: !on, confirm: on }) });
       if (!r.ok) throw r;
       reloadSoon(on ? "Blocking turned off." : "Blocking turned on.");
     } catch (failure) {

@@ -170,3 +170,20 @@ def test_turn_on_needs_an_administrator(monkeypatch):
 
     monkeypatch.setattr(auth, "require_global_permission", deny)
     assert client.post("/api/v1/shoring/turn-on").status_code == 403
+
+
+def test_turn_on_is_recorded_with_who_did_it(tmp_path, monkeypatch):
+    import maverick.audit as audit
+    from maverick import config
+    from maverick.audit import EventKind
+
+    rows: list[dict] = []
+    monkeypatch.setattr(audit, "audit_event",
+                        lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
+    (tmp_path / "config.toml").write_text("[shoring]\nenable = false\n", encoding="utf-8")
+    config.reset_config_cache()
+    assert client.post("/api/v1/shoring/turn-on").status_code == 200
+    (row,) = rows
+    assert row["kind"] == EventKind.SETTING_CHANGED
+    assert (row["section"], row["key"], row["old"], row["new"]) == ("shoring", "enable", False, True)
+    assert row["actor"]

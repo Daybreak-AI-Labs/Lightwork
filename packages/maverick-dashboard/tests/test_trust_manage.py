@@ -160,11 +160,13 @@ def test_enforcement_switch_writes_the_setting(tmp_path, monkeypatch):
     assert client.post("/api/v1/trust/enforcement", json={"enforced": True}).status_code == 200
     config.reset_config_cache()
     assert agent_trust.agent_trust_enforced() is True
-    assert client.post("/api/v1/trust/enforcement", json={"enforced": False}).status_code == 200
+    assert client.post("/api/v1/trust/enforcement",
+                       json={"enforced": False, "confirm": True}).status_code == 200
     config.reset_config_cache()
     assert agent_trust.agent_trust_enforced() is False
     monkeypatch.setenv("MAVERICK_AGENT_TRUST", "1")
-    assert client.post("/api/v1/trust/enforcement", json={"enforced": False}).status_code == 409
+    assert client.post("/api/v1/trust/enforcement",
+                       json={"enforced": False, "confirm": True}).status_code == 409
     config.reset_config_cache()
 
 
@@ -186,3 +188,55 @@ def test_public_key_is_offered(monkeypatch):
     assert client.get("/api/v1/trust/pubkey").json() == {"key": "ab" * 32}
     monkeypatch.setattr(agent_trust, "local_pubkey", lambda: None)
     assert client.get("/api/v1/trust/pubkey").status_code == 503
+
+
+@pytest.fixture
+def audit_rows(monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+
+    def capture(kind, **payload):
+        rows.append({"kind": kind, **payload})
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", capture)
+    return rows
+
+
+def test_turning_blocking_off_needs_confirmation_and_is_recorded(tmp_path, monkeypatch, audit_rows):
+    from maverick import agent_trust, config
+    from maverick.audit import EventKind
+    from maverick_dashboard import auth
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_AGENT_TRUST", raising=False)
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
+    from maverick_dashboard import rbac
+    rbac.set_role("user:ada", "admin")
+    audit_rows.clear()
+    config.reset_config_cache()
+    # Turning blocking on needs no confirmation, and is recorded.
+    assert client.post("/api/v1/trust/enforcement", json={"enforced": True}).status_code == 200
+    assert audit_rows[-1]["kind"] == EventKind.SETTING_CHANGED
+    assert audit_rows[-1]["actor"] == "user:ada"
+    assert (audit_rows[-1]["section"], audit_rows[-1]["key"]) == ("agent_trust", "enforce")
+    assert (audit_rows[-1]["old"], audit_rows[-1]["new"]) == (False, True)
+    audit_rows.clear()
+    # Turning it off without confirming is refused, and nothing changes.
+    r = client.post("/api/v1/trust/enforcement", json={"enforced": False})
+    assert r.status_code == 409
+    assert r.json()["confirm"][0]["id"] == "agent_trust.enforce"
+    config.reset_config_cache()
+    assert agent_trust.agent_trust_enforced() is True
+    assert audit_rows == []
+    # Confirmed, it changes and the record names who did it.
+    r = client.post("/api/v1/trust/enforcement", json={"enforced": False, "confirm": True})
+    assert r.status_code == 200
+    config.reset_config_cache()
+    assert agent_trust.agent_trust_enforced() is False
+    (row,) = audit_rows
+    assert row["kind"] == EventKind.SETTING_CHANGED and row["actor"] == "user:ada"
+    assert (row["old"], row["new"], row["confirmed"]) == (True, False, True)
