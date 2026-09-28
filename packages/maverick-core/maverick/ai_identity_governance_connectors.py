@@ -43,6 +43,16 @@ GrantKind = Literal["application_role", "application_assignment"]
 SubjectKind = Literal["user", "group", "service_principal", "unknown"]
 
 PROVIDERS: tuple[Provider, ...] = ("entra", "okta", "purview")
+#: The configuration table the dashboard and the scheduler select for these
+#: connectors (``configured_connectors`` receives that table).
+CONFIG_SECTION = "ai_identity_governance_connectors"
+# The credential names the installer writes; used when a provider has only a
+# key saved (sealed) on the dashboard and names no credential of its own.
+_DEFAULT_SECRET_REFERENCES = {
+    "entra": "ENTRA_IDENTITY_GOVERNANCE_TOKEN",  # pragma: allowlist secret
+    "okta": "OKTA_IDENTITY_GOVERNANCE_TOKEN",  # pragma: allowlist secret
+    "purview": "PURVIEW_IDENTITY_GOVERNANCE_TOKEN",  # pragma: allowlist secret
+}
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 _SECRET_REFERENCE = re.compile(r"[A-Z][A-Z0-9_]{1,127}\Z")
 _GUID = re.compile(
@@ -321,6 +331,15 @@ class ReadOnlyHTTPTransport(Protocol):
 
 
 SecretResolver = Callable[[str], str | None]
+
+
+def _with_saved_credential(resolver: SecretResolver, saved: str) -> SecretResolver:
+    """Resolve on the server first; fall back to the dashboard-saved key."""
+
+    def resolve(reference: str) -> str | None:
+        return resolver(reference) or saved
+
+    return resolve
 
 
 @dataclass(frozen=True)
@@ -1105,6 +1124,7 @@ def configured_connectors(
             "tenant_id",
             "base_url",
             "credential_secret_ref",
+            "credential",
             "timeout_seconds",
             "max_pages",
             "max_records",
@@ -1122,19 +1142,29 @@ def configured_connectors(
         transport = transports.get(provider)
         if transport is None:
             raise IdentityGovernanceUnsupportedError("connector_transport_required")
+        # A key saved on the dashboard is only a fallback: the credential the
+        # server holds under the provider's reference always wins.
+        saved = raw.get("credential")
+        if saved is not None and (not isinstance(saved, str) or not saved.strip()):
+            raise IdentityGovernanceConfigError("connector_credential_invalid")
         config = ConnectorConfig(
             provider=provider,
             enable=True,
             tenant_id=raw.get("tenant_id", ""),
             base_url=raw.get("base_url", ""),
-            credential_secret_ref=raw.get("credential_secret_ref", ""),
+            credential_secret_ref=raw.get(
+                "credential_secret_ref",
+                _DEFAULT_SECRET_REFERENCES[provider] if saved else "",
+            ),
             limits=_limits_from_table(raw),
         )
         result.append(
             factories[provider](
                 config,
                 transport=transport,
-                secret_resolver=secret_resolver,
+                secret_resolver=(
+                    _with_saved_credential(secret_resolver, saved) if saved else secret_resolver
+                ),
                 sleep=sleep,
                 clock=clock,
             )
@@ -1144,6 +1174,7 @@ def configured_connectors(
 
 __all__ = [
     "BoundedHTTPResponse",
+    "CONFIG_SECTION",
     "ConnectorConfig",
     "ConnectorLimits",
     "DataClassificationObservation",

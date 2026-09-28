@@ -905,3 +905,34 @@ def test_required_vendor_fields_are_explicit_and_stable() -> None:
     assert "Lightwork_Idempotency_Key" in gvt.ARCHER_REQUIRED_FIELDS
     assert "Lightwork_Payload_JSON" in gvt.ARCHER_REQUIRED_FIELDS
     assert "url" not in {field.lower() for field in gvt.ARCHER_REQUIRED_FIELDS}
+
+
+def test_config_loader_uses_a_saved_key_only_when_the_server_has_none() -> None:
+    section = {
+        "base_url": "https://tenant.service-now.com",
+        "credential": "saved-dashboard-key",  # pragma: allowlist secret
+    }
+    transport = gvt.transport_from_config(
+        GRCSystem.SERVICENOW_IRM,
+        config={"grc_outbound_sync": {"servicenow_irm": section}},
+        environ={},
+        http=_QueueHTTP([]),
+        secret_resolver=lambda _name: None,
+    )
+    assert "saved-dashboard-key" not in repr(transport)
+    assert transport._secret_resolver("SERVICENOW_TOKEN") == "saved-dashboard-key"
+    server = gvt.transport_from_config(
+        GRCSystem.SERVICENOW_IRM,
+        config={"grc_outbound_sync": {"servicenow_irm": section}},
+        environ={},
+        http=_QueueHTTP([]),
+        secret_resolver=lambda _name: "server-key",
+    )
+    assert server._secret_resolver("SERVICENOW_TOKEN") == "server-key"
+    with pytest.raises(gvt.GRCVendorConfigError) as caught:
+        gvt.transport_from_config(
+            GRCSystem.SERVICENOW_IRM,
+            config={"grc_outbound_sync": {"servicenow_irm": {**section, "credential": " "}}},
+            environ={},
+        )
+    assert caught.value.category == "credential_invalid"

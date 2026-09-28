@@ -305,6 +305,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "red_team_assurance": {
         "enable",
         "commitment_secret_ref",
+        "commitment_key",
         "max_cases",
         "max_response_bytes",
         "campaign_ttl_seconds",

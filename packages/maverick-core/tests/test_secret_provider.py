@@ -85,3 +85,14 @@ def test_backend_from_config_when_env_absent(monkeypatch, tmp_path):
         lambda *a, **k: {"secrets": {"backend": "file", "dir": str(tmp_path)}},
     )
     assert sp.get_secret("CFG_SECRET") == "cfg"
+
+
+def test_saved_key_is_a_fallback_and_the_server_value_wins(monkeypatch):
+    # A key saved (sealed) on the dashboard is used only when the server holds
+    # nothing under the reference.
+    assert sp.get_secret_or_saved("ABSENT_REF", "saved-value") == "saved-value"
+    monkeypatch.setenv("PRESENT_REF", "server-value")
+    assert sp.get_secret_or_saved("PRESENT_REF", "saved-value") == "server-value"
+    assert sp.get_secret_or_saved("ABSENT_REF", "") is None
+    assert sp.get_secret_or_saved("ABSENT_REF", None) is None
+    assert sp.get_secret_or_saved("", "saved-value") == "saved-value"

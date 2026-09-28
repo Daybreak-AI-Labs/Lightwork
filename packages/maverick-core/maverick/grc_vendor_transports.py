@@ -982,10 +982,25 @@ _TRANSPORT_CONFIG_KEYS = frozenset(
     {
         "base_url",
         "credential_secret_ref",
+        "credential",
         "timeout_seconds",
         "max_response_bytes",
     }
 )
+# Config table of each vendor under [grc_outbound_sync].
+_TRANSPORT_SECTIONS = {
+    GRCSystem.SERVICENOW_IRM: "servicenow_irm",
+    GRCSystem.ARCHER: "archer",
+}
+
+
+def _with_saved_credential(resolver: SecretResolver, saved: str) -> SecretResolver:
+    """Resolve on the server first; fall back to the dashboard-saved key."""
+
+    def resolve(reference: str) -> str | None:
+        return resolver(reference) or saved
+
+    return resolve
 
 
 def _environment_value(environ: Mapping[str, str], names: tuple[str, ...]) -> str:
@@ -1031,8 +1046,7 @@ def transport_from_config(
     root = config.get("grc_outbound_sync", {})
     if not isinstance(root, Mapping):
         raise GRCVendorConfigError("vendor_config_invalid")
-    section_name = target.value
-    section = root.get(section_name, {})
+    section = root.get(_TRANSPORT_SECTIONS[target], {})
     if not isinstance(section, Mapping):
         raise GRCVendorConfigError("vendor_config_invalid")
     if set(section) - _TRANSPORT_CONFIG_KEYS:
@@ -1061,6 +1075,15 @@ def transport_from_config(
         timeout_seconds=section.get("timeout_seconds", 15.0),
         max_response_bytes=section.get("max_response_bytes", 256 * 1_024),
     )
+    # A key saved (sealed) on the dashboard is only a fallback: the credential
+    # the server holds under the reference always wins.
+    saved = section.get("credential")
+    if saved is not None and (not isinstance(saved, str) or not saved.strip()):
+        raise GRCVendorConfigError("credential_invalid")
+    if saved:
+        secret_resolver = _with_saved_credential(
+            secret_resolver or _default_secret_resolver, saved,
+        )
     kwargs = {
         "base_url": base_url,
         "credential_secret_ref": reference,

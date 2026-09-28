@@ -29,7 +29,11 @@ from maverick.ai_identity_governance_connectors import PROVIDERS
 
 log = logging.getLogger(__name__)
 
-_PROVIDERS = tuple(PROVIDERS)
+# Spelled out so the schedulable providers are visible here; the check below
+# keeps this list and the connector module's list the same.
+_PROVIDERS = ("entra", "okta", "purview")
+if frozenset(_PROVIDERS) != frozenset(PROVIDERS):
+    raise RuntimeError("identity-governance scheduler providers are inconsistent")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _PSEUDONYMOUS_ID_RE = re.compile(r"(?:idn|sub|res|prm|grt|cls|ast)_[0-9a-f]{32}\Z")
 _CODE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}\Z")
