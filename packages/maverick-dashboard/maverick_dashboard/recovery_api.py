@@ -208,7 +208,12 @@ def _confirm(body: ConfirmIn) -> None:
 async def recovery_page(request: Request):
     require_global_permission(request, "admin")
     from .app import templates
-    response = templates.TemplateResponse(request, "workspace_recovery.html", {"recovery_mode": enabled(request.app)})
+    try:
+        feature_on = config.get_features().get("workspace_recovery") is True
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows the switched-off note
+        feature_on = False
+    response = templates.TemplateResponse(request, "workspace_recovery.html", {
+        "recovery_mode": enabled(request.app), "feature_on": feature_on})
     response.headers["Cache-Control"] = "private, no-store"
     return response
 

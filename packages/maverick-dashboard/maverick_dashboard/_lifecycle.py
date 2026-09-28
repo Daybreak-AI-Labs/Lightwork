@@ -193,6 +193,7 @@ def register_main_components(app, supervisor):
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),
         ("code_watch", "code_ops_api", "stop_watchers", "_watch_threads"),
         ("code_sessions", "repl_ops_api", "close_all_sessions", "_threads"),
+        ("services", "service_supervisor", "stop_all", "_threads"),
     ]
     for name, module_name, stop_name, thread_name in entries:
         module_key = f"{__package__}.{module_name}"

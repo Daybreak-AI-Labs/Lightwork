@@ -128,6 +128,32 @@ def render(steps: list[Step]) -> str:
     return "\n".join(lines)
 
 
+def current_plan(world=None) -> tuple[list[str], int, int, list[Step]]:
+    """``(lint problems, current version, target version, pending steps)`` for
+    the world database -- what ``maverick schema-plan`` shows.
+
+    ``world`` is an open world to read the current version from; without one
+    the default world is opened (no database yet means nothing is pending).
+    Nothing is planned when the migration table fails its structural lint.
+    """
+    from .world_model import SCHEMA_VERSION, close_world_if_owned, open_world
+    problems = validate()
+    if problems:
+        return problems, SCHEMA_VERSION, SCHEMA_VERSION, []
+    if world is not None:
+        current = world.schema_version
+    else:
+        try:
+            w = open_world()
+            try:
+                current = w.schema_version
+            finally:
+                close_world_if_owned(w)
+        except Exception:
+            current = SCHEMA_VERSION  # no DB yet -> nothing pending
+    return [], int(current), SCHEMA_VERSION, plan(int(current), SCHEMA_VERSION)
+
+
 def _default_migrations():
     from .world_model import MIGRATIONS
     return MIGRATIONS
@@ -165,7 +191,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     return 0
 
 
-__all__ = ["Step", "classify", "plan", "online_only", "validate", "render", "main"]
+__all__ = ["Step", "classify", "plan", "online_only", "validate", "render", "main",
+           "current_plan"]
 
 
 if __name__ == "__main__":  # pragma: no cover

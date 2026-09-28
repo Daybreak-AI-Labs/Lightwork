@@ -667,6 +667,11 @@ async def _lifespan(app: FastAPI):
     from maverick.installation_recovery import assert_normal_start_allowed
 
     assert_normal_start_allowed()
+    # Moves an administrator scheduled for "while Lightwork is stopped" run
+    # here, before this process takes ownership of the data folder. Never raises.
+    from .offline_maintenance import run_scheduled as _run_offline_maintenance
+
+    await run_in_threadpool(_run_offline_maintenance)
     from maverick.deployment import require_enterprise_or_die
 
     require_enterprise_or_die()
@@ -1079,6 +1084,23 @@ app.include_router(store_catalogs_router)
 app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
 app.include_router(build_tools_ops_router())
+# Installation operations that were terminal-only (Settings > Maintenance,
+# Workspaces, Billing, Help, Savings, Performance and the full setup guide).
+from . import (  # noqa: E402
+    billing_ops_api,
+    insights_ops_api,
+    installation_ops_api,
+    process_ops_api,
+    setup_guide,
+    support_ops_api,
+    tenant_ops_api,
+)
+
+for _ops_module in (billing_ops_api, insights_ops_api, installation_ops_api, support_ops_api, tenant_ops_api):
+    app.include_router(_ops_module.router)
+    app.include_router(_ops_module.asset_router)
+app.include_router(process_ops_api.router)
+app.include_router(setup_guide.router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 

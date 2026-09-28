@@ -129,6 +129,45 @@ class CanaryStore:
         return sorted(self._load())
 
 
+def measure(world, *, window_days: int = 30, now: float | None = None,
+            episode_limit: int = 5000) -> dict[str, float]:
+    """This installation's current cost/perf snapshot from finished runs.
+
+    ``cost_per_task`` and ``tokens_per_task`` (averages), ``p95_latency_s``
+    (95th-percentile run time) and ``success_rate`` over runs that finished in
+    the last ``window_days``. Empty when nothing finished in the window, so a
+    snapshot is never invented. Read-only.
+    """
+    import time as _time
+
+    from .workforce_value import _is_done
+
+    cutoff = (now if now is not None else _time.time()) - window_days * 86400.0
+    costs: list[float] = []
+    tokens: list[int] = []
+    durations: list[float] = []
+    done = 0
+    for ep in world.list_episodes(limit=episode_limit):
+        ended = float(getattr(ep, "ended_at", 0) or 0)
+        started = float(getattr(ep, "started_at", 0) or 0)
+        if not ended or ended < cutoff:
+            continue
+        costs.append(float(getattr(ep, "cost_dollars", 0) or 0))
+        tokens.append(int(getattr(ep, "input_tokens", 0) or 0) + int(getattr(ep, "output_tokens", 0) or 0))
+        durations.append(max(0.0, ended - started))
+        done += 1 if _is_done(getattr(ep, "outcome", None)) else 0
+    if not costs:
+        return {}
+    ordered = sorted(durations)
+    p95 = ordered[min(len(ordered) - 1, max(0, math.ceil(0.95 * len(ordered)) - 1))]
+    return {
+        "cost_per_task": round(sum(costs) / len(costs), 6),
+        "tokens_per_task": round(sum(tokens) / len(tokens), 2),
+        "p95_latency_s": round(p95, 3),
+        "success_rate": round(done / len(costs), 4),
+    }
+
+
 def render(result: CanaryResult) -> str:
     lines = ["CANARY: " + ("PASS" if result.passed else "FAIL")]
     for v in result.verdicts:
@@ -138,5 +177,5 @@ def render(result: CanaryResult) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["MetricVerdict", "CanaryResult", "compare", "CanaryStore", "render",
+__all__ = ["MetricVerdict", "CanaryResult", "compare", "CanaryStore", "render", "measure",
            "HIGHER_IS_BETTER", "DEFAULT_TOLERANCE"]

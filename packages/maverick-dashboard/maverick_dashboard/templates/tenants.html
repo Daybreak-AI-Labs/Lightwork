@@ -50,6 +50,63 @@
     </details>
   </div>
 
+  <div class="section-head"><h2 id="onboard-title">Set up a new client in one step</h2></div>
+  <div class="panel" id="tenant-onboard-panel">
+    <p class="muted">Creates the workspace and an invitation for its first administrator together. The invitation link is shown once so you can send it.</p>
+    <form id="tenant-onboard" class="tenants-form" aria-labelledby="onboard-title">
+      <label class="tenants-field">Workspace name
+        <input class="input" name="display_name" required maxlength="200" placeholder="e.g. Acme Finance" autocomplete="off">
+      </label>
+      <label class="tenants-field">Plan
+        <select class="select" name="plan">
+          <option value="free" selected>Free</option>
+          <option value="pro">Pro</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
+      </label>
+      <fieldset class="tenants-limit">
+        <legend>Daily spending limit</legend>
+        <label><input type="checkbox" name="no_limit" checked data-limit-toggle> No daily limit</label>
+        <label class="tenants-field">Limit in US dollars per day
+          <input class="input" name="max_daily_dollars" type="number" min="0.01" step="0.01" disabled data-limit-amount>
+        </label>
+      </fieldset>
+      <label class="tenants-field">First administrator's email
+        <input class="input" name="admin_email" type="email" required maxlength="254" autocomplete="off">
+      </label>
+      <label class="tenants-field">Their role
+        <select class="select" name="role" data-onboard-roles><option value="admin" selected>Admin</option></select>
+      </label>
+      <div><button type="submit" class="btn btn--primary">Create workspace and invite</button></div>
+    </form>
+    <p id="tenant-onboard-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+    <div id="tenant-onboard-out" hidden>
+      <label class="tenants-field" for="tenant-onboard-link">Invitation link (shown once)
+        <input class="input" id="tenant-onboard-link" readonly autocomplete="off" spellcheck="false">
+      </label>
+      <p><button type="button" class="btn" id="tenant-onboard-copy">Copy link</button></p>
+    </div>
+  </div>
+
+  <div class="section-head"><h2 id="keys-title">Workspace encryption keys</h2></div>
+  <div class="panel" id="tenant-keys-panel">
+    <p class="muted">When your IT team replaces the master encryption key, re-protect every workspace's own key with the new one here before the server switches over. Choose both key files; they are used only for this and are never saved or shown.</p>
+    <form id="tenant-keys" class="tenants-form" aria-labelledby="keys-title">
+      <label class="tenants-field">Current key file
+        <input class="input" type="file" name="current_key" accept=".txt,.key,text/plain" required>
+      </label>
+      <label class="tenants-field">New key file
+        <input class="input" type="file" name="new_key" accept=".txt,.key,text/plain" required>
+      </label>
+      <div class="tenants-actions">
+        <button type="submit" class="btn">See what would change</button>
+        <button type="button" class="btn btn--primary" id="tenant-keys-rotate" hidden>Re-protect workspaces</button>
+      </div>
+    </form>
+    <p id="tenant-keys-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+    <div id="tenant-keys-out"></div>
+  </div>
+
   {% if not tenants %}
     <div class="panel">
       <p class="muted tenants-empty">No workspaces yet. You're using a single workspace, which is
@@ -119,4 +176,5 @@
     .tenants-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
   </style>
   <script src="/static/lightwork-tenants.js" defer></script>
+  <script src="/static/lightwork-tenant-ops.js" defer></script>
 {% endblock %}

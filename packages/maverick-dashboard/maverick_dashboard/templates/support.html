@@ -32,6 +32,17 @@
   </section>
   {% elif not support_enabled %}<div class="panel"><p>Support reports are switched off. An administrator can turn them on in Settings.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>
   {% else %}<div class="panel"><p>Your administrator can make a support report. You can see each task's status and problems on its task page.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>{% endif %}
+  <section class="panel" id="issue-report" aria-labelledby="issue-report-title">
+    <h2 id="issue-report-title">Report a Problem With a Task</h2>
+    <p class="muted">Choose a task that stopped with a problem. Lightwork prepares a bug report for Lightwork's makers with the task's name and error messages filled in, after removing passwords and keys. You review it on their public page before anything is sent.</p>
+    <form id="issue-report-form" class="support-followups">
+      <label for="issue-report-task">Task that stopped</label>
+      <select class="select" id="issue-report-task" name="task" required><option value="">Loading…</option></select>
+      <button type="submit" class="btn btn--primary">Prepare the bug report</button>
+    </form>
+    <p id="issue-report-status" role="status" aria-live="polite"></p>
+  </section>
 </section>
+<script src="/static/lightwork-support-ops.js" defer></script>
 {% if can_prepare_support %}<script src="/static/lightwork-support.js" defer></script>{% endif %}
 {% endblock %}
