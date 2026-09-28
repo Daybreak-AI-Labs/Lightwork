@@ -30,14 +30,16 @@ Deliberately NOT in the catalog:
   Pushover credentials (read only from the server's environment),
   ``[deployment]`` (installer provenance), and every setting that names a
   server file path or an environment variable (``signal_cli_path``,
-  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
+  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``);
+  the privacy modules' key names are the exception, as sealed rows restricted
+  to their own module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, the per-task spending cap, capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections, the learning switches, research execution, savings
   assumptions, workspace selection, the security suite's on/off switches.
 * Structured policies that need their module's own page to author safely:
-  consent and privacy workbench options, identity-connector scheduling,
+  privacy notice publishing targets, identity-connector scheduling,
   evidence parser installs, per-team gateway credentials.
 
 Controls beyond single values: ``keys`` (trusted publisher keys, added from an
@@ -2808,6 +2810,13 @@ def cross_checks(effective: dict[str, object]) -> None:
                 f"{BY_ID[low_id].label} can't be more than "
                 f"{high_label[:1].lower() + high_label[1:]}."
             )
+    # A group module may refuse its own combinations (``cross_checks``).
+    for group in (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
+                  settings_catalog_privacy, settings_catalog_governance,
+                  settings_catalog_integrations):
+        check = getattr(group, "cross_checks", None)
+        if check is not None:
+            check(effective, BY_ID, SettingError)
 
 
 def lookup(tree: object, path: tuple[str, ...]) -> tuple[bool, object]:
