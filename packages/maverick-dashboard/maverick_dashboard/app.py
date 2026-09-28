@@ -672,6 +672,9 @@ async def _lifespan(app: FastAPI):
     from maverick.residency import require_residency_or_die
 
     require_residency_or_die()  # strict region pin (#41); no-op unless opted in
+    from maverick.supply_chain import startup_check
+
+    startup_check()  # dependency pin check; no-op unless [safety] supply_chain_pinning
     # Exactly one control plane may write a data root. Until now that was
     # enforced only by a `helm template` guard, which a raw kubectl apply,
     # `compose up --scale`, or a second local `maverick dashboard` walks past
@@ -3485,7 +3488,9 @@ async def tenant_features_page(request: Request, tenant_id: str) -> HTMLResponse
 async def skills_page(request: Request) -> HTMLResponse:
     # Same opt-in the create/install API enforces; the page only reads it so
     # it can say "switched off" instead of offering forms that would fail.
-    install_allowed = os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"}
+    from maverick.skills import url_install_allowed
+
+    install_allowed = url_install_allowed()
     return templates.TemplateResponse(request, "skills.html", {
         "skills": sorted(_load_skills(), key=lambda s: s.name),
         "is_admin": has_permission(request, "admin"),
@@ -7776,7 +7781,7 @@ async def store_page(request: Request, saved: str = "") -> HTMLResponse:
         {"entries": entries, "installed": installed,
          "is_admin": has_permission(request, "admin"),
          "catalog_admin": has_global_permission(request, "admin"),
-         "install_allowed": os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"},
+         "install_allowed": __import__("maverick.skills", fromlist=["x"]).url_install_allowed(),
          "catalogs": catalogs, "catalogs_default": catalogs_default, "saved": saved},
     )
 
@@ -11774,8 +11779,6 @@ def main() -> None:
     except Exception:  # pragma: no cover - linting never blocks a non-strict start
         pass
 
-    from ._server import run_dashboard_server
-
     # JSON logging consistency: uvicorn installs its OWN plaintext access/error
     # formatters by default, so even after configure_logging() switches the root
     # handler to JSON the access lines stayed plaintext -- a mixed JSON+text
@@ -11783,7 +11786,12 @@ def main() -> None:
     # log_config=None so uvicorn doesn't reconfigure those loggers; they then
     # propagate to the JSON root handler. In text mode omit the kwarg entirely so
     # uvicorn keeps its colored default for the local-dev experience.
-    _json_logs = os.environ.get("MAVERICK_LOG_FORMAT", "text").strip().lower() == "json"
+    from maverick.env_setting import env_or_config as _env_or_config
+
+    from ._server import run_dashboard_server
+
+    _json_logs = (_env_or_config("MAVERICK_LOG_FORMAT", "logging", "format", "text")
+                  or "text").strip().lower() == "json"
     try:
         from maverick.proxy_auth import uvicorn_launch_kwargs
         _proxy_kwargs = uvicorn_launch_kwargs()

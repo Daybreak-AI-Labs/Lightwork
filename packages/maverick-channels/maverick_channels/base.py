@@ -99,7 +99,10 @@ def _max_inbound_chars() -> int:
     drive an uncapped-context, uncapped-cost agent run. Override with
     MAVERICK_MAX_INBOUND_CHARS; 0 disables the cap."""
     try:
-        return int(os.environ.get("MAVERICK_MAX_INBOUND_CHARS", "30000"))
+        from maverick.env_setting import env_or_config
+
+        return int(env_or_config("MAVERICK_MAX_INBOUND_CHARS", "chat", "max_inbound_chars",
+                                 "30000") or "30000")
     except ValueError:
         return 30000
 

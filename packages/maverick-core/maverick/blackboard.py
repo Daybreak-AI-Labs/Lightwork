@@ -259,9 +259,10 @@ class Blackboard:
             return "", latest
         limit = max(1, int(max_entries))
         omitted = max(0, len(fresh) - limit)
-        from ._envparse import env_int
         from .compaction import excerpt
-        entry_cap = max(80, env_int("MAVERICK_BB_RENDER_ENTRY_CHARS", 800))
+        from .env_setting import env_or_config_int
+        entry_cap = max(80, env_or_config_int(
+            "MAVERICK_BB_RENDER_ENTRY_CHARS", "context", "blackboard_entry_chars", 800))
         lines = [
             f"[{e.agent}/{e.kind}] {excerpt(e.content, entry_cap)}"
             for e in fresh[-limit:]
@@ -281,9 +282,10 @@ class Blackboard:
         # first turn, so one oversized post (a long finding, a pasted dump)
         # would otherwise dominate every brief that includes it. Posts are
         # stored whole; only the rendered view is bounded.
-        from ._envparse import env_int
         from .compaction import excerpt
-        entry_cap = max(80, env_int("MAVERICK_BB_RENDER_ENTRY_CHARS", 800))
+        from .env_setting import env_or_config_int
+        entry_cap = max(80, env_or_config_int(
+            "MAVERICK_BB_RENDER_ENTRY_CHARS", "context", "blackboard_entry_chars", 800))
         lines = []
         for e in recent:
             lines.append(f"[{e.agent}/{e.kind}] {excerpt(e.content, entry_cap)}")

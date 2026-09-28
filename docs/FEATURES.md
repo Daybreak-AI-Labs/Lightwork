@@ -3983,11 +3983,14 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   default) holds risky-looking goals on the Approvals page until a person
   decides; `goal_risk_floor` raises every goal to a minimum tier. A lexical
   tripwire only: per-action gates still apply.
-- **Containment mode** (`containment.py`, opt-in `[containment]`) — lock a
-  run into no-egress + ephemeral 0700 workspace: composes the registry ACL
-  (denies the exfil tools; config *extends*, never replaces the default deny
-  set), black-holed proxy env for subprocesses (advisory; the load-bearing
-  layer is the ACL + container backends' network deny), cleanup handle.
+- **Containment mode** (`containment.py`, opt-in `[containment]`, the
+  dashboard's "Locked-down mode") — lock every run into no-egress + ephemeral
+  0700 workspace: when on, the tool registry denies the exfil tools (config
+  *extends*, never replaces the default deny set), `build_sandbox` turns
+  container networking off and gives the run a throwaway folder, the local
+  backend black-holes the proxy env for subprocesses (advisory; the
+  load-bearing layer is the ACL + container backends' network deny), and the
+  task budget is capped at `max_wall_seconds`.
 - **Cryptographic budget receipts** (`budget_receipts.py`) — HMAC-signed,
   hash-chained spend receipts per goal (prev-hash inside the signed payload
   so deletion/reorder is unforgeable; append-only 0600 ledger; refuses to

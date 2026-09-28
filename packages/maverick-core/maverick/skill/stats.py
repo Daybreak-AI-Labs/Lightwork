@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -47,7 +46,9 @@ class SkillStat:
 
 
 def _enabled() -> bool:
-    return os.environ.get("MAVERICK_SKILL_DECAY", "1") != "0"
+    from ..env_setting import env_or_config
+
+    return env_or_config("MAVERICK_SKILL_DECAY", "skills", "decay", "1") != "0"
 
 
 def _resolve(path: Path | None) -> Path:

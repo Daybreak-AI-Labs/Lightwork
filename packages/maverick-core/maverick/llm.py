@@ -1394,6 +1394,25 @@ def _provider_config_fingerprint(
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _configured_timeouts(present: dict) -> dict[str, str]:
+    """``[latency] read_timeout`` / ``connect_timeout`` for the provider client,
+    for each timeout the environment does not already set."""
+    try:
+        from .config import load_config
+
+        latency = (load_config() or {}).get("latency") or {}
+    except Exception:  # pragma: no cover -- config never blocks a call
+        return {}
+    out: dict[str, str] = {}
+    for env_name, key in (("MAVERICK_LLM_READ_TIMEOUT", "read_timeout"),
+                          ("MAVERICK_LLM_CONNECT_TIMEOUT", "connect_timeout")):
+        value = latency.get(key) if isinstance(latency, dict) else None
+        if env_name not in present and isinstance(value, (int, float)) \
+                and not isinstance(value, bool) and value > 0:
+            out[env_name] = str(float(value))
+    return out
+
+
 def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
     """Token preflight before an LLM dispatch (roadmap 'token preflight v1').
 
@@ -1408,7 +1427,12 @@ def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
     borderline-but-valid request into a false refusal (the estimate is a
     cheap chars/token heuristic); operators opt into hard-refuse explicitly.
     """
-    mode = os.environ.get("MAVERICK_PREFLIGHT", "warn").strip().lower()
+    from .env_setting import env_or_config
+
+    # ``[context] preflight`` is the same choice made in the dashboard; the
+    # environment variable still wins.
+    mode = (env_or_config("MAVERICK_PREFLIGHT", "context", "preflight", "warn")
+            or "warn").strip().lower()
     if mode not in ("warn", "strict"):
         return  # 'off' / unrecognized -> skip
     try:
@@ -1721,6 +1745,8 @@ class LLM:
                 "MAVERICK_LLM_READ_TIMEOUT", "MAVERICK_LLM_CONNECT_TIMEOUT",
             ) if name in environment
         }
+        # [latency] read/connect timeouts apply when the environment sets none.
+        common_environment.update(_configured_timeouts(common_environment))
         if provider == "anthropic" and "ANTHROPIC_AUTH_TOKEN" in environment:
             common_environment["ANTHROPIC_AUTH_TOKEN"] = environment["ANTHROPIC_AUTH_TOKEN"]
         if provider not in ("anthropic", "bedrock", "codex_cli"):
@@ -1734,6 +1760,14 @@ class LLM:
             }
             if auth_mode is not None:
                 azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
+            # [providers.azure] deployment / api_version fill what the
+            # environment leaves empty (an exported variable still wins).
+            for env_name, field in (("AZURE_OPENAI_DEPLOYMENT", "deployment"),
+                                    ("AZURE_OPENAI_API_VERSION", "api_version")):
+                value = pcfg.get(field)
+                if not azure_environment[env_name].strip() and isinstance(value, str) \
+                        and value.strip():
+                    azure_environment[env_name] = value.strip()
             common_environment.update(azure_environment)
         elif provider == "bedrock":
             # The native client derives its endpoint from the region and picks
@@ -1748,6 +1782,13 @@ class LLM:
             raw_endpoint = pcfg.get("endpoint")
             if isinstance(raw_endpoint, str) and raw_endpoint.strip():
                 bedrock_environment["BEDROCK_ENDPOINT"] = raw_endpoint.strip().lower()
+            # [providers.bedrock] region applies only when neither AWS region
+            # variable is exported.
+            raw_region = pcfg.get("region")
+            if (isinstance(raw_region, str) and raw_region.strip()
+                    and not bedrock_environment["AWS_REGION"].strip()
+                    and not bedrock_environment["AWS_DEFAULT_REGION"].strip()):
+                bedrock_environment["AWS_REGION"] = raw_region.strip()
             common_environment.update(bedrock_environment)
         elif provider == "codex_cli":
             from .providers.codex_cli_provider import _ENV_ALLOWLIST
@@ -2244,7 +2285,9 @@ class LLM:
         a no-op unless caching is on. When a budget is provided, reserve an
         estimated cache-write cost before sending and let the provider record
         returned usage. Returns whether a warm request was sent; never raises."""
-        if os.environ.get("MAVERICK_CACHE_MESSAGES", "1") == "0":
+        from .env_setting import env_or_config
+
+        if env_or_config("MAVERICK_CACHE_MESSAGES", "cache", "messages", "1") == "0":
             return False
         provider, model_id = _parse_spec(
             require_model_allowed(model or self.model)

@@ -222,6 +222,24 @@ def check_or_warn(path: str | Path | None = None) -> PinReport | None:
         return None
 
 
+def startup_check(path: str | Path | None = None) -> PinReport | None:
+    """What a starting server runs: with pinning on, record the installed
+    packages the first time (the deploy-time snapshot), then verify against
+    that record on every later start and warn on drift. Never raises."""
+    try:
+        if not enabled():
+            return None
+        p = Path(path) if path is not None else _default_path()
+        if not p.exists():
+            write_pins(p)
+            log.info("supply_chain: recorded the installed packages at %s", p)
+            return None
+    except Exception as e:
+        log.warning("supply_chain: pin record skipped (%s: %s)", type(e).__name__, e)
+        return None
+    return check_or_warn(path)
+
+
 __all__ = [
     "PinReport",
     "canonical_name",
@@ -232,4 +250,5 @@ __all__ = [
     "enabled",
     "check_or_warn",
     "DEFAULT_PINS_FILENAME",
+    "startup_check",
 ]

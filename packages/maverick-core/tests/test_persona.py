@@ -10,7 +10,7 @@ from maverick.persona import STYLES, load_persona, render_persona_prompt
 def test_no_config_returns_empty(monkeypatch):
     monkeypatch.setenv("MAVERICK_CONFIG", "/nonexistent/path.toml")
     p = load_persona()
-    assert p == {"name": "", "style": "", "addendum": ""}
+    assert p == {"name": "", "style": "", "addendum": "", "user_name": ""}
     assert render_persona_prompt() == ""
 
 

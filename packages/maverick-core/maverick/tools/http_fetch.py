@@ -20,6 +20,7 @@ import urllib.request
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+from ..env_setting import env_or_config as _env_or_config
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -158,8 +159,9 @@ def is_blocked_host(hostname: str) -> bool:
     with no override, so the broadened ranges made legitimate local hosts
     unreachable with no recourse.
     """
-    import os
-    if os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") == "1":
+    from ..env_setting import env_or_config
+
+    if env_or_config("MAVERICK_FETCH_ALLOW_PRIVATE", "tools", "fetch_allow_private") == "1":
         return False
     return _is_private_ip(hostname or "")
 
@@ -415,7 +417,7 @@ def _preflight_fetch(url: str, parsed: Any) -> str | None:
                 "private/loopback/link-local/reserved address. "
                 "Set MAVERICK_FETCH_ALLOW_PRIVATE=1 to override."
             )
-    if os.environ.get("MAVERICK_FETCH_RESPECT_ROBOTS") == "1":
+    if _env_or_config("MAVERICK_FETCH_RESPECT_ROBOTS", "tools", "fetch_respect_robots") == "1":
         if not _check_robots(url):
             return f"ERROR: blocked by robots.txt for {url!r}"
 
@@ -548,8 +550,9 @@ def _scan_fetched(rendered: str) -> tuple[str, str]:
     module isn't importable, the content passes through untouched. Disable
     with ``MAVERICK_FETCH_NO_SCAN=1``.
     """
-    import os
-    if os.environ.get("MAVERICK_FETCH_NO_SCAN") == "1":
+    from ..env_setting import env_or_config
+
+    if env_or_config("MAVERICK_FETCH_NO_SCAN", "tools", "fetch_skip_scan") == "1":
         return rendered, ""
     try:
         from ..safety import scan_remote_content

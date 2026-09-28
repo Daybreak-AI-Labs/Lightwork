@@ -166,7 +166,10 @@ class FirecrackerBackend:
         # MAVERICK_FIRECRACKER_STRICT=0 (previously the downgrade was the
         # default and only STRICT=1 failed closed, so the secure posture
         # depended on remembering to set an env var).
-        if os.environ.get("MAVERICK_FIRECRACKER_STRICT", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        from ..env_setting import env_or_config
+
+        strict = env_or_config("MAVERICK_FIRECRACKER_STRICT", "sandbox", "firecracker_strict", "1")
+        if (strict or "1").strip().lower() not in {"0", "false", "no", "off"}:
             raise RuntimeError(
                 "Firecracker local backend: firectl not on PATH, so microVM "
                 "isolation is unavailable. Refusing to silently downgrade to "

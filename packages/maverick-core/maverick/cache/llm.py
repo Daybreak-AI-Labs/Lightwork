@@ -89,7 +89,9 @@ class CachedResponse:
 
 
 def _enabled_via_env() -> bool:
-    return os.environ.get("MAVERICK_LLM_CACHE", "").strip().lower() in {
+    from ..env_setting import env_or_config
+
+    return (env_or_config("MAVERICK_LLM_CACHE", "cache", "llm_responses") or "").strip().lower() in {
         "1", "true", "yes", "on",
     }
 

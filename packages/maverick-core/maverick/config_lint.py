@@ -55,6 +55,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # reads [budget] self_tuning; self_healing.py recommends it). Without it
         # here, a client enabling the documented knob got a false "unknown key".
         "self_tuning",
+        # Signed per-task spending receipts (budget_receipts.py).
+        "receipts",
         # Deployment-wide spend ceilings per AI service (provider_cost_cap.py).
         "provider_caps",
         "provider_caps_period",
@@ -70,6 +72,17 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "compartment_unseal",
         # Periodic human review of long tasks (review_checkpoint.py).
         "review_checkpoint",
+        # Read at runtime and set from the dashboard's All settings page:
+        # consent gating (safety/consent.py), the shield requirement
+        # (shield_policy.py) and the receipt/screenshot signing keys.
+        "consent_mode",
+        "require_shield",
+        "receipt_key",
+        "screenshot_key",
+        # Shield limits and the start-up software check (All settings).
+        "max_scan_chars",
+        "decode_hidden",
+        "supply_chain_pinning",
     },
     "sandbox": {
         "backend",
@@ -100,6 +113,12 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "host",
         "ssh_args",
         "host_key_checking",
+        # Per-tool address rules (sandbox/network_policy.py) and the cluster
+        # settings file (sandbox/__init__.py), both on the All settings page.
+        "tool",
+        "kubeconfig",
+        "long_command_timeout",
+        "firecracker_strict",
     },
     # Per-tool rate limits (safety/rate_limiter.py): keys are tool names
     # ("web_search", "mcp_*", ...), values "N/window" specs -- user-chosen
@@ -124,6 +143,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # config.py. Missing here, every wizard-written config that answered
         # the ROS question warned "unknown key" on its own output.
         "ros",
+        # How long one per-call tool pass stays valid (tool_token.py).
+        "per_call_token_ttl",
     },
     # Tamper-evident audit log. The runtime reads [audit] sign (audit/writer.py)
     # and migrate.py already lists it; config-lint flagged the whole section as
@@ -292,6 +313,10 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "team_budgets",
         "budget_window_seconds",
         "default_max_output_tokens",
+        # Sealed credentials set on the dashboard (env names above still win).
+        "gateway_token",
+        "upstream_token",
+        "anthropic_upstream_token",
     },
     "vendor_management": {"enable"},
     "consent_registry": {

@@ -84,6 +84,7 @@ def _declared_windows() -> dict[str, int]:
         from .config import load_config
         raw = (load_config().get("context", {}) or {}).get("model_windows", {})
         out: dict[str, int] = {}
+        qualified: dict[str, int] = {}
         for k, v in dict(raw).items():
             try:
                 n = int(v)
@@ -91,6 +92,13 @@ def _declared_windows() -> dict[str, int]:
                 continue
             if n > 0:
                 out[str(k)] = n
+                # The dashboard names models as "provider:model-id"; lookups
+                # use the bare id, so also index the id (an exact key wins).
+                provider, sep, model = str(k).partition(":")
+                if sep and provider and model:
+                    qualified.setdefault(model, n)
+        for model, n in qualified.items():
+            out.setdefault(model, n)
         return out
     except Exception:  # pragma: no cover -- config never blocks a call
         return {}

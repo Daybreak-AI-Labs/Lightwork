@@ -140,7 +140,10 @@ def _resolve_token_counter():
     global _token_counter
     if _token_counter is not None:
         return _token_counter
-    if os.environ.get("MAVERICK_COMPACT_TIKTOKEN", "1").strip().lower() in {
+    from .env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_COMPACT_TIKTOKEN", "context", "compact_tiktoken", "1")
+            or "1").strip().lower() in {
             "0", "false", "no", "off"}:
         _token_counter = False
         return _token_counter

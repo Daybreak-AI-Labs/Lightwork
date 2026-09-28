@@ -40,7 +40,9 @@ def _default_cache_ttl() -> str:
 
     Explicit MAVERICK_ANTHROPIC_CACHE_TTL always wins.
     """
-    explicit = os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL")
+    from ..env_setting import env_or_config
+
+    explicit = env_or_config("MAVERICK_ANTHROPIC_CACHE_TTL", "cache", "anthropic_ttl")
     if explicit:
         return explicit
     coding = os.environ.get("MAVERICK_CODING_MODE", "").lower() in ("1", "true", "yes")
@@ -57,8 +59,10 @@ def _adaptive_max_tokens_floor() -> int:
     council value) quadrupled the agent loop's 4096 for roles that never asked
     to think; 8192 keeps generous anti-empty-response headroom at half the
     ceiling. Tune via MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR (min 2048)."""
-    from .._envparse import env_int
-    return max(2048, env_int("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", 8192))
+    from ..env_setting import env_or_config_int
+
+    return max(2048, env_or_config_int(
+        "MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", "thinking", "adaptive_floor", 8192))
 
 
 def _is_opus_adaptive(model_id: str) -> bool:
@@ -237,8 +241,13 @@ def _msg_cache_ttl() -> str:
     re-read lands seconds later on the next turn. 5m (1.25x write) covers
     that; 1h (2x write) buys nothing unless turns stall. An explicit
     operator TTL (either env) still wins."""
+    from ..env_setting import env_or_config
+
     explicit = (os.environ.get("MAVERICK_ANTHROPIC_MSG_CACHE_TTL")
-                or os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL"))
+                or os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL")
+                or env_or_config("MAVERICK_ANTHROPIC_MSG_CACHE_TTL", "cache",
+                                 "anthropic_message_ttl")
+                or env_or_config("MAVERICK_ANTHROPIC_CACHE_TTL", "cache", "anthropic_ttl"))
     return explicit or "5m"
 
 
@@ -434,7 +443,9 @@ class AnthropicClient:
         # tool-use turns hit the cache for the history (40-55% input
         # token cost cut on long trajectories). Toggle via env var so
         # the dashboard can A/B it.
-        if os.environ.get("MAVERICK_CACHE_MESSAGES", "1") != "0":
+        from ..env_setting import env_or_config
+
+        if env_or_config("MAVERICK_CACHE_MESSAGES", "cache", "messages", "1") != "0":
             messages_out = _add_messages_cache_breakpoint(messages)
         else:
             messages_out = messages
@@ -557,7 +568,9 @@ class AnthropicClient:
         from .base import sampling_temperature
         temp = sampling_temperature()
         if temp is None:
-            raw = os.environ.get("MAVERICK_TEMPERATURE")
+            from ..env_setting import env_or_config
+
+            raw = env_or_config("MAVERICK_TEMPERATURE", "agent", "temperature")
             if raw:
                 try:
                     temp = float(raw)

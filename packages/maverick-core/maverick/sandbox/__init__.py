@@ -344,8 +344,52 @@ def build_sandbox(
     """Construct the configured sandbox backend.
 
     Reads ``[sandbox]`` from ``~/.maverick/config.toml``; either argument
-    overrides the corresponding config value.
+    overrides the corresponding config value. Under containment mode
+    (:mod:`maverick.containment`) the backend gets no network and, except for
+    remote and project-folder backends, a throwaway 0700 folder that lives as
+    long as the returned backend.
     """
+    from ..containment import active_profile
+
+    held: list = []
+    box = _build_sandbox(workdir, backend, sandbox_config=sandbox_config,
+                         contained=active_profile(), held=held)
+    for ephemeral in held:
+        try:
+            box._containment_workdir = ephemeral  # type: ignore[attr-defined]
+        except AttributeError:  # pragma: no cover -- slotted third-party backend
+            _EPHEMERAL_WORKDIRS.append(ephemeral)
+    return box
+
+
+# Throwaway folders of backends that cannot carry one (kept until exit).
+_EPHEMERAL_WORKDIRS: list = []
+
+
+def _contain(contained, chosen: str, full_cfg: dict | None, wd: Path, held: list):
+    """Containment's changes to one backend's settings: no network, and a
+    throwaway folder unless the folder is remote or a project's own."""
+    if contained is None:
+        return full_cfg, wd
+    if contained.no_network:
+        full_cfg = {**(full_cfg or {}), "allow_network": False, "network": "egress-deny"}
+    if contained.ephemeral_workspace and chosen not in ("ssh", "devcontainer"):
+        from ..containment import make_ephemeral_workdir
+
+        ephemeral = make_ephemeral_workdir()
+        held.append(ephemeral)
+        wd = ephemeral.path
+    return full_cfg, wd
+
+
+def _build_sandbox(
+    workdir: str | Path | None,
+    backend: str | None,
+    *,
+    sandbox_config: dict | None,
+    contained,
+    held: list,
+) -> Sandbox:
     if sandbox_config is not None:
         # Privileged callers (DGM) pass an already scope-pinned policy snapshot
         # so request-tenant config cannot swap the evaluator after preflight.
@@ -380,6 +424,7 @@ def build_sandbox(
     chosen = _resolve_local_under_policy(chosen, full_cfg)
     read_only_paths = _read_only_paths_for_backend(chosen, full_cfg)
     wd = Path(workdir or cfg.get("workdir", str(Path.cwd()))).expanduser()
+    full_cfg, wd = _contain(contained, chosen, full_cfg, wd, held)
     # Coerce defensively: [sandbox] timeout is hand-editable, and a non-numeric
     # ("fast") or non-positive value would otherwise raise here and crash the
     # kernel at startup -- config.py's contract is to fall back to defaults on

@@ -26,6 +26,16 @@ from .paths import data_dir
 
 log = logging.getLogger(__name__)
 
+
+def url_install_allowed() -> bool:
+    """Whether skills may be installed from a typed web address
+    (``MAVERICK_ALLOW_SKILL_INSTALL``, else ``[skills] allow_url_install``)."""
+    from .env_setting import env_or_config
+
+    raw = env_or_config("MAVERICK_ALLOW_SKILL_INSTALL", "skills", "allow_url_install") or ""
+    return raw.strip().lower() in {"1", "true", "yes"}
+
+
 def skills_dir() -> Path:
     """The active tenant's installed-skill directory.
 
@@ -410,11 +420,13 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     """
     if not skills:
         return ""
-    from ._envparse import env_int
+    from .env_setting import env_or_config_int
     if max_body_chars is None:
-        max_body_chars = env_int("MAVERICK_SKILL_RENDER_MAX_CHARS", 4000)
+        max_body_chars = env_or_config_int(
+            "MAVERICK_SKILL_RENDER_MAX_CHARS", "skills", "render_max_chars", 4000)
     if max_total_chars is None:
-        max_total_chars = env_int("MAVERICK_SKILL_RENDER_TOTAL_CHARS", 10_000)
+        max_total_chars = env_or_config_int(
+            "MAVERICK_SKILL_RENDER_TOTAL_CHARS", "skills", "render_total_chars", 10_000)
     parts = ["# Relevant skills from past runs", ""]
     total = 0
     for s in skills:

@@ -242,7 +242,11 @@ def _route_configuration_missing(
         key = _present(table.get("api_key")) or _present(
             os.environ.get("BEDROCK_API_KEY")
         )
-        region = _present(os.environ.get("AWS_REGION"))
+        region = (
+            _present(os.environ.get("AWS_REGION"))
+            or _present(os.environ.get("AWS_DEFAULT_REGION"))
+            or _present(table.get("region"))
+        )
         return tuple(
             item
             for item, present in (("api_key", key), ("region", region))

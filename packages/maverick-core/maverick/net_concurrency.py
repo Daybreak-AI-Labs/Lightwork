@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import threading
 import weakref
 from urllib.parse import urlparse
@@ -49,7 +48,10 @@ _by_loop: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 def _cap() -> int:
     try:
-        return int(os.environ.get("MAVERICK_NET_HOST_CONCURRENCY", "4"))
+        from .env_setting import env_or_config
+
+        return int(env_or_config("MAVERICK_NET_HOST_CONCURRENCY", "tools",
+                                 "net_host_concurrency", "4") or "4")
     except ValueError:
         return 4
 

@@ -15,29 +15,31 @@ page (dashboard overlay) > the installer's config.toml > the built-in default.
 Deliberately NOT in the catalog:
 
 * Developer / operations plumbing with no business meaning: ``[grpc]``,
-  ``[grpc_dispatch]``, ``[lsp]``, ``[langchain]``, ``[tui]``, ``[perf]``,
-  ``[benchmark]``, ``[logging]``, ``[observability]``, ``[queue]``,
-  ``[coding]``, ``[model_proxy]``, ``[embedded]``, ``[ebpf_monitor]``, ``[local_runtime]``
-  (serving engines). The research rungs (``[self_modify]`` files and tests,
-  ``[adapter_rung]``, ``[emergent_protocol]``/``[emergent_codec]``) are in
+  ``[grpc_dispatch]``, ``[langchain]``, ``[queue]``, ``[coding]``,
+  ``[local_runtime]`` (serving engines). Programs the product never starts
+  itself (``python -m`` helpers) have nothing to change here: ``[perf]``
+  profiling, ``[ebpf_monitor]``, ``[model_proxy]`` (its key is kept out of the
+  product's settings on purpose) and ``[tui] keys``. The research rungs
+  (``[self_modify]`` files and tests, ``[adapter_rung]``,
+  ``[emergent_protocol]``/``[emergent_codec]``) are in
   settings_catalog_learning.py, off by default and confirmed before they widen;
   the code-experiment on/off switch itself stays on the Learning page.
 * Deployment-only by design (sign-in, isolation and key custody must not be
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
-  ``[federation]``, ``[license]``, ``[providers] per_tenant_keys``, the sandbox
-  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the
+  ``[federation]``, ``[audit.worm]`` / ``[audit.unified]`` custody, the
   Pushover credentials (read only from the server's environment),
   ``[deployment]`` (installer provenance), and every setting that names a
-  server file path or an environment variable (``signal_cli_path``,
-  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
-  Exceptions: the Obsidian notes folder (checked to be a folder path), the
-  voice program and model file, picked by name from the checked lists of
-  Lightwork's own programs and speech model folders, and the privacy
-  modules' key names, as sealed rows restricted to their own module's names
-  (settings_catalog_privacy).
+  server program or an environment variable (``signal_cli_path``,
+  ``[screening] sdn_path``, ``*_token_env``; the AI gateway's credentials
+  themselves can be set, sealed, in the runtime rows). Exceptions: the
+  Obsidian notes folder (checked to be a folder path), the voice program and
+  model file, picked by name from the checked lists of Lightwork's own
+  programs and speech model folders, and the privacy modules' key names, as
+  sealed rows restricted to their own module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
-  models, the per-task spending cap, capabilities, features, the six chat
+  models, the license (Settings > License), the per-task spending cap,
+  capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections (the account-connection and desktop-return switches are on
   the Connections page, vendor onboarding's connections and owner on its
@@ -59,8 +61,11 @@ incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
 out, so the page never offers a control that changes nothing: ``[safety]``
-goal-risk floor and quorum keys and ``[containment]`` (their library modules
-are not called by any run path yet).
+quorum keys, ``cascade`` and ``shield_rate_limit``,
+``[shield] probe_model`` and update addresses, ``[models] cascade``,
+``[routing] bandit``, ``[energy]``, ``[voice]`` only-mode and voice unlock
+(their modules are not called by any run path yet; see
+``settings_catalog_runtime``).
 """
 from __future__ import annotations
 

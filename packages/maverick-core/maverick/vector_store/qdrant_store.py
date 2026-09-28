@@ -92,8 +92,10 @@ class QdrantStore:
             ) from e
         from qdrant_client import QdrantClient
 
-        url = url or os.environ.get("MAVERICK_QDRANT_URL")
-        api_key = api_key or os.environ.get("MAVERICK_QDRANT_API_KEY")
+        from ..env_setting import env_or_config
+
+        url = url or env_or_config("MAVERICK_QDRANT_URL", "memory", "qdrant_url")
+        api_key = api_key or env_or_config("MAVERICK_QDRANT_API_KEY", "memory", "qdrant_api_key")
         self._remote = bool(url)
 
         if url:

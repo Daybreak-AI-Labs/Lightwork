@@ -7550,7 +7550,9 @@ async def get_codec_telemetry() -> dict:
 
 
 def _require_skill_install_opt_in() -> None:
-    if os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() not in {"1", "true", "yes"}:
+    from maverick.skills import url_install_allowed
+
+    if not url_install_allowed():
         raise HTTPException(
             status_code=403,
             detail=(

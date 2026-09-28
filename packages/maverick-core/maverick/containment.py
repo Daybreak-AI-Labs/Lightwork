@@ -39,7 +39,10 @@ registry exposes no getter, and replacing the ACL blind would *widen* it.
 
 Opt-in and default OFF: enable with ``MAVERICK_CONTAINMENT=1`` (env wins) or
 ``[containment] enabled = true``. Config may extend (never shrink) the
-denied-tool set. Stdlib-only, pure library — nothing imports it by default.
+denied-tool set. Stdlib-only. When on, the run path applies it: the tool
+registry denies the exfil tools (``tools.base_registry``), commands get no
+network and a throwaway folder (``sandbox.build_sandbox`` / ``LocalBackend``)
+and the task budget is capped at ``max_wall_seconds`` (``budget``).
 """
 from __future__ import annotations
 
@@ -141,6 +144,14 @@ def profile_from_config() -> ContainmentProfile:
         deny_tools=frozenset(deny),
         max_wall_seconds=wall,
     )
+
+
+def active_profile() -> ContainmentProfile | None:
+    """The profile every run is locked to now, or ``None`` when containment is
+    off. The run path consults this at its three seams: the tool registry
+    (denied tools), the work area (no network, throwaway folder) and the task
+    budget (wall-clock cap)."""
+    return profile_from_config() if enabled() else None
 
 
 def assert_no_network_env(env: dict) -> dict:
@@ -251,6 +262,7 @@ __all__ = [
     "EphemeralWorkdir",
     "DEFAULT_DENY_TOOLS",
     "NO_EGRESS_PROXY",
+    "active_profile",
     "enabled",
     "profile_from_config",
     "apply",

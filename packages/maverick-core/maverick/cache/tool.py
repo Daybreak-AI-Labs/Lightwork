@@ -213,6 +213,22 @@ def get_cached(
     ttl = _ttl_s()
     with _lock:
         entry = _store.get(k)
+    if entry is None:
+        # Shared tier ([tools] output_cache_backend = "redis"): a hit there
+        # warms this process too. Same key scope as the local cache.
+        shared = _shared_backend()
+        hit, value = shared.get(name, args, scope=namespace) if shared else (False, None)
+        with _lock:
+            if hit and isinstance(value, str):
+                _store[k] = (value, time.monotonic(), time.time())
+                while len(_store) > _maxsize():
+                    _store.popitem(last=False)
+                _hits += 1
+                return (True, value)
+            _misses += 1
+            return (False, None)
+    with _lock:
+        entry = _store.get(k)
         if entry is None:
             _misses += 1
             return (False, None)
@@ -246,6 +262,31 @@ def store_cached(
         _store.move_to_end(k)
         while len(_store) > cap:
             _store.popitem(last=False)  # evict least-recently-used
+    shared = _shared_backend()
+    if shared is not None:
+        shared.store(name, args, value, scope=namespace)
+
+
+_SHARED: dict[str, Any] = {}
+
+
+def _shared_backend():
+    """The Redis tier when ``[tools] output_cache_backend = "redis"`` (the
+    environment wins), reused while its address and lifetime stay the same."""
+    try:
+        from . import redis_tool
+
+        backend = redis_tool.from_config()
+    except Exception:  # a cache must never break the tool path
+        return None
+    if backend is None:
+        return None
+    fingerprint = f"{backend.url}|{backend.ttl_s}"
+    cached = _SHARED.get(fingerprint)
+    if cached is None:
+        _SHARED.clear()
+        _SHARED[fingerprint] = cached = backend
+    return cached
 
 
 def stats() -> dict[str, int]:

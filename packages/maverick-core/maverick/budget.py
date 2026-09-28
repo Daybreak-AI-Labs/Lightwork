@@ -1132,7 +1132,21 @@ def resolve_budget_caps(*, defaults: dict | None = None,
     for key, val in overrides.items():
         if val is not None and key in _BUDGET_KEY_TYPES:
             kwargs[key] = val
+    _clamp_to_containment(kwargs)
     return kwargs
+
+
+def _clamp_to_containment(kwargs: dict) -> None:
+    """Containment mode caps every task's running time; it never raises one."""
+    from .containment import active_profile
+
+    profile = active_profile()
+    if profile is None:
+        return
+    cap = float(profile.max_wall_seconds)
+    current = kwargs.get("max_wall_seconds")
+    if current is None or float(current) > cap:
+        kwargs["max_wall_seconds"] = cap
 
 
 def budget_from_config(*, defaults: dict | None = None,
