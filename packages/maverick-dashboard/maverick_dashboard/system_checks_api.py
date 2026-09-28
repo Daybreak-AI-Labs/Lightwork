@@ -8,8 +8,15 @@ route calls the same kernel functions the terminal commands call and answers in
 plain sentences; the exact technical rows are returned separately so the page
 can keep them inside a collapsed "Technical details" section.
 
-Every route requires the global ``admin`` permission (these read and change
-installation-wide state); mutations are also same-origin checked.
+Also the one-button checks (regulated-deployment guarantees, no outbound
+connections, hardware memory protection, add-on versions), the organisation's
+data download and erase, and tidying up old records.
+
+Routes that read or change installation-wide state require the global
+``admin`` permission; the read-only checks need the global ``audit``
+permission; tidying up acts on the current workspace only and needs that
+workspace's ``admin`` permission. Mutations are also same-origin checked and
+recorded with the person who made them.
 """
 from __future__ import annotations
 
@@ -433,3 +440,321 @@ def _diagnostics() -> dict[str, Any]:
 async def diagnostics(request: Request) -> dict:
     _admin(request)
     return await run_in_threadpool(_diagnostics)
+
+
+# ---- one-button installation checks -----------------------------------------
+# (maverick enterprise verify / airgap check / confidential-compute / plugin
+# verify). Read-only: they need the global ``audit`` permission; the exact
+# kernel wording is returned separately as ``technical`` for the collapsed
+# "Technical details" section.
+
+_GUARANTEE_LABELS = {
+    "Egress lock": "Data cannot be sent to outside AI services",
+    "At-rest encryption": "Saved data is encrypted",
+    "Threat shield": "Harmful requests are screened",
+    "Tamper-evident audit": "The activity record cannot be secretly changed",
+    "Human oversight": "People approve risky actions",
+    "Retention policy": "Old data is removed on a schedule",
+    "Sandbox isolation": "Tasks run in a sealed workspace",
+    "Data residency": "Data stays in the chosen region",
+}
+_TECHNICAL_LIMIT = 60
+
+
+def _auditor(request: Request) -> None:
+    require_global_permission(request, "audit")
+
+
+def _bounded(text: Any, limit: int = 400) -> str:
+    return str(text)[:limit]
+
+
+def _enterprise_check() -> dict[str, Any]:
+    from maverick.deployment import all_passed, verify_deployment
+    checks = verify_deployment()
+    rows = [{"label": _GUARANTEE_LABELS.get(c.name, c.name), "ok": bool(c.passed)} for c in checks]
+    failed = sum(1 for r in rows if not r["ok"])
+    passed = all_passed(checks)
+    summary = ("Every protection for a regulated deployment is working." if passed else
+               f"{failed} protection{'s' if failed != 1 else ''} for a regulated deployment "
+               f"{'is' if failed == 1 else 'are'} not in place. Share the technical details with "
+               "whoever installed Lightwork.")
+    technical = [{"level": "pass" if c.passed else "fail", "text": _bounded(f"{c.name}: {c.detail}")}
+                 for c in checks][:_TECHNICAL_LIMIT]
+    return {"passed": bool(passed), "checks": rows, "summary": summary, "technical": technical}
+
+
+@router.get("/enterprise-check")
+async def enterprise_check(request: Request) -> dict:
+    _auditor(request)
+    return await run_in_threadpool(_enterprise_check)
+
+
+def _offline_reason(violation: str) -> str:
+    text = violation.lower()
+    if text.startswith("remote model"):
+        return "An AI model is reached over the internet."
+    if "[sandbox]" in text:
+        return "The task workspace can reach the network."
+    if "sentry" in text:
+        return "Error reports are sent to another computer."
+    if "siem" in text:
+        return "The activity record is copied to another computer."
+    if "[webhooks]" in text:
+        return "Notifications are sent to other apps."
+    if "egress" in text or "allowed_hosts" in text:
+        return "Outgoing connections are not blocked."
+    if "[enterprise]" in text:
+        return "Private mode is not turned on."
+    return "Something can still send data out."
+
+
+def _offline_check() -> dict[str, Any]:
+    from maverick.air_gap import audit
+    report = audit()
+    violations = [str(v) for v in report.get("violations") or []]
+    reasons = list(dict.fromkeys(_offline_reason(v) for v in violations))
+    summary = ("Lightwork's settings have no way to send data off this computer." if report.get("clean")
+               else f"Lightwork can still send data off this computer in "
+                    f"{len(reasons)} way{'s' if len(reasons) != 1 else ''}.")
+    return {"clean": bool(report.get("clean")), "reasons": reasons, "summary": summary,
+            "technical": [{"level": "fail", "text": _bounded(v)} for v in violations][:_TECHNICAL_LIMIT]}
+
+
+@router.get("/offline-check")
+async def offline_check(request: Request) -> dict:
+    _auditor(request)
+    return await run_in_threadpool(_offline_check)
+
+
+def _hardware_check() -> dict[str, Any]:
+    from maverick.confidential_compute import detect
+    report = detect()
+    confidential = bool(report.get("confidential"))
+    maker = "Intel" if report.get("tdx") else ("AMD" if report.get("sev_snp") else "")
+    summary = (f"This computer keeps Lightwork's memory encrypted in hardware ({maker})."
+               if confidential else
+               "This computer does not encrypt Lightwork's memory in hardware. Most installations "
+               "do not need this; it matters only if your rules require it.")
+    return {"confidential": confidential, "summary": summary,
+            "technical": [{"level": "pass", "text": _bounded(i)} for i in report.get("indicators") or []]}
+
+
+@router.get("/hardware-check")
+async def hardware_check(request: Request) -> dict:
+    _auditor(request)
+    return await run_in_threadpool(_hardware_check)
+
+
+def _plugin_check() -> dict[str, Any]:
+    from maverick.plugin_lock import verify_lock
+    report = verify_lock()
+    if report.get("unlocked"):
+        return {"ok": True, "pinned": False, "problems": [],
+                "summary": "Add-on versions are not pinned, so there is nothing to compare. "
+                           "Whoever installed Lightwork can pin them.",
+                "technical": []}
+    problems: list[str] = []
+    technical: list[dict[str, str]] = []
+    for name, pinned, installed in report.get("drifted") or []:
+        problems.append(f"{name} is a different version from the approved one.")
+        technical.append({"level": "fail", "text": _bounded(f"{name}: approved {pinned}, installed {installed}")})
+    for name in report.get("missing") or []:
+        problems.append(f"{name} was approved but is not installed.")
+        technical.append({"level": "fail", "text": _bounded(f"{name}: approved, not installed")})
+    for name in report.get("unpinned") or []:
+        problems.append(f"{name} is installed but was never approved.")
+        technical.append({"level": "fail", "text": _bounded(f"{name}: installed, not in the approved list")})
+    ok = bool(report.get("ok"))
+    summary = ("Every installed add-on matches its approved version." if ok else
+               f"{len(problems)} add-on{'s' if len(problems) != 1 else ''} "
+               f"{'does' if len(problems) == 1 else 'do'} not match the approved list.")
+    return {"ok": ok, "pinned": True, "problems": problems[:_TECHNICAL_LIMIT], "summary": summary,
+            "technical": technical[:_TECHNICAL_LIMIT]}
+
+
+@router.get("/plugin-check")
+async def plugin_check(request: Request) -> dict:
+    _auditor(request)
+    return await run_in_threadpool(_plugin_check)
+
+
+# ---- client data (maverick client status / export / erase) ------------------
+# Installation-wide: every route needs the global ``admin`` permission; the
+# export and the erase are recorded with the person who asked.
+
+def _client_status() -> dict[str, Any]:
+    from maverick.client import status
+    st = status()
+    bound = bool(st.get("bound"))
+    if bound:
+        summary = (f"This installation holds data for one organisation: {st.get('client_id')}. "
+                   "You can download all of it, or erase all of it when they leave.")
+    elif st.get("enforced"):
+        summary = ("This installation must be set up for one organisation, but none is set. "
+                   "Whoever installed Lightwork needs to fix this.")
+    else:
+        summary = ("This installation is not set up for one named organisation, so its data cannot be "
+                   "erased from here. You can still download it.")
+    return {"bound": bound, "organisation": st.get("client_id") or "", "enforced": bool(st.get("enforced")),
+            "summary": summary,
+            "technical": [{"level": "info", "text": _bounded(f"data folder: {st.get('data_root')}")}]}
+
+
+@router.get("/client")
+async def client_status(request: Request) -> dict:
+    _admin(request)
+    return await run_in_threadpool(_client_status)
+
+
+@router.post("/client/export")
+async def client_export(request: Request):
+    """Download every file of this installation's organisation (portability)."""
+    _mutation(request)
+    from fastapi.responses import FileResponse
+    from maverick.backup import BackupError, create_backup
+    try:
+        path = await run_in_threadpool(create_backup)
+    except BackupError as exc:
+        raise HTTPException(
+            409, "A data export needs a signing secret that whoever installed Lightwork sets up first. "
+                 "Nothing was exported.") from exc
+    await run_in_threadpool(_record, request, "client_export")
+    import time as _time
+    name = "Lightwork-data-export-" + _time.strftime("%Y-%m-%d", _time.gmtime()) + ".tgz"
+    return FileResponse(path, media_type="application/gzip", filename=name,
+                        headers={"Cache-Control": "private, no-store"})
+
+
+class EraseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    organisation: str = Field(min_length=1, max_length=64)
+    keep_activity_record: bool = True
+    confirm: bool
+
+
+@router.post("/client/erase")
+async def client_erase(body: EraseIn, request: Request) -> dict:
+    """Erase all of this organisation's data (offboarding).
+
+    ``organisation`` is the name the page showed; a different binding is
+    refused so a stale page can never erase someone else's data."""
+    _mutation(request)
+    if body.confirm is not True:
+        raise HTTPException(409, "Confirm the erase to continue. Nothing was erased.")
+    from maverick.client import ClientBindingError, client_id, erase_client
+    current = await run_in_threadpool(client_id)
+    if not current:
+        raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.")
+    if current != body.organisation:
+        raise HTTPException(409, "The organisation changed since the page was loaded. Refresh and try again.")
+    # Recorded first: without the activity record kept, the erase removes the
+    # record it would otherwise land in.
+    try:
+        await run_in_threadpool(_record, request, "client_erase_requested", organisation=current,
+                                keep_activity_record=body.keep_activity_record)
+    except HTTPException as exc:
+        raise HTTPException(503, "The erase could not be added to the activity record, "
+                                 "so nothing was erased.") from exc
+    try:
+        result = await run_in_threadpool(lambda: erase_client(keep_audit=body.keep_activity_record))
+    except ClientBindingError as exc:
+        raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.") from exc
+    await run_in_threadpool(_record, request, "client_erase", organisation=current,
+                            removed=int(result.get("removed") or 0),
+                            keep_activity_record=body.keep_activity_record)
+    return {"erased": True, "files_removed": int(result.get("removed") or 0),
+            "kept_activity_record": bool(result.get("kept_audit"))}
+
+
+# ---- tidy up old records (maverick gc) --------------------------------------
+# Acts on the current workspace's records only, so a workspace administrator
+# may run it; it is recorded with the person who ran it.
+
+_CLEANUP_CHOICES = (7, 30, 60, 90, 180, 365)
+
+
+def _cleanup_admin(request: Request) -> None:
+    from .auth import require_permission
+    require_permission(request, "admin")
+
+
+def _cleanup_world():
+    from maverick.paths import current_tenant_id
+    from maverick.world_model_backends import is_postgres_configured
+    if is_postgres_configured() and current_tenant_id() is None:
+        raise HTTPException(409, "Choose a workspace first. Nothing was changed.")
+    from ._shared import _world
+    return _world()
+
+
+def _count_idle_conversations(world: Any, cutoff: float) -> int | None:
+    from maverick.world_model import WorldModel
+    if not isinstance(world, WorldModel):
+        return None  # a shared database server: counted when it runs
+    row = world._read_one("SELECT COUNT(*) FROM conversations WHERE last_seen < ?", (cutoff,))
+    return int(row[0] or 0) if row is not None else 0
+
+
+def _cleanup_preview(days: int, activity_days: int) -> dict[str, Any]:
+    import time as _time
+    world = _cleanup_world()
+    now = _time.time()
+    conversations = _count_idle_conversations(world, now - days * 86400)
+    events = int(world.purge_goal_events_before(now - activity_days * 86400, dry_run=True))
+    return {"conversations": conversations, "activity": events, "days": days, "activity_days": activity_days}
+
+
+def _cleanup_run(days: int, activity_days: int) -> dict[str, int]:
+    world = _cleanup_world()
+    return {
+        "conversations": int(world.prune_conversations(idle_for_seconds=days * 86400)),
+        "activity": int(world.prune_goal_events(older_than_seconds=activity_days * 86400)),
+        "duplicate_checks": int(world.prune_processed_messages(older_than_seconds=30 * 86400)),
+    }
+
+
+def _cleanup_days(days: int, activity_days: int) -> None:
+    if days not in _CLEANUP_CHOICES or activity_days not in _CLEANUP_CHOICES:
+        raise HTTPException(422, "Choose one of the listed time periods.")
+
+
+@router.get("/cleanup/preview")
+async def cleanup_preview(request: Request, days: int = 90, activity_days: int = 30) -> dict:
+    _cleanup_admin(request)
+    _cleanup_days(days, activity_days)
+    return await run_in_threadpool(_cleanup_preview, days, activity_days)
+
+
+class CleanupIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: int
+    activity_days: int
+    confirm: bool
+
+
+@router.post("/cleanup")
+async def cleanup_run(body: CleanupIn, request: Request) -> dict:
+    from . import app as app_module
+    app_module._require_same_origin(request)
+    _cleanup_admin(request)
+    _cleanup_days(body.days, body.activity_days)
+    if body.confirm is not True:
+        raise HTTPException(409, "Confirm the clean-up to continue. Nothing was removed.")
+    result = await run_in_threadpool(_cleanup_run, body.days, body.activity_days)
+    await run_in_threadpool(_record_workspace, request, "records_cleanup", days=body.days,
+                            activity_days=body.activity_days, **result)
+    return result
+
+
+def _record_workspace(request: Request, verb: str, **detail: Any) -> None:
+    """Like :func:`_record`, but in the current workspace's activity record."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+    try:
+        audit_event(EventKind.CONTROL_PLANE_ACTION, agent="dashboard", verb=verb,
+                    actor=auth.caller_principal(request) or "local administrator",
+                    ok=True, **detail)
+    except AuditRefused as exc:
+        raise HTTPException(
+            503, "The change was made, but it could not be added to the activity record."
+        ) from exc
