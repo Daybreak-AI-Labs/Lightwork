@@ -414,10 +414,25 @@ def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
         world_model.open_world().create_goal("Acme task")
         status = client.get("/api/v1/admin/system/client").json()
         assert status["bound"] is True and status["organisation"] == "acme"
-        exported = client.post("/api/v1/admin/system/client/export")
+        started = client.post("/api/v1/admin/system/client/export")
+        assert started.status_code == 202, started.text
+        job = started.json()["job"]
+        import time as _time
+        for _ in range(200):
+            state = client.get(f"/api/v1/admin/system/client/export/{job}").json()
+            if state["state"] != "running":
+                break
+            _time.sleep(0.05)
+        assert state["state"] == "ready", state
+        exported = client.get(f"/api/v1/admin/system/client/export/{job}/download")
         assert exported.status_code == 200, exported.text
         assert "attachment" in exported.headers["content-disposition"] and exported.content
+        assert client.get("/api/v1/admin/system/client/export/" + "0" * 32).status_code == 404
         assert TestClient(client.app).post("/api/v1/admin/system/client/export").status_code == 403
+        preview = client.get("/api/v1/admin/system/client/erase/preview").json()
+        assert preview["organisation"] == "acme" and preview["files"] >= 1
+        assert preview["keeps_activity_record"] is True
+        assert all(area["label"] and area["files"] for area in preview["areas"])
         erase = "/api/v1/admin/system/client/erase"
         assert client.post(erase, json={"organisation": "acme", "confirm": False}).status_code == 409
         wrong = client.post(erase, json={"organisation": "other", "confirm": True})
@@ -442,6 +457,7 @@ def test_erase_is_refused_without_a_named_organisation(client, monkeypatch):
     assert client.post("/api/v1/admin/system/client/erase",
                        json={"organisation": "acme", "confirm": True}).status_code == 403
     assert client.post("/api/v1/admin/system/client/export").status_code == 403
+    assert client.get("/api/v1/admin/system/client/erase/preview").status_code == 403
 
 
 def _old_conversation(user: str) -> None:

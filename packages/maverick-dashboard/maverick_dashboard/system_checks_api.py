@@ -607,23 +607,89 @@ async def client_status(request: Request) -> dict:
     return await run_in_threadpool(_client_status)
 
 
-@router.post("/client/export")
-async def client_export(request: Request):
-    """Download every file of this installation's organisation (portability)."""
+def _export_failure(exc: Exception) -> str:
+    from maverick.backup import BackupError
+    if isinstance(exc, BackupError):
+        return ("A data export needs a signing secret that whoever installed Lightwork sets up first. "
+                "Nothing was exported.")
+    return "The export could not be prepared. Try again, or ask whoever installed Lightwork."
+
+
+def _build_client_export(workdir) -> Any:
+    from maverick.backup import create_backup
+    return create_backup(workdir / "export.tgz")
+
+
+@router.post("/client/export", status_code=202)
+async def client_export(request: Request) -> dict:
+    """Start preparing every file of this installation's organisation
+    (portability). The file can be large, so it is built in the background;
+    the page asks for its status and then downloads it."""
     _mutation(request)
-    from fastapi.responses import FileResponse
-    from maverick.backup import BackupError, create_backup
-    try:
-        path = await run_in_threadpool(create_backup)
-    except BackupError as exc:
-        raise HTTPException(
-            409, "A data export needs a signing secret that whoever installed Lightwork sets up first. "
-                 "Nothing was exported.") from exc
-    await run_in_threadpool(_record, request, "client_export")
     import time as _time
+
+    from . import ops_jobs
+    # Recorded before the file is prepared: a refused record prepares nothing.
+    try:
+        await run_in_threadpool(_record, request, "client_export")
+    except HTTPException as exc:
+        raise HTTPException(503, "This download could not be added to the activity record, "
+                                 "so it was not prepared.") from exc
     name = "Lightwork-data-export-" + _time.strftime("%Y-%m-%d", _time.gmtime()) + ".tgz"
-    return FileResponse(path, media_type="application/gzip", filename=name,
+    job = ops_jobs.start("client_export", ops_jobs.owner_of(request), name, "application/gzip",
+                         _build_client_export, _export_failure)
+    return {"job": job, "state": "running"}
+
+
+@router.get("/client/export/{job}")
+async def client_export_status(job: str, request: Request) -> dict:
+    _admin(request)
+    from . import ops_jobs
+    return ops_jobs.status(_job_id(job), ops_jobs.owner_of(request))
+
+
+@router.get("/client/export/{job}/download")
+async def client_export_download(job: str, request: Request):
+    _admin(request)
+    from fastapi.responses import FileResponse
+
+    from . import ops_jobs
+    path, name, media = ops_jobs.finished_file(_job_id(job), ops_jobs.owner_of(request))
+    return FileResponse(path, media_type=media, filename=name,
                         headers={"Cache-Control": "private, no-store"})
+
+
+def _job_id(value: str) -> str:
+    import re as _re
+    if not _re.fullmatch(r"[0-9a-f]{32}", value or ""):
+        raise HTTPException(404, "That download is no longer available. Start it again.")
+    return value
+
+
+_AREA_LABELS = {
+    "audit": "Activity record", "world.db": "Tasks and conversations", "memory": "Saved memory",
+    "fleet": "Shared memory for outside agents", "backups": "Earlier data exports",
+    "(top level)": "Other files",
+}
+
+
+@router.get("/client/erase/preview")
+async def client_erase_preview(request: Request, keep_activity_record: bool = True) -> dict:
+    """What erasing the organisation would remove, without removing anything."""
+    _admin(request)
+    from maverick.client import ClientBindingError, erase_client_preview
+    try:
+        preview = await run_in_threadpool(lambda: erase_client_preview(keep_audit=keep_activity_record))
+    except ClientBindingError as exc:
+        raise HTTPException(409, "This installation is not set up for one organisation, so nothing can be erased.") from exc
+    areas = sorted(preview["by_area"].items(), key=lambda kv: -kv[1])
+    return {
+        "organisation": preview["client_id"],
+        "files": int(preview["files"]),
+        "areas": [{"label": _AREA_LABELS.get(name, name.replace("_", " ").replace("-", " ").capitalize()),
+                   "files": count} for name, count in areas[:40]],
+        "keeps_activity_record": bool(preview["kept_audit"]),
+    }
 
 
 class EraseIn(BaseModel):
@@ -637,8 +703,9 @@ class EraseIn(BaseModel):
 async def client_erase(body: EraseIn, request: Request) -> dict:
     """Erase all of this organisation's data (offboarding).
 
-    ``organisation`` is the name the page showed; a different binding is
-    refused so a stale page can never erase someone else's data."""
+    ``organisation`` is the name the person typed to confirm; anything but the
+    current binding is refused, so a typo or a stale page can never erase
+    someone else's data."""
     _mutation(request)
     if body.confirm is not True:
         raise HTTPException(409, "Confirm the erase to continue. Nothing was erased.")
@@ -647,7 +714,8 @@ async def client_erase(body: EraseIn, request: Request) -> dict:
     if not current:
         raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.")
     if current != body.organisation:
-        raise HTTPException(409, "The organisation changed since the page was loaded. Refresh and try again.")
+        raise HTTPException(409, "The name typed does not match this organisation, or it changed since the page "
+                                 "was loaded. Nothing was erased.")
     # Recorded first: without the activity record kept, the erase removes the
     # record it would otherwise land in.
     try:
