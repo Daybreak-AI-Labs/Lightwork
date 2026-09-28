@@ -107,8 +107,8 @@
     var timer = null, generation = 0, controller = null, expired = false;
     var status = document.getElementById('run-search-status'), retry = document.getElementById('run-search-retry');
     function esc(s) {
-      return (s == null ? '' : String(s)).replace(/[&<>"]/g, function (c) {
-        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+      return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
       });
     }
     function render(goals) {
@@ -120,15 +120,16 @@
         var d = (g.description || '').slice(0, 160);
         var when = g.created_at && window.mvWhen ? mvWhen(g.created_at) : '';
         var label = window.mvHuman ? mvHuman(g.status) : String(g.status).replace(/_/g, ' ');
-        return '<div class="g-row" id="' + g.id + '" data-status="' + esc(g.status) + '">' +
+        var gid = encodeURIComponent(g.id);
+        return '<div class="g-row" id="' + esc(g.id) + '" data-status="' + esc(g.status) + '">' +
           '<span class="g-row__id">' + esc(when) + '</span>' +
           '<span class="badge ' + esc(g.status) + '">' + esc(label) + '</span>' +
-          '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + encodeURIComponent(g.id) + '">' + esc(g.title) + '</a></div>' +
+          '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + gid + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
-          '<a href="/goals/' + g.id + '/plan">Plan</a>' +
-          '<a href="/goals/' + g.id + '/trajectory">Step by step</a>' +
-          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + g.id + '/errors">Problems</a>' : '') + '</span></div>';
+          '<a href="/goals/' + gid + '/plan">Plan</a>' +
+          '<a href="/goals/' + gid + '/trajectory">Step by step</a>' +
+          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems</a>' : '') + '</span></div>';
       }).join('');
     }
     function search(immediate) {

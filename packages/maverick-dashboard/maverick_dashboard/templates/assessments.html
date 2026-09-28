@@ -297,7 +297,7 @@
     }
     var cadence = '<label class="as-field" style="max-width:16rem;"><span>Review again</span>'
       + '<select id="as-cadence">' + cadenceOptions.map(function (c) {
-        return '<option value="' + c[0] + '"' + (c[0] === currentCadence ? ' selected' : '') + '>' + esc(c[1]) + '</option>';
+        return '<option value="' + esc(c[0]) + '"' + (c[0] === currentCadence ? ' selected' : '') + '>' + esc(c[1]) + '</option>';
       }).join('') + '</select></label>';
     detailEl.innerHTML = head + drift + lenses + cadence;
     wireDetail(a);

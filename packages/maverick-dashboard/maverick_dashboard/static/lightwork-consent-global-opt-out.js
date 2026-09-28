@@ -184,6 +184,8 @@
     event.preventDefault();
     try {
       var creating = !state.editing, payload = configurationPayload(creating);
+      if (!creating && state.editing.state === "active" &&
+          !(await CW.confirm("Update opt-out for " + keyLabel(state.editing.application_ref) + "? It is switched on, so people will see the new messages and choices right away.", "Update"))) return;
       if (creating) await post("/configurations", payload);
       else await post("/configurations/" + encodeURIComponent(state.editing.configuration_id), payload, "PUT");
       panel.hidden = true; await load();

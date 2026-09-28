@@ -16,12 +16,12 @@ const ui_={enabled:true,title:"T",body:"B",submit_label:"S",success_message:"M"}
 async function page(options={}){
   const html=expandLoops(read("templates/consent_global_opt_out.html")).replace(/\{%[\s\S]*?%\}/g,"").replace(/\{\{[\s\S]*?\}\}/g,"");
   const dom=new JSDOM(html,{url:"https://lightwork.test/consent/global-opt-out",runScripts:"outside-only"});
-  const w=dom.window,d=w.document,calls=[],confirms=[];
+  const w=dom.window,d=w.document,calls=[],confirms=[],ui_opts=[];
   Object.defineProperty(w,"crypto",{value:webcrypto});w.TextEncoder=TextEncoder;
   const shell=d.getElementById("global-opt-out-shell");
   shell.setAttribute("data-api-base","/api/v1/consent/global-opt-out");shell.setAttribute("data-can-admin","true");shell.setAttribute("data-can-audit","true");
   d.querySelectorAll("button,fieldset").forEach(n=>{n.disabled=false;});
-  w.mvConfirm=async message=>{confirms.push(message);return true;};
+  w.mvConfirm=async(message,opts)=>{confirms.push(message);ui_opts.push(opts);return !options.decline;};
   w.mvErrorText=(failure,action)=>"Could not "+action+".";
   const items=options.items||[{configuration_id:"cfg-1",application_ref:"key-1",locale:"en-US",mobile_ui:ui_,email_ui:{...ui_,enabled:false},supported_devices:["browser"],supported_services:["website"],state:"draft",revision:2,updated_at:1800000000,expires_at:null}];
   w.fetch=async(url,init={})=>{
@@ -35,7 +35,7 @@ async function page(options={}){
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-global-opt-out.js"));
   await flush();
-  return {dom,w,d,calls,confirms,posts:()=>calls.filter(c=>c.method!=="GET")};
+  return {dom,w,d,calls,confirms,confirmOptions:ui_opts,posts:()=>calls.filter(c=>c.method!=="GET")};
 }
 const rowButton=(ui,label)=>[...ui.d.querySelectorAll("#goo-table button")].find(b=>b.textContent===label);
 
@@ -85,5 +85,39 @@ test("editing sends the whole set-up with the row's version",async()=>{
     assert.equal(sent.method,"PUT");assert.equal(sent.url,"/api/v1/consent/global-opt-out/configurations/cfg-1");
     assert.equal(sent.body.expected_revision,2);assert.equal("application_ref" in sent.body,false);
     assert.deepEqual(sent.body.email_ui,{...ui_,enabled:false});
+  }finally{ui.dom.window.close();}
+});
+
+test("editing a draft saves without asking",async()=>{
+  const ui=await page();
+  try{
+    rowButton(ui,"Edit").click();
+    ui.d.getElementById("goo-config-form").dispatchEvent(new ui.w.Event("submit",{bubbles:true,cancelable:true}));await flush();
+    assert.equal(ui.confirms.length,0);assert.equal(ui.posts().length,1);
+  }finally{ui.dom.window.close();}
+});
+
+const activeItem={configuration_id:"cfg-1",application_ref:"key-1",locale:"en-US",mobile_ui:ui_,email_ui:{...ui_,enabled:false},supported_devices:["browser"],supported_services:["website"],state:"active",revision:3,updated_at:1800000000,expires_at:null};
+
+test("editing a switched-on set-up asks first in plain words",async()=>{
+  const ui=await page({items:[activeItem]});
+  try{
+    rowButton(ui,"Edit").click();
+    ui.d.getElementById("goo-config-form").dispatchEvent(new ui.w.Event("submit",{bubbles:true,cancelable:true}));await flush();
+    assert.equal(ui.confirms.length,1);
+    assert.match(ui.confirms[0],/^Update opt-out for Main site.*It is switched on, so people will see the new messages and choices right away\.$/);
+    assert.doesNotMatch(ui.confirms[0],/rebind|binding|configuration|governed/i);
+    assert.equal(ui.confirmOptions[0].okText,"Update");
+    const sent=ui.posts()[0];assert.equal(sent.method,"PUT");assert.equal(sent.body.expected_revision,3);
+  }finally{ui.dom.window.close();}
+});
+
+test("declining the question leaves a switched-on set-up unchanged",async()=>{
+  const ui=await page({items:[activeItem],decline:true});
+  try{
+    rowButton(ui,"Edit").click();
+    ui.d.getElementById("goo-config-form").dispatchEvent(new ui.w.Event("submit",{bubbles:true,cancelable:true}));await flush();
+    assert.equal(ui.confirms.length,1);assert.equal(ui.posts().length,0);
+    assert.equal(ui.d.getElementById("goo-config-panel").hidden,false);
   }finally{ui.dom.window.close();}
 });
