@@ -7,6 +7,8 @@ const { JSDOM } = require("jsdom");
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-learning-loop.js"), "utf8");
+const jobsSource = fs.readFileSync(
+  path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ops-jobs.js"), "utf8");
 
 function page(admin) {
   return `<div id="llp-root" data-admin="${admin ? 1 : 0}">
@@ -21,7 +23,10 @@ ${admin ? `<details id="llp-propose-box"><form id="llp-propose">
 <button id="llp-preview-btn">Show</button><div id="llp-preview"></div>
 <ol id="llp-log"></ol><button id="llp-holdout-btn">Check</button><div id="llp-holdout"></div>
 ${admin ? `<select id="llp-scope"><option value="main">Main</option><option value="all">All</option></select>
-<button id="llp-run">Run</button><button id="llp-quality-btn">Quality</button>` : ""}
+<input type="checkbox" id="llp-trial"><input type="checkbox" id="llp-retire" checked>
+<input type="file" id="llp-instructions"><input type="checkbox" id="llp-quality-remove">
+<button id="llp-run">Run</button><button id="llp-quality-btn">Quality</button>
+<p id="llp-cost">Both use the evaluation spending limit.</p><p id="llp-run-status"></p>` : ""}
 <div id="llp-run-result"></div><p id="llp-harness-msg"></p></div>`;
 }
 
@@ -41,8 +46,16 @@ function defaults() {
     "/log": { events: [{ when: 1700000000, what: "Learned a new lesson", model: "claude-x", lesson: "always cite" }] },
     "/preview": { enabled: true, weaknesses: [{ pattern: "forgot totals", times: 4, kind: "wrong answer", would_add: "check totals" }], scanned: 9, eligible: 5 },
     "/holdout": { configured: true, verified: true, events: 12, checks_used: 3, technical: { ledger: "L1", latest_fingerprint: "ab" } },
-    "/run": { reports: [{ patterns_found: 2, ideas_tried: 1, passed_testing: 1, adopted: 1, retired: 0,
-      paused_for_calibration: false, promotion_gate_off: false, new_lessons: ["check totals"] }] },
+    "/run": { job: { id: "0123456789abcdef", state: "done", can_stop: false, result: { reports: [{  // pragma: allowlist secret
+      patterns_found: 2, ideas_tried: 1, passed_testing: 1, adopted: 1, retired: 0,
+      paused_for_calibration: false, promotion_gate_off: false, new_lessons: ["check totals"] }] } } },
+    "/corpus-quality": { job: { id: "1123456789abcdef", state: "done", can_stop: false, result: {  // pragma: allowlist secret
+      configured: true, removed: 1, cases: [{ task: "easy task", useful: false, baseline_rate: 1 }] } } },
+    "/api/v1/learning-ops/self-harness/plan": { spending_limit: 5, checker: "Claude Checker", careful_testing: true },
+    "/api/v1/learning-ops/refinements/0123456789abcdef/preview": { title: "Check quote approval",  // pragma: allowlist secret
+      now: "", after: "Confirm the quote first", undo_also_removes: [] },
+    "/api/v1/learning-ops/refinements/fedcba9876543210/preview": { title: "Check quote approval",  // pragma: allowlist secret
+      now: "Confirm the quote first", after: "Confirm the quote first", undo_also_removes: ["Later change"] },
   };
 }
 
@@ -67,6 +80,7 @@ async function fixture({ admin = true, answers = {}, confirm = true } = {}) {
       { status, headers: { "Content-Type": "application/json" } });
   };
   const settle = async () => { for (let i = 0; i < 40; i++) await new Promise((done) => setImmediate(done)); };
+  window.eval(jobsSource);
   window.eval(source);
   await settle();
   return { window, doc: window.document, calls, settle };
@@ -93,12 +107,24 @@ test("viewers get no buttons", async (t) => {
   assert.equal(ui.doc.querySelectorAll("#llp-ref-rows button").length, 0);
 });
 
-test("apply confirms, then calls the apply route", async (t) => {
+test("apply shows the before and after while asking", async (t) => {
+  const ui = await fixture({ confirm: false });
+  t.after(() => ui.window.close());
+  ui.doc.querySelector("#llp-ref-rows button").click();
+  await ui.settle();
+  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Now it says: \(nothing yet for this\)/);
+  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /After applying: Confirm the quote first/);
+  assert.equal(ui.calls.filter((c) => c.method === "POST").length, 0);
+});
+
+test("apply previews, confirms, then calls the apply route", async (t) => {
   const ui = await fixture();
   t.after(() => ui.window.close());
   ui.doc.querySelector("#llp-ref-rows button").click();
   await ui.settle();
-  assert.ok(ui.calls.some((c) => c.confirm && /restore point/.test(c.confirm)));
+  const previewAt = ui.calls.findIndex((c) => c.url === "/api/v1/learning-ops/refinements/0123456789abcdef/preview");  // pragma: allowlist secret
+  const confirmAt = ui.calls.findIndex((c) => c.confirm && /restore point/.test(c.confirm));
+  assert.ok(previewAt >= 0 && confirmAt > previewAt);
   assert.ok(ui.calls.some((c) => c.method === "POST" && c.url === "/api/v1/learning-loop/refinements/0123456789abcdef/apply"));  // pragma: allowlist secret
   assert.match(ui.doc.getElementById("llp-ref-msg").textContent, /Change applied/);
 });
@@ -162,12 +188,38 @@ test("an auditor-only read-out explains who can see it", async (t) => {
   assert.equal(ui.doc.getElementById("llp-log").textContent, "Only administrators and auditors can see the learning activity.");
 });
 
-test("run now confirms and summarises the pass", async (t) => {
+test("run now confirms, starts a background job and summarises the pass", async (t) => {
   const ui = await fixture();
   t.after(() => ui.window.close());
+  assert.match(ui.doc.getElementById("llp-cost").textContent, /up to \$5\.00/);
+  assert.match(ui.doc.getElementById("llp-cost").textContent, /Claude Checker/);
   ui.doc.getElementById("llp-run").click();
   await ui.settle();
   const run = ui.calls.find((c) => c.method === "POST");
-  assert.deepEqual(run.body, { scope: "main" });
+  assert.deepEqual(run.body, { scope: "main", trial: false, retire: true, instructions: null });
   assert.match(ui.doc.getElementById("llp-run-result").textContent, /1 new lesson adopted/);
+  assert.equal(ui.doc.getElementById("llp-run-status").textContent, "Finished.");
+});
+
+test("undo lists the later changes it also removes", async (t) => {
+  const ui = await fixture({ confirm: false });
+  t.after(() => ui.window.close());
+  ui.doc.querySelectorAll("#llp-ref-rows button")[1].click();
+  await ui.settle();
+  const confirm = ui.calls.find((c) => c.confirm);
+  assert.match(confirm.confirm, /also undoes 1 change applied after it/);
+  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Later change/);
+});
+
+test("removing weak test cases asks first and sends the confirmation", async (t) => {
+  const ui = await fixture();
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("llp-quality-remove").checked = true;
+  ui.doc.getElementById("llp-quality-btn").click();
+  await ui.settle();
+  const confirm = ui.calls.find((c) => c.confirm);
+  assert.match(confirm.confirm, /remove the ones that are too easy/);
+  const sent = ui.calls.find((c) => c.method === "POST");
+  assert.deepEqual(sent.body, { model_id: "claude-x", remove_weak: true, confirm: true });
+  assert.match(ui.doc.getElementById("llp-run-result").textContent, /Removed 1 test case/);
 });

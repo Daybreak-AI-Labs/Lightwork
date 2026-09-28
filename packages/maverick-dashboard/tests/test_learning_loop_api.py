@@ -158,6 +158,17 @@ def test_read_outs_use_offered_models_only(client, monkeypatch):
     assert client.get(API + "/efficacy", params={"model_id": "made-up"}).status_code == 422
 
 
+def _finished(client, started, timeout: float = 15.0) -> dict:
+    import time
+    job = started.json()["job"]
+    deadline = time.time() + timeout
+    while job["state"] in ("running", "stopping"):
+        assert time.time() < deadline, job
+        time.sleep(0.05)
+        job = client.get(f"/api/v1/learning-ops/jobs/{job['id']}").json()["job"]
+    return job
+
+
 def test_run_now_respects_the_switch_and_the_learning_stop(client, monkeypatch):
     from maverick import learning_guard, self_harness
     from maverick import self_improvement_runner as runner
@@ -168,16 +179,65 @@ def test_run_now_respects_the_switch_and_the_learning_stop(client, monkeypatch):
     monkeypatch.setattr(self_harness, "enabled", lambda: True)
     report = self_harness.SelfHarnessReport(model_id="claude-x", mined=2, proposed=1, validated=1,
                                             promoted=1, applied_lines=["check totals"])
-    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda **kw: (report, 3))
-    out = client.post(API + "/run", json={"scope": "main"}).json()
+    seen: list[dict] = []
+    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda **kw: seen.append(kw) or (report, 3))
+    from maverick_dashboard import learning_jobs
+    started = client.post(API + "/run", json={"scope": "main"})
+    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is False
+    out = _finished(client, started)["result"]
     assert out["reports"][0]["adopted"] == 1 and out["reports"][0]["retired"] == 3
     assert out["reports"][0]["new_lessons"] == ["check totals"]
+    assert seen[-1] == {"retire": True, "canary": None, "evaluation_system": None}
 
     def halted(job, phase):
         raise learning_guard.Halted("stop", "operator")
     monkeypatch.setattr(learning_guard, "check_learning_halt", halted)
     stopped = client.post(API + "/run", json={"scope": "main"})
     assert stopped.status_code == 409 and "stopped" in stopped.json()["detail"]
+
+
+def test_run_now_passes_trial_retire_and_the_deployed_instructions(client, monkeypatch):
+    from maverick import self_harness
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(self_harness, "enabled", lambda: True)
+    report = self_harness.SelfHarnessReport(model_id="claude-x")
+    seen: list[dict] = []
+    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda **kw: seen.append(kw) or (report, 0))
+    body = {"scope": "main", "trial": True, "retire": False, "instructions": "You are a careful agent."}
+    _finished(client, client.post(API + "/run", json=body))
+    assert seen[-1] == {"retire": False, "canary": True, "evaluation_system": "You are a careful agent."}
+    for bad in ("   ", "a\x00b", "x" * (1024 * 1024 + 1)):
+        r = client.post(API + "/run", json=dict(body, instructions=bad))
+        assert r.status_code == 422, bad[:5]
+
+    fleet_calls: list[dict] = []
+
+    def all_models(**kw):
+        fleet_calls.append(kw)
+        assert kw["should_stop"]() is False
+        return {"claude-x": (report, 0)}
+    monkeypatch.setattr(runner, "run_self_harness_all_models", all_models)
+    from maverick_dashboard import learning_jobs
+    started = client.post(API + "/run", json={"scope": "all"})
+    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is True
+    assert len(_finished(client, started)["result"]["reports"]) == 1
+    assert fleet_calls[0]["canary"] is None and fleet_calls[0]["retire"] is True
+
+
+def test_test_case_check_runs_in_the_background_and_removal_needs_confirmation(client, monkeypatch, tmp_path):
+    from maverick import self_harness_eval as ev
+    from maverick import self_improvement_runner as runner
+    _configure(f'[self_harness]\nenable = true\neval_corpus = "{(tmp_path / "c.json").as_posix()}"')
+    monkeypatch.setattr(runner, "run_corpus_quality", lambda **kw: [
+        {"goal": "easy task", "discriminative": False, "baseline_rate": 1.0, "age_days": None},
+        {"goal": "hard task", "discriminative": True, "baseline_rate": 0.5, "age_days": 3.0}])
+    removed: list = []
+    monkeypatch.setattr(ev, "retire_corpus_cases", lambda path, key, goals: removed.append((key, goals)) or len(goals))
+    kept = _finished(client, client.post(API + "/corpus-quality", json={}))["result"]
+    assert kept["removed"] == 0 and len(kept["cases"]) == 2 and removed == []
+    assert client.post(API + "/corpus-quality", json={"remove_weak": True}).status_code == 422
+    out = _finished(client, client.post(API + "/corpus-quality", json={"remove_weak": True, "confirm": True}))
+    assert out["result"]["removed"] == 1 and removed[0][1] == ["easy task"]
 
 
 def test_learned_page_shows_the_new_sections_in_plain_words(client):

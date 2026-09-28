@@ -1,0 +1,582 @@
+"""Learning-page and Learned-page buttons for learning systems that were
+terminal-only: permission refusals, the kernel function underneath, confirm
+and size limits, one activity-record row per change, background jobs with
+status and stop, and plain-language pages."""
+from __future__ import annotations
+
+import json
+import os
+import re
+import threading
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+ORIGIN = {"Origin": "http://testserver"}
+LO = "/api/v1/learning-ops"
+TO = "/api/v1/training-ops"
+_BANNED = re.compile(
+    r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|jsonl|revision|"
+    r"idempoten\w*|harness|refinement|corpus|holdout|efficacy|canary|codebook|codec|klear|"
+    r"trajectory|dgm|flywheel_turn)\b|/api/v1|HTTP \d{3}|maverick |\[\w+\]",
+    re.IGNORECASE,
+)
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    from maverick import config, world_model
+    from maverick.audit import writer as audit_writer
+    from maverick_dashboard import app as dash_app
+    from maverick_dashboard import learning_jobs
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mh"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr(audit_writer, "_default", None)
+    audit_writer._defaults.clear()
+    for name in ("MAVERICK_DASHBOARD_TOKEN", "MAVERICK_TENANT", "MAVERICK_SELF_HARNESS",
+                 "MAVERICK_DATA_ENGINE", "MAVERICK_FACTORY_LEARNING", "MAVERICK_HARNESS_REFINE"):
+        monkeypatch.delenv(name, raising=False)
+    config.reset_config_cache()
+    dash_app._world_cache.clear()
+    learning_jobs.clear_for_tests()
+    yield TestClient(dash_app.app, headers=ORIGIN)
+    learning_jobs.clear_for_tests()
+    config.reset_config_cache()
+    dash_app._world_cache.clear()
+    audit_writer._defaults.clear()
+
+
+@pytest.fixture
+def audit_rows(monkeypatch):
+    import maverick.audit as audit
+    rows: list[dict] = []
+
+    def capture(kind, **payload):
+        rows.append({"kind": kind, **payload})
+        return True
+    monkeypatch.setattr(audit, "audit_event", capture)
+    return rows
+
+
+def _configure(body: str) -> None:
+    from maverick import config
+    with open(os.environ["MAVERICK_CONFIG"], "w", encoding="utf-8") as fh:
+        fh.write(body + "\n")
+    config.reset_config_cache()
+
+
+def _as(monkeypatch, role: str, who: str = "user:someone"):
+    from maverick_dashboard import auth, rbac
+    rbac.set_role(who, role)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: who)
+
+
+def _wait(client, started, timeout: float = 15.0) -> dict:
+    job = started.json()["job"] if hasattr(started, "json") else started
+    deadline = time.time() + timeout
+    while job["state"] in ("running", "stopping"):
+        assert time.time() < deadline, job
+        time.sleep(0.05)
+        job = client.get(f"{LO}/jobs/{job['id']}").json()["job"]
+    return job
+
+
+def _visible(page: str, marker: str) -> str:
+    own = page.split(marker, 1)[1]
+    own = re.sub(r"<style[\s\S]*?</style>|<script[\s\S]*?</script>", " ", own)
+    return re.sub(r"<[^>]+>", " ", own)
+
+
+# ---- permissions ---------------------------------------------------------------
+
+ADMIN_ONLY = (
+    ("post", f"{LO}/self-harness/clash-check", {}),
+    ("post", f"{LO}/self-harness/transfer", {"source": "m"}),
+    ("post", f"{LO}/self-harness/test-cases/harvest", {"mode": "propose"}),
+    ("get", f"{LO}/self-harness/test-cases/export", None),
+    ("get", f"{LO}/self-harness/plan", None),
+    ("post", f"{LO}/self-harness/hold-out/set-up", {"confirm": True}),
+    ("get", f"{LO}/refinements/0123456789abcdef/preview", None),  # pragma: allowlist secret
+    ("post", f"{LO}/flywheel/turn", {}),
+    ("get", f"{LO}/factory/preview", None),
+    ("get", f"{LO}/self-modify", None),
+    ("get", f"{LO}/self-modify/results", None),
+    ("post", f"{LO}/self-modify/run", {"objective": "make summaries faster", "confirm": True}),
+    ("post", f"{TO}/reward-models/train", {}),
+    ("post", f"{TO}/codec/shorthand/learn", {}),
+    ("post", f"{TO}/codec/token-codes/learn", {}),
+    ("post", f"{TO}/codec/measure", {}),
+)
+
+
+def test_every_learning_operation_needs_a_global_admin(client, monkeypatch):
+    _as(monkeypatch, "operator")
+    for method, path, body in ADMIN_ONLY:
+        kwargs = {"json": body} if body is not None else {}
+        assert getattr(client, method)(path, **kwargs).status_code == 403, path
+    for path in (f"{LO}/self-harness/test-cases/import?confirm=true", f"{LO}/self-harness/test-cases/import/preview",
+                 f"{LO}/factory/promote?confirm=true", f"{TO}/model-improvement/score?task_set=x",
+                 f"{TO}/reward-models/rm-20260101-000000/score"):
+        assert client.post(path, content=b"{}").status_code == 403, path
+    assert client.get(f"{TO}/reward-models/rm-20260101-000000/download").status_code == 403
+
+
+def test_a_workspace_admin_is_not_a_global_admin(client, monkeypatch):
+    from maverick_dashboard import auth
+    _as(monkeypatch, "operator", "user:wsadmin")
+    monkeypatch.setattr(auth, "has_permission", lambda request, perm: True)
+    assert client.post(f"{LO}/flywheel/turn", json={}).status_code == 403
+    assert client.post(f"{LO}/self-modify/run", json={"objective": "make it faster please",
+                                                       "confirm": True}).status_code == 403
+
+
+def test_reads_on_the_learning_page_need_view(client, monkeypatch):
+    _as(monkeypatch, "viewer")
+    for path in (f"{TO}/model-improvement", f"{TO}/reward-models", f"{TO}/codec", f"{LO}/donations", f"{LO}/jobs"):
+        assert client.get(path).status_code == 200, path
+    assert client.post(f"{LO}/donations/clear", json={"confirm": True}).status_code == 403
+
+
+# ---- background jobs -------------------------------------------------------------
+
+def test_jobs_are_hidden_from_people_who_cannot_start_them(client, monkeypatch):
+    from maverick_dashboard import learning_jobs
+    gate = threading.Event()
+    job = learning_jobs.start("probe", "Probe", lambda j: gate.wait(5) and {"ok": True}, started_by="user:ada")
+    assert client.get(f"{LO}/jobs/{job.id}").json()["job"]["state"] == "running"
+    _as(monkeypatch, "viewer")
+    assert client.get(f"{LO}/jobs/{job.id}").status_code == 404
+    assert client.get(f"{LO}/jobs").json()["jobs"] == []
+    gate.set()
+
+
+def test_the_same_job_cannot_run_twice_and_stopping_is_cooperative(client, audit_rows):
+    from maverick_dashboard import learning_jobs
+
+    def loop(job):
+        while not job.cancelled:
+            time.sleep(0.01)
+        return {"stopped_cleanly": True}
+    job = learning_jobs.start("loop", "Loop", loop, started_by="user:ada", cancellable=True)
+    with pytest.raises(learning_jobs.JobRefused):
+        learning_jobs.start("loop", "Loop", loop, started_by="user:ada")
+    stop = client.post(f"{LO}/jobs/{job.id}/stop", json={})
+    assert stop.status_code == 200
+    done = _wait(client, stop)
+    assert done["state"] == "stopped" and done["result"] == {"stopped_cleanly": True}
+    assert [r["action"] for r in audit_rows] == ["job_stop"]
+    again = client.post(f"{LO}/jobs/{job.id}/stop", json={})
+    assert again.status_code == 409
+
+
+def test_a_job_that_cannot_stop_refuses_the_stop_button(client):
+    from maverick_dashboard import learning_jobs
+    gate = threading.Event()
+    job = learning_jobs.start("fixed", "Fixed", lambda j: gate.wait(5) and {}, started_by="user:ada")
+    r = client.post(f"{LO}/jobs/{job.id}/stop", json={})
+    assert r.status_code == 409 and "cannot be stopped" in r.json()["detail"]
+    gate.set()
+
+
+def test_stop_budget_only_tightens_the_wall_clock():
+    from maverick.budget import Budget, BudgetExceeded
+    from maverick_dashboard.learning_jobs import stop_budget
+    budget = Budget(max_wall_seconds=3600.0)
+    time.sleep(0.01)
+    stop_budget(budget)()
+    assert budget.max_wall_seconds < 3600.0
+    with pytest.raises(BudgetExceeded):
+        budget.check()
+
+
+def test_failures_become_one_plain_sentence(client):
+    from maverick.learning_guard import Halted
+    from maverick_dashboard import learning_jobs
+    from maverick_dashboard.learning_ops_api import job_problem
+
+    def halted(job):
+        raise Halted("stop", "operator")
+    job = learning_jobs.start("halted", "Halted", halted, started_by="u", problem=job_problem)
+    done = _wait(client, job.view())
+    assert done["state"] == "failed" and "Learning is stopped" in done["problem"]
+
+    def broken(job):
+        raise RuntimeError("secret internals /etc/passwd")
+    job = learning_jobs.start("broken", "Broken", broken, started_by="u", problem=job_problem)
+    done = _wait(client, job.view())
+    assert done["problem"] == "This job stopped because of a problem. Nothing more was changed."
+
+
+# ---- improvement flywheel ------------------------------------------------------------
+
+def test_flywheel_needs_its_switch_and_respects_the_learning_stop(client, monkeypatch):
+    from maverick import data_engine, learning_guard
+    monkeypatch.setattr(data_engine, "enabled", lambda: False)
+    r = client.post(f"{LO}/flywheel/turn", json={})
+    assert r.status_code == 409 and "Improvement flywheel" in r.json()["detail"]
+    monkeypatch.setattr(data_engine, "enabled", lambda: True)
+
+    def halted(job, phase):
+        raise learning_guard.Halted("stop", "operator")
+    monkeypatch.setattr(learning_guard, "check_learning_halt", halted)
+    r = client.post(f"{LO}/flywheel/turn", json={})
+    assert r.status_code == 409 and "stopped" in r.json()["detail"]
+
+
+def test_flywheel_turn_runs_the_kernel_and_is_recorded_first(client, monkeypatch, audit_rows):
+    from maverick import data_engine, flywheel
+    monkeypatch.setattr(data_engine, "enabled", lambda: True)
+    seen: list[int] = []
+
+    def turn():
+        seen.append(len(audit_rows))
+        return SimpleNamespace(acted=True, n_episodes=12,
+                               guardrails=[SimpleNamespace(action="send_invoice_unchecked")],
+                               memories=[SimpleNamespace(action="check_totals")],
+                               hypotheses=[SimpleNamespace(baseline_action="retry", candidate_action="ask_owner")])
+    monkeypatch.setattr(flywheel, "maybe_run", turn)
+    done = _wait(client, client.post(f"{LO}/flywheel/turn", json={}))
+    assert done["state"] == "done"
+    assert done["result"]["tasks"] == 12 and done["result"]["avoid"] == ["send_invoice_unchecked"]
+    assert done["result"]["ideas"] == [{"instead_of": "retry", "try": "ask_owner"}]
+    assert [r["action"] for r in audit_rows] == ["flywheel_turn"] and seen == [1]
+
+
+# ---- self-coaching extras ----------------------------------------------------------------
+
+def _harness(monkeypatch, tmp_path, *, corpus: bool = True, ledger: str = ""):
+    from maverick import self_harness
+    body = "[self_harness]\nenable = true\n"
+    if corpus:
+        body += f'eval_corpus = "{(tmp_path / "corpus.json").as_posix()}"\n'
+    if ledger:
+        body += f'holdout_ledger = "{ledger}"\n'
+    _configure(body)
+    store = tmp_path / "addenda.json"
+    monkeypatch.setattr(self_harness, "_store_path", lambda: store)
+    self_harness._write_addenda({"claude-x": "Operating guidance learned for this model:\n"
+                                             "- always cite the source\n- never cite the source"}, store)
+
+
+def test_clash_check_asks_the_checker_model_within_a_spending_limit(client, monkeypatch, tmp_path, audit_rows):
+    from maverick import llm, self_harness
+    _harness(monkeypatch, tmp_path)
+    roles: list[str] = []
+    budgets: list = []
+    monkeypatch.setattr(llm, "model_for_role", lambda role: roles.append(role) or "checker-model")
+    monkeypatch.setattr(llm, "LLM", lambda model: SimpleNamespace(model=model))
+
+    def classifier(judge, *, budget=None, **_kw):
+        budgets.append(budget)
+        return lambda a, b: True
+    monkeypatch.setattr(self_harness, "llm_conflict_classifier", classifier)
+    from maverick_dashboard import learning_jobs
+    started = client.post(f"{LO}/self-harness/clash-check", json={"model_id": "claude-x"})
+    assert learning_jobs.get(started.json()["job"]["id"]).cancellable is True
+    done = _wait(client, started)
+    assert done["state"] == "done", done
+    assert "verifier" in roles and budgets and budgets[0] is not None
+    assert done["result"]["pairs"][0]["first"] == "always cite the source"
+    assert [r["action"] for r in audit_rows] == ["self_harness_semantic_conflicts"]
+    assert client.post(f"{LO}/self-harness/clash-check", json={"model_id": "made-up"}).status_code == 422
+
+
+def test_transfer_needs_the_switch_and_test_cases(client, monkeypatch, tmp_path, audit_rows):
+    from maverick import self_improvement_runner as runner
+    _configure("[self_harness]\nenable = false")
+    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
+    assert r.status_code == 409 and "Turn on self-coaching" in r.json()["detail"]
+    _harness(monkeypatch, tmp_path, corpus=False)
+    r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
+    assert r.status_code == 409 and "test cases" in r.json()["detail"]
+    _harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["claude-x", "worker-y"])
+    calls: list[dict] = []
+
+    def transfer(source, *, targets, force, raise_errors):
+        calls.append({"source": source, "targets": targets, "force": force, "raise": raise_errors})
+        return {"worker-y": {"attempted": ["always cite the source"], "promoted": ["always cite the source"],
+                             "skipped": []}}
+    monkeypatch.setattr(runner, "run_self_harness_transfer", transfer)
+    assert client.post(f"{LO}/self-harness/transfer", json={"source": "nope"}).status_code == 422
+    done = _wait(client, client.post(f"{LO}/self-harness/transfer",
+                                     json={"source": "claude-x", "retry_judged": True}))
+    assert calls == [{"source": "claude-x", "targets": ["worker-y"], "force": True, "raise": True}]
+    assert done["result"]["targets"][0]["tried"] == 1
+    assert [r["action"] for r in audit_rows] == ["self_harness_transfer"]
+
+
+def test_test_cases_find_download_preview_and_add(client, monkeypatch, tmp_path, audit_rows):
+    from maverick import self_improvement_runner as runner
+    r = client.post(f"{LO}/self-harness/test-cases/harvest", json={"mode": "propose"})
+    assert r.status_code == 409 and "not set up" in r.json()["detail"]
+    _harness(monkeypatch, tmp_path)
+    (tmp_path / "corpus.json").write_text(json.dumps({"claude-x": [{"goal": "old", "expected": "x"}]}))
+    modes: list[str] = []
+    monkeypatch.setattr(runner, "run_corpus_harvest",
+                        lambda world, *, mode, raise_errors: modes.append(mode) or 3)
+    assert client.post(f"{LO}/self-harness/test-cases/harvest", json={"mode": "auto"}).json() == {
+        "found": 3, "mode": "auto"}
+    assert modes == ["auto"]
+
+    down = client.get(f"{LO}/self-harness/test-cases/export")
+    assert down.status_code == 200 and "attachment" in down.headers["content-disposition"]
+    assert json.loads(down.text) == {"claude-x": [{"goal": "old", "expected": "x"}]}
+
+    upload = json.dumps({"claude-x": [{"goal": "old", "expected": "x"}, {"goal": "new", "expected": "y"}]}).encode()
+    pv = client.post(f"{LO}/self-harness/test-cases/import/preview", content=upload).json()
+    assert pv["added"] == 1 and pv["keys"][0]["now"] == 1 and pv["keys"][0]["after"] == 2
+    assert json.loads((tmp_path / "corpus.json").read_text())["claude-x"][-1]["goal"] == "old"
+    assert client.post(f"{LO}/self-harness/test-cases/import", content=upload).status_code == 422
+    assert client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=b"[1, 2]").status_code == 422
+    assert client.post(f"{LO}/self-harness/test-cases/import/preview",
+                       content=b"{" + b" " * (6 * 1024 * 1024) + b"}").status_code == 413
+    added = client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload)
+    assert added.json() == {"cases": 1, "replaced": False}
+    assert [c["goal"] for c in json.loads((tmp_path / "corpus.json").read_text())["claude-x"]] == ["old", "new"]
+    assert [r["action"] for r in audit_rows] == [
+        "self_harness_corpus_harvest", "self_harness_corpus_export", "self_harness_corpus_import"]
+
+
+def test_hold_out_record_is_set_up_once_and_never_replaced(client, monkeypatch, tmp_path, audit_rows):
+    r = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
+    assert r.status_code == 409 and "Choose where" in r.json()["detail"]
+    ledger = (tmp_path / "ledger.db").as_posix()
+    _harness(monkeypatch, tmp_path, ledger=ledger)
+    assert client.post(f"{LO}/self-harness/hold-out/set-up", json={}).status_code == 422
+    made = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
+    assert made.status_code == 200 and made.json()["record_number"]
+    assert Path(ledger).exists()
+    again = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
+    assert again.status_code == 409 and "never replaced" in again.json()["detail"]
+    assert [r["action"] for r in audit_rows] == ["self_harness_holdout_provision"]
+    plan = client.get(f"{LO}/self-harness/plan").json()
+    assert plan["hold_out"] == {"set_up": True, "exists": True}
+
+
+def test_refinement_preview_shows_before_and_after(client):
+    from maverick import harness_refine
+    from maverick.world_model import open_world
+    _configure("[harness_refine]\nenable = true")
+    change = {"target": "prompt", "title": "Check quote approval", "failure": "Emailed early",
+              "change": "Confirm the quote first.", "rationale": "Three blocked tasks."}
+    pid = client.post("/api/v1/learning-loop/refinements", json=change).json()["proposal"]["id"]
+    pv = client.get(f"{LO}/refinements/{pid}/preview").json()
+    assert pv["now"] == "" and pv["after"] == "Confirm the quote first." and pv["undo_also_removes"] == []
+    approval = harness_refine.list_proposals()[0]["approval_id"]
+    open_world().decide_approval(approval, "approved", decided_by="security@corp.test")
+    assert client.post(f"/api/v1/learning-loop/refinements/{pid}/apply").status_code == 200
+    second = dict(change, change="Confirm the quote and the date first.")
+    pid2 = client.post("/api/v1/learning-loop/refinements", json=second).json()["proposal"]["id"]
+    assert client.get(f"{LO}/refinements/{pid2}/preview").json()["now"] == "Confirm the quote first."
+    assert client.get(f"{LO}/refinements/ffffffffffffffff/preview").status_code == 404
+    assert client.get(f"{LO}/refinements/not-an-id/preview").status_code == 404
+
+
+# ---- improving how new agents are built -----------------------------------------------
+
+def test_factory_learning_preview_and_adopt_with_evidence(client, monkeypatch, audit_rows):
+    from maverick import factory_learning
+    monkeypatch.setattr(factory_learning, "enabled", lambda: False)
+    assert client.get(f"{LO}/factory/preview").status_code == 409
+    monkeypatch.setattr(factory_learning, "enabled", lambda: True)
+    monkeypatch.setattr(factory_learning, "mine_corrections", lambda min_support: [
+        SimpleNamespace(guidance="Always add a deny list.", support=min_support, scope="provisioning")])
+    pv = client.get(f"{LO}/factory/preview?min_support=5").json()
+    assert pv["corrections"] == [{"guidance": "Always add a deny list.", "seen_in": 5, "area": "provisioning"}]
+    assert client.get(f"{LO}/factory/preview?min_support=4").status_code == 422
+    assert client.post(f"{LO}/factory/promote", content=b"{}").status_code == 422
+    bad = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 1}')
+    assert bad.status_code == 422 and "version 2" in bad.json()["detail"]
+    monkeypatch.setattr(factory_learning, "load_measured_evidence", lambda path: "scorer")
+    monkeypatch.setattr(factory_learning, "review_and_promote",
+                        lambda *, min_support, scorer: ["one", "two"] if scorer == "scorer" else [])
+    ok = client.post(f"{LO}/factory/promote?confirm=true", content=b'{"version": 2}')
+    assert ok.json() == {"adopted": 2}
+    assert [r["action"] for r in audit_rows] == ["factory_learning_promote", "factory_learning_promote"]
+
+
+# ---- practising changes to its own code -----------------------------------------------------
+
+def test_self_modify_status_is_plain_and_run_needs_confirmation(client, audit_rows):
+    status = client.get(f"{LO}/self-modify").json()
+    assert status["state"] == "off" and isinstance(status["areas"], int)
+    for sentence in status["blockers"]:
+        assert "_" not in sentence and "[" not in sentence
+    assert client.get(f"{LO}/self-modify/results").json() == {"results": []}
+    r = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster"})
+    assert r.status_code == 422
+    assert client.post(f"{LO}/self-modify/run", json={"objective": "short", "confirm": True}).status_code == 422
+    assert client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "cycles": 50,
+                                                      "confirm": True}).status_code == 422
+    assert audit_rows == []
+
+
+def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, monkeypatch, audit_rows):
+    from maverick import self_modify_runner
+    seen: dict = {}
+
+    def run(*, cycles, objective, budget):
+        seen.update(cycles=cycles, objective=objective, budget=budget)
+        return self_modify_runner.RunSummary(False, reason="self-modification disabled ([self_modify] enable)")
+    monkeypatch.setattr(self_modify_runner, "run", run)
+    done = _wait(client, client.post(f"{LO}/self-modify/run", json={
+        "objective": "  make   summaries faster  ", "cycles": 2, "confirm": True}))
+    assert seen["cycles"] == 2 and seen["objective"] == "make summaries faster"
+    assert seen["budget"] is not None
+    assert done["result"]["ran"] is False and done["result"]["problem"] == "Turn this experiment on first."
+    assert [r["action"] for r in audit_rows] == ["self_modify_run"]
+
+
+def test_stopping_self_modify_tightens_its_own_budget(client, monkeypatch):
+    from maverick import self_modify_runner
+    from maverick.budget import BudgetExceeded
+
+    def run(*, cycles, objective, budget):
+        while True:
+            try:
+                budget.check()
+            except BudgetExceeded:
+                return self_modify_runner.RunSummary(True)
+            time.sleep(0.01)
+    monkeypatch.setattr(self_modify_runner, "run", run)
+    started = client.post(f"{LO}/self-modify/run", json={"objective": "make summaries faster", "confirm": True})
+    job = started.json()["job"]
+    assert job["can_stop"] is True
+    client.post(f"{LO}/jobs/{job['id']}/stop", json={})
+    done = _wait(client, started)
+    assert done["state"] == "stopped" and done["result"]["ran"] is True
+
+
+# ---- task outlines waiting to be shared ----------------------------------------------------------
+
+def test_waiting_outlines_are_listed_and_cleared_with_confirmation(client, audit_rows):
+    from maverick.paths import data_dir
+    outbox = data_dir("outbox")
+    outbox.mkdir(parents=True, exist_ok=True)
+    (outbox / "trj_1.json").write_text("{}")
+    (outbox / "trj_2.json").write_text("{}")
+    status = client.get(f"{LO}/donations").json()
+    assert status["waiting"] == 2 and status["can_clear"] is True
+    assert client.post(f"{LO}/donations/clear", json={}).status_code == 422
+    assert client.post(f"{LO}/donations/clear", json={"confirm": True}).json() == {"cleared": 2}
+    assert list(outbox.glob("*.json")) == []
+    assert [r["action"] for r in audit_rows] == ["donations_clear"]
+    assert client.post(f"{LO}/donations/clear", json={"confirm": True}).json() == {"cleared": 0}
+
+
+# ---- model planning, reward model, shorthand ---------------------------------------------------
+
+def test_model_planning_reads_and_scores_through_the_kernel(client):
+    from maverick.training.environments import list_environment_ids, load_environment
+    status = client.get(f"{TO}/model-improvement").json()
+    assert status["task_sets"] and status["choices"]["roles"]
+    role = status["choices"]["roles"][0]["value"]
+    models = client.get(f"{TO}/model-improvement/models", params={
+        "role": role, "memory_gib": 32, "context_tokens": 16384, "concurrency": 1}).json()
+    assert models["planning_only"] is True and "fits" in models["models"][0]
+    assert client.get(f"{TO}/model-improvement/models", params={"role": role, "memory_gib": 33}).status_code == 422
+    env_id = list_environment_ids()[0]
+    pack = load_environment(env_id)
+    case = pack.split("holdout")[0]
+    upload = json.dumps({case.case_id: "not the answer"}).encode()
+    assert client.post(f"{TO}/model-improvement/score?task_set=nope", content=upload).status_code == 422
+    dup = b'{"a": 1, "a": 2}'
+    assert client.post(f"{TO}/model-improvement/score?task_set={env_id}", content=dup).status_code == 422
+    done = _wait(client, client.post(f"{TO}/model-improvement/score?task_set={env_id}", content=upload))
+    assert done["state"] == "done", done
+    assert done["result"]["questions"] >= 1 and done["result"]["unanswered"] >= 0
+
+
+def _outlines() -> bytes:
+    rows = []
+    for i, reward in enumerate((1.0, 0.0, 0.9, 0.1)):
+        rows.append({"id": f"r{i}", "task_family": "fam", "outcome": "success" if reward > 0.5 else "failure",
+                     "terminal_reward": reward,
+                     "messages": [{"role": "assistant", "type": "tool_call", "name": "t", "error": i % 2 == 1}] * (i + 1),
+                     "rewards": []})
+    return "\n".join(json.dumps(r) for r in rows).encode()
+
+
+def test_reward_model_trains_keeps_scores_and_downloads(client, audit_rows):
+    empty = _wait(client, client.post(f"{TO}/reward-models/train?source=outbox", json={}))
+    assert empty["result"] == {"trained": False, "why": "There are no task outlines to learn from yet."}
+    done = _wait(client, client.post(f"{TO}/reward-models/train?source=file&epochs=100", content=_outlines()))
+    assert done["state"] == "done" and done["result"]["trained"] is True, done
+    name = done["result"]["name"]
+    listed = client.get(f"{TO}/reward-models").json()["models"]
+    assert listed[0]["name"] == name
+    scored = _wait(client, client.post(f"{TO}/reward-models/{name}/score?source=file", content=_outlines()))
+    assert scored["result"]["scored"] == 4
+    assert client.post(f"{TO}/reward-models/rm-19990101-000000/score?source=file",
+                       content=_outlines()).status_code == 404
+    down = client.get(f"{TO}/reward-models/{name}/download")
+    assert down.status_code == 200 and json.loads(down.text)["type"] == "bradley_terry_linear"
+    assert client.post(f"{TO}/reward-models/train?epochs=7", json={}).status_code == 422
+    assert [r["action"] for r in audit_rows] == ["reward_model_train", "reward_model_train", "reward_model_download"]
+
+
+def test_shorthand_learns_and_measures_from_recorded_messages(client, monkeypatch, audit_rows):
+    from maverick import codec_probe
+    from maverick_dashboard import training_ops_api
+    msgs = ["please check the quarterly totals before sending"] * 6 + ["the quarterly totals look fine"] * 4
+    monkeypatch.setattr(training_ops_api, "_messages", lambda how_many: msgs)
+    monkeypatch.setattr(codec_probe, "resolve_counter", lambda **kw: (lambda text: max(1, len(str(text)) // 4)))
+    view = client.get(f"{TO}/codec").json()
+    assert view["exact_count_available"] is False
+    learned = _wait(client, client.post(f"{TO}/codec/shorthand/learn", json={"how_many": 500}))
+    assert learned["result"]["messages"] == 10
+    measured = _wait(client, client.post(f"{TO}/codec/measure", json={"how_many": 500}))
+    assert measured["result"]["measured"] is True and "tokens_saved_pct" in measured["result"]
+    tokens = _wait(client, client.post(f"{TO}/codec/token-codes/learn", json={"how_many": 500}))
+    assert tokens["state"] == "done"
+    exact = client.post(f"{TO}/codec/measure", json={"how_many": 500, "exact": True})
+    assert exact.status_code == 409 and "free estimate" in exact.json()["detail"]
+    assert client.post(f"{TO}/codec/measure", json={"how_many": 17}).status_code == 422
+    assert [r["action"] for r in audit_rows] == ["codebook_learn", "codec_learn"]
+
+
+# ---- pages ------------------------------------------------------------------------------------
+
+def test_learning_page_has_a_control_next_to_each_system(client):
+    page = client.get("/learning").text
+    assert 'id="lo-root"' in page and 'data-admin="1"' in page
+    for control in ("lo-fw-run", "lo-fa-preview", "lo-fa-adopt", "lo-sm-run", "lo-mi-find", "lo-mi-score",
+                    "lo-rm-train", "lo-rm-score", "lo-cd-learn", "lo-cd-tokens", "lo-cd-measure", "lo-jobs"):
+        assert f'id="{control}"' in page, control
+    assert "/static/lightwork-learning-ops.js" in page and "/static/lightwork-ops-jobs.js" in page
+    visible = _visible(page, 'id="lo-root"').split("Run learning now", 1)[0]
+    assert "Improvement flywheel" in visible and "Reward model" in visible
+    assert not _BANNED.search(visible), _BANNED.search(visible)
+
+
+def test_learning_page_stays_closed_to_non_admins(client, monkeypatch):
+    _as(monkeypatch, "operator")
+    assert client.get("/learning").status_code == 403
+
+
+def test_learned_page_has_the_extra_self_coaching_tools(client, monkeypatch):
+    page = client.get("/learned").text
+    for control in ("lpo-clash-run", "lpo-transfer-run", "lpo-harvest", "lpo-export", "lpo-import-check",
+                    "llp-trial", "llp-instructions", "llp-quality-remove"):
+        assert f'id="{control}"' in page, control
+    visible = _visible(page, 'id="lpo-root"')
+    assert "Check lessons for clashes by meaning" in visible
+    assert not _BANNED.search(visible), _BANNED.search(visible)
+    _as(monkeypatch, "viewer")
+    assert 'id="lpo-root"' not in client.get("/learned").text
+
+
+def test_page_scripts_are_served_and_use_the_shared_confirm(client):
+    for name in ("lightwork-ops-jobs.js", "lightwork-learning-ops.js", "lightwork-learned-ops.js",
+                 "lightwork-workforce-ops.js"):
+        r = client.get(f"/static/{name}")
+        assert r.status_code == 200 and "javascript" in r.headers["content-type"], name
+        assert "window.confirm(" not in r.text and "alert(" not in r.text
+        assert "String(err" not in r.text and "'HTTP '" not in r.text

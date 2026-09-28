@@ -118,18 +118,11 @@ def codec_learn(ctx, limit: int, encoding: str, model: str | None) -> None:
         counter = resolve_counter(encoding=encoding, model=model)
     except RuntimeError as e:
         raise click.ClickException(str(e)) from e
-    # Candidate codes: printable ASCII + Latin/symbol ranges, filtered to the
-    # tokenizer's single-token chars that don't occur in the corpus. First viable
-    # one is the reserved escape; the rest are markers.
-    candidates = [chr(c) for c in list(range(0x21, 0x7f)) + list(range(0xa1, 0x600))]
-    pool = et.single_token_markers(counter, candidates, escape="", corpus=msgs, limit=200)
-    if len(pool) < 2:
+    learned = et.learn_from_messages(msgs, count_tokens=counter)
+    if learned is None:
         click.echo("no token-cheap markers available for this tokenizer; codec would not help")
         return
-    escape, markers = pool[0], pool[1:]
-    book = et.learn(msgs, escape=escape, markers=markers)
-    et.shared().update(book)
-    saved = et.token_savings(msgs, book, count_tokens=counter)
+    book, saved = learned
     click.echo(f"learned {book.size} token-aware codes from {len(msgs)} messages")
     click.echo(f"  estimated token savings on this corpus: {saved:+.1f}%")
     click.echo("  enable [emergent_codec] to measure it live on the coordination stream")

@@ -16,8 +16,11 @@ from . import (
     immune_actions_api,
     learning_actions_api,
     learning_loop_api,
+    learning_ops_api,
     research_actions_api,
+    training_ops_api,
     value_proof_api,
+    workforce_ops_api,
 )
 
 api_router = APIRouter()
@@ -29,9 +32,13 @@ api_router.include_router(audit_actions_api.router)
 api_router.include_router(research_actions_api.router)
 api_router.include_router(benchmark_actions_api.router)
 api_router.include_router(value_proof_api.router)
+api_router.include_router(learning_ops_api.router)
+api_router.include_router(training_ops_api.router)
+api_router.include_router(workforce_ops_api.router)
 
 asset_router = APIRouter()
 asset_router.include_router(code_actions_api.asset_router)
+asset_router.include_router(learning_ops_api.asset_router)
 
 # Page scripts for these pages, each on an explicit route (no directory mount).
 _ASSETS = ("lightwork-security-hunt.js", "lightwork-research-plain.js")

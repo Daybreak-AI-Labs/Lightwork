@@ -1945,12 +1945,8 @@ def harness_run(model: str | None, all_models: bool, system_prompt_file: Path | 
     if system_prompt_file is not None:
         try:
             with system_prompt_file.open("rb") as prompt_stream:
-                raw = prompt_stream.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
-                raise ValueError("system prompt exceeds the 1 MiB limit")
-            evaluation_system = raw.decode("utf-8")
-            if not evaluation_system.strip() or "\x00" in evaluation_system:
-                raise ValueError("system prompt must be non-empty UTF-8 text without NULs")
+                raw = prompt_stream.read(runner.EVALUATION_SYSTEM_LIMIT + 1)
+            evaluation_system = runner.read_evaluation_system(raw)
         except (OSError, UnicodeError, ValueError) as exc:
             raise click.ClickException(
                 f"cannot read deployed system prompt: {exc}") from exc

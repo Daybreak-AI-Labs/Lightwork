@@ -227,6 +227,32 @@
       })));
     }).catch(failed('vp-fleet', 'load the outside agents'));
   }
+  // Add an outside agent to the shared-memory list (fleet-memory --register).
+  var fleetForm = $('vp-fleet-add');
+  if (fleetForm) fleetForm.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    var name = $('vp-fleet-name').value.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)) {
+      say('vp-fleet-msg', 'Use letters, numbers, dots and dashes for the agent name.');
+      return;
+    }
+    var submit = fleetForm.querySelector('button[type=submit]');
+    submit.disabled = true;
+    try {
+      var r = await fetch('/api/v1/workforce-ops/outside-agents', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor: $('vp-fleet-vendor').value, name: name, description: $('vp-fleet-about').value.trim() })
+      });
+      if (!r.ok) throw r;
+      say('vp-fleet-msg', 'Added ' + name + '. It can now share what it learns.');
+      fleetForm.reset();
+      await loadFleet();
+    } catch (failure) {
+      say('vp-fleet-msg', await planError(failure, 'add the agent'));
+    } finally {
+      submit.disabled = false;
+    }
+  });
   function loadRecord() {
     return get('/record-stats').then(function (d) {
       var text = plural(d.records, 'decision', 'decisions') + ' on record: ' + plural(d.tasks, 'task', 'tasks') + ' and ' +

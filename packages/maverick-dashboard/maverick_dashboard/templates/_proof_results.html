@@ -21,6 +21,30 @@
   <div class="panel">
     <h3 id="vp-fleet-title">Outside agents sharing what they learn</h3>
     <div id="vp-fleet" aria-labelledby="vp-fleet-title">Loading…</div>
+    <details class="vp-admin" hidden>
+      <summary>Add an outside agent to the list</summary>
+      <form id="vp-fleet-add" class="vp-check">
+        <label for="vp-fleet-vendor">Made by</label>
+        <select id="vp-fleet-vendor" class="select">
+          <option value="salesforce">Salesforce Agentforce</option>
+          <option value="microsoft">Microsoft Copilot</option>
+          <option value="google">Google Gemini</option>
+          <option value="servicenow">ServiceNow</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="open-source">Open-source agent</option>
+          <option value="custom" selected>Built in-house</option>
+        </select>
+        <label for="vp-fleet-name">Agent name</label>
+        <input id="vp-fleet-name" class="input" maxlength="64" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}"
+               aria-describedby="vp-fleet-name-help">
+        <span id="vp-fleet-name-help" class="muted">Letters, numbers, dots and dashes, as the agent is named in its own system.</span>
+        <label for="vp-fleet-about">What it does</label>
+        <input id="vp-fleet-about" class="input" maxlength="200">
+        <button type="submit" class="btn btn--primary">Add agent</button>
+      </form>
+      <p id="vp-fleet-msg" role="status" aria-live="polite" class="muted"></p>
+    </details>
   </div>
 
   <div class="panel">
