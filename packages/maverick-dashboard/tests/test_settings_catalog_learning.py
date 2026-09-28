@@ -203,8 +203,27 @@ def test_defaults_match_the_kernel():
         config.get_self_learning()["auto_distill"] is False
 
 
+# settings_catalog_learning.cross_checks: sending results needs the service
+# address, which the installer normally wrote; seed it so the row saves alone.
+_INSTALLED_WITH = {
+    "ai_benchmark_exchange.coordinator.enable":
+        '[ai_benchmark_exchange.coordinator]\norigin = "https://bench.example.com"\n',
+}
+
+
+def _install_companions(setting) -> None:
+    text = _INSTALLED_WITH.get(setting.id)
+    if text:
+        from maverick import config
+
+        config.config_path().parent.mkdir(parents=True, exist_ok=True)
+        config.config_path().write_text(text, encoding="utf-8")
+        config.reset_config_cache()
+
+
 @pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
 def test_every_row_saves_and_reads_back(setting, audit_rows):
+    _install_companions(setting)
     value = _valid(setting)
     r = _save([{"id": setting.id, "value": value}], confirm=True)
     assert r.status_code == 200, r.text
@@ -290,6 +309,7 @@ WEAKENING = [s for s in ROWS if s.warning]
 
 @pytest.mark.parametrize("setting", WEAKENING, ids=lambda s: s.id)
 def test_loosening_needs_confirmation(setting, audit_rows):
+    _install_companions(setting)
     strong, weak = _strong_and_weak(setting)
     if strong is not None:
         assert _save([{"id": setting.id, "value": strong}], confirm=True).status_code == 200

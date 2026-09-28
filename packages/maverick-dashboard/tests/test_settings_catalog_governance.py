@@ -179,10 +179,36 @@ def test_rows_are_in_the_catalog_and_plain():
         assert label in page.text
 
 
+# Values that keep the all-rows sample a working combination
+# (settings_catalog_governance.cross_checks): picture and older Excel reading
+# need their file kinds, and the lookback needs a period at least as long.
+_TOGETHER_SAMPLES = {
+    "ai_evidence_analysis.enabled_media_types": ["jpeg", "png", "xls"],
+    "ai_cost_roi.collector_limits.max_period_days": 366,
+}
+# Switches that only work with others, saved with them: (first, then) extras.
+_EA = "ai_evidence_analysis"
+_TOGETHER = {
+    f"{_EA}.parser_sandbox.enable": (
+        [{"id": f"{_EA}.ocr.enable", "value": True},
+         {"id": f"{_EA}.enabled_media_types", "value": ["png"]}],
+        [{"id": f"{_EA}.ocr.enable", "value": False}]),
+    f"{_EA}.ocr.enable": (
+        [], [{"id": f"{_EA}.parser_sandbox.enable", "value": True},
+             {"id": f"{_EA}.enabled_media_types", "value": ["png"]}]),
+    f"{_EA}.legacy_xls.enable": (
+        [], [{"id": f"{_EA}.parser_sandbox.enable", "value": True},
+             {"id": f"{_EA}.enabled_media_types", "value": ["xls"]}]),
+}
+
+
 def test_every_row_saves_reads_back_and_resets(audit_rows):
     from maverick import config
 
-    changes = [{"id": row.id, "value": _sample(row)} for row in ROWS]
+    # The Databricks check needs cloud oversight, a row of another group.
+    _base('[ai_cloud_agent_governance]\nenable = true\nenabled_providers = ["aws_bedrock"]\n')
+    changes = [{"id": row.id, "value": _TOGETHER_SAMPLES.get(row.id, _sample(row))}
+               for row in ROWS]
     r = _save(changes, confirm=True)
     assert r.status_code == 200, r.text
     assert set(r.json()["changed"]) == IDS
@@ -243,12 +269,15 @@ def _weakening(setting):
 @pytest.mark.parametrize("setting", WEAKENING, ids=lambda s: s.id)
 def test_loosening_needs_confirmation(setting):
     first, then = _weakening(setting)
+    first_with, then_with = _TOGETHER.get(setting.id, ([], []))
     if first is not None:
-        assert _save([{"id": setting.id, "value": first}], confirm=True).status_code == 200
-    refused = _save([{"id": setting.id, "value": then}])
+        first_changes = [{"id": setting.id, "value": first}, *first_with]
+        assert _save(first_changes, confirm=True).status_code == 200
+    then_changes = [{"id": setting.id, "value": then}, *then_with]
+    refused = _save(then_changes)
     assert refused.status_code == 409, (setting.id, refused.text)
     assert setting.id in {item["id"] for item in refused.json()["confirm"]}
-    assert _save([{"id": setting.id, "value": then}], confirm=True).status_code == 200
+    assert _save(then_changes, confirm=True).status_code == 200
     assert catalog.lookup(_loaded(), setting.path)[1] == _stored(setting, then)
 
 

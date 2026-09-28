@@ -667,3 +667,13 @@ def _elsewhere(S) -> tuple:
           "rebuilt.", "number", "Performance", 60.0, "maverick.entity_graph", minimum=1,
           maximum=86400, unit="seconds"),
     )
+
+
+# ------------------------------------------------------------ cross checks
+def cross_checks(effective: dict, by_id: dict, error: type) -> None:
+    """Refuse learning combinations the kernel reports as a broken setup
+    (mirrors config_lint's benchmark coordinator rule)."""
+    send = "ai_benchmark_exchange.coordinator.enable"
+    origin = "ai_benchmark_exchange.coordinator.origin"
+    if effective.get(send) is True and not str(effective.get(origin) or "").strip():
+        raise error(f"{by_id[send].label}: fill in “{by_id[origin].label}” first.")

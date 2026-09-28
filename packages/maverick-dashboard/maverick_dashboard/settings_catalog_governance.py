@@ -11,6 +11,10 @@ third-party management, tech-risk compliance, governance agents, red-team
 testing, cloud AI agent oversight, AI cost collection, media provenance, the
 document vault and incident attachments. Every bound mirrors the reader that
 uses the key, so a value the page accepts is one the module accepts.
+Combinations the kernel rejects (a file reader without the isolated area or
+its file kinds, a retry ceiling below its first wait, a lookback longer than a
+collection may cover, the Databricks check without cloud oversight) are
+refused by :func:`cross_checks`, so a saved setup never switches itself off.
 
 Not here, with the reason:
 
@@ -928,3 +932,63 @@ def _outbound_vendors(S) -> tuple:
               reader, minimum=1, maximum=1024, integer=True, scale=1024, unit="KB", **sub),
         ]
     return tuple(out)
+
+
+# ------------------------------------------------------------ cross checks
+_BOX = "ai_evidence_analysis.parser_sandbox.enable"
+_OCR = "ai_evidence_analysis.ocr.enable"
+_OLD_XLS = "ai_evidence_analysis.legacy_xls.enable"
+_MEDIA = "ai_evidence_analysis.enabled_media_types"
+_PICTURES = frozenset({"jpeg", "png"})
+
+
+def cross_checks(effective: dict, by_id: dict, error: type) -> None:
+    """Refuse governance combinations the kernel reports as a broken setup.
+
+    Each rule mirrors a config_lint or module check, so a value the page
+    accepts is one the module starts with instead of switching itself off.
+    """
+    _check_file_readers(effective, by_id, error)
+    for name, _label in _IDENTITY_PROVIDERS:
+        base = f"ai_identity_governance_connectors.scheduler.providers.{name}"
+        _check_ordered(effective, by_id, error, f"{base}.retry_base_seconds",
+                       f"{base}.retry_max_seconds")
+    outcome = "ai_identity_governance_connectors.controls.production.outcome_retry"
+    _check_ordered(effective, by_id, error, f"{outcome}_base_seconds",
+                   f"{outcome}_max_seconds")
+    _check_ordered(effective, by_id, error, "ai_cost_roi.collector_lookback_days",
+                   "ai_cost_roi.collector_limits.max_period_days")
+    oversight, databricks = ("ai_cloud_agent_governance.enable",
+                             "ai_cloud_agent_governance.databricks_framework_enable")
+    if effective.get(databricks) is True and effective.get(oversight) is not True:
+        raise error(f"{by_id[databricks].label}: turn on “{by_id[oversight].label}” first.")
+
+
+def _check_file_readers(effective, by_id, error) -> None:
+    box, ocr, old = (effective.get(_BOX) is True, effective.get(_OCR) is True,
+                     effective.get(_OLD_XLS) is True)
+    media = {str(item) for item in effective.get(_MEDIA) or ()}
+    for reader in (_OCR, _OLD_XLS):
+        if effective.get(reader) is True and not box:
+            raise error(f"{by_id[reader].label}: turn on “{by_id[_BOX].label}” first.")
+    if box and not (ocr or old):
+        raise error(f"{by_id[_BOX].label}: turn on “{by_id[_OCR].label}” or "
+                    f"“{by_id[_OLD_XLS].label}” as well, or leave it off.")
+    if ocr and not media & _PICTURES:
+        raise error(f"{by_id[_OCR].label}: allow JPEG or PNG pictures in "
+                    f"“{by_id[_MEDIA].label}” first.")
+    if old and "xls" not in media:
+        raise error(f"{by_id[_OLD_XLS].label}: allow older Excel workbooks in "
+                    f"“{by_id[_MEDIA].label}” first.")
+    if "xls" in media and not old:
+        raise error(f"{by_id[_MEDIA].label}: older Excel workbooks also need "
+                    f"“{by_id[_OLD_XLS].label}” turned on.")
+
+
+def _check_ordered(effective, by_id, error, low_id: str, high_id: str) -> None:
+    low, high = effective.get(low_id), effective.get(high_id)
+    if (isinstance(low, (int, float)) and not isinstance(low, bool)
+            and isinstance(high, (int, float)) and not isinstance(high, bool) and low > high):
+        high_label = by_id[high_id].label
+        raise error(f"{by_id[low_id].label} can't be more than "
+                    f"{high_label[:1].lower() + high_label[1:]}.")
