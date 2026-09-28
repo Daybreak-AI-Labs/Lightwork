@@ -1157,13 +1157,20 @@ def _finding_excerpt(final: str) -> str:
     A finding is re-rendered into every later worker's first turn via
     ``bb.render(40)`` — the O(K^2) swarm re-send — so post an excerpt, not the
     whole answer. The full FINAL still reaches the parent via the spawn return
-    and is persisted in the world record. Tune via
-    MAVERICK_FINDING_POST_MAX_CHARS (min 200). NB: this bounds what is
+    and is persisted in the world record. Tune via ``[swarm]
+    finding_post_max_chars`` or MAVERICK_FINDING_POST_MAX_CHARS, which wins
+    (min 200). NB: this bounds what is
     STORED; Blackboard.render applies its own (smaller) per-entry cap at
     injection, so raising this alone does not widen worker briefs — raise
     MAVERICK_BB_RENDER_ENTRY_CHARS with it."""
     from .compaction import excerpt
-    cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", 1500))
+    try:
+        from .config import get_swarm
+
+        configured = get_swarm()["finding_post_max_chars"]
+    except Exception:  # an unreadable config never blocks posting a finding
+        configured = 1500
+    cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", configured))
     return excerpt(final or "", cap,
                    "finding truncated; full answer in the run record")
 

@@ -258,6 +258,8 @@ def _settings() -> dict[str, Any]:
             ),
             "commitment_secret_ref",
         ),
+        # A key saved (sealed) on the dashboard; the server's own key wins.
+        "commitment_key": section.get("commitment_key"),
         "max_cases": _integer(
             section.get("max_cases", 12), "max_cases", 1, _MAX_CASES,
         ),
@@ -321,13 +323,13 @@ def _require_enabled() -> dict[str, Any]:
 def _commitment_key(settings: Mapping[str, Any]) -> bytes:
     """Resolve the response-commitment key without persisting secret material."""
 
-    from .secret_provider import get_secret
+    from .secret_provider import get_secret_or_saved
 
     reference = _identity(
         settings.get("commitment_secret_ref"),
         "commitment_secret_ref",
     )
-    value = get_secret(reference)
+    value = get_secret_or_saved(reference, settings.get("commitment_key"))
     if value is None or len(value.encode("utf-8")) < 32:
         raise RedTeamDisabled(
             f"red-team response commitment secret {reference} is unavailable "

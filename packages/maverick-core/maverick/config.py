@@ -2052,7 +2052,10 @@ def get_swarm() -> dict:
     bounds how many of the goal's agents are inside a model call at once
     (0 = unbounded, the historical behaviour); set it when raising the spawn
     cap so a large swarm queues for the provider instead of tripping its rate
-    limits. The budget still caps total spend whatever the size."""
+    limits. The budget still caps total spend whatever the size.
+    ``finding_post_max_chars`` is how much of a helper's final answer is
+    posted to the shared board (default 1500, floor 200;
+    ``MAVERICK_FINDING_POST_MAX_CHARS`` wins)."""
     cfg = load_config().get("swarm", {})
     if not isinstance(cfg, dict):
         cfg = {}
@@ -2064,7 +2067,8 @@ def get_swarm() -> dict:
             return default
 
     return {"max_total_spawns": _int("max_total_spawns", 64, 1),
-            "max_concurrent_model_calls": _int("max_concurrent_model_calls", 0, 0)}
+            "max_concurrent_model_calls": _int("max_concurrent_model_calls", 0, 0),
+            "finding_post_max_chars": _int("finding_post_max_chars", 1500, 200)}
 
 
 def get_immune() -> dict:

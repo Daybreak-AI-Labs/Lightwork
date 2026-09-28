@@ -41,8 +41,8 @@ Deliberately NOT in the catalog:
   setup page), the learning switches, research execution, savings
   assumptions, workspace selection, the security suite's on/off switches.
 * Structured policies that need their module's own page to author safely:
-  consent and privacy workbench options, identity-connector scheduling,
-  evidence parser installs, per-team gateway credentials.
+  consent and privacy workbench options, per-team gateway credentials, and
+  the few governance tables listed in ``settings_catalog_governance``.
 
 Controls beyond single values: ``keys`` (trusted publisher keys, added from an
 uploaded or pasted key file and shown only by fingerprint), ``table`` (a list
