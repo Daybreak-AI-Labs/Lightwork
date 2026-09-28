@@ -7855,8 +7855,9 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
     def _display_channels(channels: dict) -> dict:
         out: dict = {}
         for name, cfg in (channels or {}).items():
-            if not isinstance(cfg, dict):
-                out[name] = {"enabled": bool(cfg)}
+            # [channels] rich_render and the [channels.routing] rules apply
+            # to every chat app; they are not channels of their own.
+            if not isinstance(cfg, dict) or name == "routing":
                 continue
             safe_cfg: dict = {}
             for key, value in cfg.items():

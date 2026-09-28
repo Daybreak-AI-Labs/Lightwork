@@ -89,6 +89,29 @@ def voice_choices(source: str) -> list[tuple[str, str]]:
               for p in voice_models.approved_model_files())]
 
 
+def specialist_choices() -> list[tuple[str, str]]:
+    """The enabled specialist packs a routing rule can send messages to,
+    named by department and job (the kernel re-checks the pack at intake)."""
+    from maverick.departments import department_title
+    from maverick.domain import SUITE_PREFIXES, enabled_domains, suite_for
+
+    from .identity_format import humanize
+
+    out = []
+    for name in sorted(enabled_domains()):
+        suite = suite_for(name)
+        prefix = max((p for p in SUITE_PREFIXES if name.startswith(p)), key=len, default="")
+        job = humanize(name[len(prefix):] or name)
+        out.append((name, f"{department_title(suite)}: {job}" if suite else job))
+    return sorted(out, key=lambda choice: choice[1].lower())
+
+
+_ROUTE_URGENCY = (("", "Any"), ("normal", "Normal or more urgent"), ("high", "High or critical"),
+                  ("critical", "Critical only"))
+_ROUTE_FILES = (("image", "Picture"), ("audio", "Sound recording"), ("video", "Video"),
+                ("pdf", "PDF"), ("text", "Text file"), ("file", "Other file"))
+
+
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
     plan_cells = (
         C("features", "What the plan includes", "picks", choices=_plan_features(),
@@ -392,6 +415,27 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           aliases="tax signed updates public key publisher"),
 
         # --------------------------------------------------------- chat apps
+        S("channels.routing", "rules", "Send chat messages to a specialist",
+          "Rules are checked in order for every message that arrives through a chat app; "
+          "the first one that matches decides which specialist handles it. Messages that "
+          "match no rule go to the general assistant, as they do with no rules at all.",
+          "rules", "Chat channels", [], "maverick.channel_autorouting",
+          subgroup="Message routing",
+          columns=(
+              C("any_keyword", "Contains any of these words", "words", max_items=20,
+                max_length=60, pattern=r"[^,<>{}\"\n\r]{1,60}",
+                item_error="a word or short phrase"),
+              C("urgency", "How urgent it sounds", "select", choices=_ROUTE_URGENCY, default=""),
+              C("attachments", "Has a file of this kind", "picks", choices=_ROUTE_FILES),
+              C("min_length", "At least this many characters (0 means any)", "number",
+                minimum=0, maximum=100000, integer=True, default=0, unit="characters"),
+              C("specialist", "Send to", "pick", choices_from="specialists", required=True),
+          ),
+          item_label="Rule", add_label="Add a rule",
+          empty_text="Every chat message goes to the general assistant.", weaker="change",
+          warning="Matching chat messages will be handled by the chosen specialist, with that "
+                  "specialist's tools and permissions.",
+          aliases="routing rules specialist department triage"),
         S("channels", "rich_render", "Show formulas and diagrams as a page",
           "When a reply contains formulas or diagrams, also send a page that shows them "
           "properly. The page is saved on this server.",

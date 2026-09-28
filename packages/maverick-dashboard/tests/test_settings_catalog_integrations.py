@@ -21,6 +21,17 @@ _STRIPE_KEY = "sk_test_" + "a1B2c3D4e5F6g7H8"  # pragma: allowlist secret
 _STRIPE_HOOK = "whsec_" + "Z9y8X7w6V5u4T3s2"  # pragma: allowlist secret
 _PUSHOVER_USER = "u" + "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G"  # pragma: allowlist secret
 _PUSHOVER_APP = "a" + "Z1x2C3v4B5n6M7q8W9e0R1t2Y3u4I"  # pragma: allowlist secret
+
+
+def _first_specialist() -> str:
+    from maverick.domain import enabled_domains
+
+    return sorted(enabled_domains())[0]
+
+
+_SPECIALIST = _first_specialist()
+_RULE = {"any_keyword": ["invoice"], "urgency": "", "attachments": ["pdf"], "min_length": 0,
+         "specialist": _SPECIALIST}
 _ENV = sorted({name for row in ROWS for name in row.env} | {
     "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_CONFIG", "MAVERICK_CONFIG_OVERLAY",
     "MAVERICK_OAUTH_VAULT", "MAVERICK_CONNECTIONS", "MAVERICK_STRIPE_ENABLE",
@@ -92,6 +103,7 @@ VALUES: dict[str, tuple[object, object]] = {
     "voice.whisper_cpp_model": ("ggml-custom.bin", "ggml-custom.bin"),
     "notifications.user_key": (_PUSHOVER_USER, _PUSHOVER_USER),
     "notifications.app_token": (_PUSHOVER_APP, _PUSHOVER_APP),
+    "channels.routing.rules": ([_RULE], [_RULE]),
 }
 
 # id -> a value the server must refuse
@@ -153,6 +165,7 @@ INVALID: dict[str, object] = {
     "voice.whisper_cpp_model": "ggml-escape.bin",
     "notifications.user_key": "too-short",
     "notifications.app_token": "a" * 31,
+    "channels.routing.rules": [{**_RULE, "specialist": "no_such_pack"}],
 }
 
 # id -> (value first set without confirmation or None, the loosening value)
@@ -182,6 +195,7 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "attachments.audio_max_bytes": (None, 512),
     "voice.whisper_cpp_bin": (None, "whisper-cli"),
     "voice.whisper_cpp_model": (None, "ggml-custom.bin"),
+    "channels.routing.rules": (None, [_RULE]),
 }
 
 
@@ -684,3 +698,23 @@ def test_mattermost_is_set_up_on_the_channels_page_with_a_sealed_token(monkeypat
     (row,) = [c for c in settings_store.channels_state() if c["name"] == "mattermost"]
     token_field = next(f for f in row["fields"] if f["key"] == "bot_token")
     assert token_field["hint"] == "on the server" and token_field["value"] == ""
+
+
+def test_a_saved_routing_rule_changes_which_specialist_handles_a_message(audit_rows):
+    from maverick.channel_autorouting import specialist_for
+
+    class Message:
+        channel = "slack"
+        text = "please pay this invoice"
+        attachments = [{"mime": "application/pdf"}]
+
+    assert specialist_for(Message()) == ""
+    row = _row("channels.routing.rules")
+    specialist_column = next(c for c in row["grid"]["columns"] if c["key"] == "specialist")
+    assert any(choice["value"] == _SPECIALIST for choice in specialist_column["choices"])
+    _set("channels.routing.rules", [_RULE])
+    assert specialist_for(Message()) == _SPECIALIST
+    Message.text = "what is on my calendar"
+    assert specialist_for(Message()) == ""
+    page = client.get("/channels")
+    assert page.status_code == 200 and "Routing" not in page.text

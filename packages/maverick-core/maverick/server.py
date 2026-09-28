@@ -306,12 +306,19 @@ class Server:
             # identity is opaque and stays in the database; tenant path code
             # independently percent-encodes it before any filesystem use.
             execution_user_id = f"{msg.channel or 'unknown'}:{principal_id}"
+            # [channels.routing] rules may send this message to a specialist
+            # pack; with no rules (or no match) nothing changes.
+            from .channel_autorouting import specialist_for
+            specialist = specialist_for(msg)
             goal_id = world.create_goal(
                 title,
                 msg.text,
                 owner=f"user:{execution_user_id}",
                 execution_principal=f"user:{execution_user_id}",
+                **({"domain": specialist} if specialist else {}),
             )
+            if specialist:
+                log.info("goal #%s routed to specialist %s", goal_id, specialist)
 
             # Inbound channel attachments (Slack files, email/Telegram
             # attachments) become goal attachments, exactly like a dashboard
