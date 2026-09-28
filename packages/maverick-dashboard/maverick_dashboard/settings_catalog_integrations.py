@@ -2,9 +2,398 @@
 
 Kept apart from settings_catalog.py so each group can be extended without
 editing the shared catalog. entries receives the catalog's own row and
-column types (a plain import would be circular)."""
+column types (a plain import would be circular).
+
+Covers the tools agents use to reach email, calendars, an ERP system, GitHub
+and Obsidian; issue-tracker and webhook delivery settings; alert batching and
+operational alerts; tax-figure updates; billing plans, Stripe prices and
+refunds; vendor-onboarding read retries; and voice input. Every row names the
+kernel module that reads it, and each environment variable in ``env`` still
+wins over the value saved here.
+"""
 from __future__ import annotations
 
+_HTTPS = r"https://[^\s\"'<>]{1,300}"
+_LOCAL_HTTP = r"http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/[^\s\"'<>]{0,300})?"
+# A web address: secure, or plain only when it stays on this computer.
+_ADDRESS = r"(" + _HTTPS + r"|" + _LOCAL_HTTP + r")?"
+_LABEL = r"[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_HOST = r"(" + _LABEL + r"(\." + _LABEL + r")*)?"
+_EMAIL = r"[^@\s<>\"']{1,64}@[^@\s<>\"']{1,190}\.[A-Za-z]{2,24}"
+_ACCOUNT = r"[^\s<>\"'{}]{0,254}"
+_LINE = r"[^\n\r<>{}\"]{0,256}"
+_MODEL_ID = r"[A-Za-z0-9._:/-]{0,128}"
+# A folder on this server: absolute (or in the home folder), no ".." steps.
+_FOLDER = (r"((?!.*(^|[\\/])\.\.([\\/]|$))(~?/|[A-Za-z]:[\\/])"
+           r"[^\x00-\x1f<>\"|?*]{0,500})?")
 
-def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- filled by the group
-    return ()
+_PLANS = (("free", "Free"), ("pro", "Pro"), ("enterprise", "Enterprise"))
+_FEATURE_WORDS = {
+    "core": "Core platform",
+    "channels": "Chat channels",
+    "audit_export": "Activity record export",
+    "grpc": "Connections from other software",
+    "sso": "Single sign-on",
+    "self_host": "Run on your own servers",
+}
+
+
+def _plan_features() -> tuple[tuple[str, str], ...]:
+    """Every feature a plan can include, in plain words."""
+    from maverick.billing import DEFAULT_PLANS, gateable_features
+    from maverick.departments import department_title
+
+    names = list(dict.fromkeys([*gateable_features(),
+                                *(f for plan in DEFAULT_PLANS.values() for f in plan.features)]))
+    out = []
+    for name in names:
+        if name.startswith("department:"):
+            out.append((name, "Department: " + department_title(name.split(":", 1)[1])))
+        else:
+            out.append((name, _FEATURE_WORDS.get(name, name.replace("_", " ").capitalize())))
+    return tuple(out)
+
+
+def _whisper_models() -> tuple[tuple[str, str], ...]:
+    from maverick.voice_models import KNOWN_MODELS
+
+    words = {"tiny": "Tiny (fastest, least accurate)", "base": "Base",
+             "small": "Small", "medium": "Medium",
+             "large": "Large (slowest, most accurate)"}
+    out = [("", "Automatic (recommended)")]
+    for name in KNOWN_MODELS:
+        stem, _, lang = name.partition(".")
+        label = words.get(stem.split("-")[0], stem.replace("-", " ").capitalize())
+        if stem.startswith("large") and stem != "large":
+            label = "Large, " + stem.split("-", 1)[1].replace("-", " ")
+        out.append((name, label + (", English only" if lang == "en" else "")))
+    return tuple(out)
+
+
+def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
+    plan_cells = (
+        C("features", "What the plan includes", "picks", choices=_plan_features(),
+          max_items=128),
+        C("max_daily_dollars", "Daily spending limit (0 means no limit)", "number",
+          minimum=0, maximum=1000000, unit="dollars", default=0),
+        C("max_concurrent_goals", "Tasks at once (0 means no limit)", "number",
+          minimum=0, maximum=10000, integer=True, unit="tasks", default=0),
+    )
+    return (
+        # ------------------------------------------------ plans and billing
+        S("billing", "enforce_plan_caps", "Hold workspaces to their plan's daily limit",
+          "A workspace without a daily spending limit of its own uses the daily limit of its "
+          "billing plan. When this is off, such a workspace has no daily limit.",
+          "toggle", "Spending & limits", False, "maverick.tenant.registry",
+          subgroup="Plans and billing", env=("MAVERICK_ENFORCE_PLAN_CAPS",), weaker=False,
+          warning="Workspaces without their own daily limit will be able to spend without "
+                  "a daily limit.",
+          aliases="plan cap entitlement tenant workspace"),
+        S("billing", "plans", "Billing plans",
+          "What each plan includes and its limits. A plan with no row here keeps its built-in "
+          "features and limits: Free has the core platform, 5 dollars a day and 1 task at a "
+          "time; Pro adds chat channels and connections from other software, 100 dollars a "
+          "day and 5 tasks at a time; Enterprise has everything with no limits.",
+          "table", "Spending & limits", {}, "maverick.billing", subgroup="Plans and billing",
+          row_kind="grid", choices=_PLANS, columns=plan_cells, item_label="Plan",
+          row_label="Plan", add_label="Change a plan",
+          empty_text="Every plan uses its built-in features and limits.", weaker="change",
+          warning="Workspaces on a changed plan get exactly what is listed: a feature left "
+                  "out is taken away, and a higher limit or 0 lets them spend more.",
+          aliases="entitlements plan caps pricing tiers"),
+        S("billing.stripe.prices", "pro", "Stripe price for the Pro plan",
+          "The Stripe price code charged every month for the Pro plan, the one starting "
+          "with price. Leave empty to charge no platform fee for it.",
+          "text", "Spending & limits", "", "maverick.config", subgroup="Plans and billing",
+          pattern=r"(price_[A-Za-z0-9]{1,200})?", max_length=210, weaker="change",
+          warning="Workspaces on this plan will be charged the new price from their next "
+                  "bill.",
+          aliases="stripe price subscription fee"),
+        S("billing.stripe.prices", "enterprise", "Stripe price for the Enterprise plan",
+          "The Stripe price code charged every month for the Enterprise plan, the one "
+          "starting with price. Leave empty to charge no platform fee for it.",
+          "text", "Spending & limits", "", "maverick.config", subgroup="Plans and billing",
+          pattern=r"(price_[A-Za-z0-9]{1,200})?", max_length=210, weaker="change",
+          warning="Workspaces on this plan will be charged the new price from their next "
+                  "bill.",
+          aliases="stripe price subscription fee"),
+        S("commerce", "stripe_refunds", "Let agents issue Stripe refunds",
+          "Agents using the Stripe tool may send real refunds from your Stripe account once "
+          "a request is confirmed. When off, they can only prepare a refund for a person.",
+          "toggle", "Spending & limits", False, "maverick.tools.stripe_tool",
+          env=("MAVERICK_STRIPE_ENABLE_REFUNDS",), weaker=True,
+          warning="Agents will be able to send money back to customers from your Stripe "
+                  "account.",
+          aliases="stripe refund payments"),
+
+        # ---------------------------------------------------- email for agents
+        S("email", "disable", "Stop all outgoing email",
+          "While this is on, agents cannot send email and Lightwork sends none of its own, "
+          "such as invitations.",
+          "toggle", "Integrations", False, "maverick.mailer", subgroup="Email for agents",
+          env=("MAVERICK_EMAIL_DISABLE",), weaker=False,
+          warning="Agents and Lightwork will be able to send email again.",
+          aliases="email kill switch block sending"),
+        S("email", "provider", "Send email through",
+          "The service that sends email for agents and for Lightwork.",
+          "select", "Integrations", "smtp", "maverick.mailer", subgroup="Email for agents",
+          choices=(("smtp", "Your email account (default)"),
+                   ("ses", "Amazon Simple Email Service")),
+          env=("EMAIL_PROVIDER",), aliases="smtp ses mail"),
+        S("email", "user", "Email account",
+          "The account that signs in to send and read email, usually its address.",
+          "text", "Integrations", "", "maverick.tools.email_tool", subgroup="Email for agents",
+          pattern=_ACCOUNT, max_length=254, env=("EMAIL_USER",)),
+        S("email", "app_password", "Email app password",
+          "An app password made for Lightwork in your email account's security settings, "
+          "not your normal password. It is stored sealed and never shown again.",
+          "secret", "Integrations", "", "maverick.tools.email_tool",
+          subgroup="Email for agents", max_length=500, env=("EMAIL_APP_PASSWORD",)),
+        S("email", "from", "Send email as",
+          "The address email comes from. Leave empty to use the email account above.",
+          "text", "Integrations", "", "maverick.mailer", subgroup="Email for agents",
+          pattern=r"(" + _EMAIL + r")?", max_length=254, env=("EMAIL_FROM",)),
+        S("email", "smtp_host", "Outgoing mail server",
+          "The server that sends email, such as smtp.gmail.com.",
+          "text", "Integrations", "smtp.gmail.com", "maverick.tools.email_tool",
+          subgroup="Email for agents", pattern=_HOST, max_length=253,
+          env=("EMAIL_SMTP_HOST",), weaker="change",
+          warning="Your email account and app password will be sent to the new server."),
+        S("email", "smtp_port", "Outgoing mail server port",
+          "Usually 465 for a secure connection, or 587.",
+          "number", "Integrations", 465, "maverick.tools.email_tool",
+          subgroup="Email for agents", minimum=1, maximum=65535, integer=True, unit="port",
+          env=("EMAIL_SMTP_PORT",)),
+        S("email", "imap_host", "Incoming mail server",
+          "The server agents read email from, such as imap.gmail.com.",
+          "text", "Integrations", "imap.gmail.com", "maverick.tools.email_tool",
+          subgroup="Email for agents", pattern=_HOST, max_length=253,
+          env=("EMAIL_IMAP_HOST",), weaker="change",
+          warning="Your email account and app password will be sent to the new server."),
+
+        # ------------------------------------------------- calendar for agents
+        S("calendar", "url", "Calendar server address",
+          "The web address of your calendar account, such as https://caldav.icloud.com.",
+          "text", "Integrations", "", "maverick.tools.calendar_tool", subgroup="Calendar",
+          pattern=_ADDRESS, max_length=300, env=("CALDAV_URL",), weaker="change",
+          warning="Your calendar account and password will be sent to the new address."),
+        S("calendar", "user", "Calendar account",
+          "The account name or email address that signs in to the calendar.",
+          "text", "Integrations", "", "maverick.tools.calendar_tool", subgroup="Calendar",
+          pattern=_ACCOUNT, max_length=254, env=("CALDAV_USER",)),
+        S("calendar", "password", "Calendar app password",
+          "An app password made for Lightwork in your calendar account. It is stored sealed "
+          "and never shown again.",
+          "secret", "Integrations", "", "maverick.tools.calendar_tool", subgroup="Calendar",
+          max_length=500, env=("CALDAV_PASSWORD",)),
+        S("calendar", "calendar", "Calendar to use",
+          "The name of the calendar agents use. Leave empty to use the first one.",
+          "text", "Integrations", "", "maverick.tools.calendar_tool", subgroup="Calendar",
+          pattern=_LINE, max_length=256, env=("CALDAV_CALENDAR",)),
+
+        # -------------------------------------------------------- ERP system
+        S("erp", "base_url", "Business system address",
+          "The web address of your ERP system's data service, such as your NetSuite or SAP "
+          "address.",
+          "text", "Integrations", "", "maverick.tools.erp_tool", subgroup="Business system (ERP)",
+          pattern=_ADDRESS, max_length=300, env=("ERP_BASE_URL",), weaker="change",
+          warning="The business system sign-in key will be sent to the new address."),
+        S("erp", "token", "Business system sign-in key",
+          "The access key agents use to read from your ERP system. It is stored sealed and "
+          "never shown again.",
+          "secret", "Integrations", "", "maverick.tools.erp_tool",
+          subgroup="Business system (ERP)", max_length=4000, env=("ERP_TOKEN",)),
+        S("erp", "system", "Business system name",
+          "The name agents use for your ERP system in their answers, such as NetSuite.",
+          "text", "Integrations", "", "maverick.tools.erp_tool",
+          subgroup="Business system (ERP)", pattern=r"[A-Za-z0-9 ._&()-]{0,64}",
+          max_length=64, env=("ERP_SYSTEM",)),
+
+        # ------------------------------------------------------------- GitHub
+        S("github", "token", "GitHub access key",
+          "A GitHub access key agents use to search code and read issues. Without one, only "
+          "public projects can be read. It is stored sealed and never shown again.",
+          "secret", "Integrations", "", "maverick.tools.github_search", subgroup="GitHub",
+          max_length=500, env=("GITHUB_TOKEN", "GH_TOKEN")),
+        S("github", "trigger_labels", "Issue labels that start a task",
+          "When the Lightwork GitHub app sees an issue with one of these labels, it starts a "
+          "task to fix it and opens a pull request. Leave empty to use maverick, automate "
+          "and ai-fix.",
+          "list", "Integrations", [], "maverick.github_app", subgroup="GitHub",
+          item_label="Label", item_hint="automate", pattern=r"[^\s,<>\"'{}]{1,50}",
+          item_error="a label without spaces or commas", empty_unset=True, max_items=20,
+          max_length=50, env=("MAVERICK_GH_TRIGGER_LABELS",), weaker="grow",
+          warning="Issues with the new labels will start paid tasks."),
+
+        # ----------------------------------------------------- issue trackers
+        S("webhooks", "linear_bot_id", "Linear account that gets the work",
+          "Linear issues assigned to this account start a task. Use the account's Linear "
+          "user number or email address.",
+          "text", "Integrations", "", "maverick.issue_webhooks", subgroup="Issue trackers",
+          pattern=_ACCOUNT, max_length=254, env=("MAVERICK_BOT_LINEAR_ID",),
+          weaker="change", warning="Issues assigned to this account will start paid tasks."),
+        S("webhooks", "jira_bot_id", "Jira account that gets the work",
+          "Jira issues assigned to this account start a task. Use the account's Jira account "
+          "number or email address.",
+          "text", "Integrations", "", "maverick.issue_webhooks", subgroup="Issue trackers",
+          pattern=_ACCOUNT, max_length=254, env=("MAVERICK_BOT_JIRA_ACCOUNT_ID",),
+          weaker="change", warning="Issues assigned to this account will start paid tasks."),
+        S("webhooks", "gitlab_bot_username", "GitLab account that gets the work",
+          "GitLab issues assigned to this username start a task.",
+          "text", "Integrations", "", "maverick.issue_webhooks", subgroup="Issue trackers",
+          pattern=r"[A-Za-z0-9._-]{0,255}", max_length=255,
+          env=("MAVERICK_BOT_GITLAB_USERNAME",), weaker="change",
+          warning="Issues assigned to this account will start paid tasks."),
+
+        # ----------------------------------------------------------- Obsidian
+        S("obsidian", "vault_path", "Obsidian notes folder",
+          "The folder on this server that holds your Obsidian notes, written from the top of "
+          "the drive. Agents with the notes tool can read and change the notes in it.",
+          "text", "Integrations", "", "maverick.tools.obsidian", subgroup="Obsidian notes",
+          pattern=_FOLDER, max_length=500, weaker="change",
+          warning="Agents will be able to read and change the notes in the new folder.",
+          aliases="vault notes markdown"),
+
+        # ------------------------------------------------------- notifications
+        S("notifications", "batch_max", "Send grouped alerts once there are",
+          "When routine alerts are grouped, send the group as soon as it holds this many, "
+          "without waiting for the time above.",
+          "number", "Integrations", 10, "maverick.notification_batcher", minimum=1,
+          maximum=1000, integer=True, unit="alerts", env=("MAVERICK_NOTIFY_BATCH_MAX",)),
+        S("alerts", "enabled", "Alert me about problems with Lightwork itself",
+          "Send an urgent alert with the service chosen above when, for example, the "
+          "emergency stop trips, a spending limit runs out or the activity record breaks.",
+          "toggle", "Integrations", False, "maverick.ops_alert", env=("MAVERICK_ALERTS",),
+          aliases="operations alerts paging on-call"),
+
+        # ------------------------------------------------ task event delivery
+        S("webhooks", "workers", "Deliver task events in parallel",
+          "How many task event messages are sent to your addresses at the same time.",
+          "number", "Integrations", 4, "maverick.webhooks", subgroup="Task event delivery",
+          minimum=1, maximum=64, integer=True, unit="at once", restart=True,
+          env=("MAVERICK_WEBHOOK_WORKERS",)),
+        S("webhooks", "max_inflight", "Most task events waiting to be sent",
+          "Task event messages beyond this many are dropped and recorded, so a slow "
+          "receiving address cannot use up this server's memory.",
+          "number", "Integrations", None, "maverick.webhooks", subgroup="Task event delivery",
+          minimum=1, maximum=10000, integer=True, unit="messages", restart=True,
+          none_text="Automatic (16 for each parallel delivery)", weaker="higher",
+          env=("MAVERICK_WEBHOOK_MAX_INFLIGHT",),
+          warning="More unsent messages can pile up in memory when a receiving address is "
+                  "slow."),
+        S("webhooks", "max_age_seconds", "Accept signed messages for",
+          "Signed messages from other systems older than this are refused, so a copied "
+          "message cannot be sent again later.",
+          "number", "Integrations", 300, "maverick.webhooks", subgroup="Task event delivery",
+          minimum=30, maximum=86400, integer=True, unit="seconds", weaker="higher",
+          env=("MAVERICK_WEBHOOK_MAX_AGE_SECONDS",),
+          warning="Older signed messages will be accepted, so a copied message can be sent "
+                  "again for longer."),
+        S("webhooks", "body_limit", "Largest incoming chat message",
+          "Messages sent to this server by chat apps larger than this are refused before "
+          "they are checked.",
+          "number", "Integrations", 1048576, "maverick_channels.base",
+          subgroup="Task event delivery", minimum=16, maximum=102400, integer=True,
+          scale=1024, unit="KB", restart=True, weaker="higher",
+          env=("MAVERICK_WEBHOOK_BODY_LIMIT",),
+          warning="Anyone who can reach the chat app ports can make this server read "
+                  "larger messages before they are checked."),
+
+        # ---------------------------------------------------------- automations
+        S("automation_import", "max_steps", "Steps kept from an imported automation",
+          "Imported automations with more steps than this are shortened, so their "
+          "instructions stay a sensible length for every run.",
+          "number", "Integrations", 200, "maverick.automation_import.ir", minimum=1,
+          maximum=5000, integer=True, unit="steps", weaker="higher",
+          env=("MAVERICK_IMPORT_MAX_STEPS",),
+          warning="Longer imported automations make longer instructions, which cost more on "
+                  "every run."),
+
+        # ------------------------------------------------------ tax figures
+        S("tax", "update_url", "Where tax figure updates come from",
+          "The web address Lightwork checks for signed updates to tax figures. Updates are "
+          "used only when they are signed by a trusted publisher below.",
+          "text", "Integrations", "", "maverick.config", pattern=_ADDRESS, max_length=300,
+          aliases="tax constants update channel"),
+        S("tax", "trusted_constants_pubkeys", "Trusted tax figure publishers",
+          "Tax figure updates signed by these publishers are used. Add a publisher by "
+          "uploading or pasting their public key file; each one is shown by its fingerprint.",
+          "keys", "Integrations", [], "maverick.config", weaker="grow",
+          warning="Tax figures signed by a newly trusted publisher will be used in tax work.",
+          aliases="tax signed updates public key publisher"),
+
+        # --------------------------------------------------------- chat apps
+        S("channels", "rich_render", "Show formulas and diagrams as a page",
+          "When a reply contains formulas or diagrams, also send a page that shows them "
+          "properly. The page is saved on this server.",
+          "toggle", "Chat channels", False, "maverick_channels.rich_render",
+          subgroup="Every chat app", restart=True, env=("MAVERICK_CHANNELS_RICH_RENDER",),
+          aliases="math mermaid render"),
+
+        # ---------------------------------------------------- vendor onboarding
+        S("vendor_onboarding", "safe_read_attempts", "Tries for each vendor document read",
+          "How many times Lightwork tries to read a vendor document or ticket before it "
+          "stops and asks a person.",
+          "number", "AI governance", 3, "maverick.vendor_onboarding_setup",
+          subgroup="Vendor onboarding", minimum=1, maximum=5, integer=True, unit="tries"),
+        S("vendor_onboarding", "safe_read_backoff_seconds", "Wait between those tries",
+          "How long to wait before trying a vendor document or ticket read again.",
+          "number", "AI governance", 0.25, "maverick.vendor_onboarding_setup",
+          subgroup="Vendor onboarding", minimum=0, maximum=5, step=0.05, unit="seconds"),
+
+        # -------------------------------------------------------------- voice
+        S("voice", "stt_backend", "Turn speech into text using",
+          "Where spoken requests are turned into text.",
+          "select", "AI models", "auto", "maverick.tools.voice", subgroup="Voice",
+          choices=(("local", "Only this computer (recordings stay here)"),
+                   ("auto", "Automatic: an outside service when one is set up (default)"),
+                   ("openai", "OpenAI"), ("groq", "Groq")),
+          order=("local", "auto", "openai", "groq"), weaker=True,
+          env=("MAVERICK_VOICE_STT_BACKEND",),
+          warning="Recordings of spoken requests may be sent to an outside service.",
+          aliases="speech to text transcription whisper"),
+        S("voice", "stt_model", "Speech model on this computer",
+          "The speech-to-text model used on this computer. Larger models are more accurate "
+          "and slower.",
+          "select", "AI models", "", "maverick.voice_models", subgroup="Voice",
+          choices=_whisper_models(), env=("MAVERICK_WHISPER_MODEL",),
+          aliases="whisper model size"),
+        S("voice", "stt_openai_model", "OpenAI speech model",
+          "The OpenAI model that turns speech into text. Leave empty for whisper-1.",
+          "text", "AI models", "", "maverick.tools.voice", subgroup="Voice",
+          pattern=_MODEL_ID, max_length=128, env=("MAVERICK_WHISPER_OPENAI_MODEL",)),
+        S("voice", "stt_groq_model", "Groq speech model",
+          "The Groq model that turns speech into text. Leave empty for "
+          "whisper-large-v3-turbo.",
+          "text", "AI models", "", "maverick.tools.voice", subgroup="Voice",
+          pattern=_MODEL_ID, max_length=128, env=("MAVERICK_WHISPER_GROQ_MODEL",)),
+        S("voice", "tts_openai_model", "OpenAI voice for spoken replies",
+          "The OpenAI model that reads replies aloud. Leave empty for tts-1.",
+          "text", "AI models", "", "maverick.tools.voice", subgroup="Voice",
+          pattern=_MODEL_ID, max_length=128, env=("MAVERICK_TTS_OPENAI_MODEL",)),
+        S("voice", "tts_elevenlabs_model", "ElevenLabs voice for spoken replies",
+          "The ElevenLabs model that reads replies aloud. Leave empty for their fast "
+          "turbo model.",
+          "text", "AI models", "", "maverick.tools.voice", subgroup="Voice",
+          pattern=_MODEL_ID, max_length=128, env=("MAVERICK_TTS_ELEVENLABS_MODEL",)),
+        S("voice", "max_upload_bytes", "Longest voice recording accepted",
+          "Voice recordings sent from Chat larger than this are refused.",
+          "number", "AI models", 26214400, "maverick_dashboard.api", subgroup="Voice",
+          minimum=1, maximum=200, integer=True, scale=1048576, unit="MB", weaker="higher",
+          env=("MAVERICK_VOICE_MAX_BYTES",),
+          warning="Larger recordings will be accepted, which uses more of this server's "
+                  "memory."),
+        S("voice", "transcribe_concurrency", "Recordings turned into text at once",
+          "How many voice recordings are turned into text at the same time.",
+          "number", "AI models", 2, "maverick_dashboard.api", subgroup="Voice", minimum=1,
+          maximum=16, integer=True, unit="at once",
+          env=("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY",)),
+        S("attachments", "audio_max_bytes", "Largest sound file agents study",
+          "Sound files larger than this are refused by the listening tool, so one file "
+          "cannot use up this server's memory.",
+          "number", "AI models", 67108864, "maverick.tools.audio_understanding",
+          subgroup="Voice", minimum=1, maximum=2048, integer=True, scale=1048576,
+          unit="MB", weaker="higher", env=("MAVERICK_AUDIO_MAX_BYTES",),
+          warning="Larger sound files will be accepted, which uses more of this server's "
+                  "memory."),
+    )

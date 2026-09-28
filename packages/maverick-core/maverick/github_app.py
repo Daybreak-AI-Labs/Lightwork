@@ -155,9 +155,21 @@ def parse_webhook(event: str, payload: dict) -> WebhookPayload | None:
 
 
 def _trigger_labels() -> set[str]:
+    """Issue labels that start a run: ``MAVERICK_GH_TRIGGER_LABELS`` (comma
+    separated) wins, else ``[github] trigger_labels`` (the All settings page),
+    else :data:`DEFAULT_LABELS`."""
     raw = os.environ.get("MAVERICK_GH_TRIGGER_LABELS", "")
     if raw:
         return {x.strip().lower() for x in raw.split(",") if x.strip()}
+    try:
+        from .config import load_config
+        labels = ((load_config() or {}).get("github") or {}).get("trigger_labels")
+    except Exception:  # pragma: no cover - config never blocks a webhook
+        labels = None
+    if isinstance(labels, list):
+        chosen = {x.strip().lower() for x in labels if isinstance(x, str) and x.strip()}
+        if chosen:
+            return chosen
     return set(DEFAULT_LABELS)
 
 

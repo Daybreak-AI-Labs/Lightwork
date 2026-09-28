@@ -1,6 +1,7 @@
 """Named renewable credentials; explicit consent and sealed app registration."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -64,6 +65,12 @@ class ExchangeIn(Reviewed):
 class CancelIn(Reviewed):
     state: str = Field(min_length=40, max_length=64)
     return_profile: Literal["browser", "desktop-loopback-v1"] = "browser"
+
+
+class DisableIn(Reviewed):
+    # "authorization": stop renewable account sign-in only; "all": also turn
+    # off saved connections. Saved connections are never deleted here.
+    scope: Literal["authorization", "all"] = "authorization"
 
 
 def _context(request):
@@ -227,4 +234,77 @@ def enable_desktop_return(request: Request, response: Response, payload: Reviewe
         data.setdefault("oauth", {})["desktop_return"] = True
         settings_store._write(data)
     config.reset_config_cache()
+    return {"enabled": connection_oauth.desktop_return_enabled(), "reload_required": True}
+
+
+def _global_switch(section: str, key: str) -> bool:
+    return (config.load_global_config().get(section) or {}).get(key) is True
+
+
+def _record_off(actor: str, changes: list[tuple[str, str, bool]]) -> None:
+    from maverick.audit import EventKind, audit_event
+
+    for section, key, old in changes:
+        audit_event(EventKind.SETTING_CHANGED, agent="dashboard", _global=True, actor=actor,
+                    section=section, key=key, old=old, new=False, confirmed=True)
+
+
+def _switch_off(request, response, payload, keys, still_on) -> None:
+    """Write ``False`` for each ``(section, key)`` in one locked save, verify it
+    took effect and record one audit row per switch that changed. Nothing is
+    deleted: saved connections and provider applications stay as they are."""
+    actor, _ = _authority(request, response, payload, operator=True)
+    with settings_store._locked(strict=True):
+        _authority(request, response, payload, operator=True)
+        before = settings_store._load_overlay_for_update()
+        changes = [(section, key, _global_switch(section, key)) for section, key in keys]
+        data = copy.deepcopy(before)
+        for section, key in keys:
+            table = data.get(section)
+            if table is not None and not isinstance(table, dict):
+                raise HTTPException(503, "Connection configuration is unavailable. Nothing was changed.")
+            data.setdefault(section, {})[key] = False
+        settings_store._write(data)
+        config.reset_config_cache()
+        if still_on():
+            settings_store._write(before)
+            config.reset_config_cache()
+            raise HTTPException(409, "Higher-precedence deployment settings keep this on. Nothing was changed.")
+        from maverick.audit import AuditRefused
+        try:
+            _record_off(actor, [change for change in changes if change[2]])
+        except AuditRefused as exc:
+            settings_store._write(before)
+            config.reset_config_cache()
+            raise HTTPException(503, "The change could not be recorded, so it was undone.") from exc
+
+
+@router.post("/disable")
+def disable(request: Request, response: Response, payload: DisableIn):
+    """Turn off saved account authorization (and, with scope "all", saved
+    connections). Accounts connected here stop working until it is turned on
+    again; their encrypted records are kept."""
+    _authority(request, response, payload, operator=True)
+    if any(config.env_flag(name) is True for name in ("MAVERICK_OAUTH_VAULT", "LIGHTWORK_OAUTH_VAULT")):
+        raise HTTPException(409, "Deployment settings keep saved account authorization on, so it can't be turned off here.")
+    keys = [("oauth", "vault")]
+    if payload.scope == "all":
+        if connections.deployment_override() is True:
+            raise HTTPException(409, "Deployment settings keep saved connections on, so they can't be turned off here.")
+        keys.append(("connections", "enable"))
+    _switch_off(request, response, payload, keys,
+                lambda: connection_oauth.enabled() or (payload.scope == "all" and connections.enabled()))
+    return {"enabled": connection_oauth.enabled(), "connections_enabled": connections.enabled(),
+            "reload_required": True}
+
+
+@router.post("/desktop-return/disable")
+def disable_desktop_return(request: Request, response: Response, payload: Reviewed):
+    """Stop system-browser sign-in returns to the desktop app. Accounts
+    already connected keep working; browser sign-in is unchanged."""
+    _authority(request, response, payload, operator=True)
+    if any(config.env_flag(name) is True for name in ("MAVERICK_OAUTH_DESKTOP_RETURN", "LIGHTWORK_OAUTH_DESKTOP_RETURN")):
+        raise HTTPException(409, "Deployment settings keep desktop account return on, so it can't be turned off here.")
+    _switch_off(request, response, payload, [("oauth", "desktop_return")],
+                connection_oauth.desktop_return_enabled)
     return {"enabled": connection_oauth.desktop_return_enabled(), "reload_required": True}

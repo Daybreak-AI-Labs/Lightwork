@@ -98,3 +98,37 @@ def test_deployment_managed_capture_is_not_waived(fixture, monkeypatch):
     response = client.post("/api/v1/task-files/enable", json={"context": state["context"], "confirm": True})
     assert response.status_code == 409
     assert "manage file capture" in response.text
+
+
+def test_file_protection_turns_off_for_future_runs_and_keeps_saved_copies(fixture, monkeypatch):
+    import maverick.audit as audit
+
+    client, world, goal, sandbox = fixture
+    rows: list[dict] = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
+    base = f"/api/v1/task-files/{goal}"
+    state = client.get(base).json()
+    assert client.post("/api/v1/task-files/enable", json={"context": state["context"], "confirm": True}).status_code == 200
+    with tenant_scope(tenant="file-workspace"):
+        with recovery.run_scope(world, goal, sandbox):
+            recovery.begin_capture(world, goal)
+            write_text_contained(sandbox, sandbox.workdir / "review.txt", "task revision")
+        world.set_goal_status(goal, "done", result="Synthetic complete")
+    assert client.post("/api/v1/task-files/disable", json={"context": state["context"], "confirm": False}).status_code == 409
+    assert client.post("/api/v1/task-files/disable", json={"context": state["context"], "confirm": True},
+                       headers={"X-Test-User": "foreign", "Origin": "https://foreign.example"}).status_code == 403
+    response = client.post("/api/v1/task-files/disable", json={"context": state["context"], "confirm": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["capture_enabled"] is False
+    after = client.get(base).json()
+    assert after["capture_enabled"] is False and after["has_history"] is True
+    assert sorted((row["section"], row["key"]) for row in rows) == [("workspace", "journal"), ("workspace", "journal_strict")]
+    assert client.get(base + "/preview").status_code == 200
+
+
+def test_file_protection_off_is_refused_when_deployment_manages_capture(fixture, monkeypatch):
+    client, world, goal, sandbox = fixture
+    state = client.get(f"/api/v1/task-files/{goal}").json()
+    monkeypatch.setenv("MAVERICK_WORKSPACE_JOURNAL", "1")
+    response = client.post("/api/v1/task-files/disable", json={"context": state["context"], "confirm": True})
+    assert response.status_code == 409

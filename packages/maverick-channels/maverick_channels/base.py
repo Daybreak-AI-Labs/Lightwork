@@ -123,12 +123,26 @@ def webhook_body_limit() -> int:
     """Max inbound webhook body in bytes. Webhook listeners read the body
     *before* the HMAC/signature check (they must, to compute it), so without a
     cap an unauthenticated POST to an exposed webhook port can buffer arbitrary
-    memory. Override with MAVERICK_WEBHOOK_BODY_LIMIT; 0 disables the cap.
-    Default 1 MiB -- comfortably above any real Slack/Twilio/Meta payload."""
+    memory. Override with MAVERICK_WEBHOOK_BODY_LIMIT (0 disables the cap), or,
+    when that is unset, ``[webhooks] body_limit`` (a positive byte count; the
+    All settings page cannot remove the cap). Default 1 MiB -- comfortably
+    above any real Slack/Twilio/Meta payload."""
+    default = 1 << 20
+    env = os.environ.get("MAVERICK_WEBHOOK_BODY_LIMIT")
+    if env is not None and env.strip():
+        try:
+            return int(env)
+        except ValueError:
+            return default
     try:
-        return int(os.environ.get("MAVERICK_WEBHOOK_BODY_LIMIT", str(1 << 20)))
-    except ValueError:
-        return 1 << 20
+        from maverick.config import load_config
+
+        value = ((load_config() or {}).get("webhooks") or {}).get("body_limit")
+    except Exception:  # pragma: no cover - config never blocks a listener
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return default
+    return value
 
 
 class BodySizeLimitMiddleware:

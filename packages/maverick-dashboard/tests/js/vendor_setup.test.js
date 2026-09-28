@@ -150,3 +150,15 @@ test('setup checklist renders text safely and failed refresh removes stale readi
   assert.equal(ui.el('next-actions').children.length,0);assert.equal(ui.el('readiness-summary').textContent,'Setup has not been confirmed.');
   assert.equal(ui.el('deployment').textContent,'Deployment status has not been confirmed.');
 });
+
+test('turning vendor onboarding off needs its own consent and a confirmation, and keeps the saved setup',async t=>{
+  const ui=await fixture((url,options)=>String(url).endsWith('/disable')?{...initial,modules_enabled:false}:initial);t.after(()=>ui.w.close());
+  assert.equal(ui.el('off').hidden,false);assert.equal(ui.el('disable').disabled,true);
+  ui.el('off-confirm').checked=true;ui.el('off-confirm').dispatchEvent(new ui.w.Event('change'));assert.equal(ui.el('disable').disabled,false);
+  let asked='';ui.w.mvConfirm=async message=>{asked=message;return false;};ui.el('disable').click();await ui.settle();
+  assert.match(asked,/Nothing is deleted/);assert.equal(ui.calls.some(c=>String(c.url).endsWith('/disable')),false);
+  ui.w.mvConfirm=async()=>true;ui.el('disable').click();await ui.settle();
+  const call=ui.calls.find(c=>String(c.url).endsWith('/disable'));const body=JSON.parse(call.options.body);
+  assert.equal(body.confirm,true);assert.equal(body.context,initial.context);assert.equal(body.configuration,initial.configuration);
+  assert.equal(ui.el('off').hidden,true);assert.equal(ui.el('enable').disabled,true);assert.equal(ui.el('off-confirm').checked,false);
+});

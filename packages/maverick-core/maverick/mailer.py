@@ -44,6 +44,24 @@ def _cfg(key: str, env: str, default: str = "") -> str:
         return default
 
 
+def sending_disabled() -> bool:
+    """The email kill switch shared by the email tool and platform email.
+
+    ``MAVERICK_EMAIL_DISABLE`` decides when it is set (``1`` blocks sending,
+    anything else allows it); otherwise ``[email] disable = true`` (the All
+    settings page) blocks sending. Off by default."""
+    import os
+    env = os.environ.get("MAVERICK_EMAIL_DISABLE")
+    if env is not None and env.strip():
+        return env.strip() == "1"
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("email") or {}
+        return isinstance(cfg, dict) and cfg.get("disable") is True
+    except Exception:  # noqa: BLE001 - config trouble => keep the default
+        return False
+
+
 def configured() -> bool:
     """True when a sending path is set up and the kill switch is off. The invite
     flow checks this to decide between "emailed" and "copy this link" UX — never
@@ -53,8 +71,7 @@ def configured() -> bool:
     ``ses`` (``EMAIL_PROVIDER=ses``) sends via the Amazon SES API using the
     ambient AWS role (no stored credential) and only needs a verified
     ``EMAIL_FROM``."""
-    import os
-    if os.environ.get("MAVERICK_EMAIL_DISABLE") == "1":
+    if sending_disabled():
         return False
     if _cfg("provider", "EMAIL_PROVIDER", "smtp").lower() == "ses":
         return bool(_cfg("from", "EMAIL_FROM"))
@@ -65,9 +82,8 @@ def send(to: str, subject: str, body: str, *, transport=None) -> None:
     """Send a plain-text platform email. Raises :class:`MailerError` on any
     problem; never returns partial success. ``transport`` is injectable for
     tests: a callable ``(host, port, user, password, msg) -> None``."""
-    import os
-    if os.environ.get("MAVERICK_EMAIL_DISABLE") == "1":
-        raise MailerError("email send disabled by MAVERICK_EMAIL_DISABLE=1")
+    if sending_disabled():
+        raise MailerError("email send disabled (MAVERICK_EMAIL_DISABLE=1 or [email] disable)")
 
     to = (to or "").strip()
     subject = (subject or "").strip()

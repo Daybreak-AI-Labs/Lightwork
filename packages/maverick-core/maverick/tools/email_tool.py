@@ -11,7 +11,8 @@ Config (env first, then ~/.maverick/config.toml [email]):
   EMAIL_SMTP_PORT     / [email] smtp_port    (default 465 for SSL)
   EMAIL_IMAP_HOST     / [email] imap_host    (default imap.gmail.com)
 
-The tool refuses to send when MAVERICK_EMAIL_DISABLE=1.
+The tool refuses to send when MAVERICK_EMAIL_DISABLE=1, or when that is unset
+and [email] disable = true.
 """
 from __future__ import annotations
 
@@ -58,8 +59,9 @@ def _cfg(key: str, env: str, default: str = "") -> str:
 
 
 def _send(args: dict[str, Any]) -> str:
-    if os.environ.get("MAVERICK_EMAIL_DISABLE") == "1":
-        return "ERROR: email send disabled by MAVERICK_EMAIL_DISABLE=1"
+    from ..mailer import sending_disabled
+    if sending_disabled():
+        return "ERROR: email send disabled (MAVERICK_EMAIL_DISABLE=1 or [email] disable)"
     import smtplib
     from email.message import EmailMessage
 

@@ -17,7 +17,8 @@ The real adapters are optional and never required here:
 * **Transcription**: :func:`whisper_transcriber` builds a chunk transcriber
   on local faster-whisper when the ``[voice]`` extra is installed
   (``python -m pip install -e './packages/maverick-core[voice]'``); model size comes from
-  ``MAVERICK_WHISPER_MODEL`` (default ``small``), matching tools/voice.py.
+  ``MAVERICK_WHISPER_MODEL`` or ``[voice] stt_model`` (default ``small``),
+  matching tools/voice.py.
 
 Deterministic by construction: no thread, no clock, no model in the loop.
 """
@@ -25,7 +26,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -136,7 +136,8 @@ def whisper_transcriber(model_size: str | None = None) -> Callable[[bytes], str]
             "live-mic transcription needs faster-whisper. "
             "Run: python -m pip install -e './packages/maverick-core[voice]'"
         ) from e
-    size = model_size or os.environ.get("MAVERICK_WHISPER_MODEL", "small")
+    from .tools.voice import local_stt_model
+    size = model_size or local_stt_model()
     model = WhisperModel(size, device="cpu", compute_type="int8")
 
     def _transcribe(chunk: bytes) -> str:

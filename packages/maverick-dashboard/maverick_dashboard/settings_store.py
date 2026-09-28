@@ -481,6 +481,28 @@ def _dump_plugins(lines: list[str], plugins: dict) -> None:
     lines.append("")
 
 
+def _dump_webhooks(lines: list[str], whk: dict) -> None:
+    """Emit [webhooks]: the signing key the Settings page manages (sealed
+    before persistence, never logged or re-displayed), the outbound addresses,
+    and the delivery limits and tracker identities the All settings page
+    writes. _dump is an allowlist serializer, so a catalog key missing here
+    would be silently dropped by the next save."""
+    keys = [k for k in sorted(whk) if whk[k] is not None and whk[k] != ""
+            and (k not in {"secret", "outbound"} or whk[k])]
+    if not keys:
+        return
+    lines.append("[webhooks]")
+    for k in keys:
+        if k == "secret":
+            lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
+        elif k == "outbound":
+            lines.append(f"outbound = {_toml_value(list(whk['outbound']))}")
+        else:
+            # Catalog secrets arrive already sealed (set_catalog_values).
+            lines.append(f"{_toml_key(k)} = {_toml_value(whk[k])}")
+    lines.append("")
+
+
 def _dump(data: dict) -> str:
     lines = [
         "# Dashboard-managed settings overlay (provider keys + capability/feature",
@@ -520,16 +542,7 @@ def _dump(data: dict) -> str:
         for model in sorted(tiers):
             lines.append(f"{_toml_str(model)} = {_toml_str(str(tiers[model]))}")
         lines.append("")
-    # [webhooks] secret -- the signing key the Settings page manages. Sealed
-    # before persistence and never logged or re-displayed.
-    whk = data.get("webhooks") or {}
-    if whk.get("secret") or whk.get("outbound"):
-        lines.append("[webhooks]")
-        if whk.get("outbound"):
-            lines.append(f"outbound = {_toml_value(list(whk['outbound']))}")
-        if whk.get("secret"):
-            lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
-        lines.append("")
+    _dump_webhooks(lines, data.get("webhooks") or {})
     for name in sorted(data.get("providers") or {}):
         pcfg = data["providers"][name] or {}
         # auth_mode: how Bedrock signs in, chosen on the All settings page.
@@ -542,9 +555,18 @@ def _dump(data: dict) -> str:
                 val = _seal_global_secret(val)
             lines.append(f"{field} = {_toml_str(val)}")
         lines.append("")
-    for name in sorted(data.get("channels") or {}):
-        ccfg = data["channels"][name] or {}
-        if not ccfg:
+    channels = data.get("channels") or {}
+    # Settings for every chat app at once ([channels] rich_render) sit in the
+    # table itself; each app's own settings are a [channels.<name>] table.
+    shared = {k: v for k, v in channels.items() if not isinstance(v, dict) and v is not None}
+    if shared:
+        lines.append("[channels]")
+        for k in sorted(shared):
+            lines.append(f"{_toml_key(k)} = {_toml_value(shared[k])}")
+        lines.append("")
+    for name in sorted(channels):
+        ccfg = channels[name] or {}
+        if not isinstance(ccfg, dict) or not ccfg:
             continue
         lines.append(f"[channels.{name}]")
         # Only an explicit on/off is written: a channel whose allow list alone
