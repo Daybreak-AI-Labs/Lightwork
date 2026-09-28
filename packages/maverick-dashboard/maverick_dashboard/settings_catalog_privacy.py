@@ -144,6 +144,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- rows only
         *_other_rows(S),
         *_consent_limit_rows(S),
         *_data_use_limit_rows(S),
+        *_publication_trust_rows(S),
     )
 
 
@@ -1339,4 +1340,40 @@ def _data_use_limit_rows(S) -> tuple:
           "The longest wait between two tries of the same change.", "number", _P, 1.0,
           "maverick_dashboard.data_use_provider_runtime", subgroup=enforcement, minimum=0.25,
           maximum=60, step=0.05, unit="seconds"),
+    )
+
+
+# ------------------------------------ consent publication signing and sessions
+def _publication_trust_rows(S) -> tuple:
+    """Signed consent publishing and short-lived visitor sessions.
+
+    Both were promised by the configuration but had no reader; they are built
+    in maverick.consent_publication_signing (signing key custody, publish-time
+    signatures) and maverick_dashboard.consent_public_api (signed answers and
+    visitor sessions). The signing key itself is made on the Banner and
+    Preference Center page, never typed here.
+    """
+    publishing = _sub("Consent preferences", "publishing")
+    public = _sub("Consent preferences", "public consent service")
+    return (
+        S(f"{_CP}.publishing", "require_signed_publications", "Sign published consent settings",
+          "Sign every banner, preference center and privacy notice you publish, so websites "
+          "that check signatures can prove the settings came from Lightwork unchanged. Create "
+          "the signing key on the Banner and Preference Center page first: publishing is "
+          "refused until it exists. Settings published earlier are sent unsigned until you "
+          "publish them again.", "toggle", _P, False, "maverick.consent_publication_signing",
+          subgroup=publishing, weaker=False, aliases="signature signing key ed25519",
+          warning="Published consent settings will no longer be signed, and websites that "
+                  "check signatures will stop showing your banner."),
+        S(f"{_CP}.public_api", "token_ttl_seconds", "Visitor sessions last",
+          "Websites and apps swap their site key for a short visitor session before they "
+          "read or save consent, and renew it before it ends. Leave empty to keep sending "
+          "the site key alone with every request. Websites that load the consent script from "
+          "Lightwork switch over by themselves; apps that call the consent service directly "
+          "must support sessions before you turn this on.", "number", _P, None,
+          "maverick_dashboard.consent_public_api", subgroup=public, minimum=1, maximum=1440,
+          integer=True, scale=_MINUTE, unit="minutes", none_text="Not used",
+          weaker="higher", aliases="session token lifetime",
+          warning="Visitor sessions will last longer, or the site key alone will be "
+                  "accepted again."),
     )

@@ -3334,6 +3334,23 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   and Trust Center exports remain capability-bound. Native mobile/OTT SDKs,
   production IdP/JWKS and subject-digest-key custody, localization/usability
   acceptance, and live web property deployment remain external work.
+- **Signed consent publishing and visitor sessions**
+  (`consent_publication_signing.py`, `consent_publication_signing_api.py`,
+  `[consent_preferences.publishing] require_signed_publications`,
+  `[consent_preferences.public_api] token_ttl_seconds`) — with signing on,
+  every publish, restore and withdrawal is Ed25519-signed in its own
+  transaction with a per-workspace key derived from one installation root
+  (generated and replaced on the Banner and Preference Center page by a global
+  admin, sealed in the dashboard overlay, audited, never shown; the public key
+  is shown by fingerprint and downloadable; `MAVERICK_CONSENT_PUBLICATION_SIGNING_KEY`
+  wins). Publishing without a key is refused; `/configuration` adds a
+  signature over the served configuration, publication and policy digests
+  only for publications whose publish-time signature verifies, and the web
+  SDK's `publicationKeys` option refuses anything else. `token_ttl_seconds`
+  (60-86400 s, unset = off) requires a short-lived, origin-bound visitor
+  session (`X-Lightwork-Consent-Session`, digest-only storage, renewable
+  before expiry, rate-limited like every public call) next to the site key;
+  the served SDK starts and renews sessions by itself.
 - **Verified consumer identity federation and one-time domain/device pairing**
   (`consent_identity_federation.py`,
   `consent_identity_federation_api.py`,

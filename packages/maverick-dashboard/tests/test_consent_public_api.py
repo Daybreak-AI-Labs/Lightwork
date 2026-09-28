@@ -2104,6 +2104,8 @@ def test_only_narrow_public_routes_are_exposed(environment: _Environment) -> Non
             "/api/v1/public/consent/privacy-signals",
         "/api/v1/public/consent/profiles/bootstrap",
         "/api/v1/public/consent/sdk.js",
+        "/api/v1/public/consent/sessions",
+        "/api/v1/public/consent/sessions/renew",
         "/api/v1/public/consent/trust-center",
         "/api/v1/public/consent/trust-center/brand-assets/{projection_id}/{content_sha256}",
         "/api/v1/public/consent/trust-center/exports",
