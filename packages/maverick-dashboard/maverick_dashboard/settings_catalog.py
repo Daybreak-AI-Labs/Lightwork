@@ -242,6 +242,11 @@ class Setting:
     path_kind: str = ""
     path_writable: bool = False
     path_private: bool = False
+    # ``path_new``: a file Lightwork creates itself, so it may not exist yet
+    # (its folder must). ``path_scope="data"``: only inside Lightwork's data
+    # folder, unless the deployment's own list of places allows more.
+    path_new: bool = False
+    path_scope: str = ""
     # A "Test connection" button: the name of a check in settings_tests that
     # tries the entered (or saved) value and answers in one plain sentence.
     test: str = ""
@@ -2431,7 +2436,8 @@ def _coerce_path(setting: Setting, value: object) -> str | None:
     try:
         return settings_paths.check(text, kind=setting.path_kind,
                                     writable=setting.path_writable,
-                                    private=setting.path_private)
+                                    private=setting.path_private,
+                                    new_ok=setting.path_new, scope=setting.path_scope)
     except settings_paths.PathRefused as exc:
         raise SettingError(f"{setting.label}: {exc}") from exc
 
@@ -3025,6 +3031,8 @@ def _assert_consistent() -> None:
         assert s.scale > 0, s.id
         assert (s.control == "path") == bool(s.path_kind), s.id
         assert not s.path_kind or s.path_kind in PATH_KINDS, s.id
+        assert not (s.path_new or s.path_scope) or s.control == "path", s.id
+        assert s.path_scope in {"", "data"}, s.id
     for pairs in (_REQUIRES_NONEMPTY, _REQUIRES_VALUE):
         for first, needs in pairs.items():
             first_id = first[0] if isinstance(first, tuple) else first

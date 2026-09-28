@@ -158,7 +158,7 @@ def test_outside_agents_join_shared_memory_through_the_kernel(client, monkeypatc
     from maverick import fleet_memory
     _configure("[fleet_memory]\nenable = false")
     off = client.post(f"{API}/outside-agents", json={"vendor": "custom", "name": "billing-bot"})
-    assert off.status_code == 409 and "Turn on shared memory" in off.json()["detail"]
+    assert off.status_code == 409 and "Turn on “Fleet memory” under Learning systems" in off.json()["detail"]
     _configure("[fleet_memory]\nenable = true")
     assert client.post(f"{API}/outside-agents", json={"vendor": "custom", "name": "../x"}).status_code == 422
     assert client.post(f"{API}/outside-agents", json={"vendor": "acme", "name": "bot"}).status_code == 422

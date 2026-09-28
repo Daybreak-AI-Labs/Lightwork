@@ -45,7 +45,10 @@ function defaults() {
     "/api/v1/learning-ops/donations/clear": { cleared: 2 },
     "/api/v1/learning-ops/self-harness/plan": { enabled: true, test_cases_set_up: true, careful_testing: true, spending_limit: 5,
       checker: "Checker", models: [{ value: "claude-x", label: "Claude X" }, { value: "worker-y", label: "Worker Y" }],
-      hold_out: { set_up: true, exists: false } },
+      hold_out: { set_up: true, exists: false },
+      places: { test_cases: "All settings, Memory & learning, Self-improving instructions, “Test cases for improvements”",
+        hold_out: "All settings, Memory & learning, Self-improving instructions, “Record of unseen-case checks”",
+        self_coaching: "“Self-harness” under Learning systems on the Learning page" } },
     "/api/v1/learning-ops/self-harness/clash-check": JOB({ pairs: [{ model: "claude-x", first: "cite", second: "never cite" }], spent: 0.02 }),
     "/api/v1/learning-ops/self-harness/hold-out/set-up": { created: true, record_number: "ledger-42" },
     "/api/v1/learning-ops/self-harness/test-cases/import/preview": { replace: false, added: 1, total_now: 1, total_after: 2,
@@ -172,4 +175,16 @@ test("learned page tools: clash check, hold-out set-up and a previewed import", 
   const imported = ui.calls.find((c) => (c.url || "").startsWith("/api/v1/learning-ops/self-harness/test-cases/import?"));
   assert.match(imported.url, /confirm=true&replace=false/);
   assert.match(ui.doc.getElementById("lpo-cases-status").textContent, /Added 1 test case/);
+});
+
+test("the learned page names the exact setting to fill in first", async (t) => {
+  const plan = defaults()["/api/v1/learning-ops/self-harness/plan"];
+  const answers = { "/api/v1/learning-ops/self-harness/plan": Object.assign({}, plan,
+    { test_cases_set_up: false, hold_out: { set_up: false, exists: false } }) };
+  const ui = await fixture(LEARNED(), [learned], { answers });
+  t.after(() => ui.window.close());
+  assert.match(ui.doc.getElementById("lpo-plan").textContent,
+    /choose where to keep them in All settings, Memory & learning, Self-improving instructions, “Test cases for improvements”/);
+  assert.match(ui.doc.getElementById("lpo-holdout").textContent, /“Record of unseen-case checks”/);
+  assert.equal(ui.doc.querySelector("#lpo-holdout a").getAttribute("href"), "/settings/all");
 });
