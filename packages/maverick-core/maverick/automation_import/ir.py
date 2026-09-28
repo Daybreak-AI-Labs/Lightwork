@@ -41,11 +41,27 @@ _MAX_PARAM_CHARS = 200
 _MAX_PARAM_DEPTH = 6
 # Cap the number of rendered steps so a huge imported workflow can't produce a
 # multi-megabyte template body that is re-read into the model prompt every run.
-# Env-overridable for legitimately large imports.
-try:
-    _MAX_RENDER_STEPS = max(1, int(os.environ.get("MAVERICK_IMPORT_MAX_STEPS", "200")))
-except ValueError:
-    _MAX_RENDER_STEPS = 200
+# Raisable for legitimately large imports: MAVERICK_IMPORT_MAX_STEPS wins, else
+# ``[automation_import] max_steps`` (the All settings page); read per render.
+_DEFAULT_RENDER_STEPS = 200
+_MAX_RENDER_STEPS_LIMIT = 5000
+
+
+def _max_render_steps() -> int:
+    raw = os.environ.get("MAVERICK_IMPORT_MAX_STEPS", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return _DEFAULT_RENDER_STEPS
+    try:
+        from ..config import load_config
+        value = ((load_config() or {}).get("automation_import") or {}).get("max_steps")
+    except Exception:  # pragma: no cover - config never blocks an import
+        return _DEFAULT_RENDER_STEPS
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return _DEFAULT_RENDER_STEPS
+    return min(value, _MAX_RENDER_STEPS_LIMIT)
 _SECRET_QUERY_RE = re.compile(
     r"(?i)([?&][^=]*(?:token|key|secret|password|credential)[^=]*=)[^&\s]+"
 )
@@ -359,7 +375,7 @@ class ImportedAutomation:
             "",
         ]
         if self.steps:
-            shown_steps = self.steps[:_MAX_RENDER_STEPS]
+            shown_steps = self.steps[:_max_render_steps()]
             lines += [s.render(i) for i, s in enumerate(shown_steps, 1)]
             omitted = len(self.steps) - len(shown_steps)
             if omitted > 0:

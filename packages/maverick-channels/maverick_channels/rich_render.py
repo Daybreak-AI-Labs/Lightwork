@@ -41,10 +41,12 @@ _MERMAID_JS = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
 
 
 def enabled() -> bool:
-    if os.environ.get("MAVERICK_CHANNELS_RICH_RENDER", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
+    """``MAVERICK_CHANNELS_RICH_RENDER`` decides when it is set (so a
+    deployment can force it either way); otherwise ``[channels] rich_render``
+    (the All settings page)."""
+    env = os.environ.get("MAVERICK_CHANNELS_RICH_RENDER", "").strip().lower()
+    if env:
+        return env in {"1", "true", "yes", "on"}
     try:
         from maverick.config import load_config
         return bool(((load_config() or {}).get("channels") or {}).get("rich_render"))

@@ -27,7 +27,15 @@ def settings(loaded: dict) -> VendorOnboardingSettings:
     raw = row.get("binding")
     if not isinstance(raw, dict):
         raise ValueError("Workspace vendor configuration is unavailable.")
-    value = dict(raw, enable=(loaded.get("vendor_onboarding") or {}).get("enable") is True)
+    deployment = loaded.get("vendor_onboarding") or {}
+    if not isinstance(deployment, dict):
+        raise ValueError("vendor_onboarding must be a closed configuration table")
+    value = dict(raw, enable=deployment.get("enable") is True)
+    # How often and how patiently a safe read is retried is deployment policy
+    # (Settings > All settings), not part of a workspace's saved binding.
+    for key in ("safe_read_attempts", "safe_read_backoff_seconds"):
+        if key in deployment:
+            value[key] = deployment[key]
     return VendorOnboardingSettings.from_config({"vendor_onboarding": value})
 
 

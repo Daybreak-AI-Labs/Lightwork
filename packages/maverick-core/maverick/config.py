@@ -2146,7 +2146,8 @@ def get_billing_stripe() -> dict:
             currency.strip().lower()
             if isinstance(currency, str) and currency.strip() else "usd"
         ),
-        # plan id -> Stripe recurring price id (e.g. "pro" -> "price_...").
+        # plan id -> Stripe recurring price id (e.g. "pro" or "enterprise" ->
+        # "price_...").
         "prices": {
             str(k): v.strip()
             for k, v in prices.items()

@@ -87,9 +87,16 @@ _TTS_SCHEMA: dict[str, Any] = {
 
 # ---------- STT ----------
 
-def _hosted_model(environment: str, default: str) -> str:
-    """Resolve an operator-selectable hosted voice model without blank IDs."""
-    value = (os.environ.get(environment) or default).strip()
+def _hosted_model(environment: str, default: str, config_key: str = "") -> str:
+    """Resolve an operator-selectable hosted voice model without blank IDs:
+    the environment variable, else ``[voice] <config_key>`` (the All settings
+    page), else ``default``."""
+    value = os.environ.get(environment) or ""
+    if not value.strip() and config_key:
+        from ..voice_models import _voice_cfg
+        configured = _voice_cfg().get(config_key)
+        value = configured if isinstance(configured, str) else ""
+    value = (value or default).strip()
     if not value or len(value) > 256 or any(ord(char) < 32 for char in value):
         log.warning("%s is invalid; using the documented default", environment)
         return default
@@ -113,6 +120,7 @@ def _whisper_openai(audio_path: Path, language: str | None) -> str | None:
                 "model": _hosted_model(
                     "MAVERICK_WHISPER_OPENAI_MODEL",
                     "whisper-1",
+                    "stt_openai_model",
                 ),
                 "file": f,
             }
@@ -145,6 +153,7 @@ def _whisper_groq(audio_path: Path, language: str | None) -> str | None:
                 "model": _hosted_model(
                     "MAVERICK_WHISPER_GROQ_MODEL",
                     "whisper-large-v3-turbo",
+                    "stt_groq_model",
                 ),
                 "file": f,
             }
@@ -166,13 +175,26 @@ _LOCAL_STT_LOCK = threading.Lock()
 _LOCAL_STT_CACHE: dict[str, Any] = {}
 
 
+def local_stt_model() -> str:
+    """The on-machine speech model size: ``MAVERICK_WHISPER_MODEL``, else
+    ``[voice] stt_model`` (the All settings page), else ``small``."""
+    env = (os.environ.get("MAVERICK_WHISPER_MODEL") or "").strip()
+    if env:
+        return env
+    from ..voice_models import _voice_cfg
+    configured = _voice_cfg().get("stt_model")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    return "small"
+
+
 def _whisper_local(audio_path: Path, language: str | None) -> str | None:
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError:
         return None
     try:
-        model_size = os.environ.get("MAVERICK_WHISPER_MODEL", "small")
+        model_size = local_stt_model()
         key = f"faster-whisper:{model_size}"
         with _LOCAL_STT_LOCK:
             model = _LOCAL_STT_CACHE.get(key)
@@ -475,7 +497,7 @@ def _tts_openai(text: str, voice: str | None, output: Path) -> bool:
         # One OpenAI attempt, then the outer router can try ElevenLabs.
         client = OpenAI(api_key=key, max_retries=0)
         resp = client.audio.speech.create(
-            model=_hosted_model("MAVERICK_TTS_OPENAI_MODEL", "tts-1"),
+            model=_hosted_model("MAVERICK_TTS_OPENAI_MODEL", "tts-1", "tts_openai_model"),
             voice=voice or "alloy",
             input=text,
         )
@@ -513,6 +535,7 @@ def _tts_elevenlabs(text: str, voice: str | None, output: Path) -> bool:
                 "model_id": _hosted_model(
                     "MAVERICK_TTS_ELEVENLABS_MODEL",
                     "eleven_turbo_v2_5",
+                    "tts_elevenlabs_model",
                 ),
             },
             timeout=60.0,

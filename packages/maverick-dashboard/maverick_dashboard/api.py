@@ -7690,14 +7690,32 @@ _VOICE_SUFFIXES = {
 _VOICE_MAX_BYTES = 25 * 1024 * 1024
 
 
-def _voice_transcribe_concurrency_limit() -> int:
+def _voice_setting(key: str) -> object:
+    """``[voice] <key>`` from the effective configuration (All settings page)."""
     try:
-        return max(1, int(os.environ.get("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY", "2")))
-    except ValueError:
-        return 2
+        from maverick.voice_models import _voice_cfg
+        return _voice_cfg().get(key)
+    except Exception:  # pragma: no cover - config never blocks voice input
+        return None
 
 
-_voice_transcribe_sem_limit = _voice_transcribe_concurrency_limit()
+def _voice_transcribe_concurrency_limit(*, configured: bool = True) -> int:
+    """``MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY`` wins, else ``[voice]
+    transcribe_concurrency``, else 2. The semaphore below is re-sized when
+    this changes, so a saved value applies to the next transcription."""
+    raw = os.environ.get("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return 2
+    value = _voice_setting("transcribe_concurrency") if configured else None
+    if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 16:
+        return value
+    return 2
+
+
+_voice_transcribe_sem_limit = _voice_transcribe_concurrency_limit(configured=False)
 _voice_transcribe_sem = asyncio.Semaphore(_voice_transcribe_sem_limit)
 
 
@@ -7754,6 +7772,10 @@ async def voice_transcribe(
     import tempfile as _tempfile
 
     max_bytes = _VOICE_MAX_BYTES
+    configured_bytes = _voice_setting("max_upload_bytes")
+    if (isinstance(configured_bytes, int) and not isinstance(configured_bytes, bool)
+            and configured_bytes > 0):
+        max_bytes = configured_bytes
     try:
         max_bytes = int(_os.environ.get("MAVERICK_VOICE_MAX_BYTES", max_bytes))
     except (TypeError, ValueError):

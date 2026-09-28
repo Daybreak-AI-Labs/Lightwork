@@ -164,10 +164,25 @@ _BOT_ENVS = {
     "jira": "MAVERICK_BOT_JIRA_ACCOUNT_ID",
     "gitlab": "MAVERICK_BOT_GITLAB_USERNAME",
 }
+# The same identities saved on the All settings page ([webhooks] table); the
+# environment variable above wins when it is set.
+_BOT_KEYS = {
+    "linear": "linear_bot_id",
+    "jira": "jira_bot_id",
+    "gitlab": "gitlab_bot_username",
+}
 
 
 def _bot_id(provider: str) -> str:
-    return os.environ.get(_BOT_ENVS.get(provider, ""), "").strip().lower()
+    env = os.environ.get(_BOT_ENVS.get(provider, ""), "").strip()
+    if env or provider not in _BOT_KEYS:
+        return env.lower()
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("webhooks") or {}).get(_BOT_KEYS[provider])
+    except Exception:  # pragma: no cover - config never blocks a webhook
+        return ""
+    return value.strip().lower() if isinstance(value, str) else ""
 
 
 def _is_bot(assignee_candidates: list[str], provider: str) -> bool:
