@@ -67,10 +67,29 @@ def test_concurrent_identical_requests_create_one_goal_and_one_dispatch(isolated
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(submit, range(8)))
-    assert {r.status_code for r in results} == {201}
+    assert {r.status_code for r in results} == {201}, [r.text for r in results if r.status_code != 201]
     assert len({r.json()["id"] for r in results}) == len(world.list_goals()) == len(runs) == 1
     assert sum(r.headers["Idempotency-Replayed"] == "false" for r in results) == 1
 
+
+
+def test_request_that_created_the_receipt_answers_when_a_replay_won_the_claim(isolated, monkeypatch):
+    # A same-key replay can claim the draft before the request that created
+    # it: the creator must return the dispatched goal, not a 409.
+    from maverick_dashboard import goal_submission
+
+    client, world, _runs = isolated
+    real = goal_submission.try_claim_api_dispatch
+
+    def replay_claims_first(w, receipt, intent):
+        assert real(w, receipt, intent)  # the concurrent replay wins
+        return real(w, receipt, intent)  # the creator's own claim then fails
+
+    monkeypatch.setattr(goal_submission, "try_claim_api_dispatch", replay_claims_first)
+    r = client.post("/api/v1/goals", headers={"Idempotency-Key": "replay-won"}, json={"title": "Review"})
+    assert r.status_code == 201, r.text
+    assert r.headers["Idempotency-Replayed"] == "false"
+    assert world.get_goal(r.json()["id"]).status != "draft"
 
 def test_chat_redirect_lost_reconciles_original_conversation_without_retry(isolated):
     client, world, runs = isolated

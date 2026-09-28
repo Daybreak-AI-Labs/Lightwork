@@ -194,7 +194,7 @@
     "composition": 55,
     "external": 18,
     "key_custody": 2,
-    "storage_primitive": 8,
+    "storage_primitive": 9,
     "world": 4,
     "mixed_api": 7,
     "knowledge": 4,
@@ -24175,6 +24175,25 @@
           "function": "_run",
           "kind": "atomic_write_text",
           "expression": "atomic_write_text(store / 'index.json', json.dumps((_index() + [entry])[-200:], indent=2))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/logging_config.py",
+      "contract": "storage_primitive",
+      "owner": "packages/maverick-core/maverick/logging_config.py",
+      "purpose": "Process logging setup; locates the opt-in crash-only copy of warnings and errors under the logs data folder, written by maverick.crash_only_log.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 284,
+          "function": "crash_log_path",
+          "kind": "data_dir",
+          "expression": "data_dir('logs')"
         }
       ]
     }

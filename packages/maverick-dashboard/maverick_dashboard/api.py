@@ -1421,10 +1421,14 @@ def create_goal(
                   "max_depth": max_depth, "channel": "api", "user_id": user_id,
                   "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None}
         if not try_claim_api_dispatch(w, receipt, intent):
-            if replay_resume:
-                g1 = w.get_goal(goal_id)
-                if g1 is not None and g1.status != "draft":
-                    return _to_goal_out(g1)  # a concurrent replay dispatched it
+            # A concurrent same-key request claimed the draft first (a replay
+            # can win the claim before the request that created it): the work
+            # was dispatched exactly once, so this request gets the same goal.
+            g1 = w.get_goal(goal_id)
+            if g1 is not None and g1.status != "draft":
+                response.headers["Location"] = f"/api/v1/goals/{goal_id}"
+                response.headers["Idempotency-Replayed"] = "true" if replay_resume else "false"
+                return _to_goal_out(g1)
             raise HTTPException(status_code=409, detail=(
                 "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
     if user_id:
