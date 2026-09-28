@@ -722,3 +722,11 @@ def test_page_does_not_build_the_long_tool_list(monkeypatch):
     monkeypatch.setattr(settings_all_page, "_tool_names", slow)
     assert client.get("/settings/all").status_code == 200
     assert client.get(API).status_code == 200
+
+
+def test_page_script_and_styles_are_served():
+    script = client.get("/static/lightwork-settings-all.js")
+    assert script.status_code == 200 and "javascript" in script.headers["content-type"]
+    assert "settings-all-groups" in script.text
+    styles = client.get("/static/lightwork-settings-all.css")
+    assert styles.status_code == 200 and styles.headers["content-type"].startswith("text/css")

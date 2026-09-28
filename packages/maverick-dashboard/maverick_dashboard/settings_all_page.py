@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -385,6 +385,26 @@ def _module_rows() -> list[dict[str, Any]]:
             "needs": [api._MODULE_SWITCHES[p]["label"] for p in meta["requires"]],
         })
     return rows
+
+
+# ---------------------------------------------------------------- assets
+# The dashboard serves only registered static files; without these routes
+# the page rendered with no script or styles (every Save button was dead).
+_STATIC = Path(__file__).parent / "static"
+
+
+@router.get("/static/lightwork-settings-all.js", include_in_schema=False)
+async def settings_all_script() -> FileResponse:
+    return FileResponse(_STATIC / "lightwork-settings-all.js",
+                        media_type="application/javascript; charset=utf-8",
+                        headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.get("/static/lightwork-settings-all.css", include_in_schema=False)
+async def settings_all_styles() -> FileResponse:
+    return FileResponse(_STATIC / "lightwork-settings-all.css",
+                        media_type="text/css; charset=utf-8",
+                        headers={"Cache-Control": "public, max-age=300"})
 
 
 # ---------------------------------------------------------------- page
