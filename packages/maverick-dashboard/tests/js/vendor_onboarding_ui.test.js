@@ -202,7 +202,8 @@ function fixture(records = [], intercept = null, search = "", returning = null, 
   }};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8') + "\n" + fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
-  ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
+  ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi,
+    mvErrorText: (failure, action) => "Could not " + action + ". " + ({404: "That item no longer exists.", 503: "This is temporarily unavailable."}[failure.status] || "Please try again.")}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {
       await new Promise(resolve => setImmediate(resolve));
@@ -505,7 +506,8 @@ test("a stale edit loads and displays the bounded current record without retryin
   ui.byId("rationale").value = "Different tab change";
   await ui.click("review-approve");
   assert.equal(mutations, 1);
-  assert.match(ui.byId("message").textContent, /Someone else updated this request.*latest version.*now open/);
+  assert.match(ui.byId("message").textContent, /^Someone else updated this request.*latest version.*now open/);
+  assert.doesNotMatch(ui.byId("message").textContent, /revision changed/);
   assert.doesNotMatch(ui.byId("status").textContent, /Version/);
   assert.equal(ui.byId("rationale").value, "");
 });
@@ -567,7 +569,7 @@ test("a linked vendor request reads the exact authorized case without mutating i
 test("a linked request that is no longer accessible reports failure without selecting another", async () => {
   const ui = fixture([record("another")], null, "?case=missing");
   await ui.settle();
-  assert.match(ui.byId("message").textContent, /Not found/);
+  assert.match(ui.byId("message").textContent, /no longer exists/);
   assert.equal(ui.byId("review-approve").disabled, true);
   assert.ok(ui.calls.every(call => call.method === "GET"));
 });
@@ -955,7 +957,8 @@ test("a failed refresh leaves review drafts intact and reports the error", async
   assert.equal(ui.byId("answer-training").value, "no");
   assert.equal(ui.byId("note-training").value, "Unsaved note");
   assert.equal(ui.byId("rationale").value, "Unsaved reason");
-  assert.match(ui.byId("message").textContent, /Case refresh temporarily unavailable/);
+  assert.match(ui.byId("message").textContent, /Could not finish that\. This is temporarily unavailable\./);
+  assert.doesNotMatch(ui.byId("message").textContent, /Case refresh/);
   assert.equal(ui.byId("message").getAttribute("role"), "alert");
   assert.equal(ui.byId("refresh").disabled, false);
 });
@@ -1201,3 +1204,4 @@ test("review mutations carry the selected revision and the actual corrected answ
   assert.equal(submitted.decision, "approved");
   assert.deepEqual(submitted.corrections, { training: { answer: "no", note: "Vendor terms reviewed" } });
 });
+

@@ -508,7 +508,7 @@
       append(select, "option", "Yes").value = "true";
       append(select, "option", "No").value = "false";
       if (typeof rememberedValue === "boolean") select.value = String(rememberedValue);
-      makeLabel(select, "Response", "Choose an explicit boolean response.");
+      makeLabel(select, "Response", "Choose Yes or No.");
       return;
     }
     if (question.response_type === "integer" || question.response_type === "text_ref") {
@@ -686,7 +686,7 @@
     mediaType.dataset.artifactField = "media_type_ref";
     const support = append(card, "div", null, "support-list");
     support.dataset.artifactField = "supported_questions";
-    append(support, "p", "Questions supported by this digest manifest", "help");
+    append(support, "p", "Questions this file supports", "help");
     const selected = new Set(supportIds || []);
     for (const [questionIndex, question] of state.contract.questions.entries()) {
       const label = append(support, "label");
@@ -697,7 +697,7 @@
       checkbox.id = controlId("artifact-support", index * MAX_QUESTIONS + questionIndex);
       append(label, "span", `${question.prompt_ref} (${question.question_id})`);
     }
-    const remove = append(card, "button", "Remove manifest", "secondary remove-row");
+    const remove = append(card, "button", "Remove file", "secondary remove-row");
     remove.type = "button";
     remove.addEventListener("click", () => {
       card.remove();
@@ -828,10 +828,10 @@
             (input) => input.value,
           )
         : [];
-      if (supportIds.length === 0) fail("every artifact manifest must support at least one answer");
+      if (supportIds.length === 0) fail("Choose at least one question that each file supports.");
       for (const questionId of supportIds) {
         if (!Object.prototype.hasOwnProperty.call(answers, questionId)) {
-          fail("an artifact manifest cannot support an unanswered question");
+          fail("A file can only support questions you have answered.");
         }
         answers[questionId].artifact_ids.push(artifact.artifact_id);
       }
@@ -1017,7 +1017,7 @@
     if (!state.contract) return;
     const count = elements.artifactManifests.querySelectorAll(".portal-artifact").length;
     if (count >= state.contract.artifact_policy.maximum_artifacts) {
-      setStatus("The invitation's evidence-manifest count bound has been reached.", "error");
+      setStatus("You've reached the file limit for this request.", "error");
       return;
     }
     renderArtifactRow(null, []);

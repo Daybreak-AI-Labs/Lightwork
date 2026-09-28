@@ -255,6 +255,12 @@ test('comparison pages and downloads the exact captured report without enabling 
   assert.equal(h.get('comparison-items').children.length, 50);
   assert.match(h.get('comparison-items').textContent, /<img/);
   assert.equal(h.get('comparison-items').querySelector('img'), null);
+  const first = h.get('comparison-items').children[0];
+  const plain = [...first.children].filter(node => node.tagName !== 'DETAILS').map(node => node.textContent).join(' ');
+  assert.match(plain, /Size in the snapshot: not present · Size now: 32 bytes\./);
+  assert.doesNotMatch(plain, /fingerprint|[0-9a-f]{64}/);
+  assert.equal(first.querySelector('details summary').textContent, 'Technical details');
+  assert.equal(first.querySelector('details').open, false);
   assert.equal(h.get('prepare').disabled, true);
   assert.equal(h.get('comparison-previous').disabled, true);
   h.get('comparison-next').click(); await tick();
@@ -552,6 +558,7 @@ test('recovery summary keeps failed and unsupported coverage visible outside the
   const h=await harness(async()=>report);h.select();h.get('custody-report-load').click();await settleCustody();
   assert.match(h.get('custody-totals').textContent,/3 recognized encrypted records verified; 1 failed; 1 unsupported/);
   assert.match(h.get('custody-totals').textContent,/2 files were not examined/);assert.equal(h.get('custody-totals').closest('details'),null);
+  assert.match(h.get('custody-coverage').textContent,/database columns scanned/);assert.doesNotMatch(h.get('custody-coverage').textContent,/SQLite/);
   assert.equal(h.get('custody-checks').closest('details').open,false);assert.match(h.get('custody-summary').textContent,/0.9 seconds/);assert.doesNotMatch(h.get('custody-summary').textContent,/0.855624/);h.dom.window.close();
 });
 
