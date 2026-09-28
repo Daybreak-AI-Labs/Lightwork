@@ -333,3 +333,147 @@ def test_new_encryption_key_is_recorded(client, monkeypatch, audit_rows):
     assert r.status_code == 200
     rows = [row for row in audit_rows if row.get("verb") == "encryption_new_key"]
     assert len(rows) == 1 and rows[0]["actor"]
+
+
+# ---- one-button checks, the organisation's data, tidying up ----------------
+
+def _as(monkeypatch, role: str, who: str):
+    from maverick_dashboard import auth, rbac
+    rbac.set_role(who, role)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: who)
+
+
+def test_maintenance_page_offers_the_new_checks_in_plain_words(client):
+    text = visible_text(client.get("/settings").text)
+    for label in ("Check protections", "Check connections", "Check hardware", "Check add-ons",
+                  "Show data status", "See what would be removed", "Tidy up old records",
+                  "Your organisation's data"):
+        assert label in text, label
+    for word in BANNED:
+        assert word not in text, word
+
+
+def test_one_button_checks_need_the_audit_permission(client, monkeypatch):
+    paths = ("enterprise-check", "offline-check", "hardware-check", "plugin-check")
+    _as_viewer(monkeypatch)
+    for path in paths:
+        assert client.get(f"/api/v1/admin/system/{path}").status_code == 403, path
+    _as(monkeypatch, "auditor", "user:aud")
+    for path in paths:
+        r = client.get(f"/api/v1/admin/system/{path}")
+        assert r.status_code == 200, path
+        body = r.json()
+        assert body["summary"] and body["summary"][0].isalnum() and body["summary"].endswith(".")
+        for word in ("[", "MAVERICK_", "maverick "):
+            assert word not in body["summary"], (path, word)
+    # Reading the organisation's data status is an installation administrator job.
+    assert client.get("/api/v1/admin/system/client").status_code == 403
+
+
+def test_regulated_deployment_check_keeps_kernel_wording_in_the_details(client, monkeypatch):
+    from maverick import deployment
+    monkeypatch.setattr(deployment, "verify_deployment", lambda: [
+        deployment.GuaranteeCheck("Egress lock", False, "enable [enterprise] mode = true"),
+        deployment.GuaranteeCheck("At-rest encryption", True, "sealed")])
+    body = client.get("/api/v1/admin/system/enterprise-check").json()
+    assert body["passed"] is False
+    assert body["checks"] == [{"label": "Data cannot be sent to outside AI services", "ok": False},
+                              {"label": "Saved data is encrypted", "ok": True}]
+    assert "1 protection" in body["summary"]
+    assert body["technical"][0]["text"] == "Egress lock: enable [enterprise] mode = true"
+
+
+def test_offline_check_groups_findings_into_plain_reasons(client, monkeypatch):
+    from maverick import air_gap
+    monkeypatch.setattr(air_gap, "audit", lambda: {"clean": False, "violations": [
+        "remote model(s) in use: claude", "[sandbox] allow_network is on",
+        "[observability] sentry_dsn is set", "[sandbox] backend=local uses the host network"]})
+    body = client.get("/api/v1/admin/system/offline-check").json()
+    assert body["reasons"] == ["An AI model is reached over the internet.", "The task workspace can reach the network.",
+                               "Error reports are sent to another computer."]
+    assert len(body["technical"]) == 4
+
+
+def test_plugin_check_names_each_mismatch(client, monkeypatch):
+    from maverick import plugin_lock
+    monkeypatch.setattr(plugin_lock, "verify_lock", lambda: {
+        "ok": False, "unlocked": False, "drifted": [("acme-tools", "1.0", "1.2")],
+        "missing": ["gone-plugin"], "unpinned": []})
+    body = client.get("/api/v1/admin/system/plugin-check").json()
+    assert body["ok"] is False and len(body["problems"]) == 2
+    assert "acme-tools is a different version" in body["problems"][0]
+
+
+def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
+    from maverick import client as client_binding
+    monkeypatch.setenv("MAVERICK_BACKUP_SIGNING_KEY", "00" * 32)  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    client_binding.reset_client_cache()
+    try:
+        from maverick import world_model
+        world_model.open_world().create_goal("Acme task")
+        status = client.get("/api/v1/admin/system/client").json()
+        assert status["bound"] is True and status["organisation"] == "acme"
+        exported = client.post("/api/v1/admin/system/client/export")
+        assert exported.status_code == 200, exported.text
+        assert "attachment" in exported.headers["content-disposition"] and exported.content
+        assert TestClient(client.app).post("/api/v1/admin/system/client/export").status_code == 403
+        erase = "/api/v1/admin/system/client/erase"
+        assert client.post(erase, json={"organisation": "acme", "confirm": False}).status_code == 409
+        wrong = client.post(erase, json={"organisation": "other", "confirm": True})
+        assert wrong.status_code == 409 and "changed" in wrong.json()["detail"]
+        done = client.post(erase, json={"organisation": "acme", "confirm": True, "keep_activity_record": True})
+        assert done.status_code == 200, done.text
+        assert done.json()["erased"] is True and done.json()["kept_activity_record"] is True
+        verbs = [row.get("verb") for row in audit_rows]
+        assert verbs.count("client_export") == 1
+        assert verbs.index("client_erase_requested") < verbs.index("client_erase")
+    finally:
+        monkeypatch.delenv("MAVERICK_CLIENT_ID")
+        client_binding.reset_client_cache()
+
+
+def test_erase_is_refused_without_a_named_organisation(client, monkeypatch):
+    from maverick import client as client_binding
+    client_binding.reset_client_cache()
+    r = client.post("/api/v1/admin/system/client/erase", json={"organisation": "acme", "confirm": True})
+    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"]
+    _as_viewer(monkeypatch)
+    assert client.post("/api/v1/admin/system/client/erase",
+                       json={"organisation": "acme", "confirm": True}).status_code == 403
+    assert client.post("/api/v1/admin/system/client/export").status_code == 403
+
+
+def _old_conversation(user: str) -> None:
+    import time as _time
+
+    from maverick import world_model
+    world = world_model.open_world()
+    world.get_or_create_conversation("web", user)
+    with world._writing() as conn:
+        conn.execute("UPDATE conversations SET last_seen = ?", (_time.time() - 200 * 86400,))
+
+
+def test_tidy_up_previews_then_removes_in_this_workspace_only(client, monkeypatch, audit_rows):
+    _old_conversation("old-chat")
+    preview = client.get("/api/v1/admin/system/cleanup/preview?days=90&activity_days=30").json()
+    assert preview["conversations"] == 1
+    assert client.get("/api/v1/admin/system/cleanup/preview?days=5&activity_days=30").status_code == 422
+    assert client.post("/api/v1/admin/system/cleanup",
+                       json={"days": 90, "activity_days": 30, "confirm": False}).status_code == 409
+    # Another workspace sees none of this workspace's records.
+    from maverick_dashboard import app as dash_app
+    monkeypatch.setenv("MAVERICK_TENANT", "beta")
+    dash_app._world_cache.clear()
+    assert client.get("/api/v1/admin/system/cleanup/preview?days=90&activity_days=30").json()["conversations"] == 0
+    monkeypatch.delenv("MAVERICK_TENANT")
+    dash_app._world_cache.clear()
+    done = client.post("/api/v1/admin/system/cleanup", json={"days": 90, "activity_days": 30, "confirm": True})
+    assert done.status_code == 200 and done.json()["conversations"] == 1
+    assert client.get("/api/v1/admin/system/cleanup/preview?days=90&activity_days=30").json()["conversations"] == 0
+    rows = [row for row in audit_rows if row.get("verb") == "records_cleanup"]
+    assert len(rows) == 1 and rows[0]["actor"] and rows[0]["conversations"] == 1
+    assert TestClient(client.app).post("/api/v1/admin/system/cleanup",
+                                       json={"days": 90, "activity_days": 30, "confirm": True}).status_code == 403
+    _as_viewer(monkeypatch)
+    assert client.get("/api/v1/admin/system/cleanup/preview?days=90&activity_days=30").status_code == 403

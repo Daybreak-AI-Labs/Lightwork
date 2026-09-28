@@ -176,6 +176,122 @@
 
   {% include "_workspace_worklist.html" %}
 
+  <div class="section-head"><h2 id="tax-title">Tax preparation</h2></div>
+  <section class="panel" id="tax-root" aria-labelledby="tax-title">
+    <p class="muted">Turn a client's tax documents into a first draft of their federal and state return for a qualified
+      preparer to review. Every figure shows which document it came from. Nothing is ever filed.</p>
+    <p class="muted" id="tax-tables-line" role="status" aria-live="polite">Loading tax tables…</p>
+
+    <details class="tax-part" open>
+      <summary><strong>Prepare a first draft</strong></summary>
+      <form id="tax-prepare" class="tax-form">
+        <label class="fa-field fa-grow"><span>Client documents (text copies of W-2s, 1099s and similar)</span>
+          <input class="input" type="file" name="documents" multiple accept=".txt,text/plain" required></label>
+        <div class="fa-row">
+          <label class="fa-field"><span>Filing status</span>
+            <select class="select" name="filing_status">
+              <option value="single">Single</option>
+              <option value="mfj">Married filing jointly</option>
+              <option value="hoh">Head of household</option>
+            </select></label>
+          <label class="fa-field"><span>Children under 17</span>
+            <select class="select" name="dependents">
+              <option value="0">None</option><option value="1">1</option><option value="2">2</option>
+              <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+              <option value="6">6 or more</option>
+            </select></label>
+          <label class="fa-field"><span>Home state</span>
+            <select class="select" name="state" data-tax-states>
+              <option value="">Work it out from the documents</option>
+            </select></label>
+        </div>
+        <div class="fa-row">
+          <label class="fa-field"><span>Estimated tax already paid ($)</span>
+            <input class="input" type="number" name="estimated_payments" min="0" step="0.01" value="0"></label>
+          <label class="fa-field"><span>Last year's refund applied to this year ($)</span>
+            <input class="input" type="number" name="prior_year_overpayment" min="0" step="0.01" value="0"></label>
+        </div>
+        <fieldset class="tax-checks">
+          <legend>Also applies</legend>
+          <label><input type="checkbox" name="taxpayer_65"> Client is 65 or older</label>
+          <label><input type="checkbox" name="taxpayer_blind"> Client is blind</label>
+          <label><input type="checkbox" name="spouse_65"> Spouse is 65 or older</label>
+          <label><input type="checkbox" name="spouse_blind"> Spouse is blind</label>
+        </fieldset>
+        <p class="fa-row"><button type="submit" class="btn btn--primary">Prepare draft</button></p>
+      </form>
+      <p class="muted" id="tax-prepare-status" role="status" aria-live="polite"></p>
+      <div id="tax-prepare-out"></div>
+    </details>
+
+    <details class="tax-part">
+      <summary><strong>Check whether your firm is ready to try it</strong></summary>
+      <form id="tax-readiness" class="tax-form">
+        <div class="fa-row">
+          <label class="fa-field fa-grow"><span>Firm name</span>
+            <input class="input" name="firm" maxlength="200" required></label>
+          <label class="fa-field"><span>Number of clients</span>
+            <input class="input" type="number" name="clients" min="0" step="1" value="0"></label>
+        </div>
+        <fieldset class="tax-checks tax-states">
+          <legend>States you prepare returns for</legend>
+          <div data-tax-state-boxes></div>
+        </fieldset>
+        <fieldset class="tax-checks">
+          <legend>Forms your clients bring</legend>
+          <div data-tax-form-boxes></div>
+          <label class="fa-field fa-grow"><span>Other forms (one per line)</span>
+            <textarea class="textarea" name="other_forms" rows="2"></textarea></label>
+        </fieldset>
+        <fieldset class="tax-checks">
+          <legend>Your own names for documents (optional)</legend>
+          <div data-tax-names></div>
+          <button type="button" class="btn btn--ghost" data-tax-add-name>Add a document name</button>
+        </fieldset>
+        <p class="fa-row"><button type="submit" class="btn btn--primary">Check readiness</button></p>
+      </form>
+      <p class="muted" id="tax-readiness-status" role="status" aria-live="polite"></p>
+      <div id="tax-readiness-out"></div>
+    </details>
+
+    <details class="tax-part">
+      <summary><strong>Test it on returns you already filed</strong></summary>
+      <p class="muted">Choose a .zip file with one folder per client. Each folder holds that client's documents and a
+        filed-figures file with what the firm actually filed. Lightwork prepares each draft and shows how close it came.</p>
+      <label class="fa-field fa-grow"><span>Past returns (.zip)</span>
+        <input class="input" type="file" id="tax-backtest-file" accept=".zip,application/zip"></label>
+      <p class="muted" id="tax-backtest-status" role="status" aria-live="polite"></p>
+      <div id="tax-backtest-out"></div>
+    </details>
+
+    <details class="tax-part" data-fa-needs="installation_admin" hidden>
+      <summary><strong>Tax tables</strong></summary>
+      <p class="muted">Tax rates and limits come from signed updates published when the law changes.</p>
+      <div class="fa-row">
+        <button type="button" class="btn" id="tax-tables-check">Check for newer tables</button>
+        <button type="button" class="btn btn--ghost" id="tax-tables-back" hidden>Go back to the previous tables</button>
+      </div>
+      <label class="fa-field fa-grow"><span>Apply an update file you were sent</span>
+        <input class="input" type="file" id="tax-tables-file" accept=".json,application/json"></label>
+      <p class="muted" id="tax-tables-status" role="status" aria-live="polite"></p>
+      <div id="tax-tables-out"></div>
+    </details>
+  </section>
+  <style>
+    .tax-part { margin-top: var(--space-3); border-top: 1px solid var(--hairline); padding-top: var(--space-3); }
+    .tax-form { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
+    .tax-checks { border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+    .tax-checks > div { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+    .tax-checks label { display: inline-flex; gap: var(--space-1); align-items: center; }
+    .tax-name-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end; }
+    .fa-scroll { overflow-x: auto; }
+    .fa-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .fa-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
+    .fa-grow { flex: 1 1 18rem; }
+  </style>
+  <script src="/static/lightwork-feature-actions.js" defer></script>
+  <script src="/static/lightwork-tax.js" defer></script>
+
   <div class="section-head"><h2>Automated finance checks</h2></div>
   {% from "_module_gate.html" import module_gate %}
   {% if not operations.enabled %}

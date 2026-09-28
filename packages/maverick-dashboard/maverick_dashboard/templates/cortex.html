@@ -195,6 +195,50 @@
     </div>
   </section>
 
+  {% if status.enabled %}
+  <section aria-labelledby="fa-cortex-h" data-fa-needs="operate" hidden>
+    <div class="section-head">
+      <h2 id="fa-cortex-h">Add to knowledge</h2>
+      <span class="muted">Each addition is recorded in the activity log.</span>
+    </div>
+    <form class="panel ctx-form" id="fa-cortex-add" autocomplete="off">
+      <div class="ctx-form__grid">
+        <div class="ctx-field ctx-field--wide">
+          <label for="fa-cortex-text">What should Lightwork remember?</label>
+          <textarea class="textarea" id="fa-cortex-text" name="text" rows="4" maxlength="20000" required
+                    placeholder="For example: Our refund window is 30 days from delivery."></textarea>
+        </div>
+        <div class="ctx-field">
+          <label for="fa-cortex-file">Or use a text file</label>
+          <input class="input" type="file" id="fa-cortex-file" accept=".txt,.md,text/plain,text/markdown">
+        </div>
+        <div class="ctx-field">
+          <label for="fa-cortex-source">Where it came from</label>
+          <input class="input" id="fa-cortex-source" name="source" maxlength="200"
+                 placeholder="For example: Refund policy, March 2026">
+        </div>
+        <div class="ctx-field">
+          <label for="fa-cortex-kind">Keep it as</label>
+          <select class="select" id="fa-cortex-kind" name="kind">
+            <option value="knowledge">Company knowledge</option>
+            <option value="fleet">Shared memory for agents</option>
+          </select>
+        </div>
+        <div class="ctx-field">
+          <label for="fa-cortex-domain">Business area</label>
+          <select class="select" id="fa-cortex-domain" name="domain">
+            <option value="">All areas</option>
+            {% for d in departments %}<option value="{{ d.value }}">{{ d.label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="ctx-form__row">
+        <button class="btn btn--primary" type="submit">Add to knowledge</button>
+        <span class="muted" id="fa-cortex-status" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+  {% endif %}
   <section aria-labelledby="ctx-recent-h">
     <div class="section-head">
       <h2 id="ctx-recent-h">Recent reads and writes</h2>
@@ -245,4 +289,5 @@
     You can still review the sources and recent activity above.</p></noscript>
 </div>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-cortex.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-cortex.js" defer></script>
+<script src="/static/lightwork-feature-actions.js" defer></script>{% endblock %}

@@ -79,6 +79,15 @@
         </div>
         <p id="skill-install-msg" role="status" aria-live="polite" class="muted sk-small"></p>
       </details>
+      <details class="sk-more">
+        <summary>Check a skill file before adding it</summary>
+        <p class="muted sk-small">Choose a skill file someone shared with you. Lightwork checks it for mistakes and unsafe
+          instructions without adding it.</p>
+        <label class="sk-field"><span>Skill file</span>
+          <input class="input" type="file" id="fa-skill-file" accept=".md,text/markdown,text/plain"></label>
+        <p id="fa-skill-status" role="status" aria-live="polite" class="muted sk-small"></p>
+        <div id="fa-skill-out"></div>
+      </details>
     </section>
 
     <section aria-labelledby="sk-list-title">
@@ -321,4 +330,5 @@
     });
   })();
   </script>
+  <script src="/static/lightwork-feature-actions.js" defer></script>
 {% endblock %}

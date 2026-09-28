@@ -226,4 +226,32 @@
     });
   })();
   </script>
+
+  <div class="section-head"><h2 id="fa-tags-title">Spending by team or project</h2></div>
+  <section class="panel" aria-labelledby="fa-tags-title">
+    <p class="muted">Splits what tasks cost by the label each task carries, for charging costs back to teams or projects.</p>
+    <div class="fa-row">
+      <label class="fa-field"><span>Group by</span>
+        <select class="select" id="fa-tags-field">
+          <option value="tag">Tag</option>
+          <option value="team">Team</option>
+          <option value="project">Project</option>
+          <option value="cost_center">Cost centre</option>
+        </select></label>
+      <button type="button" class="btn btn--primary" id="fa-tags-run">Show spending by group</button>
+    </div>
+    <p class="muted" id="fa-tags-status" role="status" aria-live="polite"></p>
+    <div id="fa-tags-out"></div>
+  </section>
+  <style>
+    .fa-scroll { overflow-x: auto; }
+    .fa-inline { list-style: none; padding: 0; margin: var(--space-2) 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .fa-list { margin: var(--space-2) 0; }
+    .fa-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .fa-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
+    .fa-grow { flex: 1 1 18rem; }
+    .fa-technical { margin-top: var(--space-2); }
+  </style>
+  <script src="/static/lightwork-feature-actions.js" defer></script>
+
 {% endblock %}

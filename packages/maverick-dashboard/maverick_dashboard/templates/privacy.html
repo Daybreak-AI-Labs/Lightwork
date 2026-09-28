@@ -336,6 +336,10 @@
         </div>
       </div>
       <div id="pw-lin-result"></div>
+      <div class="pw-form-actions" data-fa-needs="operate" hidden>
+        <button class="btn btn--ghost" id="fa-graph-rebuild" type="button">Refresh these connections</button>
+        <span class="muted" id="fa-graph-status" role="status" aria-live="polite" style="font-size:var(--text-sm);">If an answer looks out of date, refresh the connections from your latest records.</span>
+      </div>
       <datalist id="pw-vendor-names">
         {% set _names = [] %}
         {% for r in records.dpa %}{% if r.vendor not in _names %}{% set _ = _names.append(r.vendor) %}{% endif %}{% endfor %}
@@ -792,6 +796,7 @@
         vendor answers by link (no account needed), and monitoring notes.
         Import your OneTrust vendor export below; vendors already here are left unchanged.
       </p>
+      <p class="muted" id="fa-vendor-posture" role="status" aria-live="polite" style="font-size:var(--text-sm);">Loading the vendor summary…</p>
       <form class="pw-form" data-endpoint="/api/v1/vendors">
         <div class="pw-form-row">
           <label><span>Vendor name</span>
@@ -1102,6 +1107,15 @@
           <button class="btn" id="pe-dm-sharepoint" type="button">List SharePoint sites</button>
           <span class="muted" id="pe-dm-msg" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
         </div>
+      </div>
+      <div class="pw-form">
+        <label><span>Check column names without saving them (one per line or separated by commas)</span>
+          <textarea class="textarea" id="fa-dm-columns" rows="3" placeholder="email&#10;date_of_birth&#10;order_total"></textarea></label>
+        <div class="pw-form-actions">
+          <button class="btn" id="fa-dm-check" type="button">Check these names</button>
+          <span class="muted" id="fa-dm-check-status" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
+        </div>
+        <div id="fa-dm-check-out"></div>
       </div>
       {% if estate.assets %}
       <div class="pw-scroll">
@@ -2362,4 +2376,5 @@
   B.attach({ board: 'privacy', render: render });
 })();
 </script>
+<script src="/static/lightwork-feature-actions.js" defer></script>
 {% endblock %}

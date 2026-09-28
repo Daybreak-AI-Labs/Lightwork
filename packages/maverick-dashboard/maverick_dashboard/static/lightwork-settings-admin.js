@@ -274,10 +274,180 @@
       return data.paused_services.length ? 'Some services are paused after errors. Lightwork retries them automatically.' : 'All services are working.';
     }
   };
+  // Technical rows (kernel wording) stay inside the collapsed details.
+  function technical(name, rows) {
+    var list = document.querySelector('[data-maintenance-technical="' + name + '"]');
+    var details = document.querySelector('[data-maintenance-details="' + name + '"]');
+    if (!list || !details) return;
+    list.textContent = '';
+    (rows || []).forEach(function (row) { list.appendChild(el('li', 'muted', row.text)); });
+    details.hidden = !(rows && rows.length);
+  }
+  function plainList(name, items) {
+    var list = out(name); list.textContent = '';
+    items.forEach(function (item) {
+      var li = el('li');
+      li.appendChild(el('span', 'maintenance-label', item.label));
+      li.appendChild(badge(item.ok, item.yes || 'Yes', item.no || 'No'));
+      list.appendChild(li);
+    });
+  }
+  renderers.enterprise = function (data) {
+    plainList('enterprise', data.checks.map(function (c) { return {label: c.label, ok: c.ok, yes: 'In place', no: 'Not in place'}; }));
+    technical('enterprise', data.technical);
+    return data.summary;
+  };
+  renderers.offline = function (data) {
+    plainList('offline', data.reasons.map(function (r) { return {label: r, ok: false, no: 'Can send data out'}; }));
+    technical('offline', data.technical);
+    return data.summary;
+  };
+  renderers.hardware = function (data) {
+    plainList('hardware', []);
+    technical('hardware', data.technical);
+    return data.summary;
+  };
+  renderers.plugins = function (data) {
+    plainList('plugins', data.problems.map(function (p) { return {label: p, ok: false, no: 'Does not match'}; }));
+    technical('plugins', data.technical);
+    return data.summary;
+  };
+  function saveBlob(blob, name) {
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+  }
+  async function plainFailure(failure, action) {
+    // A server sentence written for people is shown as is; anything else
+    // falls back to the shared plain message.
+    try {
+      if (failure && typeof failure.clone === 'function') {
+        var body = await failure.clone().json();
+        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
+        if (plain) return plain;
+      }
+    } catch (ignored) { /* not a readable body */ }
+    return errorText(failure, action);
+  }
+  renderers.client = function (data) {
+    var box = out('client'); box.textContent = '';
+    technical('client', data.technical);
+    var row = el('p', 'settings-row-form');
+    var download = el('button', 'btn btn--primary', 'Download all data');
+    download.type = 'button';
+    download.addEventListener('click', async function () {
+      var ok = await window.mvConfirm('Download a copy of all of this organisation\'s data? The file holds everything Lightwork keeps, so store it somewhere safe. Encryption keys are not included.', {okText: 'Download'});
+      if (!ok) return;
+      download.disabled = true;
+      say('client', 'Preparing the download. This can take a few minutes…');
+      try {
+        var response = await window.fetch(base + '/client/export', {method: 'POST', credentials: 'same-origin'});
+        if (!response.ok) throw response;
+        saveBlob(await response.blob(), 'Lightwork-data-export.tgz');
+        say('client', 'Download ready. It has been added to the activity record.');
+      } catch (failure) {
+        say('client', await plainFailure(failure, 'download the data'));
+      } finally {
+        download.disabled = false;
+      }
+    });
+    row.appendChild(download);
+    if (data.bound) {
+      var keepLabel = el('label', 'settings-field');
+      var keep = el('input'); keep.type = 'checkbox'; keep.checked = true; keep.name = 'keep_activity_record';
+      var keepRow = el('span'); keepRow.appendChild(keep);
+      keepRow.appendChild(document.createTextNode(' Keep the activity record (needed if the law requires you to keep it)'));
+      keepLabel.appendChild(keepRow);
+      var erase = el('button', 'btn btn--danger', 'Erase all data');
+      erase.type = 'button';
+      erase.addEventListener('click', async function () {
+        var ok = await window.mvConfirm('Erase all data for ' + data.organisation + '? Every task, conversation, lesson and saved file for this organisation is deleted for good and cannot be brought back. Download a copy first if you may need it.', {okText: 'Erase everything'});
+        if (!ok) return;
+        erase.disabled = true;
+        say('client', 'Erasing…');
+        try {
+          var response = await window.fetch(base + '/client/erase', {
+            method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({organisation: data.organisation, keep_activity_record: keep.checked, confirm: true})
+          });
+          if (!response.ok) throw response;
+          var result = await response.json();
+          say('client', 'All data was erased (' + result.files_removed + ' file' + (result.files_removed === 1 ? '' : 's') + ' removed).');
+        } catch (failure) {
+          say('client', await plainFailure(failure, 'erase the data'));
+          erase.disabled = false;
+        }
+      });
+      row.appendChild(erase);
+      box.appendChild(row);
+      box.appendChild(keepLabel);
+    } else {
+      box.appendChild(row);
+    }
+    return data.summary;
+  };
   var paths = {readiness: ['/readiness', 'GET'], health: ['/health-check', 'POST'], settings: ['/settings-check', 'GET'],
-    license: ['/license', 'GET'], queue: ['/queue', 'GET'], encryption: ['/encryption', 'GET'], diagnostics: ['/diagnostics', 'GET']};
+    license: ['/license', 'GET'], queue: ['/queue', 'GET'], encryption: ['/encryption', 'GET'], diagnostics: ['/diagnostics', 'GET'],
+    enterprise: ['/enterprise-check', 'GET'], offline: ['/offline-check', 'GET'], hardware: ['/hardware-check', 'GET'],
+    plugins: ['/plugin-check', 'GET'], client: ['/client', 'GET']};
   var actions = {readiness: 'check readiness', health: 'run the health check', settings: 'check the installation settings',
-    license: 'show the license', queue: 'show background work', encryption: 'check encryption', diagnostics: 'check services'};
+    license: 'show the license', queue: 'show background work', encryption: 'check encryption', diagnostics: 'check services',
+    enterprise: 'check the protections', offline: 'check connections', hardware: 'check the hardware',
+    plugins: 'check add-ons', client: 'show the data status'};
+
+  // Tidy up old records: preview the counts first, then confirm.
+  var cleanup = document.querySelector('[data-maintenance-cleanup]');
+  if (cleanup) {
+    cleanup.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var days = Number(cleanup.elements.days.value);
+      var activityDays = Number(cleanup.elements.activity_days.value);
+      var box = out('cleanup'); box.textContent = '';
+      say('cleanup', 'Counting…');
+      try {
+        var preview = await call(base + '/cleanup/preview?days=' + days + '&activity_days=' + activityDays, 'GET');
+        var conversations = preview.conversations;
+        var list = el('ul', 'maintenance-list');
+        var li1 = el('li'); li1.appendChild(el('span', 'maintenance-label', 'Conversations'));
+        li1.appendChild(el('span', null, conversations === null ? 'Counted when you remove them' : String(conversations)));
+        var li2 = el('li'); li2.appendChild(el('span', 'maintenance-label', 'Task activity entries'));
+        li2.appendChild(el('span', null, String(preview.activity)));
+        list.appendChild(li1); list.appendChild(li2);
+        box.appendChild(list);
+        if (conversations === 0 && preview.activity === 0) { say('cleanup', 'Nothing is old enough to remove.'); return; }
+        say('cleanup', 'This is what would be removed. Nothing has been removed yet.');
+        var go = el('button', 'btn btn--danger', 'Remove these records');
+        go.type = 'button';
+        go.addEventListener('click', async function () {
+          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove'});
+          if (!ok) return;
+          go.disabled = true;
+          say('cleanup', 'Removing…');
+          try {
+            var response = await window.fetch(base + '/cleanup', {
+              method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({days: days, activity_days: activityDays, confirm: true})
+            });
+            if (!response.ok) throw response;
+            var done = await response.json();
+            box.textContent = '';
+            say('cleanup', 'Removed ' + done.conversations + ' conversation' + (done.conversations === 1 ? '' : 's') +
+              ' and ' + done.activity + ' activity entr' + (done.activity === 1 ? 'y' : 'ies') + '.');
+          } catch (failure) {
+            say('cleanup', await plainFailure(failure, 'remove the records'));
+            go.disabled = false;
+          }
+        });
+        box.appendChild(go);
+      } catch (failure) {
+        say('cleanup', await plainFailure(failure, 'count old records'));
+      }
+    });
+  }
 
   async function run(name) {
     var button = document.querySelector('[data-maintenance-run="' + name + '"]');
