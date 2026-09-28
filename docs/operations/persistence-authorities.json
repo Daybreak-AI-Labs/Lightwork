@@ -186,7 +186,7 @@
     "read_projection": 15,
     "coordinator": 1,
     "audit": 22,
-    "transient": 16,
+    "transient": 17,
     "business_records": 13,
     "execution": 21,
     "recovery": 9,
@@ -23719,6 +23719,25 @@
           "function": "_connect",
           "kind": "connect",
           "expression": "sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/value_proof_api.py",
+      "contract": "transient",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/value_proof_api.py",
+      "purpose": "Value and proof read-outs; writes an uploaded signed record to a private temporary directory only so the kernel verifier can check it, then deletes it.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 300,
+          "function": "_check",
+          "kind": "write_text",
+          "expression": "path.write_text(body.document, encoding='utf-8')"
         }
       ]
     }
