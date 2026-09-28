@@ -13,9 +13,10 @@ Event types (see ``events.py``):
   - erase                       — GDPR Art.17 erasure
   - halt                        — killswitch fired
 
-This module is intentionally minimal. The writer is fail-safe: if
-something goes wrong inside the audit path, we log a warning and keep
-the agent running. Audit failures should NEVER crash the swarm.
+This module is intentionally minimal. Ordinary audit failures are logged and
+remain best-effort. An explicit AuditRefused is different: when a deployment's
+required signing or custody policy cannot be satisfied, callers must propagate
+the refusal rather than continue an action with weaker evidence than promised.
 """
 from __future__ import annotations
 

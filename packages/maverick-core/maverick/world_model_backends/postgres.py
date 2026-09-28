@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
 
 log = logging.getLogger(__name__)
@@ -239,6 +240,8 @@ _RLS_TABLES = (
     "erasure_receipts",
     "approval_audit_outbox",
     "attachment_submissions",
+    "event_goal_admissions",
+    "event_trigger_batches",
 )
 _TENANT_MIGRATION: list[str] = [
     f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS tenant_id TEXT;" for t in _TENANT_TABLES
@@ -697,6 +700,12 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     ]),
     (38, [_ATTACHMENT_SUBMISSION_SCHEMA]),
     (39, LEARNING_TENANT_MIGRATION),
+    (40, [_EVENT_ADMISSION_SCHEMA]),
+    (41, [
+        "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS request_digest TEXT",
+        "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS sealed_contract TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_pg_event_admission_goal ON event_goal_admissions(tenant_id,goal_id)",
+    ]),
 ]
 
 # Highest migration version = the reported schema version.
@@ -1345,15 +1354,15 @@ class PostgresWorldModel:
             log.warning("RLS preflight could not run (%s); proceeding to _apply_rls", e)
             return
         offenders = {
-            t: info["null_tenant_rows"]
+            t: info.get("null_tenant_rows", 0) + info.get("empty_tenant_rows", 0)
             for t, info in report.get("tables", {}).items()
-            if info.get("null_tenant_rows")
+            if info.get("null_tenant_rows") or info.get("empty_tenant_rows")
         }
         if offenders:
             detail = ", ".join(f"{t}={n}" for t, n in sorted(offenders.items()))
             raise RuntimeError(
                 "Enterprise mode auto-enabled Postgres RLS, but legacy rows with "
-                f"tenant_id IS NULL would be hidden and frozen ({detail}). Assign "
+                f"unscoped tenant IDs would be hidden and frozen ({detail}). Assign "
                 "them to a tenant first: `maverick tenant backfill <tenant_id>` "
                 "(preview with `maverick tenant rls-preflight`). To opt into RLS "
                 "knowingly without backfilling, set MAVERICK_PG_RLS=1 explicitly."
@@ -4632,6 +4641,11 @@ class PostgresWorldModel:
                     edge_sql += " AND " + gfrag
                     edge_params += gfparams
                 cur.execute(edge_sql, tuple(edge_params))
+                cur.execute(
+                    "UPDATE event_goal_admissions SET sealed_contract=NULL, "
+                    "delivery_state='federation_retired' WHERE admission_key LIKE 'federation:%%' "
+                    "AND goal_id = ANY(%s)", (gids,),
+                )
                 cur.execute("DELETE FROM goals WHERE id = ANY(%s)", (gids,))
 
             # Scrub the subject's explicitly user-scoped facts. Facts are global

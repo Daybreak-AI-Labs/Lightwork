@@ -22,7 +22,7 @@
   {% from "_hero.html" import hero %}
   {{ hero('Governance', 'Audit binder',
           lede='A printable evidence pack of approvals, assessments and records for the selected period, ready to hand to an auditor.') }}
-  <p class="muted">Covers the last {{ days }} days · made {{ b.generated }}. The privacy and finance sections show how things stand today.</p>
+  <p class="muted">Covers the last {{ days }} days · made {{ generated }}. The privacy and finance sections show how things stand today.</p>
   <div class="bnd-actions">
     <button class="btn btn--primary" id="binder-print" type="button">Print or save as PDF</button>
     <button class="btn btn--ghost" id="binder-json" type="button">Download evidence file (for auditors)</button>
@@ -94,7 +94,7 @@
       </tbody>
     </table>
     </div>
-    <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approvals when printed. The evidence file contains all {{ b.approvals_total }}.</p>
+    <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
     {% else %}
     <p class="muted">No approvals in this period.</p>
     {% endif %}
@@ -121,7 +121,8 @@
       </tbody>
     </table>
     </div>
-    <p class="muted">Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} when printed. The evidence file contains every one, with each reviewed version.</p>
+    <p class="muted" style="font-size: var(--text-xs); margin-top: var(--space-2);">
+      Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} record(s) in print. The JSON download contains these current assessment summaries, including the revision number and template fingerprint.</p>
     {% else %}
     <p class="muted">No assessments yet. <a href="/assessments">Start an assessment</a></p>
     {% endif %}
@@ -192,7 +193,9 @@
       if (!button || !source) return;
       button.addEventListener('click', function () {
         const payload = JSON.parse(source.textContent || '{}');
-        const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], {type: 'application/json'});
+        // Preserve the server's signed JSON values: JavaScript reserialization
+        // changes integral floats and integers beyond its exact numeric range.
+        const blob = new Blob([source.textContent + '\n'], {type: 'application/json'});
         const href = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = href;

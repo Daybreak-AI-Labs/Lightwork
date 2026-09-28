@@ -5,9 +5,9 @@ the same uid that runs the agent -- so the signed chain detects accidental /
 non-privileged edits (integrity) but is NOT tamper-evidence against a same-uid
 actor, who can read the key and cleanly re-sign the chain. So:
 
-  * :mod:`maverick.proof_guarantees` downgrades the guarantee headline to an
-    *integrity* claim when the key is co-located, and only claims *tamper
-    evidence* when signing-key custody is off-host (env-injected / KMS).
+  * :mod:`maverick.proof_guarantees` keeps an *integrity* claim for both local
+    and externally supplied keys. Injection and KMS unwrap still expose the
+    private key to the signing process; they do not establish isolated signing.
   * :func:`maverick.audit.signing._load_or_create_keypair` warns (once) when it
     generates a co-located key.
 
@@ -15,6 +15,7 @@ See finding on `proof_guarantees.py` / `audit/signing.py`.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
@@ -57,19 +58,19 @@ def test_guarantee_downgrades_wording_without_offhost_key(monkeypatch, tmp_path)
     # Chain still verifies (integrity) -> the guarantee PASSES...
     assert audit.passed, audit
     # ...but the headline must NOT claim tamper-evidence; it names the co-located
-    # key and points at off-host custody as the remedy.
+    # key and points at independently retained checkpoints as additional evidence.
     assert "tamper-evident" not in audit.label.lower(), audit.label
     assert "co-located" in audit.label.lower(), audit.label
     assert "co-located key" in audit.detail.lower(), audit.detail
-    assert "off-host" in audit.detail.lower(), audit.detail
+    assert "independent" in audit.detail.lower(), audit.detail
 
 
-def test_guarantee_claims_tamper_evidence_only_with_offhost_key(monkeypatch, tmp_path):
+def test_injected_key_does_not_claim_isolated_signing(monkeypatch, tmp_path):
     pytest.importorskip("cryptography")
     from maverick import proof_guarantees as pg
     from maverick.audit import signing
 
-    # An env-injected (KMS / secrets-manager-sourced) key -> off-host custody.
+    # The external key is still usable by this signing process.
     monkeypatch.setenv(signing._SIGNING_KEY_ENV, _fresh_key_hex())
     monkeypatch.delenv(signing._KMS_WRAPPED_KEY_ENV, raising=False)
     monkeypatch.setattr(
@@ -80,8 +81,20 @@ def test_guarantee_claims_tamper_evidence_only_with_offhost_key(monkeypatch, tmp
     audit = _audit_row(pg.run_all(crypto=True))
 
     assert audit.passed, audit
-    assert audit.label == "Tamper-evident audit ledger", audit.label
-    assert "off-host" in audit.detail.lower(), audit.detail
+    assert audit.label == "Audit ledger integrity (externally supplied key)", audit.label
+    assert "private key remains available to the signing process" in audit.detail.lower()
+
+    original = signing.AuditSigner(tmp_path / "original.ndjson")
+    assert original.write({"amount": 6000}) is True
+    replacement = signing.AuditSigner(tmp_path / "replacement.ndjson")
+    assert replacement.write({"amount": 60}) is True
+    original_rows = (tmp_path / "original.ndjson").read_text().splitlines()
+    replacement_rows = (tmp_path / "replacement.ndjson").read_text().splitlines()
+    assert len(original_rows) == len(replacement_rows) == 1
+    assert json.loads(original_rows[0])["amount"] == 6000
+    assert json.loads(replacement_rows[0])["amount"] == 60
+    assert replacement.public_key_hex == original.public_key_hex
+    assert signing.verify_chain(tmp_path / "replacement.ndjson", original.public_key_hex) == []
 
 
 def test_active_key_predicate_tracks_custody(monkeypatch, tmp_path):
@@ -126,10 +139,10 @@ def test_local_key_generation_warns_about_weak_custody(monkeypatch, tmp_path, ca
     # A co-located private key was actually generated on disk...
     assert (tmp_path / "keys" / f"{key_id}.key").exists()
     # ...and the operator was warned that this is integrity-only, not
-    # tamper-evidence against a same-uid actor, with the off-host remedy named.
+    # tamper-evidence against a same-uid actor, with the key-source limit named.
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(
-        "co-located" in m and "tamper-evidence" in m.lower() and "off-host" in m.lower()
+        "co-located" in m and "tamper-evidence" in m.lower() and "signing process" in m.lower()
         for m in warnings
     ), warnings
     assert any(signing._SIGNING_KEY_ENV in m for m in warnings), warnings

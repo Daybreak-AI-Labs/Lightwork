@@ -225,11 +225,13 @@ def write_ledger(
     report: HindsightReport, *, before_label: str, path: Path | str | None = None,
     now: float | None = None,
 ) -> bool:
-    """Append the report to a tamper-evident hindsight ledger + audit row.
+    """Append an aggregate summary and a separate audit event; never raises.
 
-    The improvement/regression record becomes part of the signed audit story
-    (`maverick audit verify`), so "our agents got measurably better/worse" is
-    evidence, not a claim. Never raises."""
+    True means both writes reported success, not that signing was enabled or
+    that coverage proves improved task outcomes. False can follow a committed
+    local summary: these stores do not share a transaction, so inspect before
+    retrying. The local summary file itself is not a signed ledger.
+    """
     try:
         from . import dreaming
         p = Path(path) if path is not None else \
@@ -266,15 +268,21 @@ def write_ledger(
         return False
     try:
         from .audit import EventKind, record
-        record(
+        written = record(
             EventKind.LEARNING_UPDATE, agent="hindsight",
             replay="hindsight", before=before_label,
             n_goals=report.n_goals, covered_before=report.covered_before,
             covered_now=report.covered_now,
             gained=len(report.gained), regressed=len(report.regressed),
         )
-    except Exception:  # pragma: no cover
-        pass
+    except Exception:
+        # The local summary is already committed; report incomplete evidence
+        # without implying rollback or inviting an automatic duplicate append.
+        log.warning("hindsight: summary saved but audit write failed", exc_info=True)
+        return False
+    if written is not True:
+        log.warning("hindsight: summary saved but audit write was not confirmed")
+        return False
     return True
 
 

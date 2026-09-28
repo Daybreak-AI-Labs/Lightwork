@@ -1387,6 +1387,37 @@ def pick_event_triggers() -> dict[str, Any]:
     return {"enable": bool(enable)}
 
 
+def _pick_action_recipe_lineage() -> dict[str, Any]:
+    """Keep service-attested training evidence separate from execution approval."""
+    enabled = _q_confirm(
+        "Enable signed reviewed evidence for action recipes? "
+        "Service signatures attest recorded reviews, not personal reviewer signatures. "
+        "Copied business data needs explicit retention consent; current eligibility is checked before actions.",
+        default=False,
+    )
+    out: dict[str, Any] = {"action_recipe_lineage": enabled}
+    out["require_action_recipe_lineage"] = _q_confirm(
+        "Require governed reviewed lineage for every learned action recipe? "
+        "This blocks raw or stripped-lineage recipes at save, publication and execution.",
+        default=False,
+    )
+    if out["require_action_recipe_lineage"] and not enabled:
+        console.print("[yellow]Lineage is required but disabled; learned recipes remain blocked until configured.[/yellow]")
+    if enabled:
+        issuer = _q_text("Stable action-evidence issuer ID (letters/digits/._:-, max 128; blank keeps signing unavailable)",
+                         default="").strip()
+        if issuer and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", issuer):
+            raise ValueError("action-evidence issuer must be a bounded ASCII identifier, not a URL")
+        out["action_evidence_issuer"] = issuer
+        raw = _q_text("Revoked action-evidence key IDs (comma-separated 16-character lowercase hex; blank = none)",
+                      default="").strip()
+        revoked = [part.strip() for part in raw.split(",")] if raw else []
+        if any(not re.fullmatch(r"[0-9a-f]{16}", key) for key in revoked) or len(set(revoked)) != len(revoked):
+            raise ValueError("revoked action-evidence keys require unique 16-character lowercase hex IDs")
+        out["action_evidence_revoked_keys"] = revoked
+    return out
+
+
 def pick_flows() -> dict[str, Any]:
     """Opt-in to the flow engine (multi-step visual workflows).
 
@@ -1407,6 +1438,69 @@ def pick_flows() -> dict[str, Any]:
     if not _q_confirm("Enable the flow engine?", default=False):
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
+    out["learned_operators"] = _q_confirm(
+        "Enable bounded learned pure operators from reviewed examples? "
+        "All retained expressions must agree; other inputs use the original agent.",
+        default=False,
+    )
+    out["learned_operator_questions"] = _q_confirm(
+        "Enable stored learned-operator review questions? "
+        "Reviewed answers create drafts; nothing is automatically published.",
+        default=False,
+    )
+    out["composed_operators"] = _q_confirm(
+        "Enable bounded composed pure operators? "
+        "Also requires learned operators; every retained expression must agree.",
+        default=False,
+    )
+    out["action_recipes"] = _q_confirm(
+        "Enable learning action sequences from reviewed examples? "
+        "Generated flows retain approval gates and stop on ambiguous data bindings.",
+        default=False,
+    )
+    out["action_recipe_transforms"] = _q_confirm(
+        "Enable learned transformations in action arguments? "
+        "Also requires action recipes and explicit data bounds; every retained expression must agree. "
+        "Approvals remain required and uncertainty stops further actions.",
+        default=False,
+    )
+    out["action_recipe_choices"] = _q_confirm(
+        "Enable learned binary action choices after one shared action? "
+        "Also requires action recipes and transformed arguments. Every retained guard must agree; "
+        "the chosen terminal action needs approval, and uncertainty never repeats the shared action.",
+        default=False,
+    )
+    out["action_recipe_teaching"] = _q_confirm(
+        "Enable human teaching at a real completed action prefix? "
+        "Requires action recipes, transformed arguments, choices and governed lineage. "
+        "Both continuation arguments must agree; human choice and a separate action approval remain required. "
+        "Teaching never repeats the shared action.",
+        default=False,
+    )
+    out["action_episode_capture"] = _q_confirm(
+        "Enable retaining workflow examples for learning? "
+        "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+        default=False,
+    )
+    out["action_workflow_learning"] = _q_confirm(
+        "Enable bounded workflow learning from signed reviewed executions? "
+        "Requires action recipes, transformed arguments and governed lineage. "
+        "Learns next actions and completion from observed history, up to eight actions; "
+        "approvals remain required and ambiguity stops further work. "
+        "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+        "This choice does not enable audit signing or other dependencies.",
+        default=False,
+    )
+    out["action_workflow_memory_learning"] = _q_confirm(
+        "Enable bounded integer history accumulator learning? "
+        "Requires workflow learning, action recipes, transformed arguments and governed lineage. "
+        "One fixed update program runs across each history; all consistent models must agree. "
+        "Native approvals remain in force and ambiguity or resource exhaustion stops further work. "
+        "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+        "This choice does not enable audit signing or other dependencies.",
+        default=False,
+    )
+    out.update(_pick_action_recipe_lineage())
     console.print(
         "[dim]Retries can recover transient agent/tool failures, but every retry "
         "can spend provider budget or repeat side effects. Keep the per-node cap "
@@ -4843,6 +4937,12 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; leave off for SQLite or single-tenant installs.",
             default=False,
         ),
+        "allow_copilot_operations": _q_confirm(
+            "Let Copilot show a learning example's current status and open its "
+            "stop-use review? You confirm each decision in a protected form. "
+            "Other product actions are not included. Page controls remain available "
+            "when this is off.", default=False,
+        ),
         "governed_pg_pool": _q_confirm(
             "Reuse one bounded Postgres connection for governed records? "
             "Only affects a configured Postgres governed-record backend. "
@@ -5003,6 +5103,69 @@ def pick_advanced() -> dict[str, Any]:
     # Signed channel Approve/Reject links need the dashboard's externally-
     # reachable base URL; blank keeps approvals on the dashboard itself.
     if advanced.get("flows"):
+        advanced["flows_learned_operators"] = _q_confirm(
+            "  Enable bounded learned pure operators from reviewed examples? "
+            "Agreement within declared bounds only; otherwise use the original agent.",
+            default=False,
+        )
+        advanced["flows_learned_operator_questions"] = _q_confirm(
+            "  Enable stored learned-operator review questions? "
+            "Reviewed answers create drafts without automatic publication.",
+            default=False,
+        )
+        advanced["flows_composed_operators"] = _q_confirm(
+            "  Enable bounded composed pure operators? "
+            "Also requires learned operators; otherwise use the original agent.",
+            default=False,
+        )
+        advanced["flows_action_recipes"] = _q_confirm(
+            "  Enable learning action sequences from reviewed examples? "
+            "Generated flows retain approval gates and stop on ambiguous data bindings.",
+            default=False,
+        )
+        advanced["flows_action_recipe_transforms"] = _q_confirm(
+            "  Enable learned transformations in action arguments? "
+            "Also requires action recipes and explicit data bounds; every retained expression must agree. "
+            "Approvals remain required and uncertainty stops further actions.",
+            default=False,
+        )
+        advanced["flows_action_recipe_choices"] = _q_confirm(
+            "  Enable learned binary action choices after one shared action? "
+            "Also requires action recipes and transformed arguments. Every retained guard must agree; "
+            "the chosen terminal action needs approval, and uncertainty never repeats the shared action.",
+            default=False,
+        )
+        advanced["flows_action_recipe_teaching"] = _q_confirm(
+            "  Enable human teaching at a real completed action prefix? "
+            "Requires action recipes, transformed arguments, choices and governed lineage. "
+            "Both continuation arguments must agree; human choice and a separate action approval remain required. "
+            "Teaching never repeats the shared action.",
+            default=False,
+        )
+        advanced["flows_action_episode_capture"] = _q_confirm(
+            "  Enable retaining workflow examples for learning? "
+            "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+            default=False,
+        )
+        advanced["flows_action_workflow_learning"] = _q_confirm(
+            "  Enable bounded workflow learning from signed reviewed executions? "
+            "Requires action recipes, transformed arguments and governed lineage. "
+            "Learns next actions and completion from observed history, up to eight actions; "
+            "approvals remain required and ambiguity stops further work. "
+            "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+            "This choice does not enable audit signing or other dependencies.",
+            default=False,
+        )
+        advanced["flows_action_workflow_memory_learning"] = _q_confirm(
+            "  Enable bounded integer history accumulator learning? "
+            "Requires workflow learning, action recipes, transformed arguments and governed lineage. "
+            "One fixed update program runs across each history; all consistent models must agree. "
+            "Native approvals remain in force and ambiguity or resource exhaustion stops further work. "
+            "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+            "This choice does not enable audit signing or other dependencies.",
+            default=False,
+        )
+        advanced.update({"flows_" + key: value for key, value in _pick_action_recipe_lineage().items()})
         flows_url = _q_text(
             "  Public base URL for flow approval links (e.g. https://ops.acme.com; "
             "blank = approve from the dashboard)",
@@ -6607,6 +6770,18 @@ def _cfg_flows(flows: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _fold_flow_operator_options(flows: dict[str, Any], advanced: dict[str, Any]) -> None:
+    """Keep explicit dedicated answers when merging the advanced flow step."""
+    for key in ("learned_operators", "learned_operator_questions", "composed_operators",
+                "action_recipes", "action_recipe_transforms", "action_recipe_choices", "action_recipe_teaching",
+                "action_episode_capture", "action_workflow_learning", "action_workflow_memory_learning",
+                "action_recipe_lineage", "require_action_recipe_lineage",
+                "action_evidence_issuer", "action_evidence_revoked_keys"):
+        advanced_key = "flows_" + key
+        if advanced_key in advanced:
+            flows.setdefault(key, advanced.pop(advanced_key))
+
+
 def _cfg_knowledge(knowledge: dict[str, Any] | None) -> list[str]:
     if not knowledge:
         return []
@@ -7674,6 +7849,31 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("enable = true")
         lines.append("# Per-node retry cap; bounds repeated provider/tool calls.")
         lines.append("max_node_retries = 5")
+        if "flows_learned_operators" in advanced:
+            _emit_kv(lines, "learned_operators", advanced["flows_learned_operators"])
+        if "flows_learned_operator_questions" in advanced:
+            _emit_kv(lines, "learned_operator_questions",
+                     advanced["flows_learned_operator_questions"])
+        if "flows_composed_operators" in advanced:
+            _emit_kv(lines, "composed_operators", advanced["flows_composed_operators"])
+        if "flows_action_recipes" in advanced:
+            _emit_kv(lines, "action_recipes", advanced["flows_action_recipes"])
+        if "flows_action_recipe_transforms" in advanced:
+            _emit_kv(lines, "action_recipe_transforms", advanced["flows_action_recipe_transforms"])
+        if "flows_action_recipe_choices" in advanced:
+            _emit_kv(lines, "action_recipe_choices", advanced["flows_action_recipe_choices"])
+        if "flows_action_recipe_teaching" in advanced:
+            _emit_kv(lines, "action_recipe_teaching", advanced["flows_action_recipe_teaching"])
+        if "flows_action_episode_capture" in advanced:
+            _emit_kv(lines, "action_episode_capture", advanced["flows_action_episode_capture"])
+        if "flows_action_workflow_learning" in advanced:
+            _emit_kv(lines, "action_workflow_learning", advanced["flows_action_workflow_learning"])
+        if "flows_action_workflow_memory_learning" in advanced:
+            _emit_kv(lines, "action_workflow_memory_learning", advanced["flows_action_workflow_memory_learning"])
+        for key in ("action_recipe_lineage", "require_action_recipe_lineage",
+                    "action_evidence_issuer", "action_evidence_revoked_keys"):
+            if "flows_" + key in advanced:
+                _emit_kv(lines, key, advanced["flows_" + key])
         if advanced.get("flows_auto_evolve"):
             lines.append("# Autonomously revert a node rewrite whose grounded outcomes")
             lines.append("# regressed (the loop undoes its own bad changes).")
@@ -7859,6 +8059,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_copilot_operations") is True:
+        _feature_locks.append("copilot_operations = true")
     if advanced.get("allow_workflow_readiness") is False:
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
@@ -8688,6 +8890,7 @@ def write_config(
         flows.setdefault("enable", True)
         if advanced.pop("flows_auto_evolve", False):
             flows.setdefault("auto_evolve", True)
+        _fold_flow_operator_options(flows, advanced)
         _flows_url = advanced.pop("flows_public_url", None)
         if _flows_url:
             flows.setdefault("public_url", _flows_url)

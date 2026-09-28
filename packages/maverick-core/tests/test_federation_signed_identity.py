@@ -4,12 +4,16 @@ peer that has a pinned key. Covers round-trip verify, unsigned/ tampered/
 replayed/ stale refusals, require_signed, and the disengaged/migration paths."""
 from __future__ import annotations
 
-from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from maverick import agent_trust, federation
+from maverick import federation_admission as admission
 from maverick.agent_trust import TrustedAgent
 from maverick.federation import FederationNode, FederationService, Peer
+from maverick.grpc_api.service import GoalService
+from maverick.paths import data_dir
+from maverick.world_model import WorldModel
 
 pytest.importorskip("cryptography")
 
@@ -20,16 +24,23 @@ def _local_pubkey() -> str:
     return pub.hex()
 
 
-class _Goals:
+class _Goals(GoalService):
     def __init__(self):
         self.started = []
+        self.path = data_dir().parent / f"test-federation-{uuid4().hex}" / "world.db"
+        super().__init__(world_factory=lambda: WorldModel(self.path),
+                         dispatch=self._run, spawn=lambda fn: fn())
 
-    def start_goal(self, title, description="", **kw):
-        self.started.append({"title": title, **kw})
-        return len(self.started)
-
-    def status(self, goal_id):
-        return SimpleNamespace(status="done", result="ok")
+    def _run(self, goal_id, **kw):
+        with WorldModel(self.path) as world:
+            admission.require_execution(
+                world, goal_id, capability=kw["capability"],
+                max_dollars=kw["max_dollars"],
+                max_wall_seconds=kw["max_wall_seconds"], consume=True,
+            )
+            goal = world.get_goal(goal_id)
+            self.started.append({"title": goal.title, "owner": goal.owner, **kw})
+            world.set_goal_status(goal_id, "done", result="ok")
 
 
 def _engage(monkeypatch, registry, *, enforced=True):
@@ -44,7 +55,7 @@ def _engage(monkeypatch, registry, *, enforced=True):
 def _service():
     return FederationService(
         node="b", peers=[Peer("a", "a:1", "tok")], local_grant=None,
-        goal_service=_Goals(), record=lambda *a, **k: None,
+        goal_service=_Goals(), record=lambda *a, **k: True,
     )
 
 

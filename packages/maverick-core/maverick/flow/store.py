@@ -193,6 +193,8 @@ def save_flow(
     # Reject unsafe content before any history/version side effect, then check
     # the exact stamped payload again under the definition lock.
     _assert_safe_definition(flow.to_dict())
+    from .recipe_flow import check_persisted_lineage
+    check_persisted_lineage(flow)
     with _definitions_lock():
         prior = load_flow(flow.id)
         actual_version = int(prior.version) if prior is not None else 0
@@ -217,6 +219,7 @@ def save_flow(
             flow.revision = _new_revision()
         payload = flow.to_dict()
         _assert_safe_definition(payload)
+        check_persisted_lineage(Flow.from_dict(payload))
         if prior is not None:
             # Snapshot the version being replaced under its own number, then advance.
             _write_json(
@@ -508,6 +511,7 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
     # Apply the same size/secret persistence policy before writing CAS objects.
     _assert_safe_definition(flow.to_dict())
     manifest: dict[str, str | None] = {}
+    pending_objects: dict[str, dict] = {}
     # A subflow is executable code/data owned by its definition owner.  Flow ids
     # are not capabilities: an authenticated caller who guesses another user's
     # id must not be able to smuggle that private graph into an otherwise-owned
@@ -518,6 +522,9 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
     root_owner = str(flow.owner or "")
 
     def walk(raw: dict) -> None:
+        from .recipe_flow import check_persisted_lineage
+        _assert_safe_definition(raw)
+        check_persisted_lineage(Flow.from_dict(raw), owner=root_owner)
         for node in raw.get("nodes") or []:
             if not isinstance(node, dict):
                 continue
@@ -541,12 +548,17 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
                     f"subflow {ref!r} is unavailable to this flow owner"
                 )
             child_raw = child.to_dict()
-            manifest[ref] = _store_flow_object(child_raw)
+            # Mark visited for cycles, but write no objects until the entire
+            # selected graph passes persistence and lineage policy.
+            manifest[ref] = None
+            pending_objects[ref] = child_raw
             walk(child_raw)
 
     root = flow.to_dict()
-    root_digest = _store_flow_object(root)
     walk(root)
+    root_digest = _store_flow_object(root)
+    for ref, raw in pending_objects.items():
+        manifest[ref] = _store_flow_object(raw)
     return root_digest, int(flow.version), manifest
 
 

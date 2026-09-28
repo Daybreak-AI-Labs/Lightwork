@@ -3,20 +3,34 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from maverick import agent_trust
 from maverick import federation as fed
+from maverick import federation_admission as admission
 from maverick.federation import FederationError, FederationNode, FederationService, Peer
+from maverick.grpc_api.service import GoalService
+from maverick.paths import data_dir
+from maverick.world_model import WorldModel
 
 
-class _Goals:
+class _Goals(GoalService):
     def __init__(self):
         self.started = 0
+        self.path = data_dir().parent / f"test-federation-{uuid4().hex}" / "world.db"
+        super().__init__(world_factory=lambda: WorldModel(self.path),
+                         dispatch=self._run, spawn=lambda fn: fn())
 
-    def start_goal(self, title, description="", **kwargs):
-        self.started += 1
-        return self.started
+    def _run(self, goal_id, **kwargs):
+        with WorldModel(self.path) as world:
+            admission.require_execution(
+                world, goal_id, capability=kwargs["capability"],
+                max_dollars=kwargs["max_dollars"],
+                max_wall_seconds=kwargs["max_wall_seconds"], consume=True,
+            )
+            self.started += 1
+            world.set_goal_status(goal_id, "done", result="ok")
 
 
 def _service(goals: _Goals | None = None, *, state_path=None) -> FederationService:
@@ -25,7 +39,7 @@ def _service(goals: _Goals | None = None, *, state_path=None) -> FederationServi
         peers=[Peer("a", "a:1", "tok")],
         local_grant=None,
         goal_service=goals or _Goals(),
-        record=lambda *args, **kwargs: None,
+        record=lambda *args, **kwargs: True,
         state_path=state_path,
     )
 
@@ -40,6 +54,16 @@ def _payload(correlation_id: str = "corr-1", title: str = "do it") -> dict:
         "max_risk": "",
         "deadline_ms": 0,
     }
+
+
+def _assert_accepted_retry(first, retry):
+    for result in (first, retry):
+        assert result["accepted"] is True and result["goal_id"] == 1
+        assert result["outcome_state"] == "accepted"
+        assert result["audit_state"] == "accepted"
+    assert first["execution_state"] == "dispatched" and first["reason"] == ""
+    assert retry["execution_state"] == "unknown"
+    assert "automatic replay is prohibited" in retry["reason"]
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +85,7 @@ def test_token_mode_correlation_retry_returns_original_goal(monkeypatch):
     first = service.delegate_goal(payload)
     retry = service.delegate_goal(dict(payload))
 
-    assert first == retry == {"accepted": True, "goal_id": 1, "reason": ""}
+    _assert_accepted_retry(first, retry)
     assert goals.started == 1
     assert len(fed._fed_rate_hits["peer:a"]) == 1
 
@@ -76,7 +100,7 @@ def test_correlation_result_survives_service_restart(monkeypatch, tmp_path):
     retry = restarted.delegate_goal(dict(_payload()))
     changed = restarted.delegate_goal(_payload(title="changed"))
 
-    assert retry == first == {"accepted": True, "goal_id": 1, "reason": ""}
+    _assert_accepted_retry(first, retry)
     assert not changed["accepted"]
     assert "different delegation content" in changed["reason"]
     assert goals.started == 1
@@ -91,7 +115,8 @@ def test_corrupt_correlation_store_fails_closed(monkeypatch, tmp_path):
     result = _service(goals, state_path=state_path).delegate_goal(_payload())
 
     assert not result["accepted"]
-    assert "ledger is unavailable" in result["reason"]
+    assert result["outcome_state"] == "unknown"
+    assert "correlation state unavailable" in result["reason"]
     assert goals.started == 0
 
 
@@ -148,11 +173,10 @@ def test_concurrent_correlation_retries_start_exactly_one_goal(monkeypatch):
     release = threading.Event()
 
     class BlockingGoals(_Goals):
-        def start_goal(self, title, description="", **kwargs):
-            self.started += 1
+        def _run(self, goal_id, **kwargs):
+            super()._run(goal_id, **kwargs)
             entered.set()
             release.wait(5)
-            return self.started
 
     goals = BlockingGoals()
     service = _service(goals)
@@ -173,9 +197,9 @@ def test_concurrent_correlation_retries_start_exactly_one_goal(monkeypatch):
     assert not first.is_alive() and not second.is_alive()
     assert goals.started == 1
     assert len(results) == 2
-    assert results[0] == results[1] == {
-        "accepted": True, "goal_id": 1, "reason": "",
-    }
+    first_result = next(row for row in results if row["execution_state"] == "dispatched")
+    retry_result = next(row for row in results if row["execution_state"] == "unknown")
+    _assert_accepted_retry(first_result, retry_result)
 
 
 def test_signed_mode_new_signature_same_correlation_is_idempotent(monkeypatch):
@@ -211,7 +235,7 @@ def test_signed_mode_new_signature_same_correlation_is_idempotent(monkeypatch):
     first = service.delegate_goal(first_payload)
     retry = service.delegate_goal(second_payload)
 
-    assert first == retry == {"accepted": True, "goal_id": 1, "reason": ""}
+    _assert_accepted_retry(first, retry)
     assert goals.started == 1
 
 
@@ -413,7 +437,8 @@ def test_grpc_client_plaintext_requires_loopback_or_explicit_override(
 def test_correlation_cache_is_bounded(monkeypatch):
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
     monkeypatch.setattr(fed, "_CORRELATION_CACHE_MAX", 2)
-    service = _service()
+    goals = _Goals()
+    service = _service(goals)
 
     first = service.delegate_goal(_payload("corr-0"))
     second = service.delegate_goal(_payload("corr-1"))
@@ -422,10 +447,17 @@ def test_correlation_cache_is_bounded(monkeypatch):
     assert first["accepted"] is True and second["accepted"] is True
     assert refused["accepted"] is False
     assert "ledger capacity" in refused["reason"]
-    assert len(service._correlations) == 2
+    for index in range(3, 8):
+        rejected = service.delegate_goal(_payload(f"corr-{index}"))
+        assert rejected["accepted"] is False
+        assert "ledger capacity" in rejected["reason"]
+    with WorldModel(goals.path) as world:
+        assert len(world._read_all("SELECT admission_key FROM event_goal_admissions")) == 2
+        assert len(world.list_goals()) == 2
     # Capacity pressure must not evict a still-live idempotency record and
     # thereby reopen it to duplicate goal creation.
-    assert service.delegate_goal(_payload("corr-0")) == first
+    _assert_accepted_retry(first, service.delegate_goal(_payload("corr-0")))
+    assert goals.started == 2
 
 
 def test_rate_limited_unique_id_does_not_consume_correlation_capacity(monkeypatch):
@@ -437,7 +469,11 @@ def test_rate_limited_unique_id_does_not_consume_correlation_capacity(monkeypatc
     assert service.delegate_goal(_payload("allowed"))["accepted"]
     limited = service.delegate_goal(_payload("retry-later"))
     assert not limited["accepted"] and "rate limit" in limited["reason"]
-    assert ("a", "retry-later") not in service._correlations
+    with WorldModel(goals.path) as world:
+        assert len(world.list_goals()) == 1
+        rows = world._read_all("SELECT admission_key FROM event_goal_admissions")
+        assert len(rows) == 1
+        assert rows[0][0] != admission.identity("a", "retry-later")
 
     # Raising the operator cap lets the same side-effect-free request claim and
     # run; the rate refusal did not leave a 24-hour correlation tombstone.

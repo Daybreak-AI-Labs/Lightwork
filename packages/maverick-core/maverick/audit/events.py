@@ -221,6 +221,12 @@ class EventKind:
     # old/new names, and complete member-set deltas or bounded commitments.
     ACCESS_GRANT_CHANGED = "access_grant_changed"
     FEDERATION_DELEGATE = "federation_delegate"
+    # A bounded learned pure operator selected a value or the original agent.
+    # Payload contains only node/work/artifact digests, candidate count, status
+    # and reason. Agreement is not a grounded success label; examples and raw
+    # inputs/outputs are deliberately absent from this decision event.
+    FLOW_LEARNED_OPERATOR_DECISION = "flow_learned_operator_decision"
+    FLOW_ACTION_RECIPE_DECISION = "flow_action_recipe_decision"
     # Agent Trust Plane: an external agent was refused an inbound action or an
     # outbound dial because it is absent from the [agent_trust] registry, its
     # direction forbade the interaction, or it exceeded its tool/risk ceiling.

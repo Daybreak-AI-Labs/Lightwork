@@ -45,13 +45,15 @@
 
   <section class="panel" aria-labelledby="rcp-proves-title">
     <h2 id="rcp-proves-title" class="rcp-flush-top">What a Receipt Proves</h2>
+    <p>A verifier checks the recorded decision for consistency. It cannot prove that the underlying action really occurred. A separately retained checkpoint is needed to detect later changes to committed history.</p>
     <ul class="rcp-levels">
-      <li><strong>Genuine</strong><br>The decision was recorded by this Lightwork installation.</li>
-      <li><strong>Nothing removed after it</strong><br>The activity after the decision is included and unchanged.</li>
-      <li><strong>Matches a published checkpoint</strong><br>It agrees with a checkpoint published separately.</li>
+      <li><strong>Signed</strong><br>The recorded row verifies against the issuer's key.</li>
+      <li><strong>Chained</strong><br>The row is linked to a tip the issuer committed.</li>
+      <li><strong>Anchored</strong><br>That commitment matches a checkpoint supplied independently of this receipt.</li>
     </ul>
+    <p>Keys held on this computer, including keys supplied by an external service, remain available to its signing process. External key sourcing alone cannot prevent it from re-signing history.</p>
     <h3>Share Our Key</h3>
-    <p class="muted">People who check your receipts need this key. Send it separately from the receipt, for example by email.</p>
+    <p class="muted">Check this key through a separate trusted channel before relying on a receipt.</p>
     <div class="rcp-actions">
       <button class="btn" type="button" id="rcp-copy-key">Copy key</button>
       <button class="btn btn--ghost" type="button" id="rcp-download-key">Download key</button>

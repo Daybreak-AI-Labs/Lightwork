@@ -166,7 +166,7 @@ def test_world_and_standalone_learning_startup_share_migration(postgres_test_dsn
     with tenant_scope(tenant="alpha"):
         ls.write_addenda_db({"shared": "before world startup"})
         with PostgresWorldModel(postgres_test_dsn) as world:
-            assert world.schema_version == 39
+            assert world.schema_version == 40
         assert ls.load_addenda_db() == {"shared": "before world startup"}
     with tenant_scope(tenant="beta"):
         ls.write_addenda_db({"shared": "after world startup"})

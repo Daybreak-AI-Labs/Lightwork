@@ -130,9 +130,19 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">Nothing was recorded for these dates and filters.</p>
-      <p class="aud-links"><button type="button" class="btn btn--ghost" id="aud-pick">Pick other dates</button>
-        <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a></p>
+      <p class="muted">
+        {% if kind %}
+        No events match the selected kind in the loaded tail. Other events may
+        exist for this day; clear the kind filter or search the day.
+        {% elif audit_read_report and audit_read_report.failures %}
+        No readable events are available in this tail. The audit read is
+        incomplete; this does not establish that no activity was recorded.
+        {% else %}
+        No instrumented activity was recorded for this day. An empty view does
+        not prove that no action occurred; verify instrumentation coverage and
+        custody in the Audit Binder before relying on completeness.
+        {% endif %}
+      </p>
     {% endif %}
   </div>
 

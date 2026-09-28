@@ -11,10 +11,11 @@
       <div class="stat">
         <span class="muted">Activity record</span><br>
         <span class="badge {{ 'active' if _cs == 'verified' else ('danger' if _cs == 'broken' else '') }}">
-          {%- if _cs == 'verified' %}Checked — not altered
-          {%- elif _cs == 'broken' %}Altered · {{ replay.chain.break_count }} problem{{ '' if replay.chain.break_count == 1 else 's' }} found
-          {%- elif _cs == 'unsigned' %}Not sealed (sealing is turned off)
-          {%- else %}No sealed record{% endif -%}
+          {%- if _cs == 'verified' %}Captured segment chains verified ✓
+          {%- elif _cs == 'broken' %}Broken · {{ replay.chain.break_count }} break(s)
+          {%- elif _cs == 'incomplete' %}Incomplete audit read
+          {%- elif _cs == 'unsigned' %}Unsigned (signing off)
+          {%- else %}No signed log{% endif -%}
         </span>
       </div>
       <div class="stat"><div class="num">{{ replay.summary.tool_calls }}</div><div class="label">actions taken</div></div>
@@ -22,6 +23,15 @@
       <div class="stat"><div class="num">{{ replay.summary.denied }}</div><div class="label">denied</div></div>
       <div class="stat"><div class="num">{{ replay.summary.blocks }}</div><div class="label">stopped by your rules</div></div>
     </div>
+    <p class="muted">The timeline and segment checks use the same captured records.
+      The anchor ledger is checked separately against current files
+      ({% if not replay.chain.anchors %}not checked{% elif replay.chain.anchors.status == 'broken' %}breaks found{% else %}no breaks found{% endif %});
+      that check is not bound to this timeline. The days and ledger are not one
+      atomic point-in-time snapshot. Independent checkpoints are not checked.</p>
+    {% if replay.read_report and replay.read_report.failures %}
+    <p role="alert">Some audit records could not be read. This timeline and its
+      counts are incomplete; resolve the read failures before relying on the export.</p>
+    {% endif %}
     <p style="margin-top:1rem">
       <a class="btn btn--primary" href="/api/v1/replay/{{ goal.id }}/evidence">Download evidence for auditors</a>
     </p>
@@ -46,7 +56,11 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">Nothing recorded for this task yet.</p>
+    {% if replay.read_report and replay.read_report.failures %}
+    <p class="muted">No readable audit events are available for this run. The read is incomplete.</p>
+    {% else %}
+    <p class="muted">No audit events recorded for this run yet.</p>
+    {% endif %}
     {% endif %}
   </div>
 {% else %}

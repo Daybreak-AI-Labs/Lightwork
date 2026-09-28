@@ -158,6 +158,100 @@ def test_gate_requires_the_handler_to_actually_reraise(tmp_path) -> None:
     assert len(hits) == 1
 
 
+@pytest.mark.parametrize("broad", ["Exception", "BaseException", "RuntimeError", "(ValueError, Exception)"])
+def test_gate_rejects_refusal_handler_shadowed_by_broad_catch(tmp_path, broad) -> None:
+    hits = _scan_source(tmp_path, f"""
+        from maverick.audit import AuditRefused, record
+
+        def go():
+            try:
+                record("event")
+            except {broad}:
+                return "swallowed"
+            except AuditRefused:
+                raise
+    """)
+    assert len(hits) == 1
+
+
+@pytest.mark.parametrize("handler_body", [
+    "return None\nraise",
+    "if suppress:\n    return None\nraise",
+    "raise RuntimeError('replacement error')",
+])
+def test_gate_does_not_credit_unreachable_or_replaced_reraise(tmp_path, handler_body) -> None:
+    source = (
+        "from maverick.audit import AuditRefused, record\n"
+        "def go(suppress=True):\n"
+        "    try:\n"
+        "        record('event')\n"
+        "    except AuditRefused:\n"
+        + textwrap.indent(handler_body, "        ") + "\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    assert len(_scan_source(tmp_path, source)) == 1
+
+
+@pytest.mark.parametrize("handler", ["AuditRefused", "(AuditRefused, Exception)"])
+def test_gate_flags_typed_swallow_without_another_broad_handler(tmp_path, handler) -> None:
+    assert len(_scan_source(tmp_path, f"""
+        from maverick.audit import AuditRefused, record
+
+        def go():
+            try:
+                record("event")
+            except {handler}:
+                return None
+    """)) == 1
+
+
+def test_gate_rejects_earlier_refusal_subclass_swallow(tmp_path) -> None:
+    assert len(_scan_source(tmp_path, """
+        from maverick.audit import AuditRefused, AuditWriteRefused, record
+
+        def go():
+            try:
+                record("event")
+            except AuditWriteRefused:
+                return None
+            except AuditRefused:
+                raise
+            except Exception:
+                pass
+    """)) == 1
+
+
+@pytest.mark.parametrize("handler_body", ["raise", "log_warning()\nraise", "raise error"])
+def test_gate_accepts_reachable_refusal_propagation(tmp_path, handler_body) -> None:
+    source = (
+        "from maverick.audit import AuditRefused, record\n"
+        "def go():\n"
+        "    try:\n"
+        "        record('event')\n"
+        "    except AuditRefused as error:\n"
+        + textwrap.indent(handler_body, "        ") + "\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    assert _scan_source(tmp_path, source) == []
+
+
+def test_gate_rejects_rebinding_the_caught_exception_before_raise(tmp_path) -> None:
+    assert len(_scan_source(tmp_path, """
+        from maverick.audit import AuditRefused, record
+
+        def go():
+            try:
+                record("event")
+            except AuditRefused as error:
+                error = RuntimeError("different exception")
+                raise error
+            except Exception:
+                pass
+    """)) == 1
+
+
 def test_gate_ignores_unrelated_dot_record_calls(tmp_path) -> None:
     """A naive name match inflates the census with metrics recorders."""
     assert _scan_source(tmp_path, """

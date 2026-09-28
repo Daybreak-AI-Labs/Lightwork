@@ -105,10 +105,12 @@
     var before = JSON.stringify(recoveryPayload());
     if (source.version) {
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(source.id));
-      var current = response.ok && await response.json();
+      var current = response.ok && await (typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
+        ? FDRecipeInputs.responseJson(response) : response.json());
       if (!current || current.id !== source.id || current.revision !== source.revision || current.version !== source.version) throw new Error('The saved flow changed after this recovery copy. Current work was kept. Compare the copies and copy your edits into the latest flow before saving.');
     }
     if (before !== JSON.stringify(recoveryPayload())) throw new Error('Your newer canvas edits were kept. Review the recovery copy again.');
+    if (state.flow.learned_recipe != null) FDRecipeInputs.flowText(state.flow);
     pushHistory();
     rootFlow = JSON.parse(JSON.stringify(state.flow)); flow = rootFlow;
     rootFlow.version = source.version; rootFlow.revision = source.revision;
@@ -194,13 +196,24 @@
     return e;
   }
 
-  // ---- undo/redo: whole-root snapshots (the same serialized form a save uses),
-  // so a chat edit, a draft, or a hand edit all undo the same way ----
+  // ---- undo/redo: whole-editor snapshots, including unfinished work.
+  // Save serialization deliberately drops buffers/blank rows; history must not. ----
   function snapState() {
-    return JSON.stringify(FDCore.cloneFlow({
-      id: idInput.value || rootFlow.id, name: nameInput.value || rootFlow.name,
-      start: rootFlow.start, nodes: rootFlow.nodes }));
+    var snapshot = JSON.parse(JSON.stringify(rootFlow));
+    snapshot._editorSettings = { id: idInput.value, name: nameInput.value,
+      inputs: JSON.parse(JSON.stringify(flowInputs)) };
+    [['fd-maxsec', 'max_seconds'], ['fd-maxdollars', 'max_dollars'], ['fd-schedule', 'schedule'],
+      ['fd-tz', 'timezone'], ['fd-maxconc', 'max_concurrent']].forEach(function (pair) {
+      var field = document.getElementById(pair[0]);
+      snapshot._editorSettings[pair[1]] = field ? field.value : '';
+    });
+    var notify = document.getElementById('fd-notify');
+    snapshot._editorSettings.notify = !!(notify && notify.checked);
+    return snapshot.learned_recipe == null ? JSON.stringify(snapshot) : FDRecipeInputs.flowText(snapshot);
   }
+  // An explicit creation receipt can bind the exact unsaved history that
+  // preceded that request. Empty revisions alone never match saved history.
+  var firstSaveHistory = null;
   function pushHistory() {
     var s = snapState();
     if (undoStack[undoStack.length - 1] === s) return;
@@ -218,14 +231,45 @@
     pendingSnap = null;
   }
   function restoreState(s) {
-    var f = JSON.parse(s);
+    var f = FDRecipeInputs.parseText(s);
+    var settings = f._editorSettings || f;
+    delete f._editorSettings;
+    if (firstSaveHistory && firstSaveHistory.snapshots.indexOf(s) >= 0 &&
+        !(f.version || 0) && !f.revision && f.id === firstSaveHistory.sourceId) {
+      f.id = firstSaveHistory.receipt.id;
+      settings.id = f.id;
+      ['version', 'revision', 'published', 'published_version', 'published_revision'].forEach(function (key) {
+        f[key] = firstSaveHistory.receipt[key];
+      });
+    }
+    // Undo edits, not a successful server save/publication. Retain the latest
+    // receipts only for the same saved identity; never borrow another flow's.
+    if (f.id && f.id === rootFlow.id && f.revision && f.revision === rootFlow.revision &&
+        Number.isInteger(rootFlow.version) && rootFlow.version > 0) {
+      ['version', 'revision', 'published', 'published_version', 'published_revision'].forEach(function (key) {
+        if (rootFlow[key] !== undefined) f[key] = rootFlow[key];
+      });
+    }
     stack = []; crumbs = ['Main flow']; renderCrumbs();
-    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
-    (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
+    flow = f;
+    flow.nodes = (f.nodes || []).map(function (nd, i) { return normalizeNode(nd, i); });
     rootFlow = flow;
-    nameInput.value = flow.name; idInput.value = flow.id;
+    flowInputs = JSON.parse(JSON.stringify(settings.inputs || []));
+    [['fd-maxsec', 'max_seconds'], ['fd-maxdollars', 'max_dollars'], ['fd-schedule', 'schedule'],
+      ['fd-tz', 'timezone'], ['fd-maxconc', 'max_concurrent']].forEach(function (pair) {
+      var field = document.getElementById(pair[0]);
+      if (field) field.value = settings[pair[1]] == null ? '' : settings[pair[1]];
+    });
+    var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!settings.notify;
+    syncScheduleControls();
+    var samplePanel = document.getElementById('fd-test-data');
+    if (samplePanel) samplePanel.hidden = rootFlow.learned_recipe != null;
+    nameInput.value = settings.name == null ? flow.name : settings.name;
+    idInput.value = settings.id == null ? flow.id : settings.id;
     selected = null; selectedEdge = null;
     autoLayout(); render(); renderProps();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function')
+      window.dispatchEvent(new Event('lightwork:flow-loaded'));
   }
   function undo() {
     if (!undoStack.length) { say('Nothing to undo.'); return; }
@@ -847,8 +891,18 @@
     props.appendChild(head);
     props.appendChild(field('Step name (optional)', input(n.label, function (v) { n.label = v; render(); }, 'Shown on the step')));
     if (n.kind === 'agent') {
-      var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'For example: Summarize the new issue and draft a reply');
-      props.appendChild(withPills(n.id, field('What should the AI do?', briefTa), briefTa));
+      var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize the customer request and draft a reply');
+      props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
+      if (n.learned_operator != null) {
+        props.appendChild(hint('Learned computation attached. The original agent handles inputs the learned rules cannot resolve. Remove this attachment before changing the brief or output.'));
+        var removeLearned = document.createElement('button');
+        removeLearned.className = 'btn btn--ghost'; removeLearned.type = 'button';
+        removeLearned.textContent = 'Remove learned computation';
+        removeLearned.addEventListener('click', function () {
+          pushHistory(); delete n.learned_operator; renderProps(); render();
+        });
+        props.appendChild(removeLearned);
+      }
     }
     if (n.kind === 'action') {
       if (toolCategories.length) {
@@ -1251,7 +1305,9 @@
   function toApiFlow() {
     var notifyEl = document.getElementById('fd-notify');
     var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
-      name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes });
+      name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes,
+      learned_recipe: rootFlow.learned_recipe, recipe_lineage: rootFlow.recipe_lineage,
+      recipe_teaching: rootFlow.recipe_teaching });
     out.notify = !!(notifyEl && notifyEl.checked);
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
@@ -1406,23 +1462,30 @@
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [],
       max_seconds: f.max_seconds || 0, version: parseInt(f.version, 10) || 0,
       revision: String(f.revision || ''), published: !!f.published,
+      learned_recipe: f.learned_recipe == null ? null : JSON.parse(JSON.stringify(f.learned_recipe)),
+      recipe_lineage: f.recipe_lineage == null ? null : JSON.parse(JSON.stringify(f.recipe_lineage)),
+      recipe_teaching: f.recipe_teaching == null ? null : JSON.parse(JSON.stringify(f.recipe_teaching)),
       published_version: parseInt(f.published_version, 10) || 0,
       published_revision: String(f.published_revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     syncScheduleControls();
-    setSelectValue('fd-tz', f.timezone || '');
-    setSelectValue('fd-maxsec', f.max_seconds || '', function (v) { return durationText(Number(v)); });
-    setSelectValue('fd-maxconc', f.max_concurrent || '', function (v) { return 'Up to ' + v + ' at once'; });
+    if (document.getElementById('fd-tz')) setSelectValue('fd-tz', f.timezone || '');
+    if (document.getElementById('fd-maxsec')) setSelectValue('fd-maxsec', f.max_seconds || '', function (v) { return durationText(Number(v)); });
+    if (document.getElementById('fd-maxconc')) setSelectValue('fd-maxconc', f.max_concurrent || '', function (v) { return 'Up to ' + v + ' at once'; });
     flowInputs = (f.inputs || []).map(function (i) { return Object.assign({}, i); });
-    renderSampleFields();
+    if (document.getElementById('fd-sample-fields')) renderSampleFields();
     (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
     rootFlow = flow;
+    var samplePanel = document.getElementById('fd-test-data');
+    if (samplePanel) samplePanel.hidden = rootFlow.learned_recipe != null;
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
     selected = null; selectedEdge = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
     if (savedSnapshot) markClean();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function')
+      window.dispatchEvent(new Event('lightwork:flow-loaded'));
   }
   function autoLayout() {
     var need = flow.nodes.some(function (n) { return !n.x && !n.y; });
@@ -1480,9 +1543,9 @@
   }
   async function readMutationResult(response, action) {
     var result;
-    try { result = await response.json(); }
-    catch (e) { if (!response.ok) throw new Error(failText(response, action)); throw new Error(unconfirmedMutation(action)); }
-    if (!response.ok) throw new Error(failText(response, action));
+    try { result = typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
+      ? await FDRecipeInputs.responseJson(response) : await response.json(); }
+    catch (e) { throw new Error(unconfirmedMutation(action)); }
     if (!result || typeof result !== 'object' || Array.isArray(result)) {
       throw new Error(unconfirmedMutation(action));
     }
@@ -1508,13 +1571,17 @@
     if (!body.nodes.length) { say('Add at least one step.', true); return false; }
     var verrs = FDCore.validateFlow(body);
     if (verrs.length) { say('Before saving: ' + problemText(body), true); return false; }
+    if (verrs.length) { say('Fix first: ' + verrs.slice(0, 3).join(' · '), true); return false; }
+    var creationHistory = body.version === 0 && body.revision === ''
+      ? { sourceId: rootFlow.id, snapshots: undoStack.concat(redoStack, pendingSnap ? [pendingSnap] : []) } : null;
     rootFlow.id = body.id;
     var savedDraftSnapshot = draftSnapshot();
     saveInFlight = true; syncSaveButtons();
     say('Saving…');
     try {
       var response = await apiFetch('/api/v1/flows', {
-        method: 'POST', body: JSON.stringify({ flow: body })
+        method: 'POST', body: body.learned_recipe == null ? JSON.stringify({ flow: body })
+          : '{"flow":' + FDRecipeInputs.flowText(body) + '}'
       });
       var result = await readMutationResult(response, 'Save');
       if (result.id !== body.id || !Number.isInteger(result.version) || result.version < 1 ||
@@ -1526,6 +1593,12 @@
       rootFlow.published = result.published;
       rootFlow.published_version = result.published_version || 0;
       rootFlow.published_revision = result.published_revision;
+      if (creationHistory) {
+        creationHistory.receipt = { id: result.id, version: result.version, revision: result.revision,
+          published: result.published, published_version: result.published_version || 0,
+          published_revision: result.published_revision };
+        firstSaveHistory = creationHistory;
+      }
       markClean(savedDraftSnapshot);
       canonicalizeSavedFlow(rootFlow.id);
       say('Saved ✓');
@@ -1564,16 +1637,20 @@
       publishInFlight = false; syncSaveButtons();
     }
   }
-  function inputFields() {
+  function inputFields(definitions) {
     // The declared manual-run inputs as an mvForm field spec.
-    return flowInputs.filter(function (s) { return (s.key || '').trim(); }).map(function (s) {
+    return (definitions || flowInputs).filter(function (s) { return (s.key || '').trim(); }).map(function (s) {
       return { key: s.key, label: s.label || s.key, type: (s.type || 'text'),
                required: !!s.required, default: (s.default != null ? s.default : undefined) };
     });
   }
+  var learnedInputPending = false;
   function run(dryRun) {
-    if (runInFlight) return;
-    var data = sampleData().data;
+    if (runInFlight || learnedInputPending) return;
+    var data = {};
+    var learnedPlan = null;
+    var pinnedDraft = JSON.stringify(rootFlow), pinnedSnapshot = draftSnapshot(), selectedFlow = rootFlow, releaseId = '';
+    function unchanged() { return JSON.stringify(rootFlow) === pinnedDraft && draftSnapshot() === pinnedSnapshot; }
     async function proceed() {
       if (runInFlight) return;
       var url, payload;
@@ -1590,16 +1667,15 @@
         // publish, or let a draft schedule enter the scheduler inventory.
         url = '/api/v1/flows/dry-run'; payload = { flow: draftBody, data: data };
       } else {
-        if (!rootFlow.id) { say('Publish the flow before running it for real.', true); return; }
-        if (!rootFlow.published) { say('Publish a reviewed draft before running it for real.', true); return; }
-        url = '/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run';
-        payload = { data: data, dry_run: false };
+        url = '/api/v1/flows/' + encodeURIComponent(selectedFlow.id) + '/run';
+        payload = { data: data, dry_run: false, expected_release_id: releaseId };
       }
       var buttons = ['fd-run', 'fd-run-real'].map(function (id) { return document.getElementById(id); });
       runInFlight = true;
       buttons.forEach(function (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
       try {
-        var response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+        var response = await apiFetch(url, { method: 'POST',
+          body: learnedPlan ? FDRecipeInputs.payloadText(learnedPlan, payload) : JSON.stringify(payload) });
         var result = await readMutationResult(response, 'Run');
         if (typeof result.run_id !== 'string' || !result.run_id.trim() ||
             typeof result.status !== 'string' || !result.status.trim() || result.dry_run !== dryRun) {
@@ -1614,21 +1690,46 @@
       } finally {
         runInFlight = false;
         buttons.forEach(function (button) { button.disabled = false; button.removeAttribute('aria-busy'); });
+        var invoker = document.getElementById(dryRun ? 'fd-run' : 'fd-run-real');
+        if (learnedPlan && invoker && typeof invoker.focus === 'function' &&
+            (document.activeElement === document.body || document.activeElement === invoker)) invoker.focus();
       }
     }
-    var fields = inputFields();
-    if (fields.length) {   // the typed-input form doubles as the run confirmation
-      window.mvForm((dryRun ? 'Test' : 'Run') + ' “' + (rootFlow.name || 'this flow') + '”',
-        fields, { okText: dryRun ? 'Test' : 'Run published' }).then(function (vals) {
-        if (vals === null) { say('Run cancelled.'); return; }
-        Object.keys(vals).forEach(function (k) { data[k] = vals[k]; });   // declared inputs win over sample
-        proceed();
-      });
-      return;
+    async function prepare() {
+      if (!dryRun) {
+        if (!rootFlow.id) { say('Publish the reviewed workflow before running it.', true); return; }
+        say('Loading the published workflow…');
+        var previewResponse = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/published');
+        var preview = await readMutationResult(previewResponse, 'Published workflow');
+        if (!preview.flow || preview.flow.id !== rootFlow.id || !Array.isArray(preview.flow.nodes) ||
+            typeof preview.release_id !== 'string' || !/^[0-9a-f]{64}$/.test(preview.release_id))
+          throw new Error('The published workflow could not be confirmed. Reload it before trying again.');
+        selectedFlow = preview.flow; releaseId = preview.release_id;
+      }
+      if (!unchanged()) { say('The workflow changed. Open the input form again.', true); return; }
+      var title = (dryRun ? 'Test' : 'Run published') + ' “' + (selectedFlow.name || selectedFlow.id || 'workflow') + '”';
+      if (selectedFlow.learned_recipe != null) {
+        learnedPlan = FDRecipeInputs.plan(selectedFlow.learned_recipe);
+        data = await FDRecipeInputs.prompt(learnedPlan, {title: title, okText: dryRun ? 'Test workflow' : 'Run published',
+          restoreFocus: document.getElementById(dryRun ? 'fd-run' : 'fd-run-real')});
+        if (data === null) { say('Run cancelled.'); return; }
+      } else {
+        data = typeof sampleData === 'function' ? sampleData().data : {};
+        var fields = inputFields(dryRun ? flowInputs : (selectedFlow.inputs || []));
+        if (fields.length) {
+          var values = await window.mvForm(title, fields, {okText: dryRun ? 'Test workflow' : 'Run published'});
+          if (values === null) { say('Run cancelled.'); return; }
+          Object.keys(values).forEach(function (key) { data[key] = values[key]; });
+        } else if (!dryRun && !(await window.mvConfirm('Run the published version? This starts real work and uses connected services.', {okText: 'Run published'}))) {
+          say('Run cancelled.'); return;
+        }
+      }
+      if (!unchanged()) { say('The workflow changed while entering inputs. Open the form again.', true); return; }
+      await proceed();
     }
-    if (dryRun) { proceed(); return; }
-    window.mvConfirm('Run the published version? This starts real work and uses connected services.', { okText: 'Run published' })
-      .then(function (ok) { if (ok) proceed(); });
+    learnedInputPending = true;
+    prepare().catch(function (error) { say(error.message || 'Could not open workflow inputs.', true); })
+      .finally(function () { learnedInputPending = false; });
   }
   function runUrl(runId) {
     return '/flows/' + encodeURIComponent(rootFlow.id) + '/runs/' + encodeURIComponent(runId);
@@ -1779,8 +1880,9 @@
   function load(id, expectedDraftSnapshot) {
     var loadingFlow = rootFlow;
     return apiFetch('/api/v1/flows/' + encodeURIComponent(id)).then(function (r) {
-      if (!r.ok) { say(failText(r, 'open this flow'), true); return; }
-      return r.json().then(function (saved) {
+      if (!r.ok) { say('Could not load flow', true); return; }
+      return (typeof FDRecipeInputs !== 'undefined' && typeof r.text === 'function'
+        ? FDRecipeInputs.responseJson(r) : r.json()).then(function (saved) {
         if (expectedDraftSnapshot !== undefined &&
             (rootFlow !== loadingFlow || draftSnapshot() !== expectedDraftSnapshot)) {
           say('Applied on the server. Your newer canvas edits were kept; reload when ready to inspect the applied version.');
@@ -1955,7 +2057,10 @@
     var bad = commitRawFields();
     if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
     var body = toApiFlow();
-    var blob = new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' });
+    var wire;
+    try { wire = body.learned_recipe == null ? JSON.stringify(body, null, 2) : FDRecipeInputs.flowText(body); }
+    catch (error) { say(error.message, true); return; }
+    var blob = new Blob([wire], { type: 'application/json' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = (body.id || slugify(body.name) || 'flow') + '.json';
@@ -1967,7 +2072,7 @@
     var reader = new FileReader();
     reader.onload = function () {
       try {
-        var f = JSON.parse(String(reader.result || ''));
+        var f = FDRecipeInputs.parseText(String(reader.result || ''));
         if (!f || !Array.isArray(f.nodes)) throw new Error('not a flow');
         pushHistory();
         fromApiFlow(f);
@@ -2079,6 +2184,13 @@
   }
 
   // ---- copilot chat: converse to build, edit, explain, and repair the flow ----
+  var chatGeneration = 0;
+  var chatPending = [];
+  var chatSavedKeys = ['version', 'revision', 'published', 'published_version', 'published_revision'];
+  function chatSavedState() {
+    return JSON.stringify(chatSavedKeys.map(function (key) { return rootFlow[key]; }));
+  }
+  function chatBusy() { return saveInFlight || publishInFlight || applyInFlight || !!pendingDraft; }
   function chatMsgEl(role, text) {
     var d = document.createElement('div'); d.className = 'fd__chat-msg ' + role; d.textContent = text; return d;
   }
@@ -2107,48 +2219,134 @@
       maxY = Math.max(maxY, n.y);
     });
   }
-  function chatSend() {
-    var inp = document.getElementById('fd-chat-input');
-    var text = (inp.value || '').trim();
-    if (!text) return;
+  function chatRequest(text) {
+    if (chatBusy()) {
+      say('Wait for the current workflow update to finish, then ask Copilot again.', true);
+      return null;
+    }
     var bad = commitRawFields();
-    if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
-    inp.value = '';
+    if (bad.length) { say('Finish correcting the highlighted step settings before asking Copilot.', true); return null; }
+    var snapshot = draftSnapshot(), savedState = chatSavedState();
+    if (chatPending.some(function (request) {
+      return request.text === text && request.base === rootFlow && request.snapshot === snapshot &&
+        request.savedState === savedState && request.draftGeneration === draftGeneration;
+    })) {
+      say('Copilot is already working on that request. Your message has been kept.');
+      return null;
+    }
+    var body, wire;
+    try {
+      body = { message: text, flow: toApiFlow(), history: chatHistory.concat([{ role: 'user', content: text }]).slice(-12), run_id: lastRunId || '' };
+      // Preserve retained evidence's exact numbers in both directions, just as
+      // Save/Test do. JSON.stringify alone changes integral floats into ints.
+      wire = body.flow.learned_recipe == null ? JSON.stringify(body)
+        : '{"message":' + JSON.stringify(text) + ',"flow":' + FDRecipeInputs.flowText(body.flow) +
+          ',"history":' + JSON.stringify(body.history) + ',"run_id":' + JSON.stringify(body.run_id) + '}';
+    } catch (e) {
+      say('This workflow could not be prepared for Copilot. Save your changes, reopen it, and try again.', true);
+      return null;
+    }
+    var request = { text: text, base: rootFlow, snapshot: snapshot, savedState: savedState,
+      draftGeneration: draftGeneration, generation: ++chatGeneration,
+      historyEntry: { role: 'user', content: text } };
+    chatPending.push(request);
     chatAppend('user', text);
-    chatHistory.push({ role: 'user', content: text });
-    // Track THIS request's note element so concurrent sends each remove their
-    // own "…thinking" line instead of blindly deleting whatever is last.
-    var thinking = chatAppend('note', '…thinking');
+    chatHistory.push(request.historyEntry);
+    // Keep each reply beside its own instruction even when requests finish
+    // out of order. An older reply is never described as a later instruction.
+    var replyBox = document.createElement('div');
+    document.getElementById('fd-chat-log').appendChild(replyBox);
+    function reply(role, value) {
+      var log = document.getElementById('fd-chat-log');
+      var follow = log.scrollTop + log.clientHeight >= log.scrollHeight - 40;
+      var element = replyBox.appendChild(chatMsgEl(role, value));
+      if (follow) log.scrollTop = log.scrollHeight;
+      return element;
+    }
+    var thinking = reply('note', 'Working on your request…');
     function clearThinking() { if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking); }
-    var body = { message: text, flow: toApiFlow(), history: chatHistory.slice(-12), run_id: lastRunId || '' };
-    apiFetch('/api/v1/flows/chat', { method: 'POST', body: JSON.stringify(body) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
+    function recover(message) {
+      var note = reply('note', message);
+      var button = document.createElement('button');
+      button.type = 'button'; button.className = 'btn btn--ghost';
+      button.textContent = 'Update for current workflow';
+      button.addEventListener('click', function () {
+        if (button.disabled) return;
+        var next = chatRequest(text);
+        if (!next) return;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        next.finished.finally(function () {
+          button.disabled = false; button.removeAttribute('aria-busy');
+        });
+      });
+      note.appendChild(document.createElement('br')); note.appendChild(button);
+    }
+    request.finished = apiFetch('/api/v1/flows/chat', { method: 'POST', body: wire })
+      .then(async function (response) {
+        if (!response.ok) throw new Error('Copilot request failed');
+        return typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
+          ? FDRecipeInputs.responseJson(response) : response.json();
+      })
+      .then(function (j) {
         clearThinking();
-        if (!res.ok) { chatAppend('note', 'The assistant couldn’t respond. Try again.'); return; }
-        var j = res.j;
-        chatAppend('assistant', j.reply || 'Done.');
-        chatHistory.push({ role: 'assistant', content: j.reply || '' });
-        (j.notes || []).forEach(function (nt) { chatAppend('note', nt); });
+        if (!j || typeof j !== 'object' || Array.isArray(j) || typeof j.reply !== 'string') throw new Error('Invalid Copilot reply');
+        reply('assistant', j.reply);
+        var current = request.generation === chatGeneration && request.base === rootFlow &&
+          request.snapshot === draftSnapshot() && request.savedState === chatSavedState() &&
+          request.draftGeneration === draftGeneration && !chatBusy();
+        var entry = { role: 'assistant', content: j.reply };
+        // Preserve request order in the next conversation, with an explicit
+        // distinction between suggested and applied edits.
+        chatHistory.splice(chatHistory.indexOf(request.historyEntry) + 1, 0, entry);
+        (Array.isArray(j.notes) ? j.notes : []).forEach(function (nt) { if (typeof nt === 'string') reply('note', nt); });
         if (j.flow) {
+          entry.content = 'Suggestion only; not applied to the workflow. ' + j.reply;
+          if (!current) {
+            recover('Your newer work was kept. This suggestion was not applied. Ask Copilot to update it for your current workflow.');
+            return;
+          }
+          if (typeof j.flow !== 'object' || Array.isArray(j.flow) || !Array.isArray(j.flow.nodes) ||
+              FDCore.validateFlow(j.flow).length) throw new Error('Invalid Copilot flow');
+          // Copilot edits do not save or publish. Never let its response replace
+          // the current server-issued compare-and-set/publication metadata.
+          chatSavedKeys.forEach(function (key) { j.flow[key] = rootFlow[key]; });
+          if (j.flow.learned_recipe != null) FDRecipeInputs.flowText(j.flow);
           pushHistory();                                      // "undo what the AI did" is one Ctrl+Z
           placeNewNodes(j.flow);
           var keep = { x: view.x, y: view.y, k: view.k };
           fromApiFlow(j.flow);
           view = keep; render();
-          if (j.applied && j.applied.length) chatAppend('note', '✏️ ' + j.applied.join(' · '));
-          say('The assistant changed the flow — review it, then save.');
+          entry.content = 'Applied to the editable draft; not saved or published. ' + j.reply;
+          reply('note', 'Suggestion applied to your draft. Review the steps before saving. You can undo this change.');
+          say('Copilot updated your draft. Review the steps before saving.');
         }
       }).catch(function () {
         clearThinking();
-        chatAppend('note', 'The assistant couldn’t respond. Try again.');
+        recover('Copilot could not complete this update. Your workflow was kept. You can try again with your current workflow.');
+      }).finally(function () {
+        chatPending = chatPending.filter(function (pending) { return pending !== request; });
       });
+    return request;
+  }
+  function chatSend() {
+    var inp = document.getElementById('fd-chat-input');
+    var text = (inp.value || '').trim();
+    if (text && chatRequest(text)) inp.value = '';
   }
   function chatToggle(showOnly) {
     var box = document.getElementById('fd-chat');
-    if (window.__fdShowCanvas && !box.classList.contains('on')) window.__fdShowCanvas();
-    if (showOnly) box.classList.add('on'); else box.classList.toggle('on');
-    if (box.classList.contains('on')) document.getElementById('fd-chat-input').focus();
+    var open = showOnly === true || (showOnly !== false && !box.classList.contains('on'));
+    box.hidden = !open; box.classList.toggle('on', open);
+    var toggle = document.getElementById('fd-chat-toggle');
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) document.getElementById('fd-chat-input').focus();
+    else toggle.focus();
+  }
+  function chatKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); chatToggle(false);
+    }
   }
 
   function loadTools(q, category) {
@@ -2246,7 +2444,8 @@
     if (e.target.files && e.target.files[0]) { importJsonFile(e.target.files[0]); e.target.value = ''; }
   });
   document.getElementById('fd-chat-toggle').addEventListener('click', function () { chatToggle(); });
-  document.getElementById('fd-chat-close').addEventListener('click', function () { chatToggle(); });
+  document.getElementById('fd-chat-close').addEventListener('click', function () { chatToggle(false); });
+  document.getElementById('fd-chat').addEventListener('keydown', chatKeydown);
   document.getElementById('fd-chat-form').addEventListener('submit', function (e) { e.preventDefault(); chatSend(); });
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
   nameInput.addEventListener('input', function () { rootFlow.name = nameInput.value; });
@@ -2308,7 +2507,7 @@
   var editId = canvas.getAttribute('data-flow-id');
   var seedEl = document.getElementById('fd-seed');
   var seed = null;
-  if (seedEl) { try { seed = JSON.parse(seedEl.textContent); } catch (e) { seed = null; } }
+  if (seedEl) { try { seed = FDRecipeInputs.parseText(seedEl.textContent); } catch (e) { seed = null; } }
   // Baseline the untouched blank canvas immediately. Loading an existing flow
   // replaces this with its server snapshot; gallery/import/AI drafts remain
   // dirty and therefore receive the unload warning until saved.

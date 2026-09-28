@@ -259,6 +259,25 @@ def _finished_goal_status(world, goal_id: int) -> str | None:
         return None
 
 
+def _runner_principal_binding(world, goal, execution_principal):
+    """Bind once, then verify a newly bound identity through durable readback."""
+    from .orchestrator import _bind_goal_execution_principal
+    try:
+        matched = _bind_goal_execution_principal(world, goal, execution_principal)
+    except Exception:
+        log.exception("goal #%s execution-principal binding is unavailable", goal.id)
+        return None
+    if not matched:
+        log.warning("goal #%s execution principal does not match its binding", goal.id)
+        return False
+    if not (getattr(goal, "execution_principal", "") or ""):
+        rebound = world.get_goal(goal.id)
+        if rebound is None or (getattr(rebound, "execution_principal", "") or "") != execution_principal:
+            log.error("goal #%s execution-principal binding was not observable", goal.id)
+            return None
+    return True
+
+
 def run_goal_in_thread(
     goal_id: int,
     max_dollars: float | None = None,
@@ -334,13 +353,18 @@ def run_goal_in_thread(
         from .budget import budget_from_config
         from .llm import LLM
         from .orchestrator import (
-            _bind_goal_execution_principal,
             _execution_principal,
             run_goal_sync,
         )
         from .sandbox import build_sandbox
         from .world_model import close_world_if_owned, open_world
         world = open_world()  # client/tenant-floored canonical world
+        from .federation_admission import FederationAdmissionRequired, require_execution
+        try:
+            require_execution(world, goal_id, capability=capability,
+                              max_dollars=max_dollars, max_wall_seconds=max_wall_seconds)
+        except FederationAdmissionRequired:
+            return "blocked"
         # Bind/refuse the exact runtime authority before constructing provider
         # or sandbox clients and before trace pinning appends an event. The
         # orchestrator repeats this at its own public boundary; this earlier
@@ -352,41 +376,13 @@ def run_goal_in_thread(
         goal = world.get_goal(goal_id)
         if goal is None:
             return None
-        was_unbound = not bool(
-            getattr(goal, "execution_principal", "") or ""
-        )
-        try:
-            principal_matches = _bind_goal_execution_principal(
-                world,
-                goal,
-                execution_principal,
-            )
-        except Exception:
-            log.exception(
-                "goal #%s execution-principal binding is unavailable",
-                goal_id,
-            )
+        principal_matches = _runner_principal_binding(world, goal, execution_principal)
+        if principal_matches is None:
             return None
         if not principal_matches:
-            log.warning(
-                "goal #%s execution principal does not match its binding",
-                goal_id,
-            )
             # A rejected caller has no authority to change the goal. In
             # particular, it must not interrupt another principal's live run.
             return "blocked"
-        if was_unbound:
-            rebound = world.get_goal(goal_id)
-            if (
-                rebound is None
-                or (getattr(rebound, "execution_principal", "") or "")
-                != execution_principal
-            ):
-                log.error(
-                    "goal #%s execution-principal binding was not observable",
-                    goal_id,
-                )
-                return None
         # Precedence: explicit caller arg > [budget] config > the
         # background runner's conservative defaults (tighter than the
         # interactive Budget defaults on purpose).

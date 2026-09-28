@@ -8,9 +8,15 @@ sliding 60s window. MAVERICK_FEDERATION_RATE_LIMIT=0 disables it.
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from maverick import federation as fed
+from maverick import federation_admission as admission
 from maverick.federation import FederationService, Peer
+from maverick.grpc_api.service import GoalService
+from maverick.paths import data_dir
+from maverick.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)
@@ -21,13 +27,22 @@ def _clear(monkeypatch):
     fed._fed_rate_hits.clear()
 
 
-class _Goals:
+class _Goals(GoalService):
     def __init__(self):
         self.started = 0
+        self.path = data_dir().parent / f"test-federation-{uuid4().hex}" / "world.db"
+        super().__init__(world_factory=lambda: WorldModel(self.path),
+                         dispatch=self._run, spawn=lambda fn: fn())
 
-    def start_goal(self, *a, **kw):
-        self.started += 1
-        return self.started
+    def _run(self, goal_id, **kw):
+        with WorldModel(self.path) as world:
+            admission.require_execution(
+                world, goal_id, capability=kw["capability"],
+                max_dollars=kw["max_dollars"],
+                max_wall_seconds=kw["max_wall_seconds"], consume=True,
+            )
+            self.started += 1
+            world.set_goal_status(goal_id, "done", result="ok")
 
 
 def test_delegate_goal_refuses_over_cap(monkeypatch):
@@ -149,7 +164,7 @@ def test_invalid_signed_identity_does_not_consume_delegate_quota(monkeypatch):
     goals = _Goals()
     svc = FederationService(
         node="b", peers=[Peer("a", "a:1", "tok")],
-        local_grant=None, goal_service=goals, record=lambda *a, **k: None,
+        local_grant=None, goal_service=goals, record=lambda *a, **k: True,
     )
 
     unsigned = svc.delegate_goal({

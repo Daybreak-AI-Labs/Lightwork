@@ -1,6 +1,15 @@
 {% extends "recovery_shell.html" if recovery_mode else "base.html" %}
 {% block title %}Workspace recovery · Lightwork{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-workspace-recovery.css">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-workspace-recovery.css">
+<style>
+  .wrec-channel{list-style:none;margin:1rem 0;padding:1rem;border:1px solid var(--border,#46516a);border-radius:12px;background:var(--panel,#202b40)}
+  .wrec-channel h3{margin:.1rem 0;font-size:1.05rem}.wrec-channel form{margin-top:1rem}.wrec-channel fieldset{min-width:0;margin:1rem 0;padding:0;border:0}.wrec-channel legend{font-weight:600;padding:0}
+  .wrec-channel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:0 1rem}.wrec-channel .wrec-field-help{font-size:.9rem;margin:.25rem 0;color:var(--text-muted,#c1cadd)}
+  .wrec-channel .wrec-field-error{color:var(--danger,#ffb4a8);margin:.25rem 0}.wrec-channel [aria-invalid=true]{border-color:var(--danger,#ffb4a8)}
+  .wrec-channel .wrec-channel-result{white-space:pre-line}.wrec-channel .wrec-confirm input{margin-right:.5rem}.wrec-channel .wrec-actions button{white-space:normal}
+  #wrec-reconciliation-items:has(.wrec-channel){padding-left:0}.wrec-channel form[hidden]{display:none}
+  @media(forced-colors:active){.wrec-channel,.wrec-channel [aria-invalid=true]{border-color:CanvasText}.wrec-channel .wrec-field-error{color:CanvasText}}
+</style>{% endblock %}
 {% block content %}
 <div class="wrec" id="workspace-recovery">
   <h1 class="page-title">Workspace Recovery</h1>
@@ -85,24 +94,32 @@
     <button id="wrec-prepare" type="button" class="btn btn--primary" disabled>Prepare restore and safety copy</button>
     <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox"><span id="wrec-confirm-text">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</span></label><button id="wrec-restore" type="button" class="btn btn--danger" disabled>Restore reviewed snapshot</button></div>
   </section>
-  <section id="wrec-reconciliation" class="panel" hidden><h2>Review Restored Work Before Going Back to Normal</h2>
-    <p id="wrec-reconciliation-status" role="status" aria-live="polite"></p>
-    <p>Nothing listed here runs by itself. Requests that were waiting must be retired and asked for again. For work that may have reached an outside service, check that service and record what you found.</p>
+  <section id="wrec-reconciliation" hidden><h2>Review restored work before returning to normal use</h2>
+    <p id="wrec-reconciliation-status" role="status" aria-live="polite" tabindex="-1"></p>
+    <p>Nothing listed here runs automatically. Pending requests must be retired and recreated under current authority. Work that may have reached an external system requires an authoritative readback reference.</p>
     <ul id="wrec-reconciliation-items"></ul>
-    <p class="muted">For chat-app messages and reading positions, look at the chat service itself, then answer the questions for each item. Your check must be from the last 15 minutes. Old messages are never sent again automatically. If you can't tell what happened, leave the item unresolved.</p>
-    <p id="wrec-reconciliation-blocked" hidden>This version of Lightwork can't safely sort out at least one restored item. Stay in recovery mode and <a href="/help">create a support report</a> (private details are removed).</p>
-    <label class="wrec-confirm"><input id="wrec-reconciliation-confirm" type="checkbox">I reviewed every restored item and allow this workspace to go back to normal after a restart.</label>
-    <button id="wrec-reconciliation-complete" type="button" class="btn btn--primary" disabled>Finish the review</button>
+    <p>For each connection below, check the original service and record what you found, when you checked it, and a reference to that evidence. Your check must be no older than 15 minutes. Lightwork records your review; it does not contact the service to verify it. If you cannot establish an outcome, leave that item unresolved. Confirming a review never repeats an old action.</p>
+    <p id="wrec-reconciliation-blocked" hidden>This build cannot safely classify or rewrite at least one restored authority. Keep recovery mode active and <a href="/help">create a redacted support report in the app</a>.</p>
+    <label class="wrec-confirm"><input id="wrec-reconciliation-confirm" type="checkbox">I reviewed every restored item and authorize returning this workspace to normal use after restart.</label>
+    <button id="wrec-reconciliation-complete" type="button" disabled>Complete restored-work review</button>
   </section>
-  <section class="panel"><h2>Protect an App Update</h2><p>On Windows, installing an update affects every workspace and the shared settings on this computer. Lightwork pauses, saves a checked copy of everything, and keeps the previous installer. Going back to the previous version replaces the app and everything on this computer with that copy; newer work is kept in a separate safety copy. Outside services are not affected.</p>
-    <p class="muted">You can go back only while spending records, records of outside actions and database files still match the saved copy. If they changed, an administrator must sort that out first.</p>
-    <label class="wrec-confirm"><input id="wrec-installation-confirm" type="checkbox">I am allowed to pause and recover every workspace and the shared settings on this computer.</label>
-    <details><summary>Review a change of publisher</summary>
-      <p>Normal updates come from the same publisher as before. If the publisher or its update signature changes, the setting that allows this must be turned on, the update must be signed by both the old and new publisher, and you must approve it here. Save the review file from Install &amp; updates in the desktop app, then choose it below. Choosing a file does not trust anything by itself.</p>
-      <label for="wrec-installation-transition-file">Publisher change review file</label><input id="wrec-installation-transition-file" class="input" type="file" accept="application/json,.json">
-      <button id="wrec-installation-transition-review" type="button" class="btn" disabled>Check the publisher change</button>
-      <p id="wrec-installation-transition-details" role="status" class="wrec-pre"></p>
-      <label class="wrec-confirm"><input id="wrec-installation-transition-confirm" type="checkbox">I reviewed the exact publisher change, when it applies and its limits on going back, and I approve trusting it for app updates.</label>
+  <section id="wrec-assistant" hidden aria-labelledby="wrec-assistant-heading">
+    <h2 id="wrec-assistant-heading">Recovery Copilot</h2>
+    <p>Review a restored connection here using the same controls and confirmation as the recovery list. This helper stays on this computer and does not contact an AI provider.</p>
+    <label for="wrec-assistant-item">Connection to review</label><select id="wrec-assistant-item"><option value="">Choose a connection</option></select>
+    <div class="wrec-actions"><button id="wrec-assistant-open" type="button" disabled>Review with Copilot</button><button id="wrec-assistant-close" type="button" disabled>Return review to list</button></div>
+    <p id="wrec-assistant-status" role="status" aria-live="polite"></p>
+    <ul id="wrec-assistant-review" style="padding-left:0"></ul>
+  </section>
+  <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
+    <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>
+    <label class="wrec-confirm"><input id="wrec-installation-confirm" type="checkbox">I am authorized to pause and recover all local workspaces and shared administration on this computer.</label>
+    <details><summary>Review a signing identity transition</summary>
+      <p>Ordinary updates keep the same signing identities. A publisher or update-key change requires the default-off Signing identity transition setting, a dual-signed exact-release bridge, and your separate approval. Save the proposed review file from Install &amp; updates, then select it here. No new identity is trusted merely by selecting a file.</p>
+      <label for="wrec-installation-transition-file">Signed bridge review file</label><input id="wrec-installation-transition-file" type="file" accept="application/json,.json">
+      <button id="wrec-installation-transition-review" type="button" disabled>Verify signing transition for review</button>
+      <p id="wrec-installation-transition-details" role="status" style="overflow-wrap:anywhere;white-space:pre-line"></p>
+      <label class="wrec-confirm"><input id="wrec-installation-transition-confirm" type="checkbox">I reviewed the exact publisher and update-key change, its admission window and retained-pair rollback limits, and authorize this change in installation trust.</label>
     </details>
     <button id="wrec-installation-authorize" type="button" class="btn btn--primary" disabled>Allow a protected update</button>
     <label for="wrec-installation-point">Completed update to go back from</label><select id="wrec-installation-point" class="select"><option value="">Choose a completed upgrade</option></select>
@@ -120,4 +137,4 @@
   </section>
 </div>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-workspace-recovery.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-workspace-recovery.js" defer></script><script src="/static/lightwork-recovery-copilot.js" defer></script>{% endblock %}

@@ -111,6 +111,12 @@ publication. Matching retries retain the first admitted rows and timestamp;
 repair of missing matching chunks uses that same timestamp. Embedding-identity
 checks remain inside the transaction and continue to fence reindex operations.
 
+One document may contain at most 2,048 chunks. Ingestion checks the complete
+chunk count before embedding or publication and rejects larger documents;
+split them into separately attributable sources. The bound also applies to
+exact-document verification, so an oversized document cannot be published and
+then reported as a failed ingestion solely because verification is truncated.
+
 Because chunks carry a subject, the knowledge plane participates in the platform's
 compliance flows:
 
@@ -137,6 +143,12 @@ suite collections the shipped packs already point at. So a privacy/GRC
 specialist can cite the governing regulation out of the box; customers layer
 their own documents on top. Redistributable-restricted standards (e.g. ISO) are
 deliberately excluded.
+
+Reseeding reuses unchanged content. On SQLite and pgvector, a changed source is
+embedded and validated before replacing its prior chunks in one transaction.
+A provider failure or conflicting embedding identity leaves the accepted source
+intact. Concurrent changes to that source require a retry. Replacement is atomic
+per source; a seed command covering several sources is not one global transaction.
 
 ```
 maverick knowledge seed --list          # show the shipped corpora

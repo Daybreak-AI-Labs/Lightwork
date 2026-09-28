@@ -77,6 +77,57 @@ class ReconciliationIn(ConfirmIn):
     channel_readback: dict | None = None
 
 
+class ChannelReviewAnswers(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    checked_at: str = Field(max_length=64)
+    evidence_reference: str = Field(min_length=8, max_length=512)
+
+
+class ChannelChunkAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    outcome: Literal["absent", "recorded"]
+    provider_id: str = Field(max_length=512)
+
+
+class ChannelMessageAnswers(ChannelReviewAnswers):
+    kind: Literal["message"]
+    execution: Literal["absent", "recorded"]
+    delivery: Literal["absent", "recorded"]
+    chunks: dict[str, ChannelChunkAnswer] = Field(max_length=512)
+
+
+class ChannelRestartAnswers(ChannelReviewAnswers):
+    kind: Literal["delivery_restart"]
+
+
+class ChannelMessagePositionAnswers(ChannelReviewAnswers):
+    kind: Literal["imessage_position"]
+    position: str = Field(pattern=r"^[0-9]{1,4096}$", max_length=4096)
+
+
+class ChannelNotificationPositionAnswers(ChannelReviewAnswers):
+    kind: Literal["notification_position"]
+    position: str = Field(pattern=r"^[0-9]{1,40}$", max_length=40)
+
+
+class ChannelPollTimeAnswers(ChannelReviewAnswers):
+    kind: Literal["poll_time"]
+    resume_time: str = Field(max_length=64)
+
+
+class ChannelFinishAnswers(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["finish_recording"]
+    receipt: str = Field(pattern=r"^[a-f0-9]{64}$", max_length=64)
+
+
+class ChannelReviewIn(ConfirmIn):
+    item_id: str = Field(pattern=r"^[a-f0-9]{32}$", strict=True)
+    expected_review_token: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)
+    answers: (ChannelMessageAnswers | ChannelRestartAnswers | ChannelMessagePositionAnswers
+              | ChannelNotificationPositionAnswers | ChannelPollTimeAnswers | ChannelFinishAnswers) = Field(discriminator="kind")
+
+
 class RestoreIn(ConfirmIn):
     review: str = Field(pattern=r"^[0-9a-f]{32}$")
     target: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -445,6 +496,19 @@ async def complete_reconciliation(request: Request, body: ConfirmIn):
         media_type="application/json",
         headers={"Cache-Control": "private, no-store"},
     )
+
+
+@router.post("/api/v1/recovery/operations/channel-review")
+async def record_channel_review(request: Request, body: ChannelReviewIn):
+    actor = _admit(request, mutation=True)
+    _confirm(body)
+    result = await _call(
+        recovery.resolve_reconciliation, body.item_id, "channel_readback_confirmed",
+        evidence_reference=None, isolated=isolated(request.app), actor=actor,
+        channel_answers=body.answers.model_dump(), expected_review_token=body.expected_review_token,
+    )
+    return Response(json.dumps(result), media_type="application/json",
+                    headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/api/v1/recovery/snapshots/{identifier}/retire")

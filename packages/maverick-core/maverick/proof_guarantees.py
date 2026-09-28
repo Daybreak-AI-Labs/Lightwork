@@ -129,11 +129,10 @@ def claim_handoffs_are_verified():
 def claim_audit_is_tamper_evident():
     """The action ledger is a signed hash-chain: altering a row breaks verification.
 
-    The chain ALWAYS detects an edited row (integrity). Whether that rises to
-    *tamper-evidence against a same-uid actor* depends on key custody: a
-    co-located on-disk key can be read and used to re-sign, so the detail says so
-    and points at off-host custody; an off-host (env-injected / KMS) key closes
-    that gap. See :func:`maverick.audit.signing.active_key_is_offhost`.
+    This probe detects an edited row whose signature was not recomputed. Both
+    co-located and externally supplied private keys remain available to the
+    signing process. Injection or local KMS unwrap does not establish isolated
+    signing or exclude re-signing by an actor with access to that process.
     """
     import tempfile
     from pathlib import Path
@@ -158,10 +157,12 @@ def claim_audit_is_tamper_evident():
             base = ("2-row signed chain verifies clean; altering an amount is "
                     f"caught ({broken[0].reason})")
             if signing.active_key_is_offhost():
-                return base + "; key custody is off-host -- tamper-evident against a same-uid actor"
+                return (base + "; externally supplied private key remains available to "
+                        "the signing process; this does not prove isolated signing. "
+                        "Independently retained checkpoints can expose later history changes")
             return (base + " -- co-located key: detects non-privileged edits only, "
-                    f"NOT tamper-evidence vs a same-uid actor (set {signing._SIGNING_KEY_ENV} "
-                    "for off-host key custody)")
+                    "NOT tamper-evidence vs a same-uid actor. Independently retained "
+                    "checkpoints can expose later history changes")
     finally:
         signing.KEY_DIR = saved_key_dir
 
@@ -169,11 +170,8 @@ def claim_audit_is_tamper_evident():
 def _audit_ledger_label() -> str:
     """Label for the audit-ledger guarantee, honest about signing-key custody.
 
-    Only claims *tamper-evidence* when the key is held off-host (env-injected /
-    KMS): with the default co-located on-disk key the chain still verifies for
-    integrity (it detects accidental / non-privileged edits), but a same-uid
-    actor can read the key and cleanly re-sign, so the headline is downgraded to
-    an integrity claim rather than a tamper-evidence one.
+    External key sourcing avoids leaving a generated private key on local disk;
+    it does not isolate the signing operation from the application process.
     """
     try:
         from .audit import signing
@@ -181,7 +179,7 @@ def _audit_ledger_label() -> str:
     except BaseException:
         offhost = False
     if offhost:
-        return "Tamper-evident audit ledger"
+        return "Audit ledger integrity (externally supplied key)"
     return "Audit ledger integrity (co-located key)"
 
 
@@ -193,7 +191,7 @@ GUARANTEES = [
     ("Fleet can read, not write", claim_fleet_can_read_but_not_write, False),
     ("Segregation of duties clean", claim_segregation_of_duties_clean, False),
     ("Verified peer handoffs", claim_handoffs_are_verified, True),
-    ("Tamper-evident audit ledger", claim_audit_is_tamper_evident, True),
+    ("Audit ledger integrity", claim_audit_is_tamper_evident, True),
 ]
 
 
@@ -234,9 +232,8 @@ def run_all(*, crypto: bool | None = None) -> list[GuaranteeResult]:
             continue
         try:
             detail = fn()
-            # The audit-ledger headline must reflect signing-key custody: it may
-            # only claim tamper-evidence when the key is off-host (co-located key
-            # verifies for integrity but a same-uid actor can re-sign).
+            # Key sourcing does not establish isolated signing. Describe the
+            # observed integrity check without asserting same-host resistance.
             row_label = _audit_ledger_label() if fn is claim_audit_is_tamper_evident else label
             results.append(GuaranteeResult(row_label, True, detail, needs_crypto))
         except BaseException as e:  # a proof must report its own failure

@@ -33,12 +33,14 @@ def _isolated_scheduler(tmp_path, monkeypatch):
     monkeypatch.setattr(automation_queue, "_queue", None)
     monkeypatch.setattr(automation_queue, "_worker", None)
     monkeypatch.setattr(automation_queue, "_worker_threads", [])
-    monkeypatch.setattr(automation_queue, "_world", lambda: object())
+    world = world_model.WorldModel(tmp_path / "world.db")
+    monkeypatch.setattr(automation_queue, "_world", lambda: world)
     monkeypatch.setattr(
         "maverick_dashboard.auth.stored_automation_identity",
         lambda _owner: ("", None, None),
     )
     yield
+    world.close()
     config.reset_config_cache()
 
 
@@ -243,7 +245,7 @@ def test_automatic_scheduler_polls_valid_confined_directory(monkeypatch):
     assert calls == [
         (
             "file_dir",
-            {"path": os.fspath(confined.resolve()), "glob": "*.json"},
+            {"path": os.fspath(confined.resolve()), "glob": "*.json", "_lightwork_cursor_format": 0},
             "",
         )
     ]

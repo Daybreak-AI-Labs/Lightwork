@@ -217,6 +217,7 @@ def _audit_idempotency_identity(
         EventKind.THREAT_HUNT_RECORD_CHANGED: "event_id",
         EventKind.ENV_HUNT_RECORD_CHANGED: "event_id",
         EventKind.UNIFIED_AUDIT_PROJECTION: "projection_event_id",
+        EventKind.FEDERATION_DELEGATE: "event_id",
     }
     field = field_by_kind.get(payload.get("kind"))
     if field is None:
@@ -562,7 +563,8 @@ class AuditLog:
         appending the governed identity, refuses an unsigned prior duplicate,
         and raises :class:`AuditWriteRefused` when signing is unavailable.
         ``True`` therefore means this logical event is present as a signed row;
-        ``False`` means validation or the signed append failed without a row.
+        ``False`` means the signed append was not confirmed. A failure after
+        bytes were written does not prove that the row is absent.
         """
         with self._lock:
             path = self._rotate_if_needed()
@@ -626,9 +628,7 @@ class AuditLog:
                                 "audit destination chain is not verifiable "
                                 f"({first.reason})"
                             )
-                        return bool(
-                            signer.write(payload, idempotency_identity=None)
-                        )
+                        return signer.write(payload, idempotency_identity=None) is True
             except AuditRefused:
                 raise
             except (OSError, TypeError, ValueError) as error:
@@ -946,6 +946,7 @@ def record(
     *,
     agent: str = "system",
     goal_id: int | None = None,
+    _require_signed: bool = False,
     **payload: Any,
 ) -> bool:
     """Module-level shortcut for the default audit log.
@@ -953,7 +954,13 @@ def record(
     When ``goal_id`` is not given, falls back to the goal bound by the run loop
     (:func:`set_goal_context`) so consent/approval and other deep events still
     attribute to the active run. An explicit ``goal_id`` always wins.
+
+    ``_require_signed=True`` requires the same tenant-selected writer to use
+    its strict signed path. It does not enable disabled signing or change the
+    policy for ordinary callers. This reserved boolean option is not payload.
     """
+    if type(_require_signed) is not bool:
+        raise TypeError("_require_signed must be a bool")
     if goal_id is None:
         goal_id = _current_goal.get()
     event = AuditEvent(
@@ -963,7 +970,8 @@ def record(
         goal_id=goal_id,
         payload=payload,
     )
-    return default_audit_log().record(event)
+    sink = default_audit_log()
+    return sink.record_strict_signed(event) if _require_signed else sink.record(event)
 
 
 def record_global(

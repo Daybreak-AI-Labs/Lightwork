@@ -508,6 +508,11 @@ class FlowRunIn(BaseModel):
     # Optional caller-supplied dedup key: a repeat POST with the same key returns
     # the existing run instead of starting a second one (double-click / retry safe).
     idempotency_key: str = Field(default="", max_length=200)
+    # Bind input review to one publication epoch, including same-content
+    # republishes. Empty/omitted retains the legacy current-release behavior.
+    expected_release_id: str = Field(
+        default="", strict=True, max_length=64, pattern=r"^(?:[0-9a-f]{64})?$",
+    )
 
 
 class FlowApprovalPreviewIn(BaseModel):
