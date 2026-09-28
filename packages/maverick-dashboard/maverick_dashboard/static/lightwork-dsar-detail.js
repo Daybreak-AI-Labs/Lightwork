@@ -162,7 +162,9 @@
           ' on ' + chosen.channel_label + '? This cannot be undone.', 'Erase').then(function (ok) {
           if (!ok) return null;
           return call('POST', '/api/v1/compliance/people/erase', { channel: chosen.channel, user: chosen.user }).then(function (res) {
-            say((res.message || 'Erased.') + ' You can now close the request.');
+            say((res.message || 'Erased.') + (res.clean === false
+              ? ' Keep this request open until the erasure is certified.'
+              : ' You can now close the request.'));
           });
         });
       });

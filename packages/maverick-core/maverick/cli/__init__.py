@@ -5970,6 +5970,17 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
             "errors": {"verification": verify_error},
         }
 
+    if isinstance(ctx.obj, dict):
+        # An in-process caller (the dashboard) reads the outcome here rather
+        # than parsing this command's output.
+        ctx.obj["erase_outcome"] = {
+            "receipt_id": erasure_id,
+            "durable_proof": bool(durable_erasure_proof),
+            "closure_failures": list(closure_failures),
+            "clean": bool(verification.get("clean")),
+            "residual": dict(verification.get("residual") or {}),
+            "indeterminate": bool(verification.get("indeterminate")),
+        }
     click.echo(
         f"erased {len(convs)} conversation(s), {removed_turns} turn(s), "
         f"{len(goal_ids)} goal(s) and all linked rows, "

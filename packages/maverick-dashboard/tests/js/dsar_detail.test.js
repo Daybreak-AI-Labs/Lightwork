@@ -62,6 +62,20 @@ test("erasure picks the matching person and confirms before erasing", async (t) 
   assert.match(ui.doc.getElementById("dsar-status").textContent, /Erased 1 conversation/);
 });
 
+test("an uncertified erasure keeps the request open", async (t) => {
+  const ui = await fixture({
+    formValues: [{ who: "0" }],
+    reply: (url) => url.endsWith("/people")
+      ? json({ people: [{ channel: "email", user: "a@example.com", person: "a@example.com", channel_label: "Email" }] })
+      : json({ erased: true, clean: false, message: "Erased 1 conversation(s), but these could not be cleaned up: stored AI replies." }),
+  });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-erase").click(); await ui.settle();
+  const status = ui.doc.getElementById("dsar-status").textContent;
+  assert.match(status, /Keep this request open/);
+  assert.doesNotMatch(status, /You can now close/);
+});
+
 test("closing needs confirmation and errors stay plain", async (t) => {
   const ui = await fixture({ formValues: [], reply: () => new Response("x", { status: 500 }) });
   t.after(() => ui.window.close());

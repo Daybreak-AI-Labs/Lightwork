@@ -488,10 +488,29 @@ async def export_person(request: Request, person: PersonIn) -> Response:
     )
 
 
+_CLOSURE_STEP_LABELS = {
+    "user_notes": "saved notes about the person",
+    "llm_cache": "stored AI replies",
+    "audit_scrub": "earlier activity records",
+    "audit_reanchor": "the activity record's tamper seal",
+    "audit_record": "the note that this erasure happened",
+}
+
+
+def _unfinished_steps(failures: list) -> list[str]:
+    labels = []
+    for failure in failures:
+        step = str(failure).split(":", 1)[0]
+        label = _CLOSURE_STEP_LABELS.get(step, "stored files")
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
 def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
     import click
+    from maverick.audit import AuditRefused
     from maverick.cli import erase as erase_command
-    from maverick.erasure_verify import verify_erasure
 
     world = _world_for_request()
     before = sum(
@@ -504,31 +523,56 @@ def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
         return {"erased": False, "conversations": 0, "clean": False,
                 "message": "Nothing was found for this person."}
     out, err = io.StringIO(), io.StringIO()
+    obj = {"db": getattr(world, "path", None)}
+    refused = False
     with _ERASE_LOCK, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        ctx = click.Context(erase_command, obj={"db": getattr(world, "path", None)})
+        ctx = click.Context(erase_command, obj=obj)
         try:
             with ctx:
                 ctx.invoke(erase_command, channel=channel, user=user, yes=True)
+        except AuditRefused:
+            # Raised only after the deletion committed: the data is gone, but
+            # the record of the erasure was refused.
+            refused = True
         except (SystemExit, click.exceptions.Exit, click.ClickException) as exc:
             # A command-line exit must not end the server's worker thread.
             raise RuntimeError("erasure command stopped") from exc
     # Who erased, never whose data (the subject is exactly what was erased).
     from maverick.audit import EventKind, audit_event
-    audit_event(EventKind.ERASE, agent="operator", actor=actor, channel=channel,
-                conversations=before, source="dashboard")
     try:
-        report = verify_erasure(user, channel=channel, world=world)
-    except Exception:  # pragma: no cover - the erase itself committed
-        report = {"residual": {}}
-    residual = sum(int(v or 0) for v in (report.get("residual") or {}).values())
-    if residual:
+        audit_event(EventKind.ERASE, agent="operator", actor=actor, channel=channel,
+                    conversations=before, source="dashboard")
+    except AuditRefused:
+        refused = True
+    outcome = obj.get("erase_outcome") or {}
+    residual = sum(int(v or 0) for v in (outcome.get("residual") or {}).values())
+    unfinished = _unfinished_steps(outcome.get("closure_failures") or [])
+    if refused and "the note that this erasure happened" not in unfinished:
+        unfinished.append("the note that this erasure happened")
+    clean = bool(outcome.get("clean")) and not refused
+    if clean:
+        message = f"Erased {before} conversation(s) and everything linked to them. The erasure was verified."
+    elif residual:
         message = (
             f"Erased {before} conversation(s), but {residual} item(s) could not be "
             "removed. Try again, or ask your administrator to check the activity record."
         )
+    elif unfinished:
+        message = (
+            f"Erased {before} conversation(s), but these could not be cleaned up: "
+            + ", ".join(unfinished)
+            + ". The erasure could not be certified. Try again, or ask your administrator "
+            "to check storage and the activity record."
+        )
     else:
-        message = f"Erased {before} conversation(s) and everything linked to them."
-    return {"erased": True, "conversations": before, "remaining": residual, "message": message}
+        message = (
+            f"Erased {before} conversation(s). No data was found afterwards, but the "
+            "erasure could not be certified because its signed receipt could not be "
+            "stored. Ask your administrator to check the activity record."
+        )
+    return {"erased": True, "conversations": before, "remaining": residual,
+            "clean": clean, "unfinished": unfinished,
+            "receipt_id": outcome.get("receipt_id"), "message": message}
 
 
 @router.post("/people/erase")

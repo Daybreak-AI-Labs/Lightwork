@@ -123,6 +123,39 @@ def test_people_list_export_and_erase_are_workspace_scoped():
     assert again["erased"] is False and "Nothing was found" in again["message"]
 
 
+def test_erase_does_not_claim_everything_when_a_clean_up_step_failed(monkeypatch):
+    _seed_person()
+    import maverick.audit as audit
+
+    def broken_scrub(*args, **kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(audit, "scrub_user", broken_scrub)
+    body = client.post("/api/v1/compliance/people/erase",
+                       json={"channel": "slack", "user": "U123"}).json()
+    assert body["erased"] is True and body["clean"] is False
+    assert "everything linked" not in body["message"]
+    assert "earlier activity records" in body["message"]
+    assert body["receipt_id"]
+
+
+def test_erase_reports_a_refused_erasure_record_as_uncertified(monkeypatch):
+    _seed_person()
+    import maverick.audit as audit
+
+    def refuse(*args, **kwargs):
+        raise audit.AuditRefused("strict audit refused")
+
+    monkeypatch.setattr(audit, "record", refuse)
+    response = client.post("/api/v1/compliance/people/erase",
+                           json={"channel": "slack", "user": "U123"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["erased"] is True and body["clean"] is False
+    assert "the note that this erasure happened" in body["message"]
+    assert client.get("/api/v1/compliance/people").json()["people"] == []
+
+
 def test_ai_act_self_check_and_control_finder_are_plain():
     act = client.get("/api/v1/compliance/ai-act").json()
     assert act["banned_uses"] and act["high_risk_uses"]
