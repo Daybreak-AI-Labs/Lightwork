@@ -1,8 +1,9 @@
 """Start, stop and restart Lightwork's services from Settings > Maintenance.
 
 The background worker (``maverick worker``), the chat channel server
-(``maverick serve``) and the tool server for outside apps (``maverick mcp``)
-run as supervised child processes of this dashboard (see
+(``maverick serve``), the tool server for outside apps (``maverick mcp``) and,
+while their setting is on, performance profiling, the kernel activity monitor
+and the model proxy run as supervised child processes of this dashboard (see
 :mod:`maverick_dashboard.service_supervisor`). Starting processes on the
 server is an installation-wide action: every route needs the global ``admin``
 permission, so a workspace administrator is refused. Changes are same-origin
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/api/v1/admin/services")
 
 class ServiceIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    service: Literal["worker", "channels", "tools"]
+    service: Literal["worker", "channels", "tools", "profiling", "ebpf_monitor", "model_proxy"]
     confirm: bool = Field(default=False, strict=True)
 
 

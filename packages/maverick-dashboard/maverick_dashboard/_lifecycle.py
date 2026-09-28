@@ -195,6 +195,8 @@ def register_main_components(app, supervisor):
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),
         ("code_watch", "code_ops_api", "stop_watchers", "_watch_threads"),
         ("code_sessions", "repl_ops_api", "close_all_sessions", "_threads"),
+        # Every child program: the Maintenance services and the programs a
+        # setting starts (profiling, kernel monitor, model proxy).
         ("services", "service_supervisor", "stop_all", "_threads"),
     ]
     for name, module_name, stop_name, thread_name in entries:
@@ -222,12 +224,6 @@ def register_main_components(app, supervisor):
     supervisor.register_final_resource("postgres_pools", postgres_transactions.close_postgres_pools,
                                        postgres_transactions.postgres_pools_pending)
 
-    from . import background_programs
-
-    # Profiling, the kernel activity monitor and the model proxy (their
-    # settings on All settings) are child processes this dashboard owns.
-    supervisor.register("background_programs", background_programs.stop_all,
-                        background_programs.alive)
     supervisor.register("entitlements", entitlements.stop_refresher,
                         lambda: _thread_alive(entitlements._REFRESHER_THREAD))
     supervisor.register("voice", partial(voice_setup_api.stop_setup, app),

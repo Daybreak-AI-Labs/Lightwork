@@ -196,8 +196,10 @@ def test_background_program_settings_decide_what_starts(monkeypatch):
 
 def test_background_program_is_supervised_and_stopped(monkeypatch):
     from maverick_dashboard import background_programs as bp
+    from maverick_dashboard import service_supervisor
 
-    monkeypatch.setattr(bp, "command", lambda kind: [
+    # The dashboard's single child-program registry runs it.
+    monkeypatch.setattr(service_supervisor, "command", lambda kind: [
         sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(60)"])
     state = bp.start("model_proxy")
     try:
