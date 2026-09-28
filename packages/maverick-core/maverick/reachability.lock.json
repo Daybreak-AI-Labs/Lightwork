@@ -3,8 +3,8 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 28,
-    "PRODUCTION": 945,
-    "TEST_ONLY": 81,
+    "PRODUCTION": 946,
+    "TEST_ONLY": 80,
     "UNREACHED": 6
   },
   "modules": {
@@ -158,7 +158,7 @@
     "maverick.consent_ergonomics": "TEST_ONLY",
     "maverick.consent_registry": "PRODUCTION",
     "maverick.consequence": "PRODUCTION",
-    "maverick.containment": "TEST_ONLY",
+    "maverick.containment": "PRODUCTION",
     "maverick.content_classifier": "PRODUCTION",
     "maverick.content_provenance": "PRODUCTION",
     "maverick.context_compactor": "PRODUCTION",

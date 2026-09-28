@@ -209,6 +209,10 @@ class EventKind:
     # new (secrets are recorded only as "set"/"not set", never their value),
     # confirmed (True when the change weakened a protection and was confirmed).
     SETTING_CHANGED = "setting_changed"
+    # The scheduled shared-threat-rules check ran ([shield] federated_updates).
+    # payload: outcome ("applied" | "unchanged" | "refused"), version,
+    # previous_version, added, removed (rule ids), reason (refusals).
+    SHIELD_RULES_UPDATE = "shield_rules_update"
     # Deployment-global tenant/workspace control-plane decisions. These are
     # deliberately separate from tenant-local work so provisioning and a
     # caller changing the active confidentiality boundary cannot disappear

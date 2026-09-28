@@ -739,6 +739,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("red-team schedule dispatcher not started")
         try:
+            from maverick_dashboard.shield_update_scheduler import (
+                start_shield_update_scheduler,
+            )
+
+            await run_in_threadpool(start_shield_update_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("shared threat rules check not started")
+        try:
             from maverick_dashboard.ai_inventory_scheduler import (
                 start_ai_inventory_scheduler,
             )
@@ -10022,8 +10030,19 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
+            "voice_only": _voice_only_mode(),
         },
     )
+
+
+def _voice_only_mode() -> bool:
+    """``[voice] only_mode``: the finished result is read aloud on arrival."""
+    try:
+        from maverick.voice_only import voice_only_enabled
+
+        return voice_only_enabled()
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return False
 
 
 def _withheld_event_markers() -> list[str]:

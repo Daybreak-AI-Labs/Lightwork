@@ -178,6 +178,7 @@ def _build_shield() -> Any | None:
             _safe_exception_text(e, fallback="Shield unavailable"),
         )
         return None
+    shield = _with_cascade(shield)
     # Agent compartments: wrap the single swarm-shared shield with a run-scoped
     # threat ledger so a block by any agent immunizes the rest of the swarm for
     # the run (docs/proposals/agent-compartments.md). Opt-in, fail-open.
@@ -187,13 +188,51 @@ def _build_shield() -> Any | None:
             compartments_enabled,
         )
         if compartments_enabled():
-            return ImmunizingShield(base=shield)
+            shield = ImmunizingShield(base=shield)
     except Exception as e:  # pragma: no cover
         log.error(
             "Compartment wrap failed (fail-open): %s",
             _safe_exception_text(e, fallback="compartment unavailable"),
         )
-    return shield
+    return _with_scan_limit(shield)
+
+
+def _with_cascade(shield: Any) -> Any:
+    """``[safety] cascade``: every text still gets the ordinary scan; texts the
+    cheap probe flags also get the model-based deep check. Never weaker than
+    the shield it wraps; unset keeps the shield as it is."""
+    try:
+        from maverick_shield.cascade import CascadedShield, cascade_enabled
+
+        if not cascade_enabled():
+            return shield
+        from .safety.shield_judge import deep_scanners
+
+        deep_input, deep_output = deep_scanners()
+        return CascadedShield(base=shield, deep_scan_input=deep_input,
+                              deep_scan_output=deep_output)
+    except Exception as e:  # pragma: no cover
+        log.error(
+            "Shield cascade unavailable (ordinary scan kept): %s",
+            _safe_exception_text(e, fallback="cascade unavailable"),
+        )
+        return shield
+
+
+def _with_scan_limit(shield: Any) -> Any:
+    """``[safety] shield_rate_limit``: at most N scans per goal in a window.
+    A scan over the limit is refused (the text is blocked), never skipped."""
+    try:
+        from .safety.shield_rate_limit import RateLimitedShield, current
+
+        limiter = current()
+        return shield if limiter is None else RateLimitedShield(shield, limiter)
+    except Exception as e:  # pragma: no cover
+        log.error(
+            "Shield scan limit unavailable (scans not limited): %s",
+            _safe_exception_text(e, fallback="scan limit unavailable"),
+        )
+        return shield
 
 
 def _compartments_enabled() -> bool:
