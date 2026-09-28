@@ -1334,6 +1334,10 @@ app.include_router(admin_pages_router)
 from .settings_all_page import router as settings_all_router  # noqa: E402
 
 app.include_router(settings_all_router)
+# Settings > License (/settings/license + its install, sign and key-pair API).
+from .license_ops_api import router as license_ops_router  # noqa: E402
+
+app.include_router(license_ops_router)
 # Ekko Work Discovery: a human review/control surface only.  Endpoint
 # collectors do not enter through HTTP; they write through the local core
 # daemon's owner/device/tenant-scoped store.
