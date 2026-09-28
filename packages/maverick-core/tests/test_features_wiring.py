@@ -28,7 +28,7 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
         "support_center": True,
         "guided_onboarding": True, "record_search": True, "workspace_recovery": False,
         "workflow_readiness": True, "project_reviews": False, "outcome_measurement": False,
-        "signing_identity_transition": False,
+        "signing_identity_transition": False, "copilot_operations": False,
     }
 
 
@@ -41,6 +41,7 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "support_center = false\n"
         "guided_onboarding = false\nrecord_search = false\nworkspace_recovery = false\n"
         "workflow_readiness = false\nproject_reviews = true\noutcome_measurement = true\n"
+        "copilot_operations = true\n"
     )
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     from maverick.config import get_features
@@ -51,7 +52,7 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "support_center": False,
         "guided_onboarding": False, "record_search": False, "workspace_recovery": False,
         "workflow_readiness": False, "project_reviews": True, "outcome_measurement": True,
-        "signing_identity_transition": False,
+        "signing_identity_transition": False, "copilot_operations": True,
     }
 
 

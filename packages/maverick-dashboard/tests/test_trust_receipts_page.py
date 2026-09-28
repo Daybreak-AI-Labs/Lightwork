@@ -44,7 +44,7 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     assert page.ASSET_PATH in body
     assert 'id="rcp-download-verifier"' in body and "/verifier" not in body
     assert 'id="rcp-verify-form"' in body and 'id="rcp-rows-form"' in body
-    for level in ("Genuine", "Nothing removed after it", "Matches a published checkpoint"):
+    for level in ("Signed", "Chained", "Anchored"):
         assert f"<strong>{level}</strong>" in body
     # Upload a file, choose from lists; no pasted documents, no command lines.
     assert 'id="rcp-file"' in body and "<textarea" not in body
