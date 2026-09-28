@@ -435,7 +435,7 @@ def test_pages_offer_the_new_controls_in_plain_words(template, needles):
     for needle in needles:
         assert needle in text
     for added in re.findall(r'<(?:section|details|div)[^>]*id="(?:task-journal|goal-export|auto-new-sched|tplm-library|'
-                            r'biz-setup|ekko-recording|planning-steps)".*?</(?:section|details)>', text, re.S):
+                            r'biz-setup|ekko-recording|planning-steps)".*?</(?:section|details)>', text, re.DOTALL):
         visible = re.sub(r"<[^>]+>|\{\{.*?\}\}|\{%.*?%\}", " ", added)
         assert not BANNED.search(visible), BANNED.search(visible)
 
