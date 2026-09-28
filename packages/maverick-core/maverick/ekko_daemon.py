@@ -158,6 +158,61 @@ class WindowsForegroundObserver:
         )
 
 
+class GuidedJsonlObserver:
+    """Strict JSONL adapter for an explicitly supplied guided event stream.
+
+    One JSON object per line (at most 16 KiB each), read in order. Used by
+    ``maverick ekko run --events`` and by the dashboard's activity-file import
+    (:meth:`from_text`); a rejected line is reported by number, never echoed.
+    """
+
+    _MAX_LINE_BYTES = 16_384
+
+    def __init__(self, path, *, follow: bool = False, handle=None):
+        self.path = path
+        self.follow = follow
+        self.exhausted = False
+        self.line_number = 0
+        self._handle = handle if handle is not None else path.open("r", encoding="utf-8")
+
+    @classmethod
+    def from_text(cls, text: str) -> GuidedJsonlObserver:
+        """Observe an already uploaded, bounded activity file (never followed)."""
+        import io
+
+        return cls(None, follow=False, handle=io.StringIO(text))
+
+    def close(self) -> None:
+        self._handle.close()
+
+    def observe(self):
+        import json
+
+        while True:
+            line = self._handle.readline(self._MAX_LINE_BYTES + 1)
+            if line == "":
+                if self.follow:
+                    return None
+                self.exhausted = True
+                return None
+            self.line_number += 1
+            if len(line.encode("utf-8")) > self._MAX_LINE_BYTES:
+                raise ValueError(f"guided event line {self.line_number} exceeds 16 KiB")
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+                if not isinstance(value, dict):
+                    raise ValueError("event must be an object")
+                return ObservedActivity.from_mapping(value)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                # Never echo the line: it might be the exact raw content the
+                # semantic boundary is rejecting.
+                raise ValueError(
+                    f"invalid guided event at line {self.line_number}"
+                ) from exc
+
+
 def _default_policy_check(policy: CapturePolicy) -> None:
     from .config import validate_ekko_policy_ceiling
 

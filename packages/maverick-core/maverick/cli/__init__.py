@@ -1149,15 +1149,10 @@ def _apply_capability_plan(profile, plan, llm) -> None:
     Records the gaps as factory-learning signals (no-op unless that's on)."""
     if plan is None or plan.is_empty():
         return
-    from ..provision import apply_plan
-    result = apply_plan(plan, approved=True, llm=llm)
+    from ..provision import apply_approved_plan
+    result = apply_approved_plan(profile, plan, llm=llm)
     if result.acquired or result.generated or result.failed:
         click.echo(click.style(f"Provisioning: {result.summary()}", fg="cyan"))
-    try:
-        from .. import factory_learning
-        factory_learning.record_provisioning(profile, plan, result)
-    except Exception:  # pragma: no cover -- learning must never break onboarding
-        pass
 
 
 @main.command()
@@ -1218,34 +1213,10 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
             llm = LLM(model=_cli_model(ctx, "writer"))
         except Exception as e:  # no provider/key -> deterministic generation
             click.echo(f"(LLM unavailable; using deterministic generation: {e})", err=True)
-    kb = None
-    try:
-        from ..config import get_knowledge
-        from ..workspace import Workspace
-        kcfg = get_knowledge()
-        if kcfg.get("enable"):
-            from maverick_knowledge import KnowledgeBase, build_embedder, build_store
-            # Persist uploads to the active tenant's knowledge store (NOT :memory:,
-            # which discards them on exit) so the run-time KB reads the same store.
-            # An explicit [knowledge] path still wins.
-            if not kcfg.get("path"):
-                kcfg = {**kcfg, "path": str(Workspace.current().knowledge_path)}
-            # Shield-scan documents at ingest: a poisoned upload is dropped at the
-            # door, not only at query time (RAG-poisoning defense).
-            shield = None
-            try:
-                from maverick_shield import Shield
-                shield = Shield.from_config(warn_if_missing=False)
-            except Exception:
-                pass
-            kb = KnowledgeBase(store=build_store(kcfg), embedder=build_embedder(kcfg),
-                               shield=shield)
-            try:  # OCR uploaded diagrams/images when the vision extra is installed
-                from maverick_knowledge.image import build_ocr_describer
-                kb.image_describer = build_ocr_describer()
-            except Exception:
-                pass  # no vision extra -> images are skipped, not read as bytes
-        elif doc_paths:
+    from ..intake import onboarding_knowledge_base
+    kb, kb_problem = onboarding_knowledge_base()
+    if kb is None and doc_paths:
+        if kb_problem == "disabled":
             # The client explicitly attached docs AND the generated persona
             # tells the agent to answer from them -- so a quiet "skipping"
             # aside under-sells that the domain agent ends up with NO document
@@ -1259,9 +1230,8 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
                 "~/.maverick/config.toml, then re-run onboard.",
                 err=True,
             )
-    except Exception as e:  # knowledge layer is optional
-        if doc_paths:
-            click.echo(f"(knowledge unavailable; skipping doc ingestion: {e})", err=True)
+        elif kb_problem is not None:
+            click.echo(f"(knowledge unavailable; skipping doc ingestion: {kb_problem})", err=True)
 
     click.echo("Generating a draft domain agent...")
     profile = run_intake(spec, llm=llm, kb=None)
@@ -7386,21 +7356,14 @@ def export_goal(ctx, goal_id: int, output: str | None) -> None:
     was logged to events.
     """
     import json as _json
+
+    from ..goal_bundle import build_goal_bundle
     world = open_world(ctx.obj["db"])
     try:
-        goal = world.get_goal(goal_id)
-        if goal is None:
+        bundle = build_goal_bundle(world, goal_id)
+        if bundle is None:
             click.echo(f"goal {goal_id} not found", err=True)
             sys.exit(2)
-        events = world.goal_events(goal_id, limit=10_000)
-        episodes = world.list_episodes(limit=200, goal_id=goal_id)
-        from dataclasses import asdict
-        bundle = {
-            "v": 1,
-            "goal": asdict(goal),
-            "events": [asdict(e) for e in events],
-            "episodes": [asdict(e) for e in episodes],
-        }
     finally:
         world.close()
     out_path = Path(output) if output else Path(f"goal-{goal_id}.json")

@@ -251,47 +251,10 @@ def ekko_stop(owner: str, device_id: str) -> None:
     _transition(owner, device_id, "stopped")
 
 
-class _GuidedJsonlObserver:
-    """Strict JSONL adapter for an explicitly supplied guided event stream."""
+def _GuidedJsonlObserver(path: Path, *, follow: bool = False):  # noqa: N802 -- historical name
+    from ..ekko_daemon import GuidedJsonlObserver
 
-    _MAX_LINE_BYTES = 16_384
-
-    def __init__(self, path: Path, *, follow: bool = False):
-        self.path = path
-        self.follow = follow
-        self.exhausted = False
-        self.line_number = 0
-        self._handle = path.open("r", encoding="utf-8")
-
-    def close(self) -> None:
-        self._handle.close()
-
-    def observe(self):
-        from ..work_discovery import ObservedActivity
-
-        while True:
-            line = self._handle.readline(self._MAX_LINE_BYTES + 1)
-            if line == "":
-                if self.follow:
-                    return None
-                self.exhausted = True
-                return None
-            self.line_number += 1
-            if len(line.encode("utf-8")) > self._MAX_LINE_BYTES:
-                raise ValueError(f"guided event line {self.line_number} exceeds 16 KiB")
-            if not line.strip():
-                continue
-            try:
-                value = json.loads(line)
-                if not isinstance(value, dict):
-                    raise ValueError("event must be an object")
-                return ObservedActivity.from_mapping(value)
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                # Never echo the line: it might be the exact raw content the
-                # semantic boundary is rejecting.
-                raise ValueError(
-                    f"invalid guided event at line {self.line_number}"
-                ) from exc
+    return GuidedJsonlObserver(path, follow=follow)
 
 
 def _observer_from_options(events: Path | None, observer_name: str | None, follow: bool):
