@@ -54,7 +54,7 @@ test('image-only PDF offers explicit transcription, retains original hash and re
   await page.locator('#vo-upload').setInputFiles(path.join(fixtures,'northstar-scan.pdf'));await page.locator('#vo-upload-submit').click();
   await expect(page.locator('#vo-upload-fallback')).toBeVisible();await expect(page.locator('#vo-upload-accept')).toBeDisabled();
   await page.locator('#vo-upload-transcription').fill('Model provenance is documented with provider and version. Transcribed from the image; no other policy statements appear on this page.');
-  await page.locator('#vo-upload-transcribe').click();await expect(page.locator('#vo-upload-summary')).toContainText('user-supplied transcription; no OCR performed');
+  await page.locator('#vo-upload-transcribe').click();await expect(page.locator('#vo-upload-summary')).toContainText('text you typed in');
   await page.locator('#vo-upload-text').scrollIntoViewIfNeeded();await fits(page);await screenshot(page,info,'manual-transcription-320.png');
   // A separate legitimate editor changes the request after this preview.
   expect((await request.post(`/api/v1/vendor-onboarding/cases/${row.id}/documents`,{data:{expected_revision:row.revision,document_ids:[],upload_ids:[]}})).status()).toBe(200);
@@ -116,7 +116,7 @@ test('reviewed evidence export shows bounded manifest at desktop and mobile befo
   await page.setViewportSize({width:1280,height:900});await page.goto('/third-party/vendor-onboarding?case='+row.id);
   await expect(page.locator('#vo-message')).toContainText('Linked request loaded');await expect(page.locator('#vo-export-preview')).toBeEnabled();
   await page.locator('#vo-export-preview').click();await expect(page.locator('#vo-message')).toContainText('export preview ready');
-  await expect(page.locator('#vo-export-status')).toContainText('8 reviewed claims');await expect(page.locator('#vo-export-manifest')).toContainText('Included connected document');
+  await expect(page.locator('#vo-export-status')).toContainText('8 reviewed claims');await expect(page.locator('#vo-export-manifest')).toContainText('Document 1: included (Google Drive document, still valid).');
   await expect(page.locator('#vo-export-download')).toBeDisabled();await page.locator('#vo-export-status').scrollIntoViewIfNeeded();await fits(page);await screenshot(page,info,'evidence-export-1280.png');
   await page.setViewportSize({width:320,height:900});await page.locator('#vo-export-status').scrollIntoViewIfNeeded();await fits(page);await screenshot(page,info,'evidence-export-320.png');
   await page.locator('#vo-export-confirm').check();
@@ -136,8 +136,8 @@ test('reviewed evidence export shows bounded manifest at desktop and mobile befo
       withheld:[{reference,dependency_type:'external_evidence',disposition:'withheld',reason:'current_source_access_unavailable'}],
       included_count:0,withheld_count:1,complete:false}};
   await page.route('**/evidence-export-preview',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(withheld)}));
-  await page.locator('#vo-export-preview').click();await expect(page.locator('#vo-export-status')).toContainText('1 withheld');
-  await expect(page.locator('#vo-export-manifest')).toContainText('Withheld external evidence');
+  await page.locator('#vo-export-preview').click();await expect(page.locator('#vo-export-status')).toContainText('0 evidence sources included; 1 left out.');
+  await expect(page.locator('#vo-export-manifest')).toContainText('Document 1: left out because');
   await expect(page.locator('#vo-export-manifest')).not.toContainText('browser-policy');
   await fits(page);await screenshot(page,info,'evidence-export-withheld-320.png');
 });

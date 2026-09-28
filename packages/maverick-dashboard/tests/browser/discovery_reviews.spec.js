@@ -51,15 +51,18 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
   await page.goto('/project-reviews#project='+fixture.project_id);
   await expect(page.locator('#pr-setup')).toBeVisible();
   await page.locator('#pr-member').selectOption('user:browser-colleague');await page.locator('#pr-grant').click();
-  await expect(page.locator('#pr-members')).toContainText('user:browser-colleague');
+  await expect(page.locator('#pr-members')).toContainText('browser-colleague');
   await page.locator('#pr-goal').selectOption(String(fixture.review_goal));await page.locator('#pr-preview').click();
   await expect(page.locator('#pr-preview-text')).toContainText('Evidence limitations remain explicit');
   await page.locator('#pr-reviewer').selectOption('user:browser-colleague');
   await page.locator('#pr-due').fill(new Date(Date.now()+86400000).toISOString().slice(0,16));
   await page.locator('#pr-note').fill('Review the captured evidence and limitations before responding.');
   const sent=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/packets'));
-  await page.locator('#pr-send-button').click();const packet=await (await sent).json();
-  await expect(page.locator('#pr-status')).toContainText('Review packet sent');
+  await page.locator('#pr-send-button').click();
+  // Sharing asks for an in-page confirmation that names the reviewer.
+  const share=page.getByRole('dialog',{name:'Share exactly the captured result shown above with browser-colleague?'});
+  await share.getByRole('button',{name:'Share for review',exact:true}).click();const packet=await (await sent).json();
+  await expect(page.locator('#pr-status')).toContainText('Sent for review. No task was run or signed off.');
   const reviewer=await browser.newContext({baseURL,viewport:{width:320,height:800},extraHTTPHeaders:{Origin:baseURL,'X-Browser-Principal':'browser-colleague'}});
   try {
     const review=await reviewer.newPage();review.on('dialog',dialog=>dialog.accept());
@@ -75,7 +78,9 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
     await page.locator('#pr-response-note').fill('Owner added a clarification while the colleague was reviewing.');await page.locator('#pr-response-button').click();await expect(page.locator('#pr-status')).toContainText('Review response saved');
     await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('Your unfinished comment is kept');await expect(review.locator('#pr-response-note')).toHaveValue('Synthetic colleague reviewed the captured result and limitations.');await expect(review.locator('#pr-action')).toHaveValue('comment');
     await review.locator('#pr-action').selectOption('approve');
-    await review.locator('#pr-response-button').click();await expect(review.locator('#pr-status')).toContainText('Review response saved');
+    await review.locator('#pr-response-button').click();
+    await review.getByRole('dialog',{name:/Save this approve decision/}).getByRole('button',{name:'Save decision',exact:true}).click();
+    await expect(review.locator('#pr-status')).toContainText('Review response saved');
     await expect(review.locator('#pr-packet-summary')).toContainText('approved');await fits(review);
     const reviewImage=info.outputPath('assigned-colleague-review-320.png');await review.screenshot({path:reviewImage});await info.attach('assigned-colleague-review',{path:reviewImage,contentType:'image/png'});
     await review.route('**/api/v1/project-reviews**',route=>route.fulfill({status:401,contentType:'text/html',body:'<h1>Synthetic session expired</h1>'}));

@@ -63,11 +63,16 @@ for (const width of [360, 1280]) test(`governed research stays usable and honest
   await page.locator('#research-governed-refresh').click();
   await expect(page.locator('#research-registry-items')).toContainText('Synthetic fixture');
   await expect(page.locator('#research-governed-runs')).toContainText('USD 1.25');
-  await expect(page.locator('#research-governed-runs')).toContainText('synthetic provider report pending');
+  await expect(page.locator('#research-governed-runs')).toContainText('Synthetic provider report pending');
   await expect(page.getByRole('button', {name:'Start run', exact:true})).toBeDisabled();
   await expect(page.locator('#research-materialization-state')).toContainText('blocked before data access');
+  const costs = page.getByText('Compute · Invoice · USD 1.25', {exact: true});
+  await expect(costs).toBeHidden();
   await page.getByText('Attempt 1 · queued').click();
-  await expect(page.locator('#research-governed-runs')).toContainText(`evidence ${digest('5')}`);
+  // Expanding the attempt shows each recorded cost; its evidence fingerprint
+  // stays in the downloadable run record, not on screen.
+  await expect(costs).toBeVisible();
+  await expect(page.locator('#research-governed-runs')).not.toContainText(digest('5'));
   const overflow = await page.evaluate(() => ({viewport:document.documentElement.clientWidth,
     page:document.documentElement.scrollWidth, elements:[...document.querySelectorAll('.research-workspace *')]
       .filter(node => !node.closest('[hidden]') && node.getBoundingClientRect().width &&

@@ -119,7 +119,7 @@ for (const zoom of [1, 2]) test(`Settings sections remain keyboard usable at ${z
   const general = page.getByRole('tab', {name: 'General', exact: true});
   await expect(general).toHaveAttribute('aria-selected', 'true');
   await general.focus();
-  for (const label of ['General', 'Models', 'Integrations', 'Controls', 'Access']) {
+  for (const label of ['General', 'Models', 'Connections', 'Features', 'Access', 'Maintenance']) {
     const tab = page.getByRole('tab', {name: label, exact: true});
     await expect(tab).toBeFocused();
     await expect(tab).toHaveAttribute('aria-selected', 'true');

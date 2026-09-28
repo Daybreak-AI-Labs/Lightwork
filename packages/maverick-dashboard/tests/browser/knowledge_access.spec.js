@@ -100,7 +100,7 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
         items: [record()], count: 1, can_review: true}});
     }
     if (url.pathname.endsWith('/search')) {
-      await new Promise(resolve => setTimeout(resolve, 80));
+      await new Promise(resolve => setTimeout(resolve, 600));
       return route.fulfill({json: {context, schema: 'lightwork.knowledge-search.v1', query: 'customer',
         tenant: 'browser-workspace', actor: 'user:browser-reviewer', actor_authorization_sha256: sha('6'),
         purpose: 'product_research', items: [item()], count: 1, matched: 1,
@@ -113,7 +113,7 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
   });
   await page.goto('/knowledge-access');
   await expect(page.getByRole('heading', {name: 'Find knowledge you can use now'})).toBeVisible();
-  await expect(page.locator('#ka-requests')).toContainText('retire or retrain model');
+  await expect(page.locator('#ka-requests')).toContainText('retire or retrain the model');
   await expect(page.locator('#ka-requests')).toContainText('does not erase its influence from learned weights');
 
   await page.locator('#ka-query').fill('customer');
@@ -132,8 +132,8 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
   await page.locator('#ka-query').focus();
   await page.keyboard.press('Tab');
   await expect(page.locator('#ka-purpose')).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(page.locator('#ka-limit')).toBeFocused();
+  // The result limit is a fixed hidden value now, so it is not a tab stop.
+  await expect(page.locator('#ka-limit')).toHaveAttribute('type', 'hidden');
   await page.keyboard.press('Tab');
   await expect(page.locator('#ka-search')).toBeFocused();
 
@@ -172,7 +172,8 @@ test('empty and revoked states remove stale content and explain the next step', 
   await page.locator('#ka-search').click();
   await expect(page.locator('#ka-results')).toContainText('Synthetic customer evidence');
   await page.getByRole('button', {name: /View details/}).click();
-  await expect(page.locator('#ka-status')).toContainText('Request fresh access or evidence');
+  await expect(page.locator('#ka-status')).toContainText("This changed since you loaded it, or current access couldn't be confirmed.");
+  await expect(page.locator('#ka-status')).not.toContainText('Request fresh access or evidence');
   await expect(page.locator('#ka-detail-panel')).toBeHidden();
   await expect(page.locator('#ka-submit-request')).toBeDisabled();
   await page.locator('#ka-search').click();
@@ -237,12 +238,12 @@ test('an applying source retirement can be recovered in the app by exact replay'
 
   await page.goto('/knowledge-access');
   await expect(page.locator('#ka-requests')).toContainText('Recovery is waiting');
-  await expect(page.locator('#ka-requests')).toContainText('registry state approved');
+  await expect(page.locator('#ka-requests')).toContainText('currently approved');
   await page.locator('#ka-requests textarea').fill(rationale);
   await page.locator('#ka-requests input[type="checkbox"]').check();
-  await page.getByRole('button', {name: 'Recover approved retirement'}).click();
-  await expect(page.locator('#ka-status')).toContainText('exact source version is retired');
-  await expect(page.locator('#ka-requests')).toContainText('model retirement confirmed retraining unverified');
+  await page.getByRole('button', {name: 'Finish the approved removal'}).click();
+  await expect(page.locator('#ka-status')).toContainText('The source is no longer used.');
+  await expect(page.locator('#ka-requests')).toContainText('Model retirement confirmed retraining unverified');
   expect(submitted).toMatchObject({expected_revision: 2, decision: 'approve',
     evidence_sha256: evidence, confirm: true});
 });
@@ -261,7 +262,7 @@ test('authenticated browser uses the real APP10 API for search, detail, and rete
   await expect(page.locator('#ka-results')).toContainText('real APP10 registry');
   await page.getByRole('button', {name: 'View details for Synthetic governed browser policy'}).click();
   await expect(page.locator('#ka-detail')).toContainText('revalidated cache hit');
-  await expect(page.locator('#ka-detail')).toContainText('user:browser-reviewer');
+  await expect(page.locator('#ka-detail')).toContainText('browser-reviewer');
 
   const form = page.locator('#ka-request-form');
   await form.locator('select[name="request_type"]').selectOption('deletion');
@@ -271,17 +272,17 @@ test('authenticated browser uses the real APP10 API for search, detail, and rete
   await expect(page.locator('#ka-requests')).toContainText('Preserve, then process');
 
   const holdBox = page.locator('.ka-review', {hasText: 'Preservation hold'});
-  await holdBox.getByLabel('Hold ID', {exact: true}).fill('browser-matter-2026');
+  await holdBox.getByLabel('Name of the legal matter', {exact: true}).fill('browser-matter-2026');
   await holdBox.getByLabel('Legal or preservation basis', {exact: true}).fill('Synthetic preservation duty.');
   await holdBox.getByLabel('Hold expires', {exact: true}).fill('2099-01-01T00:00');
-  await holdBox.getByText('I verified the hold identity').click();
-  await holdBox.getByRole('button', {name: 'Place retention hold'}).click();
+  await holdBox.getByText('I checked the matter, the reason and the end date.').click();
+  await holdBox.getByRole('button', {name: 'Place a legal hold on this deletion request'}).click();
   await expect(page.locator('#ka-requests')).toContainText('browser-matter-2026 is active');
 
   const releaseBox = page.locator('.ka-review', {hasText: 'Preservation hold'});
   await releaseBox.getByLabel('Why the hold can be released').fill('Synthetic duty ended.');
   await releaseBox.getByText('I verified the preservation duty').click();
-  await releaseBox.getByRole('button', {name: 'Release retention hold'}).click();
+  await releaseBox.getByRole('button', {name: 'Release the legal hold'}).click();
   await expect(page.locator('#ka-requests')).toContainText('browser-matter-2026 is released');
   await expect(page.locator('#ka-requests')).toContainText('Synthetic duty ended');
 
