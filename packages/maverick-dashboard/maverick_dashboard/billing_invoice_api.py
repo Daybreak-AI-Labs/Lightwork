@@ -62,11 +62,13 @@ async def invoice_csv(request: Request, tenant: str = Query(..., min_length=1, m
                       minimum: float = Query(0.0, ge=0.0, le=1_000_000.0)) -> Response:
     require_global_permission(request, "admin")
     inv = await run_in_threadpool(_invoice, tenant, since, until, markup, minimum)
+    from .audit_actions_api import csv_safe
+
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["Day", "Person", "Charge (" + inv.currency + ")", "AI usage (tokens)"])
     for li in inv.line_items:
-        writer.writerow([li.day, _who(li.principal), f"{li.charge:.2f}", li.in_tokens + li.out_tokens])
+        writer.writerow([li.day, csv_safe(_who(li.principal)), f"{li.charge:.2f}", li.in_tokens + li.out_tokens])
     writer.writerow([])
     writer.writerow(["Total", "", f"{inv.total:.2f}", ""])
     if inv.invoice_id:

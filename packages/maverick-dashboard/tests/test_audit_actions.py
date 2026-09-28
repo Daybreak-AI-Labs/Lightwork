@@ -72,6 +72,29 @@ def test_check_and_download(audit_log, client):
     assert "attachment" in r.headers["content-disposition"]
 
 
+def test_download_without_dates_covers_every_day_and_never_runs_formulas(audit_log, client):
+    import csv
+    import io
+    import json
+
+    from maverick.audit.events import AuditEvent
+    from maverick.audit.reader import resolve_audit_dir
+    from maverick.audit.writer import AuditLog
+    folder = resolve_audit_dir(None)
+    AuditLog(folder).record(AuditEvent(ts=time.time(), kind="tool_call",
+                                       payload={"name": "send_email", "principal": "slack:=1+1"}))
+    today = folder / (time.strftime("%Y-%m-%d", time.gmtime()) + ".ndjson")
+    old = time.time() - 5 * 86400
+    line = dict(json.loads(today.read_text(encoding="utf-8").splitlines()[0]), ts=old)
+    (folder / (time.strftime("%Y-%m-%d", time.gmtime(old)) + ".ndjson")).write_text(
+        json.dumps(line) + "\n", encoding="utf-8")
+    rows = list(csv.reader(io.StringIO(client.get("/api/v1/audit/download").text)))[1:]
+    days = {row[0][:10] for row in rows}
+    assert time.strftime("%Y-%m-%d", time.gmtime(old)) in days and len(days) == 2
+    assert not [cell for row in rows for cell in row if cell[:1] in ("=", "+", "-", "@")]
+    assert any(cell.startswith("'=1+1") for row in rows for cell in row)
+
+
 def test_protection_actions_need_the_right_role(audit_log, client, monkeypatch):
     _as(monkeypatch, "auditor")
     assert client.post("/api/v1/audit/check", json={}).status_code == 200

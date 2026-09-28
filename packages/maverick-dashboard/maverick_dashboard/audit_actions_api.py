@@ -230,9 +230,17 @@ async def check_log(request: Request, body: CheckIn) -> dict:
     return await run_in_threadpool(_run)
 
 
+def csv_safe(value: object) -> object:
+    """A spreadsheet cell that is never run as a formula (names and details
+    come from chat users and connected systems)."""
+    from maverick.tools.spreadsheet import _neutralize_formula
+
+    return _neutralize_formula(value)
+
+
 def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
     from maverick.audit.export import iter_audit_events, to_cef, to_jsonl
-    events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events()
+    events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
     if fmt == "csv":
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -245,8 +253,9 @@ def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
             when = (_dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     if isinstance(ts, (int, float)) else "")
             details = "; ".join(f"{label}: {text}" for _k, label, text in event_details(ev))
-            writer.writerow([when, kind_label(ev.get("kind")), event_who(ev),
-                             ev.get("goal_id") if ev.get("goal_id") is not None else "", details])
+            writer.writerow([when, csv_safe(kind_label(ev.get("kind"))), csv_safe(event_who(ev)),
+                             ev.get("goal_id") if ev.get("goal_id") is not None else "",
+                             csv_safe(details)])
             yield buf.getvalue()
         return
     render = to_cef if fmt == "cef" else to_jsonl
@@ -284,7 +293,7 @@ async def forward(request: Request, body: ForwardIn) -> dict:
         from maverick.audit import forwarder
         from maverick.audit.export import iter_audit_events, to_jsonl
         forwarder.parse_dest(dest)
-        events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events()
+        events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
         return forwarder.forward((to_jsonl(ev) for ev in events), dest)
     try:
         sent = await run_in_threadpool(_run)
