@@ -1,0 +1,697 @@
+"""Settings > All settings: access, identity and deployment rows (WP1).
+
+Every row added by ``settings_catalog_access`` saves and reads back through
+the catalog API, refuses invalid values, never returns a secret, asks before
+loosening a protection and writes one audit row. The shared ``path`` control
+and the "Test connection" checks are bounded and quiet. Readers that ignored
+the dashboard settings now honour them (environment still wins), and the
+lock-out guard refuses sign-in, administrator and key changes that would lock
+the person saving -- or saved records -- out.
+"""
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+from maverick_dashboard import settings_access_guard as guard
+from maverick_dashboard import settings_all_page as page
+from maverick_dashboard import settings_catalog as catalog
+from maverick_dashboard import settings_catalog_access as access
+from maverick_dashboard import settings_tests
+from maverick_dashboard.app import app
+
+client = TestClient(app, headers={"Origin": "http://testserver"})
+API = "/api/v1/settings/catalog"
+CHECK = API + "/test"
+ROWS = [catalog.BY_ID[s.id] for s in access.entries(catalog.S, catalog.C, catalog.Column)]
+_KEY = "11" * 32
+_TOKEN = "server-access-token-for-tests-only-000000"  # pragma: allowlist secret
+_SECRET = "correct-horse-battery-staple-long-enough-0001"  # pragma: allowlist secret
+
+
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path, monkeypatch):
+    from maverick import config, world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    for name in list(os.environ):
+        if name.startswith(("MAVERICK_", "LIGHTWORK_")) and name not in {
+                "MAVERICK_HOME", "MAVERICK_ENCRYPT_AT_REST"}:
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(page, "_CHECK_TIMES", [])
+    config.reset_config_cache()
+    from maverick import client as binding
+
+    binding.reset_client_cache()
+    yield
+    binding.reset_client_cache()
+    config.reset_config_cache()
+
+
+@pytest.fixture()
+def audit_rows(monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+
+    def capture(kind, **payload):
+        rows.append({"kind": kind, **payload})
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", capture)
+    return rows
+
+
+@pytest.fixture()
+def as_token(monkeypatch):
+    """The person saving uses the server's access token (the break-glass way in)."""
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", _TOKEN)
+    client.headers["Authorization"] = "Bearer " + _TOKEN
+    yield
+    client.headers.pop("Authorization", None)
+
+
+def _loaded():
+    from maverick import config
+
+    config.reset_config_cache()
+    return config.load_config()
+
+
+def _save(changes, confirm=False, http=client):
+    return http.post(API, json={"changes": changes, "confirm": confirm})
+
+
+def _row(setting_id):
+    for group in client.get(API).json()["groups"]:
+        for row in group["settings"]:
+            if row["id"] == setting_id:
+                return row
+    raise AssertionError(setting_id)
+
+
+def _file(tmp_path, name="server.pem", mode=0o600):
+    path = tmp_path / "certs" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+_TEXT = {
+    "auth.oidc.issuer": "https://login.example.com/realm",
+    "auth.oidc.client_id": "lightwork-dashboard",
+    "auth.oidc.audience": "lightwork-dashboard",
+    "auth.oidc.redirect_uri": "https://lightwork.example.com/auth/callback",
+    "auth.oidc.jwks_uri": "https://login.example.com/keys",
+    "auth.oidc.authorization_endpoint": "https://login.example.com/authorize",
+    "auth.oidc.token_endpoint": "https://login.example.com/token",
+    "auth.oidc.end_session_endpoint": "https://login.example.com/logout",
+    "auth.saml.idp_metadata_url": "https://idp.example.com/metadata",
+    "auth.saml.sp_entity_id": "https://lightwork.example.com/saml/metadata",
+    "auth.saml.acs_url": "https://lightwork.example.com/saml/acs",
+    "auth.saml.name_attr": "displayName",
+    "auth.saml.default_relay_state": "/goals",
+    "auth.proxy.header": "X-Auth-User",
+    "dashboard.public_url": "https://lightwork.example.com",
+    "kms.key_id": "arn:aws:kms:us-east-1:123:key/abc",
+    "kms.region": "eu-west-1",
+    "kms.address": "https://vault.example.com",
+    "kms.mount": "lightwork-transit",
+    "audit.siem_dest": "https://siem.example.com/raw",
+    "audit.worm.bucket": "acme-audit-worm",
+    "audit.worm.prefix": "lightwork/audit/",
+    "audit.worm.region": "us-east-1",
+    "queue.namespace": "acme-fleet",
+    "grpc_dispatch.target": "worker.example.com:50051",
+    "federation.node": "east-1",
+    "license.api_url": "https://license.example.com/v1/license",
+    "external_agents.approval_webhook": "https://hooks.example.com/approvals",
+}
+_LIST = {
+    "auth.proxy.trusted_proxies": ["10.0.0.5", "10.1.0.0/16"],
+    "dashboard.admins": ["user:ada@example.com"],
+    "enterprise.allowed_hosts": ["api.example.com"],
+    "enterprise.local_providers": ["my-internal-vllm"],
+}
+_SECRETS = {
+    "queue.redis_dsn": "rediss://:pw@queue.example.com:6380/0",  # pragma: allowlist secret
+    "world_model.dsn": "postgres://lw:pw@db.example.com:5432/lightwork",  # pragma: allowlist secret
+}
+_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200}
+# Rows whose kernel reader refuses them alone: saved together with these.
+_WITH = {
+    "dashboard.require_auth": [{"id": "dashboard.invites", "value": True}],
+    "audit.unified.custody.enable": [{"id": "audit.unified.enable", "value": True}],
+    "audit.unified.custody.worm_enable": [{"id": "audit.worm.provider", "value": "local"}],
+}
+
+
+def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
+    control = setting.control
+    if control == "toggle":
+        return not setting.default
+    if control == "number":
+        if setting.id in _NUMBERS:
+            return _NUMBERS[setting.id]
+        low = setting.minimum if setting.minimum is not None else 0
+        value = low + 1 if setting.integer or float(low).is_integer() else low * 2
+        return int(value) if setting.integer else value
+    if control == "text":
+        return _TEXT[setting.id]
+    if control == "secret":
+        return _SECRETS.get(setting.id, _SECRET)
+    if control == "list":
+        return _LIST[setting.id]
+    if control == "keys":
+        return [_KEY]
+    if control == "path":
+        if setting.path_kind == "folder":
+            folder = tmp_path / "places" / setting.id.replace(".", "-")
+            folder.mkdir(parents=True, exist_ok=True)
+            return str(folder)
+        return str(_file(tmp_path, setting.id.replace(".", "-") + ".pem"))
+    choices = [v for v, _ in page._resolved(setting).choices]
+    if control == "select":
+        return next(v for v in choices if v != setting.default)
+    if control == "multiselect":
+        return [v for v in choices if v not in (setting.default or [])][:1]
+    if setting.id == "tenancy.egress":
+        return [{"name": "acme", "allow": ["api.example.com"], "deny": ["*.bad.example"]}]
+    columns = setting.columns
+    first = next(v for v in [c for c, _ in page._resolved(setting).columns[0].choices] if v)
+    return [{"name": choices[0], columns[0].key: first}]
+
+
+def _expected(setting, value):
+    if setting.control == "path":
+        return value
+    if setting.control == "table" and setting.id == "tenancy.egress":
+        return {"acme": {"allow": ["api.example.com"], "deny": ["*.bad.example"]}}
+    if setting.control == "table":
+        return {value[0]["name"]: value[0][setting.columns[0].key]}
+    return value
+
+
+def _lookup(tree, setting):
+    return catalog.lookup(tree, setting.path)
+
+
+@pytest.fixture()
+def workspaces(monkeypatch):
+    monkeypatch.setitem(page._ACCESS_SOURCES, "workspaces", lambda: [("acme", "Acme")])
+    monkeypatch.setitem(page._ACCESS_SOURCES, "capability_roles",
+                        lambda: [("", "None"), ("analyst", "Analyst")])
+
+
+# ------------------------------------------------------------ round trip
+@pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
+def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeypatch, as_token,
+                                                      workspaces, audit_rows):
+    monkeypatch.setattr(guard, "_prerequisites", lambda changed, values: None)
+    monkeypatch.setattr(settings_tests, "check_kms",
+                        lambda values: settings_tests.Outcome(True, "ok"))
+    value = _sample(setting, tmp_path)
+    changes = [*_WITH.get(setting.id, []), {"id": setting.id, "value": value}]
+    r = _save(changes, confirm=True)
+    assert r.status_code == 200, r.text
+    present, stored = _lookup(_loaded(), setting)
+    assert present and stored == _expected(setting, value)
+    row = _row(setting.id)
+    assert row["source"] == "here"
+    if setting.secret:
+        assert row["value"] is None and row["is_set"] is True
+        assert value not in r.text and value not in client.get(API).text
+        assert value not in client.get("/settings/all").text
+        audited = [a for a in audit_rows if a["key"] == setting.key]
+        assert audited and audited[-1]["new"] == "set" and value not in repr(audit_rows)
+    else:
+        assert audit_rows[-1]["key"] == setting.key
+    r = _save([{"id": setting.id, "reset": True}], confirm=True)
+    assert r.status_code == 200, r.text
+    assert _row(setting.id)["source"] in {"default", "installer"}
+
+
+def _invalid(setting, tmp_path):  # noqa: C901 - one branch per control
+    control = setting.control
+    if control == "toggle":
+        return "yes"
+    if control in {"select", "multiselect"}:
+        return "no-such-choice" if control == "select" else ["no-such-choice"]
+    if control == "number":
+        if setting.maximum is not None:
+            return setting.maximum + 1
+        return (setting.minimum or 0) - 1
+    if control in {"text", "secret"}:
+        return "not valid <script>" if setting.pattern else "x" * (setting.max_length + 1)
+    if control == "list":
+        return ["not valid <script>"]
+    if control == "keys":
+        return ["not a key"]
+    if control == "path":
+        return str(tmp_path / "missing" / "nothing-here")
+    return [{"name": "no-such-row"}]
+
+
+@pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
+def test_every_access_row_refuses_invalid_values(setting, tmp_path, as_token, workspaces,
+                                                 audit_rows):
+    r = _save([{"id": setting.id, "value": _invalid(setting, tmp_path)}], confirm=True)
+    assert r.status_code == 400, r.text
+    if setting.control != "keys":  # a key file names no setting: it asks for the right file
+        assert r.json()["message"].startswith(setting.label)
+    assert not _lookup(_loaded(), setting)[0]
+    assert audit_rows == []
+
+
+# ----------------------------------------------------------------- paths
+def test_paths_must_be_full_existing_readable_and_inside_allowed_places(tmp_path, as_token,
+                                                                        audit_rows):
+    key = "auth.saml.sp_key_file"
+    cases = {
+        "relative/key.pem": "full location",
+        str(tmp_path / "nope.pem"): "nothing was found",
+        str(tmp_path): "is a folder",
+        "/proc/self/status": "only uses locations",
+    }
+    for value, words in cases.items():
+        r = _save([{"id": key, "value": value}], confirm=True)
+        assert r.status_code == 400, value
+        assert words in r.json()["message"], (value, r.json()["message"])
+    world_readable = _file(tmp_path, "open.key", mode=0o644)
+    r = _save([{"id": key, "value": str(world_readable)}], confirm=True)
+    assert r.status_code == 400 and "anyone on the server can read" in r.json()["message"]
+    folder = _save([{"id": "workspace.snapshot_dir", "value": str(world_readable)}], confirm=True)
+    assert folder.status_code == 400 and "Choose a folder" in folder.json()["message"]
+    private = _file(tmp_path, "ok.key", mode=0o600)
+    assert _save([{"id": key, "value": str(private)}], confirm=True).status_code == 200
+    assert _loaded()["auth"]["saml"]["sp_key_file"] == str(private)
+
+
+def test_a_link_cannot_lead_outside_the_allowed_places(tmp_path, monkeypatch, as_token,
+                                                       audit_rows):
+    link = tmp_path / "certs" / "sneaky.pem"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to("/etc/hostname" if os.path.exists("/etc/hostname") else "/etc/passwd")
+    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
+    r = _save([{"id": "license.license_file", "value": str(link)}], confirm=True)
+    assert r.status_code == 400 and "only uses locations" in r.json()["message"]
+
+
+def test_the_check_button_checks_a_location_without_saving(tmp_path, audit_rows):
+    good = _file(tmp_path, "ca.pem", mode=0o640)
+    r = client.post(CHECK, json={"id": "queue.redis_ca_certs", "value": str(good)})
+    assert r.status_code == 200 and r.json() == {
+        "ok": True, "message": "Found. Lightwork can read this file."}
+    r = client.post(CHECK, json={"id": "queue.redis_ca_certs", "value": str(tmp_path / "x")})
+    assert r.json()["ok"] is False
+    assert r.json()["message"] == "Nothing was found at that location on the server."
+    assert "queue" not in _loaded() and audit_rows == []
+
+
+# ----------------------------------------------------------------- checks
+def test_checks_answer_in_one_sentence_and_never_echo_secrets(monkeypatch, audit_rows):
+    seen = {}
+
+    def fake_fetch(url, headers=None):
+        seen["url"], seen["headers"] = url, dict(headers or {})
+        return 401, b"denied: " + _SECRET.encode()
+
+    monkeypatch.setattr(settings_tests, "fetch", fake_fetch)
+    assert _save([{"id": "license.api_url", "value": _TEXT["license.api_url"]}]).status_code == 200
+    r = client.post(CHECK, json={"id": "license.api_token", "value": _SECRET})
+    assert r.status_code == 200
+    assert r.json() == {"ok": False, "message": "Lightwork reached your license service, "
+                                                "but it did not accept the access key."}
+    assert _SECRET not in r.text
+    assert seen["headers"]["Authorization"] == "Bearer " + _SECRET
+    assert "license" not in _loaded() or "api_token" not in _loaded()["license"]
+
+
+def test_checks_refuse_private_addresses_through_the_network_guard(audit_rows):
+    r = client.post(CHECK, json={"id": "external_agents.approval_webhook",
+                                 "value": "https://127.0.0.1/hook"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False and "private network" in r.json()["message"]
+    r = client.post(CHECK, json={"id": "grpc_dispatch.target", "value": "10.0.0.8:50051"})
+    assert r.json()["ok"] is False and "private network" in r.json()["message"]
+
+
+def test_check_validates_the_entered_value_first(audit_rows):
+    r = client.post(CHECK, json={"id": "external_agents.approval_webhook",
+                                 "value": "http://hooks.example.com"})
+    assert r.json() == {"ok": False, "message": "Approval requests for outside agents go to: "
+                                                "this value is not in the expected form."}
+
+
+def test_checks_are_admin_same_origin_bounded_and_only_where_offered(monkeypatch, audit_rows):
+    assert TestClient(app).post(CHECK, json={"id": "license.api_url"}).status_code == 403
+    r = client.post(CHECK, json={"id": "safety.profile"})
+    assert r.status_code == 404 and r.json()["message"] == "This setting has nothing to test."
+    monkeypatch.setattr(page, "_CHECK_LIMIT", 2)
+    monkeypatch.setattr(settings_tests, "fetch", lambda url, headers=None: (200, b"{}"))
+    for _ in range(2):
+        assert client.post(CHECK, json={"id": "external_agents.approval_webhook",
+                                        "value": "https://hooks.example.com/x"}).status_code == 200
+    r = client.post(CHECK, json={"id": "external_agents.approval_webhook",
+                                 "value": "https://hooks.example.com/x"})
+    assert r.status_code == 429 and "Wait a minute" in r.json()["message"]
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:vera", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vera")
+    monkeypatch.setattr(page, "_CHECK_TIMES", [])
+    assert client.post(CHECK, json={"id": "license.api_url"}).status_code == 403
+
+
+def _oidc_fetch(issuer="https://login.example.com/realm", keys=True):
+    def fetch(url, headers=None):
+        if url.endswith("/.well-known/openid-configuration"):
+            import json
+
+            return 200, json.dumps({
+                "issuer": issuer, "authorization_endpoint": issuer + "/auth",
+                "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/keys",
+            }).encode()
+        return 200, b'{"keys": [{"kty": "RSA"}]}' if keys else b'{"keys": []}'
+    return fetch
+
+
+def test_the_sign_in_provider_check(monkeypatch):
+    values = {"auth.oidc.issuer": "https://login.example.com/realm"}
+    monkeypatch.setattr(settings_tests, "fetch", _oidc_fetch())
+    assert settings_tests.check_oidc(values).ok
+    monkeypatch.setattr(settings_tests, "fetch", _oidc_fetch(issuer="https://other.example"))
+    assert "different address" in settings_tests.check_oidc(values).message
+    monkeypatch.setattr(settings_tests, "fetch", _oidc_fetch(keys=False))
+    assert not settings_tests.check_oidc(values).ok
+    assert not settings_tests.check_oidc({}).ok
+
+
+def test_the_key_service_check_opens_the_keys_already_in_use(tmp_path, monkeypatch):
+    pytest.importorskip("cryptography")
+    from maverick.tenant import kms as tenant_kms
+
+    assert settings_tests.check_kms({"kms.provider": "local"}).ok
+    path = tenant_kms._wrapped_dek_path(None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"not a wrapped key")
+    outcome = settings_tests.check_kms({"kms.provider": "local"})
+    assert not outcome.ok and "saved records would become unreadable" in outcome.message
+    assert not settings_tests.check_kms({"kms.provider": "aws"}).ok
+
+
+# ------------------------------------------------------------- safety
+def test_loosening_access_rows_needs_confirmation(as_token, audit_rows):
+    for change in (
+        {"id": "auth.saml.want_assertions_signed", "value": False},
+        {"id": "dashboard.max_request_mb", "value": 2000},
+        {"id": "enterprise.allowed_hosts", "value": ["api.example.com"]},
+        {"id": "audit.worm.mode", "value": "GOVERNANCE"},
+        {"id": "world_model.synchronous", "value": "NORMAL"},
+    ):
+        if change["id"] == "world_model.synchronous":
+            assert _save([{"id": change["id"], "value": "FULL"}]).status_code == 200
+        r = _save([change])
+        assert r.status_code == 409, change
+        assert r.json()["confirm"][0]["id"] == change["id"]
+        assert _save([change], confirm=True).status_code == 200
+    assert audit_rows[-1]["confirmed"] is True
+
+
+def test_cross_checks_keep_the_kernel_startable(as_token, audit_rows):
+    r = _save([{"id": "client.enforce", "value": True}], confirm=True)
+    assert r.status_code == 409 and "no client name" in r.json()["message"]
+    r = _save([{"id": "audit.worm.provider", "value": "s3"}], confirm=True)
+    assert r.status_code == 400 and "Storage bucket" in r.json()["message"]
+    r = _save([{"id": "audit.unified.custody.retry_backoff_seconds", "value": 600},
+               {"id": "audit.unified.custody.max_retry_backoff_seconds", "value": 60}],
+              confirm=True)
+    assert r.status_code == 400
+    r = _save([{"id": "queue.backend", "value": "arq"}], confirm=True)
+    assert r.status_code == 409 and "queue key" in r.json()["message"]
+    r = _save([{"id": "world_model.backend", "value": "postgres"}], confirm=True)
+    assert r.status_code == 409 and "connection filled in" in r.json()["message"]
+    assert "queue" not in _loaded() and "world_model" not in _loaded()
+
+
+def test_the_off_server_signing_key_is_needed_first(monkeypatch, as_token, audit_rows):
+    from maverick.audit import signing
+
+    monkeypatch.setattr(signing, "active_key_is_offhost", lambda: False)
+    r = _save([{"id": "audit.require_offhost_key", "value": True}], confirm=True)
+    assert r.status_code == 409 and "Set up that key first" in r.json()["message"]
+    monkeypatch.setattr(signing, "active_key_is_offhost", lambda: True)
+    assert _save([{"id": "audit.require_offhost_key", "value": True}],
+                 confirm=True).status_code == 200
+
+
+def test_key_service_changes_are_checked_then_confirmed(monkeypatch, as_token, audit_rows):
+    outcome = settings_tests.Outcome(False, "Lightwork could not use this key service.")
+    monkeypatch.setattr(settings_tests, "check_kms", lambda values: outcome)
+    r = _save([{"id": "kms.key_id", "value": "alias/lightwork"},
+               {"id": "kms.provider", "value": "aws"}], confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert "Nothing was changed" in r.json()["message"]
+    assert "kms" not in _loaded() and audit_rows == []
+    monkeypatch.setattr(settings_tests, "check_kms",
+                        lambda values: settings_tests.Outcome(True, "ok"))
+    r = _save([{"id": "kms.key_id", "value": "alias/lightwork"},
+               {"id": "kms.provider", "value": "aws"}])
+    assert r.status_code == 409
+    assert any(item.get("kind") == "access" for item in r.json()["confirm"])
+    r = _save([{"id": "kms.key_id", "value": "alias/lightwork"},
+               {"id": "kms.provider", "value": "aws"}], confirm=True)
+    assert r.status_code == 200 and _loaded()["kms"]["provider"] == "aws"
+
+
+# ------------------------------------------------------------ lock-out
+def test_turning_on_company_sign_in_needs_a_passing_test(monkeypatch, audit_rows):
+    base = [{"id": "auth.oidc.issuer", "value": _TEXT["auth.oidc.issuer"]},
+            {"id": "auth.oidc.client_id", "value": "lightwork"},
+            {"id": "auth.oidc.session_secret", "value": _SECRET}]
+    fail = settings_tests.Outcome(False, "Lightwork could not reach this address. Check it "
+                                         "and try again.")
+    monkeypatch.setattr(settings_tests, "check_oidc", lambda values: fail)
+    r = _save([*base, {"id": "auth.oidc.enabled", "value": True}], confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert "would lock you out" in r.json()["message"]
+    assert "auth" not in _loaded() and audit_rows == []
+
+    monkeypatch.setattr(settings_tests, "check_oidc",
+                        lambda values: settings_tests.Outcome(True, "ok"))
+    r = _save([*base, {"id": "auth.oidc.enabled", "value": True}], confirm=True)
+    assert r.status_code == 409 and "nobody would be an administrator" in r.json()["message"]
+
+    with_admin = [*base, {"id": "dashboard.admins", "value": ["user:ada@example.com"]},
+                  {"id": "auth.oidc.enabled", "value": True}]
+    r = _save(with_admin)
+    assert r.status_code == 409
+    confirm = [item for item in r.json()["confirm"] if item.get("kind") == "access"]
+    assert confirm and "sign in again with your company sign-in" in confirm[0]["warning"]
+    assert _save(with_admin, confirm=True).status_code == 200
+    assert _loaded()["auth"]["oidc"]["enabled"] is True
+
+
+def test_half_set_up_single_sign_on_is_refused(audit_rows):
+    # Any single sign-on detail ends access without sign-in on this computer.
+    r = _save([{"id": "auth.saml.acs_url", "value": _TEXT["auth.saml.acs_url"]}], confirm=True)
+    assert r.status_code == 409 and "isn't fully set up" in r.json()["message"]
+    assert "auth" not in _loaded()
+
+
+def test_requiring_sign_in_with_nothing_set_up_is_refused(audit_rows):
+    r = _save([{"id": "dashboard.require_auth", "value": True}], confirm=True)
+    assert r.status_code == 409 and "refuse to start" in r.json()["message"]
+
+
+def test_turning_on_invitations_or_the_proxy_from_an_unsigned_session_is_refused(audit_rows):
+    r = _save([{"id": "dashboard.invites", "value": True}], confirm=True)
+    assert r.status_code == 409 and "owner account first" in r.json()["message"]
+    r = _save([{"id": "auth.proxy.trusted_proxies", "value": ["10.0.0.5"]},
+               {"id": "auth.proxy.enabled", "value": True}], confirm=True)
+    assert r.status_code == 409 and "company proxy" in r.json()["message"]
+
+
+def test_enterprise_protections_from_an_unsigned_session_are_refused(audit_rows):
+    r = _save([{"id": "enterprise.mode", "value": True}], confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert "enterprise" not in _loaded()
+
+
+def test_the_access_token_is_the_break_glass_way_in(as_token, audit_rows):
+    r = _save([{"id": "dashboard.invites", "value": True}], confirm=True)
+    assert r.status_code == 200
+
+
+def _invite_client(email: str) -> TestClient:
+    """A browser signed in with an invitation session (a real, signed cookie)."""
+    from maverick_dashboard import invites
+
+    return TestClient(app, headers={"Origin": "http://testserver"},
+                      cookies={"mvk_session": invites.mint_local_session(email)})
+
+
+def _base_config(text: str) -> None:
+    from maverick import config
+
+    config.config_path().parent.mkdir(parents=True, exist_ok=True)
+    config.config_path().write_text(text, encoding="utf-8")
+    config.reset_config_cache()
+
+
+def test_you_cannot_remove_your_own_administrator_access(audit_rows):
+    _base_config('[dashboard]\ninvites = true\n'
+                 'admins = ["user:ada@example.com", "user:bo@example.com"]\n')
+    ada = _invite_client("ada@example.com")
+    r = _save([{"id": "dashboard.admins", "value": ["user:bo@example.com"]}], confirm=True,
+              http=ada)
+    assert r.status_code == 409 and "your own administrator access" in r.json()["message"]
+    r = _save([{"id": "dashboard.default_role", "value": "viewer"}], confirm=True, http=ada)
+    assert r.status_code == 200, r.text  # ada stays an administrator through the list
+    bo = _invite_client("bo@example.com")
+    assert _save([{"id": "dashboard.admins", "value": ["user:bo@example.com"]}],
+                 confirm=True, http=bo).status_code == 200
+
+
+def test_turning_off_the_way_you_signed_in_is_refused(audit_rows):
+    _base_config('[dashboard]\ninvites = true\nadmins = ["user:ada@example.com"]\n')
+    ada = _invite_client("ada@example.com")
+    assert _save([{"id": "dashboard.invite_email", "value": False}], http=ada).status_code == 200
+    r = _save([{"id": "dashboard.invites", "value": False}], confirm=True, http=ada)
+    assert r.status_code == 409 and "no working way back in" in r.json()["message"]
+    r = _save([{"id": "dashboard.session_secret", "value": _SECRET}], confirm=True, http=ada)
+    assert r.status_code == 409 and "no working way back in" in r.json()["message"]
+    assert "session_secret" not in _loaded()["dashboard"]
+    assert _loaded()["dashboard"]["invites"] is True
+
+
+def _request(host="10.0.0.5", headers=None):
+    return SimpleNamespace(client=SimpleNamespace(host=host), headers=headers or {},
+                           state=SimpleNamespace(principal=None))
+
+
+def test_a_proxy_session_survives_only_while_its_proxy_stays_trusted():
+    before = guard.access_for({"auth": {"proxy": {"enabled": True,
+                                                  "trusted_proxies": ["10.0.0.5"]}}})
+    request = _request(headers={"X-Forwarded-User": "ada"})
+    assert guard._route_survives("proxy", request, before, before)
+    moved = guard.access_for({"auth": {"proxy": {"enabled": True,
+                                                 "trusted_proxies": ["10.9.9.9"]}}})
+    assert not guard._route_survives("proxy", request, before, moved)
+    renamed = guard.access_for({"auth": {"proxy": {"enabled": True, "header": "X-User",
+                                                   "trusted_proxies": ["10.0.0.5"]}}})
+    assert not guard._route_survives("proxy", request, before, renamed)
+
+
+def test_invitation_sessions_end_when_company_sign_in_takes_over():
+    before = guard.access_for({"dashboard": {"invites": True}})
+    after = guard.access_for({"dashboard": {"invites": True}, "auth": {"oidc": {
+        "enabled": True, "client_id": "x", "session_secret": _SECRET,
+        "issuer": "https://login.example.com"}}})
+    assert guard._route_survives("invite", _request(), before, before)
+    assert not guard._route_survives("invite", _request(), before, after)
+
+
+def test_turning_everything_off_on_this_computer_opens_it_again(monkeypatch):
+    before = guard.access_for({"dashboard": {"invites": True}})
+    after = guard.access_for({"dashboard": {"invites": False}})
+    assert after.anonymous_ok
+    warning = guard._way_back(_request(host="127.0.0.1"), "invite", "user:ada@example.com",
+                              {}, after, {})
+    assert "open again without sign-in" in warning
+    with pytest.raises(guard.Refused):
+        guard._way_back(_request(host="10.0.0.7"), "invite", "user:ada@example.com",
+                        {}, after, {})
+    assert before.invites and not after.invites
+
+
+# ------------------------------------------------------------ readers
+def test_governed_record_store_follows_the_saved_choice(monkeypatch, as_token, audit_rows):
+    from maverick import governed_records
+
+    monkeypatch.setattr(guard, "_prerequisites", lambda changed, values: None)
+    assert governed_records._selection().kind == "local"
+    r = _save([{"id": "world_model.dsn", "value": _SECRETS["world_model.dsn"]},
+               {"id": "governed_records.backend", "value": "postgres"},
+               {"id": "governed_records.pool_size", "value": 4}], confirm=True)
+    assert r.status_code == 200, r.text
+    selected = governed_records._selection()
+    assert selected.kind == "postgres" and selected.dsn == _SECRETS["world_model.dsn"]
+    assert selected.pool_size == 4
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "local")
+    assert governed_records._selection().kind == "local"  # the environment still wins
+
+
+def test_saved_values_reach_their_kernel_readers(monkeypatch, tmp_path, as_token, audit_rows):
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme-corp")  # chosen at install
+    from maverick import client as binding
+    from maverick import grpc_tls, oidc, paths, proxy_auth, share_link
+    from maverick.tenant import kms as tenant_kms
+    from maverick.world_model_backends import postgres
+    from maverick_dashboard import invites, request_size
+
+    monkeypatch.setattr(guard, "_prerequisites", lambda changed, values: None)
+    monkeypatch.setattr(settings_tests, "check_kms",
+                        lambda values: settings_tests.Outcome(True, "ok"))
+    r = _save([
+        {"id": "auth.oidc.issuer", "value": _TEXT["auth.oidc.issuer"]},
+        {"id": "auth.proxy.header", "value": "X-Auth-User"},
+        {"id": "dashboard.max_request_mb", "value": 50},
+        {"id": "dashboard.invite_session_days", "value": 7},
+        {"id": "sharing.secret", "value": _SECRET},
+        {"id": "tenancy.by_user", "value": True},
+        {"id": "grpc.tls", "value": True},
+        {"id": "kms.dek_cache_ttl", "value": 120},
+        {"id": "world_model.dsn", "value": _SECRETS["world_model.dsn"]},
+        {"id": "client.enforce", "value": True},
+    ], confirm=True)
+    assert r.status_code == 200, r.text
+    binding.reset_client_cache()
+    assert oidc.load_oidc_config().issuer == _TEXT["auth.oidc.issuer"]
+    assert proxy_auth.proxy_header_name() == "X-Auth-User"
+    assert request_size.max_request_bytes() == 50 * 1024 * 1024
+    assert invites.session_ttl_seconds() == 7 * 86400
+    assert share_link._secret() == _SECRET
+    assert paths.tenant_by_user_enabled() is True
+    assert grpc_tls.tls_enabled("grpc") is True and grpc_tls._section("elsewhere") == {}
+    assert tenant_kms._dek_cache_ttl() == 120
+    assert postgres._configured_dsn() == _SECRETS["world_model.dsn"]
+    assert binding.client_id() == "acme-corp" and binding.client_binding_enforced() is True
+    stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert _SECRET not in stored and "pw@db" not in stored
+    monkeypatch.setenv("MAVERICK_PG_DSN", "postgres://env@db/lightwork")
+    monkeypatch.setenv("MAVERICK_SHARE_SECRET", "from-the-environment")
+    assert share_link._secret() == "from-the-environment"
+    assert _row("sharing.secret")["locked"] is True
+
+
+def test_the_dashboard_session_key_is_sealed_in_the_settings_file(tmp_path, as_token,
+                                                                 audit_rows):
+    from maverick import config
+    from maverick_dashboard import invites, settings_store
+
+    r = _save([{"id": "dashboard.session_secret", "value": _SECRET}], confirm=True)
+    assert r.status_code == 200
+    raw = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert _SECRET not in raw and "MVKAR1:" in raw
+    assert invites.local_session_secret() == _SECRET
+    settings_store.set_toggle("features", "skills", False)  # another save keeps it sealed
+    raw = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert _SECRET not in raw and "MVKAR1:" in raw
+
+
+def test_the_page_shows_the_new_controls_in_plain_language(workspaces):
+    from test_support.plain_language import developer_terms
+
+    html = client.get("/settings/all").text
+    assert "Server &amp; deployment" in html
+    assert "Test connection" in html and "Check this location" in html
+    assert 'data-control="path"' in html
+    assert developer_terms(html) == []
