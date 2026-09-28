@@ -43,7 +43,30 @@ def _record(request: Request, verb: str, **detail) -> None:
 @router.get("")
 async def services(request: Request) -> dict:
     require_global_permission(request, "admin")
-    return {"services": await run_in_threadpool(service_supervisor.status)}
+    from . import dashboard_restart
+    return {"services": await run_in_threadpool(service_supervisor.status),
+            "dashboard": dashboard_restart.status(request.app)}
+
+
+class RestartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: bool = Field(default=False, strict=True)
+
+
+@router.post("/dashboard/restart")
+async def restart_dashboard(body: RestartIn, request: Request) -> dict:
+    """Restart this dashboard, only where a supervisor will start it again."""
+    _mutation(request)
+    from . import dashboard_restart
+    state = dashboard_restart.status(request.app)
+    if not state["can_restart"]:
+        raise HTTPException(409, state["note"])
+    if body.confirm is not True:
+        raise HTTPException(409, "Confirm to restart this app. Nothing was changed.")
+    await run_in_threadpool(_record, request, "dashboard_restart", supervisor=state["supervisor"])
+    dashboard_restart.request(request.app)
+    return {"restarting": True,
+            "summary": "Restarting. This page reconnects when the app is back, usually within a minute."}
 
 
 async def _act(request: Request, body: ServiceIn, verb: str, action) -> dict:

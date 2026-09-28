@@ -163,3 +163,122 @@ def test_shutdown_supervisor_knows_about_the_services():
             pass
     _lifecycle.register_main_components(App, recorder)
     assert "services" in recorder.names
+
+
+# ---- restarting this dashboard -------------------------------------------------
+
+@pytest.mark.parametrize("environ, marker, kind, restarts", [
+    ({"MAVERICK_DESKTOP_CONTROL": "stdin-v1", "INVOCATION_ID": "x"}, False, "desktop", False),
+    ({"KUBERNETES_SERVICE_HOST": "10.0.0.1"}, False, "kubernetes", True),
+    ({"INVOCATION_ID": "abc"}, False, "systemd", None),
+    ({}, True, "container", None),
+    ({}, False, "none", False),
+])
+def test_what_would_start_the_dashboard_again(environ, marker, kind, restarts):
+    from maverick_dashboard.dashboard_restart import supervision
+    info = supervision(environ, exists=lambda path: marker and path == "/.dockerenv")
+    assert info["kind"] == kind and info["restarts"] is restarts and info["note"]
+
+
+@pytest.fixture
+def restartable(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick_dashboard import dashboard_restart
+    from maverick_dashboard.app import app
+    server = SimpleNamespace(should_exit=False)
+    monkeypatch.setattr(app.state, "dashboard_server", server, raising=False)
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    dashboard_restart._reset_for_tests()
+    yield server
+    dashboard_restart._reset_for_tests()
+
+
+def test_an_unsupervised_dashboard_says_plainly_it_cannot_restart_itself(client, monkeypatch):
+    from maverick_dashboard.app import app
+    for name in ("KUBERNETES_SERVICE_HOST", "INVOCATION_ID", "MAVERICK_DESKTOP_CONTROL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(app.state, "dashboard_server", None, raising=False)
+    from maverick_dashboard import dashboard_restart
+    monkeypatch.setattr(dashboard_restart.os.path, "exists", lambda path: False)
+    row = client.get(BASE).json()["dashboard"]
+    assert row["can_restart"] is False and "started by hand" in row["note"]
+    refused = client.post(f"{BASE}/dashboard/restart", json={"confirm": True})
+    assert refused.status_code == 409 and "started by hand" in refused.json()["detail"]
+    monkeypatch.setenv("INVOCATION_ID", "abc")  # supervised, but launched without Lightwork's start command
+    assert "can't restart itself" in client.get(BASE).json()["dashboard"]["note"]
+
+
+def test_a_supervised_dashboard_restarts_gracefully_with_confirmation_and_a_record(client, monkeypatch, restartable):
+    from maverick_dashboard import auth, dashboard_restart
+    row = client.get(BASE).json()["dashboard"]
+    assert row["can_restart"] is True and row["supervisor"] == "kubernetes"
+    assert client.post(f"{BASE}/dashboard/restart", json={}).status_code == 409
+    seen = _audit_verbs(monkeypatch)
+    done = client.post(f"{BASE}/dashboard/restart", json={"confirm": True})
+    assert done.status_code == 200 and done.json()["restarting"] is True
+    assert _eventually(lambda: restartable.should_exit is True)
+    assert dashboard_restart.requested() is True
+    assert any(p.get("verb") == "dashboard_restart" and p.get("supervisor") == "kubernetes" for p in seen)
+    _as(monkeypatch, "viewer", "user:wanda")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")  # a workspace admin
+    assert client.post(f"{BASE}/dashboard/restart", json={"confirm": True}).status_code == 403
+
+
+@pytest.fixture
+def logging_state():
+    """The command configures process-wide logging; put it back for later tests."""
+    import logging
+
+    from maverick import logging_config
+    configured = logging_config._configured
+    root = logging.getLogger()
+    saved = (root.level, root.handlers[:], root.filters[:])
+    handler_filters = {id(h): h.filters[:] for h in root.handlers}
+    loggers = {name: (lg.level, lg.propagate, lg.disabled, lg.handlers[:], lg.filters[:])
+               for name, lg in logging.Logger.manager.loggerDict.items() if isinstance(lg, logging.Logger)}
+    yield
+    # The command's logging set-up runs once per process; a later command in
+    # the same test process must configure it afresh, as it would alone.
+    logging_config._configured = configured
+    root.setLevel(saved[0])
+    root.handlers[:] = saved[1]
+    root.filters[:] = saved[2]
+    for handler in root.handlers:
+        handler.filters[:] = handler_filters.get(id(handler), handler.filters)
+    for name, lg in logging.Logger.manager.loggerDict.items():
+        if isinstance(lg, logging.Logger) and name in loggers:
+            level, propagate, disabled, handlers, filters = loggers[name]
+            lg.setLevel(level)
+            lg.propagate, lg.disabled = propagate, disabled
+            lg.handlers[:], lg.filters[:] = handlers, filters
+
+
+def test_launchers_exit_with_the_restart_code_after_a_requested_restart(monkeypatch, logging_state):
+    import uvicorn
+    from click.testing import CliRunner
+    from maverick.cli import main
+    from maverick_dashboard import _server, dashboard_restart
+    from maverick_dashboard.app import app
+
+    def serve_then(restart):
+        def run(self, sockets=None):
+            self.started = True
+            if restart:
+                dashboard_restart.request(app, delay=0)
+        return run
+    for name in ("MAVERICK_DESKTOP_CONTROL", "WEB_CONCURRENCY", "MAVERICK_DASHBOARD_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    try:
+        monkeypatch.setattr(uvicorn.Server, "run", serve_then(False))
+        assert CliRunner().invoke(main, ["dashboard"]).exit_code == 0
+        monkeypatch.setattr(uvicorn.Server, "run", serve_then(True))
+        result = CliRunner().invoke(main, ["dashboard"])
+        assert result.exit_code == dashboard_restart.RESTART_EXIT_CODE == 75, result.output
+        monkeypatch.setattr(_server.DashboardServer, "run", serve_then(True))
+        with pytest.raises(SystemExit) as exited:
+            _server.run_dashboard_server(app, host="127.0.0.1", port=0)
+        assert exited.value.code == 75
+    finally:
+        dashboard_restart._reset_for_tests()
+        app.state.dashboard_server = None

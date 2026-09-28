@@ -2914,7 +2914,26 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         proxy_kwargs = uvicorn_launch_kwargs()
     except Exception:  # pragma: no cover - never block startup on a config read
         proxy_kwargs = {}
-    uvicorn.run(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
+    config = uvicorn.Config(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
+    if config.reload or config.workers > 1:
+        # uvicorn.run's own refusal for an app object (one control plane per data root).
+        logging.getLogger("uvicorn.error").warning(
+            "You must pass the application as an import string to enable 'reload' or 'workers'.")
+        sys.exit(3)
+    server = uvicorn.Server(config)
+    from maverick_dashboard.dashboard_restart import RESTART_EXIT_CODE, register_server, requested
+    # Settings > Maintenance can ask a supervised copy (systemd, a container
+    # engine, Kubernetes) to restart: the server stops gracefully and this
+    # command exits with a failure code so the supervisor starts it again.
+    register_server(fastapi_app, server)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
+    if not server.started:
+        sys.exit(3)
+    if requested():
+        sys.exit(RESTART_EXIT_CODE)
 
 
 @main.command()
@@ -6141,18 +6160,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
         )
         click.confirm("Proceed?", abort=True)
 
-    def _prune(world) -> tuple[int, int, int]:
-        convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
-        events = world.prune_goal_events(
-            older_than_seconds=events_days * 24 * 3600
-        )
-        # Twilio dedup rows accumulate one-per-webhook forever; reap after
-        # 30 days (the retry window is minutes so this is generous).
-        dedup = world.prune_processed_messages(
-            older_than_seconds=30 * 24 * 3600
-        )
-        return int(convs), int(events), int(dedup)
-
+    from ..records_gc import prune_world, sweep_workspaces
     from ..world_model import close_world_if_owned
     from ..world_model_backends import is_postgres_configured
 
@@ -6160,7 +6168,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
     # implicit delete-all authority. Routine GC fans out through each explicit
     # roster tenant; a true global purge requires a separate purpose-built API.
     if is_postgres_configured():
-        from ..paths import current_tenant_id, tenant_scope
+        from ..paths import current_tenant_id
         if current_tenant_id() is None:
             from ..tenant.registry import list_tenants
             try:
@@ -6174,17 +6182,11 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
                     "refusing unbound Postgres GC: bind a tenant or provision "
                     "the tenant roster; global delete is not implicit"
                 )
-            convs = events = dedup = 0
-            for record in tenants:
-                with tenant_scope(tenant=record.id):
-                    world = open_world()
-                    try:
-                        c, e, d = _prune(world)
-                    finally:
-                        close_world_if_owned(world)
-                convs += c
-                events += e
-                dedup += d
+            rows = sweep_workspaces(tenants, days=days, events_days=events_days,
+                                    open_world=open_world)
+            convs = sum(row["conversations"] for row in rows)
+            events = sum(row["activity"] for row in rows)
+            dedup = sum(row["duplicate_checks"] for row in rows)
             click.echo(
                 f"pruned {convs} conversation(s), {events} goal_event row(s), "
                 f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
@@ -6193,7 +6195,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
 
     world = open_world(ctx.obj["db"])
     try:
-        convs, events, dedup = _prune(world)
+        convs, events, dedup = prune_world(world, days=days, events_days=events_days)
     finally:
         close_world_if_owned(world)
     click.echo(
