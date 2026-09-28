@@ -453,10 +453,23 @@ def _dump_selector_sections(lines: list[str], data: dict) -> None:
         keys = [k for k in sorted(tbl) if tbl[k] is not None and tbl[k] != ""]
         if not keys:
             continue
+        sealed = _dashboard_secret_keys() if section == "dashboard" else frozenset()
         lines.append(f"[{section}]")
         for k in keys:
-            lines.append(f"{_toml_key(k)} = {_toml_value(tbl[k])}")
+            value = tbl[k]
+            if k in sealed and isinstance(value, str):
+                # The sign-in session key: never written in the clear, even
+                # when it arrived from a hand-edited overlay.
+                value = _seal_global_secret(value)
+            lines.append(f"{_toml_key(k)} = {_toml_value(value)}")
         lines.append("")
+
+
+def _dashboard_secret_keys() -> frozenset[str]:
+    """[dashboard] keys the All settings page keeps sealed."""
+    from .settings_catalog import SETTINGS
+
+    return frozenset(s.key for s in SETTINGS if s.section == "dashboard" and s.secret)
 
 
 def _dump_plugins(lines: list[str], plugins: dict) -> None:

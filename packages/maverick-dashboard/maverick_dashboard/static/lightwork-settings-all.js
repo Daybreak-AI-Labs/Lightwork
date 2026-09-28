@@ -32,7 +32,7 @@
     var control = row.dataset.control;
     var input = row.querySelector('[data-input]');
     if (control === 'toggle') return input ? input.checked : null;
-    if (control === 'select' || control === 'text') return input ? input.value : null;
+    if (control === 'select' || control === 'text' || control === 'path') return input ? input.value : null;
     if (control === 'number') {
       if (!input) return null;
       var raw = input.value.trim();
@@ -93,7 +93,7 @@
     var control = row.dataset.control;
     var input = row.querySelector('[data-input]');
     if (control === 'toggle' && input) input.checked = data.value === true;
-    else if ((control === 'select' || control === 'text') && input) input.value = data.value == null ? '' : String(data.value);
+    else if ((control === 'select' || control === 'text' || control === 'path') && input) input.value = data.value == null ? '' : String(data.value);
     else if (control === 'number' && input) input.value = data.value == null ? '' : String(data.value);
     else if (control === 'multiselect') {
       row.querySelectorAll('[data-choice]').forEach(function (box) {
@@ -168,7 +168,43 @@
   }
   function warningText(list) {
     var lines = list.map(function (item) { return item.label + ': ' + item.warning; });
-    return 'This lowers a protection. ' + lines.join(' ') + ' Do you want to go ahead?';
+    var access = list.some(function (item) { return item.kind === 'access'; });
+    var lowers = list.some(function (item) { return item.kind !== 'access'; });
+    var lead = lowers ? 'This lowers a protection. ' : '';
+    if (access) lead += 'This changes how people get into Lightwork. ';
+    return lead + lines.join(' ') + ' Do you want to go ahead?';
+  }
+
+  // ---- "Test connection" / "Check this location" ------------------------------
+  function checkValue(row) {
+    var control = row.dataset.control;
+    var input = row.querySelector('[data-input]');
+    if (control === 'secret') {
+      return input && !input.hidden && input.value.trim() ? input.value : null;
+    }
+    if (control === 'text' || control === 'path' || control === 'select') {
+      var value = read(row);
+      return value && String(value).trim() ? value : null;
+    }
+    return null;  // other controls: check what is saved now
+  }
+  async function runCheck(row, button) {
+    say(row, 'Checking…');
+    button.disabled = true;
+    try {
+      var response = await window.fetch(API + '/test', {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+        body: JSON.stringify({id: row.dataset.settingId, value: checkValue(row)})
+      });
+      var data = null;
+      try { data = await response.json(); } catch (ignore) { data = null; }
+      say(row, data && typeof data.message === 'string' ? data.message : errorText(response, 'run the check'));
+    } catch (failure) {
+      say(row, errorText(failure, 'run the check'));
+    } finally {
+      button.disabled = false;
+    }
   }
   async function commit(changes, busyRows, action) {
     if (!changes.length) {
@@ -233,6 +269,8 @@
         ? [] : [{id: row.dataset.settingId, value: read(row)}];
       if (!single.length) { say(row, 'Choose Replace and enter a value first.'); return; }
       await commit(single, [row], 'save the setting');
+    } else if (target.hasAttribute('data-test') && row) {
+      await runCheck(row, target);
     } else if (target.hasAttribute('data-reset') && row) {
       if (row.dataset.source === 'default' && !changed(row)) {
         say(row, 'Already using the default.');
