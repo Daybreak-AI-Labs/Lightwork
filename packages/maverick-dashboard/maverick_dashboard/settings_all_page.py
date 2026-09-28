@@ -320,6 +320,10 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
             groups = {}
         names = sorted({str(g.get("displayName") or "").strip() for g in groups.values()} - {""})
         return [(name, name) for name in names]
+    if source in {"voice_programs", "voice_model_files"}:
+        from .settings_catalog_integrations import voice_choices
+
+        return voice_choices(source)
     if source == "ekko_apps":
         from maverick.config import _EKKO_DEFAULT_BLOCKED_APPS
         from maverick.work_discovery import KNOWN_APPS

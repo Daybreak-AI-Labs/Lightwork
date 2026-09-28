@@ -70,6 +70,21 @@ class WebhookPayload:
     sender_login: str = ""
 
 
+def webhook_secret() -> str:
+    """The GitHub App webhook secret: ``MAVERICK_GH_APP_WEBHOOK_SECRET`` wins;
+    otherwise ``[github] app_webhook_secret``, saved sealed on the All settings
+    page and opened by ``load_config``. Empty means requests are refused."""
+    env = os.environ.get("MAVERICK_GH_APP_WEBHOOK_SECRET", "").strip()
+    if env:
+        return env
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("github") or {}).get("app_webhook_secret")
+    except Exception:  # pragma: no cover - unreadable config means "not set"
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def verify_signature(
     body: bytes,
     signature_header: str | None,
@@ -87,7 +102,8 @@ def verify_signature(
     if not secret:
         log.warning(
             "GH webhook signature check FAILED CLOSED: no secret configured "
-            "(set MAVERICK_GH_APP_WEBHOOK_SECRET). Rejecting the request."
+            "(set MAVERICK_GH_APP_WEBHOOK_SECRET or the GitHub app webhook "
+            "secret in All settings). Rejecting the request."
         )
         return False
     if not signature_header or not signature_header.startswith("sha256="):

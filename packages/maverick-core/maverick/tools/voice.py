@@ -261,27 +261,34 @@ _WHISPER_CPP_NAMES = ("whisper-cli", "whisper-cpp", "whisper.cpp")
 def _find_whisper_cpp() -> str | None:
     """The whisper.cpp executable, or None.
 
-    Order: ``MAVERICK_WHISPER_CPP`` env > ``[voice] whisper_cpp_bin`` config
-    (either may be a PATH name or a file path) > well-known PATH names >
+    Order: ``MAVERICK_WHISPER_CPP`` env (a PATH name or a file path) >
+    ``[voice] whisper_cpp_bin`` (a program in ``<maverick_home>/bin`` chosen on
+    the All settings page, checked again here before it runs: it must stay
+    inside that folder and be executable) > well-known PATH names >
     ``<maverick_home>/bin`` (where desktop installers drop a bundled binary).
     """
-    from ..voice_models import _voice_cfg
-    for raw in (os.environ.get("MAVERICK_WHISPER_CPP"),
-                _voice_cfg().get("whisper_cpp_bin")):
-        if raw:
-            found = shutil.which(str(raw))
-            if found:
-                return found
-            log.warning("configured whisper.cpp binary %r not found", raw)
+    from ..voice_models import _voice_cfg, checked_program
+    raw = os.environ.get("MAVERICK_WHISPER_CPP")
+    if raw:
+        found = shutil.which(str(raw))
+        if found:
+            return found
+        log.warning("configured whisper.cpp binary %r not found", raw)
+    chosen = _voice_cfg().get("whisper_cpp_bin")
+    if chosen:
+        program = checked_program(chosen)
+        if program is not None:
+            return str(program)
+        log.warning("[voice] whisper_cpp_bin %r is not an approved program in "
+                    "Lightwork's programs folder; ignoring it (MAVERICK_WHISPER_CPP "
+                    "names a program elsewhere)", chosen)
     for name in _WHISPER_CPP_NAMES:
         found = shutil.which(name)
         if found:
             return found
-    from ..paths import maverick_home
-    for name in _WHISPER_CPP_NAMES:
-        cand = maverick_home() / "bin" / name
-        if cand.is_file() and os.access(cand, os.X_OK):
-            return str(cand)
+    from ..voice_models import approved_programs
+    for cand in approved_programs():  # stays inside the folder, executable
+        return str(cand)
     return None
 
 

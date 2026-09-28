@@ -5,7 +5,8 @@ editing the shared catalog. entries receives the catalog's own row and
 column types (a plain import would be circular).
 
 Covers the tools agents use to reach email, calendars, an ERP system, GitHub
-and Obsidian; issue-tracker and webhook delivery settings; alert batching and
+and Obsidian; issue-tracker and webhook delivery settings and their sealed
+secrets; the sealed Stripe and Microsoft 365 keys; alert batching and
 operational alerts; tax-figure updates; billing plans, Stripe prices and
 refunds; vendor-onboarding read retries; and voice input. Every row names the
 kernel module that reads it, and each environment variable in ``env`` still
@@ -70,6 +71,24 @@ def _whisper_models() -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+def voice_choices(source: str) -> list[tuple[str, str]]:
+    """Live options for the voice engine rows: only the programs and model
+    files the kernel approves right now (see ``maverick.voice_models``). The
+    value is the file name; the kernel finds it again inside its own folder
+    and re-checks it before use, so no path is typed or shown."""
+    from maverick import voice_models
+
+    if source == "voice_programs":
+        return [("", "Find it automatically (default)"),
+                *((p.name, "Speech program " + p.name) for p in voice_models.approved_programs())]
+    words = dict(_whisper_models())
+    by_file = {filename: words.get(name, name)
+               for name, (filename, _sha, _size) in voice_models.KNOWN_MODELS.items()}
+    return [("", "Follow the speech model setting above (default)"),
+            *((p.name, by_file.get(p.name, "Added by hand: " + p.name))
+              for p in voice_models.approved_model_files())]
+
+
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
     plan_cells = (
         C("features", "What the plan includes", "picks", choices=_plan_features(),
@@ -117,6 +136,22 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           warning="Workspaces on this plan will be charged the new price from their next "
                   "bill.",
           aliases="stripe price subscription fee"),
+        S("billing.stripe", "secret_key", "Stripe secret key",
+          "The secret key of the Stripe account that collects payments, from the Stripe "
+          "dashboard's developer settings. It is stored sealed and never shown again. A key "
+          "set on the server is used instead.",
+          "secret", "Spending & limits", "", "maverick.billing_stripe",
+          subgroup="Plans and billing", pattern=r"(sk|rk)_(test|live)_[A-Za-z0-9]{8,250}",
+          max_length=260, env=("MAVERICK_STRIPE_SECRET_KEY",),
+          aliases="stripe api key billing credentials"),
+        S("billing.stripe", "webhook_secret", "Stripe message signing secret",
+          "The signing secret of the Stripe webhook that tells Lightwork about failed or "
+          "recovered payments. It is stored sealed and never shown again. A secret set on "
+          "the server is used instead.",
+          "secret", "Spending & limits", "", "maverick.billing_stripe",
+          subgroup="Plans and billing", pattern=r"whsec_[A-Za-z0-9+/=]{8,250}",
+          max_length=260, env=("MAVERICK_STRIPE_WEBHOOK_SECRET",),
+          aliases="stripe webhook signing secret"),
         S("commerce", "stripe_refunds", "Let agents issue Stripe refunds",
           "Agents using the Stripe tool may send real refunds from your Stripe account once "
           "a request is confirmed. When off, they can only prepare a refund for a person.",
@@ -215,6 +250,13 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "public projects can be read. It is stored sealed and never shown again.",
           "secret", "Integrations", "", "maverick.tools.github_search", subgroup="GitHub",
           max_length=500, env=("GITHUB_TOKEN", "GH_TOKEN")),
+        S("github", "app_webhook_secret", "GitHub app message secret",
+          "The webhook secret of the Lightwork GitHub app. Messages from GitHub are refused "
+          "unless they are signed with it. It is stored sealed and never shown again. A "
+          "secret set on the server is used instead.",
+          "secret", "Integrations", "", "maverick.github_app", subgroup="GitHub",
+          max_length=500, env=("MAVERICK_GH_APP_WEBHOOK_SECRET",),
+          aliases="github webhook signing secret"),
         S("github", "trigger_labels", "Issue labels that start a task",
           "When the Lightwork GitHub app sees an issue with one of these labels, it starts a "
           "task to fix it and opens a pull request. Leave empty to use maverick, automate "
@@ -244,6 +286,21 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           pattern=r"[A-Za-z0-9._-]{0,255}", max_length=255,
           env=("MAVERICK_BOT_GITLAB_USERNAME",), weaker="change",
           warning="Issues assigned to this account will start paid tasks."),
+
+        S("webhooks", "gitlab_token", "GitLab message token",
+          "The secret token set on your GitLab webhook. Messages from GitLab without it are "
+          "refused. It is stored sealed and never shown again. A token set on the server is "
+          "used instead.",
+          "secret", "Integrations", "", "maverick.issue_webhooks", subgroup="Issue trackers",
+          max_length=500, env=("MAVERICK_GITLAB_WEBHOOK_TOKEN",),
+          aliases="gitlab webhook token"),
+        S("data_map", "graph_token", "Microsoft 365 access key",
+          "The access key the data map and data requests use to count a person's Microsoft "
+          "365 mail, files and SharePoint sites. It is stored sealed and never shown again. "
+          "A key set on the server is used instead.",
+          "secret", "Privacy", "", "maverick.data_map", subgroup="Data map",
+          max_length=8000, env=("MAVERICK_GRAPH_TOKEN",),
+          aliases="microsoft graph token sharepoint onedrive outlook"),
 
         # ----------------------------------------------------------- Obsidian
         S("obsidian", "vault_path", "Obsidian notes folder",
@@ -358,6 +415,23 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "select", "AI models", "", "maverick.voice_models", subgroup="Voice",
           choices=_whisper_models(), env=("MAVERICK_WHISPER_MODEL",),
           aliases="whisper model size"),
+        S("voice", "whisper_cpp_bin", "Speech program on this computer",
+          "The whisper.cpp program that turns speech into text on this computer. Only "
+          "programs in Lightwork's own programs folder are offered, and the choice is "
+          "checked again each time it runs.",
+          "select", "AI models", "", "maverick.tools.voice", subgroup="Voice",
+          choices_from="voice_programs", env=("MAVERICK_WHISPER_CPP",), weaker="change",
+          warning="Lightwork will run a different program on this server to turn speech "
+                  "into text.",
+          aliases="whisper cpp binary program"),
+        S("voice", "whisper_cpp_model", "Speech model file on this computer",
+          "The speech model file that program loads. Only files in Lightwork's speech model "
+          "folder are offered, and the choice is checked again each time it is loaded.",
+          "select", "AI models", "", "maverick.voice_models", subgroup="Voice",
+          choices_from="voice_model_files", env=("MAVERICK_WHISPER_CPP_MODEL",),
+          weaker="change",
+          warning="A different speech model file will be loaded to turn speech into text.",
+          aliases="whisper ggml model file"),
         S("voice", "stt_openai_model", "OpenAI speech model",
           "The OpenAI model that turns speech into text. Leave empty for whisper-1.",
           "text", "AI models", "", "maverick.tools.voice", subgroup="Voice",

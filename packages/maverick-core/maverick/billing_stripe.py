@@ -34,10 +34,12 @@ Design (mirrors :mod:`maverick.entitlements` and kernel rule 5):
     extra (``maverick-core[stripe]``), imported lazily inside the functions that
     talk to Stripe. The module imports and :func:`status` reports *disabled*
     cleanly when the extra or the key is absent — nothing here is a hard import.
-  - **Secrets never touch config or logs.** The API key
+  - **Secrets never touch logs.** The API key
     (``MAVERICK_STRIPE_SECRET_KEY``) and webhook signing secret
-    (``MAVERICK_STRIPE_WEBHOOK_SECRET``) are resolved through the secret provider,
-    never read from ``config.toml``.
+    (``MAVERICK_STRIPE_WEBHOOK_SECRET``) are resolved through the secret provider
+    first; when it holds none, the value a global administrator saved on the
+    All settings page is used (``[billing.stripe] secret_key`` /
+    ``webhook_secret``, stored sealed in the dashboard overlay).
   - **Injectable client.** Every Stripe-touching function takes an optional
     ``client`` implementing the small :class:`StripeClient` protocol, so tests
     pass a fake and never hit the network.
@@ -92,15 +94,35 @@ def available() -> bool:
         return False
 
 
+def _saved_secret(key: str) -> str:
+    """``[billing.stripe] <key>`` as saved on the All settings page.
+
+    The page stores it sealed with the deployment key in the dashboard
+    overlay (like every other secret setting there) and ``load_config``
+    opens it; the value is never logged or returned to the page."""
+    try:
+        from .config import load_config
+        billing = (load_config() or {}).get("billing") or {}
+        stripe = billing.get("stripe") if isinstance(billing, dict) else None
+        value = stripe.get(key) if isinstance(stripe, dict) else None
+    except Exception:  # pragma: no cover -- config never blocks a billing read
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _secret_key() -> str:
-    """The platform Stripe secret key, from the secret provider. Never logged."""
+    """The platform Stripe secret key: the secret provider (environment or a
+    mounted secret file) wins; otherwise the sealed ``[billing.stripe]
+    secret_key`` saved on the All settings page. Never logged."""
     from .secret_provider import get_secret
-    return (get_secret(_SECRET_KEY_ENV) or "").strip()
+    return (get_secret(_SECRET_KEY_ENV) or "").strip() or _saved_secret("secret_key")
 
 
 def _webhook_secret() -> str:
+    """The webhook signing secret: the secret provider wins; otherwise the
+    sealed ``[billing.stripe] webhook_secret`` saved on the All settings page."""
     from .secret_provider import get_secret
-    return (get_secret(_WEBHOOK_SECRET_ENV) or "").strip()
+    return (get_secret(_WEBHOOK_SECRET_ENV) or "").strip() or _saved_secret("webhook_secret")
 
 
 def _enable_flag() -> bool:

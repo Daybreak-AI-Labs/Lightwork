@@ -17,6 +17,8 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = integrations.entries(catalog.S, catalog.C, catalog.Column)
 _KEY = "ab" * 32  # a publisher key in the stored (hex) form
+_STRIPE_KEY = "sk_test_" + "a1B2c3D4e5F6g7H8"  # pragma: allowlist secret
+_STRIPE_HOOK = "whsec_" + "Z9y8X7w6V5u4T3s2"  # pragma: allowlist secret
 _ENV = sorted({name for row in ROWS for name in row.env} | {
     "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_CONFIG", "MAVERICK_CONFIG_OVERLAY",
     "MAVERICK_OAUTH_VAULT", "MAVERICK_CONNECTIONS", "MAVERICK_STRIPE_ENABLE",
@@ -79,6 +81,13 @@ VALUES: dict[str, tuple[object, object]] = {
     "voice.max_upload_bytes": (50, 52428800),
     "voice.transcribe_concurrency": (4, 4),
     "attachments.audio_max_bytes": (128, 134217728),
+    "billing.stripe.secret_key": (_STRIPE_KEY, _STRIPE_KEY),
+    "billing.stripe.webhook_secret": (_STRIPE_HOOK, _STRIPE_HOOK),
+    "github.app_webhook_secret": ("sample-github-app-secret", "sample-github-app-secret"),  # pragma: allowlist secret
+    "webhooks.gitlab_token": ("sample-gitlab-token", "sample-gitlab-token"),  # pragma: allowlist secret
+    "data_map.graph_token": ("sample-graph-token", "sample-graph-token"),  # pragma: allowlist secret
+    "voice.whisper_cpp_bin": ("whisper-cli", "whisper-cli"),
+    "voice.whisper_cpp_model": ("ggml-custom.bin", "ggml-custom.bin"),
 }
 
 # id -> a value the server must refuse
@@ -131,6 +140,13 @@ INVALID: dict[str, object] = {
     "voice.max_upload_bytes": 201,
     "voice.transcribe_concurrency": 17,
     "attachments.audio_max_bytes": 0,
+    "billing.stripe.secret_key": "pk_test_notasecretkey",  # pragma: allowlist secret
+    "billing.stripe.webhook_secret": "not-a-signing-secret",  # pragma: allowlist secret
+    "github.app_webhook_secret": "",
+    "webhooks.gitlab_token": "",
+    "data_map.graph_token": "",
+    "voice.whisper_cpp_bin": "/usr/bin/python3",
+    "voice.whisper_cpp_model": "ggml-escape.bin",
 }
 
 # id -> (value first set without confirmation or None, the loosening value)
@@ -158,6 +174,8 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "voice.stt_backend": (None, "openai"),
     "voice.max_upload_bytes": (None, 100),
     "attachments.audio_max_bytes": (None, 512),
+    "voice.whisper_cpp_bin": (None, "whisper-cli"),
+    "voice.whisper_cpp_model": (None, "ggml-custom.bin"),
 }
 
 
@@ -168,11 +186,38 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    _voice_engine_files(tmp_path)
     for name in _ENV:
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
     yield
     config.reset_config_cache()
+
+
+def _voice_engine_files(tmp_path):
+    """Lightwork's programs and speech model folders, with one approved entry
+    each, entries that must never be offered (not executable, a link out, an
+    unrecognised name) and a file outside both folders."""
+    import os
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "tool").write_text("#!/bin/sh\necho outside\n")
+    os.chmod(outside / "tool", 0o755)
+    (outside / "ggml-escape.bin").write_bytes(b"outside")
+    programs = tmp_path / "home" / "bin"
+    programs.mkdir(parents=True)
+    (programs / "whisper-cli").write_text("#!/bin/sh\necho ok\n")
+    os.chmod(programs / "whisper-cli", 0o755)
+    (programs / "whisper-cpp").write_text("not executable")
+    (programs / "whisper.cpp").symlink_to(outside / "tool")
+    (programs / "ffmpeg").write_text("#!/bin/sh\n")
+    os.chmod(programs / "ffmpeg", 0o755)
+    models = tmp_path / "home" / "models" / "whisper"
+    models.mkdir(parents=True)
+    (models / "ggml-custom.bin").write_bytes(b"model")
+    (models / "ggml-escape.bin").symlink_to(outside / "ggml-escape.bin")
+    return programs, models, outside
 
 
 @pytest.fixture()
@@ -276,7 +321,9 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
 
     secrets = {row.id: VALUES[row.id][0] for row in ROWS if row.secret}
     assert set(secrets) == {"email.app_password", "calendar.password", "erp.token",
-                            "github.token"}
+                            "github.token", "billing.stripe.secret_key",
+                            "billing.stripe.webhook_secret", "github.app_webhook_secret",
+                            "webhooks.gitlab_token", "data_map.graph_token"}
     r = _save([{"id": key, "value": value} for key, value in secrets.items()])
     assert r.status_code == 200, r.text
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
@@ -460,3 +507,117 @@ def test_vendor_read_retries_apply_to_a_saved_workspace_binding(monkeypatch, aud
     chosen = setup.settings(_loaded())
     assert chosen.safe_read_attempts == 5 and chosen.safe_read_backoff_seconds == 1.5
     assert chosen.ticket_connection == "jira" and chosen.resource_owner == "user:owner"
+
+
+# ------------------------------------------ sealed secrets from the server
+def test_saved_stripe_keys_are_used_when_the_server_has_none(monkeypatch, audit_rows):
+    from maverick import billing_stripe
+
+    assert billing_stripe.status().has_secret_key is False
+    _set("billing.stripe.secret_key", _STRIPE_KEY)
+    _set("billing.stripe.webhook_secret", _STRIPE_HOOK)
+    assert billing_stripe._secret_key() == _STRIPE_KEY
+    status = billing_stripe.status()
+    assert status.has_secret_key is True and status.has_webhook_secret is True
+    assert _STRIPE_KEY not in repr(status.to_dict())
+    monkeypatch.setenv("MAVERICK_STRIPE_SECRET_KEY", "sk_test_fromtheserver")  # pragma: allowlist secret
+    assert billing_stripe._secret_key() == "sk_test_fromtheserver"  # pragma: allowlist secret
+
+
+def test_saved_github_app_secret_verifies_github_messages(monkeypatch, audit_rows):
+    import hashlib
+    import hmac
+
+    from maverick import github_app
+
+    body = b'{"zen": "Keep it logically awesome."}'
+    secret = VALUES["github.app_webhook_secret"][0]
+    signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    headers = {"X-Hub-Signature-256": signature, "X-GitHub-Event": "ping",
+               "X-GitHub-Delivery": "delivery-1", "Content-Type": "application/json"}
+    assert client.post("/webhook/github", content=body, headers=headers).status_code == 401
+    _set("github.app_webhook_secret", secret)
+    assert github_app.webhook_secret() == secret
+    r = client.post("/webhook/github", content=body, headers=headers)
+    assert r.status_code == 200 and r.json() == {"status": "ignored"}
+    monkeypatch.setenv("MAVERICK_GH_APP_WEBHOOK_SECRET", "server-secret")  # pragma: allowlist secret
+    assert client.post("/webhook/github", content=body, headers=headers).status_code == 401
+
+
+def test_saved_gitlab_token_admits_gitlab_messages(monkeypatch, audit_rows):
+    from maverick import issue_webhooks
+
+    token = VALUES["webhooks.gitlab_token"][0]
+    headers = {"X-Gitlab-Token": token, "X-Gitlab-Event-UUID": "gitlab-delivery-1"}
+    assert client.post("/webhook/gitlab", json={}, headers=headers).status_code == 401
+    _set("webhooks.gitlab_token", token)
+    assert issue_webhooks.gitlab_webhook_token() == token
+    assert client.post("/webhook/gitlab", json={}, headers=headers).status_code not in {401, 403}
+    wrong = {**headers, "X-Gitlab-Token": "wrong"}
+    assert client.post("/webhook/gitlab", json={}, headers=wrong).status_code == 403
+
+
+def test_saved_graph_token_reaches_the_data_map_and_data_requests(monkeypatch, audit_rows):
+    from maverick import data_map
+
+    assert data_map.graph_token() == ""
+    _set("data_map.graph_token", "sample-graph-token")
+    assert data_map.graph_token() == "sample-graph-token"  # pragma: allowlist secret
+    assert data_map.graph_token("CUSTOM_GRAPH_TOKEN") == "sample-graph-token"  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_GRAPH_TOKEN", "server-token")
+    assert data_map.graph_token() == "server-token"
+
+
+# ------------------------------------------- voice engine from checked lists
+def test_only_checked_programs_and_model_files_are_offered(audit_rows):
+    row = _row("voice.whisper_cpp_bin")
+    assert [c["value"] for c in row["choices"]] == ["", "whisper-cli"]
+    assert "/" not in repr(row["choices"])
+    row = _row("voice.whisper_cpp_model")
+    assert [c["value"] for c in row["choices"]] == ["", "ggml-custom.bin"]
+    assert "/" not in repr(row["choices"])
+
+
+@pytest.mark.parametrize("value", ["/usr/bin/python3", "whisper.cpp", "whisper-cpp", "ffmpeg",
+                                   "../outside/tool"])
+def test_programs_outside_the_list_are_refused(value, audit_rows):
+    r = _save([{"id": "voice.whisper_cpp_bin", "value": value}], confirm=True)
+    assert r.status_code == 400, r.text
+    assert "voice" not in _loaded()
+
+
+def test_a_chosen_program_runs_and_is_checked_again_before_it_runs(tmp_path, monkeypatch,
+                                                                    audit_rows):
+    import shutil
+
+    from maverick import voice_models
+    from maverick.tools import voice
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    r = _save([{"id": "voice.whisper_cpp_bin", "value": "whisper-cli"}])
+    assert r.status_code == 409
+    _set("voice.whisper_cpp_bin", "whisper-cli")
+    program = tmp_path / "home" / "bin" / "whisper-cli"
+    assert voice._find_whisper_cpp() == str(program)
+    assert audit_rows[-1]["key"] == "whisper_cpp_bin" and audit_rows[-1]["new"] == "whisper-cli"
+    # The file is swapped for a link out of the folder after it was chosen.
+    program.unlink()
+    program.symlink_to(tmp_path / "outside" / "tool")
+    assert voice_models.checked_program("whisper-cli") is None
+    assert voice._find_whisper_cpp() is None
+    monkeypatch.setenv("MAVERICK_WHISPER_CPP", str(tmp_path / "outside" / "tool"))
+    monkeypatch.setattr(shutil, "which", lambda name: name if name.endswith("tool") else None)
+    assert voice._find_whisper_cpp() == str(tmp_path / "outside" / "tool")
+
+
+def test_a_chosen_model_file_loads_and_a_link_out_is_refused(tmp_path, audit_rows):
+    from maverick import voice_models
+
+    _set("voice.whisper_cpp_model", "ggml-custom.bin")
+    chosen = tmp_path / "home" / "models" / "whisper" / "ggml-custom.bin"
+    assert voice_models.locate_model() == chosen
+    assert all(p.name != "ggml-escape.bin" for p in voice_models.installed_models())
+    chosen.unlink()
+    chosen.symlink_to(tmp_path / "outside" / "ggml-escape.bin")
+    assert voice_models.checked_model_file("ggml-custom.bin") is None
+    assert voice_models.locate_model() is None

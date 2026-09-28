@@ -174,13 +174,83 @@ def model_path(name: str) -> Path:
     return models_dir() / KNOWN_MODELS[name][0]
 
 
+# whisper.cpp program names Lightwork recognises (a ".exe" suffix is allowed).
+PROGRAM_NAMES = ("whisper-cli", "whisper-cpp", "whisper.cpp")
+
+
+def programs_dir() -> Path:
+    """The installation's own programs folder, where desktop installers drop
+    the bundled whisper.cpp program. NOT tenant-scoped, like the weights."""
+    from .paths import maverick_home
+    return maverick_home() / "bin"
+
+
+def _checked_file(candidate: Path, root: Path) -> bool:
+    """True when ``candidate`` is a regular file whose real location, after
+    following any link, stays inside ``root``."""
+    try:
+        real_root = root.resolve(strict=True)
+        real = candidate.resolve(strict=True)
+        real.relative_to(real_root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return real.is_file()
+
+
+def approved_programs() -> list[Path]:
+    """whisper.cpp programs Settings may choose: files in :func:`programs_dir`
+    with a recognised name that stay inside it (a link out is refused) and
+    can be executed."""
+    root = programs_dir()
+    if not root.is_dir():
+        return []
+    out = []
+    for cand in sorted(root.iterdir()):
+        name = cand.name[:-4] if cand.name.lower().endswith(".exe") else cand.name
+        if name in PROGRAM_NAMES and _checked_file(cand, root) \
+                and os.access(cand.resolve(), os.X_OK):
+            out.append(cand)
+    return out
+
+
+def approved_model_files() -> list[Path]:
+    """GGML files Settings may choose: ``ggml-*.bin`` files in
+    :func:`models_dir` that stay inside it (a link out is refused); a file with
+    a pinned name must also have the pinned size."""
+    root = models_dir()
+    if not root.is_dir():
+        return []
+    sizes = {filename: size for filename, _sha, size in KNOWN_MODELS.values()}
+    out = []
+    for cand in sorted(root.glob("ggml-*.bin")):
+        if not _checked_file(cand, root):
+            continue
+        size = sizes.get(cand.name)
+        if size is None or cand.resolve().stat().st_size == size:
+            out.append(cand)
+    return out
+
+
+def checked_program(name: object) -> Path | None:
+    """The approved program called ``name`` (a file name, as All settings
+    stores it), checked again now; None when it is not, or no longer, in
+    :func:`approved_programs`."""
+    return next((p for p in approved_programs() if p.name == str(name or "").strip()), None)
+
+
+def checked_model_file(name: object) -> Path | None:
+    """The approved model file called ``name``, checked again now, or None."""
+    return next((p for p in approved_model_files() if p.name == str(name or "").strip()), None)
+
+
 def installed_models() -> list[Path]:
     """GGML files present on disk (any ``ggml-*.bin``, including ones an
-    operator copied in by hand)."""
+    operator copied in by hand). A link that leads out of the folder is not
+    used; ``MAVERICK_WHISPER_CPP_MODEL`` names a file elsewhere."""
     d = models_dir()
     if not d.is_dir():
         return []
-    return sorted(p for p in d.glob("ggml-*.bin") if p.is_file())
+    return sorted(p for p in d.glob("ggml-*.bin") if _checked_file(p, d))
 
 
 def verify_model(path: Path, *, cancel: threading.Event | None = None) -> bool | None:
@@ -329,17 +399,25 @@ def locate_model(*, cancel: threading.Event | None = None, timeout: float = 60.0
     """The GGML file the whisper.cpp backend should load, or None.
 
     Order: ``MAVERICK_WHISPER_CPP_MODEL`` env path > ``[voice]
-    whisper_cpp_model`` path > the configured size if installed > any
-    installed GGML file (so a hand-copied model Just Works) > auto-fetch of
-    the configured size when enabled.
+    whisper_cpp_model`` (a file in :func:`models_dir` chosen on the All
+    settings page, checked again here by :func:`checked_model_file`) > the
+    configured size if installed > any installed GGML file (so a hand-copied
+    model Just Works) > auto-fetch of the configured size when enabled.
     """
-    for raw in (os.environ.get("MAVERICK_WHISPER_CPP_MODEL"),
-                _voice_cfg().get("whisper_cpp_model")):
-        if raw:
-            p = Path(str(raw)).expanduser()
-            if p.is_file():
-                return p
-            log.warning("configured whisper model %s not found", p)
+    raw = os.environ.get("MAVERICK_WHISPER_CPP_MODEL")
+    if raw:
+        p = Path(str(raw)).expanduser()
+        if p.is_file():
+            return p
+        log.warning("configured whisper model %s not found", p)
+    chosen = _voice_cfg().get("whisper_cpp_model")
+    if chosen:
+        checked = checked_model_file(chosen)
+        if checked is not None:
+            return checked
+        log.warning("[voice] whisper_cpp_model %r is not an approved file in the "
+                    "speech model folder; ignoring it (MAVERICK_WHISPER_CPP_MODEL "
+                    "names a file elsewhere)", chosen)
     name = configured_model()
     try:
         preferred = model_path(name)

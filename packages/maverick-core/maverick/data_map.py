@@ -14,6 +14,7 @@ read the data. Never legal advice.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -135,6 +136,24 @@ def get_data_map_config() -> dict[str, Any]:
             "(UPPER_SNAKE_CASE)"
         )
     return {"enable": flag, "graph_token_env": token_env}
+
+
+def graph_token(env_name: str = "MAVERICK_GRAPH_TOKEN") -> str:
+    """The Microsoft Graph token: the environment variable ``env_name`` wins
+    (the data map passes its ``graph_token_env``); otherwise ``[data_map]
+    graph_token``, saved sealed on the All settings page and opened when the
+    configuration loads. Empty means Graph collection is refused."""
+    token = os.environ.get(env_name, "").strip()
+    if token:
+        return token
+    from .config import load_global_config
+
+    try:
+        section = (load_global_config() or {}).get("data_map") or {}
+    except Exception:  # unreadable configuration means "not set"
+        return ""
+    value = section.get("graph_token") if isinstance(section, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
 def enabled() -> bool:
@@ -630,10 +649,9 @@ def sync_sharepoint_sites(
     settings = _require_enabled()
     query = str(search or "").strip()[:256]
     if fetcher is None:
-        import os
         from urllib.parse import quote
 
-        token = os.environ.get(settings["graph_token_env"], "")
+        token = graph_token(settings["graph_token_env"])
         if not token:
             raise DataMapConfigError(
                 "the SharePoint sync needs a Microsoft Graph token in "
@@ -860,9 +878,7 @@ def scan_sharepoint_site_files(
     if not _GRAPH_ID_RE.fullmatch(site):
         raise ValueError("site_id must be a Microsoft Graph site identifier")
     if fetcher is None or downloader is None:
-        import os
-
-        token = os.environ.get(settings["graph_token_env"], "")
+        token = graph_token(settings["graph_token_env"])
         if not token:
             raise DataMapConfigError(
                 "the SharePoint file scan needs a Microsoft Graph token in "

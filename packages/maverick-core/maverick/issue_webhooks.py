@@ -88,6 +88,22 @@ def verify_signature(
     return hmac.compare_digest(expected.encode("utf-8"), sig.encode("utf-8"))
 
 
+def gitlab_webhook_token() -> str:
+    """The shared GitLab webhook token: ``MAVERICK_GITLAB_WEBHOOK_TOKEN`` wins;
+    otherwise ``[webhooks] gitlab_token``, saved sealed on the All settings
+    page and opened by ``load_config``. Empty means GitLab webhooks are
+    refused."""
+    env = os.environ.get("MAVERICK_GITLAB_WEBHOOK_TOKEN", "").strip()
+    if env:
+        return env
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("webhooks") or {}).get("gitlab_token")
+    except Exception:  # pragma: no cover - unreadable config means "not set"
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def verify_gitlab_token(token_header: str | None, secret: str | None) -> bool:
     """Constant-time check of GitLab's ``X-Gitlab-Token`` shared secret.
 
