@@ -171,6 +171,9 @@ class EventKind:
     # denial the compiled rules produced, ``obligations_checked`` (ids) on a
     # call that ran while obligations covering it were active. Additive.
     GOVERNANCE_DENIED = "governance_denied"
+    # A finance separation-of-duties conflict found when an action was about to
+    # run ([finance.sod] mode): tool, compartment, mode, outcome, conflicts.
+    FINANCE_SOD_FINDING = "finance_sod_finding"
     AUTONOMY_ESCALATED = "autonomy_escalated"
     AUTONOMY_GATED = "autonomy_gated"
     EGRESS_BLOCKED  = "egress_blocked"

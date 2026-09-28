@@ -63,6 +63,16 @@ _INCOMPATIBLE: frozenset[frozenset[str]] = frozenset({
 })
 
 
+#: The four duties, in a fixed order.
+DUTIES: tuple[str, ...] = ("authorize", "custody", "reconcile", "record")
+
+
+def incompatible_duties(duty: str) -> tuple[str, ...]:
+    """The duties that may never share a compartment with ``duty``."""
+    return tuple(other for other in DUTIES
+                 if frozenset({duty, other}) in _INCOMPATIBLE)
+
+
 def classify_duty(tool: str) -> str | None:
     """Return the SoD duty a tool belongs to, or ``None`` (read/analysis/propose).
 
@@ -148,6 +158,6 @@ class SoDViolation(Exception):
 
 
 __all__ = [
-    "classify_duty", "SoDConflict", "SoDViolation",
+    "DUTIES", "classify_duty", "incompatible_duties", "SoDConflict", "SoDViolation",
     "lint_compartment", "lint_roster", "assert_no_conflicts",
 ]

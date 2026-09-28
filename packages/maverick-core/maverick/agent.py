@@ -2816,6 +2816,74 @@ class Agent:
         _twin.record_gate(self.ctx.goal_id, name, args, granted=granted)
         return granted, False
 
+    def _approval_granted(self, name: str, reason: str, *, fresh: bool) -> bool:
+        """One human decision for a REQUIRE_HUMAN verdict (EU AI Act Art 14).
+
+        ``allow_auto_approve=False``: a silent auto-approve mode counts as a
+        denial. A finance action under ``[finance.approvals] timeout =
+        "fail_closed"`` is decided by a person (``require_person``): never the
+        automatic consent mode or an earlier "remember this" grant, and a
+        request nobody answers in time is refused and withdrawn.
+        """
+        from .safety.consent import require_consent, require_person
+        from .safety.tool_risk import tool_risk
+        try:
+            from .finance.profile import approval_fail_closed
+
+            fail_closed = approval_fail_closed(name)
+        except Exception:
+            log.warning("finance: approval posture unavailable for %r; asking a "
+                        "person, fail closed", name, exc_info=True)
+            fail_closed = True
+        if fail_closed:
+            return bool(require_person(name, risk=tool_risk(name), detail=reason,
+                                       provenance="governance").granted)
+        return bool(require_consent(
+            name, risk=tool_risk(name), detail=reason, provenance="governance",
+            allow_auto_approve=False, consult_ledger=not fresh,
+        ).granted)
+
+    def _finance_sod_verdict(self, name: str, cap, gov, profile_keys):
+        """Compose the action-time finance separation-of-duties check.
+
+        ``enforce`` (or any conflict on a hard-floored action) denies; ``warn``
+        records a compensating-control finding and requires a human. The
+        finding is the compensating control's evidence, so a finding that could
+        not be written denies. A check that cannot run fails closed.
+        """
+        from .governance import Decision, Verdict
+        principal = getattr(cap, "principal", None) if cap is not None else None
+        try:
+            from .finance import profile as fin
+
+            check = fin.check_action_sod(
+                name,
+                allow_tools=getattr(cap, "allow_tools", None) if cap is not None else None,
+                deny_tools=getattr(cap, "deny_tools", None) if cap is not None else None,
+                compartment=self.domain,
+            )
+            if check is None:
+                return gov
+            recorded = fin.record_sod_finding(
+                check, agent=self.name, goal_id=self.ctx.goal_id, principal=principal,
+                outcome="blocked" if check.blocks else "human_review",
+            )
+        except Exception:
+            log.warning("finance: separation-of-duties check failed for %r; "
+                        "failing closed", name, exc_info=True)
+            return Verdict(Decision.DENY,
+                           "separation-of-duties check unavailable (failed closed)",
+                           "finance_sod:error", compliance_profiles=profile_keys)
+        if check.blocks or not recorded:
+            reason = check.reason if recorded else (
+                f"{check.reason}; the finding could not be recorded (failed closed)")
+            return Verdict(Decision.DENY, reason, check.rule,
+                           compliance_profiles=profile_keys)
+        if gov is not None and gov.decision is Decision.DENY:
+            return gov
+        return Verdict(Decision.REQUIRE_HUMAN, check.reason, check.rule,
+                       compliance_profiles=profile_keys)
+
     async def _governance_denial(
         self,
         name: str,
@@ -2978,6 +3046,10 @@ class Agent:
                 name,
                 exc_info=True,
             )
+        # Finance separation of duties at action time ([finance.sod] mode):
+        # composes strictest-wins; a no-op unless the finance layer is on and
+        # the tool carries a duty.
+        _gov = self._finance_sod_verdict(name, cap, _gov, _profile_keys)
         if _gov is None or _gov.decision is _GovDecision.ALLOW:
             return None, _profile_keys
         _principal = getattr(cap, "principal", None) if cap is not None else None
@@ -3007,21 +3079,15 @@ class Agent:
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
         def _ask() -> bool:
-            from .safety.consent import require_consent
-            from .safety.tool_risk import tool_risk
-            return bool(require_consent(
-                name, risk=tool_risk(name), detail=_gov.reason,
-                provenance="governance",
-                allow_auto_approve=False,
+            return self._approval_granted(
+                name, _gov.reason,
                 # When the operator opts into per-action oversight, a prior
                 # persistent ledger grant must NOT silently satisfy the
                 # Art-14 gate -- demand a fresh human decision each time. The
                 # autonomy dial can drive REQUIRE_HUMAN with no [governance]
                 # policy set (_gov_policy None), so guard the attribute read.
-                consult_ledger=not (
-                    _gov_policy.require_fresh_human_approval if _gov_policy else False
-                ),
-            ).granted)
+                fresh=bool(getattr(_gov_policy, "require_fresh_human_approval", False)),
+            )
         granted, replayed = await self._human_decision(name, args, _ask)
         if granted:
             return None, _gov.compliance_profiles

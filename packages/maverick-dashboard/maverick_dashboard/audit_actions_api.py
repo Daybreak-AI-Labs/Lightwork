@@ -38,6 +38,7 @@ KIND_LABELS: dict[str, str] = {
     "shield_block": "Stopped by the safety filter", "ifc_flow": "Sensitive data check",
     "capability_denied": "Tool not allowed", "sandbox_denied": "Blocked by the safe workspace",
     "token_exchange": "Sign-in passed to a service", "governance_denied": "Held by a company rule",
+    "finance_sod_finding": "Finance duties not separated",
     "autonomy_escalated": "Asked for more freedom", "autonomy_gated": "Waited for permission",
     "egress_blocked": "Data not allowed to leave", "consent_prompt": "Asked for consent",
     "consent_result": "Consent answered", "secret_redacted": "Hid a secret", "erase": "Data erased",  # pragma: allowlist secret
