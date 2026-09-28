@@ -40,6 +40,9 @@ KNOWN_SECTIONS = frozenset({
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
+    # [third_party_portal] routing_keyring: the vendor portal link keyring
+    # rotated on the Third-Party Collaboration page (sealed).
+    "third_party_portal",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment",

@@ -526,6 +526,8 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
+                    # Portal link keyring (portal_routing_key_api); sealed values.
+                    "third_party_portal",
                     "research_execution", "models", "catalogs", "agent_trust", "immune",
                     *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,

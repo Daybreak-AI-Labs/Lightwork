@@ -170,6 +170,38 @@ def _environment_routing_key() -> bytes:
     return _routing_key_bytes(value)
 
 
+# Where the dashboard keeps a rotated keyring: [third_party_portal]
+# routing_keyring, sealed with the deployment key in the dashboard overlay
+# (see portal_routing_key_api). Previous keys carry an "until" time.
+KEYRING_SECTION = "third_party_portal"
+KEYRING_KEY = "routing_keyring"
+MAX_PREVIOUS_KEYS = 2
+
+
+def _configured_routing_key() -> bytes | ThirdPartyCollaborationRoutingKeyring:
+    """The portal routing key: MAVERICK_THIRD_PARTY_PORTAL_ROUTING_KEY wins;
+    otherwise the keyring rotated on the dashboard, whose previous keys are
+    still accepted for verification until their grace period ends."""
+    if os.environ.get(ROUTING_KEY_ENV):
+        return _environment_routing_key()
+    from maverick.config import load_global_config
+
+    section = (load_global_config() or {}).get(KEYRING_SECTION) or {}
+    ring = section.get(KEYRING_KEY) if isinstance(section, dict) else None
+    if not isinstance(ring, dict) or not isinstance(ring.get("current"), str):
+        raise ThirdPartyCollaborationCompositionError("portal routing key authority is unavailable")
+    now = time.time()
+    previous = []
+    for item in ring.get("previous") or []:
+        until = item.get("until") if isinstance(item, dict) else None
+        if (isinstance(until, (int, float)) and not isinstance(until, bool) and until > now
+                and isinstance(item.get("key"), str)):
+            previous.append(item["key"])
+    return ThirdPartyCollaborationRoutingKeyring(
+        revision=str(ring.get("revision") or ""), current=ring["current"],
+        previous=tuple(previous[:MAX_PREVIOUS_KEYS]))
+
+
 def _resolve_routing_key_material(
     resolver: Callable[[], bytes | str | ThirdPartyCollaborationRoutingKeyring],
 ) -> tuple[str, tuple[bytes, ...]]:
@@ -851,7 +883,7 @@ def attach_third_party_collaboration_composition(
         explicit=routing_key_resolver,
         state=state,
         name="third_party_collaboration_routing_key_resolver",
-        default=_environment_routing_key,
+        default=_configured_routing_key,
         label="third-party collaboration routing-key resolver",
     )
     registry_resolver = _selected_callable(
