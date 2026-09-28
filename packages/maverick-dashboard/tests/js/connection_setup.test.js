@@ -127,9 +127,12 @@ test('failed native cancellation keeps the cancel control and retries before ser
   failClose=false;h.el('cancel-departure').click();await h.settle();assert.equal(h.el('departure').hidden,true);assert.equal(h.calls.filter(call=>call.url.endsWith('/cancel')).length,1);assert.equal(commands.filter(command=>command==='cancel_oauth_return').length,2);
 });
 
+// The native sign-in return settles through several timers and promises; under
+// load a fixed short wait is not enough, so wait for the state being checked.
+async function until(h,predicate){const deadline=Date.now()+5000;while(!predicate()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,5));await h.settle();}
 test('refresh retries a transiently failed native-denial retirement without losing its state',async t=>{
   let cancelPosts=0;const h=await fixture(t,{data:nativeOverview(),task:task(),intercept:call=>call.url.endsWith('/authorize')?nativeAuthorize():call.url.endsWith('/cancel')&&++cancelPosts===1?new Response('Unavailable',{status:503}):undefined,nativeInvoke:async command=>{if(command==='prepare_oauth_return')return{handle:nativeHandle,context,callback_uri:nativeCallback,return_profile:'desktop-loopback-v1',expires_in:600};if(command==='consume_oauth_return')return{outcome:'denied',context};return null;}});
-  h.change('name','native-drive');h.check('authorize-confirm');await h.submit('authorize');h.el('provider-link').click();await new Promise(resolve=>setTimeout(resolve,10));await h.settle();
+  h.change('name','native-drive');h.check('authorize-confirm');await h.submit('authorize');h.el('provider-link').click();await until(h,()=>/could not be retired/.test(h.el('status').textContent));
   assert.equal(cancelPosts,1);assert.match(h.el('status').textContent,/could not be retired/);assert.notEqual(h.w.sessionStorage.getItem('lightwork:connection-retirement:v1'),null);assert.equal(h.el('authorize-button').disabled,true);
   h.el('refresh').click();await h.settle();assert.equal(cancelPosts,2);assert.equal(h.w.sessionStorage.getItem('lightwork:connection-retirement:v1'),null);assert.equal(h.el('retry').hidden,false);assert.equal(h.el('refresh').disabled,false);
 });
@@ -137,6 +140,6 @@ test('refresh retries a transiently failed native-denial retirement without losi
 test('thirty-two verified native denials retire every consent and remain retryable',async t=>{
   const h=await fixture(t,{data:nativeOverview(),task:task(),intercept:call=>call.url.endsWith('/authorize')?nativeAuthorize():undefined,nativeInvoke:async command=>{if(command==='prepare_oauth_return')return{handle:nativeHandle,context,callback_uri:nativeCallback,return_profile:'desktop-loopback-v1',expires_in:600};if(command==='consume_oauth_return')return{outcome:'denied',context};return null;}});
   h.change('name','native-drive');
-  for(let index=0;index<32;index++){h.check('authorize-confirm');await h.submit('authorize');h.el('provider-link').click();await new Promise(resolve=>setTimeout(resolve,5));await h.settle();assert.equal(h.el('retry').hidden,false);assert.equal(h.el('departure').hidden,true);if(index<31)h.el('retry').click();}
+  for(let index=0;index<32;index++){h.check('authorize-confirm');await h.submit('authorize');h.el('provider-link').click();await until(h,()=>!h.el('retry').hidden);assert.equal(h.el('retry').hidden,false);assert.equal(h.el('departure').hidden,true);if(index<31)h.el('retry').click();}
   assert.equal(h.calls.filter(call=>call.url.endsWith('/authorize')).length,32);assert.equal(h.calls.filter(call=>call.url.endsWith('/cancel')).length,32);assert.equal(h.el('name').value,'native-drive');assert.equal(h.el('task-return').hidden,false);assert.match(h.el('status').textContent,/retry now|denied/i);
 });
