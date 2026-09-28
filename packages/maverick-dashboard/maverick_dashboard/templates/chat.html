@@ -7,6 +7,12 @@
   .cs-mark svg { width: 44px; height: 44px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
   .cs-greet { margin: 0; font-family: var(--font-serif); font-weight: 500; font-size: var(--text-2xl); letter-spacing: -0.01em; color: var(--text); }
   .cs-empty-state .panel { max-width: 32rem; text-align: start; }
+  .cs-viewpoints { width: 100%; box-sizing: border-box; }
+  .cs-viewpoints summary { cursor: pointer; font-weight: 600; }
+  .cs-viewpoints__form { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+  .cs-viewpoints__form .textarea, .cs-viewpoints__form .select { width: 100%; box-sizing: border-box; max-width: 100%; }
+  .cs-viewpoints p, .cs-viewpoints li { overflow-wrap: anywhere; }
+  .cs-viewpoints__side { border-inline-start: 3px solid var(--border); padding-inline-start: var(--space-3); margin-block: var(--space-3); }
 </style>
 {% endblock %}
 
@@ -25,6 +31,27 @@
   </section>
   {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
+  {% if model_route_ready %}
+  <details class="panel cs-viewpoints" id="viewpoints">
+    <summary>Weighing up a decision? Get two viewpoints first</summary>
+    <form id="vp-form" class="cs-viewpoints__form" novalidate>
+      <label for="vp-question">Question or decision</label>
+      <textarea id="vp-question" name="question" class="textarea" rows="3" minlength="3" maxlength="2000" required
+                placeholder="For example: Should we move our weekly team meeting to Mondays?"></textarea>
+      <label for="vp-rounds">How thorough</label>
+      <select id="vp-rounds" name="rounds" class="select">
+        <option value="1">Quick: one argument from each side</option>
+        <option value="2" selected>Standard: two arguments from each side</option>
+        <option value="3">Thorough: three arguments from each side</option>
+      </select>
+      <p class="muted">One side argues for, the other argues against, and a neutral judge weighs them up. This uses AI, counts
+        toward your spending limits and costs at most $1.00 each time. Nothing else is started.</p>
+      <button type="submit" class="btn btn--primary" id="vp-run">Get two viewpoints</button>
+    </form>
+    <p id="vp-status" role="status" aria-live="polite" tabindex="-1"></p>
+    <div id="vp-result" hidden></div>
+  </details>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -83,6 +110,7 @@
 {% endblock %}
 
 {% block scripts_extra %}
+{% if model_route_ready %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
 <script>
   // A prepared template becomes an ordinary draft for review, never a run.
   (async function receiveTemplateDraft() {

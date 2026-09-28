@@ -1227,10 +1227,12 @@ app.include_router(vendor_onboarding_router, prefix="/api/v1")
 from .task_changes_api import router as task_changes_router  # noqa: E402
 from .task_file_recovery_api import router as task_file_recovery_router  # noqa: E402
 from .vendor_setup_api import router as vendor_setup_router  # noqa: E402
+from .viewpoints_api import router as viewpoints_router  # noqa: E402
 
 app.include_router(vendor_setup_router)
 app.include_router(task_file_recovery_router)
 app.include_router(task_changes_router)
+app.include_router(viewpoints_router)
 from .connection_setup_api import router as connection_setup_router  # noqa: E402
 
 app.include_router(connection_setup_router)
