@@ -301,3 +301,24 @@ def test_discovery_record_check_and_verify(client):
     assert out.status_code in (200, 422)
     bad = client.post("/api/v1/immune/title/verify", json={"sealed": {"dossier": {}}}).json()
     assert bad == {"verified": False}
+
+
+def test_people_list_is_for_administrators_and_the_active_workspace(client, monkeypatch):
+    import maverick.paths as paths
+    from maverick_dashboard import rbac
+    from maverick_dashboard.immune_actions_api import people_choices
+
+    rbac.set_role("user:boss", "admin")
+    rbac.set_role("user:worker", "viewer")
+    rbac.set_tenant_role("acme", "user:acme-member", "operator")
+    rbac.set_tenant_role("globex", "user:globex-member", "operator")
+    everyone = {p["value"] for p in people_choices()}
+    assert {"user:boss", "user:worker"} <= everyone and "user:globex-member" not in everyone
+    monkeypatch.setattr(paths, "current_tenant_id", lambda: "acme")
+    in_acme = {p["value"] for p in people_choices()}
+    assert "user:acme-member" in in_acme and "user:boss" in in_acme
+    assert "user:globex-member" not in in_acme and "user:worker" not in in_acme
+    monkeypatch.setattr(paths, "current_tenant_id", lambda: None)
+    _as(monkeypatch, "auditor")
+    body = client.get("/api/v1/immune/choices").json()
+    assert body["people"] == []

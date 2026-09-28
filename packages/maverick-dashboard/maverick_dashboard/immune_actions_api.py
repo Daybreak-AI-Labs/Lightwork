@@ -93,13 +93,32 @@ def _ai_ready() -> None:
         raise HTTPException(status_code=503, detail="Set up an AI provider in Settings first.")
 
 
+def _in_workspace(people: list[dict], tenant: str) -> list[dict]:
+    """Only people who can use ``tenant``: its members and global administrators."""
+    from . import rbac
+    from .auth import global_role_for_principal
+
+    members = set(rbac.list_tenant_roles(tenant))
+    return [p for p in people if p["principal"] in members
+            or "admin" in rbac.permissions_for(global_role_for_principal(p["principal"]))]
+
+
 def people_choices() -> list[dict]:
-    """Everyone the roster knows, as ``{value, label}`` choices."""
+    """The people of the active workspace, as ``{value, label}`` choices.
+
+    The roster is shared by every workspace, so with a workspace active only
+    its members (and global administrators) are offered."""
     try:
+        from maverick.paths import current_tenant_id
+
         from . import invites, rbac
         from .admin_pages import _invite_labels, _people, _signed_in_principals
+        tenant = current_tenant_id()
+        members = list(rbac.list_tenant_roles(tenant)) if tenant else []
         people = _people(rbac.list_users(), _invite_labels(invites.list_invites()),
-                         _signed_in_principals())
+                         [*members, *_signed_in_principals()])
+        if tenant:
+            people = _in_workspace(people, tenant)
     except Exception:  # noqa: BLE001 -- an empty picker, not a broken page
         people = []
     return [{"value": p["principal"], "label": p["label"]} for p in people]
@@ -170,14 +189,18 @@ router = APIRouter(tags=["immune-actions"])
 async def choices(request: Request) -> dict:
     require_permission(request, "audit")
     from maverick.config import get_immune
+
+    from .auth import has_permission
     world = _world()
+    # Only administrators record drills, so only they need the people list.
+    can_admin = has_permission(request, "admin")
 
     def _read() -> dict:
         settings = get_immune()
         return {"canaries": settings["canaries"], "twin_record": settings["twin_record"],
                 "decision_classes": _decision_classes(world),
                 "recorded_goals": _recorded_goals(world),
-                "people": people_choices()}
+                "people": people_choices() if can_admin else []}
     return await run_in_threadpool(_read)
 
 @router.post("/immune/settings")
