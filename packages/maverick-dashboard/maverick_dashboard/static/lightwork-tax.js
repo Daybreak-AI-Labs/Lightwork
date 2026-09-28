@@ -298,6 +298,25 @@
         say('tax-tables-status', await failText(failure, 'check for newer tables'));
       }
     });
+    var checkUrl = $('tax-tables-check-url');
+    if (checkUrl) checkUrl.addEventListener('click', async function () {
+      var address = ($('tax-tables-url').value || '').trim();
+      if (!/^https:\/\/\S+$/.test(address) || address.length > 500) {
+        say('tax-tables-status', 'Enter an address that starts with https://.'); return;
+      }
+      var ok = await window.mvConfirm('Check this address for newer tax tables? Lightwork contacts it once and applies a newer update only if it is signed by a publisher you trust.', {okText: 'Check now'});
+      if (!ok) return;
+      say('tax-tables-status', 'Checking…');
+      var out = $('tax-tables-out'); out.textContent = '';
+      try {
+        var data = await request('/tables/check', {method: 'POST', json: {url: address}});
+        say('tax-tables-status', data.summary);
+        technical(out, data.technical);
+        if (data.status === 'applied') loadStatusLine();
+      } catch (failure) {
+        say('tax-tables-status', await failText(failure, 'check that address'));
+      }
+    });
     $('tax-tables-file').addEventListener('change', async function (event) {
       var input = event.target;
       if (!input.files.length) return;

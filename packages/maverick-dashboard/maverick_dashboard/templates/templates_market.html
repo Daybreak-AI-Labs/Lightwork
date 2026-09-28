@@ -85,6 +85,14 @@
       <a class="btn btn--primary" href="/workflow-builder">New template</a>
     </div>
   {% endif %}
+  <section class="panel tplm__library" id="tplm-library" aria-labelledby="tplm-library-h">
+    <h2 id="tplm-library-h">Community library</h2>
+    <p class="muted">Ready-made templates shared outside your organisation. Each is checked before it's added, and an
+      administrator adds it for everyone here.</p>
+    <button class="btn btn--ghost" id="tplm-library-load" type="button">Show library templates</button>
+    <p id="tplm-library-status" role="status" aria-live="polite"></p>
+    <ul id="tplm-library-list" class="tplm__library-list" aria-label="Community library templates"></ul>
+  </section>
 </div>
 
 <style>
@@ -102,6 +110,10 @@
   .tplm__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: auto; }
   .tplm__field { display: grid; gap: var(--space-1); margin-bottom: var(--space-2); }
   .template-prepare, .template-rating { margin-top: var(--space-3); }
+  .tplm__library { margin-top: var(--space-5); }
+  .tplm__library-list { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
+  .tplm__library-list li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; justify-content: space-between; }
+  .tplm__library-list p { margin: 0; overflow-wrap: anywhere; }
 </style>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-template-library.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-template-library.js" defer></script><script src="/static/lightwork-community-templates.js" defer></script>{% endblock %}

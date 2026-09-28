@@ -154,6 +154,7 @@
       if (!text) { say(status, 'Write or paste what you want Lightwork to remember first.'); return; }
       var payload = {text: text, kind: form.elements.kind.value, source: form.elements.source.value.trim()};
       if (form.elements.domain && form.elements.domain.value) payload.domain = form.elements.domain.value;
+      if (form.elements.collection && form.elements.collection.value) payload.collection = form.elements.collection.value;
       form.querySelector('button[type="submit"]').disabled = true;
       say(status, 'Adding…');
       try {

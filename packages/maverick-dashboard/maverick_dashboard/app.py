@@ -1233,6 +1233,9 @@ app.include_router(vendor_setup_router)
 app.include_router(task_file_recovery_router)
 app.include_router(task_changes_router)
 app.include_router(viewpoints_router)
+from .cli_ops_api import router as cli_ops_router  # noqa: E402
+
+app.include_router(cli_ops_router)
 from .connection_setup_api import router as connection_setup_router  # noqa: E402
 
 app.include_router(connection_setup_router)

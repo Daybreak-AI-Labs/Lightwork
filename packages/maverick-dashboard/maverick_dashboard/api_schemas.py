@@ -192,6 +192,8 @@ class ScheduleIn(BaseModel):
     params: dict[str, str] | None = None
     text: str | None = None
     title: str | None = Field(None, max_length=200)
+    # IANA time zone the cron's hours are read in (empty = UTC).
+    tz: str | None = Field(None, max_length=64)
 
 
 class ScheduleOut(BaseModel):
@@ -203,6 +205,8 @@ class ScheduleOut(BaseModel):
     # Stable across cron re-arms (the job id changes each occurrence); used to
     # group a schedule's run history. Empty for schedules armed before v15.
     schedule_id: str = ""
+    # IANA time zone of the timetable; empty means UTC.
+    zone: str = ""
 
 
 class ImportRunIn(BaseModel):

@@ -34,6 +34,9 @@ class ViewpointsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=3, max_length=2000)
     rounds: int = Field(default=2, ge=1, le=3)
+    # Optional positions each side defends (the command's --for / --against).
+    for_side: str | None = Field(default=None, max_length=300)
+    against_side: str | None = Field(default=None, max_length=300)
 
 
 class _Refused(Exception):
@@ -45,7 +48,7 @@ def _audit(kind: str, actor: str, **data) -> None:
     audit_event(kind, agent="dashboard", actor=actor, **data)
 
 
-def _admit(principal: str):
+def _admit(principal: str, max_dollars: float = MAX_DOLLARS):
     """The checks a task start makes, then a capped budget. Returns the budget."""
     from maverick import killswitch, quotas, spending_limits
     from maverick.budget import budget_from_config, resolve_budget_caps
@@ -69,7 +72,7 @@ def _admit(principal: str):
         raise _Refused(reason)
     try:
         configured = resolve_budget_caps().get("max_dollars")
-        cap = MAX_DOLLARS if configured is None else min(MAX_DOLLARS, float(configured))
+        cap = max_dollars if configured is None else min(max_dollars, float(configured))
         budget = budget_from_config(max_dollars=cap)
     except ValueError as exc:
         raise _Refused("The spending caps for AI work can't be read right now, so nothing was started.") from exc
@@ -85,7 +88,8 @@ def _plain_turn(text: str) -> str:
     return text[:MAX_TURN_CHARS]
 
 
-def _run(question: str, rounds: int, principal: str, actor: str) -> dict:
+def _run(question: str, rounds: int, principal: str, actor: str,
+         stances: tuple[str | None, str | None] = (None, None)) -> dict:
     from maverick.budget import BudgetExceeded
     from maverick.debate import DebateParticipant, run_debate
     from maverick.llm import LLM, model_for_role
@@ -103,8 +107,9 @@ def _run(question: str, rounds: int, principal: str, actor: str) -> dict:
         settlement.record()
         raise _Refused("The activity log couldn't record this request, so nothing was started.") from exc
     llm = LLM(model=model_for_role("analyst"))
-    participants = [DebateParticipant(name=name, persona=persona, llm_complete=llm.complete)
-                    for name, _, persona in SIDES]
+    participants = [DebateParticipant(name=name, persona=(" ".join((chosen or "").split()) or persona),
+                                      llm_complete=llm.complete)
+                    for (name, _, persona), chosen in zip(SIDES, stances, strict=True)]
     outcome = "failed"
     try:
         with run_scope(budget, principal):
@@ -141,9 +146,8 @@ def _run(question: str, rounds: int, principal: str, actor: str) -> dict:
     }
 
 
-@router.post("/api/v1/viewpoints")
-async def get_viewpoints(request: Request, body: ViewpointsIn) -> dict:
-    """Run one two-sided debate for the signed-in person and return it."""
+def _prepare(request: Request, body: ViewpointsIn) -> tuple[str, str, str]:
+    """The checks every viewpoints request makes. Returns (question, principal, actor)."""
     from maverick.orchestrator import _execution_principal
 
     from .app import _require_same_origin, check_goal_rate_limit
@@ -159,9 +163,49 @@ async def get_viewpoints(request: Request, body: ViewpointsIn) -> dict:
     except HTTPException as exc:
         raise HTTPException(400, "AI isn't connected yet. Finish connecting AI in setup, then try again.") from exc
     principal = _execution_principal(user_id=execution_user_id_from_request(request), capability=None)
-    actor = caller_principal(request) or principal
+    return question, principal, caller_principal(request) or principal
+
+
+@router.post("/api/v1/viewpoints/jobs", status_code=202)
+async def start_viewpoints_job(request: Request, body: ViewpointsIn) -> dict:
+    """Start the same debate in the background; the page polls for the result."""
+    from .ops_jobs import JOBS, Busy, identity
+
+    question, principal, actor = _prepare(request, body)
+    stances = (body.for_side, body.against_side)
+
+    def work() -> dict:
+        try:
+            return _run(question, body.rounds, principal, actor, stances)
+        except _Refused as exc:
+            return {"ran": False, "message": str(exc)}
+
+    owner, tenant = identity(request)
     try:
-        return await run_in_threadpool(_run, question, body.rounds, principal, actor)
+        return {"job": JOBS.start(owner=owner, tenant=tenant, kind="viewpoints", work=work)}
+    except Busy as exc:
+        raise HTTPException(429, "You already have viewpoints being prepared. Wait for them to finish.") from exc
+
+
+@router.get("/api/v1/viewpoints/jobs/{job_id}")
+async def viewpoints_job(request: Request, job_id: str) -> dict:
+    from .ops_jobs import JOBS, identity
+
+    require_permission(request, "operate")
+    owner, tenant = identity(request)
+    job = JOBS.get(job_id[:64], owner=owner, tenant=tenant, kind="viewpoints")
+    if job is None:
+        raise HTTPException(404, "no such job")
+    return job
+
+
+@router.post("/api/v1/viewpoints")
+async def get_viewpoints(request: Request, body: ViewpointsIn) -> dict:
+    """Run one two-sided debate for the signed-in person and return it."""
+    question, principal, actor = _prepare(request, body)
+    try:
+        return await run_in_threadpool(_run, question, body.rounds, principal, actor,
+                                       (body.for_side, body.against_side))
     except _Refused as exc:
         return {"ran": False, "message": str(exc)}
     except HTTPException:

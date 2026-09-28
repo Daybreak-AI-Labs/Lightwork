@@ -74,13 +74,16 @@ test('add to knowledge posts the text with its source and reports success', asyn
   const ui = await fixture(markup, () => response({ok: true, reason: 'ok'}));
   t.after(() => ui.window.close());
   const form = ui.document.getElementById('fa-cortex-add');
+  // The page lists the default place plus existing document groups to keep it with.
+  form.elements.collection.innerHTML = '<option value="cortex">Company brain</option><option value="policies">Policies</option>';
+  form.elements.collection.value = 'policies';
   form.elements.text.value = 'Refunds within 30 days.';
   form.elements.source.value = 'Refund policy';
   form.dispatchEvent(new ui.window.Event('submit', {cancelable: true}));
   await ui.settle();
   const call = nonAccount(ui.calls)[0];
   assert.equal(call.url, '/api/v1/cortex/deposit');
-  assert.deepEqual(JSON.parse(call.options.body), {text: 'Refunds within 30 days.', kind: 'knowledge', source: 'Refund policy'});
+  assert.deepEqual(JSON.parse(call.options.body), {text: 'Refunds within 30 days.', kind: 'knowledge', source: 'Refund policy', collection: 'policies'});
   assert.match(ui.document.getElementById('fa-cortex-status').textContent, /Added/);
 });
 

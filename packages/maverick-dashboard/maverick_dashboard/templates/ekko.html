@@ -127,6 +127,26 @@
       </div>
     </section>
 
+    <section class="card ekko-panel" id="ekko-recording" aria-labelledby="ekko-recording-heading">
+      <div class="section-head">
+        <h2 id="ekko-recording-heading" tabindex="-1">Record activity</h2>
+      </div>
+      <p class="ekko-note">Ekko learns from activity recorded on an enrolled device. Record it here from an activity file
+        exported by a guided recording, or, when Lightwork runs on Windows, from which allowed app is in front. Only the
+        apps and details your enrollment allows are kept; everything else is skipped.</p>
+      <label class="ekko-consent" for="ekko-rec-consent">
+        <input id="ekko-rec-consent" type="checkbox">
+        <span>I understand Ekko records only the allowed apps and actions, and I can pause or stop at any time.</span>
+      </label>
+      <label for="ekko-rec-file"><strong>Activity file</strong></label>
+      <input class="input" id="ekko-rec-file" type="file" accept=".jsonl,.txt,application/json,text/plain">
+      <div class="ekko-controls">
+        <button class="btn btn--primary" type="button" id="ekko-rec-import">Record from this file</button>
+        <button class="btn" type="button" id="ekko-rec-watch" hidden>Record the app in front on this computer</button>
+      </div>
+      <p id="ekko-rec-msg" class="muted" role="status" aria-live="polite"></p>
+    </section>
+
     <section class="card ekko-panel" aria-labelledby="ekko-opportunities-heading">
       <div class="section-head">
         <h2 id="ekko-opportunities-heading" tabindex="-1">Work Lightwork could take over</h2>
@@ -193,6 +213,7 @@
 {% endblock %}
 
 {% block scripts_extra %}
+<script src="/static/lightwork-ekko-recording.js" defer></script>
 <script>
 (function () {
   'use strict';
@@ -207,6 +228,7 @@
   var chosenDevice = initial.device_id || 'local-device';
 
   function device() { return chosenDevice; }
+  window.LightworkEkkoDevice = device;
 
   function appName(app) {
     var labels = (current && current.app_labels) || {};

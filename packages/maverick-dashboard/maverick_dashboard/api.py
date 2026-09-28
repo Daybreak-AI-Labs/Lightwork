@@ -9799,6 +9799,7 @@ def _schedule_out(job) -> ScheduleOut:
         title=(str(p.get("title") or p.get("text") or ""))[:200],
         next_run=job.run_at,
         schedule_id=str(p.get("schedule_id") or ""),
+        zone=str(p.get("__tz__") or ""),
     )
 
 
@@ -9827,6 +9828,12 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     from maverick.scheduler import CronError, next_run, schedule_cron
 
     cron = (payload.cron or "").strip()
+    tz = (payload.tz or "").strip()
+    if tz:
+        from .schedule_ops_api import valid_zone
+
+        if not valid_zone(tz):
+            raise HTTPException(status_code=400, detail="unknown time zone")
     try:
         next_run(cron)  # validate up front; CronError -> 400
     except CronError as e:
@@ -9861,6 +9868,8 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
 
     schedule_id = uuid4().hex
     job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
+    if tz:
+        job_payload["__tz__"] = tz
     owner = caller_principal(request) or ""
     if owner:
         job_payload["owner"] = owner
@@ -9887,6 +9896,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
         title=title,
         next_run=run_at,
         schedule_id=schedule_id,
+        zone=tz,
     )
 
 

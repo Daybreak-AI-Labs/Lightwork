@@ -416,6 +416,21 @@
       {% endfor %}
     </div>
     {% endif %}
+    <details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
+      <summary>Show planning steps</summary>
+      <p class="muted">See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the
+        result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI,
+        counts toward your spending limits and costs at most $2.00.</p>
+      <label for="ps-passes">How many review rounds</label>
+      <select id="ps-passes" class="select">
+        <option value="1">One round</option>
+        <option value="2" selected>Up to two rounds</option>
+        <option value="3">Up to three rounds</option>
+      </select>
+      <button type="button" class="btn btn--primary" id="ps-run">Show planning steps</button>
+      <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
+      <div id="ps-result" hidden></div>
+    </details>
     <details class="more">
       <summary>More</summary>
     {% if projects %}
@@ -432,6 +447,7 @@
     {% endif %}
     <div class="goal-share" data-goal="{{ goal.id }}">
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
+      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download or share full history</a>
       <button type="button" id="share-create" class="btn btn--ghost">Create share link</button>
       <input type="text" id="share-url" class="input" readonly aria-label="Share link"
              style="display: none; max-width: 28rem;" onclick="this.select()">
@@ -507,6 +523,7 @@
   </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-planning-steps.js" defer></script>
   <script>
     // Plain-language failure text for this page (no status codes or server text).
     function cgErr(failure, what) {
