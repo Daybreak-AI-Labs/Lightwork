@@ -61,6 +61,7 @@
       return Array.prototype.slice.call(row.querySelectorAll('[data-key-item]'))
         .map(function (item) { return item.getAttribute('data-key') || ''; });
     }
+    if (row.querySelector('[data-grid]')) return readGrid(row);
     if (control === 'table') {
       var kind = (row.querySelector('[data-table]') || {dataset: {}}).dataset.rowKind;
       return Array.prototype.slice.call(row.querySelectorAll('[data-table-row]')).map(function (tr) {
@@ -116,6 +117,8 @@
         (data.key_items || []).forEach(function (key) { addKeyItem(row, key.value, key.fingerprint); });
       }
       syncEmpty(row);
+    } else if (data.grid && row.querySelector('[data-grid]')) {
+      buildGrid(row, data.grid);
     } else if (control === 'table') {
       var body = row.querySelector('[data-table-body]');
       if (body) {
@@ -266,6 +269,23 @@
       if (focusTo) focusTo.focus();
     } else if (target.hasAttribute('data-table-add') && row) {
       addFromTableForm(row);
+    } else if (target.hasAttribute('data-grid-add') && row) {
+      addFromGridForm(row);
+    } else if (target.hasAttribute('data-grid-remove') && row) {
+      var gridTr = target.closest('tr');
+      if (gridTr) gridTr.remove();
+      syncGrid(row);
+      var addControl = row.querySelector('[data-grid-newkey], [data-grid-add]');
+      if (addControl) addControl.focus();
+      say(row, 'Removed from the list. Choose Save to keep this change.');
+    } else if (target.hasAttribute('data-pick-add') && row) {
+      addPick(row, target.closest('td'));
+    } else if (target.hasAttribute('data-pick-remove') && row) {
+      var pickCell = target.closest('td');
+      var pickItem = target.closest('li');
+      if (pickItem) pickItem.remove();
+      var pickSelect = pickCell && pickCell.querySelector('[data-pick-select]');
+      if (pickSelect) pickSelect.focus();
     } else if (target.dataset.resetGroup) {
       var group = target.closest('.settings-all-group');
       var name = group.querySelector('h2') ? group.querySelector('h2').textContent : 'this group';
@@ -515,12 +535,291 @@
   root.addEventListener('input', function (event) {
     var search = event.target.closest('[data-table-search]');
     if (search) filterChoices(search.closest('.settings-all-row'));
+    var pickSearch = event.target.closest('[data-pick-search]');
+    if (pickSearch) filterPick(pickSearch.closest('.settings-all-row'), pickSearch.closest('td'));
   });
   root.addEventListener('focusin', function (event) {
     var pick = event.target.closest('[data-table-pick], [data-table-search]');
     if (pick && pick.closest('.settings-all-row').querySelector('[data-table-pick]').options.length <= 1) {
       filterChoices(pick.closest('.settings-all-row'));
     }
+    var cellPick = event.target.closest('[data-pick-search], [data-pick-select]');
+    var cell = cellPick && cellPick.closest('td');
+    if (cell && !cell.dataset.loaded) {
+      cell.dataset.loaded = '1';
+      filterPick(cellPick.closest('.settings-all-row'), cell);
+    }
+  });
+
+  // ---- grids and rules (tools per chat app, spending per service, rules) ---
+  var columnChoiceCache = {};
+  function gridState(row) {
+    var box = row.querySelector('[data-grid]');
+    if (!box) return null;
+    if (!box.gridState) {
+      try { box.gridState = JSON.parse(box.getAttribute('data-grid-state') || '{}'); } catch (ignore) { box.gridState = {}; }
+    }
+    box.gridState.columns = box.gridState.columns || [];
+    return box.gridState;
+  }
+  function columnFor(row, td) {
+    var key = td && td.getAttribute('data-cell');
+    return (gridState(row).columns || []).filter(function (c) { return c.key === key; })[0] || null;
+  }
+  function addOption(select, value, label, selected) {
+    var option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    if (selected) option.selected = true;
+    select.appendChild(option);
+    return option;
+  }
+  function gridRows(row) {
+    return Array.prototype.slice.call(row.querySelectorAll('[data-grid-row]'));
+  }
+  function syncGrid(row) {
+    var empty = row.querySelector('[data-grid-empty]');
+    if (empty) empty.hidden = gridRows(row).length > 0;
+  }
+  function addChip(td, value, label) {
+    var list = td.querySelector('[data-pick-list]');
+    if (!list) return;
+    var li = document.createElement('li');
+    li.setAttribute('data-pick-item', '');
+    li.setAttribute('data-value', value);
+    var text = document.createElement('span');
+    text.textContent = label || value;
+    var remove = document.createElement('button');
+    remove.className = 'btn btn--ghost';
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.setAttribute('data-pick-remove', '');
+    remove.setAttribute('aria-label', 'Remove ' + (label || value));
+    li.appendChild(text); li.appendChild(remove);
+    list.appendChild(li);
+  }
+  function searchBox(td, column, where) {
+    var search = document.createElement('input');
+    search.className = 'input';
+    search.type = 'search';
+    search.maxLength = 80;
+    search.placeholder = 'Search';
+    search.setAttribute('data-pick-search', '');
+    search.setAttribute('aria-label', 'Find ' + column.label.toLowerCase() + ' ' + where);
+    td.appendChild(search);
+  }
+  function buildCell(td, column, value, where) {
+    var kind = column.kind;
+    var input;
+    if (kind === 'select' || kind === 'pick') {
+      var current = value && typeof value === 'object' ? value : {value: column.default || '', label: ''};
+      if (kind === 'pick') searchBox(td, column, where);
+      input = document.createElement('select');
+      input.className = 'select';
+      var seen = false;
+      (column.choices || []).slice(0, kind === 'pick' ? 50 : 1000).forEach(function (c) {
+        if (c.value === current.value) seen = true;
+        addOption(input, c.value, c.label, c.value === current.value);
+      });
+      if (!seen) {
+        var label = current.label;
+        if (!label) label = current.value === '*' ? 'Any tool' : (current.value ? current.value : 'Choose one');
+        var first = addOption(input, current.value, label, true);
+        input.insertBefore(first, input.firstChild);
+      }
+      if (kind === 'pick') input.setAttribute('data-pick-select', '');
+    } else if (kind === 'picks') {
+      var list = document.createElement('ul');
+      list.className = 'settings-all-list-items';
+      list.setAttribute('data-pick-list', '');
+      list.setAttribute('aria-label', column.label + ' ' + where);
+      td.appendChild(list);
+      (Array.isArray(value) ? value : []).forEach(function (item) { addChip(td, item.value, item.label); });
+      if (!column.choices || !column.choices.length || column.choices.length > 20) searchBox(td, column, where);
+      input = document.createElement('select');
+      input.className = 'select';
+      input.setAttribute('data-pick-select', '');
+      addOption(input, '', 'Choose one to add', true);
+      (column.choices || []).slice(0, 50).forEach(function (c) { addOption(input, c.value, c.label, false); });
+      input.setAttribute('aria-label', 'Choose ' + column.label.toLowerCase() + ' to add ' + where);
+      td.appendChild(input);
+      var add = document.createElement('button');
+      add.className = 'btn btn--ghost';
+      add.type = 'button';
+      add.textContent = 'Add';
+      add.setAttribute('data-pick-add', '');
+      add.setAttribute('aria-label', 'Add to ' + column.label.toLowerCase() + ' ' + where);
+      td.appendChild(add);
+      return;
+    } else if (kind === 'number') {
+      input = document.createElement('input');
+      input.className = 'input';
+      input.type = 'number';
+      if (column.minimum != null) input.min = String(column.minimum);
+      if (column.maximum != null) input.max = String(column.maximum);
+      input.step = String(column.step || 'any');
+      input.value = value == null ? '' : String(value);
+    } else if (kind === 'switch') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = value === true;
+    } else {
+      input = document.createElement('input');
+      input.className = 'input';
+      input.type = 'text';
+      input.maxLength = 2000;
+      input.value = value == null ? '' : String(value);
+    }
+    input.setAttribute('data-cell-input', '');
+    input.setAttribute('aria-label', column.label + ' ' + where + (column.unit ? ' (' + column.unit + ')' : ''));
+    td.appendChild(input);
+  }
+  function addGridRow(row, entry) {
+    var state = gridState(row);
+    var body = row.querySelector('[data-grid-body]');
+    if (!body) return null;
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-grid-row', '');
+    var where;
+    if (state.kind === 'grid') {
+      tr.dataset.name = entry.name;
+      where = 'for ' + (entry.label || entry.name);
+      var name = document.createElement('td');
+      name.setAttribute('data-row-label', '');
+      name.textContent = entry.label || entry.name;
+      tr.appendChild(name);
+    } else {
+      where = 'in ' + (state.item_label || 'Rule').toLowerCase() + ' ' + (body.children.length + 1);
+    }
+    state.columns.forEach(function (column) {
+      var td = document.createElement('td');
+      td.setAttribute('data-cell', column.key);
+      buildCell(td, column, entry.cells ? entry.cells[column.key] : undefined, where);
+      tr.appendChild(td);
+    });
+    var removeCell = document.createElement('td');
+    var remove = document.createElement('button');
+    remove.className = 'btn btn--ghost'; remove.type = 'button'; remove.textContent = 'Remove';
+    remove.setAttribute('data-grid-remove', '');
+    remove.setAttribute('aria-label', 'Remove ' + where.replace(/^(for|in) /, ''));
+    removeCell.appendChild(remove);
+    tr.appendChild(removeCell);
+    body.appendChild(tr);
+    return tr;
+  }
+  function buildGrid(row, state) {
+    var box = row.querySelector('[data-grid]');
+    if (!box) return;
+    box.gridState = state;
+    state.columns = state.columns || [];
+    var body = row.querySelector('[data-grid-body]');
+    if (body) body.textContent = '';
+    (state.rows || []).forEach(function (entry) { addGridRow(row, entry); });
+    var keys = row.querySelector('[data-grid-newkey]');
+    if (keys && state.key_choices) {
+      keys.textContent = '';
+      addOption(keys, '', 'Choose one', true);
+      state.key_choices.forEach(function (k) { addOption(keys, k.value, k.label, false); });
+    }
+    syncGrid(row);
+  }
+  function readCell(td, column) {
+    if (!td) return null;
+    if (column.kind === 'picks') {
+      return Array.prototype.slice.call(td.querySelectorAll('[data-pick-item]'))
+        .map(function (li) { return li.getAttribute('data-value'); });
+    }
+    var input = td.querySelector('[data-cell-input]');
+    if (!input) return null;
+    if (column.kind === 'switch') return input.checked;
+    if (column.kind === 'number') return input.value.trim() === '' ? null : Number(input.value);
+    return input.value;
+  }
+  function readGrid(row) {
+    var state = gridState(row);
+    return gridRows(row).map(function (tr) {
+      var out = state.kind === 'grid' ? {name: tr.dataset.name} : {};
+      state.columns.forEach(function (column) {
+        out[column.key] = readCell(tr.querySelector('[data-cell="' + column.key + '"]'), column);
+      });
+      return out;
+    });
+  }
+  function addFromGridForm(row) {
+    var state = gridState(row);
+    var tr;
+    if (state.kind === 'grid') {
+      var pick = row.querySelector('[data-grid-newkey]');
+      var chosen = pick && pick.value;
+      if (!chosen) { say(row, 'Choose one from the list first.'); return; }
+      var taken = gridRows(row).some(function (r) { return r.dataset.name === chosen; });
+      if (taken) { say(row, 'That one is already in the list. Change it there.'); return; }
+      tr = addGridRow(row, {name: chosen, label: pick.options[pick.selectedIndex].textContent, cells: {}});
+      pick.value = '';
+    } else {
+      tr = addGridRow(row, {cells: {}});
+    }
+    syncGrid(row);
+    say(row, 'Added. Fill in the row, then choose Save.');
+    var first = tr && tr.querySelector('select, input, button');
+    if (first) first.focus();
+  }
+  async function columnChoices(row, column) {
+    if (!column.choices_url) return column.choices || [];
+    if (columnChoiceCache[column.choices_url]) return columnChoiceCache[column.choices_url];
+    try {
+      var response = await window.fetch(column.choices_url, {cache: 'no-store', credentials: 'same-origin',
+                                                             headers: {Accept: 'application/json'}});
+      if (!response.ok) throw response;
+      var data = await response.json();
+      columnChoiceCache[column.choices_url] = data.choices || [];
+    } catch (failure) {
+      say(row, errorText(failure, 'load the list of options'));
+      return [];
+    }
+    return columnChoiceCache[column.choices_url];
+  }
+  async function filterPick(row, td) {
+    var column = columnFor(row, td);
+    var select = td && td.querySelector('[data-pick-select]');
+    if (!column || !select) return;
+    var search = td.querySelector('[data-pick-search]');
+    var words = (search ? search.value : '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    var choices = await columnChoices(row, column);
+    var matches = choices.filter(function (c) {
+      var text = (c.label + ' ' + c.value).toLowerCase();
+      return words.every(function (w) { return text.indexOf(w) !== -1; });
+    });
+    var keep = column.kind === 'pick' ? select.value : '';
+    var keepLabel = column.kind === 'pick' && select.selectedIndex >= 0
+      ? select.options[select.selectedIndex].textContent : '';
+    select.textContent = '';
+    if (column.kind === 'pick') {
+      addOption(select, keep, keepLabel || keep, true);
+    } else {
+      addOption(select, '', matches.length
+        ? (matches.length > 50 ? 'Showing 50 of ' + matches.length + ': search to narrow' : 'Choose one to add')
+        : 'Nothing matches that search', true);
+    }
+    matches.slice(0, 50).forEach(function (c) {
+      if (column.kind === 'pick' && c.value === keep) return;
+      addOption(select, c.value, c.label, false);
+    });
+  }
+  function addPick(row, td) {
+    var select = td && td.querySelector('[data-pick-select]');
+    if (!select || !select.value) { say(row, 'Choose one to add first.'); return; }
+    var value = select.value;
+    var exists = Array.prototype.slice.call(td.querySelectorAll('[data-pick-item]'))
+      .some(function (li) { return li.getAttribute('data-value') === value; });
+    if (exists) { say(row, 'That one is already in the list.'); return; }
+    addChip(td, value, select.options[select.selectedIndex].textContent);
+    select.value = '';
+    say(row, 'Added. Choose Save to keep this change.');
+  }
+  root.querySelectorAll('[data-grid]').forEach(function (box) {
+    var owner = box.closest('.settings-all-row');
+    if (owner) buildGrid(owner, gridState(owner));
   });
 
   // ---- module switches -----------------------------------------------------

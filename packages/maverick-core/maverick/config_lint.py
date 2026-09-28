@@ -55,6 +55,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # reads [budget] self_tuning; self_healing.py recommends it). Without it
         # here, a client enabling the documented knob got a false "unknown key".
         "self_tuning",
+        # Deployment-wide spend ceilings per AI service (provider_cost_cap.py).
+        "provider_caps",
+        "provider_caps_period",
     },
     "safety": {
         "profile",
@@ -65,6 +68,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "constitution",
         "compartments",
         "compartment_unseal",
+        # Periodic human review of long tasks (review_checkpoint.py).
+        "review_checkpoint",
     },
     "sandbox": {
         "backend",

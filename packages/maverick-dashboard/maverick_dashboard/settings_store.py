@@ -530,7 +530,8 @@ def _dump(data: dict) -> str:
         lines.append("")
     for name in sorted(data.get("providers") or {}):
         pcfg = data["providers"][name] or {}
-        fields = [(f, pcfg.get(f)) for f in ("api_key", "base_url") if pcfg.get(f)]
+        # auth_mode: how Bedrock signs in, chosen on the All settings page.
+        fields = [(f, pcfg.get(f)) for f in ("api_key", "base_url", "auth_mode") if pcfg.get(f)]
         if not fields:
             continue
         lines.append(f"[providers.{name}]")
@@ -872,7 +873,16 @@ def clear_provider(name: str) -> None:
         raise ValueError("unknown provider")
     with _locked():
         data = _load_overlay_for_update()
-        (data.get("providers") or {}).pop(name, None)
+        table = (data.get("providers") or {}).get(name)
+        if isinstance(table, dict):
+            # Only the key and address are cleared; a sign-in method chosen on
+            # the All settings page stays.
+            table.pop("api_key", None)
+            table.pop("base_url", None)
+            if not table:
+                data["providers"].pop(name, None)
+        else:
+            (data.get("providers") or {}).pop(name, None)
         _write(data)
 
 
@@ -1292,7 +1302,9 @@ def set_module_enables(paths, enabled: bool) -> None:
 
 # Tables with their own serializer above; every other catalog table goes
 # through the generic allowlisted loop in _dump.
-_CATALOG_SPECIAL_SECTIONS = frozenset({"channels", "dashboard", "plugins", "sandbox", "webhooks"})
+_CATALOG_SPECIAL_SECTIONS = frozenset({
+    "channels", "dashboard", "plugins", "providers", "sandbox", "webhooks",
+})
 
 
 def _catalog_generic_sections() -> tuple[str, ...]:
