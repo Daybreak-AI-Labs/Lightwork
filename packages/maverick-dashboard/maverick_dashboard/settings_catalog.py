@@ -25,8 +25,7 @@ Deliberately NOT in the catalog:
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
   ``[federation]``, ``[license]``, ``[providers] per_tenant_keys``, the sandbox
-  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the
-  Pushover credentials (read only from the server's environment),
+  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody,
   ``[deployment]`` (installer provenance), and every setting that names a
   server file path or an environment variable (``signal_cli_path``,
   ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
@@ -789,7 +788,7 @@ SETTINGS: tuple[Setting, ...] = (
       "select", "Integrations", "ntfy", "maverick.notifications",
       choices=(("none", "Do not send alerts"), ("ntfy", "ntfy phone alerts"),
                ("slack", "Slack"), ("discord", "Discord"),
-               ("pushover", "Pushover (keys set on the server)"))),
+               ("pushover", "Pushover"))),
     S("notifications", "ntfy_topic", "ntfy topic",
       "Your private ntfy topic name. Treat it like a password.",
       "secret", "Integrations", "", "maverick.notifications"),

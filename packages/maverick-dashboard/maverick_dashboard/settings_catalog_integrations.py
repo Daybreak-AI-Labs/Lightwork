@@ -6,7 +6,7 @@ column types (a plain import would be circular).
 
 Covers the tools agents use to reach email, calendars, an ERP system, GitHub
 and Obsidian; issue-tracker and webhook delivery settings and their sealed
-secrets; the sealed Stripe and Microsoft 365 keys; alert batching and
+secrets; the sealed Stripe, Pushover and Microsoft 365 keys; alert batching and
 operational alerts; tax-figure updates; billing plans, Stripe prices and
 refunds; vendor-onboarding read retries; and voice input. Every row names the
 kernel module that reads it, and each environment variable in ``env`` still
@@ -317,6 +317,18 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "without waiting for the time above.",
           "number", "Integrations", 10, "maverick.notification_batcher", minimum=1,
           maximum=1000, integer=True, unit="alerts", env=("MAVERICK_NOTIFY_BATCH_MAX",)),
+        S("notifications", "user_key", "Pushover user key",
+          "Your Pushover user or group key, the 30 letters and numbers shown on your "
+          "Pushover dashboard. It is stored sealed and never shown again. A key set on the "
+          "server is used instead.",
+          "secret", "Integrations", "", "maverick.notifications", pattern=r"[A-Za-z0-9]{30}",
+          max_length=30, env=("PUSHOVER_USER_KEY",), aliases="pushover phone alerts"),
+        S("notifications", "app_token", "Pushover app token",
+          "The token of the Pushover app Lightwork sends alerts through, 30 letters and "
+          "numbers. It is stored sealed and never shown again. A token set on the server is "
+          "used instead.",
+          "secret", "Integrations", "", "maverick.notifications", pattern=r"[A-Za-z0-9]{30}",
+          max_length=30, env=("PUSHOVER_APP_TOKEN",), aliases="pushover phone alerts"),
         S("alerts", "enabled", "Alert me about problems with Lightwork itself",
           "Send an urgent alert with the service chosen above when, for example, the "
           "emergency stop trips, a spending limit runs out or the activity record breaks.",

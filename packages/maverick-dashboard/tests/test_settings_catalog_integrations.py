@@ -19,6 +19,8 @@ ROWS = integrations.entries(catalog.S, catalog.C, catalog.Column)
 _KEY = "ab" * 32  # a publisher key in the stored (hex) form
 _STRIPE_KEY = "sk_test_" + "a1B2c3D4e5F6g7H8"  # pragma: allowlist secret
 _STRIPE_HOOK = "whsec_" + "Z9y8X7w6V5u4T3s2"  # pragma: allowlist secret
+_PUSHOVER_USER = "u" + "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G"  # pragma: allowlist secret
+_PUSHOVER_APP = "a" + "Z1x2C3v4B5n6M7q8W9e0R1t2Y3u4I"  # pragma: allowlist secret
 _ENV = sorted({name for row in ROWS for name in row.env} | {
     "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_CONFIG", "MAVERICK_CONFIG_OVERLAY",
     "MAVERICK_OAUTH_VAULT", "MAVERICK_CONNECTIONS", "MAVERICK_STRIPE_ENABLE",
@@ -88,6 +90,8 @@ VALUES: dict[str, tuple[object, object]] = {
     "data_map.graph_token": ("sample-graph-token", "sample-graph-token"),  # pragma: allowlist secret
     "voice.whisper_cpp_bin": ("whisper-cli", "whisper-cli"),
     "voice.whisper_cpp_model": ("ggml-custom.bin", "ggml-custom.bin"),
+    "notifications.user_key": (_PUSHOVER_USER, _PUSHOVER_USER),
+    "notifications.app_token": (_PUSHOVER_APP, _PUSHOVER_APP),
 }
 
 # id -> a value the server must refuse
@@ -147,6 +151,8 @@ INVALID: dict[str, object] = {
     "data_map.graph_token": "",
     "voice.whisper_cpp_bin": "/usr/bin/python3",
     "voice.whisper_cpp_model": "ggml-escape.bin",
+    "notifications.user_key": "too-short",
+    "notifications.app_token": "a" * 31,
 }
 
 # id -> (value first set without confirmation or None, the loosening value)
@@ -323,7 +329,8 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
     assert set(secrets) == {"email.app_password", "calendar.password", "erp.token",
                             "github.token", "billing.stripe.secret_key",
                             "billing.stripe.webhook_secret", "github.app_webhook_secret",
-                            "webhooks.gitlab_token", "data_map.graph_token"}
+                            "webhooks.gitlab_token", "data_map.graph_token",
+                            "notifications.user_key", "notifications.app_token"}
     r = _save([{"id": key, "value": value} for key, value in secrets.items()])
     assert r.status_code == 200, r.text
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
@@ -621,3 +628,29 @@ def test_a_chosen_model_file_loads_and_a_link_out_is_refused(tmp_path, audit_row
     chosen.symlink_to(tmp_path / "outside" / "ggml-escape.bin")
     assert voice_models.checked_model_file("ggml-custom.bin") is None
     assert voice_models.locate_model() is None
+
+
+def test_saved_pushover_keys_send_alerts_and_the_environment_wins(monkeypatch, audit_rows):
+    import httpx
+    from maverick import notifications
+
+    sent: list[dict] = []
+
+    class Reply:
+        status_code = 200
+
+    def post(url, data=None, **kwargs):
+        sent.append(dict(data or {}))
+        return Reply()
+
+    monkeypatch.setattr(httpx, "post", post)
+    for name in ("PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    assert notifications._send_pushover("Title", "Body", "default") is False
+    _set("notifications.user_key", _PUSHOVER_USER)
+    _set("notifications.app_token", _PUSHOVER_APP)
+    assert notifications._send_pushover("Title", "Body", "default") is True
+    assert sent[-1]["user"] == _PUSHOVER_USER and sent[-1]["token"] == _PUSHOVER_APP
+    monkeypatch.setenv("PUSHOVER_USER_KEY", "server-user-key")
+    assert notifications._send_pushover("Title", "Body", "high") is True
+    assert sent[-1]["user"] == "server-user-key" and sent[-1]["token"] == _PUSHOVER_APP
