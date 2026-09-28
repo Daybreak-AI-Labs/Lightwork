@@ -45,25 +45,8 @@ def connectors_group() -> None:
 def connectors_list_cmd() -> None:
     """List the registered governed connectors and their actions."""
     ga, registered = _configured()
-    rows = []
-    for name, (read_action, write_action) in sorted(registered.items()):
-        write_spec = ga.get(write_action)
-        rows.append({
-            "connector": name,
-            "read_action": read_action,
-            "write_action": write_action,
-            "write_risk": write_spec.risk,
-            "write_requires_approval": ga.simulate(
-                write_action, _placeholder(write_spec)).requires_approval,
-        })
-    click.echo(_json.dumps(rows, indent=2))
-
-
-def _placeholder(spec) -> dict:
-    """A minimal typed-valid param dict for a spec, so we can probe its approval
-    requirement without real inputs (simulate has no side effects)."""
-    sample = {str: "x", dict: {}, int: 0, float: 0.0, bool: False}
-    return {k: sample.get(t, "x") for k, t in spec.params.items()}
+    from ..governed_rest import connector_rows
+    click.echo(_json.dumps(connector_rows(ga, registered), indent=2))
 
 
 @connectors_group.command("simulate")

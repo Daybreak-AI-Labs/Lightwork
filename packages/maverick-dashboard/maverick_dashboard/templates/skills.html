@@ -65,19 +65,36 @@
         </fieldset>
       </form>
 
-      <details class="sk-more">
+      <details class="sk-more" id="to-skill-install">
         <summary>Add a skill from a web address</summary>
-        <p class="muted sk-small">Paste the web address of a skill someone shared with you, such as a
-          page on GitHub. <strong>Only add skills from people you trust:</strong> agents follow a
-          skill's instructions the next time they use it.</p>
-        <div id="skill-install-form" class="sk-install">
-          <input class="input" type="url" id="skill-source"
-                 aria-label="Web address of the skill"
-                 placeholder="https://github.com/…"
-                 {% if not can_author %}disabled{% endif %} />
-          <button type="button" class="btn" id="skill-install-btn" {% if not can_author %}disabled{% endif %}>Add skill</button>
-        </div>
+        <p class="muted sk-small">Point Lightwork at a skill someone shared with you. Lightwork reads it and
+          shows you what it would make agents do before anything is added. <strong>Only add skills from
+          people you trust:</strong> agents follow a skill's instructions the next time they use it.</p>
+        <fieldset class="sk-fieldset" {% if not is_admin %}disabled{% endif %}>
+          <legend class="sk-small">Where is the skill?</legend>
+          <div class="sk-choice">
+            <label><input type="radio" name="to-skill-kind" value="web" checked> A web address</label>
+            <label><input type="radio" name="to-skill-kind" value="github"> A GitHub project</label>
+          </div>
+          <div id="to-skill-web">
+            <label class="sk-field"><span>Web address of the skill</span>
+              <input class="input" type="url" id="to-skill-url" maxlength="2000" placeholder="https://…" autocomplete="off"
+                     aria-label="Web address of the skill"></label>
+          </div>
+          <div id="to-skill-gh" hidden>
+            <label class="sk-field"><span>GitHub project (owner and name)</span>
+              <input class="input" type="text" id="to-skill-gh-project" maxlength="200" placeholder="your-company/skills" autocomplete="off" spellcheck="false"></label>
+            <label class="sk-field"><span>File in the project (optional)</span>
+              <input class="input" type="text" id="to-skill-gh-file" maxlength="300" placeholder="SKILL.md" autocomplete="off" spellcheck="false"
+                     aria-describedby="to-skill-gh-help"></label>
+            <span id="to-skill-gh-help" class="muted sk-small">Leave empty to use the project's main skill file.</span>
+          </div>
+          <div class="sk-actions"><button type="button" class="btn" id="to-skill-check">Check this skill</button></div>
+        </fieldset>
+        {% if not is_admin %}<p class="muted sk-small">Only administrators can add skills.</p>
+        {% elif not install_allowed %}<p class="muted sk-small">You can check a skill here, but adding one is switched off on this server.</p>{% endif %}
         <p id="skill-install-msg" role="status" aria-live="polite" class="muted sk-small"></p>
+        <div id="to-skill-preview"></div>
       </details>
       <details class="sk-more">
         <summary>Check a skill file before adding it</summary>
@@ -123,6 +140,36 @@
     </section>
   </div>
 
+  <section class="panel sk-section" aria-labelledby="to-skill-usage-title">
+    <div class="section-head"><h2 id="to-skill-usage-title">How Your Skills Are Doing</h2></div>
+    <p class="muted sk-small">Each time agents use a skill, Lightwork notes whether the task went well.</p>
+    <p id="to-skill-usage-status" class="muted" role="status" aria-live="polite">Loading…</p>
+    <div id="to-skill-usage"></div>
+  </section>
+
+  {% if is_admin %}
+  <section class="panel sk-section" aria-labelledby="to-tidy-title">
+    <div class="section-head"><h2 id="to-tidy-title">Tidy Up Skills That Rarely Help</h2></div>
+    <p class="muted sk-small">Find skills that have had a fair trial and still rarely help, then remove them.
+      Lightwork allows for chance, so a skill is only listed when the evidence is clear.</p>
+    <div class="sk-row">
+      <label class="sk-field"><span>Used at least</span>
+        <select class="select" id="to-tidy-uses">
+          <option value="3">3 times</option><option value="5" selected>5 times</option>
+          <option value="10">10 times</option><option value="20">20 times</option>
+        </select></label>
+      <label class="sk-field"><span>And helped in at most</span>
+        <select class="select" id="to-tidy-rate">
+          <option value="0.1">1 in 10 tasks</option><option value="0.2" selected>1 in 5 tasks</option>
+          <option value="0.3">3 in 10 tasks</option>
+        </select></label>
+    </div>
+    <div class="sk-actions"><button type="button" class="btn" id="to-tidy-check">Find skills that rarely help</button></div>
+    <p id="to-tidy-status" class="muted" role="status" aria-live="polite"></p>
+    <div id="to-tidy-out"></div>
+  </section>
+  {% endif %}
+
   <style>
     .sk-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: var(--space-5); align-items: start; }
     @media (max-width: 900px) { .sk-grid { grid-template-columns: 1fr; } }
@@ -142,6 +189,12 @@
     .skill-card { margin-bottom: var(--space-3); }
     .skill-card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
     .skill-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+    .sk-section { margin-top: var(--space-5); }
+    .sk-choice, .sk-row { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+    .to-card { margin: var(--space-3) 0; }
+    .to-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+    .to-text { white-space: pre-wrap; max-height: 16rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2); }
+    .to-scroll { overflow-x: auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   </style>
   <script>
@@ -196,6 +249,7 @@
       }
       installedEl.appendChild(card);
     }
+    window.lwAppendSkill = appendSkill;
 
     // Remove a skill (administrators): confirm, then delete and drop the card.
     installedEl.addEventListener('click', async function (event) {
@@ -254,36 +308,6 @@
       });
     }
 
-    // Add a skill from a web address.
-    var installBtn = document.getElementById('skill-install-btn');
-    var src = document.getElementById('skill-source');
-    var imsg = document.getElementById('skill-install-msg');
-    if (installBtn && src) installBtn.addEventListener('click', async function () {
-      var source = src.value.trim();
-      if (!source) { imsg.textContent = 'Paste the web address of the skill first.'; src.focus(); return; }
-      var ok = await window.mvConfirm('Add the skill from this web address? Agents will follow its instructions from the next task. Only continue if you trust where it came from.', {okText: 'Add skill'});
-      if (!ok) return;
-      var btn = installBtn;
-      btn.disabled = true;
-      imsg.textContent = 'Adding…';
-      try {
-        var r = await fetch('/api/v1/skills', {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'same-origin',
-          body: JSON.stringify({source: source})
-        });
-        if (r.ok) {
-          var s = await r.json().catch(function () { return null; });
-          if (s && s.name) { appendSkill(s); imsg.textContent = 'Added ' + human(s.name) + '. Agents use it from the next task.'; src.value = ''; }
-          else imsg.textContent = 'Added.';
-        } else if (r.status === 400) {
-          imsg.textContent = 'That web address didn’t lead to a skill Lightwork can use, or the skill failed its safety check.';
-        } else {
-          imsg.textContent = window.mvErrorText(r, 'add the skill');
-        }
-      } catch (e) { imsg.textContent = window.mvErrorText(e, 'add the skill'); }
-      finally { btn.disabled = false; }
-    });
-
     // Create a skill from the form.
     var form = document.getElementById('skill-create-form');
     if (!form) return;
@@ -331,4 +355,5 @@
   })();
   </script>
   <script src="/static/lightwork-feature-actions.js" defer></script>
+  <script src="/static/lightwork-tool-ops.js" defer></script>
 {% endblock %}

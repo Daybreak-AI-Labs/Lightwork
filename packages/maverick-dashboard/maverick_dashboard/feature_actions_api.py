@@ -425,6 +425,9 @@ async def mcp_registry(request: Request) -> dict:
 class RegistryAddIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
+    # The details the person looked at (Tool servers page preview): when
+    # given, a server whose details changed since is refused, not added.
+    fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 @router.post("/api/v1/mcp-registry/add")
@@ -436,6 +439,11 @@ async def mcp_registry_add(body: RegistryAddIn, request: Request) -> dict:
 
     def _do() -> str:
         spec = install_mcp_from_registry(body.name)
+        if body.fingerprint is not None:
+            from .connector_ops_api import spec_fingerprint
+            if spec_fingerprint(spec.to_dict()) != body.fingerprint:
+                raise HTTPException(409, "This tool server's details changed since you looked. "
+                                         "Look again before adding it.")
         add_mcp_server(spec.name, spec.to_dict())
         return spec.name
     try:

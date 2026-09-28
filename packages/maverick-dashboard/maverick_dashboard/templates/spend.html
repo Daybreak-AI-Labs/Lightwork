@@ -254,4 +254,33 @@
   </style>
   <script src="/static/lightwork-feature-actions.js" defer></script>
 
+  <div class="section-head"><h2 id="io-ask-title">Questions About Your Tasks</h2></div>
+  <section class="panel" aria-labelledby="io-ask-title">
+    <p class="muted">Pick what to measure, how to group it and the dates, and Lightwork answers from the tasks
+      you can see.</p>
+    <p class="muted" id="io-ask-status" role="status" aria-live="polite">Loading…</p>
+    <form id="io-ask-form" hidden>
+      <div class="fa-row">
+        <label class="fa-field"><span>What to measure</span><select class="select" name="metric"></select></label>
+        <label class="fa-field"><span>Grouped by</span><select class="select" name="group"></select></label>
+        <label class="fa-field"><span>From</span><input class="input" type="date" name="since"></label>
+        <label class="fa-field"><span>To</span><input class="input" type="date" name="until"></label>
+        <button type="submit" class="btn btn--primary">Answer</button>
+      </div>
+    </form>
+    <div id="io-ask-out"></div>
+    <details id="io-query" class="fa-technical" hidden>
+      <summary>Technical details</summary>
+      <p class="muted">For installation administrators: ask in the analytics language. Only questions that read
+        are allowed, answers are limited in size, and a question is stopped after 15 seconds.</p>
+      <label class="fa-field fa-grow"><span>Question</span>
+        <textarea class="textarea" id="io-query-text" rows="4" maxlength="4000" spellcheck="false"></textarea></label>
+      <p><button type="button" class="btn" id="io-query-run">Run</button></p>
+      <p class="muted" id="io-query-status" role="status" aria-live="polite"></p>
+      <div id="io-query-out"></div>
+    </details>
+  </section>
+  <style>.io-scroll { overflow-x: auto; }</style>
+  <script src="/static/lightwork-insight-ops.js" defer></script>
+
 {% endblock %}

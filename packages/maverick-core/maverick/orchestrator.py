@@ -1698,8 +1698,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     _trace_dir = os.environ.get("MAVERICK_TRACE_DIR")
     if _trace_dir:
         try:
-            from .replay.trace import TraceWriter
-            _trace_writer = TraceWriter(os.path.join(_trace_dir, f"goal-{goal_id}.jsonl"))
+            from .replay.trace import TraceWriter, goal_trace_path
+            _trace_writer = TraceWriter(str(goal_trace_path(goal_id)))
             blackboard.attach_trace(_trace_writer)
         except Exception:  # pragma: no cover -- tracing never blocks a run
             _trace_writer = None

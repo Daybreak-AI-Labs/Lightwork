@@ -9,6 +9,7 @@ v0.1.6 security hardening (council review):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -200,8 +201,6 @@ def validate_skill_file(path: Path) -> SkillValidation:
     can run ``maverick skill validate`` before submitting to a catalog. Pure and
     offline — no network, no disk writes. ``ok`` is True iff there are no errors
     (warnings don't block)."""
-    errors: list[str] = []
-    warnings: list[str] = []
     p = Path(path).expanduser()
     if not p.exists():
         return SkillValidation(False, [f"file not found: {p}"], [])
@@ -209,6 +208,17 @@ def validate_skill_file(path: Path) -> SkillValidation:
         text = p.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         return SkillValidation(False, [f"cannot read {p}: {e}"], [])
+    return validate_skill_text(text, p)
+
+
+def validate_skill_text(text: str, path: Path | None = None) -> SkillValidation:
+    """Lint SKILL.md ``text`` against the publish criteria of
+    :func:`validate_skill_file` (which reads a file and calls this). Pure and
+    offline, so a caller holding fetched or uploaded text lints it without
+    writing it anywhere first."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    p = path or Path("SKILL.md")
     try:
         skill = Skill.parse(text, p)
     except ValueError as e:
@@ -452,6 +462,8 @@ def install_skill(
     source: str,
     skills_dir: Path | None = None,
     trusted_local: bool = True,
+    *,
+    expected_sha256: str | None = None,
 ) -> Skill:
     """Install a skill from a URL, ``gh:org/repo[:path]``, or local path.
 
@@ -463,6 +475,10 @@ def install_skill(
             attacker can't POST ``{"source": "/etc/passwd"}`` to read host
             files. CLI callers pass True (default) since the user is
             already on the local machine.
+        expected_sha256: when given, the fetched text must hash to exactly
+            this (the fingerprint :func:`preview_skill_source` reported), so
+            what installs is what a person reviewed -- a source that changed
+            in between is refused, never installed unseen.
 
     Raises ValueError if the source can't be fetched or parsed. The file is
     only written to disk AFTER frontmatter validation succeeds.
@@ -501,7 +517,58 @@ def install_skill(
             raise ValueError(f"local file {source!r} does not exist")
         content = p.read_text(encoding="utf-8")
 
+    if expected_sha256 is not None and _text_sha256(content) != expected_sha256:
+        raise ValueError(
+            "the skill at this source changed since it was checked; check it "
+            "again before installing"
+        )
     return _validate_and_write(content, target_dir)
+
+
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class SkillPreview:
+    """What a remote skill would install, read without installing it."""
+
+    name: str
+    triggers: list[str]
+    tools_needed: list[str]
+    body: str
+    signed: bool
+    sha256: str
+    validation: SkillValidation
+
+
+def preview_skill_source(source: str) -> SkillPreview:
+    """Fetch a ``https://`` or ``gh:org/repo[:path]`` skill and lint it,
+    WITHOUT installing anything.
+
+    The fetch goes through the same SSRF-guarded, size-capped path
+    :func:`install_skill` uses (no local paths, no plain ``http``), and the
+    text is decoded the same way, so ``sha256`` is exactly what
+    ``install_skill(..., expected_sha256=...)`` will compare against. Raises
+    ``ValueError`` when the source cannot be fetched."""
+    source = str(source or "").strip()
+    if source.startswith("http://"):
+        raise ValueError("insecure URL scheme not allowed for skill install: use https://")
+    text = _fetch_skill_source(source)
+    validation = validate_skill_text(text)
+    try:
+        parsed = Skill.parse(text, Path("SKILL.md"))
+    except ValueError:
+        parsed = None
+    return SkillPreview(
+        name=parsed.name if parsed else "",
+        triggers=list(parsed.triggers) if parsed else [],
+        tools_needed=list(parsed.tools_needed) if parsed else [],
+        body=parsed.body if parsed else "",
+        signed=bool(parsed and parsed.sig and parsed.pubkey),
+        sha256=_text_sha256(text),
+        validation=validation,
+    )
 
 
 def _clean_items(items) -> list[str]:

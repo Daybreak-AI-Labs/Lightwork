@@ -63,6 +63,25 @@
     {% endif %}
     {% endif %}
   </div>
+
+  <section class="panel" aria-labelledby="io-steps-title">
+    <h2 id="io-steps-title">Recorded Steps</h2>
+    <p class="muted">When step-by-step recording is on, each run keeps a sealed recording of everything its
+      agents posted. Lightwork checks the seal before showing it.</p>
+    <div class="io-row">
+      <label class="io-field"><span>Show</span>
+        <select class="select" id="io-steps-kind" disabled><option value="">Every kind of step</option></select></label>
+      <button type="button" class="btn" id="io-steps-show" data-goal="{{ goal.id }}">Show recorded steps</button>
+    </div>
+    <p class="muted" id="io-steps-status" role="status" aria-live="polite"></p>
+    <div id="io-steps-out"></div>
+  </section>
+  <style>
+    .io-scroll { overflow-x: auto; }
+    .io-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .io-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  </style>
+  <script src="/static/lightwork-insight-ops.js" defer></script>
 {% else %}
   <h1 class="page-title">Task replay</h1>
   <p class="page-subtitle">See everything a task did, step by step, check that the record hasn't been altered, and download evidence for auditors.</p>

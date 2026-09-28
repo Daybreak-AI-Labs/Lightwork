@@ -156,12 +156,14 @@
 
   <div class="section-head"><h2 id="fa-registry-title">Find more tool servers</h2></div>
   <section class="panel" id="fa-registry" aria-labelledby="fa-registry-title">
-    <p class="muted">Browse the tool servers published in your organisation's list and add one with a click.</p>
+    <p class="muted">Browse the tool servers published in your organisation's list. Before one is added you see
+      exactly what it starts or connects to, and you can ask it which tools it offers.</p>
     <p class="fa-row"><button type="button" class="btn btn--primary" id="fa-registry-load">Show available tool servers</button></p>
     <label class="fa-field fa-grow"><span class="sr-only">Search tool servers</span>
       <input class="input" type="search" id="fa-registry-search" placeholder="Search by name or purpose" aria-label="Search tool servers" hidden></label>
     <p class="muted" id="fa-registry-status" role="status" aria-live="polite"></p>
     <div id="fa-registry-out"></div>
+    <div id="fa-registry-preview" aria-live="polite"></div>
   </section>
   <style>
     .fa-scroll { overflow-x: auto; }
