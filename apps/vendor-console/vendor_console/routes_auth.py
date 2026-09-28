@@ -52,7 +52,9 @@ def setup_submit(request: Request, email: str = Form(...), name: str = Form(""),
     audit.record(conn, actor=email, action="staff.create", target=email,
                  detail={"role": "owner", "bootstrap": True})
     resp = RedirectResponse("/enroll-totp", status_code=303)
-    auth.set_session(resp, staff_id=sid, stage="enroll", secure=secure_cookie(request))
+    auth.set_session(resp, staff_id=sid, stage="enroll",
+                     epoch=store.get_staff(conn, sid).session_epoch,
+                     secure=secure_cookie(request))
     return resp
 
 
@@ -89,7 +91,7 @@ def login_submit(request: Request, email: str = Form(...), password: str = Form(
                  target=row["email"], detail={"ip": client_ip(request)})
     resp = RedirectResponse("/totp" if enrolled else "/enroll-totp", status_code=303)
     auth.set_session(resp, staff_id=row["id"], stage="totp" if enrolled else "enroll",
-                     secure=secure_cookie(request))
+                     epoch=row["session_epoch"], secure=secure_cookie(request))
     return resp
 
 
@@ -159,7 +161,7 @@ def enroll_submit(request: Request, code: str = Form(...)):
                       {"secret": row["totp_secret"],
                        "uri": security.totp_uri(row["totp_secret"], st.email),
                        "error": _BAD_CODE})
-    store.set_totp(conn, st.id, row["totp_secret"], enrolled=True)
+    store.set_totp(conn, st.id, row["totp_secret"], enrolled=True)   # retires open links
     store.set_totp_last_step(conn, st.id, step)                 # single-use
     ratelimit.record_success(key)
     audit.record(conn, actor=st.email, action="staff.totp.enroll", target=st.email)
@@ -188,18 +190,34 @@ def _link_gone(request: Request):
     return resp
 
 
-def _welcome_key(request: Request) -> str:
-    return "welcome:" + client_ip(request)
+# Set-up page throttle. The tight limit is per (address, link), so a few clicks
+# on an old link don't lock out every new member behind one shared office
+# address; a looser per-address ceiling still bounds guessing across many links.
+WELCOME_IP_MAX_FAILS = 30
+
+
+def _welcome_keys(request: Request, token: str) -> tuple[str, str]:
+    ip = client_ip(request)
+    return "welcome:" + ip + ":" + hash_token(token)[:16], "welcome-ip:" + ip
+
+
+def _welcome_locked(keys: tuple[str, str]) -> bool:
+    return bool(ratelimit.locked(keys[0]) or ratelimit.locked(keys[1]))
+
+
+def _welcome_failed(keys: tuple[str, str]) -> None:
+    ratelimit.record_failure(keys[0])
+    ratelimit.record_failure(keys[1], max_fails=WELCOME_IP_MAX_FAILS)
 
 
 @router.get("/welcome/{token}")
 def welcome_form(request: Request, token: str):
-    key = _welcome_key(request)
-    if ratelimit.locked(key):
+    keys = _welcome_keys(request, token)
+    if _welcome_locked(keys):
         return render(request, "link_gone.html", {"message": _LOCKED})
     member = store.invite_staff(request.app.state.conn, hash_token(token))
     if member is None:
-        ratelimit.record_failure(key)
+        _welcome_failed(keys)
         return _link_gone(request)
     return render(request, "welcome.html", {"member": member, "token": token})
 
@@ -208,13 +226,13 @@ def welcome_form(request: Request, token: str):
 def welcome_submit(request: Request, token: str, password: str = Form(...),
                    confirm: str = Form(...)):
     conn = request.app.state.conn
-    key = _welcome_key(request)
-    if ratelimit.locked(key):
+    keys = _welcome_keys(request, token)
+    if _welcome_locked(keys):
         return render(request, "link_gone.html", {"message": _LOCKED})
     token_hash = hash_token(token)
     member = store.invite_staff(conn, token_hash)
     if member is None:
-        ratelimit.record_failure(key)
+        _welcome_failed(keys)
         return _link_gone(request)
     problem = ""
     if len(password) < MIN_PASSWORD:
@@ -227,14 +245,15 @@ def welcome_submit(request: Request, token: str, password: str = Form(...),
         return resp
     member = store.consume_invite(conn, token_hash, security.hash_password(password))
     if member is None:                       # used or expired in the meantime
-        ratelimit.record_failure(key)
+        _welcome_failed(keys)
         return _link_gone(request)
-    ratelimit.record_success(key)
+    ratelimit.record_success(keys[0])
     audit.record(conn, actor=member.email, action="staff.invite.accept", target=member.email,
                  detail={"ip": client_ip(request)})
     # Straight into two-step set-up, exactly like the first owner after /setup.
     resp = RedirectResponse("/enroll-totp", status_code=303)
-    auth.set_session(resp, staff_id=member.id, stage="enroll", secure=secure_cookie(request))
+    auth.set_session(resp, staff_id=member.id, stage="enroll", epoch=member.session_epoch,
+                     secure=secure_cookie(request))
     return resp
 
 
