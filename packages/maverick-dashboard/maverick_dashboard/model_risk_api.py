@@ -5081,6 +5081,11 @@ async def upsert_ai_cost_roi_assumption(
 
 # AI literacy ---------------------------------------------------------------
 
+# An employee number from the HR system, looked up on the assurance page:
+# bounded like the evidence export's person list (the register keeps only a
+# fingerprint of it).
+_EmployeeNumber = Annotated[str, Path(min_length=1, max_length=128)]
+
 
 @router.get("/ai-literacy/plane-status")
 async def get_ai_literacy_plane_status(request: Request) -> dict[str, Any]:
@@ -5127,7 +5132,7 @@ async def upsert_ai_literacy_requirement(
 @router.get("/ai-literacy/people/{person_id}/assignment")
 async def get_ai_literacy_assignment(
     request: Request,
-    person_id: str,
+    person_id: _EmployeeNumber,
 ) -> dict[str, Any]:
     require_permission(request, "view")
     _require_active_tenant()
@@ -5141,7 +5146,7 @@ async def get_ai_literacy_assignment(
 @router.put("/ai-literacy/people/{person_id}/assignment")
 async def set_ai_literacy_assignment(
     request: Request,
-    person_id: str,
+    person_id: _EmployeeNumber,
     body: schemas.AILiteracyAssignmentIn,
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
@@ -5219,7 +5224,7 @@ async def revoke_ai_literacy_waiver(
 @router.get("/ai-literacy/people/{person_id}/status")
 async def get_ai_literacy_status(
     request: Request,
-    person_id: str,
+    person_id: _EmployeeNumber,
     as_of: float | None = Query(None, gt=0),
 ) -> dict[str, Any]:
     require_permission(request, "view")
@@ -5235,7 +5240,7 @@ async def get_ai_literacy_status(
 @router.get("/ai-literacy/people/{person_id}/receipts")
 async def get_ai_literacy_receipts(
     request: Request,
-    person_id: str,
+    person_id: _EmployeeNumber,
 ) -> dict[str, Any]:
     require_permission(request, "view")
     _require_active_tenant()

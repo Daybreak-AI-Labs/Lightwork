@@ -210,3 +210,108 @@ test("an outside tool's result file is read without anyone typing it", async t =
   await assert.rejects(h.F.readRecordFile(new h.w.File(["not a record"], "x.txt"), "result"), /isn't a result file Lightwork can read/);
   await assert.rejects(h.F.readRecordFile(null, "result"), /Choose the result file first/);
 });
+
+test("values copied from another system keep their spelling and get the server's limits", t => {
+  const {F} = setup(t);
+  assert.equal(F.checkReference("  spring-campaign-2026 ", "release"), "spring-campaign-2026");
+  assert.equal(F.checkReference("DE-2026/0042", "filing"), "DE-2026/0042");
+  assert.equal(F.checkReference("10442", "employee"), "10442");
+  assert.equal(F.checkReference("2026.1", "edition"), "2026.1");
+  assert.equal(F.checkReference("Article 6 and Annex III", "provision"), "Article 6 and Annex III");
+  assert.equal(F.checkReference("Confidential", "label"), "confidential");
+  assert.throws(() => F.checkReference("spring campaign", "release"), /without spaces/);
+  assert.throws(() => F.checkReference("x".repeat(257), "release"), /at most 256 characters/);
+  assert.throws(() => F.checkReference("has spaces", "filing"), /exactly as the authority gave it/);
+  assert.throws(() => F.checkReference("x".repeat(129), "employee"), /at most 128 characters/);
+  assert.throws(() => F.checkReference("2026 spring", "edition"), /without spaces/);
+  assert.throws(() => F.checkReference("Art. 6; drop", "provision"), /Type the provision/);
+  assert.throws(() => F.checkReference("9lives", "label"), /starting with a letter/);
+  assert.throws(() => F.checkReference("   ", "filing"), /Fill in the filing reference/);
+});
+
+const PROVISIONS = [
+  {regulation: "EU AI Act", provision: "Art. 14", title: "Effective human oversight of a high-risk AI system", official_url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727"},
+  {regulation: "EU AI Act", provision: "Art. 27(1)(a)", title: "The deployer's processes in which the system will be used", official_url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727"},
+  {regulation: "GDPR", provision: "Art. 35", title: "Run a DPIA for high-risk processing", official_url: "https://eur-lex.europa.eu/eli/reg/2016/679/oj"}
+];
+const provisionMarkup = `<fieldset data-provision-picker><legend>Legal provision</legend>
+  <label>Search the list<input type="search" data-provision-search></label>
+  <label>Provision<select data-provision-choice></select></label>
+  <label data-provision-other hidden>Provision not in the list<input></label></fieldset>`;
+const setupProvision = (t, options) => {
+  const h = setup(t);
+  h.form.insertAdjacentHTML("beforeend", provisionMarkup);
+  const picker = h.F.provisionPicker(h.form.querySelector("[data-provision-picker]"), {defaultUrl: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=AIACT", ...options});
+  return {...h, picker, select: control(h.form, "Provision"), search: control(h.form, "Search the list"), typed: control(h.form, "Provision not in the list")};
+};
+const optionTexts = select => Array.from(select.options).map(option => option.textContent);
+
+test("provisions are chosen from a searchable list grouped by law, with typing as the last resort", async t => {
+  const h = setupProvision(t, {required: true});
+  assert.deepEqual(optionTexts(h.select), ["Loading provisions…", "Other (type it)"]);
+  h.picker.set(PROVISIONS, "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727");
+  assert.deepEqual(Array.from(h.select.querySelectorAll("optgroup")).map(group => group.label), ["EU AI Act", "GDPR"]);
+  assert.equal(optionTexts(h.select).at(-1), "Other (type it)", "typing is offered last");
+  h.search.value = "article 27";
+  h.search.dispatchEvent(new h.w.Event("input"));
+  assert.deepEqual(optionTexts(h.select), ["Choose a provision", "Art. 27(1)(a) — The deployer's processes in which the system will be used", "Other (type it)"]);
+  set(h.w, h.select, h.select.options[1].value);
+  assert.deepEqual(plain(h.picker.value()), {provision: "Art. 27(1)(a)", official_url: PROVISIONS[1].official_url});
+  h.search.value = "dpia";
+  h.search.dispatchEvent(new h.w.Event("input"));
+  assert.equal(h.select.value, "", "a choice hidden by the search is not sent");
+  assert.throws(() => h.picker.value(), /Choose the legal provision/);
+  h.search.value = "nothing like this";
+  h.search.dispatchEvent(new h.w.Event("input"));
+  assert.equal(optionTexts(h.select)[0], "Nothing in the list matches — try other words");
+});
+
+test("a provision not in the list is typed only after choosing Other, and is checked", async t => {
+  const h = setupProvision(t);
+  h.picker.set(PROVISIONS, "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727");
+  assert.equal(h.picker.value(), null, "an optional provision can be left empty");
+  const other = h.form.querySelector("[data-provision-other]");
+  assert.equal(other.hidden, true);
+  set(h.w, h.select, "__other__");
+  assert.equal(other.hidden, false);
+  h.typed.value = "Art. 9(2); drop";
+  assert.throws(() => h.picker.value(), /Type the provision/);
+  h.typed.value = " Article 9(2) ";
+  assert.deepEqual(plain(h.picker.value()), {provision: "Article 9(2)", official_url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727"});
+});
+
+const releaseMarkup = `<div data-release-picker>
+  <label>Release<select data-release-choice></select></label>
+  <label data-release-new hidden>Name of the new release<input></label></div>`;
+test("releases are picked from the ones already used, newest first, and a new one is typed once", async t => {
+  const h = setup(t);
+  h.form.insertAdjacentHTML("beforeend", releaseMarkup + releaseMarkup);
+  const [firstRoot, secondRoot] = h.form.querySelectorAll("[data-release-picker]");
+  const list = new h.F.ReleaseList();
+  const first = h.F.releasePicker(firstRoot, list);
+  const second = h.F.releasePicker(secondRoot, list);
+  const firstSelect = firstRoot.querySelector("select");
+  assert.equal(firstSelect.options[0].textContent, "Loading releases…");
+  list.set([
+    {context_id: "spring-campaign-2026", last_used_at: 1800000000, deployment_ids: ["production-east"]},
+    {context_id: "winter-sale", last_used_at: 1700000000, deployment_ids: ["production-west"]}
+  ]);
+  assert.deepEqual(Array.from(firstSelect.options).map(option => option.value), ["", "spring-campaign-2026", "winter-sale", "__new__"]);
+  first.setDeployment("production-west");
+  assert.deepEqual(Array.from(firstSelect.options).map(option => option.value), ["", "winter-sale", "__new__"], "only releases of the chosen deployment");
+  assert.throws(() => first.value(), /Choose a release/);
+  set(h.w, firstSelect, "__new__");
+  assert.equal(firstRoot.querySelector("[data-release-new]").hidden, false);
+  const typed = firstRoot.querySelector("[data-release-new] input");
+  typed.value = "summer launch";
+  assert.throws(() => first.value(), /without spaces/);
+  typed.value = "summer-launch-2026";
+  assert.equal(first.value(), "summer-launch-2026");
+  assert.equal(firstSelect.value, "summer-launch-2026", "the new name is now chosen from the list");
+  assert.equal(firstRoot.querySelector("[data-release-new]").hidden, true);
+  const secondValues = Array.from(secondRoot.querySelectorAll("option")).map(option => option.value);
+  assert.ok(secondValues.includes("summer-launch-2026"), "the other form offers the new name too");
+  assert.match(Array.from(secondRoot.querySelectorAll("option")).find(option => option.value === "summer-launch-2026").textContent, /added just now/);
+  set(h.w, secondRoot.querySelector("select"), "spring-campaign-2026");
+  assert.equal(second.value(), "spring-campaign-2026");
+});

@@ -40,7 +40,7 @@
          aria-live="polite"></p>
 
       <form id="ai-literacy-person-query" class="assurance-form">
-        <label class="assurance-form__wide">Person's employee number
+        <label class="assurance-form__wide">Employee number from your HR system
           <input class="input" name="person_id" required maxlength="128"
                  autocomplete="off" placeholder="For example: 10442">
         </label>
@@ -52,9 +52,9 @@
       <div id="ai-literacy-person-result" class="assurance-table" role="region" aria-label="Details" hidden></div>
 
       <form id="ai-literacy-export" class="assurance-form">
-        <label class="assurance-form__wide">People to include (optional)
+        <label class="assurance-form__wide">Employee numbers from your HR system (optional)
           <input class="input" name="person_ids" maxlength="4096" autocomplete="off"
-                 placeholder="Employee numbers separated by commas; leave empty for everyone">
+                 placeholder="Separated by commas; leave empty for everyone">
         </label>
         <div class="assurance-form__wide assurance-actions">
           <button class="btn btn--ghost" type="submit">Download training records</button>
@@ -70,9 +70,13 @@
           <label>Title<input class="input" data-pick-fill="requirement" name="title" required maxlength="300"></label>
           <label>Roles (separated by commas)<input class="input" data-pick-fill="requirement" name="role_ids" maxlength="2048" placeholder="developer, reviewer"></label>
           <label>AI systems (separated by commas)<input class="input" data-pick-fill="requirement" name="system_ids" maxlength="2048" placeholder="customer assistant"></label>
-          <label>Training provider<input class="input" data-pick-fill="requirement" name="provider_id" required maxlength="128" placeholder="for example: our learning system"></label>
-          <label>Course<input class="input" data-pick-fill="requirement" name="content_id" required maxlength="128" placeholder="for example: responsible AI 101"></label>
-          <label>Course edition<input class="input" data-pick-fill="requirement" name="content_version" required maxlength="128" placeholder="for example: 2026"></label>
+          <p class="assurance-form__wide assurance-muted">Training provider, course and edition come from your learning system. Pick one already used here, or type a new one.</p>
+          <label>Training provider<input class="input" data-pick-fill="requirement" name="provider_id" required maxlength="128" autocomplete="off" list="ai-literacy-provider-choices" placeholder="for example: our learning system"></label>
+          <label>Course<input class="input" data-pick-fill="requirement" name="content_id" required maxlength="128" autocomplete="off" list="ai-literacy-course-choices" placeholder="for example: responsible AI 101"></label>
+          <label>Course edition from your learning system<input class="input" data-pick-fill="requirement" name="content_version" required maxlength="128" autocomplete="off" list="ai-literacy-edition-choices" pattern="[A-Za-z0-9][A-Za-z0-9_.:\/\-]{0,127}" placeholder="for example: 2026"></label>
+          <datalist id="ai-literacy-provider-choices"></datalist>
+          <datalist id="ai-literacy-course-choices"></datalist>
+          <datalist id="ai-literacy-edition-choices"></datalist>
           <label>Valid for (days)<input class="input" name="validity_days" type="number" min="1" max="1830" value="365" required></label>
           <label>Due within (days)<input class="input" name="due_within_days" type="number" min="0" max="366" value="30" required></label>
           <input type="hidden" name="expected_revision" data-pick="requirement" value="0">
@@ -83,7 +87,7 @@
           </div>
         </form>
         <form id="ai-literacy-assignment-set" class="assurance-form"><p class="assurance-form__wide assurance-muted" data-pick-note="assignment">Look a person up above first to change their roles.</p>
-          <label>Person's employee number<input class="input" data-pick-fill="assignment" name="person_id" required maxlength="128" autocomplete="off"></label>
+          <label>Employee number from your HR system<input class="input" data-pick-fill="assignment" name="person_id" required maxlength="128" autocomplete="off"></label>
           <label>Roles (separated by commas)<input class="input" data-pick-fill="assignment" name="role_ids" maxlength="2048" placeholder="developer, reviewer"></label>
           <label>AI systems (separated by commas)<input class="input" data-pick-fill="assignment" name="system_ids" maxlength="2048" placeholder="customer assistant"></label>
           <input type="hidden" name="expected_revision" data-pick="assignment" value="0">
@@ -177,7 +181,7 @@
           <input type="hidden" name="incident_id" data-pick="incident" data-pick-required>
           <input type="hidden" name="report_id" data-pick="incident" data-pick-required>
           <input type="hidden" name="expected_revision" data-pick="incident" data-pick-required>
-          <label>Filing reference from the authority<input class="input" name="submission_reference" required maxlength="512"></label>
+          <label>Filing reference the authority gave you<input class="input" name="submission_reference" required maxlength="128" autocomplete="off" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/\-]{0,127}" placeholder="Copy it from the authority's receipt"></label>
           <label class="assurance-form__wide">Receipt file from the authority<input class="input" type="file" data-fingerprint="receipt_sha256" required></label><input type="hidden" name="receipt_sha256">
           <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Record that it was filed</button><span id="article-73-submission-status" role="status" aria-live="polite"></span></div>
         </form>
@@ -584,8 +588,11 @@
         <label>Your role<select class="select" name="economic_operator_role"><option value="provider">Provider</option><option value="deployer">Deployer</option><option value="importer">Importer</option><option value="distributor">Distributor</option><option value="product_manufacturer">Product manufacturer</option><option value="authorised_representative">Authorised representative</option><option value="other">Other</option></select></label>
         <label>Risk level<select class="select" name="risk_tier"><option value="undetermined">Undetermined</option><option value="high_risk">High risk</option><option value="prohibited">Prohibited</option><option value="limited">Limited</option><option value="minimal">Minimal</option><option value="general_purpose">General purpose</option></select></label>
         <label>Does the Act apply?<select class="select" name="act_applicability"><option value="undetermined">Undetermined</option><option value="applicable">Applicable</option><option value="not_applicable">Not applicable</option></select></label>
-        <label>Legal provision<input class="input" name="provision" required maxlength="128" placeholder="Article 6 and Annex III"></label>
-        <input type="hidden" name="official_url" value="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727">
+        <fieldset class="assurance-form__wide" data-provision-picker data-required><legend>Legal provision</legend>
+          <label>Search the list<input class="input" type="search" data-provision-search autocomplete="off" placeholder="for example: Article 27 or human oversight"></label>
+          <label>Provision<select class="select" data-provision-choice required><option value="">Loading provisions…</option></select></label>
+          <label data-provision-other hidden>Provision not in the list<input class="input" maxlength="128" autocomplete="off" placeholder="for example: Article 6 and Annex III"></label>
+        </fieldset>
         <input type="hidden" name="operation_id" data-auto-reference>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Start case</button><span id="ai-conformity-create-status" role="status" aria-live="polite"></span></div>
       </form>
@@ -601,7 +608,11 @@
         <input type="hidden" name="case_id" data-pick="case" data-pick-required>
         <label>Outcome<select class="select" name="outcome"><option value="undetermined">Undetermined</option><option value="required">Required</option><option value="not_required">Not required</option></select></label>
         <label class="assurance-form__wide">Reason (kept private)<textarea class="textarea" rows="2" data-fingerprint-text="rationale_sha256"></textarea></label><input type="hidden" name="rationale_sha256">
-        <label>Cited provision<input class="input" name="provision" maxlength="128" placeholder="Article 27(1)"></label>
+        <fieldset class="assurance-form__wide" data-provision-picker><legend>Cited provision (optional)</legend>
+          <label>Search the list<input class="input" type="search" data-provision-search autocomplete="off" placeholder="for example: Article 27 or human oversight"></label>
+          <label>Provision<select class="select" data-provision-choice><option value="">Loading provisions…</option></select></label>
+          <label data-provision-other hidden>Provision not in the list<input class="input" maxlength="128" autocomplete="off" placeholder="for example: Article 6 and Annex III"></label>
+        </fieldset>
         <input type="hidden" name="expected_revision" data-pick="case" data-pick-required>
         <input type="hidden" name="operation_id" data-auto-reference>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Save rights-impact decision</button><span id="ai-conformity-fria-status" role="status" aria-live="polite"></span></div>
@@ -610,7 +621,11 @@
         <input type="hidden" name="case_id" data-pick="case" data-pick-required>
         <label>Article 43 route<select class="select" name="route"><option value="undetermined">Undetermined</option><option value="internal_control_annex_vi">Internal control / Annex VI</option><option value="notified_body_annex_vii">Notified body / Annex VII</option><option value="union_harmonisation_law">Union harmonisation law</option><option value="not_applicable">Not applicable</option></select></label>
         <label class="assurance-form__wide">Reason (kept private)<textarea class="textarea" rows="2" data-fingerprint-text="rationale_sha256"></textarea></label><input type="hidden" name="rationale_sha256">
-        <label>Cited provision<input class="input" name="provision" maxlength="128" placeholder="Article 43 and Annex VI"></label>
+        <fieldset class="assurance-form__wide" data-provision-picker><legend>Cited provision (optional)</legend>
+          <label>Search the list<input class="input" type="search" data-provision-search autocomplete="off" placeholder="for example: Article 27 or human oversight"></label>
+          <label>Provision<select class="select" data-provision-choice><option value="">Loading provisions…</option></select></label>
+          <label data-provision-other hidden>Provision not in the list<input class="input" maxlength="128" autocomplete="off" placeholder="for example: Article 6 and Annex III"></label>
+        </fieldset>
         <input type="hidden" name="expected_revision" data-pick="case" data-pick-required>
         <input type="hidden" name="operation_id" data-auto-reference>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Save approval route</button><span id="ai-conformity-route-status" role="status" aria-live="polite"></span></div>
@@ -622,7 +637,11 @@
         <label>Status<select class="select" name="status"><option value="pending">Pending</option><option value="complete">Complete</option><option value="not_applicable">Not applicable</option></select></label>
         <fieldset class="assurance-form__wide"><legend>Evidence for this item</legend><div class="assurance-checks" data-conformity-evidence><p class="assurance-muted">Choose a case in the table above to see its evidence.</p></div></fieldset>
         <label class="assurance-form__wide">Reason (kept private)<textarea class="textarea" rows="2" data-fingerprint-text="rationale_sha256"></textarea></label><input type="hidden" name="rationale_sha256">
-        <label>Cited provision (needed for “Not applicable”)<input class="input" name="provision" maxlength="128" placeholder="Article 9(2)"></label>
+        <fieldset class="assurance-form__wide" data-provision-picker><legend>Cited provision (needed for “Not applicable”)</legend>
+          <label>Search the list<input class="input" type="search" data-provision-search autocomplete="off" placeholder="for example: Article 27 or human oversight"></label>
+          <label>Provision<select class="select" data-provision-choice><option value="">Loading provisions…</option></select></label>
+          <label data-provision-other hidden>Provision not in the list<input class="input" maxlength="128" autocomplete="off" placeholder="for example: Article 6 and Annex III"></label>
+        </fieldset>
         <input type="hidden" name="expected_revision" data-pick="case" data-pick-required>
         <input type="hidden" name="operation_id" data-auto-reference>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Save checklist item</button><span id="ai-conformity-checklist-status" role="status" aria-live="polite"></span></div>
@@ -965,7 +984,11 @@
         <input type="hidden" name="asset_id">
         <input type="hidden" name="expected_asset_binding_sha256">
         <input type="hidden" name="expected_source_revision">
-        <label class="assurance-form__wide">New data labels (separated by commas)<input class="input" name="classification_codes" maxlength="4096" placeholder="confidential, regulated"></label>
+        <fieldset class="assurance-form__wide" data-purview-labels><legend>New data labels</legend>
+          <p class="assurance-muted" data-purview-label-note role="status" aria-live="polite">Open this section to load your labels.</p>
+          <div class="assurance-checks" data-purview-label-choices></div>
+          <label><span data-purview-label-other-text>Labels not in the list (optional, separated by commas)</span><input class="input" name="classification_codes_other" maxlength="4096" autocomplete="off" placeholder="for example: confidential"></label>
+        </fieldset>
         <input type="hidden" data-auto-reference name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{7,255}">
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare the change (nothing changes yet)</button><span id="ai-identity-purview-prepare-status" role="status" aria-live="polite"></span></div>
       </form>
@@ -1058,7 +1081,10 @@
         <label>Media kind<select class="select" name="media_kind"><option value="image">Image</option><option value="audio">Audio</option><option value="video">Video</option></select></label>
         <label>AI system<select class="select" name="asset_id" required data-deployment-asset>{{ asset_options() }}</select></label>
         <label>Deployment<select class="select" name="deployment_id" required data-deployment-choice><option value="">Choose an AI system first</option></select></label>
-        <label class="assurance-form__wide">Release reference from your release system<input class="input" name="context_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/+=\-]{0,255}" placeholder="for example: spring-campaign-2026"></label>
+        <div class="assurance-form__wide" data-release-picker>
+          <label>Release<select class="select" required data-release-choice><option value="">Loading releases…</option></select></label>
+          <label data-release-new hidden>Name of the new release, as your release system shows it<input class="input" maxlength="256" autocomplete="off" placeholder="for example: spring-campaign-2026"></label>
+        </div>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Check file</button><span id="ai-media-provenance-verify-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
@@ -1070,7 +1096,10 @@
         <label>Media kind<select class="select" name="media_kind"><option value="image">Image</option><option value="audio">Audio</option><option value="video">Video</option></select></label>
         <label>AI system<select class="select" name="asset_id" required data-deployment-asset>{{ asset_options() }}</select></label>
         <label>Deployment<select class="select" name="deployment_id" required data-deployment-choice><option value="">Choose an AI system first</option></select></label>
-        <label>Release reference from your release system<input class="input" name="context_id" required maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:@\/+=\-]{0,255}" placeholder="for example: spring-campaign-2026"></label>
+        <div class="assurance-form__wide" data-release-picker>
+          <label>Release<select class="select" required data-release-choice><option value="">Loading releases…</option></select></label>
+          <label data-release-new hidden>Name of the new release, as your release system shows it<input class="input" maxlength="256" autocomplete="off" placeholder="for example: spring-campaign-2026"></label>
+        </div>
         <fieldset class="assurance-form__wide"><legend>What the signature records</legend><div class="assurance-checks">
           <label><input type="checkbox" name="assertion_codes" value="c2pa.created" checked> The media was created with AI</label>
           <label><input type="checkbox" name="assertion_codes" value="c2pa.actions" checked> The editing steps</label>
@@ -1422,6 +1451,10 @@
   const plainMessage = (error, fallback) => (
     error instanceof Error && !(error instanceof TypeError) && !(error instanceof ReferenceError) && !(error instanceof SyntaxError)
       ? error.message : fallback);
+  // Values copied from another system (an employee number, a course edition,
+  // a filing reference, a release name) keep their exact spelling and are
+  // checked with the server's own limits before anything is sent.
+  const outsideValue = (value, kind) => (F ? F.checkReference(value, kind) : String(value || "").trim());
   const withButton = async (form, statusId, message, action) => {
     if (form.dataset.inFlight === "true") return null;
     form.dataset.inFlight = "true";
@@ -1457,6 +1490,11 @@
             system_ids: (item.scope?.system_ids || []).join(", "), provider_id: item.content?.provider_id, content_id: item.content?.content_id,
             content_version: item.content?.content_version, expected_revision: item.revision}}));
       if (!rows.length) emptyRow(target, 4, "No training requirements yet. An administrator can add one under “Set training requirements”. No coverage conclusion is shown.");
+      [["ai-literacy-provider-choices", "provider_id"], ["ai-literacy-course-choices", "content_id"], ["ai-literacy-edition-choices", "content_version"]].forEach(([id, key]) => {
+        const list = byId(id); if (!list) return;
+        const used = Array.from(new Set(rows.map(item => item.content && item.content[key]).filter(value => typeof value === "string" && value))).sort();
+        list.replaceChildren(...used.slice(0, 200).map(value => new Option(value, value)));
+      });
       setStatus("ai-literacy-load-status", `${rows.length} training requirement(s) shown.`);
     } catch (error) {
       clear(target); emptyRow(target, 4, "Training requirements could not be loaded. No coverage conclusion is shown.");
@@ -1467,7 +1505,7 @@
   if (literacyPerson) literacyPerson.addEventListener("submit", event => {
     event.preventDefault();
     withButton(literacyPerson, "ai-literacy-person-status", "Loading their training status…", async () => {
-      const person = String(formBody(literacyPerson).get("person_id") || "").trim();
+      const person = outsideValue(formBody(literacyPerson).get("person_id"), "employee");
       const encoded = encodeURIComponent(person);
       const [assignment, status, receipts] = await Promise.all([
         request(`/ai-literacy/people/${encoded}/assignment`).catch(error => ({unavailable: error.message})),
@@ -1487,7 +1525,7 @@
   if (literacyExport) literacyExport.addEventListener("submit", event => {
     event.preventDefault();
     withButton(literacyExport, "ai-literacy-export-status", "Preparing the download…", async () => {
-      const people = splitTokens(formBody(literacyExport).get("person_ids"));
+      const people = Array.from(new Set(splitTokens(formBody(literacyExport).get("person_ids")).map(item => outsideValue(item, "employee"))));
       const body = people.length ? {person_ids: people} : {person_ids: null};
       const result = await sendJson("/ai-literacy/evidence-export", "POST", body);
       const blob = new Blob([JSON.stringify(result, null, 2)], {type: "application/json"});
@@ -1508,7 +1546,7 @@
       const names = value => splitTokens(value).map(item => shortName(item));
       await sendJson(`/ai-literacy/requirements/${encodeURIComponent(key)}`, "PUT", {
         title: fields.get("title"), role_ids: names(fields.get("role_ids")), system_ids: names(fields.get("system_ids")),
-        provider_id: shortName(fields.get("provider_id")), content_id: shortName(fields.get("content_id")), content_version: String(fields.get("content_version") || "").trim(),
+        provider_id: shortName(fields.get("provider_id")), content_id: shortName(fields.get("content_id")), content_version: outsideValue(fields.get("content_version"), "edition"),
         validity_days: Number(fields.get("validity_days")), due_within_days: Number(fields.get("due_within_days")), status: "active",
         expected_revision: Number(fields.get("expected_revision")), idempotency_key: fields.get("idempotency_key")
       });
@@ -1520,7 +1558,7 @@
   if (assignmentForm) assignmentForm.addEventListener("submit", event => {
     event.preventDefault();
     withButton(assignmentForm, "ai-literacy-assignment-status", "Saving their roles and systems…", async () => {
-      const fields = formBody(assignmentForm); const person = String(fields.get("person_id") || "").trim();
+      const fields = formBody(assignmentForm); const person = outsideValue(fields.get("person_id"), "employee");
       const names = value => splitTokens(value).map(item => shortName(item));
       await sendJson(`/ai-literacy/people/${encodeURIComponent(person)}/assignment`, "PUT", {
         role_ids: names(fields.get("role_ids")), system_ids: names(fields.get("system_ids")),
@@ -1617,7 +1655,7 @@
     event.preventDefault();
     withButton(submissionForm, "article-73-submission-status", "Recording the filing…", async () => {
       const fields = formBody(submissionForm); const incident = encodeURIComponent(String(fields.get("incident_id") || "").trim()); const report = encodeURIComponent(String(fields.get("report_id") || "").trim());
-      const result = await sendJson(`/eu-ai-incidents/${incident}/reports/${report}/submission`, "POST", {expected_revision: Number(fields.get("expected_revision")), submission_reference: fields.get("submission_reference"), receipt_sha256: fields.get("receipt_sha256"), submitted_at: Math.floor(Date.now() / 1000)});
+      const result = await sendJson(`/eu-ai-incidents/${incident}/reports/${report}/submission`, "POST", {expected_revision: Number(fields.get("expected_revision")), submission_reference: outsideValue(fields.get("submission_reference"), "filing"), receipt_sha256: fields.get("receipt_sha256"), submitted_at: Math.floor(Date.now() / 1000)});
       showProjection("article-73-detail-result", result); setStatus("article-73-submission-status", "Filing recorded. Check the authority's own system to confirm they received it."); await loadIncidents();
     });
   });
@@ -2333,7 +2371,28 @@
   {% endif %}
 
   const conformityOfficialUrl = "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727";
-  const conformityCitation = provision => provision ? [{provision, official_url: conformityOfficialUrl}] : [];
+  // Legal provisions are chosen from the ones Lightwork knows (EU AI Act and
+  // GDPR), with “Other (type it)” for anything not in the list.
+  const provisionPickers = new Map();
+  if (F) document.querySelectorAll("#ai-conformity-panel [data-provision-picker]").forEach(root => {
+    const form = root.closest("form");
+    if (form) provisionPickers.set(form, F.provisionPicker(root, {required: root.hasAttribute("data-required"), defaultUrl: conformityOfficialUrl}));
+  });
+  const conformityCitation = form => {
+    const picker = provisionPickers.get(form);
+    const chosen = picker ? picker.value() : null;
+    return chosen ? [chosen] : [];
+  };
+  const loadLegalProvisions = async () => {
+    if (!provisionPickers.size) return;
+    try {
+      const result = await request("/pickers/legal-provisions", {}, "load the legal provisions");
+      provisionPickers.forEach(picker => picker.set(result.provisions, result.default_official_url));
+    } catch (_error) {
+      // Only “Other (type it)” is left; the forms still work.
+      provisionPickers.forEach(picker => picker.set([], conformityOfficialUrl));
+    }
+  };
   // The checklist offers only the items of the chosen area and the evidence
   // already added to the chosen case.
   let conformitySections = {};
@@ -2438,7 +2497,7 @@
         economic_operator_role: fields.get("economic_operator_role"),
         risk_tier: fields.get("risk_tier"),
         act_applicability: fields.get("act_applicability"),
-        legal_basis: [{provision: fields.get("provision"), official_url: fields.get("official_url")}],
+        legal_basis: conformityCitation(conformityCreate),
         operation_id: fields.get("operation_id")
       });
       showProjection("ai-conformity-result", result); setStatus("ai-conformity-create-status", "Case started from your answers. It is not a legal classification."); await loadConformityCases();
@@ -2463,10 +2522,9 @@
       withButton(form, statusId, "Saving your decision…", async () => {
         const fields = formBody(form); const caseId = String(fields.get("case_id") || "").trim();
         const rationale = String(fields.get("rationale_sha256") || "").trim();
-        const provision = String(fields.get("provision") || "").trim();
         const body = {
           rationale_sha256: rationale || null,
-          citations: conformityCitation(provision),
+          citations: conformityCitation(form),
           expected_revision: Number(fields.get("expected_revision")),
           operation_id: fields.get("operation_id")
         };
@@ -2486,11 +2544,12 @@
       const status = String(fields.get("status") || "");
       const chosen = fields.getAll("evidence_binding_ids").map(String);
       if (status === "complete" && !chosen.length) throw new Error("Tick the evidence that shows this item is complete.");
-      if (status === "not_applicable" && (!rationale || !String(fields.get("provision") || "").trim())) throw new Error("Give the reason and the cited provision for “Not applicable”.");
+      const citations = status === "not_applicable" ? conformityCitation(conformityChecklist) : [];
+      if (status === "not_applicable" && (!rationale || !citations.length)) throw new Error("Give the reason and the cited provision for “Not applicable”.");
       const result = await sendJson(`/ai-conformity/cases/${encodeURIComponent(caseId)}/checklist`, "POST", {
         domain: fields.get("domain"), section: fields.get("section"), status, evidence_binding_ids: status === "complete" ? chosen : [],
         rationale_sha256: status === "pending" ? null : (rationale || null),
-        citations: status === "not_applicable" ? conformityCitation(String(fields.get("provision") || "").trim()) : [],
+        citations,
         expected_revision: Number(fields.get("expected_revision")), operation_id: fields.get("operation_id")
       }, "save the checklist item");
       showProjection("ai-conformity-result", result); setStatus("ai-conformity-checklist-status", "Checklist item saved.");
@@ -2985,6 +3044,40 @@
     });
     setStatus("ai-identity-governance-snapshot", message);
   };
+  // Data labels for a Purview change are ticked from the labels already on
+  // enrolled data, in prepared changes and in a Purview reading on this page.
+  // The connector cannot list a label catalog, so typing stays as a fallback.
+  const purviewLabels = {server: [], read: [], connected: null, loaded: false};
+  const LABEL_CODE = /^[a-z][a-z0-9_.:-]{0,127}$/;
+  const renderPurviewLabels = () => {
+    const known = Array.from(new Set([...purviewLabels.server, ...purviewLabels.read].filter(code => typeof code === "string" && LABEL_CODE.test(code)))).sort();
+    document.querySelectorAll("[data-purview-labels]").forEach(root => {
+      const box = root.querySelector("[data-purview-label-choices]");
+      const note = root.querySelector("[data-purview-label-note]");
+      const otherText = root.querySelector("[data-purview-label-other-text]");
+      if (!box) return;
+      const chosen = new Set(Array.from(box.querySelectorAll("input:checked")).map(input => input.value));
+      box.replaceChildren(...known.map(code => {
+        const input = document.createElement("input");
+        input.type = "checkbox"; input.value = code; input.checked = chosen.has(code);
+        const label = document.createElement("label");
+        label.append(input, ` ${words(code)}`);
+        return label;
+      }));
+      if (note) note.textContent = purviewLabels.connected === false
+        ? "Connect Microsoft Purview to choose from your labels. Until then, type the labels below."
+        : !purviewLabels.loaded ? "Loading your labels…"
+        : known.length ? "Tick every label the data should have. Labels it has now are ticked when you choose the data."
+        : "No labels are known yet. Choose Microsoft Purview and select “Read now” above to load them, or type them below.";
+      if (otherText) otherText.textContent = purviewLabels.connected === false || !known.length
+        ? "Data labels (type them, separated by commas)"
+        : "Labels not in the list (optional, separated by commas)";
+    });
+  };
+  const tickPurviewLabels = (form, codes) => {
+    const wanted = new Set(codes || []);
+    form.querySelectorAll("[data-purview-label-choices] input[type=checkbox]").forEach(input => { input.checked = wanted.has(input.value); });
+  };
   const providerNames = {entra: "Microsoft Entra", okta: "Okta", purview: "Microsoft Purview"};
   const providerName = value => providerNames[value] || words(value);
   const yesNo = value => (value === true ? "Yes" : value === false ? "No" : "Does not apply");
@@ -3013,6 +3106,11 @@
     if (!identities.length) emptyRow(identitiesTarget, 4, "No identities were in this reading. No identity-completeness conclusion is shown.");
     if (!grants.length) emptyRow(grantsTarget, 3, "No access grants were in this reading. No grant-completeness conclusion is shown.");
     if (!classifications.length) emptyRow(classificationsTarget, 4, "No data labels were in this reading. No classification-completeness conclusion is shown.");
+    if (snapshot.provider === "purview") {
+      purviewLabels.read = classifications.flatMap(item => (Array.isArray(item.classification_codes) ? item.classification_codes : []));
+      purviewLabels.connected = true;
+      renderPurviewLabels();
+    }
     setStatus(
       "ai-identity-governance-snapshot",
       `Read from ${providerName(snapshot.provider)} on ${displayTime(snapshot.observed_at)}: ${identities.length} identities, ${grants.length} access grants and ${classifications.length} data labels.`
@@ -3160,9 +3258,7 @@
     fillHidden(select.form, row && select.value !== "" ? {
       asset_id: row.asset_id, expected_asset_binding_sha256: row.binding_sha256, expected_source_revision: row.revision
     } : {asset_id: "", expected_asset_binding_sha256: "", expected_source_revision: ""});
-    if (row && select.value !== "" && select.form.elements.classification_codes && !select.form.elements.classification_codes.value) {
-      select.form.elements.classification_codes.value = (row.classification_codes || []).join(", ");
-    }
+    if (row && select.value !== "") tickPurviewLabels(select.form, row.classification_codes);
   }));
   document.querySelectorAll("select[data-purview-intent-choice]").forEach(select => select.addEventListener("change", () => {
     const row = identityChoices.purview_intents[Number(select.value)];
@@ -3177,11 +3273,17 @@
       identityChoices.purview_assets = Array.isArray(result.purview_assets) ? result.purview_assets : [];
       identityChoices.purview_intents = Array.isArray(result.purview_intents) ? result.purview_intents : [];
       identityChoices.capabilities = Array.isArray(result.capabilities) ? result.capabilities : [];
+      purviewLabels.server = Array.isArray(result.purview_labels) ? result.purview_labels : [];
+      purviewLabels.connected = result.purview_connected === true || purviewLabels.read.length > 0;
+      purviewLabels.loaded = true;
+      renderPurviewLabels();
       renderIdentityChoices();
       setStatus("ai-identity-choices-status", result.available === true
         ? `${identityChoices.federation_bindings.length} agent identit${identityChoices.federation_bindings.length === 1 ? "y" : "ies"} and ${identityChoices.purview_intents.length} prepared change(s) available.`
         : "No agent identities are enrolled for this workspace yet. Whoever runs Lightwork enrolls them on the server.");
     } catch (error) {
+      purviewLabels.loaded = true;
+      renderPurviewLabels();
       renderIdentityChoices();
       setStatus("ai-identity-choices-status", plainMessage(error, "Agent identities could not be loaded."));
     }
@@ -3262,7 +3364,9 @@
     withButton(identityPurviewPrepare, "ai-identity-purview-prepare-status", "Preparing the change (nothing changes in Purview yet)…", async () => {
       const {provider, body, fields} = identityFederationInput(identityPurviewPrepare);
       if (!String(fields.get("asset_id") || "").trim()) throw new Error("Choose the data in Purview first.");
-      const codes = Array.from(new Set(String(fields.get("classification_codes") || "").split(",").map(value => value.trim()).filter(Boolean))).sort();
+      const ticked = Array.from(identityPurviewPrepare.querySelectorAll("[data-purview-label-choices] input:checked")).map(input => input.value);
+      const typed = splitTokens(fields.get("classification_codes_other")).map(value => outsideValue(value, "label"));
+      const codes = Array.from(new Set([...ticked, ...typed])).sort();
       if (codes.length > 128) throw new Error("Use at most 128 data labels.");
       const result = await sendJson("/identity-governance/controls/purview/writebacks/prepare", "POST", {
         ...body,
@@ -3418,12 +3522,39 @@
       }
     });
   });
+  // Releases are chosen from the ones this workspace's media records already
+  // use; a new release name is typed once and then stays in the list.
+  const releaseList = F ? new F.ReleaseList() : null;
+  const releasePickers = new Map();
+  if (releaseList) document.querySelectorAll("[data-release-picker]").forEach(root => {
+    const form = root.closest("form");
+    if (form) releasePickers.set(form, F.releasePicker(root, releaseList));
+  });
+  const loadReleaseReferences = async () => {
+    if (!releaseList) return;
+    try {
+      const result = await request("/pickers/media-release-references", {}, "load the releases");
+      releaseList.set(result.references);
+    } catch (_error) {
+      releaseList.set([]);
+    }
+  };
+  const releaseFor = form => {
+    const picker = releasePickers.get(form);
+    if (!picker) throw new Error("Choose a release first.");
+    return picker.value();
+  };
+  document.querySelectorAll("select[data-deployment-choice]").forEach(select => select.addEventListener("change", () => {
+    const picker = releasePickers.get(select.form);
+    if (picker) picker.setDeployment(select.value);
+  }));
   // Deployments are chosen from the AI system's recorded deployments.
   document.querySelectorAll("select[data-deployment-asset]").forEach(assetSelect => assetSelect.addEventListener("change", async () => {
     const target = assetSelect.form ? assetSelect.form.querySelector("select[data-deployment-choice]") : null;
     if (!target) return;
     const assetId = String(assetSelect.value || "");
     target.replaceChildren(new Option(assetId ? "Loading deployments…" : "Choose an AI system first", ""));
+    target.dispatchEvent(new Event("change"));
     if (!assetId) return;
     try {
       const result = await request(`/model-risk/deployments?asset_id=${encodeURIComponent(assetId)}`, {}, "load the deployments");
@@ -3438,11 +3569,15 @@
   if (mediaProvenanceVerify) mediaProvenanceVerify.addEventListener("submit", event => {
     event.preventDefault();
     withButton(mediaProvenanceVerify, "ai-media-provenance-verify-status", "Checking the file…", async () => {
+      // A missing release is reported before the chosen file is cleared.
+      const release = releaseFor(mediaProvenanceVerify);
       try {
-        const result = await request("/ai-media-provenance/verify", {method: "POST", body: formBody(mediaProvenanceVerify)}, "check the file");
+        const body = formBody(mediaProvenanceVerify);
+        body.set("context_id", release);
+        const result = await request("/ai-media-provenance/verify", {method: "POST", body}, "check the file");
         showProjection("ai-media-provenance-result", result);
         setStatus("ai-media-provenance-verify-status", "Result recorded. The file itself was not kept.");
-        await loadMediaProvenanceRecords();
+        await Promise.all([loadMediaProvenanceRecords(), loadReleaseReferences()]);
       } finally {
         mediaProvenanceVerify.elements.file.value = "";
       }
@@ -3453,8 +3588,10 @@
   if (mediaProvenanceSign) mediaProvenanceSign.addEventListener("submit", event => {
     event.preventDefault();
     withButton(mediaProvenanceSign, "ai-media-provenance-sign-status", "Signing the file…", async () => {
+      const release = releaseFor(mediaProvenanceSign);
       try {
         const body = formBody(mediaProvenanceSign);
+        body.set("context_id", release);
         const codes = body.getAll("assertion_codes").map(String);
         if (!codes.length) throw new Error("Tick at least one thing for the signature to record.");
         body.delete("assertion_codes"); body.append("assertion_codes", codes.join(","));
@@ -3467,7 +3604,7 @@
         setTimeout(() => URL.revokeObjectURL(url), 0);
         showProjection("ai-media-provenance-result", {provenance_id: provenanceId, content_sha256: contentSha256, media_bytes_persisted: false});
         setStatus("ai-media-provenance-sign-status", "Signed file downloaded. The file was not kept, and the signature does not prove who made it.");
-        await loadMediaProvenanceRecords();
+        await Promise.all([loadMediaProvenanceRecords(), loadReleaseReferences()]);
       } finally {
         mediaProvenanceSign.elements.file.value = "";
       }
@@ -3594,12 +3731,12 @@
     ["ai-policy-management-panel", [loadPolicyManagement]],
     ["ai-explainability-panel", [loadAIExplanations]],
     ["ai-insurability-panel", [loadInsurabilityProfiles, setupInsurabilityForms]],
-    ["ai-conformity-panel", [loadConformityCases, setupConformityForms]],
+    ["ai-conformity-panel", [loadConformityCases, setupConformityForms, loadLegalProvisions]],
     ["ai-regulated-package-workbench", [loadRegulatedPackages, setupRegulatedForms]],
     ["ai-benchmark-panel", [loadBenchmarkContributions, loadBenchmarkReports, loadBenchmarkEvidence]],
     ["ai-discovery-sensors-panel", [loadDiscoverySensors, loadDiscoveryObservations]],
     ["ai-identity-governance-panel", [loadIdentityGovernanceConnectors]],
-    ["ai-media-provenance-panel", [loadMediaProvenanceCapabilities, loadMediaProvenanceRecords]],
+    ["ai-media-provenance-panel", [loadMediaProvenanceCapabilities, loadMediaProvenanceRecords, loadReleaseReferences]],
     ["grc-outbound-panel", [loadGrcEvents, loadGrcSources]],
   ];
   const loadedPanels = new Set();

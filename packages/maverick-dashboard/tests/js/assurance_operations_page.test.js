@@ -58,6 +58,12 @@ async function fixture(t, routes = {}) {
   w.eval(fs.readFileSync(path.join(base, "static/lightwork-assurance-forms.js"), "utf8"));
   w.eval(inline);
   const settle = async () => { for (let i = 0; i < 30; i += 1) await new Promise(resolve => setImmediate(resolve)); };
+  // File and text fingerprints finish on a worker thread, so wait for the
+  // effect itself rather than a fixed number of turns.
+  const until = async (check, what = "the page to finish") => {
+    for (let i = 0; i < 400; i += 1) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+    assert.fail(`timed out waiting for ${what}`);
+  };
   await settle();
   const $ = selector => w.document.querySelector(selector);
   const byId = id => w.document.getElementById(id);
@@ -71,7 +77,7 @@ async function fixture(t, routes = {}) {
   };
   const posted = route => calls.filter(call => call.method !== "GET" && call.url === route);
   const statuses = () => Array.from(w.document.querySelectorAll("[role=status]")).map(node => node.textContent).join("\n");
-  return {w, $, byId, open, change, submit, field, settle, calls, posted, confirms, statuses,
+  return {w, $, byId, open, change, submit, field, settle, until, calls, posted, confirms, statuses,
     setConfirm: value => { confirmAnswer = value; }};
 }
 
@@ -223,8 +229,10 @@ test("a sensor sighting carries the chosen sensor's setup and a repeatable finge
   h.field(form, "AI service").value = "Chat assistant";
   h.field(form, "Product").value = "Team chat";
   h.field(form, "Provider").value = "Example Vendor";
-  h.submit(form); await h.settle();
-  const body = plain(h.posted("/ai-discovery-sensors/sensors/DSN-" + "4".repeat(32) + "/observations")[0].body);
+  h.submit(form);
+  const route = "/ai-discovery-sensors/sensors/DSN-" + "4".repeat(32) + "/observations";
+  await h.until(() => h.posted(route).length, "the sighting to be sent");
+  const body = plain(h.posted(route)[0].body);
   assert.equal(body.sensor_revision, 2);
   assert.equal(body.config_sha256, D);
   assert.match(body.event_sha256, /^[0-9a-f]{64}$/);
@@ -239,4 +247,225 @@ test("messages the page writes are plain sentences", async t => {
   assert.doesNotMatch(text, BANNED);
   assert.doesNotMatch(text, /bounded|projection|control-plane|digest-only|manifest/i);
   assert.equal(h.w.document.querySelectorAll("textarea[name=statements], textarea[name=context], textarea[name=receipt], textarea[name=evidence_bindings], textarea[name=source], textarea[name=observation], textarea[name=report], textarea[name=details]").length, 0);
+});
+
+const AI_ACT = "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02024R1689-20260727";
+const releaseRoutes = extra => ({
+  "/pickers/media-release-references": {references: [
+    {context_id: "spring-campaign-2026", last_used_at: 1800000000, deployment_ids: ["production-east"], record_count: 2},
+    {context_id: "winter-sale", last_used_at: 1700000000, deployment_ids: ["production-west"], record_count: 1}
+  ], count: 2},
+  "/model-risk/deployments?asset_id=MAA-1": {deployments: [
+    {deployment_id: "production-east", status: "deployed", deployed_at: 1790000000},
+    {deployment_id: "production-west", status: "deployed", deployed_at: 1690000000}
+  ]},
+  ...extra
+});
+
+test("a media check picks the release from the ones already used, or adds a new one once", async t => {
+  const h = await fixture(t, releaseRoutes({"POST /ai-media-provenance/verify": {provenance_id: "AMP-1"}}));
+  const form = h.byId("ai-media-provenance-verify");
+  h.change(form.elements.asset_id, "MAA-1"); await h.settle();
+  h.change(form.elements.deployment_id, "production-east");
+  const release = h.field(form, "Release");
+  assert.deepEqual(Array.from(release.options).map(option => option.value), ["", "spring-campaign-2026", "__new__"],
+    "only releases used with the chosen deployment, then a way to add one");
+  assert.match(release.options[1].textContent, /^spring-campaign-2026 \(last used /);
+  assert.equal(release.options[2].textContent, "Add a new release…");
+
+  h.submit(form); await h.settle();
+  assert.equal(h.posted("/ai-media-provenance/verify").length, 0, "nothing is sent without a release");
+  assert.match(h.byId("ai-media-provenance-verify-status").textContent, /Choose a release/);
+
+  h.change(release, "spring-campaign-2026");
+  h.submit(form);
+  await h.until(() => h.posted("/ai-media-provenance/verify").length, "the check to be sent");
+  const sent = h.posted("/ai-media-provenance/verify")[0].body;
+  assert.equal(sent.get("context_id"), "spring-campaign-2026");
+  assert.equal(sent.get("deployment_id"), "production-east");
+
+  h.change(release, "__new__");
+  const name = h.field(form, "Name of the new release");
+  name.value = "summer launch";
+  h.submit(form); await h.settle();
+  assert.match(h.byId("ai-media-provenance-verify-status").textContent, /without spaces/);
+  assert.equal(h.posted("/ai-media-provenance/verify").length, 1, "a malformed name is never sent");
+  name.value = "summer-launch-2026";
+  h.submit(form);
+  await h.until(() => h.posted("/ai-media-provenance/verify").length === 2, "the second check to be sent");
+  assert.equal(h.posted("/ai-media-provenance/verify")[1].body.get("context_id"), "summer-launch-2026");
+  // The new release is now in the list, here and on the signing form.
+  assert.equal(release.value, "summer-launch-2026");
+  const signRelease = h.field(h.byId("ai-media-provenance-sign"), "Release");
+  assert.ok(Array.from(signRelease.options).some(option => option.value === "summer-launch-2026"));
+});
+
+const provisionRoutes = extra => ({
+  "/pickers/legal-provisions": {default_official_url: AI_ACT, count: 3, provisions: [
+    {regulation: "EU AI Act", provision: "Art. 27(1)(a)", title: "The deployer's processes in which the system will be used", official_url: AI_ACT},
+    {regulation: "EU AI Act", provision: "Annex III point 4", title: "High-risk area: Employment (recruitment, screening, task allocation, monitoring)", official_url: AI_ACT},
+    {regulation: "GDPR", provision: "Art. 35", title: "Run a DPIA for high-risk processing", official_url: "https://eur-lex.europa.eu/eli/reg/2016/679/oj"}
+  ]},
+  "/ai-conformity/cases?limit=100": {cases: [{case_id: "EUC-1", revision: 3, asset_binding: {asset_id: "MAA-1"}, workflow_status: "draft", manifest: {complete: false}}]},
+  ...extra
+});
+
+test("a readiness case cites a provision found by searching the list", async t => {
+  const h = await fixture(t, provisionRoutes({"POST /ai-conformity/cases": {case_id: "EUC-2"}}));
+  const form = h.byId("ai-conformity-create");
+  h.change(form.elements.asset_id, "MAA-1");
+  h.submit(form); await h.settle();
+  assert.equal(h.posted("/ai-conformity/cases").length, 0);
+  assert.match(h.byId("ai-conformity-create-status").textContent, /Choose the legal provision/);
+  const search = h.field(form, "Search the list");
+  search.value = "employment";
+  search.dispatchEvent(new h.w.Event("input"));
+  const choice = h.field(form, "Provision");
+  assert.deepEqual(Array.from(choice.options).map(option => option.textContent),
+    ["Choose a provision", "Annex III point 4 — High-risk area: Employment (recruitment, screening, task allocation, monitoring)", "Other (type it)"]);
+  h.change(choice, choice.options[1].value);
+  h.submit(form); await h.settle();
+  assert.deepEqual(plain(h.posted("/ai-conformity/cases")[0].body.legal_basis), [{provision: "Annex III point 4", official_url: AI_ACT}]);
+});
+
+test("a provision not in the list is typed under Other and cited against the AI Act", async t => {
+  const h = await fixture(t, provisionRoutes({"POST /ai-conformity/cases/EUC-1/article-43-route": {case_id: "EUC-1"}}));
+  h.open("Readiness case for Support bot");
+  await h.settle();
+  const form = h.byId("ai-conformity-route");
+  const choice = h.field(form, "Provision");
+  const other = h.field(form, "Provision not in the list");
+  assert.equal(other.closest("label").hidden, true, "typing is hidden until Other is chosen");
+  h.change(choice, "__other__");
+  assert.equal(other.closest("label").hidden, false);
+  other.value = "Article 43(2) and Annex VI";
+  h.change(form.elements.route, "internal_control_annex_vi");
+  h.submit(form);
+  await h.until(() => h.posted("/ai-conformity/cases/EUC-1/article-43-route").length, "the route to be saved");
+  const body = plain(h.posted("/ai-conformity/cases/EUC-1/article-43-route")[0].body);
+  assert.deepEqual(body.citations, [{provision: "Article 43(2) and Annex VI", official_url: AI_ACT}]);
+  assert.equal(body.expected_revision, 3);
+});
+
+const principal = "prn_" + "1".repeat(32);
+const identityControls = extra => ({available: true, capabilities: ["purview.classification.write"],
+  federation_bindings: [{provider: "okta", principal_ref: principal, provider_subject_id: "sub_" + "2".repeat(32), binding_sha256: D, authority_revision: 2}],
+  purview_assets: [{asset_id: "ast_" + "7".repeat(32), binding_sha256: D, revision: 4, classification_codes: ["confidential"]}],
+  purview_intents: [], ...extra});
+const openWorkbench = async h => {
+  const workbench = h.byId("ai-identity-control-workbench");
+  workbench.open = true; workbench.dispatchEvent(new h.w.Event("toggle")); await h.settle();
+};
+const labelBoxes = form => Array.from(form.querySelectorAll("[data-purview-label-choices] label")).map(label => [label.textContent.trim(), label.querySelector("input").checked]);
+
+test("Purview labels are ticked from the labels Lightwork has seen, and a reading adds more", async t => {
+  const h = await fixture(t, {
+    "/pickers/identity-controls": identityControls({purview_labels: ["confidential", "regulated"], purview_connected: true}),
+    "POST /identity-governance/connectors/purview/collect": {provider: "purview", observed_at: 1800000000, identities: [], grants: [],
+      data_classifications: [{entity_type: "table", classification_codes: ["financial"], label_codes: []}]},
+    "POST /identity-governance/controls/purview/writebacks/prepare": {intent_id: "IGPW-" + "3".repeat(32)}
+  });
+  await openWorkbench(h);
+  const form = h.byId("ai-identity-purview-prepare");
+  h.change(form.elements.identity_choice, "0");
+  h.change(form.elements.asset_choice, "0");
+  assert.deepEqual(labelBoxes(form), [["Confidential", true], ["Regulated", false]], "the data's current labels start ticked");
+  assert.match(form.querySelector("[data-purview-label-note]").textContent, /Tick every label/);
+
+  const collect = h.byId("ai-identity-governance-collect");
+  h.change(collect.elements.provider, "purview");
+  h.submit(collect); await h.settle();
+  assert.deepEqual(labelBoxes(form).map(([text]) => text), ["Confidential", "Financial", "Regulated"]);
+
+  form.querySelector("[data-purview-label-choices] input[value=regulated]").checked = true;
+  h.field(form, "Labels not in the list").value = "Payroll";
+  h.submit(form);
+  const route = "/identity-governance/controls/purview/writebacks/prepare";
+  await h.until(() => h.posted(route).length, "the change to be prepared");
+  const body = plain(h.posted(route)[0].body);
+  assert.deepEqual(body.classification_codes, ["confidential", "payroll", "regulated"]);
+  assert.equal(body.asset_id, "ast_" + "7".repeat(32));
+  assert.equal(body.expected_source_revision, 4);
+});
+
+test("without Purview connected the labels are typed, and a malformed one is refused plainly", async t => {
+  const h = await fixture(t, {
+    "/pickers/identity-controls": identityControls({purview_assets: [{asset_id: "ast_" + "7".repeat(32), binding_sha256: D, revision: 4, classification_codes: []}],
+      purview_labels: [], purview_connected: false}),
+    "POST /identity-governance/controls/purview/writebacks/prepare": {intent_id: "IGPW-" + "3".repeat(32)}
+  });
+  await openWorkbench(h);
+  const form = h.byId("ai-identity-purview-prepare");
+  assert.equal(form.querySelector("[data-purview-label-note]").textContent,
+    "Connect Microsoft Purview to choose from your labels. Until then, type the labels below.");
+  assert.equal(labelBoxes(form).length, 0);
+  h.change(form.elements.identity_choice, "0");
+  h.change(form.elements.asset_choice, "0");
+  const typed = h.field(form, "Data labels (type them");
+  typed.value = "Confidential, top secret";
+  h.submit(form); await h.settle();
+  const route = "/identity-governance/controls/purview/writebacks/prepare";
+  assert.equal(h.posted(route).length, 0);
+  assert.match(h.byId("ai-identity-purview-prepare-status").textContent, /as Microsoft Purview shows it/);
+  typed.value = "Confidential, restricted";
+  h.submit(form);
+  await h.until(() => h.posted(route).length, "the change to be prepared");
+  assert.deepEqual(plain(h.posted(route)[0].body.classification_codes), ["confidential", "restricted"]);
+});
+
+test("training details offer values already used, and outside numbers are checked before sending", async t => {
+  const h = await fixture(t, {
+    "/ai-literacy/requirements": {requirements: [{requirement_key: "safe-ai", title: "Safe AI", revision: 2, scope: {role_ids: [], system_ids: []},
+      content: {provider_id: "learning-hub", content_id: "responsible-ai-101", content_version: "2026"}}]},
+    "PUT /ai-literacy/requirements/new-course": {requirement_key: "new-course"},
+    "/ai-literacy/people/10442/status": {summary: {}}
+  });
+  const options = id => Array.from(h.byId(id).querySelectorAll("option")).map(option => option.value);
+  assert.deepEqual(options("ai-literacy-provider-choices"), ["learning-hub"]);
+  assert.deepEqual(options("ai-literacy-course-choices"), ["responsible-ai-101"]);
+  assert.deepEqual(options("ai-literacy-edition-choices"), ["2026"]);
+  const requirement = h.byId("ai-literacy-requirement-upsert");
+  assert.equal(h.field(requirement, "Course edition from your learning system").getAttribute("list"), "ai-literacy-edition-choices");
+  requirement.elements.requirement_key.value = "New course";
+  requirement.elements.title.value = "New course";
+  requirement.elements.provider_id.value = "learning-hub";
+  requirement.elements.content_id.value = "responsible-ai-101";
+  requirement.elements.content_version.value = "2026 spring";
+  h.submit(requirement); await h.settle();
+  assert.equal(h.posted("/ai-literacy/requirements/new-course").length, 0);
+  assert.match(h.byId("ai-literacy-requirement-status").textContent, /without spaces/);
+  requirement.elements.content_version.value = "2026";
+  h.submit(requirement); await h.settle();
+  assert.equal(plain(h.posted("/ai-literacy/requirements/new-course")[0].body).content_version, "2026");
+
+  const person = h.byId("ai-literacy-person-query");
+  assert.ok(h.field(person, "Employee number from your HR system"));
+  person.elements.person_id.value = "1".repeat(129);
+  h.submit(person); await h.settle();
+  assert.ok(!h.calls.some(call => call.url.startsWith("/ai-literacy/people/1111")), "an over-long number is never looked up");
+  assert.match(h.byId("ai-literacy-person-status").textContent, /at most 128 characters/);
+  person.elements.person_id.value = " 10442 ";
+  h.submit(person); await h.settle();
+  assert.ok(h.calls.some(call => call.url === "/ai-literacy/people/10442/status"));
+});
+
+test("a filing reference is copied from the authority and checked before it is recorded", async t => {
+  const h = await fixture(t, {
+    "/eu-ai-incidents?limit=100": {incidents: [{incident_id: "A73-1", title: "Refund bot outage", asset_id: "MAA-1", status: "reported",
+      clock: {status: "running"}, reports: [{report_id: "A73R-1"}], revision: 5}]},
+    "POST /eu-ai-incidents/A73-1/reports/A73R-1/submission": {incident_id: "A73-1"}
+  });
+  h.open("Refund bot outage");
+  await h.settle();
+  const form = h.byId("article-73-report-submission");
+  const reference = h.field(form, "Filing reference the authority gave you");
+  reference.value = "DE 2026 42";
+  h.submit(form); await h.settle();
+  const route = "/eu-ai-incidents/A73-1/reports/A73R-1/submission";
+  assert.equal(h.posted(route).length, 0);
+  assert.match(h.byId("article-73-submission-status").textContent, /exactly as the authority gave it/);
+  reference.value = "DE-2026/0042";
+  h.submit(form);
+  await h.until(() => h.posted(route).length, "the filing to be recorded");
+  assert.equal(plain(h.posted(route)[0].body).submission_reference, "DE-2026/0042");
 });

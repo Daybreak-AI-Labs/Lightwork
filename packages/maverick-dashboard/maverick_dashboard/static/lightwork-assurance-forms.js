@@ -842,9 +842,182 @@
     {type: "words", key: "context_codes", label: "Other notes (short words, separated by commas)", limit: 16}
   ]});
 
+  /* ---------- values that come from another system ---------- */
+
+  /* A release name, a filing reference, an employee number or a course
+   * edition is copied from the system that issued it, so it is checked with
+   * the same limits the server applies and never rewritten. */
+  const REFERENCE_RULES = Object.freeze({
+    release: {max: 256, pattern: /^[A-Za-z0-9][A-Za-z0-9_.:@\/+=-]*$/, what: "the release name",
+      message: "Type the release name as your release system shows it, without spaces: letters, numbers, dots, dashes or underscores."},
+    filing: {max: 128, pattern: /^[A-Za-z0-9][A-Za-z0-9_.:@\/-]*$/, what: "the filing reference",
+      message: "Type the filing reference exactly as the authority gave it, without spaces."},
+    edition: {max: 128, pattern: /^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/, what: "the course edition",
+      message: "Type the course edition as your learning system shows it, without spaces (for example: 2026)."},
+    employee: {max: 128, pattern: /^[^\u0000-\u001f\u007f]+$/, what: "the employee number",
+      message: "Type the employee number as your HR system shows it."},
+    provision: {max: 128, pattern: /^[A-Za-z0-9][A-Za-z0-9 .()\/-]*$/, what: "the provision",
+      message: "Type the provision using letters, numbers, spaces, dots, brackets or dashes, for example: Article 6 and Annex III."},
+    label: {max: 128, lower: true, pattern: /^[a-z][a-z0-9_.:-]*$/, what: "each data label",
+      message: "Type each data label as Microsoft Purview shows it: starting with a letter, without spaces."}
+  });
+  const checkReference = (value, kind) => {
+    const rule = REFERENCE_RULES[kind];
+    if (!rule) throw new Error("unknown reference kind");
+    let text = String(value === null || value === undefined ? "" : value).trim();
+    if (rule.lower) text = text.toLowerCase();
+    if (!text) fail(`Fill in ${rule.what}.`);
+    if (text.length > rule.max) fail(`Use at most ${rule.max} characters for ${rule.what}.`);
+    if (!rule.pattern.test(text)) fail(rule.message);
+    return text;
+  };
+
+  const shorten = (text, max) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+  const OTHER = "__other__";
+  /* A searchable list of the legal provisions Lightwork knows, with a
+   * secondary "Other (type it)" choice for anything not in it. */
+  const provisionPicker = (root, options = {}) => {
+    const required = options.required === true;
+    const search = root.querySelector("[data-provision-search]");
+    const select = root.querySelector("[data-provision-choice]");
+    const otherBox = root.querySelector("[data-provision-other]");
+    const typed = otherBox ? otherBox.querySelector("input") : null;
+    let rows = [];
+    let loaded = false;
+    let defaultUrl = String(options.defaultUrl || "");
+    const toggle = () => { if (otherBox) otherBox.hidden = select.value !== OTHER; };
+    const render = () => {
+      const previous = select.value;
+      const terms = String(search ? search.value : "").toLowerCase().split(/\s+/).filter(Boolean);
+      const matches = rows.map((row, index) => [row, index]).filter(([row]) => {
+        const text = `${row.regulation} ${row.provision} ${row.title || ""}`.toLowerCase().replace(/\bart\.\s*/g, "article ");
+        return terms.every(term => text.includes(term.replace(/^art\.?$/, "article")));
+      });
+      const first = !loaded ? "Loading provisions…" : terms.length && !matches.length
+        ? "Nothing in the list matches — try other words"
+        : required ? "Choose a provision" : "No provision";
+      select.replaceChildren(new Option(first, ""));
+      const groups = new Map();
+      matches.forEach(([row, index]) => {
+        if (!groups.has(row.regulation)) {
+          const group = document.createElement("optgroup");
+          group.label = row.regulation;
+          groups.set(row.regulation, group);
+          select.appendChild(group);
+        }
+        const about = String(row.title || "").split("; ")[0];
+        groups.get(row.regulation).appendChild(new Option(about ? `${row.provision} — ${shorten(about, 110)}` : row.provision, String(index)));
+      });
+      select.appendChild(new Option("Other (type it)", OTHER));
+      if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+      toggle();
+    };
+    if (search) search.addEventListener("input", render);
+    select.addEventListener("change", () => { toggle(); if (select.value === OTHER && typed) typed.focus(); });
+    render();
+    return {
+      set(list, url) {
+        rows = (Array.isArray(list) ? list : []).filter(row => row && typeof row.provision === "string" && typeof row.official_url === "string");
+        if (url) defaultUrl = String(url);
+        loaded = true;
+        render();
+      },
+      choose(provision) {
+        const index = rows.findIndex(row => row.provision === provision);
+        if (index >= 0) { if (search) search.value = ""; render(); select.value = String(index); toggle(); }
+      },
+      value() {
+        const choice = select.value;
+        if (choice === OTHER) return {provision: checkReference(typed ? typed.value : "", "provision"), official_url: defaultUrl};
+        if (!choice) {
+          if (required) fail("Choose the legal provision, or choose “Other (type it)” and type it.");
+          return null;
+        }
+        const row = rows[Number(choice)];
+        if (!row) fail("Choose the legal provision again.");
+        return {provision: row.provision, official_url: row.official_url};
+      }
+    };
+  };
+
+  /* Release names used before in this workspace, shared by every release
+   * picker on the page; a new name typed once joins the list. */
+  class ReleaseList {
+    constructor() { this.rows = []; this.added = []; this.loaded = false; this.listeners = new Set(); }
+    set(rows) {
+      this.loaded = true;
+      this.rows = (Array.isArray(rows) ? rows : []).filter(row => row && typeof row.context_id === "string").map(row => ({
+        name: row.context_id,
+        when: Number(row.last_used_at) || 0,
+        deployments: Array.isArray(row.deployment_ids) ? row.deployment_ids.map(String) : []
+      }));
+      this.listeners.forEach(listener => listener());
+    }
+    add(value) {
+      const name = checkReference(value, "release");
+      if (!this.added.includes(name)) this.added.unshift(name);
+      this.listeners.forEach(listener => listener());
+      return name;
+    }
+    choices(deployment) {
+      const used = this.rows.filter(row => !deployment || row.deployments.includes(deployment));
+      return [
+        ...this.added.filter(name => !used.some(row => row.name === name)).map(name => ({name, when: 0, added: true})),
+        ...used
+      ];
+    }
+    subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  }
+  const NEW_RELEASE = "__new__";
+  const releasePicker = (root, list) => {
+    const select = root.querySelector("[data-release-choice]");
+    const newBox = root.querySelector("[data-release-new]");
+    const typed = newBox ? newBox.querySelector("input") : null;
+    let deployment = "";
+    const toggle = () => { if (newBox) newBox.hidden = select.value !== NEW_RELEASE; };
+    const render = () => {
+      const previous = select.value;
+      const rows = list.choices(deployment);
+      const first = !list.loaded ? "Loading releases…"
+        : rows.length ? "Choose a release"
+        : deployment ? "No release used with this deployment yet" : "No release used yet";
+      select.replaceChildren(new Option(first, ""));
+      rows.forEach(row => {
+        const when = row.added ? "added just now" : row.when > 0 ? `last used ${new Date(row.when * 1000).toLocaleDateString()}` : "";
+        select.appendChild(new Option(when ? `${row.name} (${when})` : row.name, row.name));
+      });
+      select.appendChild(new Option("Add a new release…", NEW_RELEASE));
+      if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+      toggle();
+    };
+    const remember = () => {
+      if (!typed || select.value !== NEW_RELEASE || !String(typed.value || "").trim()) return null;
+      const name = list.add(typed.value);
+      select.value = name;
+      typed.value = "";
+      toggle();
+      return name;
+    };
+    select.addEventListener("change", () => { toggle(); if (select.value === NEW_RELEASE && typed) typed.focus(); });
+    if (typed) typed.addEventListener("change", () => { try { remember(); } catch (_error) { /* shown when the form is sent */ } });
+    list.subscribe(render);
+    render();
+    return {
+      setDeployment(value) { deployment = String(value || ""); render(); },
+      value() {
+        if (select.value === NEW_RELEASE) {
+          if (!typed || !String(typed.value || "").trim()) fail("Type the name of the new release, or choose one from the list.");
+          return remember();
+        }
+        if (!select.value) fail("Choose a release, or choose “Add a new release…”.");
+        return select.value;
+      }
+    };
+  };
+
   window.LWAssuranceForms = Object.freeze({
     build, slug, toName, canonical, sha256Hex, fileFingerprint, textFingerprint, readRecordFile,
-    EvidencePool, citedEvidence,
+    EvidencePool, citedEvidence, checkReference, provisionPicker, ReleaseList, releasePicker,
     specs: Object.freeze({policyContext, policyStatements, exceptionScope, reportDetails, insurability, regulated, bankMrm, discoveryObservation})
   });
 })();

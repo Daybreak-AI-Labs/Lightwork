@@ -257,6 +257,9 @@ def test_agent_identity_choices_come_from_the_workspace_registry(monkeypatch):
     assert body["purview_assets"][0]["revision"] == 4
     # Prepared changes are listed only when the change control is turned on.
     assert body["purview_intents"] == [] and body["purview_intents_available"] is False
+    # Labels to tick come from the enrolled data; Purview is not connected here.
+    assert body["purview_labels"] == ["confidential"]
+    assert body["purview_connected"] is False
 
 
 def test_agent_identity_choices_are_empty_without_an_enrolment_registry(monkeypatch):
@@ -272,3 +275,138 @@ def test_agent_identity_choices_are_empty_without_an_enrolment_registry(monkeypa
 
     assert body["available"] is False
     assert body["federation_bindings"] == [] and body["purview_assets"] == []
+
+
+def test_purview_labels_merge_enrolled_data_and_prepared_changes(monkeypatch):
+    from maverick_dashboard import assurance_pickers_api, identity_governance_runtime
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(assurance_pickers_api, "_human_principal", lambda _request: "user:admin")
+    monkeypatch.setattr(
+        app.state,
+        "identity_governance_authority_registry_factory",
+        lambda _tenant: _Registry(),
+        raising=False,
+    )
+
+    class Writeback:
+        def list_intents(self, *, limit):
+            return [
+                {"intent_id": "IGPW-" + "8" * 32, "classification_codes": ["regulated", "Not A Code"]},
+                {"intent_id": "IGPW-" + "9" * 32, "classification_codes": ["confidential"]},
+            ]
+
+    class Runtime:
+        def require_purview_writeback(self):
+            return Writeback()
+
+    monkeypatch.setattr(assurance_pickers_api, "_identity_governance_section", lambda: {"enable": True})
+    monkeypatch.setattr(assurance_pickers_api, "_identity_control_runtime", lambda *_args: Runtime())
+    monkeypatch.setattr(
+        identity_governance_runtime,
+        "connector_status",
+        lambda _section: {"configured_providers": ["okta", "purview"]},
+    )
+
+    body = client.get(f"{BASE}/identity-controls").json()
+
+    assert body["purview_intents_available"] is True
+    # Only well-formed label codes are offered, each once, in order.
+    assert body["purview_labels"] == ["confidential", "regulated"]
+    assert body["purview_connected"] is True
+
+
+def test_legal_provisions_come_from_the_kernel_catalogs_and_are_all_citable():
+    from maverick import ai_conformity_workflow as conformity
+    from maverick import eu_conformity
+
+    response = client.get(f"{BASE}/legal-provisions")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["default_official_url"] == conformity.CONSOLIDATED_REGULATION_URL
+    rows = body["provisions"]
+    assert body["count"] == len(rows) and 0 < len(rows) <= 500
+    by_key = {(row["regulation"], row["provision"]): row for row in rows}
+    fria = by_key[("EU AI Act", eu_conformity.FRIA_ELEMENTS["process_description"]["citation"])]
+    assert fria["official_url"] == conformity.CONSOLIDATED_REGULATION_URL
+    assert fria["title"].startswith("The deployer's processes")
+    assert ("EU AI Act", "Annex III point 4") in by_key
+    assert ("EU AI Act", "Art. 5(1)(h)") in by_key
+    gdpr = by_key[("GDPR", "Art. 35")]
+    assert gdpr["official_url"].startswith("https://eur-lex.europa.eu/eli/reg/2016/679")
+    # Every offered provision is accepted by the readiness workflow as is.
+    for row in rows:
+        conformity._citation(conformity.LegalCitation(row["provision"], row["official_url"]))
+    regulations = [row["regulation"] for row in rows]
+    assert regulations == sorted(regulations, key=lambda name: name != "EU AI Act")
+
+
+def test_legal_provisions_need_the_same_permission_as_the_forms(monkeypatch):
+    _viewer_only(monkeypatch)
+
+    assert client.get(f"{BASE}/legal-provisions").status_code == 403
+
+
+def test_release_references_need_an_active_workspace():
+    assert client.get(f"{BASE}/media-release-references").status_code == 409
+
+
+def test_release_references_need_the_media_records_permission(monkeypatch):
+    from maverick_dashboard import auth
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(auth, "has_permission", lambda *_args: False)
+    monkeypatch.setattr(auth, "has_global_permission", lambda *_args: False)
+
+    assert client.get(f"{BASE}/media-release-references").status_code == 403
+
+
+def test_release_references_list_only_the_active_workspace(monkeypatch):
+    from maverick_dashboard import assurance_pickers_api
+
+    seen = {}
+    row = {
+        "context_id": "spring-campaign-2026",
+        "last_used_at": 1_800_000_000.0,
+        "deployment_ids": ["production-east"],
+        "record_count": 2,
+    }
+
+    class Service:
+        def release_references(self, *, limit):
+            from maverick.paths import current_tenant_id_strict
+
+            seen["tenant"] = current_tenant_id_strict()
+            seen["limit"] = limit
+            return [dict(row)]
+
+    async def configured():
+        return None, Service()
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    _viewer_only(monkeypatch)
+    monkeypatch.setattr(assurance_pickers_api, "_configured_media_provenance", configured)
+
+    response = client.get(f"{BASE}/media-release-references")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"references": [row], "count": 1}
+    assert seen == {"tenant": "alpha", "limit": 200}
+
+
+def test_release_references_read_the_real_store_without_a_release_authority(tmp_path, monkeypatch):
+    from maverick import config
+
+    (tmp_path / "config.toml").write_text(
+        "[ai_media_provenance]\nenable = true\n", encoding="utf-8"
+    )
+    config.reset_config_cache()
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+
+    # Listing only reads stored records, so it works before any release system
+    # is connected; checking and signing still need that connection.
+    assert client.get(f"{BASE}/media-release-references").json() == {
+        "references": [],
+        "count": 0,
+    }

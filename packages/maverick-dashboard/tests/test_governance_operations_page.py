@@ -656,6 +656,25 @@ def test_governance_tools_offer_forms_and_pickers_in_plain_words(monkeypatch, ad
     assert 'name="receipt_file"' in fragment and 'name="report_file"' in fragment
     assert 'name="purpose_code" required><option' in fragment
     assert 'name="incident_member_states" value="DE"' in fragment
+    # Values that come from other systems are picked from what Lightwork
+    # already has, with typing only as a clearly secondary fallback.
+    assert fragment.count('<fieldset class="assurance-form__wide" data-provision-picker') == 4
+    assert fragment.count("<select class=\"select\" data-provision-choice") == 4
+    assert re.search(r'<input[^>]*name="provision"', fragment) is None
+    assert re.search(r'<input[^>]*name="context_id"', fragment) is None
+    assert fragment.count('<div class="assurance-form__wide" data-release-picker>') == (2 if admin else 1)
+    assert fragment.count('<select class="select" required data-release-choice>') == (2 if admin else 1)
+    assert '"/pickers/media-release-references"' in fragment
+    assert '"/pickers/legal-provisions"' in fragment
+    assert "Employee number from your HR system" in fragment
+    if admin:
+        assert '<fieldset class="assurance-form__wide" data-purview-labels>' in fragment
+        assert re.search(r'<input[^>]*name="classification_codes"', fragment) is None
+        assert 'list="ai-literacy-edition-choices"' in fragment
+        assert "Filing reference the authority gave you" in fragment
+        assert 'name="submission_reference" required maxlength="128"' in fragment
+    else:
+        assert '<fieldset class="assurance-form__wide" data-purview-labels>' not in fragment
     if admin:
         assert 'name="resolution_code" required><option value="fixed">' in fragment
         assert 'data-structured="report-details"' in fragment
