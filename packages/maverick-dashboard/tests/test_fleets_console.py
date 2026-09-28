@@ -45,9 +45,11 @@ def test_fleets_page_lists_a_saved_fleet(monkeypatch, tmp_path):
     text = r.text
     # Fleet name, owner, and each agent (name + role) are rendered.
     assert "acme" in text
-    assert "user:dana" in text
-    assert "researcher" in text
-    assert "coder" in text
+    assert "dana" in text                       # owner shown as a name
+    assert "Researcher" in text                 # roles shown as job titles
+    assert "Coder" in text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(text) == []
 
 
 def test_fleets_empty_state_shows_create_hint(monkeypatch, tmp_path):
@@ -56,7 +58,7 @@ def test_fleets_empty_state_shows_create_hint(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
-    assert "Create a fleet" in r.text
+    assert "Create a team" in r.text
     assert "maverick fleet" not in r.text
 
 
@@ -85,9 +87,9 @@ def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
     r = _client().get("/fleets")
     assert r.status_code == 200
     text = r.text
-    assert "recent oversight" in text.lower()
-    assert "shell" in text
-    assert "require_human_actions" in text
+    assert "recent decisions by your company rules" in text.lower()
+    assert "Shell" in text
+    assert "Require human actions" in text
     # Links the operator to the pending-approval (Art 14) queue.
     assert 'href="/approvals"' in text
 
@@ -112,11 +114,11 @@ def test_governance_hold_gets_source_label_on_approvals(monkeypatch, tmp_path):
     text = r.text
     # The trusted governance hold is labelled so an operator can tell it apart,
     # and the spoofed ordinary hold does not create a second Art-14 badge.
-    assert text.count("governance · Art 14") == 1
-    assert text.count('class="muted">Consent</span>') == 1
+    assert text.count("Required human oversight (EU AI Act)") == 1
+    assert text.count('class="muted">An agent asked for permission</span>') == 1
     # Both holds still render in the queue.
-    assert "shell" in text
-    assert "rm-rf" in text
+    assert "Shell" in text
+    assert "Rm rf" in text
 
 
 def test_api_fleets_returns_roster(monkeypatch, tmp_path):

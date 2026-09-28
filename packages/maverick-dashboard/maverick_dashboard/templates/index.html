@@ -26,7 +26,7 @@
       </p>
       <form method="post" action="/chat/send" style="display: flex; gap: 0.5rem; max-width: 580px; margin: 0 auto; flex-wrap: wrap;">
         <input type="text" name="title" required autofocus
-               aria-label="Describe a goal for Lightwork to run"
+               aria-label="Describe a task for Lightwork to do"
                placeholder="Plan a 2-week trip to Japan"
                class="input" style="flex: 1 1 320px;" />
         <button type="submit" class="btn btn--primary">
@@ -84,7 +84,7 @@
     <div class="panel">
       {% if facts %}
         {% for k, v in facts.items() %}
-          <p><strong>{{ k }}</strong> <span class="muted">— {{ v }}</span></p>
+          <p><strong>{{ k|humanize }}</strong> <span class="muted">— {{ v }}</span></p>
         {% endfor %}
       {% else %}
         <p class="muted">Nothing recorded yet. Lightwork remembers useful business details as it works. Review them on the <a href="/facts">Facts</a> page.</p>

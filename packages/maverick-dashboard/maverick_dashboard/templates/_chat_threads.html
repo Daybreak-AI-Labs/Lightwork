@@ -5,7 +5,7 @@
   {% for t in threads %}
   <li><a href="/chat/goal/{{ t.id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">{{ t.title }}</a></li>
   {% else %}
-  <li class="cs-empty">No chats yet</li>
+  <li class="cs-empty">No chats yet. <a href="/chat" style="display:inline; padding:0;">Start a chat</a></li>
   {% endfor %}
 </ul>
 {% endmacro %}

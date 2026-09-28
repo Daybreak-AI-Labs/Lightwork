@@ -83,10 +83,14 @@ class TestOverrideLifecycle:
         html = client.get(f"/agents?name={name}").text
         # The playbook renders as structured rows (not a raw JSON textarea),
         # with an add-step control and a clone template for new rows.
-        assert 'class="wf-name"' in html
+        assert 'class="input wf-name"' in html
         assert 'value="intake"' in html and "Read the request." in html
         assert "Check it." in html
-        assert "+ Add step" in html and 'id="wf-row-tpl"' in html
+        assert ">Add a step</button>" in html and 'id="wf-row-tpl"' in html
+        # Steps move and are removed with labelled buttons, not bare arrows.
+        assert ">Move up</button>" in html and ">Remove</button>" in html
+        row = html.split('id="wf-row-tpl"', 1)[1].split("</template>", 1)[0]
+        assert "↑" not in row and "✕" not in row
         assert 'name="workflow"' not in html   # the old JSON textarea is gone
 
     def test_invalid_override_rejected_422(self):
@@ -208,3 +212,13 @@ def test_stale_reset_cannot_delete_a_newer_agent():
     stale = client.delete(f"/api/v1/agents/{name}/override", params={"expected_generation": original["generation"]})
     assert stale.status_code == 409
     assert client.get(f"/api/v1/agents/{name}").json()["description"] == "Second"
+
+
+def test_agent_factory_reads_plainly():
+    from test_support.plain_language import developer_terms
+
+    for path in ("/agents", "/agents?new=1"):
+        html = client.get(path).text
+        assert developer_terms(html) == [], path
+        assert "window.prompt" not in html and "'HTTP '" not in html
+        assert "Team (fleet) name" not in html and "/Mtok" not in html

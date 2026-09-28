@@ -253,3 +253,18 @@ test('condition grammar parses simple predicates and rejects composites', () => 
   const q = FDCore.COND_RE.exec('status == "open item"');
   assert.equal(q[3], '"open item"');
 });
+
+test('plainProblems names steps in words instead of ids and field names', () => {
+  const bad = { start: 'a', nodes: [
+    { id: 'a', kind: 'action', label: 'Send to Slack', next: 'ghost' },
+    { id: 'b', kind: 'agent' },
+    { id: 'c', kind: 'approval', label: 'Manager sign-off' },
+  ] };
+  const text = FDCore.plainProblems(bad).join(' ');
+  assert.match(text, /The step “Send to Slack” points to a step that no longer exists/);
+  assert.match(text, /The step “Send to Slack” needs an action chosen/);
+  assert.match(text, /An AI task needs instructions for the AI/);
+  assert.match(text, /“Manager sign-off” needs a question for the approver/);
+  assert.doesNotMatch(text, /\bnode\b|ghost|if_true|\bbrief\b/);
+  assert.deepEqual(FDCore.plainProblems({ start: 'a', nodes: [{ id: 'a', kind: 'agent', brief: 'x' }] }), []);
+});

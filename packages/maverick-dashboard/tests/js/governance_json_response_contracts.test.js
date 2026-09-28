@@ -24,7 +24,6 @@ const JSON_CLIENTS = [
   ["consent_scan_inventory.html", "call", ["/probe"]],
   ["data_use_providers.html", "call", ["/probe"]],
   ["consent_preferences.html", "call", ["/probe"]],
-  ["agents.html", "call", ["GET", "/probe"]],
   ["ekko.html", "request", ["/probe"]],
 ];
 
@@ -167,6 +166,10 @@ function harness(file, functionName, args) {
     window: { confirm() { return true; } },
     confirm() { return true; },
     mvToast() {},
+    // agents.html shares these page helpers from its first script block.
+    mountToolPicks() {},
+    mountToolPick() {},
+    plainError(_failure, what) { return "Could not " + what + ". Please try again."; },
     fetch: async () => validBootResponse,
     setTimeout() { return 0; },
     clearTimeout() {},
@@ -227,6 +230,31 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
   });
 }
 
+// Plain-language pages: failures read as fixed sentences. They still fail
+// closed on malformed 2xx replies and never echo a response body or a raw
+// server detail.
+test("agents.html rejects malformed 2xx without exposing its body", async () => {
+  const secret = "private-response-content-for-agents";
+  const response = { ok: true, status: 200, ...streamedJsonBody(secret),
+    async json() { throw new Error(secret); }, async text() { return secret; } };
+  await assert.rejects(harness("agents.html", "call", ["GET", "/probe"]).invoke(response), (error) => {
+    assert.match(error.message, /could not be confirmed/);
+    assert.equal(error.message.includes(secret), false);
+    return true;
+  });
+});
+
+test("agents.html turns an error reply into a plain sentence", async () => {
+  const detail = "Reviewed conflict for agents.html.";
+  const response = { ok: false, status: 409, ...streamedJsonBody(JSON.stringify({ detail })),
+    async json() { return { detail }; }, async text() { return JSON.stringify({ detail }); } };
+  await assert.rejects(harness("agents.html", "call", ["GET", "/probe"]).invoke(response), (error) => {
+    assert.equal(error.message.includes(detail), false);
+    assert.match(error.message, /^Could not /);
+    return true;
+  });
+});
+
 test("redact.html marks malformed 2xx as failed without exposing its body", async () => {
   const secret = "private-redaction-response-content";
   const client = harness("redact.html", "preview", [null]);
@@ -237,12 +265,12 @@ test("redact.html marks malformed 2xx as failed without exposing its body", asyn
   });
 
   const message = client.element("proof-badge").textContent;
-  assert.equal(message, "Request failed: the server returned an invalid JSON response.");
+  assert.equal(message, "Could not read the result. Please try again.");
   assert.equal(message.includes(secret), false);
   assert.equal(client.element("proof-badge").className, "badge failure");
 });
 
-test("redact.html preserves a valid JSON error detail", async () => {
+test("redact.html shows a plain sentence instead of the server detail", async () => {
   const client = harness("redact.html", "preview", [null]);
   await client.invoke({
     ok: false,
@@ -250,6 +278,6 @@ test("redact.html preserves a valid JSON error detail", async () => {
     async json() { return { detail: "Reviewed redaction error." }; },
   });
 
-  assert.equal(client.element("proof-badge").textContent, "Reviewed redaction error.");
+  assert.equal(client.element("proof-badge").textContent, "Could not check the text. Please try again.");
   assert.equal(client.element("proof-badge").className, "badge failure");
 });

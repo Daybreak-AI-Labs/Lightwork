@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ "Policy unavailable" if policy_error else "500" }} · Lightwork{% endblock %}
+{% block title %}{{ "Safety settings need attention" if policy_error else "Something went wrong" }} · Lightwork{% endblock %}
 {% block content %}
   <div class="panel" style="text-align: center; padding: 3rem 1.5rem;">
     {% if policy_error %}
@@ -9,12 +9,16 @@
         read or validated. An administrator must restore or repair it before
         this operation can continue.
       </p>
+      <p style="display: flex; gap: var(--space-3); justify-content: center; flex-wrap: wrap;">
+        <a class="btn btn--primary" href="/help">Run a health check</a>
+        <a class="btn" href="/settings#settings-features">Open safety settings</a>
+      </p>
       <details style="max-width: 520px; margin: 0 auto 1.5rem;">
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: verify the repair</summary>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators</summary>
         <p class="muted" style="margin: 0.5rem 0 0;">
-          The policy file <code>runtime-overrides.toml</code> could not be read
-          or validated. Check <code>maverick logs</code>, restore the last
-          reviewed policy, then run <code>maverick doctor</code> before retrying.
+          Lightwork’s safety settings couldn’t be read. Restore the last reviewed
+          safety settings, then run the health check before trying again. The
+          Help page can prepare a support report if you need assistance.
         </p>
       </details>
     {% else %}
@@ -25,12 +29,16 @@
       </p>
       <details style="max-width: 480px; margin: 0 auto 1.5rem;">
         <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">Support details</summary>
-        <p class="muted">Page: <code>{{ path or request.url.path }}</code></p>
-        <p class="muted" style="margin: 0.5rem 0 0;">Check <code>maverick logs</code> or the server output for the full trace.</p>
+        <p class="muted">Page: {{ path or request.url.path }}</p>
+        <p class="muted" style="margin: 0.5rem 0 0;">An administrator can find the full details in Lightwork’s activity log, or prepare a support report on the <a href="/help">Help</a> page.</p>
+        <button type="button" class="btn btn--ghost" id="support-copy" data-copy="Page {{ path or request.url.path }}">Copy support details</button>
       </details>
     {% endif %}
     <p style="margin-top: 1.5rem;">
-      <a href="/" style="color: var(--accent);">Back to home</a>
+      <a class="btn" href="/">Back to home</a>
     </p>
   </div>
+  <script>
+    (function () { var b = document.getElementById('support-copy'); if (b) b.addEventListener('click', function () { if (window.mvCopy) mvCopy(b.getAttribute('data-copy')); }); })();
+  </script>
 {% endblock %}

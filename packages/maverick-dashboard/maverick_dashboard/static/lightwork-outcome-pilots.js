@@ -28,9 +28,15 @@
     let data;
     try { data = await r.json(); } catch (_) { throw new Error('Pilot information could not be read. Reload this page before continuing.'); }
     if (!r.ok) {
-      const detail = Array.isArray(data.detail) ? data.detail.map(e => e.loc.slice(1).join(' → ') + ': ' + e.msg).join('; ') : data.detail;
+      const detail = Array.isArray(data.detail) ? null : data.detail;
       if (r.status === 409 && detail && detail.code === 'pilot_context_changed') clearAuthority();
-      const message = typeof detail === 'string' ? detail : detail && typeof detail.message === 'string' ? detail.message : 'The request could not be completed.';
+      const raw = typeof detail === 'string' ? detail : detail && typeof detail.message === 'string' ? detail.message : '';
+      // Pilot rules answer in full sentences; anything code-like (field
+      // paths, keys, symbols) is replaced by a plain status sentence.
+      const readable = raw && /^[A-Z][^{}<>=_\[\]\\/]*[.!?]$/.test(raw.trim()) && raw.length <= 400;
+      const message = readable ? raw.trim()
+        : typeof window.mvErrorText === 'function' ? window.mvErrorText({status: r.status}, 'save that')
+        : (r.status === 422 || r.status === 400 ? 'Some of the details need fixing. Check what you entered and try again.' : 'That could not be completed. Please try again.');
       const error = new Error(message); error.status = r.status; throw error;
     }
     if (data.context !== context) { clearAuthority(); const error = new Error('The account or workspace changed. Reload this page.'); error.status = 409; throw error; }

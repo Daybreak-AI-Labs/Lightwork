@@ -11,7 +11,7 @@
              badge=departments | length ~ ' departments', badge_class='ok',
              copy=pack_total ~ ' specialists are available in the catalog. ' ~
                   configured_connectors ~ ' of ' ~ connector_total ~
-                  ' catalog connectors have a saved configuration; reachability is shown on Connections.') }}
+                  ' connected apps are set up; whether each one is working is shown on Connections.') }}
   {% endcall %}
 
   <div class="bd-toolbar">
@@ -30,7 +30,7 @@
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
       <h2>Delivery by department</h2>
-      <p class="viz-sub">Goals delivered (solid) against goals taken on (pale), from the Operating Record.</p>
+      <p class="viz-sub">Tasks finished (solid) against tasks taken on (pale), from the Operating Record.</p>
       <div id="bd-depts"></div>
     </div>
     <div class="panel viz-card">
@@ -61,7 +61,7 @@
     <table>
       <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
       <tbody>
-        <tr><td>Goals completed</td><td>{{ firm.goals_completed }} / {{ firm.goals_total }}</td></tr>
+        <tr><td>Tasks finished</td><td>{{ firm.goals_completed }} / {{ firm.goals_total }}</td></tr>
         <tr><td>Human approvals</td><td>{{ firm.human_decisions }} / {{ firm.approvals }}</td></tr>
         <tr><td>Spend</td><td>${{ '%.2f'|format(firm.spend_dollars) }}</td></tr>
       </tbody>
@@ -72,12 +72,12 @@
   <div class="panel">
     <div class="section-head"><h2>Integrations</h2></div>
     <p class="muted" style="margin-top: 0;">
-      {{ connector_total }} connectors available in the catalog;
-      {{ configured_connectors }} have a saved configuration. A saved
-      configuration does not prove the remote service is reachable.
+      {{ connector_total }} apps can be connected;
+      {{ configured_connectors }} are set up. Being set up does not
+      guarantee the other app is reachable right now.
     </p>
     <input id="conn-search" class="input" type="search" style="max-width: 26rem;"
-           placeholder="Search connectors — e.g. zendesk, salesforce" aria-label="Search connectors" />
+           placeholder="Search apps — for example Zendesk or Salesforce" aria-label="Search apps you can connect" />
     <ul id="conn-results" class="muted"></ul>
   </div>
 
@@ -88,7 +88,7 @@
       <article class="card" data-key="{{ d.key }}">
         <h3>{{ d.title }}</h3>
         <p class="muted">{{ d.charter or
-          'Catalog charter not provided. Review the available specialist roster before deployment.' }}</p>
+          'No description yet. View the team to see its specialists before you deploy it.' }}</p>
         <p>
           <span class="badge">{{ d.headcount }} catalog specialists available</span>
           {% if not entitlements.get(d.key) %}<span class="badge">Add-on required</span>{% endif %}
@@ -117,7 +117,7 @@
           <h3 id="dept-modal-title" style="margin: 0; font-size: var(--text-lg); text-transform: none; letter-spacing: 0; color: var(--text);">Department details</h3>
           <div class="muted" id="dept-modal-sub" style="font-size: var(--text-sm);"></div>
         </div>
-        <button type="button" class="btn btn--ghost" id="dept-modal-close" aria-label="Close department details">✕</button>
+        <button type="button" class="btn btn--ghost" id="dept-modal-close" aria-label="Close department details">Close</button>
       </div>
       <div id="dept-modal-body" style="padding: var(--space-4) var(--space-5); overflow-y: auto; flex: 1; min-height: 0;">
         <p class="muted">Loading…</p>
@@ -140,10 +140,10 @@
         sub: 'available across the catalog' }));
       k.appendChild(B.kpi({ label: 'Delivered', value: D.kpis.delivered_window,
         chip: { cur: D.kpis.delivered_window, prev: D.kpis.delivered_prev },
-        sub: 'goals in the last ' + D.days + ' days' }));
+        sub: 'tasks in the last ' + D.days + ' days' }));
       k.appendChild(B.kpi({ label: 'Record spend', value: D.kpis.spend_dollars,
         format: B.money, sub: 'across ' + B.fmt(D.kpis.goals_total) +
-        ' goals on record' }));
+        ' tasks on record' }));
 
       var dmax = 1;
       (D.depts || []).forEach(function (r) { dmax = Math.max(dmax, r.total); });
@@ -154,7 +154,7 @@
                      value_text: r.completed + ' of ' + r.total,
                      pct: r.completed / dmax * 100, pct_bg: r.total / dmax * 100,
                      title: r.label + ' — ' + r.completed + ' delivered of ' + r.total };
-          }), 'Goals delivered against goals taken on, by department.');
+          }), 'Tasks finished against tasks taken on, by department.');
         var smax = 1;
         D.depts.forEach(function (r) { smax = Math.max(smax, r.spend); });
         B.hbars(document.getElementById('bd-dept-spend'),
@@ -179,7 +179,7 @@
           : '—',
         centerSub: 'completed',
         aria: 'Completion: ' + D.kpis.goals_completed + ' of ' +
-              D.kpis.goals_total + ' goals delivered.' });
+              D.kpis.goals_total + ' tasks finished.' });
 
       if ((D.platforms || []).length) {
         document.getElementById('bd-platforms-card').hidden = false;
@@ -225,10 +225,15 @@
         });
       }
 
+      function human(v) {
+        var t = String(v == null ? "" : v).replace(/[_-]+/g, " ").trim();
+        return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
+      }
+
       function renderTeam(d) {
         var rows = (d.roster || []).map(function (p) {
-          return "<tr><td>" + esc(p.name) + "</td><td>" + esc(p.description) +
-            "</td><td>" + esc(p.max_risk) + "</td></tr>";
+          return "<tr><td>" + esc(human(p.name)) + "</td><td>" + esc(p.description) +
+            "</td><td>" + esc(human(p.max_risk)) + "</td></tr>";
         }).join("");
         return "<table><caption>" + esc(d.title) + " — roster</caption>" +
           "<thead><tr><th scope=\"col\">Specialist</th><th scope=\"col\">Does</th>" +
@@ -239,13 +244,13 @@
         var dl = r.delivery || {}, au = r.authority || {}, le = r.learning || {};
         return "<table><caption>" + esc(r.department.title) + " — performance review</caption>" +
           "<tbody>" +
-          "<tr><td>Goals completed</td><td>" + esc(dl.goals_completed) + " / " + esc(dl.goals_total) +
+          "<tr><td>Tasks finished</td><td>" + esc(dl.goals_completed) + " / " + esc(dl.goals_total) +
           " (" + Math.round((dl.completion_rate || 0) * 100) + "%)</td></tr>" +
           "<tr><td>Active specialists</td><td>" + esc(dl.active_workers) + "</td></tr>" +
           "<tr><td>Authority</td><td>" + esc(au.summary) + "</td></tr>" +
-          "<tr><td>Learned-state coverage</td><td>" +
+          "<tr><td>Tasks that recorded lessons</td><td>" +
           (le.status === "ok" ? (Math.round((le.coverage_rate || 0) * 100) + "% of " +
-            esc(le.goals_evaluated) + " goals") : "insufficient data") + "</td></tr>" +
+            esc(le.goals_evaluated) + " tasks") : "Not enough work yet to tell") + "</td></tr>" +
           "</tbody></table>" +
           "<p class=\"muted\">" + esc(r.governance_note) + "</p>";
       }
@@ -300,17 +305,18 @@
             var res = { ok: response.ok, status: response.status, body: body };
             if (res.ok) {
               var f = res.body.fleet || {};
-              box.innerHTML = "<p>Deployed <strong>" + esc(f.name) + "</strong> — " +
+              box.innerHTML = "<p>Deployed <strong>" + esc(human(f.name)) + "</strong> — " +
                 esc((f.agents || []).length) + " specialists. " +
-                "Run them from <a href=\"/fleets\">Fleets</a>.</p>";
+                "Give them tasks from <a href=\"/fleets\">Fleets</a>.</p>";
             } else if (res.status === 402) {
               box.innerHTML = "<p class=\"muted\">This department is a paid add-on. " +
-                esc(res.body.detail || "Contact your administrator to enable it.") + "</p>";
+                "Ask your administrator to add it to your plan.</p>";
             } else {
               // textContent escapes on its own; passing esc()'d text here would
               // double-encode (show literal &amp; / &lt;).
-              box.textContent = res.body.detail ||
-                ("Could not deploy the " + deptTitle + " team (HTTP " + res.status + "). Try again.");
+              box.textContent = window.mvErrorText
+                ? window.mvErrorText(res, "deploy the " + deptTitle + " team")
+                : "Could not deploy the " + deptTitle + " team. Try again.";
             }
           } catch (error) {
             box.textContent = "Could not deploy the " + deptTitle +
@@ -327,10 +333,13 @@
         var url = act === "review"
           ? "/api/v1/departments/" + encodeURIComponent(key) + "/review"
           : "/api/v1/departments/" + encodeURIComponent(key);
-        fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+        fetch(url).then(function (r) {
+          if (!r.ok) throw new Error("load");
+          return r.json();
+        }).then(function (d) {
           modalBody.innerHTML = act === "review" ? renderReview(d) : renderTeam(d);
         }).catch(function () {
-          modalBody.innerHTML = "<p class=\"muted\">Could not load.</p>";
+          modalBody.innerHTML = "<p class=\"muted\">Could not load these details. Close this and try again.</p>";
         });
       });
 
@@ -352,13 +361,13 @@
             .then(function (d) {
               if (seq !== connSearchSeq) return;
               results.innerHTML = (d.connectors || []).slice(0, 20).map(function (c) {
-                return "<li>" + esc(c.label) + " <span class=\"muted\">(" + esc(c.name) + ")</span></li>";
+                return "<li>" + esc(c.label || human(c.name)) + "</li>";
               }).join("") || "<li>No match.</li>";
               results.removeAttribute("aria-busy");
             })
             .catch(function () {
               if (seq !== connSearchSeq) return;
-              results.innerHTML = "<li>Could not search connectors right now.</li>";
+              results.innerHTML = "<li>Could not search apps right now. Try again in a moment.</li>";
               results.removeAttribute("aria-busy");
             });
         }, 200);

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Errors · Goal #{{ goal.id }} · Lightwork{% endblock %}
+{% block title %}Problems · {{ goal.title }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   .err-list { list-style: none; padding: 0; margin: 0; }
@@ -15,20 +15,35 @@
   }
   .err-empty { color: var(--muted); padding: 1rem 0; }
 </style>
-<h1 class="page-title">Errors · Goal #{{ goal.id }}</h1>
-<p class="err-meta"><a href="/goals/{{ goal.id }}/trajectory">← full trajectory</a></p>
+<h1 class="page-title">Problems in: {{ goal.title }}</h1>
+<p class="err-meta"><a href="/goals/{{ goal.id }}/trajectory">← Everything that happened</a> · <a href="/chat/goal/{{ goal.id }}">Open the task</a></p>
+{% if errors %}
+<p>Something went wrong {{ errors|length }} time{{ '' if errors|length == 1 else 's' }} while this task ran.
+  Open a problem to see the full message you can share with support.</p>
+{% endif %}
 {% if errors %}
 <ul class="err-list">
   {% for e in errors %}
   <li>
-    <details class="err-item"{% if loop.first %} open{% endif %}>
-      <summary>{{ e.agent }}<span class="err-meta">{{ e.ts | datetime }} · event #{{ e.id }}</span></summary>
+    <details class="err-item">
+      <summary>Problem reported by {{ e.agent|humanize if e.agent else 'Lightwork' }}<span class="err-meta">{{ e.ts | datetime }} · show technical details</span></summary>
+      <p class="err-meta" style="padding: 0 0.8rem;">Technical details (for support)</p>
       <pre class="err-content">{{ e.content }}</pre>
+      <p style="padding: 0 0.8rem 0.6rem;"><button type="button" class="btn btn--ghost btn--sm err-copy">Copy for support</button></p>
     </details>
   </li>
   {% endfor %}
 </ul>
 {% else %}
-<p class="err-empty">No errors recorded for this goal.</p>
+<p class="err-empty">No problems recorded for this task.</p>
 {% endif %}
+<script>
+  document.querySelectorAll(".err-copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pre = btn.closest("details").querySelector(".err-content");
+      if (window.mvCopy) window.mvCopy(pre.textContent);
+      else if (navigator.clipboard) navigator.clipboard.writeText(pre.textContent);
+    });
+  });
+</script>
 {% endblock %}

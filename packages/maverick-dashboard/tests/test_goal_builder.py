@@ -135,3 +135,12 @@ def test_compose_requires_complete_model_route(client, monkeypatch):
     r = client.post("/api/v1/goals/compose", json={"title": "t"})
     assert r.status_code == 400
     assert "model route" in r.json()["detail"].lower()
+
+
+def test_builder_page_uses_plain_language(client):
+    from test_support.plain_language import developer_terms
+    r = client.get("/goal-builder")
+    assert r.status_code == 200
+    assert developer_terms(r.text) == []
+    assert 'id="gb-channels"' in r.text               # channel picker data
+    assert "Move up" in r.text and "Remove" in r.text

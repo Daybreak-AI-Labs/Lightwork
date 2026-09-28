@@ -72,9 +72,9 @@ def test_flow_designer_has_loss_and_double_submit_guards():
     assert "window.history.replaceState" in source
     assert "saveInFlight" in source and "syncSaveButtons" in source
     assert "FDCore.commitRawParams(rootFlow)" in source
-    assert "n._paramsRaw !== undefined ? n._paramsRaw" in source
+    assert "if (n._paramsRaw !== undefined)" in source
     assert "g.setAttribute('tabindex', '0')" in source
-    assert "Yes path — next step" in source
+    assert "If yes, go to" in source
     assert 'aria-describedby="fd-canvas-help"' in markup
 
 
@@ -104,22 +104,22 @@ def test_settings_warns_before_one_section_discards_another():
 
 def test_goal_destructive_actions_and_attachment_failures_recover():
     source = (TEMPLATES / "chat_goal.html").read_text(encoding="utf-8")
-    assert "Cancel failed — check your connection and try again." in source
+    assert "Could not stop the task. Check your connection and try again." in source
     assert "if (!accepted) cancelBtn.disabled = false" in source
     assert "Revoke this share link?" in source
-    assert "Could not revoke link — check your connection" in source
+    assert "Could not turn off the link. Check your connection" in source
     assert "Attachments could not be loaded. You can still add a file" in source
     assert "panel.style.display = 'block'" in source
-    assert 'id="attach-add" multiple aria-label="Add files to this goal"' in source
+    assert 'id="attach-add" multiple aria-label="Add files to this task"' in source
     assert 'tabindex="-1"' in source
 
 
 def test_webhook_deletion_is_confirmed_and_surfaces_server_failure():
     source = (TEMPLATES / "workflow_builder.html").read_text(encoding="utf-8")
-    assert "Delete trigger “' + name + '”?" in source
-    assert "body.detail || ('Could not delete trigger (' + resp.status" in source
-    assert "Could not delete trigger — check your connection and try again." in source
-    assert "'Delete trigger ' + t.name" in source
+    assert "Other apps will no longer be able to start this workflow." in source
+    assert "var detail = plainErr(resp, 'delete it');" in source
+    assert "var message = plainErr(e, 'delete it');" in source
+    assert "'Delete the start ' + t.name" in source
 
 
 def test_high_impact_learning_workforce_and_agent_actions_confirm():
@@ -130,9 +130,9 @@ def test_high_impact_learning_workforce_and_agent_actions_confirm():
     assert "Enable automatic application of proven workflow improvements?" in learning
     assert "Scheduled and triggered workflows may start running" in learning
     assert "This creates an operational fleet and its specialists" in workforce
-    assert "This creates an operational fleet and its specialists" in agents
-    assert "Its saved authority and workflow become available to operators" in agents
-    assert "Custom authority and workflow edits will be removed" in agents
+    assert "This adds its specialists so you can give the team work" in agents
+    assert "Its allowed actions and steps take effect for everyone who uses it" in agents
+    assert "Your changes to its allowed actions and steps will be removed" in agents
 
 
 def test_privacy_decision_network_failure_restores_the_draft_control():

@@ -86,8 +86,8 @@ def test_plan_tree_html_renders(client, world_with_tree):
     resp = client.get(f"/goals/{g1}/plan")
     assert resp.status_code == 200
     body = resp.text
-    # Renders the root goal id + at least one child link.
-    assert f"#{g1}" in body
+    # Renders the root task link + the page title.
+    assert f'href="/chat/goal/{g1}"' in body
     assert "Plan tree" in body or "plan tree" in body.lower()
 
 
@@ -96,7 +96,7 @@ def test_trajectory_html_renders(client, world_with_tree):
     resp = client.get(f"/goals/{g1}/trajectory")
     assert resp.status_code == 200
     body = resp.text
-    assert "Trajectory" in body
+    assert "Step-by-step history" in body
     # The scrubber input is present.
     assert 'id="scrub"' in body
     # Our seeded event content shows up.

@@ -3,18 +3,18 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Your AI workforce', 'Projects',
-               subtitle='Workspaces for related goals',
-               lede='Workspaces that group related goals — a close cycle, an
-                     audit, a deal. Open a project to see its goals and
-                     status at a glance.') %}
+               subtitle='Keep related tasks together',
+               lede='Projects group related tasks — a close cycle, an
+                     audit, a deal. Open a project to see its tasks and
+                     how they are going at a glance.') %}
     {{ state('Current state',
              projects | length ~ ' project' ~ ('' if projects | length == 1 else 's'),
-             badge=((projects | sum(attribute='goal_count')) ~ ' goals filed') if projects else 'none yet',
+             badge=((projects | sum(attribute='goal_count')) ~ ' tasks filed') if projects else 'none yet',
              badge_class='ok' if projects else 'idle',
-             copy='Create a project below, then file goals under it from any
-                   goal page — related work stays together.') }}
+             copy='Create a project below, then file tasks under it from any
+                   task page — related work stays together.') }}
   {% endcall %}
-  <p><a href="/project-reviews">Your project review packets</a> · <a href="/settings">Enable team reviews in Settings</a></p>
+  <p><a class="btn btn--ghost" href="/project-reviews">Your project reviews</a> <a class="btn btn--ghost" href="/settings">Turn on team reviews in Settings</a></p>
 
   <div class="panel">
     <h2 style="margin-top: 0;">New project</h2>
@@ -23,7 +23,7 @@
         <input type="text" name="name" required maxlength="120"
                placeholder="e.g. Q3 controllership close" class="input"></label>
       <label class="project-field"><span class="muted">Department (optional)</span>
-        <input type="text" name="domain" placeholder="e.g. finance_sox" class="input"></label>
+        <input type="text" name="domain" placeholder="For example: Finance" maxlength="120" class="input"></label>
       <label class="project-field"><span class="muted">Description (optional)</span>
         <textarea name="description" rows="2" class="input"></textarea></label>
       <button type="submit" class="btn btn--primary">Create project</button>
@@ -33,22 +33,22 @@
   <div class="panel{% if not projects %} empty{% endif %}">
     {% if projects %}
       <table>
-        <thead><tr><th scope="col">project</th><th scope="col">department</th><th scope="col">goals</th><th scope="col">status</th></tr></thead>
+        <thead><tr><th scope="col">Project</th><th scope="col">Department</th><th scope="col">Tasks</th><th scope="col">Status</th></tr></thead>
         <tbody>
         {% for p in projects %}
           <tr>
             <td><a href="/projects/{{ p.id }}">{{ p.name or 'Untitled' }}</a>
               {% if p.description %}<div class="muted" style="font-size: var(--text-xs);">{{ p.description[:100] }}</div>{% endif %}</td>
-            <td class="muted">{{ p.domain or '—' }}</td>
+            <td class="muted">{{ p.domain|humanize if p.domain else '—' }}</td>
             <td>{{ p.goal_count }}</td>
-            <td><span class="badge {{ p.status }}">{{ p.status }}</span></td>
+            <td><span class="badge {{ p.status }}">{{ p.status|humanize }}</span></td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
       <div class="mv-empty"><p class="mv-empty__title">No projects yet</p>
-        <p class="mv-empty__body">Create one above to group related goals into a workspace.</p></div>
+        <p class="mv-empty__body">Create one above to keep related tasks together.</p></div>
     {% endif %}
   </div>
 

@@ -139,7 +139,9 @@ def test_replay_page_renders():
     assert client.get("/replay").status_code == 200          # index
     r = client.get(f"/replay?goal={gid}")
     assert r.status_code == 200
-    assert "Run replay" in r.text
+    assert "Task replay" in r.text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(r.text) == []
 
 
 # ---- agent trust / permission graph ----------------------------------------
@@ -233,7 +235,10 @@ def test_discovery_overview_shape():
 
 
 def test_discovery_page_and_api():
-    assert client.get("/discovery").status_code == 200
+    page = client.get("/discovery")
+    assert page.status_code == 200
+    # Action names read as words; raw commands stay under Technical details.
+    assert "Download the compliance file" in page.text and "(JSON)" not in page.text
     r = client.get("/api/v1/discovery")
     assert r.status_code == 200 and "tools" in r.json()
 

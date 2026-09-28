@@ -41,8 +41,10 @@ def test_workforce_deploy_is_single_flight_and_surfaces_response_details():
     assert '"Deploy the " + deptTitle + " team?' in deploy
     assert "btn.disabled = true" in deploy
     assert 'btn.setAttribute("aria-busy", "true")' in deploy
-    assert "res.body.detail" in deploy
-    assert '" team (HTTP " + res.status + "). Try again."' in deploy
+    # Failures read as plain sentences (status mapped by mvErrorText), never
+    # a raw server detail or an HTTP code.
+    assert 'window.mvErrorText(res, "deploy the " + deptTitle + " team")' in deploy
+    assert "HTTP" not in deploy and "res.body.detail" not in deploy
     assert "check your connection and try again" in deploy
     assert "finally" in deploy
     assert "delete btn.dataset.inFlight" in deploy
@@ -53,14 +55,14 @@ def test_agent_factory_deploy_and_reset_mutations_are_guarded():
 
     assert "if (dlgDeploy.dataset.inFlight === 'true') return;" in source
     assert "if (btn.dataset.inFlight === 'true') return;" in source
-    assert source.count("This creates an operational fleet and its specialists") >= 2
+    assert source.count("This adds its specialists so you can give the team work") >= 2
     assert source.count(".finally(function ()") >= 2
     assert "function beginMutation(button)" in source
     assert "if (!beginMutation(saveBtn)) return;" in source
     assert "if (!name || !beginMutation(resetBtn)) return;" in source
-    assert "Its saved authority and workflow become available to operators" in source
-    assert "Custom authority and workflow edits will be removed" in source
-    assert "Could not reach the server — check your connection and try again." in source
+    assert "Its allowed actions and steps take effect for everyone who uses it" in source
+    assert "Your changes to its allowed actions and steps will be removed" in source
+    assert "throw new Error(plainError(error, 'reach Lightwork'))" in source
     assert "finishMutation(saveBtn)" in source
     assert "finishMutation(resetBtn)" in source
 

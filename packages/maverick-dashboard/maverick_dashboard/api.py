@@ -15217,6 +15217,19 @@ router.include_router(ai_evidence_analysis_authority_router)
 from .people_picker_api import router as people_picker_router  # noqa: E402
 
 router.include_router(people_picker_router)
+
+from .facts_api import router as facts_router  # noqa: E402
+
+router.include_router(facts_router)
+from .assessment_reviewers_api import router as assessment_reviewers_router  # noqa: E402
+
+router.include_router(assessment_reviewers_router)
+from .run_tree_actions_api import router as run_tree_actions_router  # noqa: E402
+
+router.include_router(run_tree_actions_router)
+from .queue_status_api import router as queue_status_router  # noqa: E402
+
+router.include_router(queue_status_router)
 from .knowledge_library_api import router as knowledge_library_router  # noqa: E402
 
 router.include_router(knowledge_library_router)

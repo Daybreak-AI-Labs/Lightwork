@@ -834,8 +834,8 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert "pb-flow__start" in r.text and 'id="pb-flow-end"' in r.text
     # Schedule panel: arm a saved template on a cron (feature defaults on).
     assert 'id="wf-sched"' in r.text and "/api/v1/schedules" in r.text
-    # Schedules fire in UTC: the time field labels it + a local-time hint exists.
-    assert "Time (UTC)" in r.text and 'id="sched-local-hint"' in r.text
+    # Times are chosen in the viewer's own time zone and stored as UTC.
+    assert "At (your time)" in r.text and "function toUtc(" in r.text
     # Webhook-trigger panel: bind a saved template to an inbound webhook.
     assert 'id="wf-trig"' in r.text and "/api/v1/triggers" in r.text
     # Decluttered: the automate panels are collapsible <details>, not always-open.
@@ -854,8 +854,11 @@ def test_p1_builder_refinements(monkeypatch, tmp_path):
     # Design-council P1: advanced cron, signed-curl, governance gate color.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
-    assert 'value="hourly"' in t and 'value="custom"' in t and 'id="sched-cron"' in t
-    assert 'id="trig-curl"' in t and "openssl dgst -sha256 -hmac" in t and "Copy curl" in t
+    # No raw timetable box or shell snippet: days, a day of the month and a
+    # copyable address are offered instead.
+    assert 'value="hourly"' in t and 'value="days"' in t and 'value="monthly"' in t
+    assert 'id="sched-cron"' not in t and "Cron expression" not in t
+    assert 'id="trig-curl"' not in t and "openssl" not in t and "Copy address" in t
     assert ".pb-gatebadge.gov" in t and "'gov'" in t   # approval = brand, not amber
     assert "mvCopy(" in t                                # shared copy primitive
 
@@ -865,7 +868,7 @@ def test_p0_council_fixes_builder(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
     assert 'role="heading" aria-level="3"' in t      # <summary> regained heading semantics
-    assert "shifts with daylight saving" in t          # UTC->local hint is DST-honest
+    assert "function cronWords(" in t                  # stored timetables read in local words
     assert "label.htmlFor" in t                        # param inputs associate their label
 
 
@@ -942,3 +945,14 @@ def test_builder_prefill_deeplink_jumps_to_automate(monkeypatch, tmp_path):
     # an unknown template (and no query) yields no prefill; the page still renders
     assert "WF_PREFILL = null" in _client().get("/workflow-builder?template=nope").text
     assert "WF_PREFILL = null" in _client().get("/workflow-builder").text
+
+
+def test_workflow_builder_reads_plainly(monkeypatch, tmp_path):
+    from test_support.plain_language import developer_terms
+
+    _isolate(monkeypatch, tmp_path)
+    t = _client().get("/workflow-builder").text
+    assert developer_terms(t) == []
+    for phrase in ("a name (id)", "no gate", "Trigger from a webhook", "POSTing", "Failed: '", "Save failed: '"):
+        assert phrase not in t
+    assert "Someone must approve" in t and "Start it from another app" in t

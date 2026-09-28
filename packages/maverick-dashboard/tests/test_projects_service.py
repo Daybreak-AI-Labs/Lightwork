@@ -19,8 +19,10 @@ def test_projects_page_lists(tmp_path, monkeypatch):
     pid = w.create_project("Q3 Close", domain="finance_sox")
     w.create_goal("Reconcile", "", project_id=pid)
     t = client.get("/projects").text
-    assert "Q3 Close" in t and "finance_sox" in t
+    assert "Q3 Close" in t and "Finance sox" in t   # department shown as words
     assert "New project" in t  # create form present
+    from test_support.plain_language import developer_terms
+    assert developer_terms(t) == []
 
 
 def test_create_project_redirects_to_detail(tmp_path, monkeypatch):
@@ -44,7 +46,10 @@ def test_project_detail_shows_member_goals(tmp_path, monkeypatch):
     w.create_goal("Unrelated", "")  # not in project
     t = client.get(f"/projects/{pid}").text
     assert "Reconcile AP" in t and "Unrelated" not in t
-    assert "Goals in this project" in t
+    assert "Tasks in this project" in t
+    assert "finance_sox" not in t and "#1<" not in t
+    from test_support.plain_language import developer_terms
+    assert developer_terms(t) == []
 
 
 def test_project_detail_404(tmp_path, monkeypatch):

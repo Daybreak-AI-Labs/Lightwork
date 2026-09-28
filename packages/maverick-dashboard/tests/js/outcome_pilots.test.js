@@ -169,3 +169,9 @@ test('pilot picker can load a later context-filtered page',async()=>{
   assert.ok(calls.some(call=>call.url.includes('cursor=OPL-page-one.json')));
   dom.window.close();
 });
+
+test('a code-like server detail is replaced by a plain sentence',()=>{
+  const source=require('node:fs').readFileSync(require('node:path').resolve(__dirname,'../../maverick_dashboard/static/lightwork-outcome-pilots.js'),'utf8');
+  assert.equal(source.includes("e.loc.slice(1)"),false);
+  assert.match(source,/const readable = raw && /);
+});

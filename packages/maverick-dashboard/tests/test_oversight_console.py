@@ -173,7 +173,7 @@ def test_pending_exact_operation_renders_current_and_actionable_inline(
     assert "Customer settings save button" in row.group(0)
     assert f'data-binding="{card["binding_sha256"]}"' in row.group(0)
     assert 'data-action="approve" disabled' not in row.group(0)
-    assert "older request has no exact-operation review" not in row.group(0)
+    assert "older request is missing the details" not in row.group(0)
 
 
 def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path):
@@ -192,16 +192,16 @@ def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path
 
     text = _client().get("/oversight").text
 
-    assert "governed-shell" in text
-    assert "ordinary-shell" in text
-    assert text.count("governance · Art 14") == 1
-    assert text.count('class="muted">Consent</span>') == 1
+    assert "Governed shell" in text
+    assert "Ordinary shell" in text
+    assert text.count("Required human oversight (EU AI Act)") == 1
+    assert text.count('class="muted">An agent asked for permission</span>') == 1
 
 
 def test_no_pending_holds_shows_empty_state(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/oversight").text
-    assert "No pending approvals." in text
+    assert "Nothing needs your decision right now." in text
 
 
 def _enable_oidc_principal_map(monkeypatch):

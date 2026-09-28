@@ -2280,7 +2280,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             ),
         )
         if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
-            message = "Enter a real audit date in YYYY-MM-DD format, then try again."
+            message = "That date isn’t valid. Pick a day from the calendar, then try again."
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -2414,10 +2414,9 @@ async def runtime_policy_exception_handler(
 async def flow_payload_exception_handler(request: Request, exc: FlowPayloadError):
     """Expose a recovery action without leaking private payload or key details."""
     message = (
-        "Workflow data could not be saved or loaded safely. Ask an administrator "
-        "to check storage limits and restore the complete checkpoint with its key "
-        "before retrying. If recovery is unavailable, review the original inputs "
-        "and any prior effects before creating a replacement run."
+        "We couldn't open this workflow's saved progress. Ask your administrator "
+        "to restore it, or start the workflow again after checking what it already "
+        "did in other apps."
     )
     headers = {"Cache-Control": "no-store"}
     if _wants_html(request):
@@ -3224,7 +3223,10 @@ async def action_center_page(request: Request) -> HTMLResponse:
     from .draft_api import context_for
 
     require_enabled(request)
-    return templates.TemplateResponse(request, "action_center.html", {"action_context": context_for(request)})
+    return templates.TemplateResponse(
+        request, "action_center.html",
+        {"action_context": context_for(request), "can_admin": has_permission(request, "admin")},
+    )
 
 
 @app.get("/workflow-readiness", response_class=HTMLResponse)
@@ -5838,7 +5840,10 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
         detail = xa.agent_detail(agent_id)
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    return templates.TemplateResponse(request, "external_agent_detail.html", {"a": detail})
+    can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
+    return templates.TemplateResponse(
+        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage}
+    )
 
 
 @app.get("/discovery", response_class=HTMLResponse)
@@ -6426,6 +6431,13 @@ async def run_tree_page(request: Request) -> HTMLResponse:
         cfg = get_session_tree()
     except Exception:  # pragma: no cover - unreadable config => documented defaults
         cfg = {"enable": False, "max_depth": 10}
+    try:
+        recent = [
+            {"id": g.id, "title": g.title, "status": g.status}
+            for g in _world().list_goals(owner=owner_filter, limit=50, order="desc")
+        ]
+    except Exception:  # pragma: no cover - the picker is best-effort
+        recent = []
     return templates.TemplateResponse(
         request,
         "run_tree.html",
@@ -6434,6 +6446,9 @@ async def run_tree_page(request: Request) -> HTMLResponse:
             "max_depth": cfg.get("max_depth"),
             "roots": rows,
             "tree": tree,
+            "recent": recent,
+            "can_operate": has_permission(request, "operate"),
+            "can_admin": has_permission(request, "admin"),
         },
     )
 
@@ -7416,16 +7431,16 @@ def _approval_source(provenance: str | None) -> str | None:
     trusted ``provenance`` field may drive source labels in the decision UI.
     """
     if provenance == "governance":
-        return "governance · Art 14"
+        return "Required human oversight (EU AI Act)"
     if provenance == "external_agents":
-        return "external agent · BYOA gateway"
+        return "Outside agent"
     if provenance == "harness_refine":
         # The agent is asking to change its OWN operating instructions.
         # An approver must be able to see that at a glance, not read it as
         # an ordinary task approval.
-        return "self-refinement · changes the agent's instructions"
+        return "Agent wants to change its own instructions"
     if provenance == "assessment":
-        return "assessment · human review"
+        return "Assessment review"
     return None
 
 
@@ -7607,11 +7622,18 @@ def fleets_page(request: Request) -> HTMLResponse:
         fleets = [f for f in fleets if f.owner == owner]
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
+    try:  # role picker for new agents (same roles the access page offers)
+        from . import rbac as _rbac
+
+        role_options = list(_rbac.known_roles())
+    except Exception:  # pragma: no cover - the picker falls back to typing
+        role_options = []
     return templates.TemplateResponse(
         request,
         "fleets.html",
         {
             "fleets": fleets,
+            "role_options": role_options,
             "runs_by_fleet": runs_by_fleet,
             "holds": _recent_governance_holds(),
             "pending_count": len(_world().pending_approvals()),
@@ -10074,9 +10096,8 @@ def _render_tree_html(node: dict) -> str:
     def _render(n: dict) -> str:
         dollars_html = f' <span class="cost">${n["dollars"]:.4f}</span>' if n.get("dollars") else ""
         node_html = (
-            f'<a class="node" href="/goals#{n["id"]}">'
-            f'<span class="nid">#{_esc(n["id"])}</span> '
-            f'<span class="badge {_esc(n["status"])}">{_esc(n["status"])}</span> '
+            f'<a class="node" href="/chat/goal/{_esc(n["id"])}">'
+            f'<span class="badge {_esc(n["status"])}">{_esc(_idfmt.humanize(n["status"]))}</span> '
             f'<span class="title">{_esc(n.get("title") or "(untitled)")}</span>'
             f"{dollars_html}"
             f"</a>"
@@ -10116,10 +10137,17 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     events = w.goal_events(goal_id, limit=10_000)
+    try:
+        from maverick import session_tree
+
+        fork_enabled = session_tree.enabled()
+    except Exception:  # pragma: no cover - branching is optional
+        fork_enabled = False
     return templates.TemplateResponse(
         request,
         "trajectory.html",
-        {"goal": g, "events": events},
+        {"goal": g, "events": events, "fork_enabled": fork_enabled,
+         "can_operate": has_permission(request, "operate")},
     )
 
 
@@ -10900,7 +10928,11 @@ def graph_editor_page(request: Request) -> HTMLResponse:
 @app.get("/goal-builder", response_class=HTMLResponse)
 async def goal_builder_page(request: Request) -> HTMLResponse:
     """Drag-and-drop goal builder: compose a brief from blocks, then run it."""
-    return templates.TemplateResponse(request, "goal_builder.html", {})
+    from .control_plane import _discover_channels
+
+    return templates.TemplateResponse(
+        request, "goal_builder.html", {"channels": _discover_channels()}
+    )
 
 
 @app.get("/workflow-builder", response_class=HTMLResponse)
@@ -11241,6 +11273,7 @@ def automations_page(request: Request) -> HTMLResponse:
             "schedule_count": schedule_count,
             "trigger_count": trigger_count,
             "event_trigger_count": event_trigger_count,
+            "can_admin": has_permission(request, "admin"),
         },
     )
 

@@ -38,7 +38,7 @@ def test_page_renders_finance_worklist_and_catalog():
     assert resp.status_code == 200
     html = resp.text
     assert "Q3 revenue controls" in html
-    assert 'class="pw-review-btn"' in html
+    assert 'class="btn btn--primary pw-review-btn"' in html
     # The shared pop-out rides the chassis.
     assert 'id="arv-dialog"' in html
     # The catalog lists the FINANCE frameworks — and only those.

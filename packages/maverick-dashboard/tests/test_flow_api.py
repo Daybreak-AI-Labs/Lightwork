@@ -2806,7 +2806,7 @@ def test_run_viewer_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/flows/demo/runs/abc123")
     assert r.status_code == 200
-    assert 'id="fr-steps"' in r.text and "open in designer" in r.text
+    assert 'id="fr-steps"' in r.text and "Open the flow" in r.text
 
 
 def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
@@ -3014,3 +3014,18 @@ def test_flow_crud_admin_keeps_unscoped_access(monkeypatch, tmp_path):
     saved = c.get("/api/v1/flows/demo").json()
     assert saved["name"] == "Admin edit"
     assert saved["owner"] == "user:alice"
+
+
+def test_run_viewer_and_results_pages_read_plainly(monkeypatch, tmp_path):
+    from test_support.plain_language import developer_terms
+
+    _isolate(monkeypatch, tmp_path)
+    run_page = _client().get("/flows/demo/runs/abc123").text
+    results = _client().get("/flows/analytics").text
+    for text in (run_page, results):
+        assert developer_terms(text) == []
+    for phrase in ("Approve exact operation", "Target commitment", "Credential revision",
+                   "JSON.stringify(card.budget", "No such run (or not yours)"):
+        assert phrase not in run_page
+    assert "Information in this run" in run_page and "Technical details" in run_page
+    assert "Typical time" in results and ">p50<" not in results

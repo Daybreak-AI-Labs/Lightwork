@@ -37,6 +37,8 @@ def test_errors_page_shows_only_error_events(monkeypatch, tmp_path):
     body = r.text
     assert "boom in widget.py line 42" in body        # the error is shown...
     assert "ran a tool fine" not in body              # ...non-error events are filtered out
+    # The raw message stays folded away as technical details for support.
+    assert '<details class="err-item">' in body and "Copy for support" in body
 
 
 def test_errors_page_empty_state(monkeypatch, tmp_path):
@@ -45,7 +47,7 @@ def test_errors_page_empty_state(monkeypatch, tmp_path):
     w.close()
     r = _client().get(f"/goals/{gid}/errors")
     assert r.status_code == 200
-    assert "No errors recorded" in r.text
+    assert "No problems recorded" in r.text
 
 
 def test_errors_page_unknown_goal_is_404(monkeypatch, tmp_path):

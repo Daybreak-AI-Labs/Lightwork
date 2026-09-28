@@ -76,7 +76,7 @@ def test_missing_companion_is_explicit_before_runner_and_in_model_context(enviro
     assert "has not been read" in receipt["detail"]["message"]
     assert any("Do not imply that its contents were read" in block.get("text", "") for block in blocks)
     page = client.get(f"/chat/goal/{goal_id}")
-    assert "text companion unavailable" in page.text
+    assert "could not be read (unavailable)" in page.text
     assert world.get_goal(goal_id).status == "pending"
 
 

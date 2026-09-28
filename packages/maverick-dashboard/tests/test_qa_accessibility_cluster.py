@@ -92,8 +92,8 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "_workspace_worklist.html",
             (
-                'aria-label="Assign {{ s.subject }} assessment"',
-                'aria-label="Review {{ s.subject }} assessment"',
+                'aria-label="Assign the {{ s.subject }} assessment"',
+                'aria-label="Review the {{ s.subject }} assessment"',
             ),
         ),
         (

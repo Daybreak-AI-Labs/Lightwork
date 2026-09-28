@@ -33,7 +33,7 @@ def test_artifact_versions_shown(tmp_path, monkeypatch):
     w.add_artifact(gid, "text", "Note", "ZZZ_BODY_ONE")
     w.add_artifact(gid, "text", "Note", "ZZZ_BODY_TWO")
     t = client.get(f"/chat/goal/{gid}").text
-    assert "v2" in t and "2 versions" in t
+    assert "Version 2 of 2" in t
     assert "ZZZ_BODY_TWO" in t          # latest version rendered
     assert "ZZZ_BODY_ONE" not in t      # older version not rendered (latest only)
 
@@ -90,6 +90,6 @@ def test_version_history_loader_checks_status_and_retries(tmp_path, monkeypatch)
     loader = t[t.index("artifact__history').forEach"):]
     loader = loader[:loader.index("</script>")]
     assert "if (!r.ok)" in loader
-    assert "HTTP ' + r.status" in loader
+    assert "cgErr(r, 'load earlier versions')" in loader
     assert "delete d.dataset.loaded" in loader
     assert "Close and reopen to retry" in loader

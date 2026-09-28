@@ -2,23 +2,23 @@
 {% block title %}Output Styles · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Output styles</h1>
-  <p class="page-subtitle">Pick the response style applied to every agent run — tone and format only, never capabilities or safety.</p>
+  <p class="page-subtitle">Pick how agents write their answers — tone and layout only. It never changes what they are allowed to do or any safety rule.</p>
 
   <div class="panel">
     <form method="post" action="/styles/set" style="margin: 0;">
       <div role="radiogroup" aria-label="Output style">
       <table>
-        <thead><tr><th scope="col"></th><th scope="col">style</th><th scope="col">guidance</th></tr></thead>
+        <thead><tr><th scope="col"><span class="sr-only">Choose</span></th><th scope="col">Style</th><th scope="col">What it does</th></tr></thead>
         <tbody>
           <tr>
             <td><input type="radio" name="name" value="" id="style-none"{% if not active %} checked{% endif %}></td>
             <td><label for="style-none">Default</label></td>
-            <td class="muted">No style block — the agent's default voice.</td>
+            <td class="muted">No extra style — the agent's usual voice.</td>
           </tr>
           {% for s in styles %}
           <tr>
             <td><input type="radio" name="name" value="{{ s.name }}" id="style-{{ s.name }}"{% if active == s.name %} checked{% endif %}></td>
-            <td><label for="style-{{ s.name }}"><code>{{ s.name }}</code></label></td>
+            <td><label for="style-{{ s.name }}">{{ s.name|humanize }}</label></td>
             <td class="muted">{{ s.guidance }}</td>
           </tr>
           {% endfor %}
@@ -26,12 +26,12 @@
       </table>
       </div>
       <div style="margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-3);">
-        <button type="submit" class="btn btn--primary">Apply</button>
-        {% if active %}<span class="muted">Active: <code>{{ active }}</code></span>{% endif %}
+        <button type="submit" class="btn btn--primary">Use this style</button>
+        {% if active %}<span class="muted">In use now: {{ active|humanize }}</span>{% endif %}
       </div>
     </form>
   </div>
   <p class="muted" style="font-size: var(--text-sm);">
-    Applies deployment-wide and takes effect on the next run. Per-conversation and custom styles are on the roadmap.
+    Applies to everyone here, starting with the next task. Styles per conversation and your own custom styles are coming later.
   </p>
 {% endblock %}

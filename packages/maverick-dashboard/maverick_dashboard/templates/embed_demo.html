@@ -15,31 +15,52 @@
 <h2>Add it to another page</h2>
 <div class="panel">
   <p>
-    Copy the snippet below into the page where you want the card to appear.
-    Replace <code>YOUR-DASHBOARD</code> with this dashboard's address, and ask
-    your administrator for an access token if your workspace requires sign-in:
+    Copy the code below and give it to whoever looks after the page where
+    you want the card to appear (for example your wiki or intranet team).
+    It already points at this dashboard. Ask your administrator for an access
+    key if your workspace requires sign-in.
   </p>
-  <pre style="overflow-x: auto;">&lt;script src="http://YOUR-DASHBOARD:8765/static/lightwork-analytics.js"&gt;&lt;/script&gt;
+  <p>
+    <button type="button" class="btn btn--primary" id="embed-copy">Copy the code</button>
+  </p>
+  <details>
+    <summary>Technical details (the code to paste)</summary>
+    <pre id="embed-snippet" style="overflow-x: auto;">&lt;script src="http://YOUR-DASHBOARD:8765/static/lightwork-analytics.js"&gt;&lt;/script&gt;
 &lt;lightwork-analytics
     endpoint="http://YOUR-DASHBOARD:8765"
     token="YOUR-ACCESS-TOKEN"&gt;&lt;/lightwork-analytics&gt;</pre>
+    <p class="muted">Replace YOUR-ACCESS-TOKEN with the access key, or remove that line if your workspace runs without sign-in.</p>
+  </details>
   <h3 style="font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Good to know</h3>
   <ul class="muted" style="font-size: 0.9rem;">
     <li><strong>Works on pages served alongside Lightwork.</strong> For
       security, browsers only let the card load data from pages on the same
       address as this dashboard (or behind the same reverse proxy). A page
-      hosted elsewhere will show a blocked-request error rather than your data.</li>
-    <li><strong>Treat the token like a password.</strong> Anyone who can view
-      the embedding page can see the token, and it grants the same access as
-      the dashboard itself. Only embed on pages whose audience you trust with
-      that access. If your workspace runs without sign-in, leave the token
-      out entirely.</li>
+      hosted elsewhere will show a "blocked" message rather than your data.</li>
+    <li><strong>Treat the access key like a password.</strong> Anyone who can
+      view the page with the card can see the key, and it grants the same
+      access as the dashboard itself. Only add the card to pages whose
+      audience you trust with that access. If your workspace runs without
+      sign-in, leave the key out entirely.</li>
     <li><strong>View-only.</strong> The card only reads data — it can't change
       anything, and it shows the error plainly if a request fails.</li>
-    <li><strong>Already embedded somewhere?</strong> Snippets created before
-      the Lightwork rebrand (<code>&lt;maverick-analytics&gt;</code>) keep
-      working unchanged.</li>
+    <li><strong>Already added somewhere?</strong> Cards added before Lightwork
+      was renamed keep working unchanged.</li>
   </ul>
 </div>
 <script src="/static/lightwork-analytics.js"></script>
+<script>
+  (function () {
+    // Point the snippet at this dashboard so nobody has to edit an address.
+    var pre = document.getElementById("embed-snippet");
+    if (pre && window.location && window.location.origin) {
+      pre.textContent = pre.textContent.split("http://YOUR-DASHBOARD:8765").join(window.location.origin);
+    }
+    var btn = document.getElementById("embed-copy");
+    if (btn) btn.addEventListener("click", function () {
+      if (window.mvCopy) window.mvCopy(pre.textContent);
+      else if (navigator.clipboard) navigator.clipboard.writeText(pre.textContent);
+    });
+  })();
+</script>
 {% endblock %}

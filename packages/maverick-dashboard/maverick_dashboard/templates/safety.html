@@ -5,45 +5,46 @@
   {% call hero('Agent Shield', 'Safety',
                subtitle='The screening layer',
                lede='What Agent Shield — the safety layer that screens what
-                     agents read, do, and say — blocked, read from this
-                     server\'s signed audit log.') %}
+                     agents read, do, and say — stopped, taken from the
+                     sealed activity record kept on this server.') %}
     {{ state('Current state',
              total ~ ' block' ~ ('' if total == 1 else 's') ~ (' on ' ~ day if day else ' today'),
-             badge=('shield active' if total else 'all clear'),
+             badge=('shield stopped something' if total else 'all clear'),
              badge_class=('warn' if total else 'ok'),
-             copy='input: ' ~ by_stage.get('input', 0) ~ ' · tool: ' ~
-                  by_stage.get('tool', 0) ~ ' · output: ' ~
-                  by_stage.get('output', 0) ~ ' — every block lands on the
-                  signed audit chain.') }}
+             copy='What agents read: ' ~ by_stage.get('input', 0) ~ ' · What agents did: ' ~
+                  by_stage.get('tool', 0) ~ ' · What agents said: ' ~
+                  by_stage.get('output', 0) ~ ' — every stop is sealed in the
+                  activity record.') }}
   {% endcall %}
 
-  <div class="section-head"><h2>Time window</h2></div>
+  <div class="section-head"><h2>Which day</h2></div>
   <div class="panel">
     <form method="get" action="/safety" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
       <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">events scanned</div>
-        <input type="number" name="n" value="{{ n }}" min="1" max="5000"
-               style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+        <div class="muted" style="font-size: 0.85rem;">Day</div>
+        <input class="input" type="date" name="day" value="{{ day or '' }}" />
       </label>
       <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">day (YYYY-MM-DD)</div>
-        <input type="text" name="day" value="{{ day or '' }}" placeholder="today"
-               style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+        <div class="muted" style="font-size: 0.85rem;">How far back to look</div>
+        <select class="input" name="n">
+          {% for opt, label in [(200, 'Latest 200 records'), (1000, 'Latest 1,000 records'), (5000, 'Latest 5,000 records')] %}
+            <option value="{{ opt }}"{% if n == opt %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+          {% if n not in [200, 1000, 5000] %}<option value="{{ n }}" selected>Latest {{ n }} records</option>{% endif %}
+        </select>
       </label>
-      <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
-        load
-      </button>
+      <button type="submit" class="btn">Show</button>
+      {% if day %}<a class="btn btn--ghost" href="/safety">Back to today</a>{% endif %}
     </form>
   </div>
 
-  <div class="section-head"><h2>Blocks {% if day %}on {{ day }}{% else %}today{% endif %}</h2></div>
+  <div class="section-head"><h2>Stopped {% if day %}on {{ day }}{% else %}today{% endif %}</h2></div>
   <div class="panel">
     <p style="font-size: 2rem; margin: 0.2rem 0;">{{ total }}</p>
     <div class="muted" style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-      <span>input: <strong>{{ by_stage.get('input', 0) }}</strong></span>
-      <span>tool: <strong>{{ by_stage.get('tool', 0) }}</strong></span>
-      <span>output: <strong>{{ by_stage.get('output', 0) }}</strong></span>
+      <span>What agents read: <strong>{{ by_stage.get('input', 0) }}</strong></span>
+      <span>What agents did: <strong>{{ by_stage.get('tool', 0) }}</strong></span>
+      <span>What agents said: <strong>{{ by_stage.get('output', 0) }}</strong></span>
     </div>
   </div>
 
@@ -51,7 +52,7 @@
   <div class="section-head"><h2>Top reasons</h2></div>
   <div class="panel">
     <table>
-      <thead><tr><th scope="col">reason</th><th scope="col">count</th></tr></thead>
+      <thead><tr><th scope="col">Reason</th><th scope="col">Times</th></tr></thead>
       <tbody>
       {% for reason, count in top_reasons %}
         <tr><td>{{ reason }}</td><td>{{ count }}</td></tr>
@@ -66,17 +67,17 @@
     {% if events %}
       <table>
         <thead>
-          <tr><th scope="col">ts</th><th scope="col">stage</th><th scope="col">reason</th><th scope="col">score</th></tr>
+          <tr><th scope="col">When</th><th scope="col">Where</th><th scope="col">Reason</th><th scope="col">How sure</th></tr>
         </thead>
         <tbody>
         {% for ev in events %}
           <tr>
             <td class="muted" style="white-space: nowrap;">{{ ev.ts | datetime }}</td>
-            <td><code>{{ ev.stage or '-' }}</code></td>
+            <td>{{ {'input': 'What it read', 'tool': 'What it did', 'output': 'What it said'}.get(ev.stage, ev.stage|humanize if ev.stage else '-') }}</td>
             <td>{{ ev.reason or '-' }}</td>
             <td class="muted">
               {% set s = ev.score | default(none) %}
-              {% if s is not none %}{{ "%.2f" | format(s) }}{% else %}-{% endif %}
+              {% if s is not none %}{{ "%.0f" | format(s * 100) }}%{% else %}-{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -84,9 +85,9 @@
       </table>
     {% else %}
       <p class="muted">
-        No shield blocks for the selected day — nothing was denied. Every
-        block is recorded on the signed <a href="/audit">audit log</a> kept
-        on this server, so a quiet day is provable, not assumed.
+        Nothing was stopped on this day. Every stop is sealed in the
+        <a href="/audit">activity record</a> kept on this server, so a quiet
+        day is provable, not assumed.
       </p>
     {% endif %}
   </div>

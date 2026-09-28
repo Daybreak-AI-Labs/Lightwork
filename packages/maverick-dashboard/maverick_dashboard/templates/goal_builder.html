@@ -18,51 +18,51 @@
   .gb-field label { display: block; font-size: 0.8rem; color: var(--muted); margin: 0 0 0.25rem; }
   .gb-field input { width: 100%; padding: 0.55rem 0.7rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 </style>
-<h1 class="page-title">Goal builder</h1>
+<h1 class="page-title">Task builder</h1>
 <p class="page-subtitle">Describe the steps, spending limit, and where you want updates, then start the work.</p>
 <div class="panel">
   <div class="gb-field" style="margin-bottom: 1rem;">
-    <label for="gb-title">Goal title</label>
+    <label for="gb-title">Task title</label>
     <input id="gb-title" type="text" maxlength="200" required autocomplete="off"
            placeholder="Ship the Q3 report">
   </div>
   <div class="gb-wrap">
-    <div class="gb-palette" aria-label="Block palette">
-      <h2 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Blocks</h2>
+    <div class="gb-palette" aria-label="Add to your task">
+      <h2 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Add to your task</h2>
       {# Each palette entry is BOTH a drag source (HTML5 DnD) and a plain
          button (keyboard / touch path) that appends the block. #}
-      <button type="button" class="gb-add" data-kind="step" draggable="true">+ Step (checklist line)</button>
-      <button type="button" class="gb-add" data-kind="budget" draggable="true">+ Budget (dollar cap)</button>
-      <button type="button" class="gb-add" data-kind="channel" draggable="true">+ Channel (announce on)</button>
-      <button type="button" class="gb-add" data-kind="priority" draggable="true">+ Priority</button>
+      <button type="button" class="btn btn--ghost gb-add" data-kind="step" draggable="true">+ Add a step</button>
+      <button type="button" class="btn btn--ghost gb-add" data-kind="budget" draggable="true">+ Set a spending limit</button>
+      <button type="button" class="btn btn--ghost gb-add" data-kind="channel" draggable="true">+ Where to post updates</button>
+      <button type="button" class="btn btn--ghost gb-add" data-kind="priority" draggable="true">+ Set priority</button>
       <p class="muted" style="font-size: 0.78rem;">
-        Drag a block onto the canvas, or press it to add. Reorder with the
-        ↑ / ↓ buttons (or drag); remove with ✕.
+        Press an item to add it, or drag it into your task. Change the order
+        with Move up and Move down (or drag); remove with Remove.
       </p>
     </div>
     <div>
-      <h2 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Canvas</h2>
-      <ol id="gb-canvas" aria-label="Goal blocks (ordered)">
-        <li class="placeholder">Drop blocks here</li>
+      <h2 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Your task</h2>
+      <ol id="gb-canvas" aria-label="Parts of your task, in order">
+        <li class="placeholder">Add steps and settings here</li>
       </ol>
-      <h2 style="margin: 1rem 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Assembled brief</h2>
-      <pre id="gb-preview" aria-label="Assembled goal description preview"
-           style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; min-height: 4rem; white-space: pre-wrap;">(add blocks to preview the brief)</pre>
-      <button type="button" id="gb-submit"
-              style="padding: 0.6rem 1.5rem; background: var(--brand); color: var(--brand-fg); border: 0; border-radius: var(--radius-md); cursor: pointer; font-weight: 500;">
-        Create &amp; run goal
+      <h2 style="margin: 1rem 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Preview</h2>
+      <div id="gb-preview" aria-label="Preview of the task description"
+           style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; min-height: 4rem;"><p class="muted" style="margin:0;">Add steps to see a preview.</p></div>
+      <button type="button" id="gb-submit" class="btn btn--primary" style="margin-top: var(--space-3);">
+        Create and start the task
       </button>
       <p id="gb-error" role="alert" aria-live="assertive"
          style="display: none; margin: 0.75rem 0 0; color: var(--danger); font-size: 0.85rem;"></p>
       <p class="muted" style="font-size: 0.78rem;">
-        Steps become a checklist in the goal description. Channel and priority
-        are instructions for Lightwork to follow; the budget is also enforced
-        as the run's spending limit.
+        Steps become a checklist in the task. Where to post updates and priority
+        are instructions for Lightwork to follow; the spending limit is also
+        enforced while the task runs.
       </p>
     </div>
   </div>
 </div>
-<noscript><p class="muted">The goal builder needs JavaScript. Use <a href="/chat">chat</a> instead.</p></noscript>
+<noscript><p class="muted">The task builder needs JavaScript. Use <a href="/chat">Chat</a> instead.</p></noscript>
+<script id="gb-channels" type="application/json">{{ (channels or []) | tojson }}</script>
 
 <script>
 // Drag-and-drop goal builder. Blocks live in #gb-canvas as <li> rows; the
@@ -75,6 +75,10 @@
   const titleEl = document.getElementById("gb-title");
   if (!canvas) return;
   let seq = 0;
+  const KIND_NAMES = { step: "Step", budget: "Spending limit", channel: "Where to post updates", priority: "Priority" };
+  let CHANNELS = [];
+  try { CHANNELS = JSON.parse(document.getElementById("gb-channels").textContent || "[]"); } catch (e) { CHANNELS = []; }
+  function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v); }
 
   function showError(msg) {
     errEl.textContent = msg; errEl.style.display = msg ? "block" : "none";
@@ -87,7 +91,7 @@
 
   function mkButton(label, aria, fn) {
     const b = document.createElement("button");
-    b.type = "button"; b.textContent = label; b.setAttribute("aria-label", aria);
+    b.type = "button"; b.className = "btn btn--ghost"; b.textContent = label; b.setAttribute("aria-label", aria);
     b.addEventListener("click", fn);
     return b;
   }
@@ -95,7 +99,7 @@
   function addBlock(kind, before) {
     // budget / channel / priority are single-instance blocks.
     if (kind !== "step" && canvas.querySelector('li[data-kind="' + kind + '"]')) {
-      showError("only one " + kind + " block per goal"); return;
+      showError("You can add only one " + KIND_NAMES[kind].toLowerCase() + " per task."); return;
     }
     showError("");
     seq += 1;
@@ -103,7 +107,7 @@
     li.dataset.kind = kind;
     li.draggable = true;
     const tag = document.createElement("span");
-    tag.className = "kind"; tag.textContent = kind;
+    tag.className = "kind"; tag.textContent = KIND_NAMES[kind] || kind;
     li.appendChild(tag);
     let field;
     if (kind === "step") {
@@ -115,18 +119,27 @@
       field = document.createElement("input");
       field.type = "number"; field.min = "0"; field.max = "100"; field.step = "0.5";
       field.value = "5";
-      field.setAttribute("aria-label", "Budget cap in dollars");
+      field.setAttribute("aria-label", "Spending limit in dollars (up to 100)");
     } else if (kind === "channel") {
-      field = document.createElement("input");
-      field.type = "text"; field.maxLength = 64;
-      field.placeholder = "e.g. slack #general";
-      field.setAttribute("aria-label", "Channel to announce progress on");
+      // An app from the connected channels, plus an optional place in it.
+      field = document.createElement("span");
+      field.className = "gb-channel"; field.style.cssText = "display:flex;gap:0.35rem;flex:1;flex-wrap:wrap;";
+      const app = document.createElement("select"); app.className = "select gb-channel-app";
+      app.setAttribute("aria-label", "App to post updates in");
+      (CHANNELS.length ? CHANNELS : ["email"]).forEach(function (name) {
+        const o = document.createElement("option"); o.value = human(name); o.textContent = human(name); app.appendChild(o);
+      });
+      const where = document.createElement("input"); where.type = "text"; where.maxLength = 48; where.className = "input gb-channel-where";
+      where.placeholder = "Channel or address, for example #general";
+      where.setAttribute("aria-label", "Channel or address in that app (optional)");
+      app.addEventListener("change", render); where.addEventListener("input", render);
+      field.appendChild(app); field.appendChild(where);
     } else {
       field = document.createElement("select");
       field.setAttribute("aria-label", "Priority");
       ["low", "normal", "high"].forEach(function (p) {
         const o = document.createElement("option");
-        o.value = p; o.textContent = p; if (p === "normal") o.selected = true;
+        o.value = p; o.textContent = p.charAt(0).toUpperCase() + p.slice(1); if (p === "normal") o.selected = true;
         field.appendChild(o);
       });
     }
@@ -135,17 +148,17 @@
     li.appendChild(field);
     const ctl = document.createElement("span");
     ctl.className = "ctl";
-    ctl.appendChild(mkButton("↑", "Move " + kind + " block up", function () {
+    ctl.appendChild(mkButton("Move up", "Move " + (KIND_NAMES[kind] || kind).toLowerCase() + " up", function () {
       const prev = li.previousElementSibling;
       if (prev && !prev.classList.contains("placeholder")) canvas.insertBefore(li, prev);
       render();
     }));
-    ctl.appendChild(mkButton("↓", "Move " + kind + " block down", function () {
+    ctl.appendChild(mkButton("Move down", "Move " + (KIND_NAMES[kind] || kind).toLowerCase() + " down", function () {
       const next = li.nextElementSibling;
       if (next) canvas.insertBefore(next, li);
       render();
     }));
-    ctl.appendChild(mkButton("✕", "Remove " + kind + " block", function () {
+    ctl.appendChild(mkButton("Remove", "Remove " + (KIND_NAMES[kind] || kind).toLowerCase(), function () {
       li.remove(); placeholder(); render();
     }));
     li.appendChild(ctl);
@@ -162,7 +175,8 @@
     });
     canvas.insertBefore(li, before || null);
     placeholder(); render();
-    if (field.focus) field.focus();
+    const first = field.matches && field.matches("input, select") ? field : field.querySelector && field.querySelector("input, select");
+    if (first && first.focus) first.focus();
   }
 
   function gather() {
@@ -170,7 +184,11 @@
     canvas.querySelectorAll("li:not(.placeholder)").forEach(function (li) {
       const kind = li.dataset.kind;
       const field = li.querySelector("input, select");
-      const val = (field.value || "").trim();
+      let val = (field.value || "").trim();
+      if (kind === "channel") {
+        const where = (li.querySelector(".gb-channel-where") || {}).value || "";
+        val = (val + " " + where.trim()).trim();
+      }
       if (kind === "step" && val) out.steps.push(val);
       if (kind === "budget" && val !== "") out.budget_dollars = parseFloat(val);
       if (kind === "channel" && val) out.channel = val;
@@ -179,17 +197,24 @@
     return out;
   }
 
-  // Mirror of the server's brief assembly, for the live preview.
+  // A readable preview of what the server assembles into the task brief.
   function render() {
     const d = gather();
-    const parts = [];
-    if (d.steps.length) parts.push("## Steps\n" + d.steps.map(function (s) { return "- [ ] " + s; }).join("\n"));
+    preview.textContent = "";
+    if (d.steps.length) {
+      const h = document.createElement("strong"); h.textContent = "Steps"; preview.appendChild(h);
+      const ol = document.createElement("ol");
+      d.steps.forEach(function (s) { const li = document.createElement("li"); li.textContent = s; ol.appendChild(li); });
+      preview.appendChild(ol);
+    }
     const meta = [];
-    if (d.budget_dollars !== undefined && !isNaN(d.budget_dollars)) meta.push("Spending limit: $" + d.budget_dollars.toFixed(2) + " (enforced for this run)");
-    if (d.channel) meta.push("Announce progress on: " + d.channel);
-    if (d.priority) meta.push("Priority: " + d.priority);
-    if (meta.length) parts.push(meta.join("\n"));
-    preview.textContent = parts.length ? parts.join("\n\n") : "(add blocks to preview the brief)";
+    if (d.budget_dollars !== undefined && !isNaN(d.budget_dollars)) meta.push("Spending limit: $" + d.budget_dollars.toFixed(2) + " (enforced while it runs)");
+    if (d.channel) meta.push("Post updates in: " + d.channel);
+    if (d.priority) meta.push("Priority: " + d.priority.charAt(0).toUpperCase() + d.priority.slice(1));
+    meta.forEach(function (m) { const p = document.createElement("p"); p.style.margin = "0.25rem 0 0"; p.textContent = m; preview.appendChild(p); });
+    if (!preview.childNodes.length) {
+      const p = document.createElement("p"); p.className = "muted"; p.style.margin = "0"; p.textContent = "Add steps to see a preview."; preview.appendChild(p);
+    }
   }
 
   let dragging = null;
@@ -212,7 +237,7 @@
 
   document.getElementById("gb-submit").addEventListener("click", async function () {
     const d = gather();
-    if (!d.title) { showError("goal title is required"); titleEl.focus(); return; }
+    if (!d.title) { showError("Give the task a title first."); titleEl.focus(); return; }
     showError("");
     const btn = this;
     btn.disabled = true;
@@ -227,14 +252,11 @@
         window.location.href = "/chat/goal/" + j.id;
         return;
       }
-      let detail = "could not create the goal (" + r.status + ")";
-      try {
-        const j = await r.json();
-        if (j && j.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-      } catch (e) {}
-      showError(detail);
+      showError(r.status === 422 || r.status === 400
+        ? "Check the spending limit (0 to 100 dollars) and the steps, then try again."
+        : (window.mvErrorText ? window.mvErrorText(r, "create the task") : "Could not create the task. Please try again."));
     } catch (e) {
-      showError("network error — is the dashboard still running?");
+      showError("Lightwork can't be reached. Check your connection and try again.");
     } finally { btn.disabled = false; }
   });
 })();

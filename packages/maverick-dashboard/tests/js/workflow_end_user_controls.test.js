@@ -76,16 +76,21 @@ test("template handoff counts Unicode characters consistently with the goal API"
 });
 
 function scheduleFixture(value = "") {
+  const custom = { hidden: true };
+  const days = ["1", "2", "3", "4", "5", "6", "0"].map(v => ({ value: v, checked: v === "1" }));
   const fields = {
-    "fd-schedule": { value, focus() { this.focused = true; } },
-    "fd-schedule-preset": { value: "", options: ["", "0 9 * * *", "0 9 * * 1-5", "0 9 * * 1", "0 9 1 * *", "custom"].map(value => ({ value })) },
-    "fd-schedule-advanced": { open: false },
+    "fd-schedule": { value },
+    "fd-sched-freq": { value: "", querySelector: () => custom },
+    "fd-sched-time": { value: "09:00" }, "fd-sched-dom": { value: "1" }, "fd-sched-minute": { value: "0" },
+    "fd-tz": { value: "" }, "fd-sched-words": { textContent: "" },
+    "fd-sched-days": { hidden: true }, "fd-sched-dom-row": { hidden: true }, "fd-sched-minute-row": { hidden: true },
+    "fd-sched-time-row": { hidden: true }, "fd-sched-tz-row": { hidden: true },
   };
-  const context = { document: { getElementById: id => fields[id] } };
+  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days } };
   const source = fs.readFileSync(path.join(templates, "flow_designer.js"), "utf8");
-  vm.runInNewContext(source.slice(source.indexOf("  function syncScheduleControls("),
-    source.indexOf("  function fromApiFlow(")), context);
-  return { fields, context };
+  vm.runInNewContext(source.slice(source.indexOf("  // ---- schedule picker"),
+    source.indexOf("  function fillTimeZones(")), context);
+  return { fields, context, custom, days };
 }
 
 function authoringFixture(kind, handoff, fetchImpl = async () => ({ ok: true, json: async () => ({ context: "ctx" }) })) {
@@ -194,28 +199,32 @@ for (const kind of ["agent", "flow"]) {
   });
 }
 
-test("schedule presets submit the corresponding expression without changing custom values on load", () => {
+test("a loaded custom timetable is kept exactly and shown as custom", () => {
   const ui = scheduleFixture("*/15 8-17 * * 1-5");
   ui.context.syncScheduleControls();
-  assert.equal(ui.fields["fd-schedule-preset"].value, "custom");
+  assert.equal(ui.fields["fd-sched-freq"].value, "custom");
+  assert.equal(ui.custom.hidden, false);
+  ui.context.chooseSchedule();
   assert.equal(ui.fields["fd-schedule"].value, "*/15 8-17 * * 1-5");
-  assert.equal(ui.fields["fd-schedule-advanced"].open, false);
-  for (const expression of ["", "0 9 * * *", "0 9 * * 1-5", "0 9 * * 1", "0 9 1 * *"]) {
-    ui.fields["fd-schedule-preset"].value = expression;
-    ui.context.chooseSchedule();
-    assert.equal(ui.fields["fd-schedule"].value, expression);
-    ui.context.syncScheduleControls();
-    assert.equal(ui.fields["fd-schedule-preset"].value, expression);
-  }
+  assert.match(ui.fields["fd-sched-words"].textContent, /custom timetable/);
 });
 
-test("choosing a custom schedule reveals and focuses its existing value", () => {
-  const ui = scheduleFixture("0 9 * * 1");
-  ui.fields["fd-schedule-preset"].value = "custom";
+test("plain schedule choices produce the matching timetable and read back the same way", () => {
+  const ui = scheduleFixture("");
+  const cases = [["daily", "0 9 * * *"], ["weekdays", "0 9 * * 1-5"], ["weekly", "0 9 * * 1"], ["monthly", "0 9 1 * *"], ["hourly", "0 * * * *"], ["", ""]];
+  for (const [freq, expected] of cases) {
+    ui.fields["fd-sched-freq"].value = freq;
+    ui.context.chooseSchedule();
+    assert.equal(ui.fields["fd-schedule"].value, expected);
+    ui.context.syncScheduleControls();
+    assert.equal(ui.fields["fd-sched-freq"].value, freq);
+  }
+  ui.fields["fd-sched-freq"].value = "weekly";
+  ui.days.find(d => d.value === "5").checked = true;
+  ui.fields["fd-sched-time"].value = "17:45";
   ui.context.chooseSchedule();
-  assert.equal(ui.fields["fd-schedule-advanced"].open, true);
-  assert.equal(ui.fields["fd-schedule"].focused, true);
-  assert.equal(ui.fields["fd-schedule"].value, "0 9 * * 1");
+  assert.equal(ui.fields["fd-schedule"].value, "45 17 * * 1,5");
+  assert.match(ui.fields["fd-sched-words"].textContent, /every Monday, Friday at 5:45 pm/);
 });
 
 test("readable permission chips retain exact identifiers and remove only the selected permission", () => {
@@ -282,6 +291,6 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
   assert.match(now.textContent, /issue|attention/i);
   status.textContent = "failed";
   observers.get(status)();
-  assert.equal(meta.textContent, "failed");
+  assert.equal(meta.textContent, "Failed");  // shown as a plain word
   assert.equal(spin.style.display, "none");
 });

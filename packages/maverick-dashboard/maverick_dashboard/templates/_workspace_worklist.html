@@ -13,10 +13,8 @@
   .pw-cat .chip { border: 1px solid var(--border); border-radius: var(--radius-pill);
                   padding: 0.3rem 0.8rem; font-size: var(--text-sm); background: var(--surface-2); }
   .pw-cat .chip b { color: var(--brand); font-weight: var(--font-semibold); }
-  .pw-review-btn { padding: 0.35rem 0.85rem; background: var(--brand); color: var(--brand-fg);
-                   border: 1px solid transparent; border-radius: 4px; cursor: pointer;
-                   font-size: 0.85rem; font-weight: var(--font-medium); }
-  .pw-review-btn:hover { background: var(--brand-hi); }
+  .pw-owner { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+  .pw-assign-btn { padding: 0.2rem 0.6rem; font-size: var(--text-xs); }
 </style>
 
 
@@ -28,14 +26,14 @@
       <form id="pw-start-form">
         <div class="field">
           <label for="pw-start-type">Questionnaire</label>
-          <select id="pw-start-type" required style="min-width:0; max-width:100%;">
+          <select id="pw-start-type" class="select" required style="min-width:0; max-width:100%;">
             <option value="">Choose a questionnaire</option>
             {% for t in templates %}<option value="{{ t.type }}">{{ t.title }}</option>{% endfor %}
           </select>
         </div>
         <div class="field">
           <label for="pw-start-subject">What are you assessing?</label>
-          <input id="pw-start-subject" required maxlength="300" placeholder="A vendor, system, process, or project" style="min-width:0; max-width:100%;">
+          <input id="pw-start-subject" class="input" required maxlength="300" placeholder="A vendor, system, process, or project" style="min-width:0; max-width:100%;">
         </div>
         <button id="pw-start-submit" class="btn btn--primary" type="submit">Start assessment</button>
       </form>
@@ -46,7 +44,7 @@
       <button class="btn btn--primary" data-filter="all" type="button">All ({{ stats.total }})</button>
       <button class="btn" data-filter="pending_review" type="button">Needs review ({{ stats.pending }})</button>
       <button class="btn" data-filter="needs_more" type="button">Awaiting answers ({{ stats.needs_more }})</button>
-      <button class="btn" data-filter="high" type="button">High residual ({{ stats.high_residual }})</button>
+      <button class="btn" data-filter="high" type="button">High risk after safeguards ({{ stats.high_residual }})</button>
       <button class="btn" data-filter="due" type="button">Due for re-review ({{ stats.review_due }})</button>
       <button class="btn" data-filter="mine" type="button">Mine ({{ stats.mine }})</button>
       <button class="btn" data-filter="unassigned" type="button">Unassigned ({{ stats.unassigned }})</button>
@@ -55,61 +53,62 @@
     <table id="pw-table">
       <thead>
         <tr>
-          <th scope="col">assessment</th><th scope="col">subject</th>
-          <th scope="col">risk (inherent → residual)</th>
-          <th scope="col">status</th><th scope="col">owner</th>
-          <th scope="col">follow-ups</th>
-          <th scope="col">age / next review</th><th scope="col"></th>
+          <th scope="col">Questionnaire</th><th scope="col">Subject</th>
+          <th scope="col">Risk before → after safeguards</th>
+          <th scope="col">Status</th><th scope="col">Reviewer</th>
+          <th scope="col">Follow-ups</th>
+          <th scope="col">Age / next review</th><th scope="col"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
       <tbody>
         {% set rows = worklist if worklist is defined else sessions %}
+        {% set _titles = {} %}{% for t in templates %}{% set _ = _titles.update({t.type: t.title}) %}{% endfor %}
         {% for s in rows %}
         <tr data-status="{{ s.status }}" data-residual="{{ s.residual_risk }}" data-due="{{ '1' if s.review_due else '' }}"
             data-assignee="{{ s.assignee or '' }}" data-mine="{{ '1' if s.mine else '' }}"
             data-revision="{{ s.revision }}">
-          <td><code>{{ s.id }}</code><br><span class="muted" style="font-size:var(--text-xs); text-transform:uppercase;">{{ s.type }}</span></td>
+          <td>{{ _titles.get(s.type) or (s.type | humanize) }}</td>
           <td>{{ s.subject }}</td>
           <td class="pw-risk">
             {% if s.total is defined and s.total and s.answered < s.total %}
             <span class="badge warn">Incomplete · {{ s.answered }} of {{ s.total }} resolved</span>
             {% else %}
-            <span class="badge {{ 'blocked' if s.inherent_risk == 'high' else 'warn' if s.inherent_risk == 'medium' else 'done' }}">{{ s.inherent_risk }}</span>
+            <span class="badge {{ 'blocked' if s.inherent_risk == 'high' else 'warn' if s.inherent_risk == 'medium' else 'done' }}">{{ s.inherent_risk | humanize }}</span>
             <span aria-hidden="true" class="muted">→</span>
-            <span class="badge {{ 'blocked' if s.residual_risk == 'high' else 'warn' if s.residual_risk == 'medium' else 'done' }}">{{ s.residual_risk }}</span>
+            <span class="badge {{ 'blocked' if s.residual_risk == 'high' else 'warn' if s.residual_risk == 'medium' else 'done' }}">{{ s.residual_risk | humanize }}</span>
             {% endif %}
           </td>
           <td>
             {% if s.status == 'approved' %}
-              <span class="badge done">approved</span>
+              <span class="badge done">Approved</span>
             {% elif s.status == 'rejected' %}
-              <span class="badge blocked">rejected</span>
+              <span class="badge blocked">Rejected</span>
             {% elif s.status == 'needs_more' %}
-              <span class="badge warn">awaiting answers</span>
+              <span class="badge warn">Awaiting answers</span>
             {% else %}
-              <span class="badge info">needs review</span>
+              <span class="badge info">Needs review</span>
             {% endif %}
           </td>
           <td class="pw-owner">
             {% if s.assignee %}
-              <span class="badge {{ 'info' if s.mine else '' }}">{{ s.assignee }}</span>
+              <span class="badge {{ 'info' if s.mine else '' }}">{{ (s.assignee | identity).name }}{% if s.mine %} (you){% endif %}</span>
             {% else %}
-              <span class="muted">unassigned</span>
+              <span class="muted">Unassigned</span>
             {% endif %}
-            <button class="pw-assign-btn" data-assessment="{{ s.id }}"
-                    data-current="{{ s.assignee or '' }}" type="button"
-                    aria-label="Assign {{ s.subject }} assessment"
-                    title="Assign this assessment to a reviewer">assign</button>
+            <button class="btn btn--ghost pw-assign-btn" data-assessment="{{ s.id }}"
+                    data-current="{{ s.assignee or '' }}" data-subject="{{ s.subject }}" type="button"
+                    aria-label="Assign the {{ s.subject }} assessment">Assign</button>
           </td>
           <td>{{ s.open_followups or '—' }}</td>
           <td {% if s.review_due or (s.status in ('pending_review', 'needs_more') and s.age_days is not none and s.age_days > 7) %}class="pw-age-warn"{% endif %}>
             {% if s.review_in_days is not none %}
-              {{ ('re-review in ' ~ s.review_in_days ~ 'd') if s.review_in_days >= 0 else ('re-review ' ~ (0 - s.review_in_days) ~ 'd overdue') }}
+              {% set _d = s.review_in_days if s.review_in_days >= 0 else (0 - s.review_in_days) %}
+              {{ ('Re-review in ' ~ _d ~ (' day' if _d == 1 else ' days')) if s.review_in_days >= 0 else ('Re-review ' ~ _d ~ (' day' if _d == 1 else ' days') ~ ' overdue') }}
             {% else %}
-              {{ (s.age_days ~ 'd') if s.age_days is not none else '—' }}
+              {{ (s.age_days ~ (' day old' if s.age_days == 1 else ' days old')) if s.age_days is not none else '—' }}
             {% endif %}</td>
-          <td><button class="pw-review-btn" data-assessment="{{ s.id }}" type="button"
-                      aria-label="Review {{ s.subject }} assessment">Review</button></td>
+          <td><button class="btn btn--primary pw-review-btn" data-assessment="{{ s.id }}" type="button"
+                      aria-label="Review the {{ s.subject }} assessment">Review</button></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -120,7 +119,8 @@
         re-review first. The stats above count everything.</p>
     {% endif %}
     {% else %}
-      <p class="muted">No assessments yet. Submitted questionnaires appear here.</p>
+      <p class="muted">No assessments yet. Start one to see it here.</p>
+      <button class="btn btn--primary" type="button" id="pw-start-empty">Start an assessment</button>
     {% endif %}
   </div>
   <script>
@@ -132,6 +132,10 @@
     let busy = false, createdId = null;
     function openCreated() { if (createdId && window.mvAssessmentReview) window.mvAssessmentReview.open(createdId); }
     openButton.addEventListener('click', openCreated);
+    const startEmpty = document.getElementById('pw-start-empty');
+    if (startEmpty) startEmpty.addEventListener('click', function () {
+      const box = document.getElementById('pw-start'); box.open = true; type.focus();
+    });
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
       if (busy || !form.reportValidity()) return;
@@ -146,13 +150,14 @@
         const response = await fetch('/api/v1/assess/bulk-import', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv: csv })
         });
+        if (!response.ok) throw new Error(window.mvErrorText ? window.mvErrorText(response, 'start the assessment') : 'Could not start the assessment.');
         const data = await response.json(), row = data && data.created && data.created[0];
-        if (!response.ok || !data || data.created_count !== 1 || data.error_count !== 0 || !Array.isArray(data.created) || data.created.length !== 1 || !row || typeof row.id !== 'string' || !row.id || row.subject !== name || row.type !== kind) {
-          throw new Error(data && typeof data.detail === 'string' ? data.detail : 'The assessment could not be confirmed. Refresh the worklist before trying again.');
+        if (!data || data.created_count !== 1 || data.error_count !== 0 || !Array.isArray(data.created) || data.created.length !== 1 || !row || typeof row.id !== 'string' || !row.id || row.subject !== name || row.type !== kind) {
+          throw new Error('The assessment could not be confirmed. Refresh the worklist before trying again.');
         }
         createdId = row.id; created = true; subject.value = ''; openButton.hidden = false;
         message.textContent = 'Assessment created. Complete the questionnaire, then review the findings.';
-      } catch (error) { message.textContent = error.message || 'Could not start the assessment. Try again when your connection is restored.'; }
+      } catch (error) { message.textContent = error && error.name !== 'TypeError' && error.message ? error.message : 'Could not start the assessment. Try again when your connection is restored.'; }
       finally { busy = false; submit.disabled = type.disabled = subject.disabled = false; }
       if (created) openCreated();
     });

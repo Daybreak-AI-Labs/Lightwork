@@ -165,23 +165,28 @@ test("a duplicate run click queues one request and restores controls after respo
   assert.equal(ui.buttons.get("fd-run").disabled, false);
 });
 
-test("a failed run request restores controls and preserves a useful server error", async () => {
-  const ui = fixture(async () => response({ detail: "Flow changed; reload it." }, { ok: false }));
+test("a failed run request restores controls and explains the conflict in plain words", async () => {
+  const ui = fixture(async () => response({ detail: "revision mismatch for flow" }, { ok: false }));
   ui.context.run(true);
   await turn();
-  assert.equal(ui.messages.at(-1).message, "Flow changed; reload it.");
+  assert.match(ui.messages.at(-1).message, /Could not start the run\. This flow was changed since you opened it/);
+  assert.doesNotMatch(ui.messages.at(-1).message, /revision|409/);
   assert.equal(ui.messages.at(-1).error, true);
   assert.equal(ui.buttons.get("fd-run").disabled, false);
 });
 
-test("invalid advanced test data is revealed and focused before a test can run", () => {
-  const ui = fixture(async () => response({}));
-  ui.context.sample.value = "{ incomplete";
+test("sample answers for a test come from labelled boxes, not a code box", async () => {
+  const field = (attrs, value) => ({ value, getAttribute: (name) => attrs[name] });
+  const answers = [field({ "data-sample-key": "customer" }, "Acme")];
+  const extra = { querySelector: (sel) => sel.includes("name") ? { value: "Order total" } : { value: "42" } };
+  const ui = fixture(async () => response({ run_id: "run", dry_run: true, status: "queued" }));
+  ui.context.slugKey = (v) => String(v).toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  const original = ui.context.document.getElementById;
+  ui.context.document.getElementById = (id) => id === "fd-sample-fields"
+    ? { querySelectorAll: (sel) => sel === "[data-sample-key]" ? answers : [extra] } : original(id);
   ui.context.run(true);
-  assert.equal(ui.calls.length, 0);
-  assert.equal(ui.context.testData.open, true);
-  assert.equal(ui.context.sample.focused, true);
-  assert.equal(ui.messages.at(-1).error, true);
+  await turn();
+  assert.deepEqual(JSON.parse(ui.calls[0][1].body).data, { customer: "Acme", order_total: "42" });
 });
 
 function deferred() {
@@ -223,7 +228,7 @@ test("Apply & track awaits its confirmed save and suppresses duplicate clicks un
   await operation;
   assert.equal(ui.context.proposals.step, undefined);
   assert.equal(ui.loaded[0][0], "flow");
-  assert.match(ui.messages.at(-1).message, /Applied.*v3/);
+  assert.match(ui.messages.at(-1).message, /Applied.*version 3/);
   assert.equal(button.disabled, true, "the consumed suggestion cannot be applied a second time");
   assert.equal(ui.context.applyInFlight, false);
 });
@@ -272,7 +277,7 @@ test("a failed apply restores its control and shows the server's conflict messag
   assert.equal(ui.calls.length, 2);
   assert.equal(button.disabled, false);
   assert.ok(ui.context.proposals.step);
-  assert.equal(ui.messages.at(-1).message, "Flow changed; reload before applying.");
+  assert.match(ui.messages.at(-1).message, /Could not apply the suggestion\. This flow was changed since you opened it/);
 });
 
 test("manual save and publish cannot interleave with an in-flight apply", async () => {

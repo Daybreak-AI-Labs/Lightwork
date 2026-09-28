@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Flow Run · Lightwork{% endblock %}
+{% block title %}Flow run · Lightwork{% endblock %}
 {% block content %}
 <style>
   .fr { max-width: 900px; }
@@ -22,36 +22,45 @@
               border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
   .fr__step:last-child { border-bottom: none; }
   .fr__step .badge { width: 20px; text-align: center; }
-  .fr__step .nid { font-family: var(--font-mono, monospace); color: var(--muted); min-width: 70px; }
-  .fr__step .kind { text-transform: uppercase; font-size: 10px; letter-spacing: .04em;
-                    font-weight: 700; min-width: 70px; }
+  .fr__step .kind { font-size: var(--text-xs); color: var(--muted); min-width: 130px; }
   .fr__step .lbl { flex: 1; }
   .fr__step.cursor { background: var(--surface-sunken); }
   .fr__data { margin-top: var(--space-4); }
+  .fr__data table { width: 100%; }
+  .fr__data td { overflow-wrap: anywhere; }
   .fr__data pre { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius);
                   padding: var(--space-3); font-size: 12px; overflow-x: auto; max-height: 320px; }
+  .fr__allow { display: flex; gap: var(--space-2); align-items: flex-end; flex-wrap: wrap; flex: 1 0 100%; }
 </style>
 
 <div class="fr">
   <div class="fr__head">
-    <h1 style="margin:0;">Run <span style="font-family:var(--font-mono,monospace);font-size:.7em;" id="fr-runid"></span></h1>
-    <span class="fr__status" id="fr-status">loading…</span>
-    <a id="fr-designer-link" href="/flows/designer/{{ flow_id }}">open in designer →</a>
-    <a href="/automations">all automations</a>
+    <h1 style="margin:0;" id="fr-title">Flow run</h1>
+    <span class="badge" id="fr-status" role="status">Loading…</span>
   </div>
   <p class="fr__msg" id="fr-meta"></p>
-  <div class="fr__error" id="fr-error" hidden></div>
+  <p>
+    <a class="btn btn--ghost" id="fr-designer-link" href="/flows/designer/{{ flow_id }}">Open the flow</a>
+    <a class="btn btn--ghost" href="/automations">All automations</a>
+  </p>
+  <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
-  <span class="fr__msg" id="fr-msg" aria-live="polite"></span>
+  <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
 
   <h2 style="font-size:var(--text-base);">Steps</h2>
   <ul class="fr__steps" id="fr-steps"></ul>
 
   <div class="fr__data">
-    <h2 style="font-size:var(--text-base);">Run data (redacted)</h2>
-    <pre id="fr-data">…</pre>
-    <h2 style="font-size:var(--text-base);">Original trigger input</h2>
-    <pre id="fr-input">…</pre>
+    <h2 style="font-size:var(--text-base);">Information in this run</h2>
+    <p class="fr__msg">Private values are hidden.</p>
+    <table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="fr-data-rows"></tbody></table>
+    <h2 style="font-size:var(--text-base);">What it started with</h2>
+    <table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="fr-input-rows"></tbody></table>
+    <details style="margin-top: var(--space-3);">
+      <summary>Technical details</summary>
+      <pre id="fr-data">…</pre>
+      <pre id="fr-input">…</pre>
+    </details>
   </div>
 </div>
 
@@ -62,6 +71,22 @@
   var runId = {{ run_id | tojson }};
   var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', foreach: '🔁',
                     parallel: '🔱', approval: '✅', delay: '⏱', subflow: '📎' };
+  var KIND_LABEL = { agent: 'AI task', action: 'Connected action', branch: 'Decision', switch: 'Choose a path',
+    foreach: 'Repeat for each item', while: 'Repeat while', parallel: 'Run together', approval: 'Approval',
+    delay: 'Wait', wait_event: 'Wait for another app', scope: 'Handle a failure', subflow: 'Run another flow', setvar: 'Update data' };
+  var STATUS_LABEL = { queued: 'Waiting to start', running: 'Running', completed: 'Finished', failed: 'Failed',
+    rejected: 'Rejected', cancelled: 'Cancelled', paused_approval: 'Waiting for approval', paused_delay: 'Waiting',
+    paused_event: 'Waiting for another app', budget_limited: 'Paused — spending limit reached',
+    indeterminate: 'Needs checking in the other app' };
+  var STATUS_BADGE = { completed: 'ok', failed: 'blocked', rejected: 'blocked', indeterminate: 'warn', budget_limited: 'warn' };
+  var ORIGIN = { webhook: 'Started by another app', schedule: 'Started on schedule', event_trigger: 'Started by a new item', retry: 'Started again' };
+  var flowName = '';
+  function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || '').replace(/_/g, ' '); }
+  function plain(failure, what) { return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.'; }
+  function stepLabel(id) {
+    var n = (flowNodes || []).filter(function (x) { return x.id === id; })[0];
+    return n ? (n.title || KIND_LABEL[n.kind] || 'that step') : 'the step that stopped';
+  }
   var ACTIVE = ['queued', 'running', 'paused_delay'];
   var msg = document.getElementById('fr-msg');
   var flowNodes = null;   // ordered [{id, kind, label}] from the flow definition
@@ -84,7 +109,7 @@
     }
     (flow.nodes || []).forEach(function (n) { if (!seen[n.id]) order.push(n); });
     return order.map(function (n) {
-      return { id: n.id, kind: n.kind, label: n.label || n.brief || n.tool || n.prompt || n.condition || '',
+      return { id: n.id, kind: n.kind, title: n.label || '', label: n.label || n.brief || (n.tool ? human(n.tool) : '') || n.prompt || '',
                choices: n.choices || [], form: n.form || [], assignee: n.assignee || '' };
     });
   }
@@ -112,12 +137,18 @@
       li.innerHTML = '';
       function span(cls, text) { var s = document.createElement('span'); s.className = cls; s.textContent = text; return s; }
       li.appendChild(span('badge', badgeFor(run, n.id)));
-      li.appendChild(span('nid', n.id));
-      li.appendChild(span('kind', (KIND_ICON[n.kind] || '') + ' ' + (n.kind || '')));
+      li.appendChild(span('kind', (KIND_ICON[n.kind] || '') + ' ' + (KIND_LABEL[n.kind] || human(n.kind || 'Step'))));
       li.appendChild(span('lbl', n.label || ''));
-      var st = rs.status || (run.cursor === n.id ? (run.status === 'failed' ? 'failed here' : 'waiting here') : 'not reached');
-      li.appendChild(span('', st + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')
-        + (rs.seconds != null ? ' · ' + rs.seconds + 's' : '')));
+      var st;
+      if (run.cursor === n.id && !rs.status) st = run.status === 'failed' ? 'Stopped here' : 'Waiting here';
+      else if (rs.outcome === 1) st = 'Worked';
+      else if (rs.outcome === 0) st = 'Failed';
+      else if (rs.status === 'true') st = 'Answered yes';
+      else if (rs.status === 'false') st = 'Answered no';
+      else if (rs.status) st = human(rs.status);
+      else st = 'Not reached';
+      if (rs.seconds != null) st += ' · ' + (rs.seconds < 1 ? 'under a second' : Math.round(rs.seconds) + ' seconds');
+      li.appendChild(span('', st));
       ul.appendChild(li);
     });
   }
@@ -142,37 +173,40 @@
       });
       parent.appendChild(ul);
     }
+    function money(budget) {
+      if (budget && typeof budget.maximum === 'number') return 'Up to $' + budget.maximum.toFixed(2);
+      if (budget && budget.state) return 'Checked again when it runs';
+      return 'Within your workspace limits';
+    }
     function renderApprovalCard(card) {
       var review = document.createElement('section');
-      review.className = 'fr__review'; review.setAttribute('aria-label', 'Exact approval review');
-      addText(review, 'strong', 'Recommendation only — prediction does not grant authority.');
+      review.className = 'fr__review'; review.setAttribute('aria-label', 'What you are approving');
+      addText(review, 'strong', 'This is Lightwork’s suggestion — the decision is yours.');
       addText(review, 'h3', card.summary || 'Approval details');
-      addText(review, 'p', 'Target: ' + ((card.target && card.target.label) || 'Unavailable'));
-      addText(review, 'p', 'Target commitment: ' + ((card.target && card.target.sha256) || 'Unavailable'));
-      var authority = card.authority || {};
-      addText(review, 'p', 'Actor: ' + (authority.actor || 'Unavailable')
-        + ' · Workspace: ' + (authority.workspace || 'Unavailable')
-        + ' · Role: ' + (authority.role || 'Unavailable'));
-      var currentAuthority = run.approval_authority || {};
-      addText(review, 'p', 'Current execution authority: role '
-        + (currentAuthority.role || 'Unavailable') + ' · tenant '
-        + (currentAuthority.tenant || 'local') + ' · role revision '
-        + (currentAuthority.role_permissions_sha256 || 'Unavailable'));
-      addText(review, 'p', 'Credential revision: '
-        + (currentAuthority.credential_inventory_sha256 || 'Unavailable')
-        + ' · budget revision: '
-        + (currentAuthority.budget_authority_sha256 || 'Unavailable'));
-      addText(review, 'p', 'Expires: ' + String(card.expires_at || 'Unavailable'));
-      addList(review, 'Exact inputs', card.parameters && card.parameters.summary);
+      addText(review, 'p', 'What it changes: ' + ((card.target && card.target.label) || 'Not available'));
+      addList(review, 'What it will do', card.parameters && card.parameters.summary);
       var preview = card.preview || {};
-      addText(review, 'p', 'Before: ' + (preview.before || 'Unavailable'));
-      addText(review, 'p', 'After: ' + (preview.after || 'Unavailable'));
+      addText(review, 'p', 'Before: ' + (preview.before || 'Not available'));
+      addText(review, 'p', 'After: ' + (preview.after || 'Not available'));
       var consequences = card.consequences || {};
-      addList(review, 'Known effects', consequences.known_effects);
-      addList(review, 'Unresolved assumptions', consequences.unresolved_assumptions);
-      addText(review, 'p', 'Irreversible or uncertain: '
-        + (consequences.irreversible ? 'yes' : 'no'));
-      addText(review, 'p', 'Budget: ' + JSON.stringify(card.budget || {}));
+      addList(review, 'What happens next', consequences.known_effects);
+      if ((consequences.unresolved_assumptions || []).length) addList(review, 'Open questions', consequences.unresolved_assumptions);
+      addText(review, 'p', 'Can it be undone? ' + (consequences.irreversible ? 'No' : 'Yes'));
+      addText(review, 'p', 'Spending: ' + money(card.budget));
+      var authority = card.authority || {};
+      var who = authority.actor ? (window.mvHuman ? authority.actor.replace(/^[a-z]+:/, '') : authority.actor) : '';
+      if (who) addText(review, 'p', 'Requested by: ' + who);
+      var expires = window.mvWhen ? window.mvWhen(card.expires_at) : '';
+      if (expires) addText(review, 'p', 'Decide by: ' + expires);
+      var tech = document.createElement('details');
+      addText(tech, 'summary', 'Technical details (for auditors)');
+      var currentAuthority = run.approval_authority || {};
+      addText(tech, 'p', 'Item fingerprint: ' + ((card.target && card.target.sha256) || 'Not available'));
+      addText(tech, 'p', 'Role: ' + (currentAuthority.role || authority.role || 'Not available'));
+      addText(tech, 'p', 'Role fingerprint: ' + (currentAuthority.role_permissions_sha256 || 'Not available'));
+      addText(tech, 'p', 'Connected accounts fingerprint: ' + (currentAuthority.credential_inventory_sha256 || 'Not available'));
+      addText(tech, 'p', 'Spending rules fingerprint: ' + (currentAuthority.budget_authority_sha256 || 'Not available'));
+      review.appendChild(tech);
       box.appendChild(review);
     }
     if (run.status === 'paused_approval') {
@@ -187,10 +221,11 @@
         && run.approval_binding_sha256.length === 64 && card;
       if (card) renderApprovalCard(card);
       if (!canDecide) {
-        addText(box, 'p', 'This operation cannot be approved until current, integrity-checked details are available. Reload or request a fresh review.');
+        addText(box, 'p', 'This request can’t be decided yet because its details could not be checked. Reload the page to get the latest details. If it still can’t be decided, run the flow again so it asks afresh.');
+        btn('Reload', true, function () { window.location.reload(); });
       }
       if (run.prompt) { var p = document.createElement('span'); p.className = 'fr__msg'; p.textContent = '“' + run.prompt + '” '; box.appendChild(p); }
-      if (node.assignee) { var as = document.createElement('span'); as.className = 'fr__msg'; as.textContent = '· for ' + node.assignee + ' '; box.appendChild(as); }
+      if (node.assignee) { var as = document.createElement('span'); as.className = 'fr__msg'; as.textContent = '· asked of ' + node.assignee.replace(/^[a-z]+:/, '') + ' '; box.appendChild(as); }
       // optional form fields collected on sign-off (merged into flow data on resume)
       var inputs = {}, formFields = [], reviewedInputs = null, reviewPending = false;
       var inputReview = document.createElement('section');
@@ -201,11 +236,12 @@
       }
       (node.form || []).forEach(function (fld) {
         if (!fld.name) return;
-        formFields.push({ name: fld.name, label: fld.label || fld.name });
+        formFields.push({ name: fld.name, label: fld.label || human(fld.name) });
         var wrap = document.createElement('div'); wrap.style.margin = '4px 0';
         var lab = document.createElement('label'); lab.style.cssText = 'display:block;font-size:12px;color:var(--muted);';
-        lab.textContent = fld.label || fld.name;
+        lab.textContent = fld.label || human(fld.name);
         var inp = document.createElement('input'); inp.className = 'input';
+        inp.id = 'fr-field-' + fld.name; lab.htmlFor = inp.id;
         inp.addEventListener('input', function () {
           inputs[fld.name] = inp.value; clearInputReview();
         });
@@ -222,30 +258,36 @@
         }
         if (reviewPending) return;
         reviewPending = true;
-        say('Binding the entered values to this exact operation…');
+        say('Checking your answers…');
         api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/approval-preview',
             { method: 'POST', body: JSON.stringify({ inputs: inputs }) })
           .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
             if (!r.ok || typeof j.approval_binding_sha256 !== 'string'
                 || !/^[0-9a-f]{64}$/.test(j.approval_binding_sha256)) {
-              throw new Error(typeof j.detail === 'string' ? j.detail : 'Could not bind these inputs.');
+              throw new Error(plain(r, 'check these answers'));
             }
             if (fingerprint !== JSON.stringify(inputs)) return;
             reviewedInputs = { fingerprint: fingerprint, binding: j.approval_binding_sha256 };
             inputReview.textContent = '';
-            addText(inputReview, 'strong', 'Exact submitted inputs — review before confirming.');
+            addText(inputReview, 'strong', 'Check your answers, then confirm.');
             formFields.forEach(function (field) {
               var value = Object.prototype.hasOwnProperty.call(inputs, field.name)
                 ? String(inputs[field.name]) : '';
               addText(inputReview, 'p', field.label + ': ' + (value || '(empty)'));
             });
+            var confirmBtn = document.createElement('button');
+            confirmBtn.type = 'button'; confirmBtn.className = 'btn btn--primary';
+            confirmBtn.textContent = decision === 'approved' ? 'Confirm approval' : (decision === 'rejected' ? 'Confirm rejection' : 'Confirm “' + decision + '”');
+            confirmBtn.addEventListener('click', function () { reviewThenResume(decision); });
+            inputReview.appendChild(confirmBtn);
             inputReview.hidden = false;
-            say('Inputs are bound. Review them above, then click the decision again to confirm.');
+            confirmBtn.focus();
+            say('Check your answers above, then confirm.');
           }); })
-          .catch(function (error) { say(error.message || 'Could not bind these inputs.'); })
+          .catch(function (error) { say(error && error.message ? error.message : plain(error, 'check these answers')); })
           .finally(function () { reviewPending = false; });
       }
-      if (canDecide) btn('Approve exact operation', true, function () {
+      if (canDecide) btn('Approve', true, function () {
         reviewThenResume('approved');
       });
       // any declared choice verdicts become their own buttons (routed by a switch)
@@ -254,33 +296,44 @@
           reviewThenResume(ch);
         });
       });
-      if (canDecide) btn('Reject / request revision', false, function () {
+      if (canDecide) btn('Reject', false, function () {
         reviewThenResume('rejected');
       });
     }
     if (run.status === 'paused_event') {
       if (run.prompt) { var pe = document.createElement('span'); pe.className = 'fr__msg'; pe.textContent = '📥 ' + run.prompt + ' '; box.appendChild(pe); }
-      btn('▶ Resume now (skip the wait)', false, function () { resume('approved'); });
+      btn('Continue now (skip the wait)', false, function () { resume('approved'); });
     }
     if (run.status === 'failed' && run.cursor) {
-      btn('🔁 Retry from failed step (' + run.cursor + ')', true, function () { retry(true); });
+      btn('Try again from “' + stepLabel(run.cursor) + '”', true, function () { retry(true); });
     }
     if (run.status === 'budget_limited' && run.cursor) {
-      var allowance = document.createElement('input');
-      allowance.type = 'number'; allowance.min = String(Math.max(run.cost_dollars || 0, run.budget_limit_dollars || 0));
-      allowance.step = '0.01'; allowance.placeholder = 'New total run allowance (USD)';
-      allowance.setAttribute('aria-label', 'New total run allowance in US dollars');
-      box.appendChild(allowance);
+      var current = Math.max(run.cost_dollars || 0, run.budget_limit_dollars || 0);
+      var allowWrap = document.createElement('div'); allowWrap.className = 'fr__allow';
+      var allowField = document.createElement('div'); allowField.className = 'field';
+      var allowLabel = document.createElement('label'); allowLabel.htmlFor = 'fr-allowance';
+      allowLabel.textContent = 'New spending limit for this run ($) — currently $' + current.toFixed(2);
+      var allowance = document.createElement('input'); allowance.id = 'fr-allowance'; allowance.className = 'input';
+      allowance.type = 'number'; allowance.min = String(current);
+      allowance.step = '0.01'; allowance.value = (current + 5).toFixed(2);
+      allowField.appendChild(allowLabel); allowField.appendChild(allowance); allowWrap.appendChild(allowField);
+      [5, 20].forEach(function (extra) {
+        var quick = document.createElement('button'); quick.type = 'button'; quick.className = 'btn btn--ghost';
+        quick.textContent = '+$' + extra; quick.setAttribute('aria-label', 'Set the limit to $' + (current + extra).toFixed(2));
+        quick.addEventListener('click', function () { allowance.value = (current + extra).toFixed(2); });
+        allowWrap.appendChild(quick);
+      });
+      box.appendChild(allowWrap);
       btn('Continue saved work with this allowance', true, function () {
         var amount = Number(allowance.value);
         if (!Number.isFinite(amount) || amount <= Number(allowance.min)) {
-          say('Enter a total allowance above the current limit. Organization limits still apply.'); return;
+          say('Choose a limit above the current one. Your organization’s limits still apply.'); return;
         }
         retry(true, amount);
       });
     }
     if (['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
-      btn('↻ Re-run from scratch', false, function () { retry(false); });
+      btn('Run again from the start', false, function () { retry(false); });
     }
   }
 
@@ -289,39 +342,80 @@
         { method: 'POST', body: JSON.stringify({ decision: decision, inputs: inputs || {},
           approval_binding_sha256: approvalBinding || '' }) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        say(r.ok ? (decision === 'rejected' ? 'Rejected.' : '‘' + decision + '’ — resuming…')
-          : (typeof j.detail === 'string' ? j.detail : 'Could not resume.'));
+        say(r.ok ? (decision === 'rejected' ? 'Rejected.' : (decision === 'approved' ? 'Approved — continuing…' : '“' + decision + '” chosen — continuing…'))
+          : plain(r, 'continue the run'));
         poll(8);
       }); })
-      .catch(function () { say('Could not resume.'); });
+      .catch(function (e) { say(plain(e, 'continue the run')); });
   }
   function retry(fromFailure, allowance) {
     var query = fromFailure ? '?from_failure=1' : '';
     if (allowance !== undefined) query += '&budget_limit_dollars=' + encodeURIComponent(allowance);
     api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry' + query,
         { method: 'POST' })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, r: r, j: j }; }); })
       .then(function (res) {
-        if (!res.ok) { say(res.j.detail || 'Could not retry.'); return; }
+        if (!res.ok) { say(plain(res.r, 'run it again')); return; }
         if (res.j.retried_from) { window.location = '/flows/' + encodeURIComponent(flowId) + '/runs/' + encodeURIComponent(res.j.run_id); return; }
-        say('Resuming from ' + (res.j.from_node || 'the failed step') + '…'); poll(8);
-      }).catch(function () { say('Could not retry.'); });
+        say('Continuing from “' + stepLabel(res.j.from_node) + '”…'); poll(8);
+      }).catch(function (e) { say(plain(e, 'run it again')); });
   }
 
+  function fillRows(id, data) {
+    var body = document.getElementById(id); if (!body) return;
+    body.textContent = '';
+    var keys = Object.keys(data || {});
+    if (!keys.length) {
+      var tr0 = document.createElement('tr'); var td0 = document.createElement('td'); td0.colSpan = 2; td0.className = 'muted';
+      td0.textContent = 'Nothing yet.'; tr0.appendChild(td0); body.appendChild(tr0); return;
+    }
+    keys.forEach(function (k) {
+      var v = data[k], text;
+      if (v === null || v === undefined) text = '—';
+      else if (typeof v === 'boolean') text = v ? 'Yes' : 'No';
+      else if (Array.isArray(v)) text = v.length + (v.length === 1 ? ' item' : ' items');
+      else if (typeof v === 'object') text = Object.keys(v).map(function (kk) {
+        var vv = v[kk]; return human(kk) + ': ' + (vv !== null && typeof vv === 'object' ? '…' : String(vv));
+      }).join(' · ');
+      else text = String(v);
+      var tr = document.createElement('tr');
+      var th = document.createElement('td'); th.textContent = human(k);
+      var td = document.createElement('td'); td.textContent = text.length > 400 ? text.slice(0, 399) + '…' : text;
+      tr.appendChild(th); tr.appendChild(td); body.appendChild(tr);
+    });
+  }
   function renderRun(run) {
-    document.getElementById('fr-runid').textContent = run.run_id.slice(0, 12) + '…';
+    var started = window.mvWhen ? window.mvWhen(run.created || run.created_at || run.started_at) : '';
+    document.getElementById('fr-title').textContent = '“' + (flowName || 'Flow') + '”' + (started ? ' — run started ' + started : ' — run');
     var st = document.getElementById('fr-status');
-    st.textContent = run.status; st.className = 'fr__status ' + run.status;
+    st.textContent = STATUS_LABEL[run.status] || human(run.status);
+    st.className = 'badge ' + (STATUS_BADGE[run.status] || (ACTIVE.indexOf(run.status) >= 0 || /^paused/.test(run.status) ? 'pending' : 'idle'));
     var meta = document.getElementById('fr-meta');
     if (meta) {
       var bits = [];
-      if (run.origin && run.origin !== 'manual') bits.push('fired by ' + run.origin);
-      else bits.push('run manually');
+      if (run.origin && run.origin !== 'manual') bits.push(ORIGIN[run.origin] || human(run.origin));
+      else bits.push('Started by hand');
       if (run.cost_dollars) bits.push('cost $' + Number(run.cost_dollars).toFixed(2));
       meta.textContent = bits.join(' · ');
     }
     var err = document.getElementById('fr-error');
-    if (run.error) { err.hidden = false; err.textContent = run.error; } else { err.hidden = true; }
+    if (run.error) {
+      err.hidden = false; err.textContent = '';
+      var lead = document.createElement('p');
+      lead.textContent = run.status === 'indeterminate'
+        ? 'We couldn’t tell whether the last step finished in the other app. Check it there before running again.'
+        : 'This run stopped at “' + stepLabel(run.cursor) + '”. Open the flow to fix that step, or try again.';
+      err.appendChild(lead);
+      var more = document.createElement('details'); var sum = document.createElement('summary');
+      sum.textContent = 'Technical details'; more.appendChild(sum);
+      var pre = document.createElement('pre'); pre.textContent = run.error; more.appendChild(pre);
+      var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'btn btn--ghost'; copy.textContent = 'Copy details for support';
+      copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(run.error); });
+      more.appendChild(copy);
+      err.appendChild(more);
+    } else { err.hidden = true; }
+    fillRows('fr-data-rows', run.data || {});
+    fillRows('fr-input-rows', run.input_data || {});
     document.getElementById('fr-data').textContent = JSON.stringify(run.data || {}, null, 2);
     document.getElementById('fr-input').textContent = JSON.stringify(run.input_data || {}, null, 2);
     renderSteps(run); renderActions(run);
@@ -330,14 +424,20 @@
   function poll(tries) {
     api('/api/v1/flows/runs/' + encodeURIComponent(runId))
       .then(function (r) {
-        if (!r.ok) { say(r.status === 404 ? 'No such run (or not yours).' : 'Could not load the run.'); return null; }
+        if (!r.ok) {
+          if (r.status === 404) {
+            say('We couldn’t find this run, or you don’t have access to it.');
+            document.getElementById('fr-status').textContent = 'Not found';
+          } else say(plain(r, 'load the run'));
+          return null;
+        }
         return r.json();
       })
       .then(function (run) {
         if (!run) return;
         renderRun(run);
         if (ACTIVE.indexOf(run.status) >= 0 && tries > 0) setTimeout(function () { poll(tries - 1); }, 1200);
-      }).catch(function () { say('Could not load the run.'); });
+      }).catch(function (e) { say(plain(e, 'load the run')); });
   }
   function watch() {
     // Live updates over SSE; polling is the fallback (no EventSource, stream
@@ -359,7 +459,10 @@
 
   api('/api/v1/flows/' + encodeURIComponent(flowId))
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (f) { if (f) flowNodes = orderNodes(f); watch(); })
+    .then(function (f) {
+      if (f) { flowNodes = orderNodes(f); flowName = f.name || human(flowId); }
+      watch();
+    })
     .catch(function () { watch(); });
 })();
 </script>

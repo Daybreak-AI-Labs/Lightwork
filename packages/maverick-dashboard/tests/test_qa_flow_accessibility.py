@@ -71,10 +71,10 @@ def test_qa_065_generated_property_condition_and_approval_controls_are_named() -
         source.index("function input(val, oninput, ph)")
     ]
     condition = source[
-        source.index("function conditionField(n, label, placeholder)") :
-        source.index("// a datalist of the keys this node can see")
+        source.index("function conditionField(n, label)") :
+        source.index("// ---- serialize / api ----")
     ]
-    approval_start = source.index("// form fields collected on sign-off")
+    approval_start = source.index("if (n.kind === 'approval') {")
     approval = source[
         approval_start : source.index("if (n.kind === 'delay')", approval_start)
     ]
@@ -82,18 +82,11 @@ def test_qa_065_generated_property_condition_and_approval_controls_are_named() -
     assert "l.id = labelId" in generic_field
     assert "inputEl.setAttribute('aria-labelledby', labelId)" in generic_field
     assert "l.htmlFor = inputEl.id" in generic_field
-    assert "ta.setAttribute('aria-labelledby', conditionLabelId)" in condition
-    assert "keyIn.setAttribute('aria-label', label + ' data key')" in condition
-    assert "opSel.setAttribute('aria-label', label + ' operator')" in condition
-    assert "valIn.setAttribute('aria-label', label + ' comparison value')" in condition
-    assert (
-        "nm.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' key')"
-        in approval
-    )
-    assert (
-        "lb.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' prompt')"
-        in approval
-    )
+    assert "keySel.setAttribute('aria-label', label + ': information to check')" in condition
+    assert "opSel.setAttribute('aria-label', label + ': comparison')" in condition
+    assert "valIn.setAttribute('aria-label', label + ': value')" in condition
+    assert "lb.setAttribute('aria-label', 'Approver question ' + (fi + 1))" in approval
+    assert "ci0.setAttribute('aria-label', 'Extra answer ' + (ci + 1))" in approval
 
 
 def test_qa_066_workflow_picker_traps_escape_tab_and_restores_opener() -> None:

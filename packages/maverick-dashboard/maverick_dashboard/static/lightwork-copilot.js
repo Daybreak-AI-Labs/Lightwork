@@ -22,12 +22,12 @@
   var contextLoaded = false;
   var fallback = {
     title: "Lightwork",
-    summary: "Use this helper to understand the current workspace and its authority boundary.",
+    summary: "Use this helper to understand this page and what it lets you do.",
     boundaries: [
-      "Copilot guidance is read-only and never grants authority or executes an action.",
-      "Local status is not proof of live provider or customer acceptance."
+      "Copilot only gives advice. It never gives anyone new permissions or does anything for you.",
+      "What this page shows is not proof that an outside service or a customer has accepted anything."
     ],
-    next_steps: ["Read the page readiness state before running an operation."],
+    next_steps: ["Check whether the page says it is ready before you start something."],
     suggested_questions: [
       "What can I do on this page?",
       "What should I verify before I continue?"
@@ -143,9 +143,12 @@
       });
       var payload;
       try { payload = await response.json(); }
-      catch (_error) { payload = {detail: "The server returned an unreadable response."}; }
+      catch (_error) { payload = {}; }
       if (!response.ok || !payload.reply) {
-        throw new Error(typeof payload.detail === "string" ? payload.detail : "Copilot is unavailable.");
+        var failure = {status: response.ok ? 0 : response.status};
+        throw new Error(response.ok || typeof window.mvErrorText !== "function"
+          ? "Copilot is not available right now. Please try again."
+          : window.mvErrorText(failure, "get an answer"));
       }
       addMessage("bot", payload.reply);
       // Only prior user questions return to the server. Model replies stay in
@@ -156,15 +159,17 @@
       if (payload.page_context) renderContext(payload.page_context);
       renderProviderSetup(payload);
       if (payload.mode === "built_in_fallback") {
-        note.textContent = "Model provider unavailable — using the built-in page guide.";
+        note.textContent = "The AI provider is not available — using the built-in page guide.";
       } else if (payload.mode === "built_in") {
-        note.textContent = "Built-in page guide — no model provider required.";
+        note.textContent = "Built-in page guide — no AI provider needed.";
       } else {
         note.textContent = payload.warning ||
-          "Model-generated guidance is unverified — confirm it against live status and retained evidence.";
+          "AI answers can be wrong — check them against what the page shows before acting.";
       }
     } catch (error) {
-      note.textContent = "Copilot could not answer: " + String(error.message || error);
+      note.textContent = error && error.name === "TypeError"
+        ? "Copilot could not answer — Lightwork can't be reached. Check your connection."
+        : (error && error.message) || "Copilot is not available right now. Please try again.";
     } finally {
       sendButton.disabled = false;
       sendButton.removeAttribute("aria-busy");
