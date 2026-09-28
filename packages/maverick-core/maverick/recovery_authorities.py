@@ -58,6 +58,12 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "eu_registrations": "eu_registration_authority",
     "finance_anomaly_cases": "finance_anomaly_case_authority",
     "finance_screening_cases": "finance_screening_case_authority",
+    # Retained action evidence, operator answers and recipe admissions carry
+    # withdrawal and signed-lineage state; a restored older copy could revive
+    # withdrawn evidence or a revoked admission.
+    "flow_action_episodes": "flow_action_episode_authority",
+    "flow_operator_reviews": "flow_operator_review_authority",
+    "flow_recipe_lineage": "flow_recipe_lineage_authority",
     "imessage-intake-cursors": "imessage_intake_cursor_authority",
     "model_risk_portfolio_snapshots": "model_risk_portfolio_authority",
     "outcome_value_evidence": "outcome_value_evidence_authority",

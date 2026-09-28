@@ -176,7 +176,7 @@
     }
   },
   "counts": {
-    "governed": 70,
+    "governed": 73,
     "artifact": 48,
     "a2a": 4,
     "preferences": 3,
@@ -185,7 +185,7 @@
     "configuration": 57,
     "read_projection": 16,
     "coordinator": 1,
-    "audit": 22,
+    "audit": 23,
     "transient": 19,
     "business_records": 13,
     "execution": 21,
@@ -23813,6 +23813,106 @@
           "function": "_journal_records",
           "kind": "data_dir",
           "expression": "data_dir()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/audit/federation.py",
+      "contract": "audit",
+      "owner": "packages/maverick-core/maverick/audit/federation.py",
+      "purpose": "Federated audit-log verification: checks each node's signed chain from locked segment snapshots and cross-node references.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 177,
+          "function": "collect_node",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(f, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/flow/action_episode_review.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/flow/action_episode_review.py",
+      "purpose": "Encrypted, tenant-owned native action evidence with authenticated review.",
+      "referenced_store_owners": [
+        "..governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [
+        {
+          "namespace": "flow_action_episodes",
+          "line": 41,
+          "recovery_policy": "flow_action_episode_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 41,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('flow_action_episodes', 'LAE', 'flow_action_episode')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/flow/operator_review.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/flow/operator_review.py",
+      "purpose": "Tenant-scoped reviewed operator questions that produce unpublished flow drafts.",
+      "referenced_store_owners": [
+        "..governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [
+        {
+          "namespace": "flow_operator_reviews",
+          "line": 28,
+          "recovery_policy": "flow_operator_review_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 28,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('flow_operator_reviews', 'LOQ', 'flow_operator_review')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/flow/recipe_lineage.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/flow/recipe_lineage.py",
+      "purpose": "Signed training lineage and tenant-scoped governed recipe admission.",
+      "referenced_store_owners": [
+        "..governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [
+        {
+          "namespace": "flow_recipe_lineage",
+          "line": 31,
+          "recovery_policy": "flow_recipe_lineage_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 31,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('flow_recipe_lineage', 'LRA', 'flow_recipe_lineage')"
         }
       ]
     }
