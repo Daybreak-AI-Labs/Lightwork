@@ -132,7 +132,7 @@ test("projection requests take the live row's version and never caller material"
     "definition_id", "expected_active_version", "expected_blueprint_sha256", "projection_kind", "studio_id", "target_id", "target_revision",
   ]);
   assert.equal(payload.expected_active_version, 3);
-  assert.throws(() => api.buildProjectionPayload(live, "questionnaire:intake", { target_id: "https://x", target_revision: "1" }), /destination name/);
+  assert.throws(() => api.buildProjectionPayload(live, "questionnaire:intake", { target_id: "https://x", target_revision: "1" }), /Choose a destination/);
 });
 
 test("oversized responses are cancelled and failures carry only a status", async () => {
@@ -158,7 +158,7 @@ test("oversized responses are cancelled and failures carry only a status", async
   assert.equal(failure.technical, "GRC studio action conflicts");
 });
 
-function page(t, rows) {
+function page(t, rows, extra = {}) {
   const dom = new JSDOM(`<main id="content">${shell}</main>`, { url: "https://lightwork.test/compliance/grc-studio", runScripts: "outside-only" });
   t.after(() => dom.window.close());
   const w = dom.window;
@@ -172,6 +172,7 @@ function page(t, rows) {
   w.fetch = async (url, options = {}) => {
     const key = (options.method || "GET") + " " + String(url).replace("/api/v1/compliance/grc-studio", "");
     calls.push({ key, body: options.body ? JSON.parse(options.body) : undefined });
+    if (extra[key]) return respond(extra[key]);
     if (key === "GET /status") return respond({ enabled: true, configured: true, ready: true, runtime_projection_preview_configured: false });
     if (key === "GET ?limit=1000") return respond({ items: rows });
     if (key === "GET /operations/recovery/backups") return respond({ items: [{ backup_id: "grc-1-abc", created_at: 1800000000 }] });
@@ -234,4 +235,47 @@ test("building with pickers saves the next version and errors stay plain", async
   const saved = h.calls.find((call) => call.key === "POST /studios/supplier-review/versions");
   assert.equal(saved.body.expected_latest_version, 1);
   assert.match(h.$("grcs-operation-status").textContent, /draft version 2/);
+});
+
+test("collectors and destinations are chosen from lists, not typed", async (t) => {
+  const digest = "a".repeat(64);
+  const h = page(t, [row({ state: "published" })], {
+    "GET /sources": {
+      collectors: [{ collector_id: "cloud-config-scan", collector_version: 3, collector_integrity_sha256: digest }],
+      destinations: [
+        { target_kind: "questionnaire", target_id: "vendor-portal", target_revision: 7, label: "Vendor portal" },
+        { target_kind: "report", target_id: "board-pack", target_revision: 2, label: null },
+      ],
+      destinations_listed: true,
+    },
+  });
+  await h.settle();
+  const collector = h.$("grcs-collector-choice");
+  assert.equal(collector.options.length, 2);
+  assert.equal(collector.options[1].textContent, "Cloud config scan (version 3)");
+  assert.equal(h.$("grcs-collector-id").closest("details").open, false);
+  collector.value = "0";
+  collector.dispatchEvent(new h.w.Event("change"));
+  assert.equal(h.$("grcs-collector-id").value, "cloud-config-scan");
+  assert.equal(h.$("grcs-collector-version").value, "3");
+  assert.equal(h.$("grcs-collector-digest").value, digest);
+  const target = h.$("grcs-projection-target");
+  // Only destinations that accept the chosen kind (a form) are offered.
+  assert.deepEqual([...target.options].map((option) => option.textContent), ["Choose a destination", "Vendor portal (version 7)"]);
+  target.value = "0";
+  target.dispatchEvent(new h.w.Event("change"));
+  const form = h.$("grcs-projection-form");
+  assert.equal(form.elements.target_id.value, "vendor-portal");
+  assert.equal(form.elements.target_revision.value, "7");
+  assert.equal(form.elements.target_id.closest("details").open, false);
+});
+
+test("without a destination list the page says who to ask", async (t) => {
+  const h = page(t, [row({ state: "published" })], {
+    "GET /sources": { collectors: [], destinations: [], destinations_listed: false },
+  });
+  await h.settle();
+  assert.match(h.$("grcs-collector-note").textContent, /No collectors are linked/);
+  assert.match(h.$("grcs-projection-target-note").textContent, /Ask your administrator/);
+  assert.doesNotMatch(h.$("grcs-projection-target-note").textContent, /fingerprint|revision|[0-9a-f]{64}/);
 });

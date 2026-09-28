@@ -175,6 +175,19 @@ async def pilot_sources(request: Request, response: Response):
     return {**await _call(outcome_pilot_sources.choices, request), "context": context}
 
 
+@router.get("/api/v1/outcome-pilots/independent-review")
+async def review_queue(request: Request, response: Response):
+    """Pilots in this workspace waiting for this administrator's independent
+    review, so a reviewer picks one instead of typing its reference."""
+    context = _context(request)
+    require_global_permission(request, "admin")
+    actor = caller_principal(request) or ""
+    if not actor.startswith("user:"):
+        raise HTTPException(403, "A different named global administrator must review this pilot.")
+    response.headers["Cache-Control"] = "private, no-store"
+    return {"items": await _call(outcome_pilots.review_queue, actor), "context": context}
+
+
 @router.get("/api/v1/outcome-pilots/{pilot_id}")
 async def pilot_report(request: Request, response: Response, pilot_id: str):
     from .outcome_pilot_costs_api import report_for

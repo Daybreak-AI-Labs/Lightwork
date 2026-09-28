@@ -338,3 +338,106 @@ def test_backup_list_is_admin_scoped_and_newest_first(environment, monkeypatch) 
 
     monkeypatch.setattr(api, "require_global_permission", deny)
     assert client.get(f"{BASE}/operations/recovery/backups").status_code == 403
+
+
+def _with_collector(collector_id: str, version: int, digest: str) -> dict[str, object]:
+    value = blueprint()
+    value["collector_bindings"] = [
+        {
+            "binding_id": f"link-{collector_id}",
+            "collector_id": collector_id,
+            "collector_version": version,
+            "collector_integrity_sha256": digest,
+            "object_id": "risk",
+            "field_mappings": [
+                {"source_path": ["findings", "severity"], "target_field_id": "severity", "mode": "replace"}
+            ],
+            "control_refs": ["ctl-1"],
+        }
+    ]
+    return value
+
+
+def test_sources_list_linked_collectors_and_adapter_destinations(
+    environment, tmp_path: Path, monkeypatch
+) -> None:
+    client, state = environment
+    digest = "b" * 64
+    for studio_id, expected in (("enterprise-grc", 0), ("second-grc", 0)):
+        value = _with_collector("cloud-scan", 2, digest)
+        value["studio_id"] = studio_id
+        created = client.post(
+            f"{BASE}/studios/{studio_id}/versions",
+            json={"blueprint": value, "expected_latest_version": expected, "operation_id": f"c-{studio_id}"},
+        )
+        assert created.status_code == 200, created.text
+    # Another workspace's collector sharing the same database never appears.
+    other = studio.GRCStudioStore(
+        tmp_path / "grc.sqlite3",
+        tenant_id="tenant-b",
+        integrity_key=b"k" * 32,
+        principal_resolver=lambda: "author",
+        maintenance_authorizer=lambda: True,
+        config_gate=lambda: None,
+        clock=lambda: NOW,
+        retention_seconds=86_400,
+        recovery_directory=tmp_path / "recovery-b",
+    )
+    other.create_version(
+        "tenant-b", "enterprise-grc",
+        blueprint=_with_collector("other-tenant-scan", 1, "c" * 64),
+        expected_latest_version=0, operation_id="c-other",
+    )
+
+    listed = client.get(f"{BASE}/sources")
+    assert listed.status_code == 200, listed.text
+    assert listed.headers["cache-control"].startswith("no-store")
+    payload = listed.json()
+    assert payload["collectors"] == [
+        {"collector_id": "cloud-scan", "collector_version": 2, "collector_integrity_sha256": digest}
+    ]
+    assert payload["destinations"] == [] and payload["destinations_listed"] is False
+
+    class Resolver:
+        def __call__(self, *_args):  # pragma: no cover - not used for listing
+            raise AssertionError
+
+        def list_targets(self, tenant):
+            assert tenant == "tenant-a"
+            return [
+                {"target_kind": "questionnaire", "target_id": "vendor-portal", "target_revision": 4, "label": "Vendor portal"},
+                {"target_kind": "report", "target_id": "../escape", "target_revision": 1},
+                {"target_kind": "unknown", "target_id": "x", "target_revision": 1},
+                {"target_kind": "report", "target_id": "board", "target_revision": True},
+            ]
+
+    client.app.state.grc_studio_target_authority_resolver_factory = lambda **_kwargs: Resolver()
+    payload = client.get(f"{BASE}/sources").json()
+    assert payload["destinations_listed"] is True
+    assert payload["destinations"] == [
+        {"target_kind": "questionnaire", "target_id": "vendor-portal", "target_revision": 4, "label": "Vendor portal"}
+    ]
+
+    def broken(**_kwargs):
+        raise RuntimeError("adapter down")
+
+    client.app.state.grc_studio_target_authority_resolver_factory = broken
+    payload = client.get(f"{BASE}/sources").json()
+    assert payload["destinations"] == [] and payload["destinations_listed"] is False
+
+
+def test_sources_need_view_permission_and_an_enabled_studio(environment, monkeypatch) -> None:
+    client, state = environment
+    seen = []
+
+    def deny(_request, permission):
+        seen.append(permission)
+        raise api.HTTPException(status_code=403, detail="denied")
+
+    monkeypatch.setattr(api, "require_permission", deny)
+    assert client.get(f"{BASE}/sources").status_code == 403
+    assert seen == ["view"]
+    assert state.factory_calls == []
+    monkeypatch.setattr(api, "require_permission", lambda *_: None)
+    state.enabled = False
+    assert client.get(f"{BASE}/sources").status_code == 403
