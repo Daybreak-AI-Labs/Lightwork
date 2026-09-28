@@ -118,6 +118,7 @@
       if (canAdmin) {
         wrap.appendChild(button("Start a change", "btn--primary", function () { pickRepo(r.name); }));
         wrap.appendChild(button("Get latest changes", "btn--ghost", function () { syncRepo(r.name); }));
+        wrap.appendChild(button("Download a copy", "btn--ghost", function () { exportRepo(r.name); }));
       } else {
         wrap.appendChild(el("span", "muted", "Administrators can start changes."));
       }
@@ -168,6 +169,111 @@
     });
   }
 
+  // Download a copy (code export): an unprotected plain copy, confirmed first.
+  async function exportRepo(name) {
+    var ok = await window.mvConfirm("Download a full copy of " + name + "? Once it leaves Lightwork, the copy is " +
+      "not protected, so keep it somewhere safe. The download is recorded.", { okText: "Download" });
+    if (!ok) { return; }
+    say("Preparing a copy of " + name + ". Large projects can take a minute.");
+    var response;
+    try {
+      response = await fetch("/api/v1/code/repos/" + encodeURIComponent(name) + "/export", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true })
+      });
+    } catch (e) { say(""); fail(window.mvErrorText(e, "download the copy")); return; }
+    if (!response.ok) { say(""); fail(await failure(response, "download the copy")); return; }
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = name + "-copy.zip";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+    say("Downloaded a copy of " + name + ".");
+  }
+
+  // Watch a code project for notes to Lightwork (watch).
+  var WATCH = { starting: "Starting", watching: "Watching", stopped: "Stopped", failed: "Stopped after a problem" };
+  var watchState = { rows: [] };
+  function renderWatch() {
+    var list = document.getElementById("code-watch-list");
+    if (!list) { return; }
+    clear(list);
+    var rows = watchState.rows;
+    if (!rows.length) {
+      list.appendChild(el("p", "muted", "Lightwork is not watching any code project. Choose one above to start."));
+      return;
+    }
+    rows.forEach(function (w) {
+      var box = el("div", "panel ic-watch");
+      var head = el("div", "ic-head");
+      head.appendChild(el("h3", null, w.repo + " · " + (WATCH[w.state] || w.state)));
+      if (w.state === "watching" || w.state === "starting") {
+        head.appendChild(button("Stop watching", "btn--ghost", function () { stopWatch(w.repo); }));
+      } else {
+        head.appendChild(button("Start again", "btn--ghost", function () { startWatch(w.repo); }));
+      }
+      box.appendChild(head);
+      if (w.reason && w.state !== "watching") { box.appendChild(el("p", "muted", w.reason)); }
+      box.appendChild(el("p", "muted", w.last_scan ? "Last read " + when(w.last_scan) + ". " + (w.notes.length ?
+        w.notes.length + " note" + (w.notes.length === 1 ? "" : "s") + " found." : "No notes found.") :
+        "Reading the code project for the first time."));
+      if (w.notes.length) {
+        var wrap = el("div", "ic-table-wrap");
+        var t = el("table", "ic-table");
+        t.appendChild(el("caption", null, "Notes to Lightwork found in " + w.repo));
+        var hr = el("tr");
+        ["Note", "Where", "Actions"].forEach(function (h) { var th = el("th", null, h); th.scope = "col"; hr.appendChild(th); });
+        var thead = el("thead"); thead.appendChild(hr); t.appendChild(thead);
+        var tb = el("tbody");
+        w.notes.forEach(function (n) {
+          var tr = el("tr");
+          tr.appendChild(el("td", null, n.note || "(a note with no text)"));
+          tr.appendChild(el("td", null, n.file + ", line " + n.line));
+          var td = el("td");
+          td.appendChild(button("Start a task from this note", "btn--primary", function () { startNoteTask(n); }));
+          tr.appendChild(td);
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb);
+        wrap.appendChild(t);
+        box.appendChild(wrap);
+      }
+      list.appendChild(box);
+    });
+  }
+  async function loadWatch() {
+    if (!document.getElementById("code-watch-list")) { return; }
+    try {
+      var response = await fetch("/api/v1/code/watch", { credentials: "same-origin", headers: { "Accept": "application/json" } });
+      if (!response.ok) { return; }
+      watchState.rows = (await response.json()).watching || [];
+      renderWatch();
+    } catch (e) { /* the list simply stays as it was */ }
+  }
+  async function startWatch(name) {
+    if (!name) { fail("Choose a code project to watch."); return; }
+    var ok = await window.mvConfirm("Watch " + name + " for notes to Lightwork? Lightwork reads the project again " +
+      "each time it changes, for up to eight hours. Nothing runs until you start a task from a note.", { okText: "Start watching" });
+    if (!ok) { return; }
+    var out = await post("/api/v1/code/watch/" + encodeURIComponent(name) + "/start", { confirm: true }, "start watching");
+    if (out) { say("Watching " + name + "."); await loadWatch(); }
+  }
+  async function stopWatch(name) {
+    var out = await post("/api/v1/code/watch/" + encodeURIComponent(name) + "/stop", {}, "stop watching");
+    if (out) { say("Stopped watching " + name + "."); await loadWatch(); }
+  }
+  // A note becomes an ordinary task through the normal task start, with its
+  // permission, spending limits and risk checks.
+  async function startNoteTask(n) {
+    var ok = await window.mvConfirm("Start a task from the note “" + (n.note || n.file) + "”? It runs like any other " +
+      "task, within your spending limits, and uses AI.", { okText: "Start task" });
+    if (!ok) { return; }
+    var out = await post("/api/v1/goals", { title: n.title, description: n.task }, "start the task");
+    if (out && out.id) { say("Started task #" + out.id + ". Open Tasks to follow it."); }
+  }
+
   function renderPicker() {
     var sel = document.getElementById("code-feature-repo");
     if (!sel) { return; }
@@ -191,6 +297,13 @@
     renderRepos();
     renderProposals();
     renderPicker();
+    var watchSel = document.getElementById("code-watch-repo");
+    if (watchSel) {
+      var picked = watchSel.value;
+      while (watchSel.options.length > 1) { watchSel.remove(1); }
+      (summary.repos || []).forEach(function (r) { var o = el("option", null, r.name); o.value = r.name; watchSel.appendChild(o); });
+      if (picked) { watchSel.value = picked; }
+    }
   }
 
   async function load(keepStatus) {
@@ -371,6 +484,13 @@
   if (mergeBtn) { mergeBtn.addEventListener("click", mergeApproved); }
   var closeBtn = document.getElementById("code-review-close");
   if (closeBtn) { closeBtn.addEventListener("click", function () { document.getElementById("code-review").hidden = true; }); }
+  var watchBtn = document.getElementById("code-watch-start");
+  if (watchBtn) {
+    watchBtn.addEventListener("click", function () { startWatch(document.getElementById("code-watch-repo").value); });
+    var refresh = document.getElementById("code-watch-refresh");
+    if (refresh) { refresh.addEventListener("click", loadWatch); }
+  }
 
   load();
+  loadWatch();
 })();

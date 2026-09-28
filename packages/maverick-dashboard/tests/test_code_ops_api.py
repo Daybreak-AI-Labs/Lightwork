@@ -1,0 +1,196 @@
+"""Code page: download a copy (``maverick code export``) and watch a code
+project for notes to Lightwork (``maverick watch``), over a real vault."""
+from __future__ import annotations
+
+import io
+import shutil
+import subprocess
+import time
+import zipfile
+
+import pytest
+from fastapi.testclient import TestClient
+
+ORIGIN = {"Origin": "http://testserver"}
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    from maverick import config, world_model
+    from maverick.audit import writer as audit_writer
+    from maverick_dashboard import app as dash_app
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    for name in ("MAVERICK_CONFIG", "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_DASHBOARD_REQUIRE_AUTH",
+                 "MAVERICK_OIDC_ENABLED", "MAVERICK_PROXY_AUTH", "MAVERICK_TENANT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config, "get_codebase", lambda: {"enable": True, "default_protect": "block"})
+    config.reset_config_cache()
+    audit_writer._default = None
+    audit_writer._defaults.clear()
+    dash_app._world_cache.clear()
+    try:
+        yield TestClient(dash_app.app, headers=ORIGIN)
+    finally:
+        from maverick_dashboard import code_ops_api
+        code_ops_api.stop_watchers(timeout=5)
+        code_ops_api._watchers.clear()
+        config.reset_config_cache()
+        audit_writer._default = None
+        audit_writer._defaults.clear()
+        dash_app._world_cache.clear()
+
+
+def _as(monkeypatch, role: str) -> None:
+    from maverick_dashboard import auth, rbac
+    rbac.set_role(f"user:{role}1", role)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: f"user:{role}1")
+
+
+def _audit(monkeypatch) -> list[str]:
+    from maverick.audit import writer
+    seen: list[str] = []
+    real = writer.audit_event
+
+    def spy(kind, **payload):
+        if payload.get("verb"):
+            seen.append(payload["verb"])
+        return real(kind, **payload)
+    monkeypatch.setattr(writer, "audit_event", spy)
+    import maverick.audit as audit_pkg
+    monkeypatch.setattr(audit_pkg, "audit_event", spy)
+    return seen
+
+
+def _git(*args, cwd):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
+                   capture_output=True)
+
+
+@pytest.fixture
+def project(tmp_path, client):
+    src = tmp_path / "src"
+    src.mkdir()
+    _git("init", "-q", "-b", "main", cwd=src)
+    (src / "app.py").write_text("def total(xs):\n    # AI: add input validation for empty lists\n"
+                                "    return sum(xs)\n")
+    (src / "notes.md").write_text("# AI: this file type is not scanned\n")
+    _git("add", "-A", cwd=src)
+    _git("commit", "-q", "-m", "init", cwd=src)
+    from maverick.codebase import vault
+    vault.register("website", str(src))
+    return src
+
+
+# ---- download a copy (code export) ---------------------------------------------
+
+def test_download_is_confirmed_recorded_and_contains_the_project(client, monkeypatch, project):
+    assert client.post("/api/v1/code/repos/website/export", json={}).status_code == 422
+    assert client.post("/api/v1/code/repos/nope/export", json={"confirm": True}).status_code == 404
+    seen = _audit(monkeypatch)
+    r = client.post("/api/v1/code/repos/website/export", json={"confirm": True})
+    assert r.status_code == 200, r.text
+    assert 'filename="website-copy.zip"' in r.headers["content-disposition"]
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert "website/app.py" in zf.namelist()
+    assert "AI: add input validation" in zf.read("website/app.py").decode()
+    assert seen == ["code_export"]
+
+
+def test_download_refuses_oversized_projects(client, monkeypatch, project):
+    from maverick_dashboard import code_ops_api
+    monkeypatch.setattr(code_ops_api, "_MAX_EXPORT_BYTES", 10)
+    r = client.post("/api/v1/code/repos/website/export", json={"confirm": True})
+    assert r.status_code == 413 and "too large" in r.json()["detail"]
+
+
+def test_code_routes_need_a_workspace_administrator(client, monkeypatch, project):
+    _as(monkeypatch, "operator")
+    assert client.post("/api/v1/code/repos/website/export", json={"confirm": True}).status_code == 403
+    assert client.get("/api/v1/code/watch").status_code == 403
+    assert client.post("/api/v1/code/watch/website/start", json={"confirm": True}).status_code == 403
+    assert client.post("/api/v1/code/watch/website/stop", json={}).status_code == 403
+
+
+def test_code_routes_say_so_when_code_projects_are_off(client, monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "get_codebase", lambda: {"enable": False, "default_protect": "block"})
+    assert client.post("/api/v1/code/repos/website/export", json={"confirm": True}).status_code == 503
+    assert client.post("/api/v1/code/watch/website/start", json={"confirm": True}).status_code == 503
+
+
+# ---- watch for notes (watch) ------------------------------------------------------
+
+def _wait(client, state="watching", notes=True, seconds=20.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        rows = client.get("/api/v1/code/watch").json()["watching"]
+        if rows and rows[0]["state"] == state and (not notes or rows[0]["notes"]):
+            return rows[0]
+        time.sleep(0.1)
+    raise AssertionError(client.get("/api/v1/code/watch").json())
+
+
+def test_watch_finds_notes_and_stops_on_request(client, monkeypatch, project):
+    from maverick_dashboard import code_ops_api
+    monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.2)
+    assert client.post("/api/v1/code/watch/website/start", json={}).status_code == 422
+    seen = _audit(monkeypatch)
+    r = client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+    assert r.status_code == 202, r.text
+    row = _wait(client)
+    assert [(n["file"], n["line"], n["note"]) for n in row["notes"]] == [
+        ("app.py", 2, "add input validation for empty lists")]
+    task = row["notes"][0]["task"]
+    assert task.startswith("In the website code project.\nFrom app.py:2") and "/tmp" not in task
+    # Starting twice keeps one watcher.
+    client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+    assert len(code_ops_api._watchers) == 1
+    stopped = client.post("/api/v1/code/watch/website/stop", json={}).json()
+    assert stopped["state"] == "stopped"
+    assert seen == ["code_watch_start", "code_watch_stop"]
+    watcher = next(iter(code_ops_api._watchers.values()))
+    watcher.thread.join(5)
+    assert not watcher.thread.is_alive()
+    assert client.post("/api/v1/code/watch/other/stop", json={}).status_code == 404
+
+
+def test_watch_is_bounded_and_stops_at_shutdown(client, monkeypatch, project):
+    from maverick_dashboard import code_ops_api
+    monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.2)
+    monkeypatch.setattr(code_ops_api, "_MAX_WATCHERS", 0)
+    r = client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+    assert r.status_code == 409 and "Stop one first" in r.json()["detail"]
+    monkeypatch.setattr(code_ops_api, "_MAX_WATCHERS", 10)
+    client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+    _wait(client)
+    code_ops_api.stop_watchers(timeout=5)
+    assert not any(t.is_alive() for t in code_ops_api._watch_threads)
+
+
+def test_watch_stops_itself_after_repeated_read_failures(client, monkeypatch, project):
+    from maverick.codebase import vault
+    from maverick_dashboard import code_ops_api
+    monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.05)
+    client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+    _wait(client)
+
+    def broken(name):
+        raise vault.VaultError("unreadable")
+    monkeypatch.setattr(vault, "get", broken)
+    row = _wait(client, state="failed", notes=False)
+    assert "three times" in row["reason"]
+
+
+def test_code_page_offers_download_and_watch(client, project):
+    from test_support.plain_language import developer_terms, visible_text
+    page = client.get("/code").text
+    text = visible_text(page)
+    assert "Watch for notes to Lightwork" in text and "Start watching" in text
+    assert developer_terms(page) == []

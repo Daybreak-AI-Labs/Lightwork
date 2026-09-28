@@ -196,6 +196,41 @@
     {% endif %}
   </div>
 
+  <div class="section-head"><h2 id="to-versions-title">Approved Versions</h2></div>
+  <section class="panel" aria-labelledby="to-versions-title">
+    <p class="muted plg-flush">Pin the add-on versions you have checked, and Lightwork tells you when an
+      installed add-on no longer matches. Reload an add-on after its files were updated, without restarting.</p>
+    <p id="to-versions-status" role="status" aria-live="polite">Checking…</p>
+    <div id="to-versions"></div>
+    <p><button type="button" class="btn btn--primary" id="to-versions-pin">Pin current versions</button></p>
+  </section>
+
+  <div class="section-head"><h2 id="to-plugin-usage-title">How Often Add-on Tools Are Used</h2></div>
+  <section class="panel" aria-labelledby="to-plugin-usage-title">
+    <p id="to-plugin-usage-status" class="muted" role="status" aria-live="polite">Loading…</p>
+    <div id="to-plugin-usage"></div>
+  </section>
+
+  <div class="section-head"><h2 id="to-starter-title">Start a New Plugin</h2></div>
+  <section class="panel" aria-labelledby="to-starter-title">
+    <p class="muted plg-flush">Download the starting files for a new add-on, ready for a developer to build on.
+      Nothing is installed or changed on this server.</p>
+    <form id="to-starter-form" class="plg-approvals">
+      <label class="plg-field" for="to-starter-name">Name of the add-on
+        <input id="to-starter-name" class="input" type="text" name="name" maxlength="42" required autocomplete="off"
+               spellcheck="false" placeholder="e.g. weather-tools" aria-describedby="to-starter-help"></label>
+      <span id="to-starter-help" class="muted plg-small">3 to 42 lowercase letters, numbers or dashes, starting with a letter.</span>
+      <label class="plg-field" for="to-starter-kind">What it adds
+        <select id="to-starter-kind" class="select" name="kind">
+          <option value="tool">A tool agents can use</option>
+          <option value="channel">A chat app connection</option>
+          <option value="persona">An agent personality</option>
+        </select></label>
+      <div><button type="submit" class="btn">Download starter plugin</button></div>
+    </form>
+    <p id="to-starter-status" class="muted" role="status" aria-live="polite"></p>
+  </section>
+
   {% if plugins_can_admin %}
   <div class="section-head"><h2 id="plg-admin">Administration</h2></div>
   <div class="panel">
@@ -261,8 +296,11 @@
     .plg-list { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
     .plg-check { display: flex; align-items: center; gap: var(--space-2); }
     .plg-field { display: flex; flex-direction: column; gap: var(--space-1); }
+    .to-scroll { overflow-x: auto; }
+    .to-technical { margin-top: var(--space-2); }
   </style>
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-plugins.js" defer></script>
+  <script src="/static/lightwork-tool-ops.js" defer></script>
 {% endblock %}

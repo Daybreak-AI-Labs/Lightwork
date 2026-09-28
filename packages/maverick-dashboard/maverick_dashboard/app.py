@@ -1057,6 +1057,7 @@ from .store_catalogs import router as store_catalogs_router  # noqa: E402
 from .support_api import router as support_router  # noqa: E402
 from .system_checks_api import router as system_checks_router  # noqa: E402
 from .tax_actions_api import router as tax_actions_router  # noqa: E402
+from .tools_ops_api import build_router as build_tools_ops_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
 
@@ -1073,6 +1074,7 @@ app.include_router(mcp_presets_router)
 app.include_router(store_catalogs_router)
 app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
+app.include_router(build_tools_ops_router())
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 

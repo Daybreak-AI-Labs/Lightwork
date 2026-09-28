@@ -144,10 +144,14 @@ test('loading customizations shows what will be loaded, then confirms', async (t
   assert.equal(nonAccount(ui.calls).filter((c) => c.url.endsWith('/load')).length, 0);  // cancelled
 });
 
-test('the tool server list is searchable and adding one confirms the consequence', async (t) => {
+test('the tool server list is searchable, shows what a server starts, and adding one confirms the consequence', async (t) => {
   const markup = slice('mcp.html', '<section class="panel" id="fa-registry"', '</section>');
+  const fp = 'a'.repeat(64);
   const ui = await fixture(markup, (url) => {
     if (url.endsWith('/add')) return response({added: 'weather'});
+    if (url.endsWith('/preview')) return response({name: 'weather', online: true, address: 'https://mcp.example.com/weather',
+      program: '', arguments: [], settings: [], extra_headers: ['X-Region'], program_checked: false, fingerprint: fp});
+    if (url.endsWith('/tools')) return response({tools: [{name: 'forecast', description: "Tomorrow's weather"}]});
     return response({configured: true, servers: [
       {name: 'weather', summary: 'Forecasts', verified: true, online: true},
       {name: 'files', summary: 'Local files', verified: false, online: false}]});
@@ -163,9 +167,20 @@ test('the tool server list is searchable and adding one confirms the consequence
   assert.equal(rows.length, 1);
   rows[0].querySelector('button').click();
   await ui.settle();
-  assert.match(ui.confirms[0], /another company's computers/);
+  const box = ui.document.getElementById('fa-registry-preview');
+  assert.match(box.textContent, /Web address it connects tohttps:\/\/mcp\.example\.com\/weather/);
+  assert.match(box.textContent, /Extra details sent with each requestX-Region/);
+  assert.equal(nonAccount(ui.calls).filter((c) => c.url.endsWith('/mcp-registry/add')).length, 0);  // looking adds nothing
+  [...box.querySelectorAll('button')].find((b) => b.textContent === 'Ask which tools it offers').click();
+  await ui.settle();
+  assert.match(ui.confirms[0], /Nothing is added/);
+  assert.deepEqual(JSON.parse(nonAccount(ui.calls).find((c) => c.url.endsWith('/tools')).options.body), {name: 'weather', fingerprint: fp, confirm: true});
+  assert.match(box.textContent, /forecastTomorrow's weather/);
+  [...box.querySelectorAll('button')].find((b) => b.textContent === 'Add this tool server').click();
+  await ui.settle();
+  assert.match(ui.confirms[1], /another company's computers/);
   const add = nonAccount(ui.calls).find((c) => c.url.endsWith('/mcp-registry/add'));
-  assert.deepEqual(JSON.parse(add.options.body), {name: 'weather'});
+  assert.deepEqual(JSON.parse(add.options.body), {name: 'weather', fingerprint: fp});
 });
 
 test('screening test shows caught and wrongly stopped rates in words', async (t) => {

@@ -527,24 +527,77 @@
       out.appendChild(table(['Tool server', 'What it does', 'Where it runs', ''], shown.slice(0, 200).map(function (s) {
         var name = el('span', null, s.name);
         if (s.verified) { name.appendChild(document.createTextNode(' ')); name.appendChild(el('span', 'badge ok', 'Verified')); }
-        var add = el('button', 'btn', 'Add');
-        add.type = 'button';
-        add.setAttribute('aria-label', 'Add ' + s.name);
-        add.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Add the ' + s.name + ' tool server? Agents can use its tools from their next task.' +
-            (s.online ? ' It runs on another company\'s computers, so task details may be sent there.' : ' It runs on this computer.'), {okText: 'Add'});
-          if (!ok) return;
-          add.disabled = true;
-          try {
-            await request('/api/v1/mcp-registry/add', {method: 'POST', json: {name: s.name}});
-            say(status, s.name + ' was added. Reload the page and press Test to check that it works.');
-          } catch (failure) {
-            say(status, await failText(failure, 'add the tool server'));
-            add.disabled = false;
-          }
-        });
-        return [name, s.summary, s.online ? 'Online service' : 'On this computer', add];
+        var look = el('button', 'btn', 'Look before adding');
+        look.type = 'button';
+        look.setAttribute('aria-label', 'Look at ' + s.name + ' before adding it');
+        look.addEventListener('click', function () { preview(s); });
+        return [name, s.summary, s.online ? 'Online service' : 'On this computer', look];
       })));
+    }
+    // Before adding: the exact program or address, and (on request) its tools.
+    async function preview(s) {
+      var box = $('fa-registry-preview');
+      box.textContent = '';
+      say(status, 'Looking up ' + s.name + '…');
+      var p;
+      try {
+        p = await request('/api/v1/mcp-registry/preview', {method: 'POST', json: {name: s.name}});
+      } catch (failure) {
+        say(status, await failText(failure, 'look up the tool server'));
+        return;
+      }
+      say(status, 'Check what ' + p.name + ' does before adding it.');
+      box.appendChild(el('h3', null, 'Before adding ' + p.name));
+      var facts = [['Where it runs', p.online ? 'On another company\'s computers' : 'On this computer']];
+      if (p.online) facts.push(['Web address it connects to', p.address]);
+      else {
+        facts.push(['Program it starts', [p.program].concat(p.arguments).join(' ')]);
+        facts.push(['Program checked before it starts', p.program_checked ? 'Yes, against its published fingerprint' : 'No']);
+      }
+      if (p.settings.length) facts.push(['Settings it is given', p.settings.join(', ')]);
+      if (p.extra_headers.length) facts.push(['Extra details sent with each request', p.extra_headers.join(', ')]);
+      box.appendChild(table(['Detail', 'Value'], facts));
+      var tools = el('div');
+      var ask = el('button', 'btn btn--ghost', 'Ask which tools it offers');
+      ask.type = 'button';
+      ask.addEventListener('click', async function () {
+        var ok = await window.mvConfirm('Start ' + p.name + ' once to ask which tools it offers? ' +
+          (p.online ? 'Lightwork contacts its web address.' : 'Lightwork runs its program on this computer for a few seconds.') +
+          ' Nothing is added.', {okText: 'Ask'});
+        if (!ok) return;
+        ask.disabled = true;
+        tools.textContent = '';
+        try {
+          var found = await request('/api/v1/mcp-registry/tools', {method: 'POST', json: {name: p.name, fingerprint: p.fingerprint, confirm: true}});
+          if (!found.tools.length) tools.appendChild(el('p', 'muted', 'It answered, but offers no tools.'));
+          else tools.appendChild(table(['Tool', 'What it does'], found.tools.map(function (t) { return [t.name, t.description]; })));
+        } catch (failure) {
+          tools.appendChild(el('p', 'muted', await failText(failure, 'ask the tool server')));
+        } finally {
+          ask.disabled = false;
+        }
+      });
+      var add = el('button', 'btn btn--primary', 'Add this tool server');
+      add.type = 'button';
+      add.addEventListener('click', async function () {
+        var ok = await window.mvConfirm('Add the ' + p.name + ' tool server? Agents can use its tools from their next task.' +
+          (p.online ? ' It runs on another company\'s computers, so task details may be sent there.' : ' It runs on this computer.'), {okText: 'Add'});
+        if (!ok) return;
+        add.disabled = true;
+        try {
+          await request('/api/v1/mcp-registry/add', {method: 'POST', json: {name: p.name, fingerprint: p.fingerprint}});
+          box.textContent = '';
+          say(status, p.name + ' was added. Reload the page and press Test to check that it works.');
+        } catch (failure) {
+          say(status, await failText(failure, 'add the tool server'));
+          add.disabled = false;
+        }
+      });
+      var row = el('p', 'fa-row');
+      row.appendChild(ask);
+      row.appendChild(add);
+      box.appendChild(row);
+      box.appendChild(tools);
     }
     $('fa-registry-load').addEventListener('click', async function () {
       say(status, 'Loading the list…');

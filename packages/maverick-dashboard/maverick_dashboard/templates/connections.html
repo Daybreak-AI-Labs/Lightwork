@@ -127,6 +127,45 @@
   <div class="section-head"><h2>Saved connections</h2></div>
   <ul class="cx__list" id="cx-list"></ul>
   <p class="cx__sub" id="cx-empty" hidden>None yet — save your first connection above and it appears here, ready to test.</p>
+
+  <section aria-labelledby="to-connectors-title" id="to-connectors-panel" hidden>
+  <div class="section-head"><h2 id="to-connectors-title">Systems Lightwork May Change</h2></div>
+  <div class="panel">
+    <p class="muted">Systems of record such as Salesforce or ServiceNow, where every change is checked first,
+      approved by a person when the risk calls for it, and recorded. Preview a change here to see what would
+      happen, without changing anything.</p>
+    <p id="to-connectors-status" class="muted" role="status" aria-live="polite">Loading…</p>
+    <div id="to-connectors"></div>
+    <form id="to-change-form" class="to-change" hidden>
+      <h3>Preview a Change</h3>
+      <label class="to-label">System
+        <select class="select" name="connector"></select></label>
+      <label class="to-label">Kind of change
+        <select class="select" name="change">
+          <option value="update">Update a record</option>
+          <option value="create">Create a record</option>
+          <option value="replace">Replace a record</option>
+          <option value="delete">Delete a record</option>
+        </select></label>
+      <label class="to-label">Record type
+        <input class="input" type="text" name="record_type" maxlength="80" required placeholder="e.g. Opportunity or incident" autocomplete="off"></label>
+      <div id="to-change-record-wrap">
+        <label class="to-label">Record number in that system
+          <input class="input" type="text" name="record_id" maxlength="80" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <fieldset class="to-change__fields">
+        <legend>Fields to change</legend>
+        <div id="to-change-fields"></div>
+        <button type="button" class="btn btn--ghost" id="to-change-add-field">Add a field</button>
+      </fieldset>
+      <label class="to-check"><input type="checkbox" name="read_current_values" checked>
+        Also read the record's current values, to tell whether the change could be undone</label>
+      <p class="muted" id="to-change-read-note"></p>
+      <div><button type="submit" class="btn btn--primary">Preview this change</button></div>
+    </form>
+    <div id="to-change-out" aria-live="polite"></div>
+  </div>
+  </section>
 </div>
 
 <script>
@@ -357,4 +396,14 @@
   load();
 })();
 </script>
+<style>
+  .to-change { display: flex; flex-direction: column; gap: var(--space-2); max-width: 40rem; margin-top: var(--space-4); }
+  .to-change__fields { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .to-field { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .to-field .input { flex: 1 1 10rem; }
+  .to-check { display: flex; gap: var(--space-2); align-items: flex-start; }
+  .to-label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-sm); font-weight: var(--font-semibold); }
+  .to-scroll { overflow-x: auto; }
+</style>
+<script src="/static/lightwork-tool-ops.js" defer></script>
 {% endblock %}

@@ -85,6 +85,14 @@
       <a class="btn btn--primary" href="/workflow-builder">New template</a>
     </div>
   {% endif %}
+
+  <section class="panel tplm__ratings" id="to-ratings" aria-labelledby="to-ratings-title" hidden>
+    <h2 id="to-ratings-title">Share Your Ratings</h2>
+    <p class="muted">Download the star ratings your team gave, to share with whoever runs the shared template
+      list. Your comments stay here.</p>
+    <button type="button" class="btn" id="to-ratings-download">Download ratings</button>
+    <p id="to-ratings-status" class="muted" role="status" aria-live="polite"></p>
+  </section>
 </div>
 
 <style>
@@ -102,6 +110,8 @@
   .tplm__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: auto; }
   .tplm__field { display: grid; gap: var(--space-1); margin-bottom: var(--space-2); }
   .template-prepare, .template-rating { margin-top: var(--space-3); }
+  .tplm__ratings { margin-top: var(--space-5); }
 </style>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-template-library.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-template-library.js" defer></script>
+<script src="/static/lightwork-tool-ops.js" defer></script>{% endblock %}

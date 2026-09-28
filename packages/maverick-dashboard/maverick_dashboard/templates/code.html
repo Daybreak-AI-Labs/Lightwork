@@ -56,6 +56,23 @@
   </section>
   {% endif %}
 
+  {% if can_admin and module_on %}
+  <section class="panel" aria-labelledby="code-watch-title" id="code-watch">
+    <h2 id="code-watch-title">Watch for notes to Lightwork</h2>
+    <p class="muted">Developers can leave a note for Lightwork in the code, such as a comment starting with “AI:”.
+      While Lightwork watches a code project, it lists every note it finds, and you can start a task from one.</p>
+    <div class="ic-form">
+      <label for="code-watch-repo">Code project</label>
+      <select id="code-watch-repo" class="select"><option value="">Choose a code project</option></select>
+      <div class="ic-actions">
+        <button type="button" class="btn btn--primary" id="code-watch-start">Start watching</button>
+        <button type="button" class="btn btn--ghost" id="code-watch-refresh">Check for new notes</button>
+      </div>
+    </div>
+    <div id="code-watch-list" aria-live="polite"></div>
+  </section>
+  {% endif %}
+
   <section class="panel" aria-labelledby="ic-prop-title">
     <div class="ic-head">
       <h2 id="ic-prop-title">Proposed changes</h2>
