@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -19,6 +21,7 @@ from .auth import require_global_permission, require_permission
 from .model_risk_api import (
     _call,
     _configured_conformity_workflow,
+    _configured_media_provenance,
     _human_principal,
     _identity_control_runtime,
     _identity_governance_section,
@@ -131,6 +134,139 @@ async def conformity_case_evidence(
             for item in items
         ],
     }
+
+
+_AI_ACT = "EU AI Act"
+_GDPR = "GDPR"
+_MAX_PROVISIONS = 500
+_REGISTRIES = {"eu_database": "in the EU database", "national": "at national level"}
+
+
+def _provision_order(row: Mapping[str, Any]) -> tuple:
+    regulation = 0 if row["regulation"] == _AI_ACT else 1
+    text = str(row["provision"])
+    parts = tuple(
+        (0, int(part), "") if part.isdigit() else (1, 0, part.lower())
+        for part in re.findall(r"\d+|[^\d]+", text)
+    )
+    return (regulation, 0 if text.startswith("Art") else 1, parts)
+
+
+@lru_cache(maxsize=1)
+def _provision_catalog() -> tuple[dict[str, str], ...]:
+    """Provisions the kernel's regulatory catalogs already cite.
+
+    Only entries the readiness workflow itself accepts as an official citation
+    are offered, so choosing one can never be refused for its wording.
+    """
+
+    from maverick import (
+        ai_act,
+        ai_conformity_workflow,
+        ai_literacy,
+        controls,
+        eu_conformity,
+        regulatory_compiler,
+    )
+
+    ai_act_url = ai_conformity_workflow.CONSOLIDATED_REGULATION_URL
+    gdpr_url = next(item.source_url for item in regulatory_compiler.REGULATIONS["gdpr"])
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def add(regulation: str, provision: str, title: str, url: str) -> None:
+        entry = rows.setdefault(
+            (regulation, provision),
+            {"regulation": regulation, "provision": provision, "official_url": url, "titles": []},
+        )
+        text = " ".join(str(title or "").split())
+        if text and text not in entry["titles"]:
+            entry["titles"].append(text)
+
+    literacy = ai_literacy.REGULATION_METADATA
+    add(_AI_ACT, literacy["article"], literacy["obligation"], ai_act_url)
+    # The self-assessment lists follow the Regulation's own order: Art. 5(1)
+    # points (a)-(h) and Annex III points 1-8.
+    for index, text in enumerate(ai_act._PROHIBITED):
+        add(_AI_ACT, f"Art. 5(1)({chr(ord('a') + index)})", f"Prohibited practice: {text}", ai_act_url)
+    for index, text in enumerate(ai_act._HIGH_RISK, start=1):
+        add(_AI_ACT, f"Annex III point {index}", f"High-risk area: {text}", ai_act_url)
+    for element in eu_conformity.FRIA_ELEMENTS.values():
+        add(_AI_ACT, element["citation"], element["prompt"], ai_act_url)
+    for table in (
+        eu_conformity.ANNEX_IV_ITEMS,
+        eu_conformity.IFU_ITEMS,
+        eu_conformity.GPAI_OBLIGATIONS,
+        eu_conformity.GPAI_SYSTEMIC_OBLIGATIONS,
+        eu_conformity.DEPLOYER_OBLIGATIONS,
+    ):
+        for citation, text in table.values():
+            add(_AI_ACT, citation, text, ai_act_url)
+    for citation, text, _flag in eu_conformity.DEPLOYER_CONDITIONAL_OBLIGATIONS.values():
+        add(_AI_ACT, citation, text, ai_act_url)
+    add(
+        _AI_ACT,
+        eu_conformity.DEPLOYER_OVERSIGHT_CITATION,
+        eu_conformity.DEPLOYER_OVERSIGHT_KEY.replace("_", " ").capitalize(),
+        ai_act_url,
+    )
+    for basis, (citation, registry) in eu_conformity.REGISTRATION_BASES.items():
+        where = _REGISTRIES.get(registry, "")
+        basis_words = basis.replace("_", " ").replace("annex iii", "Annex III")
+        add(_AI_ACT, citation, f"Registration {where}: {basis_words}", ai_act_url)
+    for obligation in regulatory_compiler.REGULATIONS["eu_ai_act"]:
+        add(_AI_ACT, obligation.article, obligation.title, ai_act_url)
+    for obligation in regulatory_compiler.REGULATIONS["gdpr"]:
+        add(_GDPR, obligation.article, obligation.title, obligation.source_url)
+    for control in controls.CONTROLS:
+        for framework, reference in control.frameworks.items():
+            if framework == _AI_ACT:
+                add(_AI_ACT, reference, control.title, ai_act_url)
+            elif framework == _GDPR:
+                add(_GDPR, reference, control.title, gdpr_url)
+
+    accepted = []
+    for entry in rows.values():
+        try:
+            ai_conformity_workflow._citation(
+                ai_conformity_workflow.LegalCitation(entry["provision"], entry["official_url"])
+            )
+        except (TypeError, ValueError):
+            continue
+        accepted.append(
+            {
+                "regulation": entry["regulation"],
+                "provision": entry["provision"],
+                "title": "; ".join(entry["titles"])[:400],
+                "official_url": entry["official_url"],
+            }
+        )
+    return tuple(sorted(accepted, key=_provision_order)[:_MAX_PROVISIONS])
+
+
+@router.get("/legal-provisions")
+async def legal_provisions(request: Request) -> dict[str, Any]:
+    """Provisions to cite on the launch-readiness forms, from the kernel's catalogs."""
+
+    require_permission(request, "operate")
+    from maverick import ai_conformity_workflow
+
+    provisions = [dict(row) for row in _provision_catalog()]
+    return {
+        "provisions": provisions,
+        "count": len(provisions),
+        "default_official_url": ai_conformity_workflow.CONSOLIDATED_REGULATION_URL,
+    }
+
+
+@router.get("/media-release-references")
+async def media_release_references(request: Request) -> dict[str, Any]:
+    """Release references this workspace's media checks already used."""
+
+    require_permission(request, "view")
+    _require_active_tenant()
+    _provenance, service = await _configured_media_provenance()
+    rows = await _call(service.release_references, limit=200)
+    return {"references": rows, "count": len(rows)}
 
 
 def _finding_sources(officer: Any) -> list[dict[str, Any]]:
@@ -310,4 +446,41 @@ async def identity_control_choices(request: Request) -> dict[str, Any]:
         intents = []
     result["purview_intents"] = intents
     result["purview_intents_available"] = intents_available
+    result["purview_labels"] = _purview_labels(result["purview_assets"], intents)
+    result["purview_connected"] = await _call(_purview_connected)
     return result
+
+
+_LABEL_CODE = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
+_MAX_LABELS = 512
+
+
+def _purview_labels(*sources: list[Mapping[str, Any]]) -> list[str]:
+    """Labels already on enrolled Purview data or in prepared label changes.
+
+    The Purview connector reads the labels on data; it has no call that lists
+    a label catalog, so these are the labels this workspace has seen.
+    """
+
+    labels = {
+        code
+        for rows in sources
+        for row in rows
+        if isinstance(row, Mapping)
+        for code in (row.get("classification_codes") or ())
+        if isinstance(code, str) and _LABEL_CODE.fullmatch(code)
+    }
+    return sorted(labels)[:_MAX_LABELS]
+
+
+def _purview_connected() -> bool:
+    from . import identity_governance_runtime
+
+    try:
+        section = _identity_governance_section()
+        status = identity_governance_runtime.connector_status(section)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        return False
+    return "purview" in (status.get("configured_providers") or ())

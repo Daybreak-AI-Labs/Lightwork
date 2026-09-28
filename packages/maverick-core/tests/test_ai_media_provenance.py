@@ -669,3 +669,78 @@ def test_explicit_tenant_is_required():
     service, *_ = _service("tenant-required", adapter=FakeC2PAAdapter())
     with pytest.raises(provenance.MediaProvenanceStateError, match="explicit tenant"):
         _verify(service)
+
+
+class _TwoReleaseAuthorities(Authorities):
+    def context(self, context_id: str):
+        if context_id not in {CONTEXT, "spring-campaign-2026"}:
+            return None
+        return {
+            "context_id": context_id,
+            "revision": self.context_revision,
+            "context_digest": self.context_digest,
+            "deployment_id": DEPLOYMENT,
+            "status": "active",
+        }
+
+
+class _SteppedAdapter(FakeC2PAAdapter):
+    """Each receipt is observed a little later than the one before."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.step = 0
+
+    def _receipt(self, binding, **kwargs):
+        self.step += 1
+        receipt = super()._receipt(binding, **kwargs)
+        return _rehash({**receipt, "observed_at": NOW - 100 + self.step})
+
+
+def test_release_references_list_the_workspace_releases_newest_first():
+    authorities = _TwoReleaseAuthorities()
+    service = provenance.MediaProvenanceService(
+        records=_store("release_refs"),
+        verifier=_SteppedAdapter(),
+        asset_lookup=authorities.asset,
+        deployment_lookup=authorities.deployment,
+        context_lookup=authorities.context,
+        clock=ManualClock(),
+    )
+
+    def check(data: bytes, context_id: str):
+        return service.verify_media(
+            data,
+            media_kind="image",
+            asset_id=ASSET,
+            deployment_id=DEPLOYMENT,
+            context_id=context_id,
+            actor=_system(),
+        )
+
+    with tenant_scope(tenant="acme"):
+        assert service.release_references() == []
+        check(b"first", CONTEXT)
+        check(b"second", "spring-campaign-2026")
+        check(b"third", CONTEXT)
+        listed = service.release_references()
+        assert service.release_references(limit=1) == listed[:1]
+        with pytest.raises(ValueError, match="limit"):
+            service.release_references(limit=0)
+
+    assert [row["context_id"] for row in listed] == [CONTEXT, "spring-campaign-2026"]
+    assert listed[0] == {
+        "context_id": CONTEXT,
+        "last_used_at": NOW - 97,
+        "deployment_ids": [DEPLOYMENT],
+        "record_count": 2,
+    }
+    # Another workspace never sees these releases.
+    with tenant_scope(tenant="beta"):
+        assert service.release_references() == []
+
+
+def test_release_references_need_an_explicit_tenant():
+    service, *_ = _service("release-refs-tenant", adapter=FakeC2PAAdapter())
+    with pytest.raises(provenance.MediaProvenanceStateError, match="explicit tenant"):
+        service.release_references()
