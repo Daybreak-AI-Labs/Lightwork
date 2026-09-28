@@ -83,6 +83,13 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_scan_chars",
         "decode_hidden",
         "supply_chain_pinning",
+        # Second-opinion scan, scan limit per task, and approvals for
+        # protected settings (All settings).
+        "cascade",
+        "shield_rate_limit",
+        "quorum_required",
+        "quorum_protected_keys",
+        "quorum_ttl_days",
     },
     "sandbox": {
         "backend",

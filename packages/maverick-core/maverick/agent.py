@@ -1020,6 +1020,16 @@ def _tool_call_failed(output: str) -> bool:
     return tool_result_failed(output)
 
 
+def _cascade_draft(role: str, model: str) -> str | None:
+    """The cascade's cheap first model for ``role`` (None when off)."""
+    try:
+        from .routing import cascade_draft_model
+
+        return cascade_draft_model(role, model)
+    except Exception:  # pragma: no cover -- routing never breaks agent setup
+        return None
+
+
 def _budget_error_label(e: BudgetExceeded) -> str:
     """W1-30: distinguish a genuinely unpriced model from a real cap trip.
 
@@ -1718,6 +1728,11 @@ class Agent:
         # addendum's except swallows it, and the learned guidance is silently
         # dropped from every prompt -- the feature becomes a no-op.
         self.model = model_override or model_for_role(role)
+        # Cascaded routing ([models] cascade): a role with no model of its own
+        # starts its turns on a cheaper model and moves to self.model on the
+        # kernel's low-confidence signals (see _cascade_turn_model).
+        self._cascade_draft = None if model_override else _cascade_draft(role, self.model)
+        self._cascade_escalated = False
         self.tools = self._build_tools()
         self.system = self._build_system()
         # Per-role reasoning effort (opt-in; None unless configured). Resolved
@@ -3706,9 +3721,32 @@ class Agent:
             from .speculative_exec import draft_model_for_turn
             acts = getattr(self, "_actions", None)
             last = acts[-1] if acts else ""
-            return draft_model_for_turn(self.domain, self.role, last) or self.model
+            return (draft_model_for_turn(self.domain, self.role, last)
+                    or self._cascade_turn_model())
         except Exception:  # pragma: no cover -- never break the loop
             return self.model
+
+    def _cascade_turn_model(self) -> str:
+        """The cascade's model for this turn: the cheap draft until the
+        verifier rejects an answer under the confidence threshold or this
+        agent's tool chain passes the depth threshold, then ``self.model`` for
+        the rest of the run. ``self.model`` when the cascade is off."""
+        draft = getattr(self, "_cascade_draft", None)
+        if not draft or getattr(self, "_cascade_escalated", False):
+            return self.model
+        from .routing import RouteSignal, should_escalate
+
+        rejected = bool(getattr(self, "_verifier_revision_used", False))
+        signal = RouteSignal(
+            role=self.role,
+            verifier_confidence=(getattr(self.ctx, "last_verifier_confidence", None)
+                                 if rejected else None),
+            tool_call_depth=len(getattr(self, "_actions", None) or ()),
+        )
+        if should_escalate(signal):
+            self._cascade_escalated = True
+            return self.model
+        return draft
 
     def _twin_denial(self, name: str) -> str | None:
         """The Operating-Twin pre-execution gates, first hold wins: rehearsal

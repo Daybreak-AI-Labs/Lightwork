@@ -24,7 +24,8 @@ _ROLES = (("orchestrator", "Lead agent"), ("researcher", "Researcher"), ("coder"
           ("verifier", "Answer checker"), ("summarizer", "Summariser"),
           ("skill_distiller", "Skill writer"), ("vision", "Image reader"),
           ("translator", "Translator"), ("coding", "Coding helper"),
-          ("reviewer", "Reviewer"))
+          ("reviewer", "Reviewer"), ("shield_judge", "Safety second opinion"),
+          ("cascade_draft", "Low-cost first try"))
 _RISKS = (("low", "Low risk"), ("medium", "Medium risk"), ("high", "High risk"))
 _SEVERITIES = (("medium", "Medium"), ("high", "High (default)"), ("critical", "Critical"))
 
@@ -165,6 +166,26 @@ def _models(S, C) -> tuple:
           "at least this often.", "number", "AI models", 0.5, "maverick.cost.router",
           subgroup="Model choices", minimum=5, maximum=100, scale=0.01,
           unit="percent", env=("MAVERICK_ROUTING_MAX_ERROR_RATE",)),
+        S("routing", "bandit", "Learn which AI service works best",
+          "When picking the cheapest model, try the suitable services and learn which one "
+          "gives the most successful answers for the money for each kind of work.",
+          "toggle", "AI models", False, "maverick.cost.router_v3", subgroup="Model choices",
+          env=("MAVERICK_ROUTING_BANDIT",)),
+        S("models", "cascade", "Start with a lower-cost model",
+          "Agents without a model of their own start on the low-cost first-try model and "
+          "move to their usual model when an answer is rejected or a task gets long.",
+          "toggle", "AI models", False, "maverick.routing", subgroup="Model choices",
+          env=("MAVERICK_CASCADE_ROUTING",)),
+        S("models", "cascade_escalate_below", "Move to the usual model when the checker is less sure than",
+          "With a lower-cost start, an answer the checker rejects with less confidence "
+          "than this moves the agent to its usual model.", "number", "AI models", 0.6,
+          "maverick.routing", subgroup="Model choices", minimum=1, maximum=100, scale=0.01,
+          unit="percent", env=("MAVERICK_ESCALATE_BELOW",)),
+        S("models", "cascade_escalate_tool_depth", "Move to the usual model after",
+          "With a lower-cost start, an agent that has taken more actions than this on one "
+          "task moves to its usual model.", "number", "AI models", 3, "maverick.routing",
+          subgroup="Model choices", minimum=1, maximum=100, integer=True, unit="actions",
+          env=("MAVERICK_ESCALATE_TOOL_DEPTH",)),
         S("routing", "battery_threshold_pct", "Prefer lower-energy models below",
           "On battery, switch to the lower-energy model once the charge falls below this.",
           "number", "AI models", 20, "maverick.energy_aware_router", subgroup="Model choices",
@@ -456,6 +477,66 @@ def _safety(S, C) -> tuple:
           item_label="Rule", add_label="Add phrases",
           empty_text="Only the built-in checks apply.", weaker="change",
           warning="Phrases you remove or lower will no longer be stopped."),
+        S("safety", "cascade", "Second opinion on suspicious text",
+          "Every request and answer gets the ordinary safety check. Text that still looks "
+          "suspicious also goes to an AI model for a second opinion, charged to the task.",
+          "toggle", "Safety", False, "maverick_shield.cascade", subgroup="Safety checks",
+          env=("MAVERICK_CASCADE_SHIELD",), weaker=False,
+          warning="Suspicious text will get only the ordinary safety check."),
+        S("shield", "probe_model", "Trained model for spotting suspicious text",
+          "A file with a trained model that helps decide which text gets a second opinion. "
+          "It can only add suspicion, never remove it.", "path", "Safety", "",
+          "maverick_shield.probe_model", subgroup="Safety checks", path_kind="file",
+          max_length=400, env=("MAVERICK_SHIELD_PROBE_MODEL",)),
+        S("safety", "shield_rate_limit", "Safety checks allowed per task",
+          "The most safety checks one task may run in a period of time. Text over the limit "
+          "is refused, never let through unchecked. Clear it for no limit.", "rate", "Safety",
+          None, "maverick.safety.shield_rate_limit", subgroup="Safety checks",
+          env=("MAVERICK_SHIELD_RATE_LIMIT",), weaker="higher",
+          warning="A runaway task will be able to run many more safety checks, which slows "
+                  "Lightwork and can cost more."),
+        S("shield", "update_url", "Where shared threat updates come from",
+          "The web address of the signed threat check updates to download.", "text",
+          "Safety", "", "maverick.shield_updates", subgroup="Shared threat updates",
+          max_length=300, pattern=r"(" + _HTTPS + r")?"),
+        S("shield", "update_pubkey", "Publisher key for threat updates",
+          "The publisher's signing key, 64 letters and digits. Updates signed with any other "
+          "key are refused.", "text", "Safety", "", "maverick.shield_updates",
+          subgroup="Shared threat updates", max_length=64, pattern=r"([0-9a-fA-F]{64})?",
+          weaker="change", warning="Threat check updates from a different publisher will "
+                                   "be trusted."),
+        S("shield", "update_interval_hours", "Check for threat updates every",
+          "How often to look for new signed threat check updates.", "number", "Safety", 24,
+          "maverick_dashboard.shield_update_scheduler", subgroup="Shared threat updates",
+          minimum=1, maximum=168, integer=True, unit="hours"),
+        S("safety", "quorum_required", "Approvals needed to change protected settings",
+          "How many other administrators must approve a change to a protected setting "
+          "before it is saved. The person asking can't approve their own change.", "select",
+          "Safety", "", "maverick.quorum", subgroup="Changing protected settings",
+          choices=(("", "None: one administrator can save (default)"),
+                   ("2", "Two other administrators"), ("3", "Three other administrators"),
+                   ("4", "Four other administrators"), ("5", "Five other administrators")),
+          weaker=True, order=("5", "4", "3", "2", ""), env=("MAVERICK_QUORUM_REQUIRED",),
+          warning="Protected settings will change with fewer approvals, or with none."),
+        S("safety", "quorum_protected_keys", "Protected settings",
+          "The settings that need other administrators' approval to change. With none "
+          "ticked, the four marked as default are protected.", "multiselect", "Safety",
+          ["budget.max_dollars", "governance.*", "plugins.*", "safety.*"], "maverick.quorum",
+          subgroup="Changing protected settings",
+          choices=(("safety.*", "Safety settings (default)"),
+                   ("governance.*", "Governance settings (default)"),
+                   ("plugins.*", "Plugin settings (default)"),
+                   ("budget.max_dollars", "Spending limit per task (default)"),
+                   ("budget.*", "All spending limits"), ("security.*", "Security settings"),
+                   ("shield.*", "Shared threat updates"), ("auth.*", "Sign-in settings"),
+                   ("audit.*", "Activity record settings")),
+          weaker="shrink", warning="The settings you remove will change without anyone "
+                                   "else's approval."),
+        S("safety", "quorum_ttl_days", "Approvals stay usable for",
+          "How long an approved change to a protected setting can still be saved.", "number",
+          "Safety", 7, "maverick.quorum", subgroup="Changing protected settings", minimum=1,
+          maximum=90, integer=True, unit="days", weaker="higher",
+          warning="Approved changes will stay usable for longer after they are approved."),
         S("safety", "require_shield", "Require the safety checks",
           "Refuse outside messages and agent requests when Lightwork's safety checks are not "
           "installed, instead of letting them through.", "toggle", "Safety", False,
@@ -822,6 +903,10 @@ def _switches(S) -> tuple:
           "maverick.providers.anthropic_provider", subgroup="How agents work", minimum=2048,
           maximum=128000, integer=True, unit="tokens",
           env=("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR",)),
+        S("voice", "only_mode", "Talk to agents by voice only",
+          "Read every finished answer aloud as soon as it is shown, with code, tables and "
+          "links described instead of spelled out.", "toggle", "AI models", False,
+          "maverick.voice_only", subgroup="How agents work"),
         S("context", "auto_recall", "Remind agents of related past tasks",
           "Before a task starts, give agents the results of the most similar finished "
           "tasks.", "toggle", "AI models", False, "maverick.orchestrator",

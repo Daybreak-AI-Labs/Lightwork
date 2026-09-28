@@ -188,6 +188,8 @@ def register_main_components(app, supervisor):
         ("security", "security_api", "stop_hunter_scheduler", "_hunter_scheduler_thread"),
         ("finance", "finance_scheduler", "stop_finance_scheduler", "_scheduler_thread"),
         ("red_team", "red_team_scheduler", "stop_red_team_scheduler", "_scheduler_thread"),
+        ("shield_updates", "shield_update_scheduler", "stop_shield_update_scheduler",
+         "_scheduler_thread"),
         ("ai_inventory", "ai_inventory_scheduler", "stop_ai_inventory_scheduler", "_scheduler_thread"),
         ("ai_cost", "ai_cost_scheduler", "stop_ai_cost_scheduler", "_scheduler_thread"),
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),

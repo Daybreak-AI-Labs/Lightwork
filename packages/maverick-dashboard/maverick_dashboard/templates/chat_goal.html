@@ -368,6 +368,7 @@
                   data-rating="down" aria-label="No, not useful">👎</button>
           <button id="copy-result" class="btn btn--ghost" type="button" aria-label="Copy the answer">⧉ Copy</button>
           <button id="read-aloud" class="btn btn--ghost" type="button"
+                  data-voice-only="{{ '1' if voice_only else '0' }}"
                   aria-label="Read the result aloud" aria-pressed="false">🔊 Read aloud</button>
           <button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted"
@@ -1600,6 +1601,9 @@
           player.play();
         }).catch(function () {}).finally(function () { speakBtn.disabled = false; });
       });
+      // Voice-only mode: read the finished result aloud as soon as it is
+      // shown (the browser may still ask for a click before playing sound).
+      if (speakBtn.getAttribute('data-voice-only') === '1') speakBtn.click();
     })();
   </script>
 {% endblock %}

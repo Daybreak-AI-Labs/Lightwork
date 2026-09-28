@@ -65,12 +65,9 @@ an AI service, a department) with the ``columns`` described by
 incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
-out, so the page never offers a control that changes nothing: ``[safety]``
-quorum keys, ``cascade`` and ``shield_rate_limit``,
-``[shield] probe_model`` and update addresses, ``[models] cascade``,
-``[routing] bandit``, ``[energy]``, ``[voice]`` only-mode and voice unlock
-(their modules are not called by any run path yet; see
-``settings_catalog_runtime``).
+out, so the page never offers a control that changes nothing: ``[energy]``
+and ``[voice] biometric_unlock`` (voice unlock needs a speaker-recognition
+model this product does not ship; see ``settings_catalog_runtime``).
 """
 from __future__ import annotations
 

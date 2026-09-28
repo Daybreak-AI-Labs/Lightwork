@@ -6,26 +6,19 @@ real latency and real money; even locally it starves the loop. This module
 puts a sliding-window cap on *scans per goal* so one runaway goal can't
 hammer the chokepoint, while other goals' scans proceed untouched.
 
-IMPORTANT — fail-open direction
-===============================
-When :meth:`ShieldRateLimiter.allow` returns ``False``, the caller must
-**skip the shield scan and let the text through with a warning** — never
-block the agent and never fail the tool call. The shield itself is a
-fail-open chokepoint, not a hard dependency (CLAUDE.md rule 1); a rate
-limiter wrapped around it inherits that direction. Throttling trades a
-window of *unscanned* traffic for keeping the agent alive — the warning
-log / ``on_throttle`` callback is what tells the operator that trade
-happened. Do not invert this: a limiter that blocks turns a cost-control
-knob into a denial-of-service of our own agent.
+What happens to throttled text
+==============================
+At the live shield check (:class:`RateLimitedShield`, wrapped around the run's
+shield by ``orchestrator._build_shield``) a throttled scan is REFUSED: the
+text is blocked with a plain reason, it never passes unscanned. The agent
+sees a refusal it can react to (wait, summarise, stop) and the scan budget is
+not bypassed. :meth:`ShieldRateLimiter.allow` still just answers "is there
+room in this goal's window"; the refusal is the wrapper's job.
 
 Usage shape::
 
-    limiter = shield_rate_limit.shared()
-    if limiter is None or limiter.allow(goal_id):
-        verdict = shield.scan(text)          # normal path
-    else:
-        log.warning("shield scan skipped (rate limit) goal=%s", goal_id)
-        verdict = None                       # treat as allowed
+    shield = RateLimitedShield(base=shield, limiter=current())
+    verdict = shield.scan_input(text)   # scanned, or refused when throttled
 
 Throttle observability: ``on_throttle(goal_id, suppressed)`` fires on the
 *first* suppressed call of a window (``suppressed == 1``, timely signal) and
@@ -136,10 +129,10 @@ class ShieldRateLimiter:
                 self._last_alert.pop(gid, None)
 
     def allow(self, goal_id: str | int) -> bool:
-        """True = scan; False = SKIP the scan and pass the text through.
+        """True = scan; False = the goal's window is full.
 
-        The False branch is the fail-open path documented at module top:
-        callers log a warning and continue, they do not block.
+        The live caller (:class:`RateLimitedShield`) refuses the text on
+        False; it never lets it through unscanned.
         """
         gid = str(goal_id)
         now = self._clock()
@@ -167,7 +160,7 @@ class ShieldRateLimiter:
         if fire is not None:
             log.warning(
                 "shield rate limit: goal %s exceeded %d/%.0fs; %d scan(s) "
-                "suppressed (text passes through UNSCANNED)",
+                "refused (the text was blocked, not passed unscanned)",
                 gid, self.max_calls, self.per_seconds, fire,
             )
             if self._on_throttle is not None:
@@ -224,13 +217,91 @@ def shared() -> ShieldRateLimiter | None:
 
 def reset_shared() -> None:
     """Drop the process limiter (tests / config reload)."""
-    global _shared, _shared_built
+    global _shared, _shared_built, _current
     with _shared_lock:
         _shared = None
         _shared_built = False
+        _current = None
+
+
+_current: ShieldRateLimiter | None = None
+
+
+def current() -> ShieldRateLimiter | None:
+    """The limiter for the live shield check, or None when no limit is set.
+
+    Unlike :func:`shared` this follows the configuration: a changed rate
+    (a dashboard save) builds a fresh limiter for the next task, so the new
+    limit applies without a restart. An unchanged rate keeps the same
+    limiter and its windows.
+    """
+    global _current
+    rate = configured_rate()
+    with _shared_lock:
+        if rate is None:
+            _current = None
+        elif _current is None or (_current.max_calls, _current.per_seconds) != rate:
+            _current = ShieldRateLimiter(rate[0], rate[1])
+        return _current
+
+
+def _refused(reason: str):
+    try:
+        from maverick_shield.guard import ShieldVerdict
+    except ImportError:  # pragma: no cover -- only wrapped around a real shield
+        from types import SimpleNamespace
+
+        return SimpleNamespace(allowed=False, severity="high", reasons=[reason],
+                               raw=None, scan_error=False)
+    return ShieldVerdict.block("high", reason)
+
+
+_REFUSAL = ("safety check limit reached for this task: too many checks in a short "
+            "time; the text was not used. Wait, then try again with less")
+
+
+class RateLimitedShield:
+    """Counts each scan against the running goal's window; refuses when full.
+
+    Scans outside a goal (no goal bound) are not counted. A throttled scan is
+    answered with a blocked verdict, so throttled text is never passed on
+    unscanned. Everything else is the wrapped shield's.
+    """
+
+    def __init__(self, base, limiter: ShieldRateLimiter):
+        self.base = base
+        self.limiter = limiter
+
+    def __getattr__(self, name):
+        if name in {"base", "limiter"}:
+            raise AttributeError(name)
+        return getattr(self.base, name)
+
+    @property
+    def backend(self) -> str:
+        return f"rate_limited({getattr(self.base, 'backend', 'unknown')})"
+
+    def _room(self) -> bool:
+        from ..logging_config import current_goal_id
+
+        goal = current_goal_id()
+        return goal is None or self.limiter.allow(goal)
+
+    def scan_input(self, text: str):
+        return self.base.scan_input(text) if self._room() else _refused(_REFUSAL)
+
+    def scan_output(self, text: str, known_prompt: str | None = None):
+        if not self._room():
+            return _refused(_REFUSAL)
+        return self.base.scan_output(text, known_prompt=known_prompt)
+
+    def scan_tool_call(self, tool_name: str, args: dict):
+        if not self._room():
+            return _refused(_REFUSAL)
+        return self.base.scan_tool_call(tool_name, args)
 
 
 __all__ = [
-    "ShieldRateLimiter", "parse_rate", "configured_rate",
-    "shared", "reset_shared",
+    "ShieldRateLimiter", "RateLimitedShield", "parse_rate", "configured_rate",
+    "shared", "reset_shared", "current",
 ]

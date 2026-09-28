@@ -7853,6 +7853,15 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
         text, _redactions = redact_for_speech(text)
     except Exception:  # pragma: no cover -- redaction is fail-open by design
         pass
+    try:
+        # [voice] only_mode: replies are heard, not read, so code, tables and
+        # links are described instead of spelled out.
+        from maverick.voice_only import shape_for_speech, voice_only_enabled
+
+        if voice_only_enabled():
+            text = shape_for_speech(text) or text
+    except Exception:  # pragma: no cover -- shaping never blocks read-aloud
+        log.warning("voice-only shaping failed; reading the text as written")
 
     import os as _os
     import tempfile as _tempfile

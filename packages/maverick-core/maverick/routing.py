@@ -9,8 +9,16 @@ for a (role, signal) tuple, get back the best fit for the current
 cost/quality budget. Defaults match May 2026 Anthropic pricing.
 
 The cascade is opt-in; the legacy ``model_for_role`` path remains
-the default. Wire by passing ``cascade=True`` to your call site or
-setting ``MAVERICK_CASCADE_ROUTING=1``.
+the default. Turn it on with ``[models] cascade = true`` or
+``MAVERICK_CASCADE_ROUTING=1``. The agent loop then consults
+:func:`cascade_draft_model` and :func:`should_escalate` for each turn
+(``Agent._speculative_turn_model``): a role with no model of its own starts
+on the cheaper ``cascade_draft`` model and moves to its normal model once the
+verifier rejects an answer with low confidence or the task goes deeper than
+the tool-call threshold. The thresholds are read at call time from
+``MAVERICK_ESCALATE_BELOW`` / ``MAVERICK_ESCALATE_TOOL_DEPTH`` (environment
+wins) or ``[models] cascade_escalate_below`` /
+``cascade_escalate_tool_depth``.
 """
 from __future__ import annotations
 
@@ -33,9 +41,63 @@ class RouteSignal:
     requires_thinking: bool = False  # caller knows the task needs reasoning
 
 
-# Cascade thresholds (env-tunable).
+# Cascade thresholds (env-tunable). Import-time values kept for callers that
+# read them; the live checks use escalate_below() / escalate_tool_depth().
 ESCALATE_VERIFIER_BELOW = float(os.environ.get("MAVERICK_ESCALATE_BELOW", "0.6"))
 ESCALATE_TOOL_DEPTH = int(os.environ.get("MAVERICK_ESCALATE_TOOL_DEPTH", "3"))
+
+# Roles that anchor the swarm stay on their own model (pick() gives them Opus).
+_ANCHOR_ROLES = frozenset({"orchestrator", "revisor"})
+DRAFT_ROLE = "cascade_draft"
+
+
+def escalate_below() -> float:
+    """Verifier confidence under which the cascade escalates (0 to 1)."""
+    from .env_setting import env_or_config_float
+
+    value = env_or_config_float("MAVERICK_ESCALATE_BELOW", "models",
+                                "cascade_escalate_below", 0.6)
+    return min(max(value, 0.0), 1.0)
+
+
+def escalate_tool_depth() -> int:
+    """Tool calls after which the cascade escalates."""
+    from .env_setting import env_or_config_int
+
+    return max(0, env_or_config_int("MAVERICK_ESCALATE_TOOL_DEPTH", "models",
+                                    "cascade_escalate_tool_depth", 3))
+
+
+def should_escalate(signal: RouteSignal) -> bool:
+    """The kernel's low-confidence signals: a retry, a verifier rejection
+    under the threshold, a tool chain past the depth, or a task that needs
+    reasoning."""
+    if signal.prior_attempt >= 1 or signal.requires_thinking:
+        return True
+    if (signal.verifier_confidence is not None
+            and signal.verifier_confidence < escalate_below()):
+        return True
+    return signal.tool_call_depth > escalate_tool_depth()
+
+
+def cascade_draft_model(role: str, model: str) -> str | None:
+    """The cheaper model a role's turns start on, or None to keep ``model``.
+
+    None unless the cascade is on, the role is not an anchor role, and nobody
+    chose a model for the role (a per-role setting or override always wins).
+    """
+    if role in _ANCHOR_ROLES or not cascade_enabled():
+        return None
+    try:
+        from .llm import _explicit_model_for_role, model_for_role
+
+        if _explicit_model_for_role(role):
+            return None
+        draft = model_for_role(DRAFT_ROLE)
+    except Exception as exc:  # noqa: BLE001 -- routing never breaks the loop
+        log.warning("routing: cascade draft model unavailable (%s)", type(exc).__name__)
+        return None
+    return draft if draft and draft != model else None
 
 
 def pick(signal: RouteSignal) -> str:
@@ -70,14 +132,7 @@ def pick(signal: RouteSignal) -> str:
                     "using the default cascade", signal.role, e)
 
     # Cascade escalation paths.
-    if signal.prior_attempt >= 1:
-        return MODEL_OPUS
-    if (signal.verifier_confidence is not None
-            and signal.verifier_confidence < ESCALATE_VERIFIER_BELOW):
-        return MODEL_OPUS
-    if signal.tool_call_depth > ESCALATE_TOOL_DEPTH:
-        return MODEL_OPUS
-    if signal.requires_thinking:
+    if should_escalate(signal):
         return MODEL_OPUS
 
     # Role-based defaults.
