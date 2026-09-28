@@ -24,10 +24,26 @@ _world_cache: dict[str, Any] = {}
 # which created TWO independent semaphores -- so the real ceiling was the cap
 # per module, not process-wide. One shared semaphore makes the limit actually
 # bind across all streaming routes. Built lazily on the running loop.
+def dashboard_setting(env: str, key: str, default: object) -> object:
+    """``env`` when set, else ``[dashboard] <key>`` (settable on Settings > All
+    settings), else ``default``."""
+    raw = os.environ.get(env)
+    if raw is not None and raw.strip() != "":
+        return raw
+    try:
+        from maverick.config import load_config
+
+        table = (load_config() or {}).get("dashboard") or {}
+    except Exception:  # an unreadable config keeps the default
+        return default
+    value = table.get(key) if isinstance(table, dict) else None
+    return default if value is None else value
+
+
 def _max_sse_streams() -> int:
     try:
-        return max(1, int(os.environ.get("MAVERICK_DASHBOARD_MAX_SSE", "64")))
-    except ValueError:
+        return max(1, int(dashboard_setting("MAVERICK_DASHBOARD_MAX_SSE", "max_sse", 64)))
+    except (TypeError, ValueError):
         return 64
 
 

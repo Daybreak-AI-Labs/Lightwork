@@ -20,7 +20,11 @@ def shutdown_seconds() -> float:
     """New total deadline wins; legacy drain timeout is the explicit fallback."""
     raw = os.environ.get("MAVERICK_SHUTDOWN_TIMEOUT")
     if raw is None:
-        raw = os.environ.get("MAVERICK_DRAIN_TIMEOUT", "20")
+        raw = os.environ.get("MAVERICK_DRAIN_TIMEOUT")
+    if raw is None:
+        from ._shared import dashboard_setting
+
+        raw = dashboard_setting("MAVERICK_SHUTDOWN_TIMEOUT", "shutdown_timeout_seconds", 20)
     try:
         value = float(raw)
         if not math.isfinite(value) or not 0 <= value <= 300:

@@ -131,12 +131,17 @@ _TEXT = {
     "federation.node": "east-1",
     "license.api_url": "https://license.example.com/v1/license",
     "external_agents.approval_webhook": "https://hooks.example.com/approvals",
+    "a2a.base_url": "https://agents.example.com",
 }
 _LIST = {
     "auth.proxy.trusted_proxies": ["10.0.0.5", "10.1.0.0/16"],
     "dashboard.admins": ["user:ada@example.com"],
     "enterprise.allowed_hosts": ["api.example.com"],
     "enterprise.local_providers": ["my-internal-vllm"],
+    "a2a.allowed_origins": ["https://app.example.com"],
+    "a2a.tools": ["web_search"],
+    "a2a.deny_tools": ["shell"],
+    "residency.allowed_regions": ["EU"],
 }
 _SECRETS = {
     "queue.redis_dsn": "rediss://:pw@queue.example.com:6380/0",  # pragma: allowlist secret
@@ -190,6 +195,8 @@ def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
 def _expected(setting, value):
     if setting.control == "path":
         return value
+    if setting.control == "number" and setting.scale != 1.0:
+        return int(value * setting.scale)
     if setting.control == "table" and setting.id == "tenancy.egress":
         return {"acme": {"allow": ["api.example.com"], "deny": ["*.bad.example"]}}
     if setting.control == "table":
@@ -695,3 +702,82 @@ def test_the_page_shows_the_new_controls_in_plain_language(workspaces):
     assert "Test connection" in html and "Check this location" in html
     assert 'data-control="path"' in html
     assert developer_terms(html) == []
+
+
+def test_switches_that_lived_only_in_the_environment_now_have_settings(monkeypatch, as_token,
+                                                                      audit_rows):
+    from maverick import (
+        a2a,
+        a2a_tasks,
+        db_timeouts,
+        federation,
+        residency,
+        worker,
+        workspace_journal,
+        world_model,
+    )
+    from maverick.audit import forwarder
+    from maverick.grpc_api import server as grpc_server
+    from maverick_dashboard import _lifecycle, _shared, scim
+    from maverick_dashboard import app as dashboard_app
+
+    r = _save([
+        {"id": "a2a.token", "value": _SECRET},
+        {"id": "a2a.base_url", "value": "https://agents.example.com"},
+        {"id": "a2a.allowed_origins", "value": ["https://app.example.com"]},
+        {"id": "a2a.max_concurrency", "value": 2},
+        {"id": "a2a.max_dollars", "value": 1.5},
+        {"id": "dashboard.max_goals_per_min", "value": 7},
+        {"id": "dashboard.max_sse", "value": 9},
+        {"id": "dashboard.shutdown_timeout_seconds", "value": 45},
+        {"id": "dashboard.scim_token", "value": _SECRET},
+        {"id": "world_model.connect_timeout_seconds", "value": 20},
+        {"id": "world_model.statement_timeout_ms", "value": 12},
+        {"id": "world_model.orphan_reclaim_seconds", "value": 300},
+        {"id": "queue.goal_acquire_timeout_seconds", "value": 9},
+        {"id": "audit.siem_token", "value": _SECRET},
+        {"id": "audit.siem_allow_insecure", "value": True},
+        {"id": "federation.rate_limit", "value": 11},
+        {"id": "grpc.rate_limit", "value": 13},
+        {"id": "grpc.token", "value": _SECRET},
+        {"id": "residency.allowed_regions", "value": ["DE"]},
+        {"id": "workspace.journal_strict", "value": True},
+        {"id": "workspace.journal_max_file_mb", "value": 3},
+    ], confirm=True)
+    assert r.status_code == 200, r.text
+    assert a2a_tasks._a2a_value("MAVERICK_A2A_TOKEN", "token") == _SECRET
+    assert a2a._base_url() == "https://agents.example.com"
+    assert "https://app.example.com" in a2a._a2a_allowed_origins()
+    assert a2a_tasks._max_concurrency() == 2
+    assert float(a2a_tasks._a2a_value("MAVERICK_A2A_MAX_DOLLARS", "max_dollars", 5.0)) == 1.5
+    assert dashboard_app._max_goals_per_min() == 7
+    assert dashboard_app._max_goals_global_per_min() == 70
+    assert _shared._max_sse_streams() == 9
+    assert _lifecycle.shutdown_seconds() == 45
+    assert scim._scim_secrets() == [_SECRET]
+    assert db_timeouts.postgres_connect_timeout() == 20
+    assert world_model.reclaim_window_seconds() == 300
+    assert worker._queue_goal_acquire_timeout() == 9
+    assert forwarder._siem_token() == _SECRET and forwarder._insecure_siem_allowed() is True
+    assert federation._fed_rate_limit_per_min() == 11
+    assert grpc_server._grpc_rate_limit_per_min() == 13
+    assert grpc_server._resolve_bearer_token() == _SECRET
+    assert residency.allowed_regions() == {"DE"}
+    assert workspace_journal.strict() is True
+    assert workspace_journal._max_file_bytes() == 3 * 1024 * 1024
+    assert _loaded()["world_model"]["statement_timeout_ms"] == 12000
+    # The environment still wins over every one of them.
+    for name, value in (("MAVERICK_A2A_MAX_CONCURRENCY", "5"),
+                        ("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "3"),
+                        ("MAVERICK_ORPHAN_RECLAIM_SECONDS", "10"),
+                        ("MAVERICK_FEDERATION_RATE_LIMIT", "4"),
+                        ("MAVERICK_SIEM_ALLOW_INSECURE", "0"),
+                        ("MAVERICK_GRPC_BEARER_TOKEN", "from-the-environment")):
+        monkeypatch.setenv(name, value)
+    assert a2a_tasks._max_concurrency() == 5
+    assert dashboard_app._max_goals_per_min() == 3
+    assert world_model.reclaim_window_seconds() == 10
+    assert federation._fed_rate_limit_per_min() == 4
+    assert forwarder._insecure_siem_allowed() is False
+    assert grpc_server._resolve_bearer_token() == "from-the-environment"
+    assert _row("dashboard.max_goals_per_min")["locked"] is True

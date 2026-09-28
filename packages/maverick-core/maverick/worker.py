@@ -44,6 +44,24 @@ log = logging.getLogger(__name__)
 # thread does -- other jobs are waiting behind it -- so it probes for a slot
 # only briefly and defers instead of blocking the pool for minutes.
 _QUEUE_GOAL_ACQUIRE_TIMEOUT = env_float("MAVERICK_QUEUE_GOAL_ACQUIRE_TIMEOUT", 5.0)
+
+
+def _queue_goal_acquire_timeout() -> float:
+    """The environment's value, else ``[queue] goal_acquire_timeout_seconds``
+    (settable on the dashboard's All settings page), else the default."""
+    import math
+    import os
+
+    if os.environ.get("MAVERICK_QUEUE_GOAL_ACQUIRE_TIMEOUT", "").strip():
+        return _QUEUE_GOAL_ACQUIRE_TIMEOUT
+    try:
+        from .config import load_config
+
+        raw = ((load_config() or {}).get("queue") or {}).get("goal_acquire_timeout_seconds")
+        value = float(raw) if raw is not None else _QUEUE_GOAL_ACQUIRE_TIMEOUT
+    except Exception:  # an unreadable config keeps the default
+        return _QUEUE_GOAL_ACQUIRE_TIMEOUT
+    return value if math.isfinite(value) and value >= 0 else _QUEUE_GOAL_ACQUIRE_TIMEOUT
 # Bounded like automation_queue._defer_for_slot's flow-concurrency defer, so a
 # goal whose principal/global lane never frees up doesn't requeue forever.
 _MAX_GOAL_SLOT_DEFERS = env_int("MAVERICK_GOAL_SLOT_MAX_DEFERS", 20)
@@ -189,7 +207,7 @@ class Worker:
             # with cron ticks and flow sweeps -- for minutes.
             from .runner import run_goal_in_thread
             status = run_goal_in_thread(
-                int(goal_id), acquire_timeout=_QUEUE_GOAL_ACQUIRE_TIMEOUT,
+                int(goal_id), acquire_timeout=_queue_goal_acquire_timeout(),
                 **_run_identity_kwargs(job.payload),
             )
             if status is None:
@@ -253,7 +271,7 @@ class Worker:
             # a missing concurrency slot defers instead (W1-73).
             from .runner import run_goal_in_thread
             status = run_goal_in_thread(
-                int(goal_id), acquire_timeout=_QUEUE_GOAL_ACQUIRE_TIMEOUT,
+                int(goal_id), acquire_timeout=_queue_goal_acquire_timeout(),
                 **_run_identity_kwargs(job.payload),
             )
             if status is None:

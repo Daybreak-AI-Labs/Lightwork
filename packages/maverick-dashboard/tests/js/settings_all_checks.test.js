@@ -81,7 +81,7 @@ test("testing a switch tests what is saved; a secret is sent only after Replace"
     await click(secret.querySelector("[data-test]"));
     assert.equal(ui.calls[1].body.value,null);
     await click(secret.querySelector("[data-secret-replace]"));
-    secret.querySelector("[data-input]").value="new-access-key";
+    secret.querySelector("[data-input]").value="new-access-key"; // pragma: allowlist secret
     await click(secret.querySelector("[data-test]"));
     assert.equal(ui.calls[2].body.value,"new-access-key");
   }finally{ui.dom.window.close();}

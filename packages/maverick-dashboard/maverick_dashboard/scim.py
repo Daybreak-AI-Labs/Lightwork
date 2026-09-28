@@ -72,6 +72,11 @@ def _scim_secrets() -> list[str]:
     the token; default backend reads ``MAVERICK_SCIM_TOKEN`` from env as before."""
     from maverick.secret_provider import get_secret
     raw = get_secret("MAVERICK_SCIM_TOKEN", "") or ""
+    if not raw.strip():
+        # The dashboard's sealed ``[dashboard] scim_token`` (All settings).
+        from ._shared import dashboard_setting
+
+        raw = str(dashboard_setting("MAVERICK_SCIM_TOKEN", "scim_token", "") or "")
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 

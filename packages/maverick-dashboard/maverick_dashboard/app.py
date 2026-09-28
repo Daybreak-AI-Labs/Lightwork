@@ -2739,9 +2739,12 @@ _goal_rl_lock = threading.Lock()
 
 
 def _max_goals_per_min() -> int:
+    from ._shared import dashboard_setting
+
     try:
-        return max(1, int(os.environ.get("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "30")))
-    except ValueError:
+        return max(1, int(dashboard_setting(
+            "MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "max_goals_per_min", 30)))
+    except (TypeError, ValueError):
         return 30
 
 
@@ -2749,17 +2752,13 @@ def _max_goals_global_per_min() -> int:
     # Process-wide ceiling across all clients; defaults to 10x the per-client
     # cap so one client can't starve others yet a distributed flood is still
     # bounded.
+    from ._shared import dashboard_setting
+
     try:
-        return max(
-            1,
-            int(
-                os.environ.get(
-                    "MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN",
-                    str(_max_goals_per_min() * 10),
-                )
-            ),
-        )
-    except ValueError:
+        return max(1, int(dashboard_setting(
+            "MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "max_goals_global_per_min",
+            _max_goals_per_min() * 10)))
+    except (TypeError, ValueError):
         return _max_goals_per_min() * 10
 
 

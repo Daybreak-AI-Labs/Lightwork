@@ -306,6 +306,40 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Everyone signed in with an invitation or the owner account will be signed "
                   "out.",
           aliases="session secret"),
+        S("dashboard", "scim_token", "Password for automatic account updates",
+          "The password your sign-in provider uses to add, change and remove people in "
+          "Lightwork automatically. Several can be listed, separated by commas, while you "
+          "change it. It is stored sealed and never shown again.",
+          "secret", grp, "", "maverick_dashboard.scim", subgroup=access, max_length=2000,
+          env=("MAVERICK_SCIM_TOKEN",), weaker="change",
+          warning="Your sign-in provider will be able to add, change and remove people with "
+                  "this password.",
+          aliases="scim provisioning token"),
+        S("dashboard", "max_goals_per_min", "New tasks per person each minute",
+          "The most tasks one person or program can start in a minute from the dashboard.",
+          "number", grp, 30, "maverick_dashboard.app", subgroup=access, minimum=1,
+          maximum=10000, integer=True, unit="per minute",
+          env=("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN",), weaker="higher",
+          warning="One person will be able to start many more paid tasks at once.",
+          aliases="rate limit goals"),
+        S("dashboard", "max_goals_global_per_min", "New tasks for everyone each minute",
+          "The most tasks everyone together can start in a minute from the dashboard.",
+          "number", grp, None, "maverick_dashboard.app", subgroup=access, minimum=1,
+          maximum=100000, integer=True, unit="per minute",
+          env=("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN",), weaker="higher",
+          warning="Many more paid tasks will be able to start at once.",
+          none_text="Ten times the limit above", aliases="rate limit goals"),
+        S("dashboard", "max_sse", "Live pages open at once",
+          "How many pages can follow live updates at the same time; more wait.",
+          "number", grp, 64, "maverick_dashboard._shared", subgroup=access, minimum=1,
+          maximum=10000, integer=True, unit="pages", restart=True,
+          env=("MAVERICK_DASHBOARD_MAX_SSE",), aliases="live updates streams"),
+        S("dashboard", "shutdown_timeout_seconds", "Time to finish work when stopping",
+          "When Lightwork stops, how long it waits for running work to finish.",
+          "number", grp, 20, "maverick_dashboard._lifecycle", subgroup=access, minimum=0,
+          maximum=300, unit="seconds",
+          env=("MAVERICK_SHUTDOWN_TIMEOUT", "MAVERICK_DRAIN_TIMEOUT"),
+          aliases="shutdown drain"),
         # ---------------------------------------------------- workspaces
         S("tenancy", "by_user", "A separate workspace for each chat user",
           "Keep each person who writes to Lightwork from a chat app in their own workspace, so "
@@ -419,6 +453,18 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           max_length=300, test="siem", env=("MAVERICK_SIEM_DEST",), weaker="change",
           warning="Activity records will be sent to a different place.",
           aliases="siem splunk syslog forward"),
+        S("audit", "siem_token", "Security monitoring access key",
+          "The access key sent with the activity record to a web address. Stored sealed and "
+          "never shown again.",
+          "secret", grp, "", "maverick.audit.forwarder", subgroup=custody, max_length=1000,
+          env=("MAVERICK_SIEM_TOKEN",), aliases="siem token hec"),
+        S("audit", "siem_allow_insecure", "Allow unencrypted sending",
+          "Let the activity record be sent without encryption, only on a trusted private "
+          "network.",
+          "toggle", grp, False, "maverick.audit.forwarder", subgroup=custody,
+          env=("MAVERICK_SIEM_ALLOW_INSECURE",), weaker=True,
+          warning="Activity records could be read by anyone on the network path.",
+          aliases="insecure plaintext"),
         S("audit.unified", "enable", "Shared activity record",
           "Collect every workspace's activity into one signed record with its own reading "
           "position. Needs the signed activity record.",
@@ -484,6 +530,13 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "number", grp, 3600, "maverick.unified_audit_custody", subgroup=custody, minimum=1,
           maximum=604800, integer=True, unit="seconds", weaker="higher",
           warning="Failed custody copies may be retried less often."),
+        S("residency", "allowed_regions", "Regions data may be stored in",
+          "The only regions Lightwork may keep data in, such as EU or DE. Groups such as EU "
+          "include every member country. Empty: any region.",
+          "list", grp, [], "maverick.residency", pattern=r"[A-Za-z]{2,3}",
+          item_label="Region", item_hint="EU", item_error="a region or country code",
+          env=("MAVERICK_RESIDENCY_ALLOWED",), weaker="widen",
+          warning="Data will be allowed in more regions.", aliases="residency sovereignty"),
         S("audit.worm", "provider", "Tamper-proof storage",
           "Where copies of the activity record are kept so they cannot be changed or deleted "
           "until they expire.",
@@ -522,6 +575,157 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "number", grp, 2555, "maverick.audit.worm", subgroup=worm, minimum=1,
           maximum=36500, integer=True, unit="days", weaker="lower",
           warning="Copies will be removable sooner."),
+    )
+
+
+def _other_agents(S) -> tuple:  # noqa: N803 -- the catalog's row type
+    grp, sub = "Security", "Requests from other agents"
+    tool = r"[A-Za-z0-9_.*-]{1,128}"
+    return (
+        S("a2a", "token", "Password other agents must send",
+          "Other agents must send this password with each request. Stored sealed and never "
+          "shown again.",
+          "secret", grp, "", "maverick.a2a_tasks", subgroup=sub, pattern=_SECRET32,
+          max_length=512, env=("MAVERICK_A2A_TOKEN",), weaker="change",
+          warning="Agents that know this password will be able to send Lightwork work.",
+          aliases="a2a token bearer"),
+        S("a2a", "allow_unauthenticated", "Accept requests without a password",
+          "Only for a trusted network: accept work from other agents that send no password, "
+          "when no password is set.",
+          "toggle", grp, False, "maverick.a2a_tasks", subgroup=sub,
+          env=("MAVERICK_A2A_ALLOW_UNAUTHENTICATED",), weaker=True,
+          warning="Any agent that can reach Lightwork will be able to send it work.",
+          aliases="unauthenticated"),
+        S("a2a", "allowed_origins", "Web pages allowed to send requests",
+          "Web page addresses whose scripts may send requests to Lightwork's agent service.",
+          "list", grp, [], "maverick.a2a", subgroup=sub, pattern=_HTTPS_OR_LOCAL,
+          item_label="Address", item_hint="https://app.example.com",
+          item_error="a web address", env=("MAVERICK_A2A_ALLOWED_ORIGINS",), weaker="grow",
+          warning="More web pages will be able to send Lightwork requests.",
+          aliases="origins cors"),
+        S("a2a", "base_url", "Address other agents use",
+          "The address Lightwork tells other agents to use for this service.",
+          "text", grp, "", "maverick.a2a", subgroup=sub, pattern=_HTTPS_OR_LOCAL,
+          max_length=300, env=("MAVERICK_A2A_BASE_URL",), aliases="base url"),
+        S("a2a", "tools", "Tools other agents' tasks may use",
+          "When filled in, tasks from other agents may use only these tools. Empty: any tool "
+          "the other limits allow.",
+          "list", grp, [], "maverick.a2a_tasks", subgroup=sub, pattern=tool,
+          item_label="Tool", item_hint="web_search", item_error="a tool name",
+          weaker="widen", warning="Tasks from other agents will be able to use more tools.",
+          aliases="allowed tools"),
+        S("a2a", "deny_tools", "Tools other agents' tasks may never use",
+          "Tasks from other agents may never use these tools.",
+          "list", grp, [], "maverick.a2a_tasks", subgroup=sub, pattern=tool,
+          item_label="Tool", item_hint="shell", item_error="a tool name",
+          weaker="shrink", warning="Tasks from other agents will be able to use a tool that "
+                                   "was blocked.",
+          aliases="blocked tools"),
+        S("a2a", "max_dollars", "Spending limit per task from another agent",
+          "The most one task from another agent may spend, whatever it asks for.",
+          "number", grp, 5.0, "maverick.a2a_tasks", subgroup=sub, minimum=0,
+          maximum=100000, unit="dollars", env=("MAVERICK_A2A_MAX_DOLLARS",),
+          weaker="higher", warning="Tasks from other agents will be able to spend more."),
+        S("a2a", "max_wall_seconds", "Time limit per task from another agent",
+          "The longest one task from another agent may run.",
+          "number", grp, 3600.0, "maverick.a2a_tasks", subgroup=sub, minimum=1,
+          maximum=604800, unit="seconds", env=("MAVERICK_A2A_MAX_WALL_SECONDS",),
+          weaker="higher", warning="Tasks from other agents will be able to run longer."),
+        S("a2a", "max_depth", "Sub-task levels for another agent's task",
+          "How many levels of sub-tasks a task from another agent may start.",
+          "number", grp, 3, "maverick.a2a_tasks", subgroup=sub, minimum=1, maximum=64,
+          integer=True, unit="levels", env=("MAVERICK_A2A_MAX_DEPTH",), weaker="higher",
+          warning="Tasks from other agents will be able to start more sub-tasks."),
+        S("a2a", "max_concurrency", "Tasks from other agents at once",
+          "How many tasks from other agents may run at the same time. 0 removes the limit.",
+          "number", grp, 4, "maverick.a2a_tasks", subgroup=sub, minimum=0, maximum=256,
+          integer=True, unit="tasks", env=("MAVERICK_A2A_MAX_CONCURRENCY",),
+          aliases="concurrency"),
+        S("a2a", "max_tasks", "Tasks from other agents kept track of",
+          "How many tasks from other agents Lightwork keeps track of at once.",
+          "number", grp, 1000, "maverick.a2a_tasks", subgroup=sub, minimum=16,
+          maximum=100000, integer=True, unit="tasks", restart=True,
+          env=("MAVERICK_A2A_MAX_TASKS",)),
+    )
+
+
+def _plumbing(S) -> tuple:  # noqa: N803 -- the catalog's row type
+    grp = "Server & deployment"
+    store, queue, grpc, fed = ("Record store", "Shared work queue", "Remote workers",
+                               "Linked Lightwork servers")
+    return (
+        S("world_model", "connect_timeout_seconds", "Wait to reach the database",
+          "How long Lightwork waits to connect to the shared PostgreSQL database.",
+          "number", grp, 10, "maverick.db_timeouts", subgroup=store, minimum=2, maximum=300,
+          integer=True, unit="seconds", env=("MAVERICK_PG_CONNECT_TIMEOUT_SECONDS",)),
+        S("world_model", "io_timeout_seconds", "Wait for a database reply",
+          "How long Lightwork waits for the shared database to answer before treating the "
+          "step as failed.",
+          "number", grp, 35.0, "maverick.postgres_io", subgroup=store, minimum=0.1,
+          maximum=3600, unit="seconds", env=("MAVERICK_PG_IO_TIMEOUT_SECONDS",)),
+        S("world_model", "statement_timeout_ms", "Longest database request",
+          "The longest one request to the shared database may run. 0 removes the limit.",
+          "number", grp, 30000, "maverick.db_timeouts", subgroup=store, minimum=0,
+          maximum=86400, integer=True, unit="seconds", scale=1000,
+          env=("MAVERICK_PG_STATEMENT_TIMEOUT_MS",), weaker="higher",
+          warning="A runaway database request will be able to run longer."),
+        S("world_model", "idle_tx_timeout_ms", "Longest pause inside a database change",
+          "How long a half-finished database change may sit idle before it is cancelled. 0 "
+          "removes the limit.",
+          "number", grp, 60000, "maverick.db_timeouts", subgroup=store, minimum=0,
+          maximum=86400, integer=True, unit="seconds", scale=1000,
+          env=("MAVERICK_PG_IDLE_TX_TIMEOUT_MS",), weaker="higher",
+          warning="A stuck database change will be able to hold records longer."),
+        S("world_model", "orphan_reclaim_seconds", "Treat stopped tasks as stuck after",
+          "After a restart, tasks untouched for this long are marked as stuck so they can be "
+          "looked at.",
+          "number", grp, 60.0, "maverick.world_model", subgroup=store, minimum=0,
+          maximum=86400, unit="seconds", env=("MAVERICK_ORPHAN_RECLAIM_SECONDS",),
+          aliases="orphan reclaim"),
+        S("queue", "goal_acquire_timeout_seconds", "Wait for a free task slot",
+          "How long a worker waits for a free task slot before putting the task back in the "
+          "queue.",
+          "number", grp, 5.0, "maverick.worker", subgroup=queue, minimum=0, maximum=3600,
+          unit="seconds", env=("MAVERICK_QUEUE_GOAL_ACQUIRE_TIMEOUT",)),
+        S("grpc", "token", "Worker service password",
+          "The password callers must send to this server's worker service. Stored sealed "
+          "and never shown again.",
+          "secret", grp, "", "maverick.grpc_api.server", subgroup=grpc, pattern=_SECRET32,
+          max_length=512, restart=True, env=("MAVERICK_GRPC_BEARER_TOKEN",),
+          weaker="change", warning="Callers using the old password will be refused.",
+          aliases="bearer token"),
+        S("grpc", "rate_limit", "Worker service requests per caller each minute",
+          "How many requests one caller may send the worker service in a minute. 0 removes "
+          "the limit.",
+          "number", grp, 600, "maverick.grpc_api.server", subgroup=grpc, minimum=0,
+          maximum=100000, integer=True, unit="per minute", env=("MAVERICK_GRPC_RATE_LIMIT",),
+          weaker="higher", warning="Callers will be able to send more requests."),
+        S("federation", "rate_limit", "Requests per linked server each minute",
+          "How many requests one linked server may send in a minute. 0 removes the limit.",
+          "number", grp, 60, "maverick.federation", subgroup=fed, minimum=0, maximum=100000,
+          integer=True, unit="per minute", env=("MAVERICK_FEDERATION_RATE_LIMIT",),
+          weaker="higher", warning="Linked servers will be able to send more requests."),
+    )
+
+
+def _journal(S) -> tuple:  # noqa: N803 -- the catalog's row type
+    grp = "Data retention"
+    return (
+        S("workspace", "journal_strict", "Stop a change when its record fails",
+          "When a workspace change can't be written to the change record, refuse the change "
+          "instead of only warning.",
+          "toggle", grp, False, "maverick.workspace_journal",
+          env=("MAVERICK_WORKSPACE_JOURNAL_STRICT",), weaker=False,
+          warning="Workspace changes will go ahead even when they can't be recorded.",
+          aliases="journal strict"),
+        S("workspace", "journal_max_file_mb", "Largest change record file",
+          "Change records larger than this are split into a new file.",
+          "number", grp, 8, "maverick.workspace_journal", minimum=1, maximum=4096,
+          integer=True, unit="MB", env=("MAVERICK_WORKSPACE_JOURNAL_MAX_FILE_MB",)),
+        S("workspace", "journal_max_total_mb", "Space for change records",
+          "The most disk space all workspace change records may use.",
+          "number", grp, 256, "maverick.workspace_journal", minimum=1, maximum=1048576,
+          integer=True, unit="MB"),
     )
 
 
@@ -894,7 +1098,8 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
 def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row and column types
     import dataclasses
 
-    rows = list(_sign_in(S) + _people(S) + _security(S) + _server(S))
+    rows = list(_sign_in(S) + _people(S) + _security(S) + _other_agents(S) + _server(S)
+                + _plumbing(S) + _journal(S))
     for index, row in enumerate(rows):
         if row.id == "tenancy.egress":
             rows[index] = dataclasses.replace(row, columns=(

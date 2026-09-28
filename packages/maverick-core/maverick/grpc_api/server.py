@@ -78,8 +78,22 @@ def _generate_stubs() -> None:
         raise RuntimeError(f"protoc failed to generate gRPC stubs (rc={rc})")
 
 
+def _configured_bearer_token() -> str:
+    """``MAVERICK_GRPC_BEARER_TOKEN``, else the sealed ``[grpc] token`` the
+    dashboard's All settings page keeps."""
+    token = os.getenv(_TOKEN_ENV, "")
+    if token.strip():
+        return token
+    try:
+        from ..config import load_config
+        value = ((load_config() or {}).get("grpc") or {}).get("token")
+    except Exception:
+        return ""
+    return value if isinstance(value, str) else ""
+
+
 def _resolve_bearer_token(bearer_token: str | None = None) -> str:
-    token = (bearer_token if bearer_token is not None else os.getenv(_TOKEN_ENV, "")).strip()
+    token = (bearer_token if bearer_token is not None else _configured_bearer_token()).strip()
     if not token:
         raise ValueError(
             "Lightwork gRPC requires a bearer token. Set "
@@ -224,9 +238,16 @@ _GRPC_RATE_MAX_KEYS = 8192
 def _grpc_rate_limit_per_min() -> int:
     """Requests/minute per caller. Default 600; 0 disables. Complements
     maximum_concurrent_rpcs (in-flight cap) with a request-rate cap."""
+    raw = os.environ.get("MAVERICK_GRPC_RATE_LIMIT")
+    if raw is None or raw.strip() == "":
+        try:
+            from ..config import load_config
+            raw = ((load_config() or {}).get("grpc") or {}).get("rate_limit", 600)
+        except Exception:
+            raw = 600
     try:
-        return max(0, int(os.environ.get("MAVERICK_GRPC_RATE_LIMIT", "600")))
-    except ValueError:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
         return 600
 
 

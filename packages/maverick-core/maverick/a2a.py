@@ -49,10 +49,22 @@ def a2a_enabled() -> bool:
     return bool(val)
 
 
+def _a2a_config(key: str) -> object:
+    """``[a2a] <key>`` from config (the dashboard's All settings page writes
+    it); ``None`` when unset or unreadable. Environment variables still win."""
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("a2a") or {}
+    except Exception:
+        return None
+    return cfg.get(key) if isinstance(cfg, dict) else None
+
+
 def _base_url(override: str | None = None) -> str:
     url = (
         override
         or os.environ.get("MAVERICK_A2A_BASE_URL")
+        or str(_a2a_config("base_url") or "").strip()
         or _DEFAULT_BASE_URL
     )
     return url.rstrip("/")
@@ -254,8 +266,12 @@ def _origin_is_loopback(normalized: str) -> bool:
 def _a2a_allowed_origins() -> set[str]:
     # The Host header is intentionally NOT trusted -- DNS rebinding makes it
     # attacker-controlled for this defense. Shared with the MCP allow-list.
-    raw = (os.environ.get("MAVERICK_A2A_ALLOWED_ORIGINS", "")
-           + "," + os.environ.get("MAVERICK_MCP_ALLOWED_ORIGINS", ""))
+    own = os.environ.get("MAVERICK_A2A_ALLOWED_ORIGINS", "")
+    if not own.strip():
+        configured = _a2a_config("allowed_origins")
+        if isinstance(configured, list):
+            own = ",".join(str(origin) for origin in configured)
+    raw = own + "," + os.environ.get("MAVERICK_MCP_ALLOWED_ORIGINS", "")
     return {
         normalized
         for origin in raw.split(",")

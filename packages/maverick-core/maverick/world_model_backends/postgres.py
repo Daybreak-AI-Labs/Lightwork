@@ -2663,12 +2663,8 @@ class PostgresWorldModel:
         Positive windows continue to require the full stale interval.
         Returns the number of rows reclaimed.
         """
-        env_override = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
-        if env_override is not None:
-            try:
-                max_age_seconds = max(0.0, float(env_override))
-            except ValueError:
-                pass
+        from ..world_model import reclaim_window_seconds
+        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"

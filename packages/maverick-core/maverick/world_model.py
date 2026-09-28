@@ -4553,10 +4553,17 @@ def reclaim_window_seconds(default: float = 60.0) -> float:
     heartbeats) can tell callers how often they must refresh liveness."""
     import os
     raw = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
+    if raw is None:
+        # ``[world_model] orphan_reclaim_seconds`` (All settings); env wins.
+        try:
+            from .config import load_config
+            raw = ((load_config() or {}).get("world_model") or {}).get("orphan_reclaim_seconds")
+        except Exception:
+            raw = None
     if raw is not None:
         try:
             return max(0.0, float(raw))
-        except ValueError:
+        except (TypeError, ValueError):
             pass
     return default
 

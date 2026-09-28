@@ -648,9 +648,16 @@ def _replay_seen(
 def _fed_rate_limit_per_min() -> int:
     """Inbound delegations/minute per peer. Default 60; 0 disables. Mirrors
     ``MAVERICK_GRPC_RATE_LIMIT`` on the sibling gRPC API."""
+    raw = os.environ.get("MAVERICK_FEDERATION_RATE_LIMIT")
+    if raw is None or raw.strip() == "":
+        try:
+            from .config import load_config
+            raw = ((load_config() or {}).get("federation") or {}).get("rate_limit", 60)
+        except Exception:
+            raw = 60
     try:
-        return max(0, int(os.environ.get("MAVERICK_FEDERATION_RATE_LIMIT", "60")))
-    except ValueError:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
         return 60
 
 

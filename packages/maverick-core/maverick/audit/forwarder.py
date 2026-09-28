@@ -66,14 +66,28 @@ def _siem_token() -> str | None:
     # failure-policy: best_effort
     except Exception:  # pragma: no cover -- never block forwarding on token lookup
         tok = None
+    if not tok:
+        # The sealed ``[audit] siem_token`` from the dashboard's All settings.
+        value = _audit_config("siem_token")
+        tok = value if isinstance(value, str) else None
     return tok.strip() if tok else None
+
+
+def _audit_config(key: str) -> object:
+    try:
+        from ..config import load_config
+        return ((load_config() or {}).get("audit") or {}).get(key)
+    except Exception:  # pragma: no cover -- config never blocks forwarding
+        return None
 
 
 def _insecure_siem_allowed() -> bool:
     """Opt-in escape hatch for plaintext SIEM transport on a trusted segment."""
     import os
-    return os.environ.get("MAVERICK_SIEM_ALLOW_INSECURE", "").strip().lower() in (
-        "1", "true", "yes", "on")
+    raw = os.environ.get("MAVERICK_SIEM_ALLOW_INSECURE", "").strip().lower()
+    if raw:
+        return raw in ("1", "true", "yes", "on")
+    return _audit_config("siem_allow_insecure") is True
 
 
 def _send_tcp(host: str, port: int, lines: Iterable[str], timeout: float) -> int:
