@@ -150,6 +150,32 @@ def test_authority_registry_is_exact_cas_bound_and_integrity_checked():
         registry.resolve_authority("9" * 64, authority.principal_ref)
 
 
+def test_authority_registry_lists_only_active_enrolled_records_of_one_kind():
+    tenant, authority, binding, rule, asset = _authorities()
+    registry = IdentityGovernanceAuthorityRegistry(
+        tenant_sha256=tenant,
+        store=MemoryStore(),
+        clock=lambda: 1_000.0,
+    )
+    registry.enroll_authority(authority, actor="system:provisioner")
+    registry.enroll_federation_binding(binding, actor="system:provisioner")
+    registry.enroll_capability_rule(rule, actor="system:provisioner")
+    registry.enroll_purview_asset(asset, actor="system:provisioner")
+
+    bindings = registry.active_payloads("federation_binding")
+    assert [row["binding_sha256"] for row in bindings] == [binding.binding_sha256]
+    assert bindings[0]["authority_revision"] == authority.revision
+    assert [row["asset_id"] for row in registry.active_payloads("purview_asset_binding")] == [
+        asset.asset_id
+    ]
+    assert registry.active_payloads("capability_rule")[0]["capabilities"] == list(
+        rule.capabilities
+    )
+    # Short-lived capability mappings are never offered as choices.
+    with pytest.raises(ValueError, match="kind is invalid"):
+        registry.active_payloads("capability_mapping")
+
+
 def test_capability_mapping_registry_retains_then_purges_after_bound():
     tenant, authority, binding, rule, _asset = _authorities()
     now = {"value": 1_000.0}

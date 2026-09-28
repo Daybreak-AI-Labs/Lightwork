@@ -2238,6 +2238,21 @@ class EUAIConformityWorkflow:
         record = _validate_evidence_record(raw, tenant_ref=tenant_ref)
         return _public_evidence(record)
 
+    def list_case_evidence(self, case_id: str) -> list[dict[str, Any]]:
+        """Return one case's fingerprint-only evidence bindings, read-only."""
+
+        tenant_ref = self._require_active()
+        case = self._get_case_record(case_id, tenant_ref=tenant_ref)
+        rows = self._evidence.list(limit=_MAX_EVIDENCE_RECORDS + 1)
+        if len(rows) > _MAX_EVIDENCE_RECORDS:
+            raise AIConformityWorkflowStateError("evidence namespace exceeds its bound")
+        result = []
+        for row in rows:
+            checked = _validate_evidence_record(row, tenant_ref=tenant_ref)
+            if checked["case_id"] == case["id"]:
+                result.append(_public_evidence(checked))
+        return sorted(result, key=lambda item: item["binding_id"])
+
     def export_package(self, case_id: str) -> dict[str, Any]:
         """Export only an exact current four-eyes-approved readiness package."""
 
