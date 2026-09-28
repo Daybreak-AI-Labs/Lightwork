@@ -22,5 +22,37 @@
   <div id="ops-ckpt-result" role="status" aria-live="polite"></div>
   <h3 id="ops-ckpt-list-title">Published checkpoints</h3>
   <div id="ops-ckpt-rows" aria-labelledby="ops-ckpt-list-title">Loading…</div>
+  {% if can_global_admin %}
+  <details class="ops-sub" id="ops-ckpt-settings">
+    <summary>Where checkpoints are kept and which keys may sign them (whole installation)</summary>
+    <p class="muted" id="ops-ckpt-where" role="status" aria-live="polite">Loading…</p>
+    <h4 id="ops-ckpt-folder-title">Folder</h4>
+    <p class="muted">Keep checkpoints somewhere separate from the activity log, such as another disk or
+      write-once storage, so one mistake or attack cannot change both. Leave it empty to keep them beside each
+      workspace&rsquo;s log.</p>
+    <div class="ops-row">
+      <label for="ops-ckpt-folder">Full location of the folder on the server
+        <input class="input" type="text" id="ops-ckpt-folder" maxlength="1024" spellcheck="false" autocomplete="off"></label>
+      <button type="button" class="btn btn--ghost" id="ops-ckpt-folder-check">Check this folder</button>
+      <button type="button" class="btn btn--primary" id="ops-ckpt-folder-save">Use this folder</button>
+    </div>
+    <h4 id="ops-ckpt-keys-title">Pinned keys</h4>
+    <p class="muted">With no pinned keys, checkpoints signed by any key this installation trusts are accepted. Pin
+      keys to accept only checkpoints signed by those keys. Keys are shown by fingerprint only.</p>
+    <ul class="ops-list" id="ops-ckpt-keys" aria-labelledby="ops-ckpt-keys-title"></ul>
+    <div class="ops-row">
+      <label for="ops-ckpt-key-file">Upload a public key file
+        <input class="input" type="file" id="ops-ckpt-key-file" accept=".pub,.pem,.txt,.key,text/plain"></label>
+      <button type="button" class="btn btn--ghost" id="ops-ckpt-key-own">Pin this installation&rsquo;s own key</button>
+    </div>
+    <details>
+      <summary>Paste a key instead</summary>
+      <label for="ops-ckpt-key-paste">Public key
+        <textarea class="textarea" id="ops-ckpt-key-paste" rows="3" maxlength="4096"></textarea></label>
+      <button type="button" class="btn btn--ghost" id="ops-ckpt-key-add">Pin this key</button>
+    </details>
+    <p id="ops-ckpt-settings-msg" role="status" aria-live="polite" class="muted"></p>
+  </details>
+  {% endif %}
 </section>
 <script src="/static/lightwork-ops-panels.js" defer></script>

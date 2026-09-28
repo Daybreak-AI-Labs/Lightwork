@@ -18,10 +18,28 @@ later change to that day can be proven.
 * ``POST /api/v1/audit/checkpoints/retire`` -- retire the checkpoint of a
   day the record-keeping policy deleted (workspace ``admin``, confirmed).
 
-Paths never come from the browser: the log is the workspace's own and the
-checkpoints live in the same folder the trust receipts use. Fingerprints are
-looked up on the server from the chosen row. Every change is recorded in the
-activity log before it is made; a refused record changes nothing.
+Where checkpoints live and which keys they must be signed with (the
+commands' ``--checkpoint-dir`` and ``--pubkey``) is chosen once by an
+installation administrator:
+
+* ``GET  /api/v1/audit/checkpoints/settings`` -- the folder in use and the
+  pinned keys, by fingerprint only (installation ``audit``).
+* ``POST /api/v1/audit/checkpoints/settings/folder/check`` -- check a folder
+  on the server without saving (installation ``admin``).
+* ``POST /api/v1/audit/checkpoints/settings/folder`` -- use another folder,
+  or go back to the default (installation ``admin``, always confirmed:
+  checks then read a different history).
+* ``POST /api/v1/audit/checkpoints/settings/keys`` and ``.../keys/remove`` --
+  pin a key from a key file (or this installation's own key) and unpin one
+  (installation ``admin``). Widening the pinned set, and removing the last
+  pinned key (which falls back to this installation's own key list), need
+  confirmation.
+
+A chosen folder is only accepted inside the allowed places (the same
+server-side check Settings uses for locations); the log is always the
+workspace's own. Fingerprints are looked up on the server from the chosen
+row. Every change is recorded in the activity log before it is made; a
+refused record changes nothing.
 """
 from __future__ import annotations
 
@@ -35,7 +53,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, require_permission
+from .auth import caller_principal, require_global_permission, require_permission
 
 router = APIRouter(prefix="/api/v1/audit/checkpoints", tags=["audit-checkpoints"])
 
@@ -91,18 +109,26 @@ def _audit_dir() -> Path:
 
 
 def _checkpoint_dir() -> Path:
-    from .trust_receipts_api import _checkpoint_dir as shared_dir
+    from .audit_checkpoint_settings import checkpoint_dir
 
-    return shared_dir()
+    return checkpoint_dir()
 
 
-def _record(request: Request, action: str, **detail: Any) -> None:
+def _pinned() -> list[str] | None:
+    """The pinned keys (``--pubkey``), or None for the local key list."""
+    from .audit_checkpoint_settings import trusted_pubkeys
+
+    return trusted_pubkeys()
+
+
+def _record(request: Request, action: str, *, installation: bool = False, **detail: Any) -> None:
     """One activity-log row naming who asked; refused -> nothing happens."""
     from maverick.audit import AuditRefused, audit_event
 
+    extra = {"_global": True} if installation else {}
     try:
         audit_event("control_plane_action", agent="dashboard", action=action,
-                    actor=caller_principal(request) or "local administrator", **detail)
+                    actor=caller_principal(request) or "local administrator", **extra, **detail)
     except AuditRefused as exc:
         raise HTTPException(status_code=503, detail=(
             "This could not be added to the activity log, so nothing was changed.")) from exc
@@ -127,7 +153,7 @@ def _retired_by_policy() -> set[str]:
 def _chain() -> list[dict]:
     from maverick.audit.checkpoints import list_checkpoints
 
-    return list_checkpoints(_checkpoint_dir())
+    return list_checkpoints(_checkpoint_dir(), trusted_pubkeys=_pinned())
 
 
 def _overview() -> dict:
@@ -175,7 +201,7 @@ def _publish(body: PublishIn, supersede: str | None) -> dict:
     from maverick.audit.checkpoints import publish_checkpoint
 
     path = publish_checkpoint(
-        _audit_dir(), _checkpoint_dir(), day=body.day,
+        _audit_dir(), _checkpoint_dir(), day=body.day, trusted_pubkeys=_pinned(),
         supersedes_checkpoint_sha256=supersede,
         lifecycle_reason="gdpr_reanchor" if supersede else None,
     )
@@ -194,6 +220,9 @@ def _publish_problem(exc: Exception) -> str:
         return "There is no activity recorded for that day."
     if "intact" in text:
         return "Nothing changed on this day, so publish it normally instead."
+    if "outside the pinned" in text:
+        return ("This installation's own signing key is not one of the pinned keys, so it cannot sign "
+                "checkpoints. Pin its key below, or remove the pinned keys.")
     if "key" in text or "sign" in text:
         return "Checkpoints need tamper-evident records. Turn them on on the Compliance page first."
     return "The checkpoint could not be published. Check the log below, then try again."
@@ -217,7 +246,8 @@ def _verify(body: VerifyIn) -> dict:
     from maverick.audit.checkpoints import verify_checkpoints
 
     minimum_sequence, minimum_digest = _parse_receipt(body.receipt)
-    breaks = verify_checkpoints(_audit_dir(), _checkpoint_dir(),
+    pinned = _pinned()
+    breaks = verify_checkpoints(_audit_dir(), _checkpoint_dir(), trusted_pubkeys=pinned,
                                 minimum_sequence=minimum_sequence,
                                 minimum_digest=minimum_digest)
     problems: list[str] = []
@@ -233,6 +263,7 @@ def _verify(body: VerifyIn) -> dict:
         "intact": not breaks,
         "none_yet": missing,
         "pinned": minimum_sequence is not None,
+        "keys_pinned": bool(pinned),
         "problems": problems,
         "technical": [f"{b.sequence}: {b.reason}: {str(b.detail)[:300]}" for b in breaks[:50]],
     }
@@ -259,7 +290,7 @@ def _retire_target(sequence: int) -> dict:
 def _retire(target: dict) -> dict:
     from maverick.audit.checkpoints import retire_checkpoint
 
-    retire_checkpoint(_audit_dir(), _checkpoint_dir(),
+    retire_checkpoint(_audit_dir(), _checkpoint_dir(), trusted_pubkeys=_pinned(),
                       supersedes_checkpoint_sha256=str(target["sha256"]),
                       lifecycle_reason="retention_purge")
     return {"retired": True, "day": target["day"]}
@@ -325,6 +356,191 @@ async def retire(request: Request, body: RetireIn) -> dict:
     await run_in_threadpool(_record, request, "audit_checkpoint_retire", sequence=body.sequence,
                             day=target["day"])
     return await _run(_retire, target)
+
+
+# ---- where checkpoints live and which keys sign them (installation-wide) -------
+
+class FolderIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A folder on the server; empty means "beside each workspace's log".
+    folder: str = Field(default="", max_length=1024)
+    confirm: bool = False
+
+
+class KeyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: A public key file's text (uploaded or pasted), in any common form.
+    key: str | None = Field(default=None, max_length=4096)
+    #: Pin this installation's own signing key instead.
+    own_key: bool = False
+    confirm: bool = False
+
+
+class KeyRemoveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fingerprint: str = Field(min_length=4, max_length=40)
+    confirm: bool = False
+
+
+def _fingerprint(hex_key: str) -> str:
+    from .settings_catalog import key_fingerprint
+
+    return key_fingerprint(hex_key)
+
+
+def _own_key() -> str | None:
+    """This installation's active signing key, when signing is on."""
+    from maverick.audit.writer import _resolve_signing
+
+    if not _resolve_signing(None):
+        return None
+    try:
+        from maverick.attestation import publisher_key
+
+        return publisher_key()[1]
+    except Exception:  # noqa: BLE001 -- no key material reachable
+        return None
+
+
+def _settings_view() -> dict:
+    from . import audit_checkpoint_settings as store
+
+    current = store.load()
+    own = _own_key()
+    return {
+        "folder": current["folder"] or "",
+        "default_folder": not current["folder"],
+        "keys": [{"fingerprint": _fingerprint(k), "own": k == own} for k in current["keys"]],
+        "signing_on": own is not None,
+        "own_key_pinned": bool(own and own in current["keys"]),
+        "max_keys": store.MAX_KEYS,
+    }
+
+
+def _check_folder(folder: str) -> str:
+    from . import settings_paths
+
+    try:
+        return settings_paths.check(folder, kind="folder", writable=True)
+    except settings_paths.PathRefused as exc:
+        text = str(exc)
+        raise HTTPException(status_code=422, detail=text[:1].upper() + text[1:]) from exc
+
+
+def _no_overlap(folder: str) -> None:
+    """The kernel refuses a checkpoint folder that holds, or sits inside, an
+    activity log; refuse such a choice up front in plain words."""
+    from maverick.paths import maverick_home
+
+    chosen = Path(folder).resolve()
+    home = maverick_home().resolve()
+    audit = _audit_dir().resolve()
+    holds_logs = chosen == home or chosen in home.parents
+    inside_log = chosen == audit or audit in chosen.parents
+    if holds_logs or inside_log:
+        raise HTTPException(status_code=422, detail=(
+            "Choose a folder outside Lightwork's own folder, such as a separate disk or "
+            "write-once storage."))
+
+
+@router.get("/settings")
+async def settings(request: Request) -> dict:
+    require_global_permission(request, "audit")
+    try:
+        return await run_in_threadpool(_settings_view)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="The checkpoint settings could not be read.") from exc
+
+
+@router.post("/settings/folder/check")
+async def check_folder(request: Request, body: FolderIn) -> dict:
+    require_global_permission(request, "admin")
+    if not body.folder.strip():
+        return {"ok": True, "message": "Checkpoints will be kept beside each workspace's activity log."}
+    stored = await run_in_threadpool(_check_folder, body.folder)
+    _no_overlap(stored)
+    from . import settings_paths
+
+    return {"ok": True, "message": settings_paths.describe_ok("folder")}
+
+
+@router.post("/settings/folder")
+async def choose_folder(request: Request, body: FolderIn) -> dict:
+    require_global_permission(request, "admin")
+    from . import audit_checkpoint_settings as store
+
+    stored = None
+    if body.folder.strip():
+        stored = await run_in_threadpool(_check_folder, body.folder)
+        _no_overlap(stored)
+    current = await run_in_threadpool(store.load)
+    if (current["folder"] or None) == stored:
+        return {"saved": False, "message": "That folder is already in use."}
+    if body.confirm is not True:
+        raise HTTPException(status_code=409, detail=(
+            "Confirm the change to continue. Checks will read the checkpoints in the new folder. "
+            "Nothing was changed."))
+    await run_in_threadpool(_record, request, "audit_checkpoint_folder", installation=True,
+                            folder=stored or "default", previous=current["folder"] or "default")
+    await run_in_threadpool(store.save, stored, current["keys"])
+    return {"saved": True, "message": ("Checkpoints are now kept in the chosen folder." if stored else
+                                       "Checkpoints are kept beside each workspace's activity log again.")}
+
+
+@router.post("/settings/keys")
+async def pin_key(request: Request, body: KeyIn) -> dict:
+    require_global_permission(request, "admin")
+    from . import audit_checkpoint_settings as store
+    from .settings_catalog import SettingError, parse_public_key
+
+    if body.own_key:
+        key = await run_in_threadpool(_own_key)
+        if key is None:
+            raise HTTPException(status_code=409, detail=(
+                "This installation has no signing key yet. Turn on tamper-evident records first."))
+    else:
+        try:
+            key = parse_public_key(body.key or "")
+        except SettingError as exc:
+            raise HTTPException(status_code=422, detail=(
+                "That file is not a public key this page can read. Ask for the public key file.")) from exc
+    current = await run_in_threadpool(store.load)
+    if key in current["keys"]:
+        return {"saved": False, "message": "That key is already pinned."}
+    if len(current["keys"]) >= store.MAX_KEYS:
+        raise HTTPException(status_code=422, detail=f"Pin at most {store.MAX_KEYS} keys.")
+    # A second key widens who can sign trusted checkpoints: confirm it.
+    if current["keys"] and body.confirm is not True:
+        raise HTTPException(status_code=409, detail=(
+            "Confirm to continue. Checkpoints signed with this key will be trusted too. Nothing was changed."))
+    fingerprint = _fingerprint(key)
+    await run_in_threadpool(_record, request, "audit_checkpoint_key_pinned", installation=True,
+                            fingerprint=fingerprint)
+    await run_in_threadpool(store.save, current["folder"], [*current["keys"], key])
+    return {"saved": True, "fingerprint": fingerprint,
+            "message": f"Pinned the key {fingerprint}. Only pinned keys are trusted from now on."}
+
+
+@router.post("/settings/keys/remove")
+async def unpin_key(request: Request, body: KeyRemoveIn) -> dict:
+    require_global_permission(request, "admin")
+    from . import audit_checkpoint_settings as store
+
+    current = await run_in_threadpool(store.load)
+    match = [k for k in current["keys"] if _fingerprint(k) == body.fingerprint]
+    if not match:
+        raise HTTPException(status_code=404, detail="That key is no longer pinned. Refresh the page.")
+    remaining = [k for k in current["keys"] if k not in match]
+    # Removing the last pin falls back to this installation's own key list.
+    if not remaining and body.confirm is not True:
+        raise HTTPException(status_code=409, detail=(
+            "Confirm to continue. With no pinned keys, any key this installation trusts is accepted. "
+            "Nothing was changed."))
+    await run_in_threadpool(_record, request, "audit_checkpoint_key_unpinned", installation=True,
+                            fingerprint=body.fingerprint)
+    await run_in_threadpool(store.save, current["folder"], remaining)
+    return {"saved": True, "message": ("Unpinned. Checkpoints are trusted when signed by any key this "
+                                       "installation trusts." if not remaining else "Unpinned.")}
 
 
 __all__ = ["RECEIPT_KIND", "router"]

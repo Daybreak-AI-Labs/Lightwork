@@ -226,6 +226,7 @@
         result.textContent = '';
         if (v.intact) {
           result.appendChild(el('p', null, 'Every checkpoint matches the activity log.' +
+            (v.keys_pinned ? ' Every checkpoint is signed with a pinned key.' : '') +
             (v.pinned ? ' Your kept receipt matches too.' : ' Choose a kept receipt to also check nothing was rolled back.')));
         } else if (v.none_yet) {
           result.appendChild(el('p', null, 'No checkpoints have been published yet.'));
@@ -239,6 +240,98 @@
       } catch (failure) { say(result, await failText(failure, 'check the checkpoints')); }
     }));
     load();
+    checkpointSettings(load);
+  }
+
+  // Where checkpoints are kept and which keys may sign them (installation admins).
+  function checkpointSettings(reloadList) {
+    var box = $('ops-ckpt-settings');
+    if (!box) return;
+    var msg = $('ops-ckpt-settings-msg');
+    var folder = $('ops-ckpt-folder');
+    async function loadSettings() {
+      try {
+        var data = await request('/api/v1/audit/checkpoints/settings');
+        folder.value = data.folder || '';
+        var where = data.default_folder ? 'Checkpoints are kept beside each workspace\'s activity log.'
+          : 'Checkpoints are kept in ' + data.folder + '.';
+        where += data.keys.length ? ' Only checkpoints signed with ' + plural(data.keys.length, 'pinned key') + ' are accepted.'
+          : ' Checkpoints signed by any key this installation trusts are accepted.';
+        if (data.keys.length && data.signing_on && !data.own_key_pinned) {
+          where += ' This installation\'s own key is not pinned, so it cannot publish new checkpoints.';
+        }
+        say($('ops-ckpt-where'), where);
+        var list = $('ops-ckpt-keys');
+        list.textContent = '';
+        if (!data.keys.length) list.appendChild(el('li', 'muted', 'No keys are pinned.'));
+        data.keys.forEach(function (k) {
+          var li = el('li');
+          li.appendChild(el('span', null, (k.own ? 'This installation\'s key' : 'Key') + ', fingerprint '));
+          li.appendChild(el('strong', null, k.fingerprint));
+          var remove = button('Unpin');
+          remove.setAttribute('aria-label', 'Unpin the key ' + k.fingerprint);
+          remove.addEventListener('click', busy(remove, async function () {
+            var last = data.keys.length === 1;
+            if (last && !(await confirmed('Unpin the last key? Checkpoints signed by any key this installation trusts will be accepted again.', 'Unpin'))) return;
+            await save('/api/v1/audit/checkpoints/settings/keys/remove', {fingerprint: k.fingerprint, confirm: last}, 'unpin the key');
+          }));
+          li.appendChild(document.createTextNode(' '));
+          li.appendChild(remove);
+          list.appendChild(li);
+        });
+        box.setAttribute('data-keys', String(data.keys.length));
+      } catch (failure) { say($('ops-ckpt-where'), await failText(failure, 'load the checkpoint settings')); }
+    }
+    async function save(url, body, action) {
+      try {
+        var r = await request(url, {method: 'POST', json: body});
+        say(msg, r.message);
+        await loadSettings();
+        if (reloadList) await reloadList();
+      } catch (failure) { say(msg, await failText(failure, action)); }
+    }
+    async function pin(body) {
+      var widening = Number(box.getAttribute('data-keys') || '0') > 0;
+      if (widening && !(await confirmed('Also accept checkpoints signed with this key? The keys already pinned stay pinned.', 'Pin key'))) return;
+      body.confirm = widening;
+      await save('/api/v1/audit/checkpoints/settings/keys', body, 'pin the key');
+    }
+    var check = $('ops-ckpt-folder-check');
+    check.addEventListener('click', busy(check, async function () {
+      say(msg, 'Checking…');
+      try {
+        var r = await request('/api/v1/audit/checkpoints/settings/folder/check', {method: 'POST', json: {folder: folder.value.trim()}});
+        say(msg, r.message);
+      } catch (failure) { say(msg, await failText(failure, 'check the folder')); }
+    }));
+    var use = $('ops-ckpt-folder-save');
+    use.addEventListener('click', busy(use, async function () {
+      var chosen = folder.value.trim();
+      var text = chosen ? 'Keep checkpoints in ' + chosen + ' from now on? Checks will read the checkpoints in that folder, not the ones kept so far.'
+        : 'Keep checkpoints beside each workspace\'s activity log again? Checks will read the checkpoints kept there.';
+      if (!(await confirmed(text, 'Use this folder'))) return;
+      await save('/api/v1/audit/checkpoints/settings/folder', {folder: chosen, confirm: true}, 'use the folder');
+    }));
+    var own = $('ops-ckpt-key-own');
+    own.addEventListener('click', busy(own, async function () { await pin({own_key: true}); }));
+    var add = $('ops-ckpt-key-add');
+    add.addEventListener('click', busy(add, async function () {
+      var text = $('ops-ckpt-key-paste').value.trim();
+      if (!text) { say(msg, 'Paste a public key first.'); return; }
+      await pin({key: text});
+      $('ops-ckpt-key-paste').value = '';
+    }));
+    var file = $('ops-ckpt-key-file');
+    file.addEventListener('change', async function () {
+      var f = file.files[0];
+      if (!f) return;
+      if (f.size > 4096) { say(msg, 'That file is too large to be a public key.'); return; }
+      var text;
+      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read.'); return; }
+      await pin({key: text.trim()});
+      file.value = '';
+    });
+    loadSettings();
   }
 
   // ======================================================================
@@ -711,7 +804,12 @@
     if (!check) return;
     var out = $('ops-network-out');
     check.addEventListener('click', busy(check, async function () {
-      var body = {shared_messaging: $('ops-network-shared').checked};
+      function dial(id) {
+        var v = $(id) ? $(id).value : '';
+        return v === 'on' ? true : (v === 'off' ? false : null);
+      }
+      var body = {shared_messaging: $('ops-network-shared').checked,
+        levels: dial('ops-network-levels'), grounding: dial('ops-network-grounding')};
       var f = $('ops-network-file') && $('ops-network-file').files[0];
       if (f) {
         if (f.size > 512 * 1024) { say(out, 'That file is too large.'); return; }
