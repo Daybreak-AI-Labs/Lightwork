@@ -508,10 +508,12 @@ def _finance_profile_rows(S, C) -> tuple:
                   "refused may go ahead once a person approves them.",
           aliases="gaap ifrs accounting standards"),
         S("finance", "materiality", "Materiality",
-          "The amount at which a finance matter is significant. An unusual payment pattern "
+          "The amount at which a finance matter is significant. A duplicate payment, a "
+          "payment just under or split around an approval limit, or one made out of hours "
           "that adds up to this much or more needs a second, independent reviewer before "
-          "its case can close, and agents never act alone on an amount this large. Leave "
-          "empty for no materiality. Applies while finance operations are turned on.",
+          "its case can close. A finance action set to act alone under the approval limit "
+          "waits for a person above this amount. Leave empty for no materiality. "
+          "Applies while finance operations are turned on.",
           "number", "Finance", None, "maverick.finance.profile", subgroup=_FINANCE_SUBGROUP,
           minimum=1, maximum=1000000000, unit="dollars", weaker="higher",
           warning="Fewer unusual payment patterns will need a second reviewer, and agents "

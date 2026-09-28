@@ -16,7 +16,7 @@ configuration); with the layer off, or a key unset, behaviour is unchanged.
     A positive amount in the reporting currency. Anomaly findings at or above
     it are raised to high severity, so closing them needs a second, independent
     person (:mod:`maverick.finance.anomaly_engine`), and an ``auto_threshold``
-    action never runs on its own at or above it.
+    action never runs on its own above it.
 ``[finance.automation]``
     ``default`` sets the automation level of every finance action
     (:data:`FINANCE_ACTIONS`); any other key names one action class
@@ -248,8 +248,8 @@ def compile_policy(profile: FinanceProfile) -> Policy | None:
     automation = automation_levels(profile)
     parts: list[Policy] = []
     if automation:
-        # Materiality caps what may run on its own: an auto_threshold action at
-        # or above it always waits for a person (lowest threshold wins in the
+        # Materiality caps what may run on its own: an auto_threshold action
+        # above it always waits for a person (lowest threshold wins in the
         # union, so a smaller [governance] require_human_above still applies).
         ceiling = {} if profile.materiality is None else {
             action: profile.materiality

@@ -281,7 +281,7 @@ regimes = ["sox", "gaap", "dora", "basel_iii", "ifrs_17", "pci"]
 #                            # (strictest-wins with regimes)
 # materiality = 50000        # anomaly findings totalling this or more need a
 #                            # second reviewer; auto_threshold never acts alone
-#                            # at or above it
+#                            # above it
 
 # [finance.automation]
 # Automation level of the finance actions: draft (agent prepares, a person
