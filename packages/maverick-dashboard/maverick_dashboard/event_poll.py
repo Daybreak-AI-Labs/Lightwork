@@ -105,7 +105,6 @@ def _require_stored_event_source_authority(owner: str, authority: str) -> None:
     if authority == "operate":
         return
 
-    import os
 
     from maverick_dashboard import rbac
     from maverick_dashboard.auth import (
@@ -119,7 +118,9 @@ def _require_stored_event_source_authority(owner: str, authority: str) -> None:
         return
     # Static-token requests deliberately persist this reserved execution owner;
     # the token itself is the deployment-global operator credential.
-    if owner == "user:local" and os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    from ._shared import dashboard_token
+
+    if owner == "user:local" and dashboard_token():
         return
     role = (
         global_role_for_principal(owner)

@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import auth
+from . import auth, settings_access_guard, settings_tests
 from . import settings_catalog as catalog
 
 router = APIRouter()
@@ -324,6 +324,8 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
         from .settings_catalog_integrations import voice_choices
 
         return voice_choices(source)
+    if source in _ACCESS_SOURCES:
+        return _ACCESS_SOURCES[source]()
     if source == "ekko_apps":
         from maverick.config import _EKKO_DEFAULT_BLOCKED_APPS
         from maverick.work_discovery import KNOWN_APPS
@@ -335,6 +337,64 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
     return []
 
 
+def _theme_choices() -> list[tuple[str, str]]:
+    from . import identity_format
+    from .themes import BUILTIN_THEMES, custom_themes
+
+    names = {"dark": "Dark", "light": "Light", "solarized": "Solarized",
+             "hicontrast": "High contrast"}
+    out = [(name, names.get(name, identity_format.humanize(name)))
+           for name in sorted(BUILTIN_THEMES)]
+    try:
+        extra = sorted(custom_themes())
+    except Exception:  # an unreadable theme table offers the built-in themes
+        extra = []
+    return out + [(name, identity_format.humanize(name)) for name in extra]
+
+
+def _capability_role_choices() -> list[tuple[str, str]]:
+    from maverick.capability import configured_roles
+
+    from . import identity_format
+
+    try:
+        roles = sorted(configured_roles())
+    except Exception:  # an unreadable roles table offers no roles
+        roles = []
+    # No empty choice: an empty default permission set would make every
+    # permission lookup fail. Reset removes the setting instead.
+    return [(role, identity_format.humanize(role)) for role in roles]
+
+
+def _workspace_choices() -> list[tuple[str, str]]:
+    try:
+        from maverick.tenant.registry import list_tenants
+
+        tenants = list_tenants()
+    except Exception:  # no workspace list: nothing to choose
+        tenants = []
+    out = []
+    for tenant in tenants:
+        tid = str(getattr(tenant, "id", "") or "")
+        if tid:
+            out.append((tid, str(getattr(tenant, "display_name", "") or "") or tid))
+    return sorted(out, key=lambda c: c[1].lower())
+
+
+def _model_role_choices() -> list[tuple[str, str]]:
+    from maverick.llm import ROLE_MODELS
+
+    from . import identity_format
+
+    return [(role, identity_format.humanize(role)) for role in sorted(ROLE_MODELS)]
+
+
+_ACCESS_SOURCES = {
+    "themes": _theme_choices,
+    "capability_roles": _capability_role_choices,
+    "workspaces": _workspace_choices,
+    "model_roles": _model_role_choices,
+}
 _LAZY_SOURCES = frozenset({"tools", "tools_any"})
 
 
@@ -441,6 +501,8 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         "item_hint": setting.item_hint,
         "empty_text": setting.empty_text,
         "add_label": setting.add_label,
+        "path_kind": setting.path_kind,
+        "test_label": settings_tests.button_label(setting),
     }
     if setting.empty_hint:
         row["empty_hint"] = setting.empty_hint
@@ -496,7 +558,8 @@ def _grid_state(setting: catalog.Setting, value: object) -> dict[str, Any]:
                             if lazy else ""),
         })
     return {
-        "kind": "rules" if setting.control == "rules" else "grid",
+        "kind": "rules" if setting.control == "rules" else (
+            "named" if setting.row_kind == "named" else "grid"),
         "columns": columns,
         "key_choices": [{"value": v, "label": label} for v, label in setting.choices],
         "row_label": setting.row_label,
@@ -521,6 +584,9 @@ def _grid_rows(setting: catalog.Setting, value: object) -> list[dict[str, Any]]:
                 cell = spec
             else:
                 cell = spec.get(column.key) if isinstance(spec, dict) else None
+            if column.kind == "secret":
+                cells[column.key] = {"is_set": bool(cell)}  # never the password
+                continue
             if cell is None:
                 cell = [] if column.kind == "picks" else column.default
             if column.kind == "picks":
@@ -573,11 +639,22 @@ def _effective(setting: catalog.Setting, layers: dict[str, Any]) -> object:
     return state["value"] if state["known"] else None
 
 
+def _working_values(layers: dict[str, Any]) -> dict[str, object]:
+    """Every setting's value as the kernel uses it, for checks run on the
+    server (a value set in the environment is used as the environment has it).
+    Secrets are included; nothing built from this is ever sent to the page."""
+    values: dict[str, object] = {}
+    for setting in catalog.SETTINGS:
+        env = next((os.environ[n].strip() for n in setting.env if os.environ.get(n, "").strip()), None)
+        values[setting.id] = env if env is not None else _effective(setting, layers)
+    return values
+
+
 def catalog_state() -> dict[str, Any]:
     layers = _sources()
     groups = []
     for name in catalog.GROUPS:
-        rows = [_row(s, layers) for s in catalog.SETTINGS if s.group == name]
+        rows = [_row(s, layers) for s in _in_page_order(name)]
         subgroups = list(dict.fromkeys(r["subgroup"] for r in rows if r["subgroup"]))
         for r in rows:
             r["subgroup_slug"] = _slug(name + " " + r["subgroup"]) if r["subgroup"] else ""
@@ -589,6 +666,19 @@ def catalog_state() -> dict[str, Any]:
             "subgroups": [{"name": sub, "slug": _slug(name + " " + sub)} for sub in subgroups],
         })
     return {"groups": groups}
+
+
+def _in_page_order(group: str) -> list[catalog.Setting]:
+    """A group's settings with each part (subgroup) kept together.
+
+    Rows come from several group modules, so one part's rows can be split by
+    another module's; the page shows rows without a part first, then each part
+    in the order it first appears, never one heading twice."""
+    settings = [s for s in catalog.SETTINGS if s.group == group]
+    first: dict[str, int] = {}
+    for setting in settings:
+        first.setdefault(setting.subgroup, len(first))
+    return sorted(settings, key=lambda s: (s.subgroup != "", first[s.subgroup]))
 
 
 def _slug(name: str) -> str:
@@ -706,7 +796,52 @@ def _audit_value(setting: catalog.Setting, value: object) -> object:
         return "set" if value else "not set"
     if setting.control == "keys" and isinstance(value, list):
         return [catalog.key_fingerprint(k) for k in value]
+    secret = _secret_columns(setting)
+    if secret and isinstance(value, list):
+        return [{k: ("set" if v else "not set") if k in secret else v for k, v in row.items()}
+                if isinstance(row, dict) else row for row in value]
     return value
+
+
+def _secret_columns(setting: catalog.Setting) -> list[str]:
+    return [c.key for c in setting.columns if c.kind == "secret"]
+
+
+def _keep_row_secrets(setting: catalog.Setting, old: object, new: object) -> object:
+    """A password left empty in a row keeps that row's saved password (rows
+    are matched by their unique column); a new row must have one."""
+    keys = _secret_columns(setting)
+    if not keys or not isinstance(new, list):
+        return new
+    unique = next((c.key for c in setting.columns if c.unique), None)
+    saved = {row.get(unique): row for row in (old if isinstance(old, list) else [])
+             if isinstance(row, dict) and unique}
+    out = []
+    for row in new:
+        row = dict(row)
+        for key in keys:
+            if row.get(key):
+                continue
+            previous = saved.get(row.get(unique)) if unique else None
+            kept = previous.get(key) if isinstance(previous, dict) else None
+            column = next(c for c in setting.columns if c.key == key)
+            if not kept and column.required:
+                raise _Refused(400, f"{setting.label}: enter the {column.label.lower()} for "
+                                    f"each new {setting.item_label.lower()}.")
+            row[key] = kept or ""
+        out.append(row)
+    return out
+
+
+def _sealed_rows(setting: catalog.Setting, rows: object) -> object:
+    """Rows as they are written: every password sealed with the deployment key."""
+    keys = _secret_columns(setting)
+    if not keys or not isinstance(rows, list):
+        return rows
+    from . import settings_store
+
+    return [{k: settings_store._seal_global_secret(v) if k in keys and v else v
+             for k, v in row.items()} for row in rows]
 
 
 def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # noqa: C901
@@ -765,12 +900,13 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 new = catalog.coerce(_resolved(setting, old), item.value)
             except catalog.SettingError as exc:
                 raise _Refused(400, str(exc)) from exc
+            new = _keep_row_secrets(setting, old, new)
             if new is None:
                 base_present, base_value = catalog.lookup(layers["base"], setting.path)
                 writes[setting.path] = None
                 new = base_value if base_present else _default_of(setting)
             else:
-                writes[setting.path] = new
+                writes[setting.path] = _sealed_rows(setting, new)
         unchanged = old == new and (not item.reset or state["source"] != "here")
         if unchanged and (item.reset or not setting.secret):
             writes.pop(setting.path, None)
@@ -843,7 +979,8 @@ def _plan_table(
     return {**base_rows, **wanted}, writes
 
 
-def _record(changes: list[dict], actor: str, confirmed: bool) -> None:
+def _record(changes: list[dict], actor: str, confirmed: bool,
+            asked: frozenset[str] = frozenset()) -> None:
     from maverick.audit import EventKind, audit_event
 
     for change in changes:
@@ -857,8 +994,19 @@ def _record(changes: list[dict], actor: str, confirmed: bool) -> None:
             key=setting.key,
             old=_audit_value(setting, change["old"]),
             new=_audit_value(setting, change["new"]),
-            confirmed=bool(confirmed and catalog.weakens(setting, change["old"], change["new"])),
+            confirmed=bool(confirmed and (setting.id in asked or catalog.weakens(
+                setting, change["old"], change["new"]))),
         )
+
+
+def _guard(request: Request, writes: dict, changes: list[dict],
+           layers: dict[str, Any]) -> list[dict]:
+    """Sign-in, administrator and key changes that could lock people or data
+    out: refused (settings_access_guard.Refused) or returned for confirmation."""
+    prospective = _working_values(layers)
+    for change in changes:
+        prospective[change["setting"].id] = change["new"]
+    return settings_access_guard.review(request, changes, layers, writes, prospective)
 
 
 @router.post(API_PATH)
@@ -875,6 +1023,13 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
         # ``message`` is written for people (the page shows it as is).
         return JSONResponse({"detail": exc.message, "message": exc.message},
                             status_code=exc.status, headers={"Cache-Control": "no-store"})
+    try:
+        access = await run_in_threadpool(_guard, request, writes, changes, _layers) \
+            if changes else []
+    except settings_access_guard.Refused as exc:
+        return JSONResponse({"detail": exc.message, "message": exc.message, "lockout": True},
+                            status_code=409, headers={"Cache-Control": "no-store"})
+    weakening = weakening + access
     if weakening and not body.confirm:
         return JSONResponse(
             {"detail": "confirmation required", "confirm": weakening},
@@ -898,7 +1053,8 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
         ) from exc
     actor = auth.caller_principal(request) or "local administrator"
     try:
-        await run_in_threadpool(_record, changes, actor, body.confirm)
+        await run_in_threadpool(_record, changes, actor, body.confirm,
+                                frozenset(item["id"] for item in access))
     except AuditRefused as exc:
         # The activity record refused the change: put the previous values back
         # so nothing changes without a record of it.
@@ -922,6 +1078,69 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+# ---------------------------------------------------------------- checks
+class SettingCheck(BaseModel):
+    id: str = Field(min_length=3, max_length=120)
+    value: Any = None
+
+
+# A few checks a minute: each can reach out over the network, so the button
+# must not become a way to probe the server's surroundings.
+_CHECK_LIMIT = 20
+_CHECK_WINDOW = 60.0
+_CHECK_TIMES: list[float] = []
+_CHECK_LOCK = threading.Lock()
+
+
+def _check_allowed() -> bool:
+    now = time.monotonic()
+    with _CHECK_LOCK:
+        _CHECK_TIMES[:] = [t for t in _CHECK_TIMES if now - t < _CHECK_WINDOW]
+        if len(_CHECK_TIMES) >= _CHECK_LIMIT:
+            return False
+        _CHECK_TIMES.append(now)
+        return True
+
+
+def _run_check(setting: catalog.Setting, value: object) -> settings_tests.Outcome:
+    layers = _sources()
+    values = _working_values(layers)
+    if value is None or value == "":
+        value = values.get(setting.id)
+    elif setting.control != "path":
+        try:
+            value = catalog.coerce(_resolved(setting, values.get(setting.id)), value)
+        except catalog.SettingError as exc:
+            return settings_tests.Outcome(False, str(exc))
+        values[setting.id] = value
+    else:
+        values[setting.id] = value
+    return settings_tests.run(setting, value, values)
+
+
+@router.post(API_PATH + "/test")
+async def catalog_test(request: Request, body: SettingCheck) -> JSONResponse:
+    """Try an entered (or the saved) value: one plain pass or fail sentence.
+
+    Never echoes the value or any secret, reaches the network only through the
+    SSRF guard with a short time limit, and is limited to a few checks a
+    minute."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    setting = catalog.BY_ID.get(body.id)
+    headers = {"Cache-Control": "no-store"}
+    if setting is None or not settings_tests.button_label(setting):
+        message = "This setting has nothing to test."
+        return JSONResponse({"detail": message, "message": message}, status_code=404,
+                            headers=headers)
+    if not _check_allowed():
+        message = "Too many checks in a short time. Wait a minute and try again."
+        return JSONResponse({"detail": message, "message": message}, status_code=429,
+                            headers=headers)
+    outcome = await run_in_threadpool(_run_check, setting, body.value)
+    return JSONResponse({"ok": outcome.ok, "message": outcome.message}, headers=headers)
 
 
 __all__ = ["router", "catalog_state", "PAGE_PATH", "API_PATH"]

@@ -14,31 +14,33 @@ page (dashboard overlay) > the installer's config.toml > the built-in default.
 
 Deliberately NOT in the catalog:
 
-* Developer / operations plumbing with no business meaning: ``[grpc]``,
-  ``[grpc_dispatch]``, ``[langchain]``, ``[queue]``, ``[coding]``,
-  ``[local_runtime]`` (serving engines). Programs the product never starts
-  itself (``python -m`` helpers) have nothing to change here: ``[perf]``
-  profiling, ``[ebpf_monitor]``, ``[model_proxy]`` (its key is kept out of the
-  product's settings on purpose) and ``[tui] keys``. The research rungs
-  (``[self_modify]`` files and tests, ``[adapter_rung]``,
+* Developer / operations plumbing with no business meaning: ``[langchain]``,
+  ``[coding]``, ``[local_runtime]`` (serving engines). Programs the product
+  never starts itself (``python -m`` helpers) have nothing to change here:
+  ``[perf]`` profiling, ``[ebpf_monitor]``, ``[model_proxy]`` (its key is kept
+  out of the product's settings on purpose) and ``[tui] keys``. The research
+  rungs (``[self_modify]`` files and tests, ``[adapter_rung]``,
   ``[emergent_protocol]``/``[emergent_codec]``) are in
   settings_catalog_learning.py, off by default and confirmed before they widen;
   the code-experiment on/off switch itself stays on the Learning page.
-* Deployment-only by design (sign-in, isolation and key custody must not be
-  changeable from inside the app they protect): ``[auth]`` (single sign-on),
-  ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
-  ``[federation]``, ``[audit.worm]`` / ``[audit.unified]`` custody, the
-  Pushover credentials (read only from the server's environment),
-  ``[deployment]`` (installer provenance), and every setting that names a
-  server program or an environment variable (``signal_cli_path``,
-  ``[screening] sdn_path``, ``*_token_env``; the AI gateway's credentials
-  themselves can be set, sealed, in the runtime rows). Exceptions: the
-  Obsidian notes folder (checked to be a folder path), the voice program and
-  model file, picked by name from the checked lists of Lightwork's own
-  programs and speech model folders, and the privacy modules' key names, as
-  sealed rows restricted to their own module's names (settings_catalog_privacy).
+* Sign-in, workspaces, key custody, record stores, the work queue, remote
+  workers, linked servers and the license settings ARE here
+  (settings_catalog_access), behind the lock-out guard in
+  ``settings_access_guard``: a change that would lock the person saving (or
+  saved records) out is refused until its check passes. Still
+  deployment-only by design: ``[client] id`` (it also places the encryption
+  key), ``[deployment] type`` (installer provenance), and the settings that
+  name an environment variable or a server program (``*_token_env``,
+  ``signal_cli_path``, ``[screening] sdn_path``) until their groups add a
+  ``path`` row; the credentials themselves (AI gateway, Stripe, Pushover,
+  webhooks) can be set, sealed. Exceptions: the Obsidian notes folder
+  (checked to be a folder path), the voice program and model file, picked by
+  name from the checked lists of Lightwork's own programs and speech model
+  folders, and the privacy modules' key names, as sealed rows restricted to
+  their own module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
-  models, the license (Settings > License), the per-task spending cap,
+  models, installing and issuing licenses (Settings > License), the per-task
+  spending cap,
   capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections (the account-connection and desktop-return switches are on
@@ -48,6 +50,10 @@ Deliberately NOT in the catalog:
 * Structured policies that need their module's own page to author safely:
   privacy notice publishing targets, per-team gateway credentials, and the
   few governance tables listed in ``settings_catalog_governance``.
+
+A ``path`` control names a file or folder on the server; the server checks it
+(settings_paths). A row with ``test`` gets a "Test connection" button whose
+check (settings_tests) is bounded, SSRF-guarded and never repeats a secret.
 
 Controls beyond single values: ``keys`` (trusted publisher keys, added from an
 uploaded or pasted key file and shown only by fingerprint), ``table`` (a list
@@ -90,6 +96,7 @@ GROUPS: tuple[str, ...] = (
     "Security suite",
     "AI governance",
     "People & access",
+    "Server & deployment",
 )
 
 GROUP_INTROS: dict[str, str] = {
@@ -107,15 +114,21 @@ GROUP_INTROS: dict[str, str] = {
     "Finance": "When money movements stop for a person, which rules apply and how finance monitoring runs.",
     "Security suite": "How the environment hunter gathers security events and how often the hunters run.",
     "AI governance": "Detailed policies for the AI governance modules, the AI gateway and outbound GRC records.",
-    "People & access": "Which departments people can use, and what membership of a sign-in group gives them.",
+    "People & access": "How people sign in, who administers Lightwork, and which departments people can use.",
+    "Server & deployment": "Where Lightwork keeps its records, how its servers work together, and its license. Most of these take effect after a restart.",
 }
 
 CONTROLS = frozenset({
     "toggle", "select", "number", "text", "list", "secret", "multiselect", "rate",
-    "keys", "table", "rules",
+    "keys", "table", "rules", "path",
 })
 
-COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words"})
+# ``path`` rows name a file or folder on the server; ``path_kind`` says which.
+PATH_KINDS = frozenset({"file", "folder"})
+
+COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words", "text",
+                          "secret", "color"})
+_COLOR = r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})"
 
 
 @dataclass(frozen=True)
@@ -124,8 +137,13 @@ class Column:
 
     ``select`` is a short fixed list, ``pick`` one choice from a long list the
     page can search, ``picks`` several such choices in order, ``number`` a
-    bounded number, ``switch`` on or off, and ``words`` short references
-    separated by commas.
+    bounded number, ``switch`` on or off, ``words`` short references
+    separated by commas, ``text`` one short value, ``secret`` a password
+    for the row: sealed when saved, never shown again, and kept as it is when
+    left empty (``rules`` rows are matched by their ``unique`` column), and
+    ``color`` a colour chosen with a colour picker (optional ones may be left
+    out). A ``table`` with row kind ``named`` has rows the person names
+    (``pattern`` checks the name; ``fixed_keys`` are names it may not use).
     """
 
     key: str
@@ -218,6 +236,16 @@ class Setting:
     # The default when the setting's table already holds other keys (some
     # kernel readers keep older defaults for a partly written table).
     partial_default: object = _NO_PARTIAL
+    # ``path`` controls: a "file" or a "folder" on the server. The server
+    # checks it exists, stays inside the allowed places, and that Lightwork
+    # may read it (``path_writable``: also save into it; ``path_private``: a
+    # key file nobody else on the server may read). See settings_paths.
+    path_kind: str = ""
+    path_writable: bool = False
+    path_private: bool = False
+    # A "Test connection" button: the name of a check in settings_tests that
+    # tries the entered (or saved) value and answers in one plain sentence.
+    test: str = ""
 
     @property
     def id(self) -> str:
@@ -463,6 +491,7 @@ SETTINGS: tuple[Setting, ...] = (
     S("agent_trust", "require_signed", "Require outside agents to sign",
       "Refuse outside agents that only present a shared password instead of a signature.",
       "toggle", "Security", False, "maverick.federation", weaker=False,
+      env=("MAVERICK_FEDERATION_REQUIRE_SIGNED",),
       warning="Outside agents will be able to connect with a shared password alone."),
     S("external_agents", "require_signed", "Outside agents must use their strongest credential",
       "An outside agent registered with a signature key must always use it.",
@@ -2179,9 +2208,10 @@ from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_runtime,
 )
 
-for _group in (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
-               settings_catalog_privacy, settings_catalog_governance,
-               settings_catalog_integrations):
+_GROUP_MODULES = (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
+                  settings_catalog_privacy, settings_catalog_governance,
+                  settings_catalog_integrations)
+for _group in _GROUP_MODULES:
     SETTINGS += tuple(_group.entries(S, C, Column))
 
 BY_ID: dict[str, Setting] = {s.id: s for s in SETTINGS}
@@ -2216,6 +2246,16 @@ _ORDERED: tuple[tuple[str, str], ...] = (
     # Ekko counts a pattern only on days it still keeps.
     ("ekko.min_distinct_days", "ekko.retention_days"),
 )
+# Settings that need others filled in only when they hold one chosen value
+# (a choice of "shared queue" needs the queue's address and key).
+_REQUIRES_VALUE: dict[tuple[str, str], tuple[str, ...]] = {}
+# Group modules may declare the same kinds of pairs for their own rows
+# (``REQUIRES_NONEMPTY``, ``REQUIRES_ANY``, ``ORDERED``, ``REQUIRES_VALUE``).
+for _group in _GROUP_MODULES:
+    _REQUIRES_NONEMPTY.update(getattr(_group, "REQUIRES_NONEMPTY", {}))
+    _REQUIRES_ANY.update(getattr(_group, "REQUIRES_ANY", {}))
+    _ORDERED += tuple(getattr(_group, "ORDERED", ()))
+    _REQUIRES_VALUE.update(getattr(_group, "REQUIRES_VALUE", {}))
 
 
 class SettingError(ValueError):
@@ -2316,6 +2356,8 @@ def _coerce_value(setting: Setting, value: object) -> object:  # noqa: C901 - on
                 and number == int(number):
             number = int(number)
         return number
+    if control == "path":
+        return _coerce_path(setting, value)
     if control in {"text", "secret"}:
         if not isinstance(value, str):
             raise SettingError(f"{label}: enter text.")
@@ -2365,6 +2407,27 @@ def _coerce_value(setting: Setting, value: object) -> object:  # noqa: C901 - on
     if control == "rules":
         return _coerce_rules(setting, value)
     raise SettingError(f"{label}: this setting cannot be changed here.")  # pragma: no cover
+
+
+def _coerce_path(setting: Setting, value: object) -> str | None:
+    """A server location: checked on the server where Lightwork runs."""
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise SettingError(f"{setting.label}: enter a location on the server.")
+    text = value.strip()
+    if len(text) > setting.max_length:
+        raise SettingError(f"{setting.label}: use at most {setting.max_length} characters.")
+    if not text:
+        return None  # an emptied box means "stop setting this here"
+    from . import settings_paths
+
+    try:
+        return settings_paths.check(text, kind=setting.path_kind,
+                                    writable=setting.path_writable,
+                                    private=setting.path_private)
+    except settings_paths.PathRefused as exc:
+        raise SettingError(f"{setting.label}: {exc}") from exc
 
 
 # --------------------------------------------------------- publisher keys
@@ -2476,6 +2539,14 @@ def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one 
             if name not in allowed:
                 raise SettingError(f"{label}: choose each {setting.item_label.lower()} from the list.")
             out[name] = _grid_spec(setting, row)
+        elif setting.row_kind == "named":
+            if setting.pattern and not re.fullmatch(setting.pattern, name):
+                raise SettingError(f"{label}: each name must be {setting.item_error}.")
+            if name in setting.fixed_keys:
+                raise SettingError(f"{label}: “{name}” is already taken. Choose another name.")
+            spec = _grid_spec(setting, row)
+            # An optional column left empty is left out, never stored empty.
+            out[name] = {k: v for k, v in spec.items() if v not in ("", None)}
         elif setting.row_kind == "risk":
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name) or "__" in name:
                 raise SettingError(
@@ -2539,6 +2610,26 @@ def _coerce_cell(setting: Setting, column: Column, value: object) -> object:  # 
                 raise SettingError(f"{where}: enter a whole number.")
             return int(value)
         return float(value)
+    if kind == "color":
+        text = "" if value is None else value
+        if not isinstance(text, str) or (text and not re.fullmatch(_COLOR, text.strip())):
+            raise SettingError(f"{where}: choose a colour.")
+        if column.required and not text.strip():
+            raise SettingError(f"{where}: choose a colour for each row.")
+        return text.strip().lower()
+    if kind in {"text", "secret"}:
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            raise SettingError(f"{where}: enter text.")
+        text = value.strip()
+        if len(text) > column.max_length:
+            raise SettingError(f"{where}: use at most {column.max_length} characters.")
+        if text and column.pattern and not re.fullmatch(column.pattern, text):
+            raise SettingError(f"{where}: each entry must be {column.item_error}.")
+        if kind == "text" and column.required and not text:
+            raise SettingError(f"{where}: fill this in for each row.")
+        return text  # an empty secret keeps the row's saved one (settings_all_page)
     if kind == "words":
         if value is None:
             value = ""
@@ -2778,6 +2869,8 @@ def _table_loosens(setting: Setting, old: object, new: object) -> bool:
     after = new if isinstance(new, dict) else {}
     if setting.row_kind == "grid":
         return _grid_loosens(setting, before, after)
+    if setting.row_kind == "named":
+        return False if setting.weaker is None else before != after
     if setting.row_kind == "rate":
         for name, spec in before.items():
             if name not in after:
@@ -2814,6 +2907,14 @@ def cross_checks(effective: dict[str, object]) -> None:
             first = BY_ID[setting_id]
             names = ", ".join(f"“{BY_ID[o].label}”" for o in options)
             raise SettingError(f"{first.label}: fill in at least one of {names} first.")
+    for (setting_id, wanted), needs in _REQUIRES_VALUE.items():
+        if str(effective.get(setting_id)) != wanted:
+            continue
+        for needed in needs:
+            if not effective.get(needed):
+                first, second = BY_ID[setting_id], BY_ID[needed]
+                chosen = dict(first.choices).get(wanted, wanted)
+                raise SettingError(f"{first.label} “{chosen}”: fill in “{second.label}” first.")
     for low_id, high_id in _ORDERED:
         low, high = effective.get(low_id), effective.get(high_id)
         if _is_number(low) and _is_number(high) and float(low) > float(high):
@@ -2869,7 +2970,7 @@ def display_value(setting: Setting, value: object) -> str:
     if setting.control == "keys" and isinstance(value, list):
         return f"{len(value)} trusted key" + ("" if len(value) == 1 else "s")
     if setting.control == "table" and isinstance(value, dict):
-        if setting.row_kind == "grid":
+        if setting.row_kind in {"grid", "named"}:
             return _count(len(value), setting.item_label.lower()) if value else "None"
         noun = "limit" if setting.row_kind == "rate" else "tool"
         return f"{len(value)} {noun}" + ("" if len(value) == 1 else "s") if value else "None"
@@ -2904,8 +3005,8 @@ def _assert_consistent() -> None:
         if s.warning:
             assert s.weaker is not None, s.id
         if s.control == "table":
-            assert s.row_kind in {"rate", "risk", "grid"}, s.id
-        if s.row_kind == "grid" or s.control == "rules":
+            assert s.row_kind in {"rate", "risk", "grid", "named"}, s.id
+        if s.row_kind in {"grid", "named"} or s.control == "rules":
             assert s.columns and all(c.kind in COLUMN_KINDS for c in s.columns), s.id
             assert not s.scalar or len(s.columns) == 1, s.id
             for c in s.columns:
@@ -2916,6 +3017,14 @@ def _assert_consistent() -> None:
         if s.key_kind == "entries":
             assert s.control == "table", s.id
         assert s.scale > 0, s.id
+        assert (s.control == "path") == bool(s.path_kind), s.id
+        assert not s.path_kind or s.path_kind in PATH_KINDS, s.id
+    for pairs in (_REQUIRES_NONEMPTY, _REQUIRES_VALUE):
+        for first, needs in pairs.items():
+            first_id = first[0] if isinstance(first, tuple) else first
+            assert first_id in BY_ID, first_id
+            for needed in (needs if isinstance(needs, tuple) else (needs,)):
+                assert needed in BY_ID, needed
 
 
 _assert_consistent()

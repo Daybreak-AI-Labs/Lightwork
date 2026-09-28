@@ -53,6 +53,7 @@ from ._shared import (
     require_provider_or_400,
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear api._world_cache
+from ._shared import dashboard_token as _dashboard_token
 from .api_schemas import (
     ActiveTenantIn,
     AgentOverrideIn,
@@ -1722,7 +1723,7 @@ async def upload_attachment(
 
 def _privacy_auth_genuinely_off() -> bool:
     """Strict auth-off decision for privacy credential and mutation boundaries."""
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    if _dashboard_token():
         return False
     try:
         from maverick.config import config_source_errors, load_config
@@ -1794,7 +1795,7 @@ def _request_identity(request: Request) -> str | None:
     principal = str(caller_principal(request) or "")
     if principal:
         return principal
-    expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    expected = _dashboard_token()
     if expected:
         authorization = request.headers.get("authorization", "")
         supplied = authorization[7:] if authorization.startswith("Bearer ") else ""

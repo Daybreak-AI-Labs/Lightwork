@@ -374,27 +374,18 @@ def load_governed_records_config() -> dict:
     """Load only sources allowed to select the governed-record backend.
 
     Tenant overlays must not select a deployment-global persistence plane.
-    Base/operator configuration and environment variables remain the authority
-    for that selection.
+    The deployment-global sources do: config.toml, the dashboard settings
+    overlay (written only by a global administrator on Settings > All
+    settings), then the operator overlay; environment variables still win in
+    the readers. This is :func:`load_global_config`, which never merges a
+    tenant overlay.
     """
-    _load_wizard_env()
-    cfg = _load_config_file(config_path())
-    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
-    if overlay:
-        cfg = _deep_merge_config(
-            cfg,
-            _load_config_file(Path(overlay).expanduser()),
-        )
-    return cfg
+    return load_global_config()
 
 
 def governed_records_config_source_errors() -> dict[str, str]:
     """Unreadable sources participating in governed-backend selection."""
-    paths = [config_path()]
-    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
-    if overlay:
-        paths.append(Path(overlay).expanduser())
-    return _source_errors(paths)
+    return config_source_errors(include_tenant=False)
 
 
 def _source_errors(paths: list[Path]) -> dict[str, str]:

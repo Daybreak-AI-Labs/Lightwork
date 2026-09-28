@@ -61,6 +61,9 @@ _PUBKEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _MAX_PEERS = 64
 
 DEFAULT_ORIGIN = "local"
+# The ``[federation]`` peer lists this module reads: linked servers that may
+# pass on chat messages, and those that may share marketplace listings.
+PEER_TABLES = ("channel_peers", "marketplace_peers")
 
 
 class FederationError(Exception):
@@ -97,6 +100,8 @@ def peer_allowlist(kind: str, cfg: dict | None = None) -> dict[str, dict]:
     fail-closed direction. An unreadable config yields an empty allowlist
     (reject everything), never an exception.
     """
+    if kind not in PEER_TABLES:
+        return {}  # an unknown list never borrows another list's peers
     if cfg is None:
         try:
             from .config import load_config

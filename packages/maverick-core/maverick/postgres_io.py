@@ -24,7 +24,15 @@ class PostgresIOTimeout(psycopg.OperationalError):
 
 def postgres_io_timeout_seconds(value=None) -> float:
     if value is None:
-        value = os.environ.get("MAVERICK_PG_IO_TIMEOUT_SECONDS", DEFAULT_IO_TIMEOUT_SECONDS)
+        # A present environment value is used as given (even empty, which is
+        # refused below); only an absent one falls back to the dashboard's
+        # ``[world_model] io_timeout_seconds``.
+        value = os.environ.get("MAVERICK_PG_IO_TIMEOUT_SECONDS")
+    if value is None:
+        from .db_timeouts import configured
+
+        value = configured("MAVERICK_PG_IO_TIMEOUT_SECONDS", "io_timeout_seconds",
+                           DEFAULT_IO_TIMEOUT_SECONDS)
     try:
         seconds = float(value)
     except (ValueError, TypeError, OverflowError):

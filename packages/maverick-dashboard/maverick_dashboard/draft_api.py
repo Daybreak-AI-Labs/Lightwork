@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from maverick import config
@@ -34,7 +33,9 @@ def context_for(request: Request) -> str:
     principal = _authorization_principal(request)
     mode = "principal"
     if principal is None:
-        mode = "dashboard-token" if os.environ.get("MAVERICK_DASHBOARD_TOKEN") else "local"
+        from ._shared import dashboard_token
+
+        mode = "dashboard-token" if dashboard_token() else "local"
     identity = [current_tenant_id_strict(), mode, principal]
     return hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
 

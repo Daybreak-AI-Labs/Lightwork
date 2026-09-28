@@ -8,7 +8,6 @@ concerns out of the dashboard's page controller.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -96,7 +95,9 @@ def readiness_deep_checks() -> tuple[bool, dict[str, str]]:
 
 def health_should_redact() -> bool:
     """Whether auth-exempt probe responses must omit operational details."""
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    from ._shared import dashboard_token
+
+    if dashboard_token():
         return True
     try:
         from maverick.oidc import oidc_enabled

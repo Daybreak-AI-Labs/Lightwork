@@ -61,7 +61,12 @@ def _oversight() -> dict:
         .capability_enforced(), False)
     from .paths import maverick_home
     out["killswitch_path"] = str(maverick_home() / "HALT")
+    # The delegation rules live in ``[approval] delegation`` (the dashboard's
+    # "Who reviews which approvals"); the older ``[approval_delegation]``
+    # table name still counts.
     out["approval_delegation_configured"] = _safe(
+        lambda: bool(__import__("maverick.approval_delegation", fromlist=["load_rules"])
+                     .load_rules()), False) or _safe(
         lambda: bool((__import__("maverick.config", fromlist=["load_config"])
                       .load_config() or {}).get("approval_delegation")), False)
     return out

@@ -40,14 +40,14 @@
   <details class="panel settings-all-about">
     <summary>What can't be changed here</summary>
     <p class="muted">
-      Sign-in and single sign-on, how workspaces are kept apart, encryption keys, where Lightwork
-      stores its files, and payment service keys are set by whoever runs your server. They protect
-      this page itself, so they can only be changed there. A setting marked
-      &ldquo;Set by your server's deployment settings&rdquo; is fixed in the same way.
+      A setting marked &ldquo;Set by your server's deployment settings&rdquo; is fixed by whoever
+      runs your server, so it can only be changed there. So are the main encryption key and the
+      folder Lightwork keeps its files in: they protect or start Lightwork itself.
     </p>
     <p class="muted">
-      Where Lightwork keeps its files on the server, the file of sanctions names, and the server
-      passwords that outside agents and the AI gateway use are also set there.
+      Sign-in, administrator and key settings are checked before they are saved. A change that
+      would lock you out, or leave saved records unreadable, is refused until its test passes,
+      and you are asked to confirm before you are signed out.
     </p>
     <p class="muted">
       AI service keys, models, the spending cap per task, features, abilities, connections, plugins
@@ -160,6 +160,11 @@
           {% elif s.control == 'text' %}
             <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
                    value="{{ s.value or '' }}" aria-describedby="{{ cid }}-help">
+          {% elif s.control == 'path' %}
+            <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
+                   value="{{ s.value or '' }}" spellcheck="false" autocomplete="off"
+                   placeholder="{{ 'Full location of the folder on the server' if s.path_kind == 'folder' else 'Full location of the file on the server' }}"
+                   aria-describedby="{{ cid }}-help">
           {% elif s.control == 'list' %}
             <div class="settings-all-list" data-list data-item-label="{{ s.item_label }}" data-item-hint="{{ s.item_hint }}" data-max-length="{{ s.max_length }}">
               <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label">
@@ -193,7 +198,7 @@
               </details>
             </div>
           {% elif s.grid %}
-            {% set grid_rows = s.grid.kind == 'grid' %}
+            {% set grid_rows = s.grid.kind in ['grid', 'named'] %}
             <div class="settings-all-grid" data-grid data-grid-state='{{ s.grid | tojson }}'>
               <table class="settings-all-rows" aria-labelledby="{{ cid }}-label">
                 <thead><tr>
@@ -204,9 +209,15 @@
                 <tbody data-grid-body></tbody>
               </table>
               <p class="muted" data-grid-empty>{{ s.empty_text }}</p>
-              {% if s.grid.key_choices or not grid_rows %}
+              {% if s.grid.key_choices or not grid_rows or s.grid.kind == 'named' %}
               <div class="settings-all-table-add">
-                {% if grid_rows %}
+                {% if s.grid.kind == 'named' %}
+                <label class="settings-all-field" for="{{ cid }}">New {{ s.grid.row_label | lower }}
+                  <input class="input" type="text" id="{{ cid }}" data-grid-newname maxlength="64"
+                         autocomplete="off" aria-describedby="{{ cid }}-help">
+                </label>
+                <button class="btn btn--ghost" type="button" data-grid-add>{{ s.add_label }}</button>
+                {% elif grid_rows %}
                 <label class="settings-all-field" for="{{ cid }}">{{ s.grid.row_label }}
                   <select class="select" id="{{ cid }}" data-grid-newkey aria-describedby="{{ cid }}-help">
                     <option value="">Choose one</option>
@@ -290,6 +301,7 @@
           {% if not s.locked %}
           <div class="settings-all-actions">
             <button class="btn btn--primary" type="button" data-save>Save</button>
+            {% if s.test_label %}<button class="btn btn--ghost" type="button" data-test>{{ s.test_label }}</button>{% endif %}
             <button class="btn btn--ghost" type="button" data-reset>Reset to default</button>
           </div>
           {% endif %}

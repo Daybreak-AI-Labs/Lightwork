@@ -65,6 +65,7 @@ from ._shared import (
     require_provider_or_400,
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear app._world_cache
+from ._shared import dashboard_token as _dashboard_token
 from .action_center_api import router as action_center_router
 from .api import router as api_router
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
@@ -539,7 +540,7 @@ def _assert_dashboard_auth_configured() -> None:
     a fresh single-tenant install is never locked out."""
     if not _require_auth_enabled():
         return
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    if _dashboard_token():
         return
     try:
         from maverick.oidc import oidc_enabled
@@ -2037,7 +2038,7 @@ async def http_metrics(request: Request, call_next):
 
 @app.middleware("http")
 async def bearer_auth(request: Request, call_next):
-    expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
+    expected = _dashboard_token() or None
     if (
         request.url.path in _AUTH_EXEMPT
         or request.url.path.startswith("/share/")
@@ -2664,7 +2665,7 @@ def _allowed_extension_origin(request: Request) -> str | None:
     """The request's Origin, iff extension CORS is enabled and token-gated."""
     origin = request.headers.get("origin") or ""
     if (
-        os.environ.get("MAVERICK_DASHBOARD_TOKEN")
+        _dashboard_token()
         and _EXTENSION_ORIGIN_RE.match(origin)
         and _extension_cors_enabled()
     ):
@@ -2750,9 +2751,12 @@ _goal_rl_lock = threading.Lock()
 
 
 def _max_goals_per_min() -> int:
+    from ._shared import dashboard_setting
+
     try:
-        return max(1, int(os.environ.get("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "30")))
-    except ValueError:
+        return max(1, int(dashboard_setting(
+            "MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "max_goals_per_min", 30)))
+    except (TypeError, ValueError):
         return 30
 
 
@@ -2760,17 +2764,13 @@ def _max_goals_global_per_min() -> int:
     # Process-wide ceiling across all clients; defaults to 10x the per-client
     # cap so one client can't starve others yet a distributed flood is still
     # bounded.
+    from ._shared import dashboard_setting
+
     try:
-        return max(
-            1,
-            int(
-                os.environ.get(
-                    "MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN",
-                    str(_max_goals_per_min() * 10),
-                )
-            ),
-        )
-    except ValueError:
+        return max(1, int(dashboard_setting(
+            "MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "max_goals_global_per_min",
+            _max_goals_per_min() * 10)))
+    except (TypeError, ValueError):
         return _max_goals_per_min() * 10
 
 
@@ -11749,10 +11749,10 @@ def main() -> None:
         from .recovery_mode import configure
         configure(app, host=args.host)
 
-    if not _is_loopback_host(args.host) and not os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    if not _is_loopback_host(args.host) and not _dashboard_token():
         raise SystemExit(
             "Refusing to bind dashboard to a non-loopback host without "
-            "MAVERICK_DASHBOARD_TOKEN set."
+            "MAVERICK_DASHBOARD_TOKEN (or the access token on Settings > All settings) set."
         )
 
     # Apply Lightwork's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,

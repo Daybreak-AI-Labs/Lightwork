@@ -828,6 +828,17 @@ def _rls_explicitly_set() -> bool:
     return _explicit_toggle("MAVERICK_PG_RLS", "rls") is not None
 
 
+def _configured_dsn() -> str:
+    """``[world_model] dsn`` (config.toml or the dashboard settings, where it is
+    kept sealed); ``MAVERICK_PG_DSN`` in the environment wins over it."""
+    try:
+        from ..config import load_config
+        value = ((load_config() or {}).get("world_model") or {}).get("dsn")
+    except Exception:  # pragma: no cover -- config never blocks construction
+        return ""
+    return str(value).strip() if isinstance(value, str) else ""
+
+
 def _pool_size() -> int:
     """Max connections for the optional ``psycopg_pool`` connection pool
     (default 0 = no pool, single shared connection as before). A positive value
@@ -1171,7 +1182,7 @@ class PostgresWorldModel:
             ) from e
         from ..postgres_io import BoundedConnection, postgres_io_timeout_seconds
 
-        self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or ""
+        self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or _configured_dsn()
         if not self._dsn:
             raise RuntimeError(
                 "Postgres world model requires MAVERICK_PG_DSN or "
@@ -2652,12 +2663,8 @@ class PostgresWorldModel:
         Positive windows continue to require the full stale interval.
         Returns the number of rows reclaimed.
         """
-        env_override = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
-        if env_override is not None:
-            try:
-                max_age_seconds = max(0.0, float(env_override))
-            except ValueError:
-                pass
+        from ..world_model import reclaim_window_seconds
+        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
