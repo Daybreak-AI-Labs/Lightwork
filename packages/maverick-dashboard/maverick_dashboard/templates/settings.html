@@ -20,6 +20,9 @@
     <strong>Saved.</strong> {{ saved }}
   </div>
   {% endif %}
+  {% if notice %}
+  <div class="panel settings-saved" role="status" id="settings-notice">{{ notice }}</div>
+  {% endif %}
 
   <section class="settings-index" aria-labelledby="settings-index-title"
            data-initial-group="{{ saved_section or 'general' }}">
@@ -274,6 +277,7 @@
     <p id="voice-setup-status" role="status" aria-live="polite">Checking voice setup…</p>
     <p><a class="btn" id="voice-setup-try" href="/chat" hidden>Try dictation in Chat</a></p>
     <p class="muted">You can leave Settings and come back to check progress. Lightwork checks the downloaded file before using it.</p>
+    <p><a href="/settings/voice-unlock">Voice unlock: record your voice so spoken requests are checked against it</a></p>
   </section>
 
   <div class="section-head" data-settings-group="general"><h2>Spending per task</h2></div>

@@ -1077,6 +1077,7 @@ from .tax_actions_api import router as tax_actions_router  # noqa: E402
 from .tools_ops_api import build_router as build_tools_ops_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
+from .voice_unlock_api import router as voice_unlock_router  # noqa: E402
 
 app.include_router(recovery_router)
 app.include_router(provider_spending_router)
@@ -1091,6 +1092,7 @@ app.include_router(mcp_presets_router)
 app.include_router(store_catalogs_router)
 app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
+app.include_router(voice_unlock_router)
 app.include_router(build_tools_ops_router())
 # Installation operations that were terminal-only (Settings > Maintenance,
 # Workspaces, Billing, Help, Savings, Performance and the full setup guide).

@@ -70,7 +70,7 @@ def test_store_holds_embeddings_not_audio(gate, tmp_path):
     gate.enroll("alice", [b"RAW-AUDIO-1", b"RAW-AUDIO-2", b"RAW-AUDIO-3"])
     raw = (tmp_path / "profiles.json").read_bytes()
     assert b"RAW-AUDIO" not in raw          # never raw audio
-    assert b"centroid" in raw
+    assert b"sealed" in raw and b"0.6" not in raw  # the embedding itself is sealed
     assert private_path_is_restricted(tmp_path / "profiles.json", 0o600)
 
 
@@ -105,7 +105,8 @@ def test_store_created_without_readable_temp_window(tmp_path, monkeypatch):
 
     gate.enroll("alice", [b"a1", b"a2", b"a3"])
 
-    assert private_before_write == [True]
+    # The profile store (and, on first use, the at-rest key that seals it).
+    assert private_before_write and all(private_before_write)
     assert private_path_is_restricted(tmp_path / "private", 0o700)
     assert private_path_is_restricted(tmp_path / "private" / "profiles.json", 0o600)
     assert not list((tmp_path / "private").glob("*.tmp"))
@@ -152,3 +153,16 @@ def test_custom_parent_is_verified_without_acl_takeover(tmp_path, monkeypatch):
     gate._ensure_parent()
 
     assert seen == [parent]
+
+
+def test_profile_is_bound_to_its_person(gate, tmp_path):
+    """A sealed profile copied under another name does not open."""
+    import json
+
+    gate.enroll("alice", [b"a1", b"a2", b"a3"])
+    path = tmp_path / "profiles.json"
+    data = json.loads(path.read_text())
+    data["mallory"] = data["alice"]
+    path.write_text(json.dumps(data))
+    assert gate.score("alice", b"a") == pytest.approx(1.0)
+    assert gate.score("mallory", b"a") is None

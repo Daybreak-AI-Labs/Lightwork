@@ -66,8 +66,8 @@ incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
 out, so the page never offers a control that changes nothing: ``[energy]``
-and ``[voice] biometric_unlock`` (voice unlock needs a speaker-recognition
-model this product does not ship; see ``settings_catalog_runtime``).
+(see ``settings_catalog_runtime``). Voice unlock is offered, but its switch is
+refused until the voice-unlock add-on and a speaker model are present.
 """
 from __future__ import annotations
 

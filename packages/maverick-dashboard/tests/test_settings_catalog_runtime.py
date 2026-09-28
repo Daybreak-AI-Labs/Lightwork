@@ -169,7 +169,10 @@ def _sample(setting) -> tuple[object, object]:  # noqa: C901 - one branch per co
         from pathlib import Path
 
         found = Path(os.environ["HOME"]) / (sid.replace(".", "-") + ".json")
-        found.write_text("{}", encoding="utf-8")
+        if setting.path_kind == "folder":
+            found.mkdir(exist_ok=True)
+        else:
+            found.write_text("{}", encoding="utf-8")
         return str(found), str(found)
     raise AssertionError(f"no sample for {sid}")
 
@@ -216,8 +219,10 @@ def test_every_runtime_row_is_in_the_catalog():
 
 
 # Saving a quorum turns on approvals for safety settings, the quorum itself
-# included, so its reset is held for approval: tested on its own below.
-_GENERIC = [s for s in ROWS if s.id != "safety.quorum_required"]
+# included, so its reset is held for approval; voice unlock can't be turned on
+# without its add-on. Both are tested on their own (test_settings_runtime_safety,
+# test_settings_voice_unlock).
+_GENERIC = [s for s in ROWS if s.id not in {"safety.quorum_required", "voice.biometric_unlock"}]
 
 
 @pytest.mark.parametrize("setting", _GENERIC, ids=lambda s: s.id)

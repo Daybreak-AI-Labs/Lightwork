@@ -907,6 +907,25 @@ def _switches(S) -> tuple:
           "Read every finished answer aloud as soon as it is shown, with code, tables and "
           "links described instead of spelled out.", "toggle", "AI models", False,
           "maverick.voice_only", subgroup="How agents work"),
+        S("voice", "biometric_unlock", "Check spoken requests against people's voices",
+          "People who recorded their voice on the Voice unlock page can give spoken requests "
+          "only in their own voice, as a second check on top of signing in. Needs the "
+          "voice-unlock add-on and a speaker-recognition model on this server.", "toggle",
+          "AI models", False, "maverick.voice_unlock", subgroup="Voice unlock",
+          env=("MAVERICK_VOICE_UNLOCK",), weaker=False,
+          warning="Spoken requests will no longer be checked against people's recorded "
+                  "voices."),
+        S("voice", "speaker_model_path", "Speaker-recognition model",
+          "The folder on this server that holds the speaker-recognition model "
+          "(speechbrain/spkrec-ecapa-voxceleb). It is never downloaded while Lightwork runs.",
+          "path", "AI models", "", "maverick.voice_unlock", subgroup="Voice unlock",
+          path_kind="folder", max_length=400),
+        S("voice", "unlock_threshold", "How closely a voice must match",
+          "How similar a spoken request must sound to the recorded voice. Higher refuses "
+          "more near matches; lower accepts more.", "number", "AI models", 0.6,
+          "maverick.voice_unlock", subgroup="Voice unlock", minimum=30, maximum=99,
+          scale=0.01, unit="percent", weaker="lower",
+          warning="Voices less like the recorded one will be accepted."),
         S("context", "auto_recall", "Remind agents of related past tasks",
           "Before a task starts, give agents the results of the most similar finished "
           "tasks.", "toggle", "AI models", False, "maverick.orchestrator",
@@ -1202,3 +1221,16 @@ def _switches(S) -> tuple:
           env=("MAVERICK_PROMETHEUS_ADDR",),
           warning="Anyone who can reach the server will be able to read its measurements."),
     )
+
+
+def cross_checks(effective: dict, by_id: dict, error: type) -> None:
+    """Voice unlock can't be turned on until it can actually check voices."""
+    if effective.get("voice.biometric_unlock") is not True:
+        return
+    from maverick import voice_unlock
+
+    if voice_unlock.enabled():
+        return  # already on: other saves are not held up by it
+    reason = voice_unlock.readiness(str(effective.get("voice.speaker_model_path") or ""))
+    if reason:
+        raise error(f"{by_id['voice.biometric_unlock'].label}: {reason}")
