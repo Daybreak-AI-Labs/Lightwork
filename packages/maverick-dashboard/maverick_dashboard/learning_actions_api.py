@@ -77,6 +77,24 @@ def snapshot_label(name: str) -> str:
     return name
 
 
+def _record(request: Request, action: str, **detail) -> None:
+    """One learning activity-record row naming the administrator who acted.
+
+    The kernel's own learning rows do not know who pressed the button; this
+    one does. Raises HTTP 503 when the activity record refuses the row (the
+    change has already been made, so the page says so)."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    from . import auth
+    try:
+        audit_event(EventKind.LEARNING_UPDATE, agent="dashboard", _global=True,
+                    action=action, actor=auth.caller_principal(request) or "local administrator",
+                    **detail)
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail=(
+            "The change was made, but it could not be added to the activity record.")) from exc
+
+
 def _halted(exc: Exception) -> HTTPException:
     return HTTPException(status_code=409, detail=(
         "Learning is stopped for this installation right now, so nothing was changed."))
@@ -148,9 +166,14 @@ async def run_dream(request: Request, body: DreamIn) -> dict:
         raise HTTPException(status_code=409, detail=(
             "Turn on Dreaming under Learning systems first."))
     try:
-        return await run_in_threadpool(_dream, body.preview)
+        result = await run_in_threadpool(_dream, body.preview)
     except Halted as exc:
         raise _halted(exc) from exc
+    if not body.preview:
+        await run_in_threadpool(
+            lambda: _record(request, "dream_run", **{k: v for k, v in result.items()
+                                                     if k != "preview"}))
+    return result
 
 
 @router.post("/learning/rollback")
@@ -171,6 +194,8 @@ async def rollback(request: Request, body: RollbackIn) -> dict:
             "Lightwork could not restore that saved point. What was learned is unchanged.")) from exc
     if not restored:
         raise HTTPException(status_code=404, detail="There is no saved point to go back to yet.")
+    await run_in_threadpool(lambda: _record(request, "rollback", snapshot=body.snapshot,
+                                            restored=[str(n) for n in restored]))
     return {"restored": len(restored)}
 
 

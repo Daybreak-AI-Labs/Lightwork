@@ -112,3 +112,58 @@ def test_learning_page_offers_run_now_to_admins(client):
                   "Go back to this point", "Check now", "Check the results"):
         assert label in text, label
     assert "HTTP" not in page and "flip it" not in page
+
+
+@pytest.fixture
+def audit_rows(monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+
+    def capture(kind, **payload):
+        rows.append({"kind": kind, **payload})
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", capture)
+    return rows
+
+
+def _admin(monkeypatch):
+    from maverick_dashboard import auth, rbac
+    rbac.set_role("user:ada", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
+
+
+def test_rollback_is_recorded_with_who_did_it(client, monkeypatch, audit_rows):
+    from maverick import dreaming
+    from maverick.audit import EventKind
+    _admin(monkeypatch)
+    audit_rows.clear()
+    monkeypatch.setattr(dreaming, "list_snapshots", lambda: ["20260101T000000Z"])
+    monkeypatch.setattr(dreaming, "rollback_learning_state", lambda name: ["skills", "insights"])
+    r = client.post("/api/v1/learning/rollback", json={"snapshot": "20260101T000000Z"})
+    assert r.status_code == 200
+    rows = [row for row in audit_rows if row.get("action") == "rollback"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["kind"] == EventKind.LEARNING_UPDATE and row["actor"] == "user:ada"
+    assert row["snapshot"] == "20260101T000000Z" and row["restored"] == ["skills", "insights"]
+
+
+def test_a_learning_run_is_recorded_with_who_started_it(client, monkeypatch, audit_rows):
+    from maverick import dreaming
+    from maverick.audit import EventKind
+    _admin(monkeypatch)
+    audit_rows.clear()
+    report = dreaming.DreamReport(goals_replayed=4, insights_written=1, skills_distilled=2)
+    monkeypatch.setattr(dreaming, "enabled", lambda: True)
+    monkeypatch.setattr(dreaming, "settings", lambda: {"snapshots": False})
+    monkeypatch.setattr(dreaming, "dream_cycle", lambda world: report)
+    monkeypatch.setattr(dreaming, "dream_cycle_dry", lambda world: report)
+    assert client.post("/api/v1/learning/dream", json={"preview": True}).status_code == 200
+    assert [row for row in audit_rows if row.get("action") == "dream_run"] == []
+    assert client.post("/api/v1/learning/dream", json={"preview": False}).status_code == 200
+    rows = [row for row in audit_rows if row.get("action") == "dream_run"]
+    assert len(rows) == 1
+    assert rows[0]["kind"] == EventKind.LEARNING_UPDATE and rows[0]["actor"] == "user:ada"
+    assert rows[0]["lessons_written"] == 1 and rows[0]["skills_learned"] == 2
