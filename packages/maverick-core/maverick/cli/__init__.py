@@ -44,11 +44,20 @@ def _strip_terminal_control(text: str) -> str:
     return _TERMINAL_CONTROL_RE.sub("", text)
 
 
-def _default_model() -> str:
-    """Lazy resolver so the click default callback doesn't pull `.llm`
-    (and the anthropic SDK) at module import time."""
-    from ..llm import DEFAULT_MODEL
-    return DEFAULT_MODEL
+def _default_model(role: str = "orchestrator") -> str:
+    """The configured model for ``role`` (kernel rule 2: never a hard-coded
+    model). Resolves through ``model_for_role`` -- per-role overrides, the
+    ``[models]`` config, dashboard pins and the admin allow-list -- the same
+    way the dashboard and the channel server pick the model for the same
+    action. Lazy so importing the CLI doesn't pull ``.llm`` (and the anthropic
+    SDK)."""
+    from ..llm import model_for_role
+    return model_for_role(role)
+
+
+def _cli_model(ctx: click.Context, role: str) -> str:
+    """An explicit ``--model`` wins; otherwise the configured ``role`` model."""
+    return (ctx.obj or {}).get("model") or _default_model(role)
 
 
 def _fact_subject_token(channel: str, user: str) -> str:
@@ -71,7 +80,7 @@ def _model_route_configuration_missing(
     from ..operator_preflight import _route_configuration_missing
     from ..providers import _canonical
 
-    spec = str(model_spec or _default_model()).strip()
+    spec = str(model_spec or _default_model("orchestrator")).strip()
     provider = _canonical(spec.split(":", 1)[0] if ":" in spec else "anthropic")
     return provider, _route_configuration_missing(provider, load_config())
 
@@ -219,12 +228,12 @@ def _kernel():
     import types
 
     from ..budget import Budget
-    from ..llm import DEFAULT_MODEL, LLM
+    from ..llm import LLM
     from ..orchestrator import run_goal_sync
     from ..sandbox import build_sandbox
     from ..secrets import scrub
     return types.SimpleNamespace(
-        Budget=Budget, LLM=LLM, DEFAULT_MODEL=DEFAULT_MODEL,
+        Budget=Budget, LLM=LLM,
         run_goal_sync=run_goal_sync, build_sandbox=build_sandbox, scrub=scrub,
     )
 
@@ -1203,8 +1212,10 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
     llm = None
     if not no_llm:
         try:
-            from ..llm import DEFAULT_MODEL, LLM
-            llm = LLM(model=ctx.obj.get("model") or DEFAULT_MODEL)
+            from ..llm import LLM
+
+            # Same role the dashboard's agent drafting uses (intake proposer).
+            llm = LLM(model=_cli_model(ctx, "writer"))
         except Exception as e:  # no provider/key -> deterministic generation
             click.echo(f"(LLM unavailable; using deterministic generation: {e})", err=True)
     kb = None
@@ -1315,8 +1326,10 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     llm = None
     if not no_llm:
         try:
-            from ..llm import DEFAULT_MODEL, LLM
-            llm = LLM(model=ctx.obj.get("model") or DEFAULT_MODEL)
+            from ..llm import LLM
+
+            # Same role the dashboard's agent drafting uses (intake proposer).
+            llm = LLM(model=_cli_model(ctx, "writer"))
         except Exception as e:  # no provider/key -> deterministic derivation
             click.echo(f"(LLM unavailable; deriving pack from steps: {e})", err=True)
 
@@ -4007,7 +4020,7 @@ def start(
         sys.exit(2)
 
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir, backend=sandbox_backend)
     import threading
     import types as _types
@@ -4189,7 +4202,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
     _require_llm_key()
     k = _kernel()
     world = open_world(ctx.obj["db"])
-    llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir)
     # Thread turns through a conversation scoped to this REPL process.
     # Do not use a fixed (channel, user_id) key here: conversations are
@@ -5045,7 +5058,7 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
     # should remain useful while an operator is repairing provider credentials.
     _require_llm_key()
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     # Honor [budget] config, and let --max-dollars/--max-wall-seconds raise
     # the cap on resume (the budget-halt message tells users to do this).
     from ..budget import budget_from_config
@@ -6464,7 +6477,7 @@ def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
 
         if run:
             # Don't sys.exit in the watch loop: just skip this marker and continue.
-            selected_model = ctx.obj["model"] or _default_model()
+            selected_model = _cli_model(ctx, "orchestrator")
             try:
                 from ..config import load_config
                 from ..operator_preflight import _routed_configuration_missing
