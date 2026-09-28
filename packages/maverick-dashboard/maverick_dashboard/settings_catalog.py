@@ -19,9 +19,10 @@ Deliberately NOT in the catalog:
   ``[benchmark]``, ``[logging]``, ``[observability]``, ``[queue]``,
   ``[coding]``, ``[model_proxy]``, ``[obsidian]``, ``[github]``,
   ``[calendar]``, ``[embedded]``, ``[ebpf_monitor]``, ``[local_runtime]``
-  (serving engines), ``[emergent_protocol]``/``[emergent_codec]`` (research
-  telemetry), ``[self_modify]``/``[adapter_rung]`` (research-only code and
-  weights rungs with their own high-risk page).
+  (serving engines). The research rungs (``[self_modify]`` files and tests,
+  ``[adapter_rung]``, ``[emergent_protocol]``/``[emergent_codec]``) are in
+  settings_catalog_learning.py, off by default and confirmed before they widen;
+  the code-experiment on/off switch itself stays on the Learning page.
 * Deployment-only by design (sign-in, isolation and key custody must not be
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
@@ -336,10 +337,10 @@ SETTINGS: tuple[Setting, ...] = (
       warning="Code from new repositories will be able to leave with less oversight."),
     S("autonomy", "enable", "Extra checks on uncertain work",
       "When agents disagree or are unsure, double-check the answer and tighten what risky tools may do.",
-      "toggle", "Safety", False, "maverick.config"),
+      "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMY_GATE",)),
     S("autonomy", "headless_assume", "Carry on when nobody can answer",
       "When no person is available to answer a question, let the agent make a reasonable assumption instead of waiting.",
-      "toggle", "Safety", False, "maverick.config", weaker=True,
+      "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMOUS",), weaker=True,
       warning="Agents will act on their own assumptions instead of waiting for a person."),
     S("earned_autonomy", "enable", "Track which actions agents predict well",
       "Record how accurately agents predict the results of their actions, as evidence for trusting them more.",
