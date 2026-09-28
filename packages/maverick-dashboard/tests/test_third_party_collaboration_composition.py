@@ -575,3 +575,59 @@ def test_limiter_bucket_state_is_bounded_and_expired_state_is_cleaned() -> None:
     )
     assert admitted.status_code == 200
     assert limiter.bucket_count <= 8
+
+
+def test_evidence_uploads_have_their_own_rate_limited_action() -> None:
+    app = FastAPI()
+    composition.attach_third_party_collaboration_composition(
+        app,
+        routing_key_resolver=lambda: KEY,
+        tenant_registry_resolver=lambda: [Tenant("rate-limit-tenant", True)],
+        rate_limit_policy=composition.ThirdPartyCollaborationRateLimitPolicy(
+            global_portal_action_limit=100,
+            source_portal_action_limit=100,
+            credential_portal_action_limit=2,
+            max_buckets=32,
+        ),
+        rate_limit_clock=lambda: 100.0,
+    )
+    portal = composition.derive_third_party_collaboration_portal_ref("rate-limit-tenant", KEY)
+
+    @app.post("/api/v1/external/third-party-collaboration/{portal_ref}/evidence")
+    def evidence(portal_ref: str, request: Request) -> dict[str, str]:
+        action = request.headers.get("X-Test-Action", "evidence")
+        request.app.state.third_party_collaboration_rate_limit("0" * 64, action)
+        return {"portal_ref": portal_ref}
+
+    client = TestClient(app)
+    path = f"/api/v1/external/third-party-collaboration/{portal}/evidence"
+    assert client.post(path, headers={"X-Test-Action": "contract"}).status_code == 429
+    assert [client.post(path).status_code for _ in range(3)] == [200, 200, 429]
+
+
+def test_lazy_store_forwards_evidence_measurement_only_for_its_own_tenant(allow_policy) -> None:
+    measured: list[tuple[str, dict[str, Any]]] = []
+
+    class MeasuringStore(FakeStore):
+        def measure_evidence(self, tenant_id: str, token: str, **kwargs: Any) -> dict[str, str]:
+            measured.append((tenant_id, kwargs))
+            return {"tenant_id": tenant_id}
+
+    app = FastAPI()
+    composition.attach_third_party_collaboration_composition(
+        app,
+        routing_key_resolver=lambda: KEY,
+        tenant_registry_resolver=lambda: [Tenant("tenant-a", True), Tenant("tenant-b", True)],
+        store_builder=lambda *, tenant_id, **_kwargs: MeasuringStore(tenant_id),
+    )
+    portal_a = app.state.third_party_collaboration_portal_ref_for_tenant("tenant-a")
+    material = app.state.third_party_collaboration_portal_resolver(
+        portal_a,
+        _request(f"/api/v1/external/third-party-collaboration/{portal_a}/evidence"),
+    )
+    assert material.store.measure_evidence("tenant-a", "token", content=b"x") == {
+        "tenant_id": "tenant-a"
+    }
+    with pytest.raises(collaboration.ThirdPartyCollaborationPermissionDenied):
+        material.store.measure_evidence("tenant-b", "token", content=b"x")
+    assert measured == [("tenant-a", {"content": b"x"})]

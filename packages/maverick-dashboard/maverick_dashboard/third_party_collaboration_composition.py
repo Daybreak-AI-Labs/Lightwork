@@ -38,9 +38,9 @@ _PORTAL_RE = re.compile(r"tpcp_[A-Za-z0-9_-]{43}\Z")
 _CREDENTIAL_RE = re.compile(r"[0-9a-f]{64}\Z")
 _EXTERNAL_PATH_RE = re.compile(
     r"/api/v1/external/third-party-collaboration/"
-    r"(?P<portal>tpcp_[A-Za-z0-9_-]{43})/(?P<action>contract|draft|finalize)\Z"
+    r"(?P<portal>tpcp_[A-Za-z0-9_-]{43})/(?P<action>contract|draft|finalize|evidence)\Z"
 )
-_ACTIONS = frozenset({"contract", "draft", "finalize"})
+_ACTIONS = frozenset({"contract", "draft", "finalize", "evidence"})
 _MAX_ACTIVE_TENANTS = 10_000
 _MAX_ROUTING_KEY_BYTES = 4_096
 _ROUTING_REVISION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
@@ -473,6 +473,9 @@ class _LazyTenantCollaborationStore:
 
     def finalize_submission(self, tenant_id: str, *args: Any, **kwargs: Any) -> Any:
         return self._invoke("finalize_submission", tenant_id, *args, **kwargs)
+
+    def measure_evidence(self, tenant_id: str, *args: Any, **kwargs: Any) -> Any:
+        return self._invoke("measure_evidence", tenant_id, *args, **kwargs)
 
 
 class ThirdPartyCollaborationExternalRateLimiter:

@@ -1646,6 +1646,11 @@ async def bound_public_governance_body(request: Request, call_next):
         maximum = _MAX_PUBLIC_CONSENT_BODY_BYTES
         detail = "public consent request body too large"
     elif path.startswith("/api/v1/external/third-party-collaboration/"):
+        if request.method == "POST" and path.endswith("/evidence"):
+            # Evidence files are not buffered here: the route authenticates the
+            # invitation first, then streams at most that invitation's own
+            # byte bound (and requires an exact Content-Length).
+            return await call_next(request)
         maximum = _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES
         detail = "third-party collaboration request body too large"
     else:
