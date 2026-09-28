@@ -99,7 +99,7 @@ test("apply confirms, then calls the apply route", async (t) => {
   ui.doc.querySelector("#llp-ref-rows button").click();
   await ui.settle();
   assert.ok(ui.calls.some((c) => c.confirm && /restore point/.test(c.confirm)));
-  assert.ok(ui.calls.some((c) => c.method === "POST" && c.url === "/api/v1/learning-loop/refinements/0123456789abcdef/apply"));
+  assert.ok(ui.calls.some((c) => c.method === "POST" && c.url === "/api/v1/learning-loop/refinements/0123456789abcdef/apply"));  // pragma: allowlist secret
   assert.match(ui.doc.getElementById("llp-ref-msg").textContent, /Change applied/);
 });
 
@@ -112,7 +112,7 @@ test("declining the undo confirmation sends nothing", async (t) => {
 });
 
 test("a refusal shows the server's plain sentence", async (t) => {
-  const ui = await fixture({ answers: { "/refinements/0123456789abcdef/apply": { __status: 409,
+  const ui = await fixture({ answers: { "/refinements/0123456789abcdef/apply": { __status: 409,  // pragma: allowlist secret
     __body: { detail: "This change is still waiting for approval." } } } });
   t.after(() => ui.window.close());
   ui.doc.querySelector("#llp-ref-rows button").click();

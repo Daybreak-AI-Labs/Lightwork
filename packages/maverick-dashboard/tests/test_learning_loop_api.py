@@ -66,7 +66,7 @@ def test_every_change_needs_a_global_admin(client, monkeypatch):
     _as(monkeypatch, "operator")
     for path, body in (
         ("/refinements", SUGGESTION),
-        ("/refinements/0123456789abcdef/apply", {}),
+        ("/refinements/0123456789abcdef/apply", {}),  # pragma: allowlist secret
         ("/refinements/0123456789abcdef/revert", {}),
         ("/run", {"scope": "main"}),
         ("/corpus-quality", {}),

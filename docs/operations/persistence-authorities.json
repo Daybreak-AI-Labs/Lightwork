@@ -186,7 +186,7 @@
     "read_projection": 15,
     "coordinator": 1,
     "audit": 22,
-    "transient": 17,
+    "transient": 19,
     "business_records": 13,
     "execution": 21,
     "recovery": 9,
@@ -23738,6 +23738,56 @@
           "function": "_check",
           "kind": "write_text",
           "expression": "path.write_text(body.document, encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/feature_actions_api.py",
+      "contract": "transient",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/feature_actions_api.py",
+      "purpose": "Dashboard buttons for terminal-only features; writes uploaded lesson files and customization bundles only into private temporary directories for preview or import through the kernel, then deletes them.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 207,
+          "function": "_insight_preview",
+          "kind": "write_bytes",
+          "expression": "path.write_bytes(raw)"
+        },
+        {
+          "line": 242,
+          "function": "_do",
+          "kind": "write_bytes",
+          "expression": "path.write_bytes(raw)"
+        },
+        {
+          "line": 324,
+          "function": "_unpack",
+          "kind": "write_bytes",
+          "expression": "target.write_bytes(archive.read(member)[:_BUNDLE_FILE_LIMIT])"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/tax_actions_api.py",
+      "contract": "transient",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/tax_actions_api.py",
+      "purpose": "Tax preparation buttons on the Finance page; unpacks an uploaded set of past returns into a private temporary directory for a trial run, then deletes it.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 236,
+          "function": "_unpack_cases",
+          "kind": "write_bytes",
+          "expression": "target.write_bytes(archive.read(member))"
         }
       ]
     }
