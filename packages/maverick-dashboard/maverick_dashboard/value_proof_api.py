@@ -15,6 +15,7 @@ workspace's world and stores, and heavy reads run off the event loop.
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,9 @@ _CLAIM_LABELS = {
 
 class DocumentIn(BaseModel):
     document: str = Field(min_length=2, max_length=_MAX_UPLOAD)
+    # The text of the publisher's key file (``attest key`` output), for a
+    # statement signed by another installation (``memory-plane verify --key``).
+    publisher_key: str | None = Field(default=None, max_length=2000)
 
 
 class RevokeIn(BaseModel):
@@ -71,6 +75,13 @@ def _audit(request: Request, action: str, **payload: Any) -> None:
         raise HTTPException(status_code=503, detail="The activity log refused this download.") from exc
 
 
+def _pick(value: int, allowed: tuple[int, ...]) -> int:
+    """A tuning value must be one the page offered (the CLI's options)."""
+    if value not in allowed:
+        raise HTTPException(status_code=422, detail="Choose from the list.")
+    return value
+
+
 def _words(value: Any) -> str:
     text = " ".join(str(value or "").replace("_", " ").split())
     return text[:1].upper() + text[1:200]
@@ -86,11 +97,12 @@ async def access(request: Request) -> dict:
 # ---- results --------------------------------------------------------------
 
 @router.get("/compounding")
-async def compounding(request: Request) -> dict:
+async def compounding(request: Request, window: int = 5) -> dict:
     require_permission(request, "view")
     from maverick.compounding_metric import report_from_world
+    _pick(window, (3, 5, 10))
     world = _world()
-    reps = await run_in_threadpool(lambda: report_from_world(world, window=5))
+    reps = await run_in_threadpool(lambda: report_from_world(world, window=window))
     return {"task_types": [
         {"name": _words(r.task_class), "runs": int(r.runs),
          "cost_change_pct": float(r.cost_delta_pct),
@@ -101,11 +113,12 @@ async def compounding(request: Request) -> dict:
 
 
 @router.get("/departments")
-async def departments(request: Request) -> dict:
+async def departments(request: Request, window: int = 5) -> dict:
     require_permission(request, "view")
     from maverick.memory_plane import compounding_by_department
+    _pick(window, (3, 5, 10))
     world = _world()
-    curves = await run_in_threadpool(lambda: compounding_by_department(world, window=5))
+    curves = await run_in_threadpool(lambda: compounding_by_department(world, window=window))
     return {"departments": [
         {"name": _words(c.department), "runs": int(c.runs),
          "cost_before": round(float(c.cold_cost), 4), "cost_now": round(float(c.warm_cost), 4),
@@ -182,31 +195,35 @@ async def record_stats(request: Request) -> dict:
 # ---- spend ----------------------------------------------------------------
 
 @router.get("/cost-retro")
-async def cost_retro(request: Request) -> dict:
+async def cost_retro(request: Request, top: int = 10) -> dict:
     require_permission(request, "audit")
     from maverick.cost.retrospective import retrospective
+    _pick(top, (5, 10, 25))
     world = _world()
-    rep = await run_in_threadpool(lambda: retrospective(world, top_n=10))
+    rep = await run_in_threadpool(lambda: retrospective(world, top_n=top))
     return {
         "total": float(rep["total_spend"]), "tasks": int(rep["priced_goals"]),
         "failed_spend": float(rep["failed_spend"]), "failed_share": float(rep["failed_share"]),
         "costliest": [{"task": int(r["goal_id"]), "title": str(r.get("title") or "")[:200],
                        "cost": float(r["cost"]), "failed": bool(r["failed"])}
-                      for r in rep["top_goals"][:10]],
+                      for r in rep["top_goals"][:top]],
         "advice": [str(o)[:300] for o in rep["observations"][:10]],
     }
 
 
 @router.get("/budget-tune")
-async def budget_tune(request: Request) -> dict:
+async def budget_tune(request: Request, percentile: int = 90, min_samples: int = 5) -> dict:
     require_permission(request, "view")
     from maverick.budget_tuner import recommend_for_world
+    _pick(percentile, (75, 90, 95))
+    _pick(min_samples, (3, 5, 10))
     world = _world()
-    recs = await run_in_threadpool(lambda: recommend_for_world(world, pct=90.0, min_samples=5))
-    return {"minimum_tasks": 5, "suggestions": [
+    recs = await run_in_threadpool(lambda: recommend_for_world(world, pct=float(percentile),
+                                                               min_samples=min_samples))
+    return {"minimum_tasks": min_samples, "percentile": percentile, "suggestions": [
         {"for": "Every task" if cls == "default" else _words(cls),
          "cap": float(info["recommended_max_dollars"]),
-         "typical_high": float(info.get("p90", 0.0)), "tasks": int(info["samples"])}
+         "typical_high": float(info.get(f"p{percentile}", 0.0)), "tasks": int(info["samples"])}
         for cls, info in sorted(recs.items())[:20]
     ]}
 
@@ -311,11 +328,19 @@ async def memory_verify(request: Request, body: DocumentIn) -> dict:
     from maverick import memory_plane
     bundle = _parse(body.document)
     own = await run_in_threadpool(_own_key)
-    if not own:
+    anchor = own
+    if body.publisher_key:
+        found = re.findall(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])", body.publisher_key)
+        if len(set(k.lower() for k in found)) != 1:
+            raise HTTPException(status_code=422, detail=(
+                "That key file does not hold exactly one key. Ask the other installation for its key file."))
+        anchor = found[0].lower()
+    if not anchor:
         raise HTTPException(status_code=409, detail=(
             "Signing is not available on this installation, so the statement cannot be checked here."))
-    result = await run_in_threadpool(lambda: memory_plane.verify(bundle, trusted_key_hex=own))
-    return {"intact": bool(result.ok), "claims": [
+    result = await run_in_threadpool(lambda: memory_plane.verify(bundle, trusted_key_hex=anchor))
+    return {"intact": bool(result.ok), "from_this_installation": bool(own) and anchor == own.lower(),
+            "claims": [
         {"claim": _CLAIM_LABELS.get(c.name, _words(c.name)),
          "result": {"HOLDS": "Holds", "FAILS": "Does not hold",
                     "NOT_APPLICABLE": "Does not apply here"}.get(c.status, "Could not be decided")}

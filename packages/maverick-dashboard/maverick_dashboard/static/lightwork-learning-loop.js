@@ -149,8 +149,37 @@
       rows.appendChild(tr);
     });
   }
+  // Before/after for a change: what the instructions say now and what they
+  // will say, or which later changes an undo also removes.
+  async function preview(p) {
+    try {
+      var r = await fetch('/api/v1/learning-ops/refinements/' + encodeURIComponent(p.id) + '/preview', { credentials: 'same-origin' });
+      if (!r.ok) throw r;
+      return await r.json();
+    } catch (failure) {
+      say('llp-ref-msg', await problem(failure, 'show what would change'));
+      return null;
+    }
+  }
+  function previewBox(lines) {
+    var box = el('div', null, 'llp-preview');
+    box.setAttribute('role', 'status');
+    lines.forEach(function (l) { box.appendChild(el('p', l[1] ? l[0] + ' ' + l[1] : l[0])); });
+    return box;
+  }
+  function showPreview(b, box) {
+    var cell = b.parentNode;
+    var old = cell.querySelector('.llp-preview');
+    if (old) old.remove();
+    cell.appendChild(box);
+  }
   async function applyChange(p, b) {
-    if (!(await window.mvConfirm('Apply "' + p.title + '"? Lightwork saves a restore point first, so you can undo it later.',
+    b.disabled = true;
+    var pv = await preview(p);
+    b.disabled = false;
+    if (!pv) return;
+    showPreview(b, previewBox([['Now it says:', pv.now || '(nothing yet for this)'], ['After applying:', pv.after]]));
+    if (!(await window.mvConfirm('Apply "' + p.title + '"? Agents follow the new text from their next task. Lightwork saves a restore point first, so you can undo it later.',
       { okText: 'Apply change' }))) return;
     b.disabled = true;
     say('llp-ref-msg', 'Applying…');
@@ -164,7 +193,14 @@
     }
   }
   async function undoChange(p, b) {
-    if (!(await window.mvConfirm('Undo "' + p.title + '"? Instructions go back to exactly how they were before it was applied, which also undoes any change applied after it.',
+    b.disabled = true;
+    var pv = await preview(p);
+    b.disabled = false;
+    if (!pv) return;
+    var also = pv.undo_also_removes || [];
+    showPreview(b, previewBox([['Removes:', pv.after]].concat(also.length ? [['Also removes, because they came later:', also.join('; ')]] : [])));
+    if (!(await window.mvConfirm('Undo "' + p.title + '"? Instructions go back to exactly how they were before it was applied' +
+      (also.length ? ', which also undoes ' + also.length + ' change' + (also.length === 1 ? '' : 's') + ' applied after it.' : '.'),
       { okText: 'Undo change' }))) return;
     b.disabled = true;
     say('llp-ref-msg', 'Undoing…');
@@ -291,7 +327,9 @@
     box.textContent = '';
     previewBtn.disabled = true;
     try {
-      var data = await get('/preview' + (model() ? '?model_id=' + encodeURIComponent(model()) : ''));
+      var support = $('llp-support') ? $('llp-support').value : '3';
+      var data = await get('/preview?min_support=' + encodeURIComponent(support) +
+        (model() ? '&model_id=' + encodeURIComponent(model()) : ''));
       if (!data.enabled) {
         box.appendChild(el('p', 'Self-coaching is off, so there is nothing to preview. Turn it on on the Learning page.', 'muted'));
       } else if (!data.weaknesses.length) {
@@ -351,60 +389,70 @@
     }
     return div;
   }
-  var runBtn = $('llp-run');
-  if (runBtn) runBtn.addEventListener('click', async function () {
+  // Learning pass and test-case check run as background jobs (see
+  // lightwork-ops-jobs.js): the page shows progress and, for every model,
+  // a Stop button.
+  var J = window.LWJobs;
+  function runUi(action, render, after) {
+    return { status: $('llp-run-status'), out: $('llp-run-result'), action: action, render: render, after: after };
+  }
+  function loadPlan() {
+    var cost = $('llp-cost');
+    if (!cost || !J) return;
+    J.request('/api/v1/learning-ops/self-harness/plan').then(function (d) {
+      var parts = [d.spending_limit != null ? 'Each run can spend up to ' + J.money(d.spending_limit) + ' on testing.'
+        : 'No testing spending limit is set, so the general limits apply.'];
+      if (d.checker) parts.push('Answers are checked by ' + d.checker + '.');
+      if (d.careful_testing) parts.push('Careful testing is on, so include the current standing instructions for new lessons to be adopted.');
+      parts.push('It stops if learning is paused.');
+      cost.textContent = parts.join(' ');
+    }).catch(function () { /* the default sentence stays */ });
+  }
+  if (J) J.wire($('llp-run'), async function () {
     var scope = $('llp-scope').value;
-    if (!(await window.mvConfirm('Run a learning pass now for ' + (scope === 'all' ? 'every model in use' : 'the main assistant model') +
-      '? It looks for repeated mistakes, tests possible lessons within the evaluation spending limit, and retires old ones.',
-      { okText: 'Run now' }))) return;
-    runBtn.disabled = true;
-    var box = $('llp-run-result');
-    box.textContent = '';
-    say('llp-harness-msg', 'Running. This can take a few minutes…');
-    try {
-      var data = await post('/run', { scope: scope });
-      data.reports.forEach(function (r) { box.appendChild(reportBlock(r)); });
-      say('llp-harness-msg', 'Learning pass finished.');
-      await Promise.all([modelChanged(), loadLog()]);
-    } catch (failure) {
-      say('llp-harness-msg', await problem(failure, 'run the learning pass'));
-    } finally {
-      runBtn.disabled = false;
+    var input = $('llp-instructions');
+    var file = input && input.files && input.files[0];
+    var text = null;
+    if (file) {
+      if (file.size > 1024 * 1024) { say('llp-run-status', 'That instructions file is larger than 1 MB.'); return null; }
+      text = await J.readText(file);
     }
-  });
+    if (scope === 'chosen' && !model()) { say('llp-run-status', 'Choose a model first.'); return null; }
+    var who = scope === 'all' ? 'every model in use' : (scope === 'chosen' ? 'the model chosen above' : 'the main assistant model');
+    if (!(await window.mvConfirm('Run a learning pass now for ' + who +
+      '? It looks for repeated mistakes, tests possible lessons within the evaluation spending limit' +
+      ($('llp-retire').checked ? ', and retires old ones.' : '.'), { okText: 'Run now' }))) return null;
+    var body = { scope: scope, trial: $('llp-trial').checked, retire: $('llp-retire').checked, instructions: text };
+    if (scope === 'chosen') body.model_id = model();
+    return { url: API + '/run', init: { method: 'POST', json: body } };
+  }, runUi('run the learning pass', function (d) {
+    return d.reports.map(reportBlock);
+  }, function () { modelChanged(); loadLog(); }));
 
-  var qualityBtn = $('llp-quality-btn');
-  if (qualityBtn) qualityBtn.addEventListener('click', async function () {
-    if (!(await window.mvConfirm('Check every test case now? Each one is tried a couple of times, which uses part of the evaluation spending limit. Nothing is removed.',
-      { okText: 'Check test cases' }))) return;
-    qualityBtn.disabled = true;
-    var box = $('llp-run-result');
-    box.textContent = '';
-    say('llp-harness-msg', 'Checking the test cases…');
-    try {
-      var data = await post('/corpus-quality', { model_id: model() || null });
-      if (!data.configured) box.appendChild(el('p', 'No test cases are set up yet, so there is nothing to check.', 'muted'));
-      else if (!data.cases.length) box.appendChild(el('p', 'There are no test cases for this model yet.', 'muted'));
-      else {
-        var weak = data.cases.filter(function (c) { return !c.useful; }).length;
-        box.appendChild(el('p', plural(data.cases.length, 'test case', 'test cases') + ' checked. ' +
-          (weak ? weak + (weak === 1 ? ' is' : ' are') + ' too easy to show whether a lesson helps.' : 'All of them can show whether a lesson helps.')));
-        var ul = el('ul');
-        data.cases.forEach(function (c) {
-          ul.appendChild(el('li', c.task + ': ' + (c.useful ? 'useful' : 'too easy') +
-            (c.baseline_rate != null ? ' (passed ' + Math.round(c.baseline_rate * 100) + '% without help)' : '')));
-        });
-        box.appendChild(ul);
-      }
-      say('llp-harness-msg', 'Test case check finished.');
-    } catch (failure) {
-      say('llp-harness-msg', await problem(failure, 'check the test cases'));
-    } finally {
-      qualityBtn.disabled = false;
-    }
-  });
+  if (J) J.wire($('llp-quality-btn'), async function () {
+    var remove = $('llp-quality-remove').checked;
+    var msg = remove
+      ? 'Check every test case now and remove the ones that are too easy to show whether a lesson helps? Each case is tried a couple of times, which uses part of the evaluation spending limit. Removed cases cannot be recovered here.'
+      : 'Check every test case now? Each one is tried a couple of times, which uses part of the evaluation spending limit. Nothing is removed.';
+    if (!(await window.mvConfirm(msg, { okText: remove ? 'Check and remove' : 'Check test cases' }))) return null;
+    return { url: API + '/corpus-quality', init: { method: 'POST', json: { model_id: model() || null, remove_weak: remove, confirm: remove } } };
+  }, runUi('check the test cases', function (data) {
+    if (!data.configured) return el('p', 'No test cases are set up yet, so there is nothing to check.', 'muted');
+    if (!data.cases.length) return el('p', 'There are no test cases for this model yet.', 'muted');
+    var weak = data.cases.filter(function (c) { return !c.useful; }).length;
+    var head = el('p', plural(data.cases.length, 'test case', 'test cases') + ' checked. ' +
+      (weak ? weak + (weak === 1 ? ' is' : ' are') + ' too easy to show whether a lesson helps.' : 'All of them can show whether a lesson helps.') +
+      (data.removed ? ' Removed ' + plural(data.removed, 'test case', 'test cases') + '.' : ''));
+    var ul = el('ul');
+    data.cases.forEach(function (c) {
+      ul.appendChild(el('li', c.task + ': ' + (c.useful ? 'useful' : 'too easy') +
+        (c.baseline_rate != null ? ' (passed ' + Math.round(c.baseline_rate * 100) + '% without help)' : '')));
+    });
+    return [head, ul];
+  }));
 
   loadRefinements();
   loadModels();
   loadLog();
+  loadPlan();
 })();

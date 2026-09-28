@@ -82,6 +82,28 @@ def test_spend_read_outs_use_the_kernel(client, monkeypatch):
                        {"reason": "Sign-in or permission problem", "count": 1}]
 
 
+def test_spend_and_savings_tuning_matches_the_command_options(client, monkeypatch):
+    from maverick import budget_tuner, compounding_metric
+    from maverick.cost import retrospective as retro
+    seen: dict = {}
+    monkeypatch.setattr(budget_tuner, "recommend_for_world", lambda world, pct, min_samples: seen.update(
+        pct=pct, min_samples=min_samples) or {"default": {"recommended_max_dollars": 6.0, "samples": 4, "p95": 5.0}})
+    out = client.get(API + "/budget-tune", params={"percentile": 95, "min_samples": 3}).json()
+    assert seen == {"pct": 95.0, "min_samples": 3}
+    assert out["percentile"] == 95 and out["suggestions"][0]["typical_high"] == 5.0
+    assert client.get(API + "/budget-tune", params={"percentile": 80}).status_code == 422
+    monkeypatch.setattr(retro, "retrospective", lambda world, top_n: seen.update(top=top_n) or {
+        "total_spend": 1.0, "priced_goals": 1, "failed_spend": 0.0, "failed_share": 0.0,
+        "observations": [], "top_goals": []})
+    client.get(API + "/cost-retro", params={"top": 25})
+    assert seen["top"] == 25
+    assert client.get(API + "/cost-retro", params={"top": 7}).status_code == 422
+    monkeypatch.setattr(compounding_metric, "report_from_world", lambda world, window: seen.update(window=window) or [])
+    client.get(API + "/compounding", params={"window": 10})
+    assert seen["window"] == 10
+    assert client.get(API + "/departments", params={"window": 4}).status_code == 422
+
+
 def test_earned_autonomy_withdraw_is_admin_checked_and_recorded(client, monkeypatch):
     from maverick import earned_autonomy
 
@@ -139,8 +161,18 @@ def test_learning_statement_download_and_check(client):
     r = client.get(API + "/memory-export")
     assert r.status_code == 200, r.text
     out = client.post(API + "/memory-verify", json={"document": r.text}).json()
-    assert out["intact"] is True
+    assert out["intact"] is True and out["from_this_installation"] is True
     assert all(set(c) == {"claim", "result"} for c in out["claims"])
+    from maverick.attestation import publisher_key
+    key_id, pub = publisher_key()
+    key_file = f"key_id: {key_id}\npubkey: {pub}\n"
+    same = client.post(API + "/memory-verify", json={"document": r.text, "publisher_key": key_file}).json()
+    assert same["intact"] is True
+    other = "pubkey: " + "ab" * 32  # pragma: allowlist secret
+    wrong = client.post(API + "/memory-verify", json={"document": r.text, "publisher_key": other}).json()
+    assert wrong["intact"] is False and wrong["from_this_installation"] is False
+    none = client.post(API + "/memory-verify", json={"document": r.text, "publisher_key": "no key here"})
+    assert none.status_code == 422
 
 
 def test_spend_and_savings_pages_show_the_new_sections_plainly(client):

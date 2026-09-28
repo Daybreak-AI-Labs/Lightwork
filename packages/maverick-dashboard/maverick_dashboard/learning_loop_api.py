@@ -59,11 +59,21 @@ class ProposeIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    scope: Literal["main", "all"] = "main"
+    # ``chosen`` runs for the model picked on the page (``--model``).
+    scope: Literal["main", "all", "chosen"] = "main"
+    model_id: str | None = Field(default=None, max_length=200)
+    # Stage new lessons on trial (``--canary``) and retire stale ones
+    # (``--retire``); ``instructions`` is the deployed system-prompt snapshot
+    # careful (risk-limited) testing compares against (``--system-prompt-file``).
+    trial: bool = False
+    retire: bool = True
+    instructions: str | None = Field(default=None, max_length=1024 * 1024 + 1)
 
 
 class QualityIn(BaseModel):
     model_id: str | None = Field(default=None, max_length=200)
+    remove_weak: bool = False
+    confirm: bool = False
 
 
 def _clip(value: Any, size: int = _MAX_TEXT) -> str:
@@ -367,8 +377,10 @@ def _preview(model_id: str | None, min_support: int) -> dict:
 
 @router.get("/preview")
 async def preview(request: Request, model_id: str | None = Query(default=None, max_length=200),
-                  min_support: Literal[2, 3, 5] = 3) -> dict:
+                  min_support: int = 3) -> dict:
     require_permission(request, "audit")
+    if min_support not in (2, 3, 5):
+        raise HTTPException(status_code=422, detail="Choose from the list.")
     model = await run_in_threadpool(_model_choice, model_id)
     try:
         return await run_in_threadpool(_preview, model, min_support)
@@ -418,52 +430,90 @@ def _report_view(report: Any, retired: int) -> dict:
             "back_on_trial": [_clip(ln) for ln in list(getattr(report, "relapsed", []) or [])[:20]]}
 
 
+def _instructions(text: str | None) -> str | None:
+    if not text:
+        return None
+    from maverick import self_improvement_runner as runner
+    try:
+        return runner.read_evaluation_system(text.encode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=(
+            "That instructions file is empty, larger than 1 MB, or not plain text.")) from exc
+
+
 @router.post("/run")
 async def run_now(request: Request, body: RunIn) -> dict:
+    """``self-harness run``: a background job the page polls. Every model
+    (``--all-models``) can be stopped between models."""
     require_global_permission(request, "admin")
     from maverick import self_harness
     from maverick import self_improvement_runner as runner
     from maverick.learning_guard import Halted, check_learning_halt
+
+    from .learning_ops_api import start_job
     if not self_harness.enabled():
         raise HTTPException(status_code=409, detail=(
             "Self-coaching is off. Turn it on on the Learning page first."))
-
-    def _run() -> list[dict]:
-        check_learning_halt("self-harness", "dashboard-start")
-        if body.scope == "all":
-            results = runner.run_self_harness_all_models()
-            return [_report_view(rep, ret) for _m, (rep, ret) in sorted(results.items())][:20]
-        report, retired = runner.run_self_harness_cycle()
-        return [_report_view(report, retired)]
-    _audit(request, "self_harness_run", scope=body.scope)
+    evaluation_system = _instructions(body.instructions)
+    chosen = None
+    if body.scope == "chosen":
+        chosen = await run_in_threadpool(_model_choice, body.model_id)
+        if not chosen:
+            raise HTTPException(status_code=422, detail="Choose a model from the list.")
     try:
-        reports = await run_in_threadpool(_run)
+        check_learning_halt("self-harness", "dashboard-start")
     except Halted as exc:
         raise HTTPException(status_code=409, detail=_HALTED) from exc
-    return {"reports": reports}
+    stage = True if body.trial else None
+    _audit(request, "self_harness_run", scope=body.scope, model=chosen or "", trial=body.trial,
+           retire=body.retire, with_instructions=evaluation_system is not None)
+
+    def _run(job) -> dict:
+        check_learning_halt("self-harness", "dashboard-start")
+        if body.scope == "all":
+            results = runner.run_self_harness_all_models(
+                retire=body.retire, canary=stage, evaluation_system=evaluation_system,
+                should_stop=lambda: job.cancelled)
+            return {"reports": [_report_view(rep, ret) for _m, (rep, ret) in sorted(results.items())][:20]}
+        pin = {"model_id": chosen} if chosen else {}
+        report, retired = runner.run_self_harness_cycle(
+            retire=body.retire, canary=stage, evaluation_system=evaluation_system, **pin)
+        return {"reports": [_report_view(report, retired)]}
+    return start_job(request, "self_harness_run", "Learning pass", _run, cancellable=body.scope == "all")
 
 
 @router.post("/corpus-quality")
 async def corpus_quality(request: Request, body: QualityIn) -> dict:
+    """``self-harness corpus quality`` (with ``--retire`` when asked): a
+    background job. Removing test cases needs an explicit confirmation."""
     require_global_permission(request, "admin")
     from maverick import self_harness
+    from maverick import self_harness_eval as ev
     from maverick import self_improvement_runner as runner
-    if not self_harness.settings().get("eval_corpus"):
+
+    from .learning_ops_api import start_job
+    cpath = self_harness.settings().get("eval_corpus")
+    if not cpath:
         return {"configured": False, "cases": []}
+    if body.remove_weak and not body.confirm:
+        raise HTTPException(status_code=422, detail="Confirm removing the test cases first.")
     model = await run_in_threadpool(_model_choice, body.model_id)
-    _audit(request, "self_harness_corpus_quality", model=model or "")
-    try:
-        rows = await run_in_threadpool(lambda: runner.run_corpus_quality(key=model, samples=2,
-                                                                         raise_errors=True))
-    except Exception as exc:  # noqa: BLE001 -- plain message, no internals
-        raise HTTPException(status_code=503, detail=(
-            "The test cases could not be checked right now. Nothing was changed.")) from exc
-    return {"configured": True, "cases": [
-        {"task": _clip(str(r.get("goal") or "").splitlines()[0] if r.get("goal") else ""),
-         "useful": bool(r.get("discriminative")), "baseline_rate": r.get("baseline_rate"),
-         "age_days": r.get("age_days")}
-        for r in rows[:200]
-    ]}
+    _audit(request, "self_harness_corpus_quality", model=model or "", retire=body.remove_weak)
+
+    def _run(job) -> dict:
+        rows = runner.run_corpus_quality(key=model, samples=2, raise_errors=True)
+        removed = 0
+        weak = [r["goal"] for r in rows if not r.get("discriminative")]
+        if body.remove_weak and weak:
+            from maverick.llm import model_for_role
+            removed = ev.retire_corpus_cases(cpath, model or model_for_role("orchestrator"), weak)
+        return {"configured": True, "removed": int(removed), "cases": [
+            {"task": _clip(str(r.get("goal") or "").splitlines()[0] if r.get("goal") else ""),
+             "useful": bool(r.get("discriminative")), "baseline_rate": r.get("baseline_rate"),
+             "age_days": r.get("age_days")}
+            for r in rows[:200]
+        ]}
+    return start_job(request, "self_harness_corpus_quality", "Checking the test cases", _run)
 
 
 __all__ = ["router"]
