@@ -41,6 +41,9 @@ KNOWN_SECTIONS = frozenset({
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment",
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",
+    # Written by the installer's candidate promotion, governed knowledge and
+    # agent suites steps, and changeable on Settings > All settings.
+    "candidate_promotion", "knowledge_access", "suites",
     "capabilities", "catalogs", "channels", "client", "coding", "compaction",
     "compliance", "computer_use", "connections", "consent_preferences",
     "consequence", "containment", "control_plane",
