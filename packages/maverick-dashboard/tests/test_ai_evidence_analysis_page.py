@@ -79,7 +79,7 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
     assert "a different, authorized person" in response.text
     assert "/api/v1/ai-evidence-analysis" in response.text
     assert "may be sent to that provider" in response.text
-    assert "Do not enter document contents, secrets, personal" in response.text
+    assert "Do not type in document contents, passwords," in response.text
     assert 'aria-describedby="mv-copilot-egress"' in response.text
 
 
@@ -271,7 +271,7 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
     assert "enabled and composed for operations" not in source
     assert ".status-card > .governance-details" in css
     assert "Grounded in the current page" not in copilot_source
-    assert "Model-generated guidance is unverified" in copilot_source
+    assert "AI answers can be wrong" in copilot_source
     assert 'history.push({role: "user", content: message})' in copilot_source
     assert '{role: "assistant", content: payload.reply}' not in copilot_source
 
