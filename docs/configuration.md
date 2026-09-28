@@ -465,6 +465,9 @@ allow_provider_egress = false # extra learning-only model calls may cross provid
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above
 distill_local = true
+auto_distill = false       # a model writes a recallable skill straight from each
+                           #   finished run (untrusted run text: keep off unless
+                           #   reviewed). MAVERICK_AUTO_DISTILL, when set, decides.
 provision_packs = true     # equip a freshly-approved pack with the skills + tools
                            #   its workflow needs at creation time (capability
                            #   provisioning at pack-birth). Default on once
@@ -511,6 +514,11 @@ evaluator_evolution = true  # promote a BETTER judge instead of only freezing wh
                            #   Override via MAVERICK_EVALUATOR_EVOLUTION. See FEATURES.md.
 evaluator_eps = 0.05       # confidence level of the eps-best-belief lower bound used
                            #   for evaluator promotion (lower = more conservative).
+prm_backend = "null"       # step scorer: null | heuristic | remote | learned | linear
+prm_endpoint = ""          # remote scorer address (https, or http on loopback)
+prm_api_key = ""           # remote scorer key (sealed when set from the dashboard)
+prm_path = ""              # learned-model folder or linear artifact file
+                           #   Each MAVERICK_PRM* variable, when set, wins over its key.
 
 [self_modify]              # research-only code DGM (default off)
 enable = false             # dashboard/API arming changes only this gate

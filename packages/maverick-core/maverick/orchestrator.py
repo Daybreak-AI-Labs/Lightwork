@@ -80,6 +80,25 @@ def _skill_distillation_frozen(*, config: dict | None = None) -> bool:
     return learning_frozen_safe() if config is None else learning_frozen_safe(config=config)
 
 
+def _auto_distill_enabled() -> bool:
+    """Whether a finished run may have a model write a recallable skill.
+
+    Off by default: run text is untrusted, so this is an explicit opt-in via
+    ``[self_learning] auto_distill`` (Settings > All settings) or
+    ``MAVERICK_AUTO_DISTILL``. A set environment variable decides (only
+    ``1``/``true``/``yes``/``on`` enable it); a config value must be a real
+    boolean true."""
+    if "MAVERICK_AUTO_DISTILL" in os.environ:
+        return os.getenv("MAVERICK_AUTO_DISTILL", "").strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+    try:
+        from .config import get_self_learning
+        return get_self_learning()["auto_distill"] is True
+    except Exception:  # pragma: no cover -- config never enables distillation
+        return False
+
+
 # The "skill distill disabled" opt-in hint is a standing setting, not a
 # per-goal event -- show it at most once per process (see run_goal).
 _WARNED_DISTILL_DISABLED = False
@@ -2345,10 +2364,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # default. Trajectories can contain untrusted goal/tool/workspace text
         # and writing LLM output directly to persisted skills creates a
         # cross-run prompt-injection primitive. Operators can opt in explicitly
-        # via MAVERICK_AUTO_DISTILL=1.
-        auto_distill = os.getenv("MAVERICK_AUTO_DISTILL", "").strip().lower() in {
-            "1", "true", "yes", "on",
-        }
+        # (see _auto_distill_enabled).
+        auto_distill = _auto_distill_enabled()
         # Same calibration-freeze interlock as the local distillation path
         # below (and dreaming._consolidate_learning): a drifted verifier's
         # success/failure labels must not seed a new, LLM-written, recallable

@@ -1487,6 +1487,10 @@ def get_self_learning(*, config: dict[str, Any] | None = None) -> dict:
         # engines themselves default on.
         "allow_provider_egress": cfg.get("allow_provider_egress") is True,
         "distill_local": _strict_config_bool(cfg, "distill_local", True),
+        # A model writes a recallable skill straight from each finished run.
+        # Run text is untrusted, so this stays a strict, default-off opt-in
+        # (MAVERICK_AUTO_DISTILL, when set, decides instead).
+        "auto_distill": cfg.get("auto_distill") is True,
         "max_acquisitions": max(1, max_acq),
     }
 

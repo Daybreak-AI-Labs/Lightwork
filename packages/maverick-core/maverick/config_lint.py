@@ -674,6 +674,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "allow_mcp_acquisition",
         "allow_provider_egress",
         "distill_local",
+        "auto_distill",
     },
     "ekko": {"provider_egress"},
     "model_improvement": {
