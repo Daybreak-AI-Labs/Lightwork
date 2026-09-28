@@ -17,6 +17,7 @@ from . import (
     learning_actions_api,
     learning_loop_api,
     research_actions_api,
+    value_proof_api,
 )
 
 api_router = APIRouter()
@@ -27,6 +28,7 @@ api_router.include_router(learning_loop_api.router)
 api_router.include_router(audit_actions_api.router)
 api_router.include_router(research_actions_api.router)
 api_router.include_router(benchmark_actions_api.router)
+api_router.include_router(value_proof_api.router)
 
 asset_router = APIRouter()
 asset_router.include_router(code_actions_api.asset_router)

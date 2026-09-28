@@ -1,0 +1,50 @@
+{#- Savings page: proof that the work is paying off -- cheaper over time,
+    what earned automatic approval, outside agents sharing memory, and the
+    signed records to hand to someone else. Filled by lightwork-value-proof.js. -#}
+<div id="vp-proof" class="vp">
+  <div class="section-head"><h2>Proof of results</h2></div>
+
+  <div class="panel">
+    <h3 id="vp-comp-title">Is the work getting cheaper and better?</h3>
+    <p class="muted">Compares the first runs of each kind of task with the most recent ones.</p>
+    <div id="vp-comp" aria-labelledby="vp-comp-title">Loading…</div>
+    <h3 id="vp-dept-title">By department</h3>
+    <div id="vp-dept" aria-labelledby="vp-dept-title">Loading…</div>
+  </div>
+
+  <div class="panel">
+    <h3 id="vp-ea-title">Actions approved automatically</h3>
+    <p id="vp-ea-state" class="muted">Loading…</p>
+    <div id="vp-ea" aria-labelledby="vp-ea-title"></div>
+  </div>
+
+  <div class="panel">
+    <h3 id="vp-fleet-title">Outside agents sharing what they learn</h3>
+    <div id="vp-fleet" aria-labelledby="vp-fleet-title">Loading…</div>
+  </div>
+
+  <div class="panel">
+    <h3 id="vp-rec-title">Record of decisions</h3>
+    <p id="vp-rec">Loading…</p>
+    <p class="vp-admin" hidden>
+      <a class="btn" id="vp-rec-download" href="/api/v1/value-proof/record-export" download>Download the signed record</a>
+      <a class="btn" id="vp-mem-download" href="/api/v1/value-proof/memory-export" download>Download the signed learning statement</a>
+    </p>
+    <form id="vp-check" class="vp-check">
+      <label for="vp-check-kind">Check a file someone gave you</label>
+      <select id="vp-check-kind" class="select">
+        <option value="record">A signed record of decisions</option>
+        <option value="memory">A signed learning statement</option>
+      </select>
+      <label for="vp-check-file">File</label>
+      <input id="vp-check-file" type="file" accept=".json,application/json">
+      <button type="submit" class="btn btn--primary">Check the file</button>
+    </form>
+    <div id="vp-check-result" role="status" aria-live="polite"></div>
+  </div>
+  <p id="vp-proof-msg" role="status" aria-live="polite" class="muted"></p>
+</div>
+<style>
+  .vp-check { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-top: .6rem; }
+</style>
+<script src="/static/lightwork-value-proof.js" defer></script>
