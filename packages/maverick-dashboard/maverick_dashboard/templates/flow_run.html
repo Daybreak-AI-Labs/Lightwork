@@ -48,6 +48,7 @@
   <p class="fr__msg" id="fr-meta"></p>
   <p>
     <a class="btn btn--ghost" id="fr-designer-link" href="/flows/designer/{{ flow_id }}">Open the flow</a>
+    <a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a>
     <a class="btn btn--ghost" href="/automations">All automations</a>
   </p>
   <div class="fr__error" id="fr-error" role="alert" hidden></div>

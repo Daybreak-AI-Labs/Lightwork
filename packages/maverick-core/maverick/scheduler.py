@@ -205,4 +205,53 @@ def schedule_cron(queue, expr: str, kind: str, payload: dict | None = None,
     return job_id, run_at
 
 
-__all__ = ["parse_cron", "next_run", "schedule_cron", "CronError"]
+TIMETABLE_REPEATS = ("hourly", "daily", "weekdays", "weekly", "monthly")
+
+
+def timetable_cron(repeat: str, *, at: str = "09:00", days: list[int] | None = None,
+                   day_of_month: int = 1, every_hours: int = 1) -> str:
+    """The 5-field cron for a plain timetable ("every weekday at 09:00").
+
+    Hours and minutes are wall-clock in the schedule's own zone (carried as
+    ``__tz__`` beside the cron), so no UTC shifting happens here. ``days`` are
+    cron weekdays (0 = Sunday .. 6 = Saturday); ``day_of_month`` is 1-28 so a
+    monthly run happens every month. Raises :class:`CronError` on bad input.
+    """
+    if repeat not in TIMETABLE_REPEATS:
+        raise CronError("choose how often the schedule repeats")
+    if repeat == "hourly":
+        if type(every_hours) is not int or not 1 <= every_hours <= 12:
+            raise CronError("every_hours must be between 1 and 12")
+        return "0 * * * *" if every_hours == 1 else f"0 */{every_hours} * * *"
+    parts = str(at or "").split(":")
+    if len(parts) != 2 or not all(p.isdigit() and len(p) == 2 for p in parts):
+        raise CronError("time must look like 09:00")
+    hour, minute = int(parts[0]), int(parts[1])
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise CronError("time must be a real time of day")
+    if repeat == "daily":
+        return f"{minute} {hour} * * *"
+    if repeat == "weekdays":
+        return f"{minute} {hour} * * 1-5"
+    if repeat == "weekly":
+        chosen = sorted(set(days or []))
+        if not chosen or any(type(d) is not int or not 0 <= d <= 6 for d in chosen):
+            raise CronError("choose at least one day of the week")
+        return f"{minute} {hour} * * {','.join(str(d) for d in chosen)}"
+    if type(day_of_month) is not int or not 1 <= day_of_month <= 28:
+        raise CronError("day_of_month must be between 1 and 28")
+    return f"{minute} {hour} {day_of_month} * *"
+
+
+def upcoming_runs(expr: str, *, tz: str = "", count: int = 3, after: float | None = None) -> list[float]:
+    """The next ``count`` (at most 10) run times for ``expr`` in ``tz``, as UTC epochs."""
+    out: list[float] = []
+    cursor = after
+    for _ in range(max(1, min(int(count), 10))):
+        cursor = next_run(expr, after=cursor, tz=tz)
+        out.append(cursor)
+    return out
+
+
+__all__ = ["parse_cron", "next_run", "schedule_cron", "CronError", "TIMETABLE_REPEATS",
+           "timetable_cron", "upcoming_runs"]

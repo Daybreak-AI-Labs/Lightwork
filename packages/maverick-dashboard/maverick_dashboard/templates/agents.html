@@ -201,6 +201,36 @@
     </div>
   </details>
 
+  {% if editable %}
+  <details class="af-card" id="biz-setup" style="margin-bottom: var(--space-4);">
+    <summary style="cursor: pointer; font-weight: 600;">Set up a specialist for your business
+      <span class="muted" style="font-weight: 400;">— describe what you do, review the draft, then add it with your documents</span>
+    </summary>
+    <form id="biz-form" style="margin-top: 0.8rem;" novalidate>
+      <div class="fld"><label for="biz-name">Business name</label>
+        <input id="biz-name" class="input" type="text" maxlength="120" required></div>
+      <div class="fld"><label for="biz-what">What does the business do?</label>
+        <textarea id="biz-what" class="textarea" rows="4" maxlength="4000"></textarea></div>
+      <div class="fld"><label for="biz-industry">Industry (optional)</label>
+        <input id="biz-industry" class="input" type="text" maxlength="120"></div>
+      <div class="fld"><label for="biz-ai">How to draft it</label>
+        <select id="biz-ai" class="select">
+          <option value="ai">Draft it with AI (counts toward your spending limits, at most $0.50)</option>
+          <option value="plain">Draft it from a standard outline (no AI)</option>
+        </select></div>
+      <button type="submit" class="btn btn--primary" id="biz-draft">Draft the specialist</button>
+    </form>
+    <p id="biz-status" role="status" aria-live="polite" tabindex="-1" class="muted"></p>
+    <div id="biz-review" hidden>
+      <div id="biz-summary"></div>
+      <div class="fld"><label for="biz-docs">Documents it should know (optional, up to 10)</label>
+        <input id="biz-docs" type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.odt,.csv,.png,.jpg,.jpeg"></div>
+      <button type="button" class="btn btn--primary" id="biz-approve">Add this specialist</button>
+      <button type="button" class="btn btn--ghost" id="biz-discard">Discard the draft</button>
+    </div>
+  </details>
+  {% endif %}
+
   <div class="af-grid">
     <!-- ============ LEFT: build a specialist ============ -->
     <div class="af-card">
@@ -1183,4 +1213,5 @@
   })();
   </script>
   {% endif %}
+<script src="/static/lightwork-business-agent.js" defer></script>
 {% endblock %}

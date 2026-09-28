@@ -76,17 +76,35 @@
     button.setAttribute('aria-busy', 'true');
     result.hidden = true;
     result.replaceChildren();
-    say('Getting two viewpoints. This can take a minute…');
+    say('Getting two viewpoints. This can take a minute; you can keep using the page…');
     try {
-      const response = await fetch('/api/v1/viewpoints', {
+      const sides = {};
+      const forSide = document.getElementById('vp-for'), againstSide = document.getElementById('vp-against');
+      if (forSide && forSide.value.trim()) sides.for_side = forSide.value.trim().slice(0, 300);
+      if (againstSide && againstSide.value.trim()) sides.against_side = againstSide.value.trim().slice(0, 300);
+      const response = await fetch('/api/v1/viewpoints/jobs', {
         method: 'POST', credentials: 'same-origin', cache: 'no-store',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ question: text.slice(0, 2000), rounds: Number(rounds.value) || 2 })
+        body: JSON.stringify(Object.assign({ question: text.slice(0, 2000), rounds: Number(rounds.value) || 2 }, sides))
       });
       if (!response.ok) { say(failText(response)); return; }
-      const raw = await response.text();
+      const started = await response.json();
+      if (!started || typeof started.job !== 'string' || !/^[a-f0-9]{32}$/.test(started.job)) {
+        say('The request couldn’t be checked. Please try again.'); return;
+      }
       let data = null;
-      try { data = raw.length <= 256 * 1024 ? JSON.parse(raw) : null; } catch (_) { data = null; }
+      for (let tries = 0; tries < 300; tries += 1) {
+        await new Promise(resolve => setTimeout(resolve, tries ? 2000 : 500));
+        const poll = await fetch('/api/v1/viewpoints/jobs/' + started.job, {
+          credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }
+        });
+        if (!poll.ok) { say(failText(poll)); return; }
+        const job = await poll.json();
+        if (job && job.state === 'running') continue;
+        if (job && job.state === 'failed') { say((job.result && job.result.message) || 'This couldn’t be finished. Try again.'); return; }
+        data = job && job.result;
+        break;
+      }
       if (!valid(data)) { say('The answer couldn’t be checked. Please try again.'); return; }
       if (data.ran === false) { say(data.message || 'This couldn’t be started. Please try again.'); return; }
       show(data);

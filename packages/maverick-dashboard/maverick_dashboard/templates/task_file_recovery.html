@@ -51,6 +51,25 @@
       files that aren't text are listed without their content. Commands the task ran are not included.</p>
   </details>
 </section>
+<section id="task-journal" class="tf-wrap panel" data-goal="{{ goal.id }}" aria-labelledby="tj-title">
+  <h2 id="tj-title">Undo this task's recorded file changes</h2>
+  <p class="tf-flush">While "Keep a copy before files change" is on, Lightwork records each file this task writes.
+    List those writes, check what undoing them would do, then put the files back as they were before the task.</p>
+  <button id="tj-list" class="btn btn--ghost" type="button">List recorded changes</button>
+  <button id="tj-preview" class="btn btn--primary" type="button">Check what would be undone</button>
+  <p id="tj-status" role="status" aria-live="polite" tabindex="-1"></p>
+  <ul id="tj-entries" class="tj-list" aria-label="Recorded file changes"></ul>
+  <div id="tj-review" class="panel" hidden>
+    <p id="tj-plan"></p>
+    <label id="tj-partial-wrap" hidden><input id="tj-partial" type="checkbox">Undo only what was recorded. Some later changes weren't recorded, so they stay as they are.</label>
+    <button id="tj-undo" class="btn btn--danger" type="button">Undo these changes</button>
+  </div>
+  <details class="tf-about"><summary>What this can undo</summary>
+    <p>Only files this task wrote with its file tools while recording was on, inside its own work folder. Commands the task ran,
+      online files and tickets aren't undone. Stop the task first. After an undo the history is kept as a record, so the same undo
+      can't run twice by accident.</p>
+  </details>
+</section>
 <style>
   .tf-wrap{max-width:900px;margin-inline:auto;min-width:0}.tf-flush{margin:0}
   #task-files p,#task-files h1,#task-files h2,#task-files button{overflow-wrap:anywhere}
@@ -65,7 +84,10 @@
   .tc-line{padding-inline-start:var(--space-2);border-inline-start:3px solid transparent}
   .tc-line--add{border-inline-start-color:var(--success)}.tc-line--remove{border-inline-start-color:var(--danger)}
   .tc-line--gap{color:var(--muted)}
+  #task-journal{margin-block:var(--space-4)}#task-journal h2,#task-journal p,#task-journal button,#task-journal li{overflow-wrap:anywhere}#task-journal button{white-space:normal;max-width:100%;margin-block:var(--space-2)}
+  #task-journal label{display:flex;align-items:flex-start;gap:var(--space-2);margin-block:var(--space-3)}.tj-list{list-style:none;padding:0;margin:var(--space-2) 0}
 </style>
 <script src="/static/lightwork-task-file-recovery.js"></script>
 <script src="/static/lightwork-task-changes.js"></script>
+<script src="/static/lightwork-task-journal.js"></script>
 {% endblock %}

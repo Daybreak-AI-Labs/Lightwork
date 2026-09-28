@@ -383,7 +383,23 @@ def provision_profile(
     return plan, result
 
 
+
+def apply_approved_plan(profile, plan, *, llm: Any = None) -> ProvisionResult:
+    """Equip an approved onboarding pack: install catalog skills and generate
+    declared tools through the governed paths (a no-op unless self-learning is
+    on), then record the gaps as factory-learning signals (a no-op unless that
+    is on). Shared by ``maverick onboard`` and the dashboard's business setup."""
+    result = apply_plan(plan, approved=True, llm=llm)
+    try:
+        from . import factory_learning
+        factory_learning.record_provisioning(profile, plan, result)
+    except Exception:  # pragma: no cover -- learning must never break onboarding
+        pass
+    return result
+
+
 __all__ = [
+    "apply_approved_plan",
     "CapabilityGap", "ProvisioningPlan", "ProvisionResult",
     "analyze_profile", "apply_plan", "provision_profile",
 ]

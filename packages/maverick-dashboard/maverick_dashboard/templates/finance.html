@@ -273,6 +273,12 @@
       </div>
       <label class="fa-field fa-grow"><span>Apply an update file you were sent</span>
         <input class="input" type="file" id="tax-tables-file" accept=".json,application/json"></label>
+      <details>
+        <summary>Technical details</summary>
+        <label class="fa-field fa-grow"><span>Check a different update address once (it must start with https://)</span>
+          <input class="input" type="url" id="tax-tables-url" maxlength="500" placeholder="https://"></label>
+        <button type="button" class="btn btn--ghost" id="tax-tables-check-url">Check this address</button>
+      </details>
       <p class="muted" id="tax-tables-status" role="status" aria-live="polite"></p>
       <div id="tax-tables-out"></div>
     </details>

@@ -12,6 +12,7 @@
   .cs-viewpoints__form { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
   .cs-viewpoints__form .textarea, .cs-viewpoints__form .select { width: 100%; box-sizing: border-box; max-width: 100%; }
   .cs-viewpoints p, .cs-viewpoints li { overflow-wrap: anywhere; }
+  .cs-viewpoints__sides { display: grid; gap: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
   .cs-viewpoints__side { border-inline-start: 3px solid var(--border); padding-inline-start: var(--space-3); margin-block: var(--space-3); }
 </style>
 {% endblock %}
@@ -44,6 +45,13 @@
         <option value="2" selected>Standard: two arguments from each side</option>
         <option value="3">Thorough: three arguments from each side</option>
       </select>
+      <fieldset class="cs-viewpoints__sides">
+        <legend>What each side argues (optional)</legend>
+        <label for="vp-for">The side for argues that…</label>
+        <input id="vp-for" class="input" type="text" maxlength="300" placeholder="Leave blank for: the answer is yes, the idea is sound">
+        <label for="vp-against">The side against argues that…</label>
+        <input id="vp-against" class="input" type="text" maxlength="300" placeholder="Leave blank for: the answer is no, the idea is flawed">
+      </fieldset>
       <p class="muted">One side argues for, the other argues against, and a neutral judge weighs them up. This uses AI, counts
         toward your spending limits and costs at most $1.00 each time. Nothing else is started.</p>
       <button type="submit" class="btn btn--primary" id="vp-run">Get two viewpoints</button>

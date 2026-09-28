@@ -10,6 +10,7 @@ page is at the registry's ``view`` floor.
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from typing import Any
@@ -151,6 +152,19 @@ def _card(name: str, info: dict[str, Any]) -> dict[str, Any]:
             "switch": _SOURCE_SWITCH.get(name, "") if not available and not error else ""}
 
 
+def _deposit_collections(status: dict[str, Any]) -> list[dict[str, str]]:
+    """Document groups a person can add to: the default plus existing ones."""
+    info = (status.get("sources") or {}).get("knowledge") or {}
+    names = ["cortex"] + [str(c) for c in (info.get("collections") or []) if isinstance(c, str)]
+    out, seen = [], set()
+    for name in names:
+        if name in seen or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
+            continue
+        seen.add(name)
+        out.append({"value": name, "label": "Company brain (usual place)" if name == "cortex" else humanize(name)})
+    return out[:100]
+
+
 def _cards(status: dict[str, Any]) -> list[dict[str, Any]]:
     sources = status.get("sources") or {}
     fallback = str(status.get("error") or "not reported")
@@ -242,6 +256,7 @@ def create_cortex_page_router(templates: Jinja2Templates) -> APIRouter:
                 "status": status, "cards": cards, "sources": list(SOURCES),
                 "source_labels": {name: _label(name) for name in SOURCES},
                 "departments": await run_in_threadpool(_departments),
+                "deposit_collections": _deposit_collections(status),
                 "can_switch": has_global_permission(request, "admin"),
                 "answering": sum(1 for c in cards if c["available"]), "total": len(cards),
                 "can_audit": can_audit, "recent": recent, "recent_n": _RECENT_N,

@@ -265,6 +265,7 @@
     <button class="btn btn--ghost" type="button" id="fd-run-real" title="Run the published version using connected services">Run published</button>
     <button class="btn btn--ghost" type="button" id="fd-history">Earlier versions</button>
     <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">What starts it</button>
+    {% if flow_id %}<a class="btn btn--ghost" id="fd-teach" href="/flows/{{ flow_id | urlencode }}/teach" title="Teach steps from examples, or build a flow from reviewed runs">Teach this flow</a>{% endif %}
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">Assistant</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
   </div>
