@@ -26,16 +26,25 @@ Deliberately NOT in the catalog:
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
   ``[federation]``, ``[license]``, ``[providers] per_tenant_keys``, the sandbox
-  ``workdir``/``host``/``namespace``, ``[audit.worm]`` / ``[audit.unified]``
-  custody, the Stripe and Pushover credentials (read only from the server's
-  environment), ``[deployment]`` (installer provenance).
+  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the Stripe and
+  Pushover credentials (read only from the server's environment),
+  ``[deployment]`` (installer provenance), and every setting that names a
+  server file path or an environment variable (``signal_cli_path``,
+  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
 * Settings that already have a dedicated control elsewhere: provider keys,
-  models, the per-task spending cap, capabilities, features, channels,
-  plugins, connections, the learning switches, research execution, savings
-  assumptions, workspace selection.
-* Structured per-module policies (security suite modules, consent and privacy
-  workbench options, model-risk thresholds, rate-limit patterns beyond the
-  common tools) that need their module's own page to author safely.
+  models, the per-task spending cap, capabilities, features, the six chat
+  channels on the Channels page (their sign-in fields and on/off), plugins,
+  connections, the learning switches, research execution, savings
+  assumptions, workspace selection, the security suite's on/off switches.
+* Structured policies that need their module's own page to author safely:
+  consent and privacy workbench options, identity-connector scheduling,
+  evidence parser installs, per-team gateway credentials.
+
+Controls beyond single values: ``keys`` (trusted publisher keys, added from an
+uploaded or pasted key file and shown only by fingerprint), ``table`` (a list
+of rows, e.g. usage limits per tool or reviewed tools with a risk level), and
+lists/pickers whose options come from live data (``choices_from``: people,
+tools, models, connected systems) resolved by the page at request time.
 """
 from __future__ import annotations
 
@@ -53,6 +62,11 @@ GROUPS: tuple[str, ...] = (
     "Data retention",
     "Integrations",
     "Performance",
+    "Chat channels",
+    "Protected work area",
+    "Finance",
+    "Security suite",
+    "AI governance",
 )
 
 GROUP_INTROS: dict[str, str] = {
@@ -65,10 +79,16 @@ GROUP_INTROS: dict[str, str] = {
     "Data retention": "How long records are kept before they are removed automatically.",
     "Integrations": "Notifications and connections to other systems.",
     "Performance": "Speed and reliability settings.",
+    "Chat channels": "Who may give agents work from each chat app, and how the apps not on the Channels page connect.",
+    "Protected work area": "Where agent commands run and what that area is allowed to reach.",
+    "Finance": "When money movements stop for a person, which rules apply and how finance monitoring runs.",
+    "Security suite": "How the environment hunter gathers security events and how often the hunters run.",
+    "AI governance": "Detailed policies for the AI governance modules, the AI gateway and outbound GRC records.",
 }
 
 CONTROLS = frozenset({
     "toggle", "select", "number", "text", "list", "secret", "multiselect", "rate",
+    "keys", "table",
 })
 
 
@@ -102,8 +122,28 @@ class Setting:
     pattern: str = ""  # optional full-match rule for text/list items
     aliases: str = ""  # extra search words
     # "key" = a fixed key the reader names; "tool" = the key is a registered
-    # tool name in a per-tool table (``[rate_limits]``).
+    # tool name in a per-tool table (``[rate_limits]``); "entries" = every
+    # other key of the table named by ``section`` (a ``table`` control whose
+    # rows are the table's own keys, minus ``fixed_keys``).
     key_kind: str = "key"
+    # A heading inside the group; each one is its own small form on the page.
+    subgroup: str = ""
+    # Options filled from live data at request time (see settings_all_page).
+    choices_from: str = ""
+    # list controls: how one entry is named, hinted and explained when wrong.
+    item_label: str = "Address"
+    item_hint: str = "https://"
+    item_error: str = "a secure web address"
+    # list controls: an emptied list stops setting the value here (so the
+    # installer's or server's list applies) instead of storing an empty one.
+    empty_unset: bool = False
+    # number controls: the page shows value / scale in ``unit``; the kernel
+    # stores value * scale (e.g. days shown, seconds stored).
+    scale: float = 1.0
+    # table controls: "rate" (usage limit per tool) or "risk" (reviewed tool
+    # with a risk level); ``fixed_keys`` are rows other settings own.
+    row_kind: str = ""
+    fixed_keys: tuple[str, ...] = ()
 
     @property
     def id(self) -> str:
@@ -115,6 +155,8 @@ class Setting:
 
     @property
     def path(self) -> tuple[str, ...]:
+        if self.key_kind == "entries":
+            return tuple(self.section.split("."))
         return (*self.section.split("."), self.key)
 
     @property
@@ -753,6 +795,936 @@ SETTINGS: tuple[Setting, ...] = (
       "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool"),
 )
 
+# ====================================================================
+# Settings that need more than one value per control, or a guided form:
+# chat channels, publisher keys, the protected work area, document search,
+# connected business systems, finance, the security suite, AI governance
+# modules, the AI gateway, GRC sync, outside tool gateway, local models,
+# plugin permissions and usage limits for any tool.
+# ====================================================================
+
+_PHONE = r"\+[0-9]{6,15}"
+_DIGITS = r"-?[0-9]{1,20}"
+_EMAIL = r"[^@\s<>]{1,64}@[^@\s<>]{1,190}\.[A-Za-z]{2,24}"
+
+# Channel name -> (label shown, on the Channels page already?, allow-list key,
+# item word, item hint, item pattern, item error). Names match the channel
+# adapter registry in maverick.server (``_WIRES``); a test pins that.
+CHANNEL_ALLOWLISTS: dict[str, tuple[str, bool, str, str, str, str, str]] = {
+    "telegram": ("Telegram", True, "allowed_user_ids", "Person", "123456789",
+                 _DIGITS, "a Telegram person number"),
+    "discord": ("Discord", True, "allowed_user_ids", "Person", "123456789012345678",
+                _DIGITS, "a Discord person number"),
+    "slack": ("Slack", True, "allowed_user_ids", "Person", "U01ABCDEF",
+              r"[A-Z0-9]{5,24}", "a Slack member code, for example U01ABCDEF"),
+    "whatsapp_cloud": ("WhatsApp (Cloud)", True, "allowed_user_ids", "Number", "14155551234",
+                       r"[0-9]{6,15}", "a phone number written as digits only"),
+    "sms": ("Text messages", True, "allowed_user_ids", "Number", "+14155551234",
+            _PHONE, "a phone number starting with + and the country code"),
+    "email": ("Email", True, "allowed_user_ids", "Address", "name@example.com",
+              _EMAIL, "an email address"),
+    "signal": ("Signal", False, "allowed_user_ids", "Number", "+14155551234",
+               _PHONE, "a phone number starting with + and the country code"),
+    "matrix": ("Matrix", False, "allowed_user_ids", "Account", "@name:matrix.org",
+               r"@[^:\s]{1,255}:[^\s]{1,255}", "a Matrix account such as @name:matrix.org"),
+    "bluesky": ("Bluesky", False, "allowed_user_ids", "Handle", "name.bsky.social",
+                r"[A-Za-z0-9.:-]{3,253}", "a Bluesky handle"),
+    "mastodon": ("Mastodon", False, "allowed_user_ids", "Account", "name@mastodon.social",
+                 r"@?[^@\s]{1,64}@[^@\s]{1,253}", "an account such as name@mastodon.social"),
+    "whatsapp": ("WhatsApp (Twilio)", False, "allowed_user_ids", "Number",
+                 "whatsapp:+14155551234", r"whatsapp:\+[0-9]{6,15}",
+                 "a number written as whatsapp:+ and the country code"),
+    "threads": ("Threads", False, "allowed_user_ids", "Username", "name",
+                r"[A-Za-z0-9._]{1,30}", "a Threads username"),
+    "rcs": ("RCS messages", False, "allowed_user_ids", "Number", "+14155551234",
+            _PHONE, "a phone number starting with + and the country code"),
+    "imessage": ("iMessage", False, "allowed_user_ids", "Contact", "+14155551234",
+                 r"(" + _PHONE + r"|" + _EMAIL + r")", "a phone number or email address"),
+    "irc": ("IRC", False, "allowed_user_ids", "Account", "nickname",
+            r"[^\s,]{1,64}", "a signed-in IRC account name"),
+    "voice": ("Phone calls", False, "allowed_callers", "Number", "+14155551234",
+              _PHONE, "a phone number starting with + and the country code"),
+}
+
+
+def _channel_settings() -> tuple[Setting, ...]:
+    out: list[Setting] = []
+    for name, (label, on_page, key, item, hint, pattern, error) in CHANNEL_ALLOWLISTS.items():
+        section = f"channels.{name}"
+        common = {"group": "Chat channels", "reader": "maverick.server", "subgroup": label,
+                  "restart": True}
+        if not on_page:
+            out.append(S(section, "enabled", f"Use {label}",
+                         f"Let people on the list below give agents work through {label}.",
+                         "toggle", default=False, weaker=True,
+                         warning=f"People on the {label} list will be able to give agents work.",
+                         aliases=f"{name} channel chat", **common))
+        noun = "callers" if key == "allowed_callers" else "people"
+        out.append(S(section, key, f"Who may use {label}",
+                     f"Only {noun} listed here can give agents work through {label}. When the "
+                     "list is empty, the list set on your server applies; with no list at all, "
+                     "nobody can.",
+                     "list", default=[], weaker="grow", item_label=item, item_hint=hint,
+                     pattern=pattern, item_error=error, empty_unset=True, max_items=200,
+                     max_length=300,
+                     warning=f"More people will be able to give agents work through {label}.",
+                     aliases=f"{name} allow list allowed senders", **common))
+        if name == "telegram":
+            out.append(S(section, "allowed_chat_ids", "Telegram chats that may use Lightwork",
+                         "Private chats listed here may also give agents work.",
+                         "list", default=[], weaker="grow", item_label="Chat",
+                         item_hint="123456789", pattern=_DIGITS,
+                         item_error="a Telegram chat number", empty_unset=True, max_items=200,
+                         warning="More Telegram chats will be able to give agents work.",
+                         **common))
+    return tuple(out)
+
+
+def _https(_label: str) -> str:
+    return r"(" + _HTTPS + r")?"
+
+
+_CHANNEL_FIELDS: tuple[Setting, ...] = (
+    # Signal
+    S("channels.signal", "phone_number", "Signal number",
+      "The phone number your Signal account uses, starting with + and the country code.",
+      "text", "Chat channels", "", "maverick.server", subgroup="Signal", restart=True,
+      pattern=r"(" + _PHONE + r")?", max_length=16),
+    # Matrix
+    S("channels.matrix", "homeserver", "Matrix server",
+      "The web address of your Matrix server.", "text", "Chat channels", "",
+      "maverick.server", subgroup="Matrix", restart=True, pattern=_https("x"), max_length=300),
+    S("channels.matrix", "user_id", "Matrix account",
+      "The account Lightwork signs in as, such as @lightwork:matrix.org.", "text",
+      "Chat channels", "", "maverick.server", subgroup="Matrix", restart=True,
+      pattern=r"(@[^:\s]{1,255}:[^\s]{1,255})?", max_length=300),
+    S("channels.matrix", "access_token", "Matrix sign-in key",
+      "The access key for that account. It is stored sealed and never shown again.",
+      "secret", "Chat channels", "", "maverick.server", subgroup="Matrix", restart=True,
+      max_length=500),
+    # Bluesky
+    S("channels.bluesky", "handle", "Bluesky handle",
+      "The Bluesky account Lightwork uses, such as lightwork.bsky.social.", "text",
+      "Chat channels", "", "maverick.server", subgroup="Bluesky", restart=True,
+      pattern=r"[A-Za-z0-9.:-]{0,253}", max_length=253),
+    S("channels.bluesky", "password", "Bluesky app password",
+      "An app password created in Bluesky's settings. It is stored sealed and never shown again.",
+      "secret", "Chat channels", "", "maverick.server", subgroup="Bluesky", restart=True,
+      max_length=200),
+    S("channels.bluesky", "poll_interval", "Check Bluesky every",
+      "How often Lightwork looks for new messages.", "number", "Chat channels", 30,
+      "maverick.server", subgroup="Bluesky", restart=True, minimum=10, maximum=3600,
+      integer=True, unit="seconds"),
+    # Mastodon
+    S("channels.mastodon", "instance", "Mastodon server",
+      "The web address of your Mastodon server.", "text", "Chat channels", "",
+      "maverick.server", subgroup="Mastodon", restart=True, pattern=_https("x"), max_length=300),
+    S("channels.mastodon", "access_token", "Mastodon sign-in key",
+      "The access key for Lightwork's account. It is stored sealed and never shown again.",
+      "secret", "Chat channels", "", "maverick.server", subgroup="Mastodon", restart=True,
+      max_length=500),
+    S("channels.mastodon", "poll_interval", "Check Mastodon every",
+      "How often Lightwork looks for new messages.", "number", "Chat channels", 30,
+      "maverick.server", subgroup="Mastodon", restart=True, minimum=10, maximum=3600,
+      integer=True, unit="seconds"),
+    # WhatsApp through Twilio
+    S("channels.whatsapp", "account_sid", "Twilio account code",
+      "Your Twilio account code, which starts with AC.", "text", "Chat channels", "",
+      "maverick.server", subgroup="WhatsApp (Twilio)", restart=True,
+      pattern=r"(AC[0-9a-fA-F]{32})?", max_length=34),
+    S("channels.whatsapp", "auth_token", "Twilio sign-in key",
+      "Your Twilio auth token. It is stored sealed and never shown again.", "secret",
+      "Chat channels", "", "maverick.server", subgroup="WhatsApp (Twilio)", restart=True,
+      max_length=200),
+    S("channels.whatsapp", "from_number", "WhatsApp sending number",
+      "The number messages come from, written as whatsapp:+ and the country code.", "text",
+      "Chat channels", "", "maverick.server", subgroup="WhatsApp (Twilio)", restart=True,
+      pattern=r"(whatsapp:\+[0-9]{6,15})?", max_length=30),
+    S("channels.whatsapp", "port", "Port for incoming WhatsApp messages",
+      "The port on this server that receives messages from Twilio.", "number",
+      "Chat channels", 8765, "maverick.server", subgroup="WhatsApp (Twilio)", restart=True,
+      minimum=1024, maximum=65535, integer=True, unit="port"),
+    # Threads
+    S("channels.threads", "access_token", "Threads sign-in key",
+      "The access key for Lightwork's Threads account. It is stored sealed and never shown again.",
+      "secret", "Chat channels", "", "maverick.server", subgroup="Threads", restart=True,
+      max_length=500),
+    S("channels.threads", "user_id", "Threads account number",
+      "The number of the Threads account Lightwork uses.", "text", "Chat channels", "",
+      "maverick.server", subgroup="Threads", restart=True, pattern=r"[0-9]{0,30}",
+      max_length=30),
+    S("channels.threads", "poll_seconds", "Check Threads every",
+      "How often Lightwork looks for new replies.", "number", "Chat channels", 30,
+      "maverick.server", subgroup="Threads", restart=True, minimum=10, maximum=3600,
+      integer=True, unit="seconds"),
+    # RCS
+    S("channels.rcs", "agent_id", "RCS agent name",
+      "The name of your RCS business messaging agent.", "text", "Chat channels", "",
+      "maverick.server", subgroup="RCS messages", restart=True,
+      pattern=r"[A-Za-z0-9._-]{0,128}", max_length=128),
+    S("channels.rcs", "webhook_token", "RCS message check key",
+      "The shared key that proves incoming RCS messages are genuine. It is stored sealed.",
+      "secret", "Chat channels", "", "maverick.server", subgroup="RCS messages", restart=True,
+      max_length=200),
+    S("channels.rcs", "port", "Port for incoming RCS messages",
+      "The port on this server that receives RCS messages.", "number", "Chat channels", 8768,
+      "maverick.server", subgroup="RCS messages", restart=True, minimum=1024, maximum=65535,
+      integer=True, unit="port"),
+    # iMessage
+    S("channels.imessage", "poll_interval", "Check iMessage every",
+      "How often Lightwork looks for new messages on this Mac.", "number", "Chat channels", 5,
+      "maverick.server", subgroup="iMessage", restart=True, minimum=1, maximum=600,
+      integer=True, unit="seconds"),
+    # IRC
+    S("channels.irc", "server", "IRC server",
+      "The name of the IRC server, such as irc.libera.chat.", "text", "Chat channels", "",
+      "maverick.server", subgroup="IRC", restart=True,
+      pattern=r"[A-Za-z0-9.-]{0,253}", max_length=253),
+    S("channels.irc", "port", "IRC port", "The port of the IRC server.", "number",
+      "Chat channels", 6697, "maverick.server", subgroup="IRC", restart=True, minimum=1,
+      maximum=65535, integer=True, unit="port"),
+    S("channels.irc", "tls", "Use an encrypted IRC connection",
+      "Connect to the IRC server over an encrypted connection.", "toggle", "Chat channels",
+      True, "maverick.server", subgroup="IRC", restart=True, weaker=False,
+      warning="Messages to and from IRC will travel unencrypted."),
+    S("channels.irc", "nick", "IRC name", "The name Lightwork uses on IRC.", "text",
+      "Chat channels", "maverick", "maverick.server", subgroup="IRC", restart=True,
+      pattern=r"[A-Za-z0-9\[\]\\`^{}|-]{1,30}", max_length=30),
+    S("channels.irc", "channels", "IRC rooms to join",
+      "The rooms Lightwork joins, such as #support.", "list", "Chat channels", [],
+      "maverick.server", subgroup="IRC", restart=True, item_label="Room",
+      item_hint="#support", pattern=r"[#&][^\s,]{1,49}", item_error="a room name starting with #",
+      max_items=50),
+    S("channels.irc", "password", "IRC password",
+      "The password for Lightwork's IRC account. It is stored sealed and never shown again.",
+      "secret", "Chat channels", "", "maverick.server", subgroup="IRC", restart=True,
+      max_length=200),
+    # Phone calls
+    S("channels.voice", "provider", "Phone call service",
+      "The service that answers calls for Lightwork. Its key is added below.", "select",
+      "Chat channels", "vapi", "maverick.server", subgroup="Phone calls", restart=True,
+      choices=(("vapi", "Vapi"), ("retell", "Retell"), ("bland", "Bland"))),
+    S("channels.voice", "api_key", "Phone call service key",
+      "The key for the service above. It is stored sealed and never shown again.", "secret",
+      "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
+      max_length=300),
+    S("channels.voice", "phone_number", "Phone number",
+      "The number people call, starting with + and the country code.", "text",
+      "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
+      pattern=r"(" + _PHONE + r")?", max_length=16),
+    S("channels.voice", "assistant_id", "Call assistant name",
+      "The assistant set up in the call service, if it asks for one.", "text",
+      "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
+      pattern=r"[A-Za-z0-9._:-]{0,128}", max_length=128),
+    S("channels.voice", "webhook_token", "Call check key",
+      "The shared key that proves incoming calls are genuine. It is stored sealed.", "secret",
+      "Chat channels", "", "maverick.server", subgroup="Phone calls", restart=True,
+      max_length=300),
+    S("channels.voice", "port", "Port for incoming calls",
+      "The port on this server that receives call events.", "number", "Chat channels", 8770,
+      "maverick.server", subgroup="Phone calls", restart=True, minimum=1024, maximum=65535,
+      integer=True, unit="port"),
+    # Email (on the Channels page; how often to check is not)
+    S("channels.email", "poll_interval", "Check email every",
+      "How often Lightwork looks for new email.", "number", "Chat channels", 30,
+      "maverick.server", subgroup="Email", restart=True, minimum=10, maximum=3600,
+      integer=True, unit="seconds"),
+)
+
+_MORE: tuple[Setting, ...] = (
+    # ------------------------------------------------ trusted skill publishers
+    S("skills", "trusted_pubkeys", "Trusted skill publishers",
+      "Skills signed by these publishers are trusted. Add a publisher by uploading or "
+      "pasting their public key file; each one is shown by its fingerprint.",
+      "keys", "Safety", [], "maverick.config", subgroup="Skill publishers", weaker="grow",
+      warning="Skills signed by a newly trusted publisher will install and run, or, if the "
+              "list is emptied, a signature from anyone will be accepted.",
+      aliases="signed skills public key publisher"),
+
+    # --------------------------------------------------- protected work area
+    S("sandbox", "language", "Tools in the work area",
+      "The set of programming tools the work area starts with.", "select",
+      "Protected work area", "", "maverick.sandbox", subgroup="Work area",
+      choices=(("", "Python (default)"), ("javascript", "JavaScript and TypeScript"),
+               ("go", "Go"), ("rust", "Rust"), ("java", "Java and Kotlin"), ("ruby", "Ruby"))),
+    S("sandbox", "image", "Custom work area image",
+      "A specific container image to run commands in, instead of the one chosen by the tools "
+      "above. Leave empty to use the standard one.", "text", "Protected work area", "",
+      "maverick.sandbox", subgroup="Work area", max_length=255, weaker="change",
+      pattern=r"([A-Za-z0-9][A-Za-z0-9._/:@-]{0,254})?",
+      warning="Commands will run in a different image, which may include programs your team "
+              "has not reviewed."),
+    S("sandbox", "allow_network", "Let the work area reach the internet",
+      "Commands may download packages and contact other computers.", "toggle",
+      "Protected work area", False, "maverick.sandbox", subgroup="Work area", weaker=True,
+      warning="Agent commands will be able to send data to, and download programs from, "
+              "anywhere on the internet."),
+    S("sandbox", "allow_root", "Run commands with full control of the work area",
+      "Commands run as the all-powerful user inside the work area.", "toggle",
+      "Protected work area", False, "maverick.sandbox", subgroup="Work area", weaker=True,
+      warning="Agent commands will be able to change anything inside the work area, which "
+              "makes breaking out of it easier."),
+    S("sandbox", "memory", "Memory for the work area",
+      "The most memory commands may use.", "select", "Protected work area", "4g",
+      "maverick.sandbox", subgroup="Work area",
+      choices=(("1g", "1 GB"), ("2g", "2 GB"), ("4g", "4 GB (default)"), ("8g", "8 GB"),
+               ("16g", "16 GB"), ("32g", "32 GB"))),
+    S("sandbox", "cpus", "Processors for the work area",
+      "How many processors commands may use. Leave empty for the standard amount.", "number",
+      "Protected work area", None, "maverick.sandbox", subgroup="Work area", minimum=0.5,
+      maximum=64, step=0.5, unit="processors"),
+    S("sandbox", "pids_limit", "Programs running at once",
+      "The most programs commands may run at the same time.", "number",
+      "Protected work area", 512, "maverick.sandbox", subgroup="Work area", minimum=16,
+      maximum=65536, integer=True, unit="programs"),
+    S("sandbox", "host", "Remote computer for commands",
+      "When commands run on another computer, the name of that computer, such as "
+      "builder@build-server. It must already trust this server.", "text",
+      "Protected work area", "", "maverick.sandbox", subgroup="Remote computer",
+      max_length=255, weaker="change",
+      pattern=r"((?:[^\s@/:\\-][^\s@/:\\]{0,63}@)?[^\s@/\\-][^\s@/\\]{0,190})?",
+      warning="Agent commands will run on a different computer."),
+    S("sandbox", "host_key_checking", "Checking the remote computer",
+      "How strictly the remote computer's identity is checked before commands run on it.",
+      "select", "Protected work area", "accept-new", "maverick.sandbox",
+      subgroup="Remote computer",
+      choices=(("yes", "Only computers already known (strictest)"),
+               ("accept-new", "Trust a new computer the first time, then check (default)"),
+               ("no", "Do not check (not recommended)")),
+      weaker=True, order=("yes", "accept-new", "no"),
+      warning="Commands could be sent to an impostor computer without anyone noticing."),
+    S("sandbox", "namespace", "Cluster area for commands",
+      "When commands run in a cluster, the area (namespace) of that cluster they run in.",
+      "text", "Protected work area", "default", "maverick.sandbox", subgroup="Cluster",
+      max_length=63, weaker="change", pattern=r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?",
+      warning="Agent commands will run in a different part of your cluster, which may have "
+              "different network rules."),
+
+    # ------------------------------------------------------ document search
+    S("knowledge", "embedder", "How documents are indexed",
+      "The service that turns document passages into searchable form. Changing it means "
+      "documents are indexed again.", "select", "Memory & learning", "hosted",
+      "maverick.config", subgroup="Document search",
+      choices=(("hosted", "Voyage AI service (its key is set on the server)"),
+               ("local", "On this server, no outside service"),
+               ("deterministic", "Offline test mode (low quality)")),
+      weaker="change",
+      warning="Document text may be sent to a different service to be indexed."),
+    S("knowledge", "store", "Where the search index is kept",
+      "Where searchable passages are stored.", "select", "Memory & learning", "sqlite",
+      "maverick.config", subgroup="Document search",
+      choices=(("sqlite", "A file on this server (default)"),
+               ("pgvector", "Your company database (connection set on the server)"),
+               ("qdrant", "An existing Qdrant index (read and erase only)"))),
+    S("knowledge", "model", "Indexing model",
+      "The model name the indexing service uses, such as voyage-3.", "text",
+      "Memory & learning", "voyage-3", "maverick.config", subgroup="Document search",
+      pattern=r"[A-Za-z0-9._:/-]{1,128}", max_length=128),
+    S("knowledge", "base_url", "Indexing service address",
+      "The web address of the indexing service.", "text", "Memory & learning",
+      "https://api.voyageai.com/v1", "maverick.config", subgroup="Document search",
+      pattern=_HTTPS, max_length=300, weaker="change",
+      warning="Document text will be sent to a different address to be indexed."),
+    S("knowledge", "dim", "Index size per passage",
+      "Must match the indexing model; change it only together with the model.", "number",
+      "Memory & learning", 1024, "maverick.config", subgroup="Document search", minimum=64,
+      maximum=8192, integer=True, unit="values"),
+    S("knowledge", "url", "Qdrant index address",
+      "The web address of an existing Qdrant index, when that is where passages are kept.",
+      "text", "Memory & learning", "", "maverick.config", subgroup="Document search",
+      pattern=r"(https?://[^\s\"'<>]{1,300})?", max_length=300),
+
+    # ---------------------------------------------- connected business systems
+    S("governed_connectors", "connectors", "Business systems whose changes are governed",
+      "Changes agents make in these systems are previewed, approved and recorded.",
+      "multiselect", "Security", [], "maverick.config", subgroup="Connected business systems",
+      choices_from="governed_connectors", weaker="shrink",
+      warning="Agent changes to the systems you remove will no longer be previewed and approved."),
+    S("governed_connectors", "approver", "Standing approver for changes",
+      "The person agent changes to connected business systems are approved against. With "
+      "nobody chosen, those changes wait until someone approves them outside Lightwork.",
+      "select", "Security", "", "maverick.governed_tools", subgroup="Connected business systems",
+      choices_from="people", env=("MAVERICK_GOVERNED_APPROVER",), weaker="change",
+      warning="A different person will be the approver of record for agent changes to your "
+              "business systems."),
+
+    # ---------------------------------------------------------------- finance
+    S("governance.require_human_above", "*", "Pause payments above",
+      "Any money movement larger than this waits for a person to approve it. Leave empty to "
+      "not pause by amount.", "number", "Finance", None, "maverick.governance",
+      subgroup="Approval limits", minimum=0, maximum=1000000000, unit="dollars",
+      weaker="higher", warning="Larger payments will go ahead without a person approving."),
+    S("governance.deny_above", "*", "Refuse payments above",
+      "Any money movement larger than this is refused outright. Leave empty for no ceiling.",
+      "number", "Finance", None, "maverick.governance", subgroup="Approval limits", minimum=0,
+      maximum=1000000000, unit="dollars", weaker="higher",
+      warning="Larger payments will be allowed to go ahead."),
+    S("governance", "require_fresh_human_approval", "Ask every time",
+      "A paused action always needs a new approval, even if a person chose remember this "
+      "before.", "toggle", "Finance", False, "maverick.governance", subgroup="Approval limits",
+      weaker=False,
+      warning="An earlier remember this approval will let paused actions run without asking."),
+    S("finance", "regimes", "Finance rules to enforce",
+      "The strictest rule among those chosen applies to each money movement.", "multiselect",
+      "Finance", [], "maverick.finance.regimes", subgroup="Rules",
+      choices=(("sox", "SOX"), ("coso", "COSO"), ("gaap", "GAAP"), ("pci", "PCI DSS"),
+               ("glba", "GLBA"), ("aml", "Anti-money laundering"), ("sec", "SEC rules"),
+               ("irs", "IRS rules"), ("dora", "DORA"), ("basel_iii", "Basel III"),
+               ("ifrs_17", "IFRS 17")),
+      weaker="shrink", warning="Money movements will no longer be held to the rules you remove."),
+    S("finance_operations", "federal_register_enable", "Watch the US Federal Register",
+      "Check the official Federal Register for new finance rules.", "toggle", "Finance", True,
+      "maverick.finance.status", subgroup="Regulatory monitoring"),
+    S("finance_operations", "texas_register_enable", "Watch the Texas Register",
+      "Check the Texas Register and queue each issue for review.", "toggle", "Finance", False,
+      "maverick.finance.status", subgroup="Regulatory monitoring"),
+    S("finance_operations", "eur_lex_enable", "Watch EU legislation",
+      "Check new EU Parliament and Council legislation for review.", "toggle", "Finance", False,
+      "maverick.finance.status", subgroup="Regulatory monitoring"),
+    S("finance_operations", "edpb_enable", "Watch EU data protection guidance",
+      "Check the European Data Protection Board's news for review.", "toggle", "Finance", False,
+      "maverick.finance.status", subgroup="Regulatory monitoring"),
+    S("finance_operations", "regulatory_domains", "Topics to send for review",
+      "Which kinds of new rules go to the review queue.", "multiselect", "Finance",
+      ["finance", "money_transmitter", "insurance_producer"],
+      "maverick_dashboard.finance_scheduler", subgroup="Regulatory monitoring",
+      choices=(("finance", "Finance"), ("money_transmitter", "Money transmission"),
+               ("insurance_producer", "Insurance sales"), ("lending", "Lending"))),
+    S("finance_operations", "regulatory_poll_seconds", "Check for new rules every",
+      "How often the rule sources above are checked.", "number", "Finance", 3600,
+      "maverick_dashboard.finance_scheduler", subgroup="Regulatory monitoring", minimum=5,
+      maximum=10080, integer=True, scale=60, unit="minutes"),
+    S("finance_operations", "control_test_interval_seconds", "Test finance controls every",
+      "How often finance controls are tested and evidence is gathered.", "number", "Finance",
+      86400, "maverick.finance.control_testing", subgroup="Control testing", minimum=1,
+      maximum=744, integer=True, scale=3600, unit="hours"),
+    S("finance_operations", "evidence_due_days", "Evidence is due within",
+      "How long the control owner has to supply evidence after a test.", "number", "Finance",
+      7, "maverick.finance.control_testing", subgroup="Control testing", minimum=1,
+      maximum=365, integer=True, unit="days"),
+    S("finance_operations", "control_owner", "Control owner",
+      "Who is named as responsible for finance controls and evidence.", "text", "Finance",
+      "Finance Control Owner", "maverick.finance.control_testing", subgroup="Control testing",
+      pattern=r"[^\n\r<>{}]{1,256}", max_length=256),
+    S("finance_operations", "anomaly_enable", "Look for unusual money movements",
+      "Open a case when a payment pattern looks unusual.", "toggle", "Finance", True,
+      "maverick.finance.control_testing", subgroup="Screening", weaker=False,
+      warning="Unusual payment patterns will no longer open a case."),
+    S("finance_operations", "sanctions_max_age_hours", "Oldest sanctions list allowed",
+      "Screening fails a control test when the sanctions list is older than this.", "number",
+      "Finance", 72, "maverick.finance.control_testing", subgroup="Screening", minimum=1,
+      maximum=8760, integer=True, unit="hours", weaker="higher",
+      warning="Payments may be screened against an older sanctions list without a warning."),
+
+    # --------------------------------------------------------- security suite
+    S("threat_hunt", "poll_seconds", "Run the platform hunter every",
+      "How often the platform hunter looks for threats when it is on.", "number",
+      "Security suite", 300, "maverick_dashboard.security_api", subgroup="Hunting schedule",
+      minimum=0.5, maximum=1440, step=0.5, scale=60, unit="minutes", weaker="higher",
+      warning="Threats may be found later."),
+    S("env_hunt", "poll_seconds", "Run the environment hunter every",
+      "How often the environment hunter gathers security events when it is on.", "number",
+      "Security suite", 300, "maverick_dashboard.security_api", subgroup="Hunting schedule",
+      minimum=0.5, maximum=1440, step=0.5, scale=60, unit="minutes", weaker="higher",
+      warning="Threats may be found later."),
+)
+
+# Environment hunter event sources: name -> label. Names match
+# maverick.env_hunt.tooling.CONNECTOR_NAMES (a test pins that).
+ENV_HUNT_SOURCES: dict[str, str] = {
+    "cloudtrail": "AWS CloudTrail",
+    "guardduty": "AWS GuardDuty",
+    "syslog": "System logs",
+    "edr": "Device protection software",
+    "splunk": "Splunk",
+    "elastic": "Elastic",
+    "sentinel": "Microsoft Sentinel",
+    "kubernetes_audit": "Kubernetes activity log",
+    "okta": "Okta",
+    "entra": "Microsoft Entra",
+}
+
+
+def _env_hunt_settings() -> tuple[Setting, ...]:
+    out: list[Setting] = []
+    for name, label in ENV_HUNT_SOURCES.items():
+        section = f"env_hunt.connectors.{name}"
+        common = {"group": "Security suite", "reader": "maverick.env_hunt.tooling",
+                  "subgroup": f"Event source: {label}", "aliases": f"{name} hunter connector"}
+        out.append(S(section, "enable", f"Gather events from {label}",
+                     f"The environment hunter reads security events from {label} using the "
+                     "sign-in details set on your server.", "toggle", default=False, **common))
+        out.append(S(section, "pivot_enable", f"Look up related {label} events",
+                     "When something suspicious is found, fetch nearby events for context.",
+                     "toggle", default=False, **common))
+        out.append(S(section, "push_enable", f"Accept events sent in for {label}",
+                     f"Let other systems send events that are recorded as coming from {label}.",
+                     "toggle", default=False, weaker=True,
+                     warning=f"Other systems will be able to submit events that are trusted as "
+                             f"if they came from {label}.", **common))
+    return tuple(out)
+
+
+_GOVERNANCE: tuple[Setting, ...] = (
+    # ------------------------------------------------------------ AI gateway
+    S("llm_gateway", "enable", "Run the AI gateway",
+      "AI agents built elsewhere can send their AI requests through Lightwork, where each one "
+      "is checked, recorded and kept within budget. Its passwords are set on the server.",
+      "toggle", "AI governance", False, "maverick.llm_gateway", subgroup="AI gateway",
+      weaker=True,
+      warning="Agents that hold the gateway password will be able to send AI requests through "
+              "Lightwork, which spends your budget."),
+    S("llm_gateway", "upstream_url", "AI service the gateway forwards to",
+      "The secure web address of the AI service requests are passed on to, such as "
+      "https://api.openai.com.", "text", "AI governance", "", "maverick.llm_gateway",
+      subgroup="AI gateway", pattern=r"(" + _HTTPS + r")?", max_length=300, weaker="change",
+      warning="Requests, and any data in them, will be sent to a different AI service."),
+    S("llm_gateway", "anthropic_upstream_url", "Claude service the gateway forwards to",
+      "Where requests written for Claude are passed on to. Leave empty to refuse them.",
+      "text", "AI governance", "", "maverick.llm_gateway", subgroup="AI gateway",
+      pattern=r"(" + _HTTPS + r")?", max_length=300, weaker="change",
+      warning="Requests, and any data in them, will be sent to a different AI service."),
+    S("llm_gateway", "allowed_models", "Models the gateway allows",
+      "Only requests for these models are passed on. Leave all unticked to allow any model.",
+      "multiselect", "AI governance", [], "maverick.llm_gateway", subgroup="AI gateway",
+      choices_from="gateway_models", weaker="grow",
+      warning="Requests for more models, which may cost more, will be passed on."),
+    S("llm_gateway", "screen_prompts", "Screen requests for attacks",
+      "Check each request for hidden instructions before passing it on.", "toggle",
+      "AI governance", False, "maverick.llm_gateway", subgroup="AI gateway", weaker=False,
+      warning="Requests will be passed on without being checked for hidden instructions."),
+    S("llm_gateway", "redact_prompts", "Remove personal data from requests",
+      "Mask personal details in requests before they leave Lightwork.", "toggle",
+      "AI governance", False, "maverick.llm_gateway", subgroup="AI gateway", weaker=False,
+      warning="Personal details in requests will be sent to the AI service."),
+    S("llm_gateway", "redact_completions", "Remove personal data from answers",
+      "Mask personal details in answers before they are returned.", "toggle",
+      "AI governance", False, "maverick.llm_gateway", subgroup="AI gateway", weaker=False,
+      warning="Personal details in answers will be returned as they are."),
+    S("llm_gateway", "max_body_bytes", "Largest request",
+      "Bigger requests are refused.", "number", "AI governance", 1048576,
+      "maverick.llm_gateway", subgroup="AI gateway", minimum=4, maximum=4096, integer=True,
+      scale=1024, unit="KB"),
+    S("llm_gateway", "default_max_output_tokens", "Longest answer when none is asked for",
+      "The answer length used when a request does not set one, in tokens.", "number",
+      "AI governance", 4096, "maverick.llm_gateway", subgroup="AI gateway", minimum=1,
+      maximum=1000000, integer=True, unit="tokens"),
+    S("llm_gateway", "budget_window_seconds", "Gateway budget period",
+      "The period the gateway's request and token limits below count over.", "number",
+      "AI governance", 3600, "maverick.llm_gateway", subgroup="AI gateway", minimum=1,
+      maximum=8784, integer=True, scale=3600, unit="hours"),
+    S("llm_gateway.team_budgets.default", "max_requests", "Requests allowed per period",
+      "The most requests callers may make in one budget period. Empty means no limit.",
+      "number", "AI governance", None, "maverick.llm_gateway", subgroup="AI gateway",
+      minimum=1, maximum=2000000000, integer=True, unit="requests", weaker="higher",
+      warning="Callers will be able to send more requests and spend more."),
+    S("llm_gateway.team_budgets.default", "max_completion_tokens",
+      "Answer tokens allowed per period",
+      "The most answer text, in tokens, callers may receive in one budget period. Empty means "
+      "no limit.", "number", "AI governance", None, "maverick.llm_gateway",
+      subgroup="AI gateway", minimum=1, maximum=2000000000, integer=True, unit="tokens",
+      weaker="higher", warning="Callers will be able to spend more."),
+
+    # ------------------------------------------------------- GRC record sync
+    S("grc_sync", "enable", "Copy governance records to your GRC system",
+      "Send model-risk findings, accepted risks and incidents to your governance, risk and "
+      "compliance system as linked records. Evidence stays in Lightwork.", "toggle",
+      "AI governance", False, "maverick.grc_sync", subgroup="GRC record sync", weaker=True,
+      warning="Summaries of findings, accepted risks and incidents will be sent to your GRC "
+              "system."),
+    S("grc_sync", "connector", "Your GRC system",
+      "The connected system records are sent to. Its address and key are set on the server.",
+      "select", "AI governance", "servicenow", "maverick.grc_sync", subgroup="GRC record sync",
+      choices_from="governed_connectors"),
+    S("grc_sync", "findings_path", "Where findings go",
+      "The table in your GRC system that receives findings. Your GRC administrator can give "
+      "you this; it is the part of the table's web address after the system's name, starting "
+      "with a slash.", "text",
+      "AI governance", "", "maverick.grc_sync", subgroup="GRC record sync",
+      pattern=r"(/[^\s?#]{0,511})?", max_length=512),
+    S("grc_sync", "acceptances_path", "Where accepted risks go",
+      "The table in your GRC system that receives accepted risks, in the same form.", "text",
+      "AI governance", "", "maverick.grc_sync", subgroup="GRC record sync",
+      pattern=r"(/[^\s?#]{0,511})?", max_length=512),
+    S("grc_sync", "incidents_path", "Where incidents go",
+      "The table in your GRC system that receives incidents, in the same form.", "text",
+      "AI governance", "", "maverick.grc_sync", subgroup="GRC record sync",
+      pattern=r"(/[^\s?#]{0,511})?", max_length=512),
+    S("grc_sync", "backlink_base", "Link back to Lightwork",
+      "The address people use to open this dashboard, added to each record so it links back.",
+      "text", "AI governance", "", "maverick.grc_sync", subgroup="GRC record sync",
+      pattern=r"(" + _HTTPS + r")?", max_length=512),
+
+    # ------------------------------------------------------ outbound GRC sync
+    S("grc_outbound_sync", "targets", "Governance systems for assurance records",
+      "Where assurance results are sent when outbound GRC records are on.", "multiselect",
+      "AI governance", [], "maverick.grc_outbound_sync", subgroup="Outbound assurance records",
+      choices=(("servicenow_irm", "ServiceNow risk management"), ("archer", "Archer"))),
+    S("grc_outbound_sync", "max_attempts_per_revision", "Tries per record",
+      "How many times one record is sent before it waits for a person.", "number",
+      "AI governance", 8, "maverick.grc_outbound_sync", subgroup="Outbound assurance records",
+      minimum=1, maximum=100, integer=True, unit="tries"),
+
+    # ------------------------------------------------------ drift monitoring
+    S("drift_monitoring", "bins", "Groups used to compare results",
+      "How finely results are grouped when they are compared with the starting point.",
+      "number", "AI governance", 10, "maverick.drift_monitoring",
+      subgroup="Model drift monitoring", minimum=2, maximum=64, integer=True, unit="groups"),
+    S("drift_monitoring", "min_samples", "Results needed before judging drift",
+      "How many new results are needed before drift is judged.", "number", "AI governance", 30,
+      "maverick.drift_monitoring", subgroup="Model drift monitoring", minimum=2,
+      maximum=50000, integer=True, unit="results", weaker="higher",
+      warning="Drift will be reported later, after more results."),
+    S("drift_monitoring", "psi_threshold", "Alert when the spread of results shifts by",
+      "How far the overall spread of results may move before an alert (stability score).",
+      "number", "AI governance", 0.2, "maverick.drift_monitoring",
+      subgroup="Model drift monitoring", minimum=0, maximum=100, step=0.01, unit="score",
+      weaker="higher", warning="Bigger changes in results will pass without an alert."),
+    S("drift_monitoring", "js_threshold", "Alert when results differ by",
+      "How different new results may be from the starting point before an alert, from 0 to 1.",
+      "number", "AI governance", 0.1, "maverick.drift_monitoring",
+      subgroup="Model drift monitoring", minimum=0, maximum=1, step=0.01, unit="score",
+      weaker="higher", warning="Bigger changes in results will pass without an alert."),
+    S("drift_monitoring", "kl_threshold", "Alert when information changes by",
+      "A second measure of how much new results differ from the starting point.", "number",
+      "AI governance", 0.1, "maverick.drift_monitoring", subgroup="Model drift monitoring",
+      minimum=0, maximum=100, step=0.01, unit="score", weaker="higher",
+      warning="Bigger changes in results will pass without an alert."),
+    S("drift_monitoring", "ks_p_value_floor", "Confidence needed for number changes",
+      "How unlikely a change in numbers must be to raise an alert. Smaller is stricter about "
+      "proof, so fewer alerts.", "number", "AI governance", 0.01, "maverick.drift_monitoring",
+      subgroup="Model drift monitoring", minimum=0, maximum=0.5, step=0.001, unit="chance",
+      weaker="lower", warning="Fewer changes will raise an alert."),
+    S("drift_monitoring", "chi2_p_value_floor", "Confidence needed for category changes",
+      "How unlikely a change in categories must be to raise an alert.", "number",
+      "AI governance", 0.01, "maverick.drift_monitoring", subgroup="Model drift monitoring",
+      minimum=0, maximum=0.5, step=0.001, unit="chance", weaker="lower",
+      warning="Fewer changes will raise an alert."),
+    S("drift_monitoring", "embedding_cosine_threshold", "Alert when meaning shifts by",
+      "How far the meaning of text results may move before an alert, from 0 to 2.", "number",
+      "AI governance", 0.1, "maverick.drift_monitoring", subgroup="Model drift monitoring",
+      minimum=0, maximum=2, step=0.01, unit="score", weaker="higher",
+      warning="Bigger changes in meaning will pass without an alert."),
+    S("drift_monitoring", "performance_decay_threshold", "Alert when accuracy drops by",
+      "How much accuracy may fall before an alert, as a share from 0 to 1.", "number",
+      "AI governance", 0.05, "maverick.drift_monitoring", subgroup="Model drift monitoring",
+      minimum=0, maximum=1, step=0.01, unit="share", weaker="higher",
+      warning="Bigger drops in accuracy will pass without an alert."),
+    S("drift_monitoring", "evidence_validity_seconds", "Drift checks stay valid for",
+      "How long a drift check counts as current evidence.", "number", "AI governance",
+      2592000, "maverick.drift_monitoring", subgroup="Model drift monitoring", minimum=1,
+      maximum=366, integer=True, scale=86400, unit="days", weaker="higher",
+      warning="Older drift checks will still count as current evidence."),
+
+    # ------------------------------------------------ shared governance inventory
+    S("governance_inventory", "enable", "Shared governance inventory",
+      "Keep one combined, versioned view of records across the governance modules.", "toggle",
+      "AI governance", False, "maverick_dashboard.shared_governance_inventory_composition",
+      subgroup="Shared governance inventory"),
+    S("governance_inventory", "retention_seconds", "Keep inventory snapshots for",
+      "How long saved inventory snapshots are kept.", "number", "AI governance", 31536000,
+      "maverick_dashboard.shared_governance_inventory_composition",
+      subgroup="Shared governance inventory", minimum=1, maximum=3650, integer=True,
+      scale=86400, unit="days", weaker="lower",
+      warning="Older inventory snapshots will be deleted sooner."),
+    S("governance_inventory", "max_source_records", "Records read from each module",
+      "The most records read from one module when the inventory is built.", "number",
+      "AI governance", 10000, "maverick_dashboard.shared_governance_inventory_composition",
+      subgroup="Shared governance inventory", minimum=1, maximum=100000, integer=True,
+      unit="records"),
+    S("governance_inventory", "max_entities", "Items in the inventory",
+      "The most items one inventory may hold.", "number", "AI governance", 20000,
+      "maverick_dashboard.shared_governance_inventory_composition",
+      subgroup="Shared governance inventory", minimum=1, maximum=100000, integer=True,
+      unit="items"),
+    S("governance_inventory", "max_relationships", "Links in the inventory",
+      "The most links between items one inventory may hold.", "number", "AI governance", 40000,
+      "maverick_dashboard.shared_governance_inventory_composition",
+      subgroup="Shared governance inventory", minimum=1, maximum=200000, integer=True,
+      unit="links"),
+    S("governance_inventory", "max_snapshots", "Snapshots kept",
+      "The most inventory snapshots kept at once.", "number", "AI governance", 10000,
+      "maverick_dashboard.shared_governance_inventory_composition",
+      subgroup="Shared governance inventory", minimum=2, maximum=10000, integer=True,
+      unit="snapshots"),
+
+    # ------------------------------------------------------------ AI inventory
+    S("ai_inventory", "connectors", "Where to find AI systems",
+      "The platforms the AI inventory reads from, using sign-in details set on the server.",
+      "multiselect", "AI governance", [], "maverick.ai_inventory", subgroup="AI inventory",
+      choices=(("agentforce", "Salesforce Agentforce"), ("azure_ai_foundry", "Azure AI Foundry"),
+               ("aws_sagemaker", "Amazon SageMaker"), ("bedrock", "Amazon Bedrock"),
+               ("copilot_studio", "Microsoft Copilot Studio"),
+               ("databricks_unity_catalog", "Databricks Unity Catalog"),
+               ("hugging_face", "Hugging Face"), ("mlflow", "MLflow"), ("openai", "OpenAI"),
+               ("replicate", "Replicate"), ("snowflake", "Snowflake"),
+               ("snowflake_cortex", "Snowflake Cortex"), ("vertex_ai", "Google Vertex AI"))),
+    S("ai_inventory", "poll_seconds", "Refresh the inventory every",
+      "How often the platforms above are read again.", "number", "AI governance", 3600,
+      "maverick_dashboard.ai_inventory_scheduler", subgroup="AI inventory", minimum=1,
+      maximum=1440, integer=True, scale=60, unit="minutes"),
+    S("ai_inventory", "page_cap", "Pages read per platform",
+      "The most result pages read from one platform in one refresh.", "number",
+      "AI governance", 100, "maverick.ai_inventory", subgroup="AI inventory", minimum=1,
+      maximum=1000, integer=True, unit="pages"),
+    S("ai_inventory", "retry_attempts", "Tries per platform",
+      "How many times a platform is tried before the refresh gives up on it.", "number",
+      "AI governance", 3, "maverick.ai_inventory", subgroup="AI inventory", minimum=1,
+      maximum=10, integer=True, unit="tries"),
+    S("ai_inventory", "timeout_seconds", "Time limit per platform request",
+      "How long one request to a platform may take.", "number", "AI governance", 30.0,
+      "maverick.ai_inventory", subgroup="AI inventory", minimum=0.1, maximum=300, step=0.1,
+      unit="seconds"),
+
+    # ----------------------------------------------------------- AI entity tasks
+    S("ai_entity_tasks", "max_tasks", "Open AI system tasks",
+      "The most follow-up tasks about AI systems kept at once.", "number", "AI governance",
+      100000, "maverick_dashboard.ai_entity_tasks_composition", subgroup="AI system tasks",
+      minimum=1, maximum=1000000, integer=True, unit="tasks"),
+    S("ai_entity_tasks", "retention_seconds", "Keep finished tasks for",
+      "How long finished tasks are kept.", "number", "AI governance", 31536000,
+      "maverick_dashboard.ai_entity_tasks_composition", subgroup="AI system tasks",
+      minimum=1, maximum=3650, integer=True, scale=86400, unit="days", weaker="lower",
+      warning="Finished tasks will be deleted sooner."),
+
+    # ---------------------------------------------------------- governance loop
+    S("ai_governance_loop", "poll_seconds", "Check for governance work every",
+      "How often the governance loop looks for new work.", "number", "AI governance", 300,
+      "maverick_dashboard.ai_governance_loop_composition", subgroup="AI governance loop",
+      minimum=5, maximum=3600, integer=True, unit="seconds"),
+    S("ai_governance_loop", "batch_size", "Items handled at a time",
+      "How many items the loop handles in one pass.", "number", "AI governance", 100,
+      "maverick_dashboard.ai_governance_loop_composition", subgroup="AI governance loop",
+      minimum=1, maximum=500, integer=True, unit="items"),
+    S("ai_governance_loop", "max_attempts", "Tries per item",
+      "How many times an item is tried before it waits for a person.", "number",
+      "AI governance", 5, "maverick_dashboard.ai_governance_loop_composition",
+      subgroup="AI governance loop", minimum=1, maximum=20, integer=True, unit="tries"),
+    S("ai_governance_loop", "retry_base_seconds", "Wait before trying again",
+      "How long to wait before the first retry; later retries wait longer.", "number",
+      "AI governance", 30, "maverick_dashboard.ai_governance_loop_composition",
+      subgroup="AI governance loop", minimum=1, maximum=86400, integer=True, unit="seconds"),
+    S("ai_governance_loop", "max_lag_seconds", "Warn when work is behind by",
+      "Show a warning when governance work falls this far behind.", "number", "AI governance",
+      900, "maverick_dashboard.ai_governance_loop_composition", subgroup="AI governance loop",
+      minimum=1, maximum=525600, integer=True, scale=60, unit="minutes", weaker="higher",
+      warning="Delays in governance work will be flagged later."),
+
+    # ---------------------------------------------------- model improvement
+    S("model_improvement", "enable", "Train improved specialist models",
+      "Allow training runs that improve specialist models from your reviewed work.", "toggle",
+      "AI governance", False, "maverick.config", subgroup="Model improvement"),
+    S("model_improvement", "allow_hosted", "Allow training on an outside service",
+      "Training runs may use a hosted training service instead of this server.", "toggle",
+      "AI governance", False, "maverick.config", subgroup="Model improvement", weaker=True,
+      warning="Examples from your work will be sent to an outside training service."),
+    S("model_improvement", "require_signed_receipt", "Require a signed training receipt",
+      "An improved model is only used once its training run has a verified, signed receipt.",
+      "toggle", "AI governance", True, "maverick.config", subgroup="Model improvement",
+      weaker=False, warning="Improved models could be used without proof of how they were trained."),
+    S("model_improvement", "minimum_train_families", "Different task kinds needed for training",
+      "The fewest different kinds of task a training run must learn from.", "number",
+      "AI governance", 20, "maverick.config", subgroup="Model improvement", minimum=20,
+      maximum=1000000, integer=True, unit="kinds"),
+    S("model_improvement", "minimum_holdout_families", "Different task kinds kept for testing",
+      "The fewest different kinds of task kept aside to test an improved model.", "number",
+      "AI governance", 20, "maverick.config", subgroup="Model improvement", minimum=20,
+      maximum=1000000, integer=True, unit="kinds"),
+
+    # -------------------------------------------- assessment evidence proposals
+    S("assessment_evidence_autopopulation", "apply_enabled", "Let accepted answers fill assessments",
+      "When a reviewer accepts a proposed answer, write it into the assessment.", "toggle",
+      "AI governance", False,
+      "maverick_dashboard.assessment_evidence_autopopulation_composition",
+      subgroup="Assessment evidence proposals", weaker=True,
+      warning="Accepted proposals will change assessment answers directly."),
+    S("assessment_evidence_autopopulation", "min_confidence_bps", "Lowest confidence to propose",
+      "Only propose an answer when the evidence supports it at least this strongly.", "number",
+      "AI governance", 7000, "maverick_dashboard.assessment_evidence_autopopulation_composition",
+      subgroup="Assessment evidence proposals", minimum=0.01, maximum=100, step=0.01,
+      integer=True, scale=100, unit="percent", weaker="lower",
+      warning="Answers backed by weaker evidence will be proposed."),
+    S("assessment_evidence_autopopulation", "max_citations_per_answer", "Evidence cited per answer",
+      "The most pieces of evidence cited for one proposed answer.", "number", "AI governance",
+      8, "maverick_dashboard.assessment_evidence_autopopulation_composition",
+      subgroup="Assessment evidence proposals", minimum=1, maximum=32, integer=True,
+      unit="pieces"),
+    S("assessment_evidence_autopopulation", "retention_seconds", "Keep proposals for",
+      "How long proposals are kept.", "number", "AI governance", 31536000,
+      "maverick_dashboard.assessment_evidence_autopopulation_composition",
+      subgroup="Assessment evidence proposals", minimum=1, maximum=3660, integer=True,
+      scale=86400, unit="days", weaker="lower", warning="Proposals will be deleted sooner."),
+
+    # --------------------------------------------------------- AI vendor risk
+    S("ai_vendor_risk", "portal_enable", "Vendor answer portal",
+      "Let vendors answer AI risk questionnaires through a private link.", "toggle",
+      "AI governance", False, "maverick.ai_vendor_portal", subgroup="AI vendor risk", weaker=True,
+      warning="People outside your organisation will be able to submit answers through a link."),
+
+    # ------------------------------------------------------ governance agents
+    S("governance_agents", "enabled_agents", "Governance agents available",
+      "Which governance specialists can be used when governance agents are on.", "multiselect",
+      "AI governance", ["breach_response", "privacy_risk_assessment", "program_copilot",
+                        "knowledgebase_governance", "third_party_risk"],
+      "maverick.governance_agents", subgroup="Governance agents",
+      choices=(("breach_response", "Breach response"),
+               ("privacy_risk_assessment", "Privacy risk assessment"),
+               ("program_copilot", "Program assistant"),
+               ("knowledgebase_governance", "Knowledge base governance"),
+               ("third_party_risk", "Third-party risk"))),
+
+    # ---------------------------------------------------------- document vault
+    S("governed_document_vault", "max_document_bytes", "Largest document",
+      "Bigger documents are refused.", "number", "AI governance", 26214400,
+      "maverick.governed_document_vault", subgroup="Document vault", minimum=1, maximum=100,
+      integer=True, scale=1048576, unit="MB"),
+    S("governed_document_vault", "max_documents", "Documents kept",
+      "The most documents the vault holds.", "number", "AI governance", 100000,
+      "maverick.governed_document_vault", subgroup="Document vault", minimum=1,
+      maximum=1000000, integer=True, unit="documents"),
+    S("governed_document_vault", "retention_seconds", "Keep documents for",
+      "How long documents are kept.", "number", "AI governance", 31536000,
+      "maverick.governed_document_vault", subgroup="Document vault", minimum=1, maximum=3650,
+      integer=True, scale=86400, unit="days", weaker="lower",
+      warning="Documents will be deleted sooner."),
+    S("governed_document_vault", "grant_ttl_seconds", "Download links last",
+      "How long a one-time download link works.", "number", "AI governance", 60,
+      "maverick.governed_document_vault", subgroup="Document vault", minimum=5, maximum=300,
+      integer=True, unit="seconds", weaker="higher",
+      warning="Download links will work for longer if they are passed on."),
+
+    # ------------------------------------------ administrator document access
+    S("administration_document_access", "enable", "Administrator document access",
+      "Let administrators open governed documents through short-lived, recorded links.",
+      "toggle", "AI governance", False, "maverick.administration_document_access",
+      subgroup="Administrator document access", weaker=True,
+      warning="Administrators will be able to open governed documents."),
+    S("administration_document_access", "default_ttl_seconds", "Access lasts by default",
+      "How long an administrator's access to a document lasts unless they choose less.",
+      "number", "AI governance", 300, "maverick.administration_document_access",
+      subgroup="Administrator document access", minimum=30, maximum=3600, integer=True,
+      unit="seconds", weaker="higher", warning="Document access will last longer."),
+    S("administration_document_access", "max_ttl_seconds", "Longest access allowed",
+      "The longest an administrator's access to a document may last.", "number",
+      "AI governance", 900, "maverick.administration_document_access",
+      subgroup="Administrator document access", minimum=30, maximum=3600, integer=True,
+      unit="seconds", weaker="higher", warning="Document access will be allowed to last longer."),
+    S("administration_document_access", "max_uses", "Opens per access",
+      "How many times one access may open the document.", "number", "AI governance", 1,
+      "maverick.administration_document_access", subgroup="Administrator document access",
+      minimum=1, maximum=10, integer=True, unit="opens", weaker="higher",
+      warning="One access will be able to open a document more times."),
+    S("administration_document_access", "retention_seconds", "Keep access records for",
+      "How long records of administrator access are kept.", "number", "AI governance", 604800,
+      "maverick.administration_document_access", subgroup="Administrator document access",
+      minimum=1, maximum=366, integer=True, scale=86400, unit="days", weaker="lower",
+      warning="Records of who opened documents will be deleted sooner."),
+)
+
+_INTEGRATIONS_MORE: tuple[Setting, ...] = (
+    # ------------------------------------------- outside tool gateway (sidecar)
+    S("mcp_sidecar", "enable", "Offer reviewed tools to outside AI clients",
+      "Outside AI clients with their own credentials may use the reviewed tools below, each "
+      "checked, recorded and kept within budget.", "toggle", "Integrations", False,
+      "maverick_mcp.sidecar", subgroup="Tool gateway for outside AI clients", weaker=True,
+      restart=True,
+      warning="Outside AI clients will be able to use the reviewed tools you list."),
+    S("mcp_sidecar", "upstream_url", "Tool server the gateway fronts",
+      "The secure web address of the tool server whose tools are offered.", "text",
+      "Integrations", "", "maverick_mcp.sidecar", subgroup="Tool gateway for outside AI clients",
+      pattern=r"(" + _HTTPS + r"|http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?(/[^\s\"'<>]*)?)?",
+      max_length=300, restart=True, weaker="change",
+      warning="Outside AI clients will reach a different tool server."),
+    S("mcp_sidecar", "tools", "Reviewed tools",
+      "Only these tools are offered, each with the risk level your team gave it. Type the "
+      "tool's name exactly as the tool server lists it.", "table", "Integrations", {},
+      "maverick_mcp.sidecar", subgroup="Tool gateway for outside AI clients", row_kind="risk",
+      restart=True, weaker="grow",
+      warning="More tools, or tools marked as less risky, will be offered to outside AI clients."),
+    S("mcp_sidecar", "max_calls_per_window", "Calls allowed per client",
+      "The most tool calls one client may make each hour. Zero means no count limit.",
+      "number", "Integrations", 0, "maverick_mcp.sidecar",
+      subgroup="Tool gateway for outside AI clients", minimum=0, maximum=1000000, integer=True,
+      unit="calls per hour", restart=True),
+    S("mcp_sidecar", "listen_port", "Gateway port",
+      "The port on this server the gateway listens on.", "number", "Integrations", 8787,
+      "maverick_mcp.sidecar", subgroup="Tool gateway for outside AI clients", minimum=1024,
+      maximum=65535, integer=True, unit="port", restart=True),
+    S("mcp_sidecar", "require_shield", "Require the safety checks",
+      "Refuse to start the gateway when Lightwork's safety checks are not installed.", "toggle",
+      "Integrations", True, "maverick_mcp.sidecar", subgroup="Tool gateway for outside AI clients",
+      restart=True, weaker=False,
+      warning="The gateway could run without screening tool calls for threats."),
+
+    # ------------------------------------------------------------ local models
+    S("system", "local_first", "Prefer AI models on this network",
+      "When a local model is running, use it before an outside AI service.", "toggle",
+      "Integrations", False, "maverick.provider_local_first", subgroup="Local AI models",
+      env=("MAVERICK_LOCAL_FIRST",)),
+    S("local_first", "model", "Local model to prefer",
+      "The local model used when the option above is on.", "select", "Integrations", "",
+      "maverick.provider_local_first", subgroup="Local AI models", choices_from="local_models"),
+    S("local_runtime", "enabled", "Run a local model server",
+      "Let Lightwork start and manage a model server on this computer.", "toggle",
+      "Integrations", False, "maverick.local_runtime", subgroup="Local AI models"),
+    S("local_runtime", "engine", "Model server program",
+      "The program that serves the local model.", "select", "Integrations", "vllm",
+      "maverick.local_runtime", subgroup="Local AI models",
+      choices=(("vllm", "vLLM"), ("tgi", "Text Generation Inference"), ("llamacpp", "llama.cpp"))),
+    S("local_runtime", "model", "Model to serve",
+      "The model the server loads, as the model's publisher names it.", "text", "Integrations",
+      "", "maverick.local_runtime", subgroup="Local AI models",
+      pattern=r"[A-Za-z0-9._:/-]{0,200}", max_length=200),
+    S("local_runtime", "precision", "Model precision",
+      "Lower precision uses less memory and may lower answer quality.", "select",
+      "Integrations", "auto", "maverick.local_runtime", subgroup="Local AI models",
+      choices=(("auto", "Automatic (default)"), ("bf16", "High (bf16)"), ("fp16", "High (fp16)"),
+               ("int8", "Medium (8-bit)"), ("int4", "Low (4-bit)"))),
+    S("local_runtime", "max_concurrent", "Requests served at once",
+      "How many requests the server answers at the same time. Zero uses the program's choice.",
+      "number", "Integrations", 0, "maverick.local_runtime", subgroup="Local AI models",
+      minimum=0, maximum=4096, integer=True, unit="requests"),
+    S("local_runtime", "kv_cache", "Reuse work between similar requests",
+      "Keep the start of recent requests so similar ones answer faster.", "select",
+      "Integrations", "", "maverick.local_runtime", subgroup="Local AI models",
+      choices=(("", "Off (default)"), ("persistent", "On"))),
+    S("local_runtime", "autoscale", "Add servers when busy",
+      "Start more copies of the server when requests queue up.", "toggle", "Integrations",
+      False, "maverick.local_runtime", subgroup="Local AI models"),
+    S("local_runtime", "min_replicas", "Fewest server copies",
+      "The fewest copies of the model server kept running.", "number", "Integrations", 1,
+      "maverick.local_runtime", subgroup="Local AI models", minimum=1, maximum=64,
+      integer=True, unit="copies"),
+    S("local_runtime", "max_replicas", "Most server copies",
+      "The most copies of the model server started when it is busy.", "number", "Integrations", 1,
+      "maverick.local_runtime", subgroup="Local AI models", minimum=1, maximum=64,
+      integer=True, unit="copies"),
+
+    # ------------------------------------------------------ plugin permissions
+    S("plugins", "grant", "What plugins may do",
+      "Permissions granted to every turned-on plugin that asks for them.", "multiselect",
+      "Integrations", [], "maverick.plugins", subgroup="Plugin permissions",
+      choices=(("network", "Use the internet"), ("fs_write", "Change files"),
+               ("subprocess", "Run other programs")),
+      weaker="grow", warning="Plugins will be able to do more on this server."),
+    S("plugins", "enforce_permissions", "Skip plugins that ask for more",
+      "A plugin asking for a permission not granted above is not loaded.", "toggle",
+      "Integrations", True, "maverick.plugins", subgroup="Plugin permissions", weaker=False,
+      env=("MAVERICK_PLUGINS_ENFORCE",),
+      warning="Plugins asking for permissions you have not granted will load anyway."),
+
+    # ------------------------------------------------- usage limits, any tool
+    S("rate_limits", "other", "Usage limits for other tools",
+      "Add a limit for any other tool, or for every tool from outside tool servers at once.",
+      "table", "Performance", {}, "maverick.safety.rate_limiter", key_kind="entries",
+      row_kind="rate", choices_from="tools", subgroup="Usage limits for other tools",
+      fixed_keys=("web_search", "http_fetch", "shell"), weaker="grow",
+      warning="Tools will be able to run more often."),
+)
+
+SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt_settings()
+            + _GOVERNANCE + _INTEGRATIONS_MORE)
+
 BY_ID: dict[str, Setting] = {s.id: s for s in SETTINGS}
 
 # Top-level tables the catalog may write; settings_store's allowlisted
@@ -762,11 +1734,27 @@ CATALOG_TOP_SECTIONS: tuple[str, ...] = tuple(sorted({s.top for s in SETTINGS}))
 # Settings that must agree with another setting before the kernel accepts
 # them: enabling cloud-agent oversight without choosing a cloud makes the
 # module's configuration invalid, so the pair is validated together.
-_REQUIRES_NONEMPTY: dict[str, str] = {
+_REQUIRES_NONEMPTY: dict[str, str | tuple[str, ...]] = {
     "ai_cloud_agent_governance.enable": "ai_cloud_agent_governance.enabled_providers",
     # Strict residency refuses to start without a declared region.
     "residency.strict": "residency.region",
+    # The gateway and the tool gateway refuse to start without somewhere to
+    # forward to (and, for the tool gateway, reviewed tools).
+    "llm_gateway.enable": "llm_gateway.upstream_url",
+    "mcp_sidecar.enable": ("mcp_sidecar.upstream_url", "mcp_sidecar.tools"),
+    "local_runtime.enabled": "local_runtime.model",
 }
+# GRC sync only runs when at least one destination table is named.
+_REQUIRES_ANY: dict[str, tuple[str, ...]] = {
+    "grc_sync.enable": ("grc_sync.findings_path", "grc_sync.acceptances_path",
+                        "grc_sync.incidents_path"),
+}
+# Pairs the kernel rejects when the first is larger than the second.
+_ORDERED: tuple[tuple[str, str], ...] = (
+    ("administration_document_access.default_ttl_seconds",
+     "administration_document_access.max_ttl_seconds"),
+    ("local_runtime.min_replicas", "local_runtime.max_replicas"),
+)
 
 
 class SettingError(ValueError):
@@ -822,7 +1810,14 @@ def coerce(setting: Setting, value: object) -> object:  # noqa: C901 - one branc
                 raise SettingError(f"{label}: enter a number.") from exc
         if not _is_number(value) or not math.isfinite(float(value)):
             raise SettingError(f"{label}: enter a number.")
-        number = float(value)
+        shown = float(value)
+        if setting.minimum is not None and shown < setting.minimum:
+            raise SettingError(f"{label}: enter at least {_fmt(setting.minimum)}.")
+        if setting.maximum is not None and shown > setting.maximum:
+            raise SettingError(f"{label}: enter at most {_fmt(setting.maximum)}.")
+        number = shown * setting.scale
+        if setting.scale != 1.0 and abs(number - round(number)) < 1e-6:
+            number = float(round(number))
         if setting.integer:
             if number != int(number):
                 raise SettingError(f"{label}: enter a whole number.")
@@ -830,10 +1825,6 @@ def coerce(setting: Setting, value: object) -> object:  # noqa: C901 - one branc
         elif isinstance(setting.default, int) and not isinstance(setting.default, bool) \
                 and number == int(number):
             number = int(number)
-        if setting.minimum is not None and number < setting.minimum:
-            raise SettingError(f"{label}: enter at least {_fmt(setting.minimum)}.")
-        if setting.maximum is not None and number > setting.maximum:
-            raise SettingError(f"{label}: enter at most {_fmt(setting.maximum)}.")
         return number
     if control in {"text", "secret"}:
         if not isinstance(value, str):
@@ -871,11 +1862,137 @@ def coerce(setting: Setting, value: object) -> object:  # noqa: C901 - one branc
             if len(item) > setting.max_length or (
                 setting.pattern and not re.fullmatch(setting.pattern, item)
             ):
-                raise SettingError(f"{label}: each entry must be a secure web address.")
+                raise SettingError(f"{label}: each entry must be {setting.item_error}.")
             if item not in items:
                 items.append(item)
+        if not items and setting.empty_unset:
+            return None
         return items
+    if control == "keys":
+        return _coerce_keys(setting, value)
+    if control == "table":
+        return _coerce_table(setting, value)
     raise SettingError(f"{label}: this setting cannot be changed here.")  # pragma: no cover
+
+
+# --------------------------------------------------------- publisher keys
+_ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+MAX_KEYS = 20
+
+
+def parse_public_key(text: object) -> str:
+    """A publisher's public key in any common file form -> the stored form.
+
+    Accepts the plain hexadecimal form the kernel stores, an OpenSSH
+    ``ssh-ed25519`` line, a PEM ``PUBLIC KEY`` block, or the bare base64 of
+    the 32 key bytes. Raises :class:`SettingError` with a plain sentence.
+    """
+    import base64
+    import binascii
+
+    raw = str(text or "").strip()
+    bad = SettingError(
+        "That file is not a publisher key this page can read. Ask the publisher for their "
+        "public key file."
+    )
+    if not raw or len(raw) > 4096:
+        raise bad
+    if re.fullmatch(r"[0-9a-fA-F]{64}", raw):
+        return raw.lower()
+    try:
+        if raw.startswith("ssh-ed25519 "):
+            blob = base64.b64decode(raw.split()[1], validate=True)
+            name_len = int.from_bytes(blob[:4], "big")
+            if blob[4:4 + name_len] != b"ssh-ed25519":
+                raise bad
+            rest = blob[4 + name_len:]
+            key_len = int.from_bytes(rest[:4], "big")
+            key = rest[4:4 + key_len]
+        elif "-----BEGIN PUBLIC KEY-----" in raw:
+            body = raw.split("-----BEGIN PUBLIC KEY-----", 1)[1].split("-----END", 1)[0]
+            der = base64.b64decode("".join(body.split()), validate=True)
+            if len(der) != 44 or not der.startswith(_ED25519_SPKI_PREFIX):
+                raise bad
+            key = der[12:]
+        else:
+            key = base64.b64decode("".join(raw.split()), validate=True)
+    except (binascii.Error, ValueError, IndexError) as exc:
+        raise bad from exc
+    if len(key) != 32:
+        raise bad
+    return key.hex()
+
+
+def key_fingerprint(hex_key: str) -> str:
+    """A short readable fingerprint of a stored key (never the key itself)."""
+    import hashlib
+
+    try:
+        digest = hashlib.sha256(bytes.fromhex(str(hex_key))).hexdigest().upper()
+    except ValueError:
+        return "Unreadable key"
+    return " ".join(digest[i:i + 4] for i in range(0, 16, 4))
+
+
+def _coerce_keys(setting: Setting, value: object) -> list[str]:
+    if not isinstance(value, list) or len(value) > MAX_KEYS:
+        raise SettingError(f"{setting.label}: use at most {MAX_KEYS} keys.")
+    keys: list[str] = []
+    for item in value:
+        parsed = parse_public_key(item)
+        if parsed not in keys:
+            keys.append(parsed)
+    return keys
+
+
+# ---------------------------------------------------------------- tables
+RISK_LEVELS: tuple[tuple[str, str], ...] = (
+    ("low", "Low risk"), ("medium", "Medium risk"), ("high", "High risk"),
+)
+_RISK_RANK = {"low": 0, "medium": 1, "high": 2}
+MAX_TABLE_ROWS = 64
+
+
+def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one branch per row kind
+    label = setting.label
+    if value is None or value == "":
+        return {}
+    if not isinstance(value, list) or len(value) > MAX_TABLE_ROWS:
+        raise SettingError(f"{label}: use at most {MAX_TABLE_ROWS} rows.")
+    allowed = {v for v, _ in setting.choices}
+    out: dict[str, object] = {}
+    for row in value:
+        if not isinstance(row, dict):
+            raise SettingError(f"{label}: each row needs a name and a value.")
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        if name in out:
+            raise SettingError(f"{label}: each row must be different.")
+        if setting.row_kind == "rate":
+            if name in setting.fixed_keys:
+                raise SettingError(f"{label}: that tool has its own setting above.")
+            if name not in allowed:
+                raise SettingError(f"{label}: choose a tool from the list.")
+            count, seconds = row.get("count"), row.get("seconds")
+            if not (_is_number(count) and _is_number(seconds)) or count != int(count) \
+                    or seconds != int(seconds) or not 1 <= count <= 100000 \
+                    or not 1 <= seconds <= 86400:
+                raise SettingError(f"{label}: enter a whole number of times and a period.")
+            out[name] = f"{int(count)}/{int(seconds)}"
+        elif setting.row_kind == "risk":
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name) or "__" in name:
+                raise SettingError(
+                    f"{label}: a tool name uses letters, numbers, dots, dashes and single "
+                    "underscores only."
+                )
+            risk = str(row.get("risk") or "")
+            if risk not in _RISK_RANK:
+                raise SettingError(f"{label}: choose a risk level for each tool.")
+            out[name] = {"risk": risk}
+        else:  # pragma: no cover - guarded by _assert_consistent
+            raise SettingError(f"{label}: this setting cannot be changed here.")
+    return out
 
 
 RATE_PERIODS: tuple[tuple[int, str], ...] = (
@@ -906,11 +2023,19 @@ def warning_lead(setting: Setting) -> str:
         return "If you lower this:"
     if setting.weaker == "higher":
         return "If you raise this:"
+    if setting.weaker == "change":
+        return "If you change this:"
+    if setting.weaker == "grow":
+        return "If you add to this:"
+    if setting.weaker == "shrink":
+        return "If you remove from this:"
     return "If you loosen this:"
 
 
 def _fmt(number: float) -> str:
-    return str(int(number)) if float(number) == int(number) else str(number)
+    if float(number) == int(number):
+        return f"{int(number):,}" if abs(number) >= 10000 else str(int(number))
+    return str(number)
 
 
 def weakens(setting: Setting, old: object, new: object) -> bool:
@@ -925,6 +2050,8 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
             return order.index(str(new)) > order.index(str(old))
         except ValueError:
             return str(new) != str(setting.order[0])
+    if setting.weaker == "change":
+        return old != new
     if setting.control == "number":
         if setting.weaker == "lower":
             if new is None:
@@ -934,16 +2061,66 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
             if new is None:
                 return old is not None
             return old is not None and float(new) > float(old)
+    if setting.control in {"list", "multiselect", "keys"}:
+        old_items = [str(v) for v in old] if isinstance(old, list) else []
+        new_items = [str(v) for v in new] if isinstance(new, list) else []
+        if setting.weaker == "grow":
+            added = any(item not in old_items for item in new_items)
+            # Emptying hands the decision back to a broader default: an empty
+            # publisher list trusts any signature, an empty model list allows
+            # every model, an empty allow list falls back to the server's list.
+            return added or (bool(old_items) and not new_items)
+        if setting.weaker == "shrink":
+            return any(item not in new_items for item in old_items)
+    if setting.control == "table":
+        return _table_loosens(setting, old, new)
+    return False
+
+
+def _table_loosens(setting: Setting, old: object, new: object) -> bool:
+    before = old if isinstance(old, dict) else {}
+    after = new if isinstance(new, dict) else {}
+    if setting.row_kind == "rate":
+        for name, spec in before.items():
+            if name not in after:
+                return True  # a limit was removed
+            was, now = parse_rate(spec), parse_rate(after[name])
+            if was and now and now[0] / now[1] > was[0] / was[1]:
+                return True  # more calls allowed per second
+        return False
+    for name, row in after.items():
+        if name not in before:
+            return True  # a new tool is exposed
+        was = before[name].get("risk") if isinstance(before[name], dict) else None
+        now = row.get("risk") if isinstance(row, dict) else None
+        if _RISK_RANK.get(str(now), 2) < _RISK_RANK.get(str(was), 2):
+            return True  # a tool was marked as less risky
     return False
 
 
 def cross_checks(effective: dict[str, object]) -> None:
     """Refuse combinations the kernel would reject as a broken configuration."""
-    for setting_id, needed in _REQUIRES_NONEMPTY.items():
-        if effective.get(setting_id) is True and not effective.get(needed):
-            first, second = BY_ID[setting_id], BY_ID[needed]
+    for setting_id, needs in _REQUIRES_NONEMPTY.items():
+        if effective.get(setting_id) is not True:
+            continue
+        for needed in (needs if isinstance(needs, tuple) else (needs,)):
+            if not effective.get(needed):
+                first, second = BY_ID[setting_id], BY_ID[needed]
+                raise SettingError(
+                    f"{first.label}: fill in “{second.label}” first."
+                    if second.control in {"text", "select", "table"}
+                    else f"{first.label}: choose at least one option in “{second.label}” first."
+                )
+    for setting_id, options in _REQUIRES_ANY.items():
+        if effective.get(setting_id) is True and not any(effective.get(o) for o in options):
+            first = BY_ID[setting_id]
+            names = ", ".join(f"“{BY_ID[o].label}”" for o in options)
+            raise SettingError(f"{first.label}: fill in at least one of {names} first.")
+    for low_id, high_id in _ORDERED:
+        low, high = effective.get(low_id), effective.get(high_id)
+        if _is_number(low) and _is_number(high) and float(low) > float(high):
             raise SettingError(
-                f"{first.label}: choose at least one option in “{second.label}” first."
+                f"{BY_ID[low_id].label} can't be more than {BY_ID[high_id].label.lower()}."
             )
 
 
@@ -975,7 +2152,16 @@ def display_value(setting: Setting, value: object) -> str:
             return ", ".join(labels.get(str(v), str(v)) for v in value) or "None"
         return labels.get(str(value), "Other value")
     if setting.control == "list" and isinstance(value, list):
-        return f"{len(value)} address" + ("" if len(value) == 1 else "es")
+        noun = setting.item_label.lower()
+        if len(value) == 1:
+            return f"1 {noun}"
+        return f"{len(value)} {noun}es" if noun.endswith(("s", "x", "sh", "ch")) \
+            else f"{len(value)} {noun}s"
+    if setting.control == "keys" and isinstance(value, list):
+        return f"{len(value)} trusted key" + ("" if len(value) == 1 else "s")
+    if setting.control == "table" and isinstance(value, dict):
+        noun = "limit" if setting.row_kind == "rate" else "tool"
+        return f"{len(value)} {noun}" + ("" if len(value) == 1 else "s") if value else "None"
     if setting.control == "rate":
         parsed = parse_rate(value)
         if parsed is None:
@@ -983,15 +2169,16 @@ def display_value(setting: Setting, value: object) -> str:
         count, seconds = parsed
         return f"{count} every {_period_text(seconds)}"
     if setting.control == "number" and _is_number(value):
-        text = _fmt(float(value))
+        text = _fmt(round(float(value) / setting.scale, 4))
         return f"{text} {setting.unit}".strip()
     return str(value)
 
 
 __all__ = [
     "BY_ID", "CATALOG_TOP_SECTIONS", "GROUPS", "GROUP_INTROS", "SETTINGS",
-    "RATE_PERIODS", "Setting", "SettingError", "coerce", "cross_checks",
-    "display_value", "lookup", "parse_rate", "warning_lead", "weakens",
+    "RATE_PERIODS", "RISK_LEVELS", "Setting", "SettingError", "coerce", "cross_checks",
+    "display_value", "key_fingerprint", "lookup", "parse_public_key", "parse_rate",
+    "warning_lead", "weakens",
 ]
 
 
@@ -1000,9 +2187,14 @@ def _assert_consistent() -> None:
         assert s.control in CONTROLS, s.id
         assert s.group in GROUPS, s.id
         if s.control in {"select", "multiselect"}:
-            assert s.choices, s.id
+            assert s.choices or s.choices_from, s.id
         if s.warning:
             assert s.weaker is not None, s.id
+        if s.control == "table":
+            assert s.row_kind in {"rate", "risk"}, s.id
+        if s.key_kind == "entries":
+            assert s.control == "table", s.id
+        assert s.scale > 0, s.id
 
 
 _assert_consistent()
