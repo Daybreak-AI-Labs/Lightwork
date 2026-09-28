@@ -213,6 +213,13 @@ class EventKind:
     # payload: outcome ("applied" | "unchanged" | "refused"), version,
     # previous_version, added, removed (rule ids), reason (refusals).
     SHIELD_RULES_UPDATE = "shield_rules_update"
+    # Voice unlock ([voice] biometric_unlock). Never the audio or the voice
+    # profile itself. VOICE_PROFILE_ENROLLED payload: actor, samples.
+    # VOICE_PROFILE_DELETED payload: actor. VOICE_UNLOCK_CHECKED payload:
+    # actor, surface ("check" | "spoken_request"), matched, score, threshold.
+    VOICE_PROFILE_ENROLLED = "voice_profile_enrolled"
+    VOICE_PROFILE_DELETED = "voice_profile_deleted"
+    VOICE_UNLOCK_CHECKED = "voice_unlock_checked"
     # Deployment-global tenant/workspace control-plane decisions. These are
     # deliberately separate from tenant-local work so provisioning and a
     # caller changing the active confidentiality boundary cannot disappear

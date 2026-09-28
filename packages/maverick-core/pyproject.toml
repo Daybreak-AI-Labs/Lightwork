@@ -105,6 +105,9 @@ evidence-analysis = [
 ]
 clipboard       = ["pyperclip>=1.8"]
 voice           = ["faster-whisper>=1.0"]
+# Voice unlock (voice_unlock.py): SpeechBrain's ECAPA-TDNN speaker model, run on
+# the CPU from the folder at [voice] speaker_model_path. Never required.
+voice-unlock    = ["speechbrain>=1.0", "torch>=2.2", "torchaudio>=2.2"]
 # CLAP zero-shot audio understanding (tools/audio_understanding.py,
 # audio_analysis.py). torch floor mirrors [training].
 clap            = ["transformers>=4.40", "torch>=2.2"]

@@ -7819,6 +7819,14 @@ async def voice_transcribe(
             detail=f"audio too large: {len(data)} bytes (limit {max_bytes})",
         )
 
+    # [voice] biometric_unlock: a person who recorded their voice is heard
+    # only in that voice (a second check on top of signing in).
+    from .voice_unlock_api import check_spoken_request
+
+    refusal = await run_in_threadpool(check_spoken_request, request, data)
+    if refusal is not None:
+        raise HTTPException(status_code=403, detail=refusal)
+
     suffix = _VOICE_SUFFIXES.get(_os.path.splitext(file.filename or "")[1].lower(), ".webm")
     lang = (language or "").strip()[:8] or None
 

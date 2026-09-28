@@ -237,8 +237,11 @@ def test_every_runtime_row_is_in_the_catalog():
 
 
 # Saving a quorum turns on approvals for safety settings, the quorum itself
-# included, so its reset is held for approval: tested on its own below.
-_GENERIC = [s for s in ROWS if s.id != "safety.quorum_required" and s.id not in _REFUSED]
+# included, so its reset is held for approval; voice unlock can't be turned on
+# without its add-on. Both are tested on their own (test_settings_runtime_safety,
+# test_settings_voice_unlock).
+_GENERIC = [s for s in ROWS if s.id not in {"safety.quorum_required", "voice.biometric_unlock"}
+            and s.id not in _REFUSED]
 
 
 @pytest.mark.parametrize("setting", _GENERIC, ids=lambda s: s.id)

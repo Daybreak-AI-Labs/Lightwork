@@ -9,8 +9,10 @@ templates.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
@@ -35,6 +37,13 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     Lightwork uses by default. Appearance is applied via the existing
     persist_theme middleware (the form GETs back here with the params); the
     model choice is saved to the dashboard-owned runtime overlay."""
+    return _settings_response(request, saved)
+
+
+def _settings_response(request: Request, saved: str = "", *, notice: str = "",
+                       status_code: int = 200) -> HTMLResponse:
+    """The settings page; ``notice`` is a message shown instead of "Saved"
+    (a change waiting for other administrators' approval)."""
     # Every form on this page changes deployment-wide process configuration.
     # A tenant-local admin must not see an apparently actionable console whose
     # POSTs all fail the correct global gate.
@@ -180,7 +189,8 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "webhook_configured": webhook_configured,
         "saved": saved_msg,
         "saved_section": saved_section,
-    })
+        "notice": notice,
+    }, status_code=status_code)
 
 
 @router.post("/settings/models")
@@ -216,7 +226,7 @@ async def settings_set_model(request: Request) -> RedirectResponse:
 
 @router.post("/settings/budget")
 def settings_set_budget(request: Request, max_dollars: str = Form(""),
-                        mode: str = Form("configured")) -> RedirectResponse:
+                        mode: str = Form("configured")) -> Response:
     """Set (or clear) the dashboard's per-goal spend cap via the runtime
     overlay. An empty value clears it, reverting to config.toml / defaults.
     config.toml is never written."""
@@ -225,22 +235,88 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
     from maverick.runtime_overrides import clear_budget, set_budget, set_task_limits
     val = (max_dollars or "").strip()
     try:
-        if mode == "disabled":
-            set_task_limits(False)
-        elif mode == "configured" and val:
-            set_budget(float(val))
-        elif mode in ("configured", "default"):
-            # "default" is the page's "use your installation's standard
-            # limits" choice: drop the Settings amount, keep limits on.
-            clear_budget()
-            set_task_limits(True)
-        else:
-            raise ValueError("unknown task limit policy")
+        wanted = _budget_choice(mode, val)
     except ValueError as exc:
         raise HTTPException(
             status_code=400, detail="spend cap must be a positive number",
         ) from exc
+    # [safety] quorum_required: the per-task spending limit is a protected
+    # setting by default, so a change waits for other administrators'
+    # approval exactly as on All settings (settings_quorum).
+    approved = None
+    current = _budget_now()
+    if wanted != current:
+        from . import settings_quorum
+
+        actor = auth.caller_principal(request) or "local administrator"
+        change = [{"setting": _BUDGET_SETTING, "old": current, "new": wanted}]
+        hold, approved = settings_quorum.review(change, actor, lambda _s, value: value)
+        if hold is not None:
+            return _held(request, hold)
+    try:
+        if mode == "disabled":
+            set_task_limits(False)
+        elif mode == "configured" and val:
+            set_budget(float(val))
+        else:
+            # "default" is the page's "use your installation's standard
+            # limits" choice: drop the Settings amount, keep limits on.
+            clear_budget()
+            set_task_limits(True)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="spend cap must be a positive number",
+        ) from exc
+    if approved is not None:
+        from . import settings_quorum
+
+        settings_quorum.settle(approved)
     return RedirectResponse("/settings?saved=budget", status_code=303)
+
+
+# The per-task spending limit as the quorum sees it: one protected setting
+# (``budget.max_dollars`` in [safety] quorum_protected_keys), whatever the
+# form's mode, so switching limits off is protected too.
+_BUDGET_SETTING = SimpleNamespace(id="budget.max_dollars", label="Spending limit per task")
+
+
+def _budget_choice(mode: str, amount: str) -> str:
+    """What the form asks for, in the words approvers see."""
+    if mode == "disabled":
+        return "No limit for each task"
+    if mode == "configured" and amount:
+        value = float(amount)
+        if not 0 < value < float("inf"):
+            raise ValueError("spend cap must be positive")
+        return f"Stop a task after ${value:,.2f}"
+    if mode in ("configured", "default"):
+        return "Your installation's standard limits"
+    raise ValueError("unknown task limit policy")
+
+
+def _budget_now() -> str:
+    from maverick.config import load_config
+    from maverick.runtime_overrides import budget_override, task_limits_override
+
+    enabled = task_limits_override()
+    if enabled is None:
+        enabled = (load_config().get("budget") or {}).get("task_limits_enabled", True)
+    if not enabled:
+        return "No limit for each task"
+    amount = budget_override()
+    return (f"Stop a task after ${amount:,.2f}" if amount is not None
+            else "Your installation's standard limits")
+
+
+def _held(request: Request, hold: dict):
+    """202: the change waits for approval. JSON for scripts, the settings
+    page with the message for the browser form."""
+    from fastapi.responses import JSONResponse
+
+    if "application/json" in (request.headers.get("accept") or ""):
+        return JSONResponse({"changed": [], "quorum": hold, "message": hold["message"]},
+                            status_code=202, headers={"Cache-Control": "no-store"})
+    return _settings_response(request, notice=hold["message"], status_code=202)
 
 
 @router.post("/settings/models/roles")
