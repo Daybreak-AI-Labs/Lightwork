@@ -33,7 +33,9 @@ Deliberately NOT in the catalog:
   server file path or an environment variable (``signal_cli_path``,
   ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``,
   the voice program ``whisper_cpp_bin``). The Obsidian notes folder is the
-  exception: a folder agents read and write, checked to be a folder path.
+  exception: a folder agents read and write, checked to be a folder path; so
+  are the privacy modules' key names, as sealed rows restricted to their own
+  module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, the per-task spending cap, capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
@@ -42,8 +44,8 @@ Deliberately NOT in the catalog:
   setup page), the learning switches, research execution, savings
   assumptions, workspace selection, the security suite's on/off switches.
 * Structured policies that need their module's own page to author safely:
-  consent and privacy workbench options, per-team gateway credentials, and
-  the few governance tables listed in ``settings_catalog_governance``.
+  privacy notice publishing targets, per-team gateway credentials, and the
+  few governance tables listed in ``settings_catalog_governance``.
 
 Controls beyond single values: ``keys`` (trusted publisher keys, added from an
 uploaded or pasted key file and shown only by fingerprint), ``table`` (a list
@@ -2815,6 +2817,13 @@ def cross_checks(effective: dict[str, object]) -> None:
                 f"{BY_ID[low_id].label} can't be more than "
                 f"{high_label[:1].lower() + high_label[1:]}."
             )
+    # A group module may refuse its own combinations (``cross_checks``).
+    for group in (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
+                  settings_catalog_privacy, settings_catalog_governance,
+                  settings_catalog_integrations):
+        check = getattr(group, "cross_checks", None)
+        if check is not None:
+            check(effective, BY_ID, SettingError)
 
 
 def lookup(tree: object, path: tuple[str, ...]) -> tuple[bool, object]:

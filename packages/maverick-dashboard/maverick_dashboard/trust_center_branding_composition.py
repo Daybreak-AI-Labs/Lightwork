@@ -37,8 +37,12 @@ def trust_center_branding_enabled() -> bool:
         root = load_config() or {}
         consent = root.get("consent_preferences") or {}
         trust_center = consent.get("trust_center") or {}
+        # config.enable is the validated [consent_preferences.trust_center.
+        # branding] enable (Settings > All settings); read from the same load.
+        branding = trust_center.get("branding") or {}
         return (
             config.enable
+            and branding.get("enable") is True
             and consent.get("enable") is True
             and trust_center.get("enable") is True
         )

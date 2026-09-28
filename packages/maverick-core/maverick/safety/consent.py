@@ -679,9 +679,23 @@ def _dashboard_timeout() -> float:
 
     A timeout falls through to the interactive/non-tty path (fail-open),
     so a dashboard that's never opened doesn't wedge the agent forever.
+    ``MAVERICK_CONSENT_DASHBOARD_TIMEOUT`` wins; otherwise ``[approval]
+    dashboard_wait_seconds`` (set on Settings > All settings) applies.
     """
+    raw = os.environ.get("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "")
+    if not raw.strip():
+        try:
+            from ..config import load_config
+
+            value = ((load_config() or {}).get("approval") or {}).get("dashboard_wait_seconds")
+        except Exception:  # config never blocks the approval wait
+            value = None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and math.isfinite(value):
+            return max(0.0, float(value))
+        raw = "300"
     try:
-        return max(0.0, float(os.environ.get("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "300")))
+        return max(0.0, float(raw))
     except ValueError:
         return 300.0
 
