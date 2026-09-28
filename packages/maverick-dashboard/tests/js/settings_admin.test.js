@@ -98,3 +98,15 @@ test('forms marked for confirmation do not submit when cancelled', async (t) => 
   assert.equal(submitted, false);
   assert.equal(ui.confirms.length, 1);
 });
+
+test('encryption explains a shared database instead of claiming older records are encrypted', async (t) => {
+  const note = 'Older records are kept in a shared database that this page cannot check or encrypt.';
+  const ui = await fixture(() => response({enabled: true, older_unprotected: null, older_note: note}));
+  t.after(() => ui.window.close());
+  ui.document.querySelector('[data-maintenance-run="encryption"]').click();
+  await ui.settle();
+  const box = ui.document.querySelector('[data-maintenance-out="encryption"]');
+  assert.match(box.textContent, /shared database/);
+  assert.doesNotMatch(box.textContent, /All older records are encrypted/);
+  assert.ok(![...box.querySelectorAll('button')].some((b) => b.textContent === 'Encrypt older records'));
+});

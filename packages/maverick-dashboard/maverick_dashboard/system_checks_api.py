@@ -20,7 +20,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from . import auth
 from .auth import require_global_permission
+from .queue_status_api import redacted_error
 
 router = APIRouter(prefix="/api/v1/admin/system")
 _DOCTOR_LOCK = threading.Lock()
@@ -34,6 +36,25 @@ def _mutation(request: Request) -> None:
     from . import app as app_module
     app_module._require_same_origin(request)
     _admin(request)
+
+
+def _record(request: Request, verb: str, **detail: Any) -> None:
+    """One activity-record row per maintenance change, naming who made it.
+
+    Raises HTTP 503 when the activity record refuses the row (the change has
+    already been made, so the page says so rather than claiming nothing
+    happened).
+    """
+    from maverick.audit import AuditRefused, EventKind, audit_event
+    try:
+        audit_event(EventKind.CONTROL_PLANE_ACTION, agent="dashboard", _global=True,
+                    verb=verb, principal="*",
+                    actor=auth.caller_principal(request) or "local administrator",
+                    ok=True, **detail)
+    except AuditRefused as exc:
+        raise HTTPException(
+            503, "The change was made, but it could not be added to the activity record."
+        ) from exc
 
 
 def _row(key: str, label: str, ok: bool, detail: str, fix_label: str = "",
@@ -273,7 +294,9 @@ def _queue() -> dict[str, Any]:
             "what": _job_kind(j.kind),
             "when": j.updated_at or j.created_at,
             "needs_decision": bool(j.recurrence_reconcile_required),
-            "technical": (j.last_error or "").strip()[:300],
+            # Masked the same way as the Action Center: a provider error can
+            # quote the key it was given.
+            "technical": redacted_error(j.last_error)[:300],
         } for j in failed],
     }
 
@@ -306,28 +329,51 @@ async def queue_resume(job_id: int, body: ResumeIn, request: Request) -> dict:
         next_id = await run_in_threadpool(_do)
     except ValueError as exc:
         raise HTTPException(409, "This schedule changed since the list was loaded. Refresh and try again.") from exc
+    await run_in_threadpool(_record, request, "queue_resume", job_id=job_id, next_job_id=next_id)
     return {"resumed": True, "next": next_id}
 
 
 # ---- encryption (maverick encryption migrate / rotate) ---------------------
 
+_SHARED_DATABASE_NOTE = (
+    "Older records are kept in a shared database that this page cannot check or "
+    "encrypt. Whoever installed Lightwork can encrypt them there."
+)
+
+
 def _world_db():
-    from maverick import world_model
-    return world_model.DEFAULT_DB
+    """The world database file this request's workspace uses, or None.
+
+    Resolved exactly as the other dashboard pages resolve it, so the count and
+    the "Encrypt older records" button act on the workspace's own records. None
+    means the records live in a shared database server, which this page does
+    not handle.
+    """
+    from pathlib import Path
+
+    from maverick.world_model_backends import is_postgres_configured
+    if is_postgres_configured():
+        return None
+    from ._shared import _world
+    return Path(_world().path)
 
 
 def _encryption() -> dict[str, Any]:
     from maverick.crypto_at_rest import at_rest_enabled
     on = bool(at_rest_enabled())
     unprotected = None
+    note = ""
     if on:
         try:
             from maverick.encryption_migrate import migrate_world_db
             db = _world_db()
-            unprotected = sum(migrate_world_db(db, dry_run=True).values()) if db.exists() else 0
+            if db is None:
+                note = _SHARED_DATABASE_NOTE
+            else:
+                unprotected = sum(migrate_world_db(db, dry_run=True).values()) if db.exists() else 0
         except Exception:  # noqa: BLE001 -- status read is best effort
             unprotected = None
-    return {"enabled": on, "older_unprotected": unprotected}
+    return {"enabled": on, "older_unprotected": unprotected, "older_note": note}
 
 
 @router.get("/encryption")
@@ -342,13 +388,17 @@ async def encryption_protect_older(request: Request) -> dict:
     from maverick.crypto_at_rest import EncryptionUnavailable
     from maverick.encryption_migrate import migrate_world_db
 
+    db = await run_in_threadpool(_world_db)
+    if db is None:
+        raise HTTPException(409, _SHARED_DATABASE_NOTE + " Nothing was changed here.")
+
     def _do() -> int:
-        db = _world_db()
         return sum(migrate_world_db(db, dry_run=False, backup=False).values()) if db.exists() else 0
     try:
         count = await run_in_threadpool(_do)
     except EncryptionUnavailable as exc:
         raise HTTPException(503, "Encryption is not set up on this installation, so nothing was changed.") from exc
+    await run_in_threadpool(_record, request, "encryption_protect_older", records=count)
     return {"protected": count}
 
 
@@ -360,6 +410,7 @@ async def encryption_new_key(request: Request) -> dict:
         await run_in_threadpool(rotate_at_rest_key)
     except EncryptionUnavailable as exc:
         raise HTTPException(503, "Encryption is not set up on this installation, so no new key was made.") from exc
+    await run_in_threadpool(_record, request, "encryption_new_key")
     return {"rotated": True}
 
 

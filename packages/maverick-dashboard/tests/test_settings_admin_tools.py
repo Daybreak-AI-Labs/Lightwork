@@ -227,3 +227,109 @@ def test_encryption_status_and_new_key_when_off(client, monkeypatch):
 def test_diagnostics_shape(client):
     data = client.get("/api/v1/admin/system/diagnostics").json()
     assert set(data) == {"paused_services", "recent_calls"}
+
+
+# ---- review fixes: audit, redaction and the right world database ---------
+
+@pytest.fixture
+def audit_rows(monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+
+    def capture(kind, **payload):
+        rows.append({"kind": kind, **payload})
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", capture)
+    return rows
+
+
+def test_resuming_a_schedule_is_recorded_with_who_did_it(client, monkeypatch, tmp_path, audit_rows):
+    from maverick import job_queue
+    from maverick_dashboard import auth
+    monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
+    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence",
+                        lambda self, job_id, **kw: 77)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
+    from maverick_dashboard import rbac
+    rbac.set_role("user:ada", "admin")
+    r = client.post("/api/v1/admin/system/queue/5/resume", json={"attempts": 2})
+    assert r.status_code == 200, r.text
+    rows = [row for row in audit_rows if row.get("verb") == "queue_resume"]
+    assert len(rows) == 1
+    assert rows[0]["actor"] == "user:ada" and rows[0]["job_id"] == 5
+
+
+def test_stopped_job_errors_are_redacted_like_the_action_center(client, monkeypatch, tmp_path):
+    from maverick import job_queue
+    monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
+    q = job_queue.JobQueue()
+    q.enqueue("run_goal", {"title": "t"})
+    job = q.claim()
+    secret = "provider said: invalid x-api-key sk-ant-api03-" + "A" * 40  # pragma: allowlist secret
+    q.fail(job.id, secret, max_attempts=1, expected_attempts=job.attempts)
+    stopped = client.get("/api/v1/admin/system/queue").json()["stopped"][0]
+    assert "sk-ant-api03-AAAA" not in stopped["technical"]
+    assert "REDACTED" in stopped["technical"]
+    summary = client.get("/api/v1/queue/summary").json()["failed_items"][0]
+    assert stopped["technical"] == summary["detail"][:300]
+
+
+def test_encryption_maintenance_uses_the_workspace_world(client, monkeypatch, tmp_path, audit_rows):
+    from maverick import crypto_at_rest, encryption_migrate, paths
+    from maverick_dashboard import system_checks_api as sc
+
+    with paths.tenant_scope(tenant="acme"):
+        from maverick_dashboard import _shared
+        expected = _shared._world().path
+        assert str(sc._world_db()) == str(expected)
+        assert "acme" in str(sc._world_db())
+
+    seen: list[str] = []
+
+    def fake_migrate(db, dry_run=False, backup=False):
+        seen.append(str(db))
+        return {"turns.content": 3}
+
+    monkeypatch.setattr(crypto_at_rest, "at_rest_enabled", lambda: True)
+    monkeypatch.setattr(encryption_migrate, "migrate_world_db", fake_migrate)
+    monkeypatch.setattr(sc, "_world_db", lambda: tmp_path / "chosen.db")
+    (tmp_path / "chosen.db").write_bytes(b"")
+    assert client.get("/api/v1/admin/system/encryption").json()["older_unprotected"] == 3
+    r = client.post("/api/v1/admin/system/encryption/protect-older")
+    assert r.status_code == 200 and r.json()["protected"] == 3
+    assert seen == [str(tmp_path / "chosen.db")] * 2
+    rows = [row for row in audit_rows if row.get("verb") == "encryption_protect_older"]
+    assert len(rows) == 1 and rows[0]["records"] == 3 and rows[0]["actor"]
+
+
+def test_encryption_maintenance_says_plainly_when_the_database_is_shared(
+    client, monkeypatch, audit_rows,
+):
+    from maverick import crypto_at_rest, encryption_migrate
+    from maverick import world_model_backends as backends
+
+    monkeypatch.setattr(crypto_at_rest, "at_rest_enabled", lambda: True)
+    monkeypatch.setattr(backends, "is_postgres_configured", lambda: True)
+
+    def never(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("migrate must not run against a local file")
+
+    monkeypatch.setattr(encryption_migrate, "migrate_world_db", never)
+    data = client.get("/api/v1/admin/system/encryption").json()
+    assert data["older_unprotected"] is None
+    assert data["older_note"] and "cannot" in data["older_note"]
+    r = client.post("/api/v1/admin/system/encryption/protect-older")
+    assert r.status_code == 409
+    assert "protected" not in r.json()
+    assert audit_rows == []
+
+
+def test_new_encryption_key_is_recorded(client, monkeypatch, audit_rows):
+    from maverick import crypto_at_rest
+    monkeypatch.setattr(crypto_at_rest, "rotate_at_rest_key", lambda: None)
+    r = client.post("/api/v1/admin/system/encryption/new-key")
+    assert r.status_code == 200
+    rows = [row for row in audit_rows if row.get("verb") == "encryption_new_key"]
+    assert len(rows) == 1 and rows[0]["actor"]

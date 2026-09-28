@@ -43,9 +43,16 @@ def _problem(text: str) -> str:
     return "It failed after trying again."
 
 
+def redacted_error(text: object) -> str:
+    """A stopped job's error, on one line, bounded, with secrets masked."""
+    from maverick.safety.secret_detector import redact
+
+    detail, _ = redact(" ".join(str(text or "").split())[:500])
+    return detail
+
+
 def _summary(limit: int) -> dict:
     from maverick.job_queue import JobQueue
-    from maverick.safety.secret_detector import redact
 
     queue = JobQueue()
     counts = queue.counts()
@@ -53,7 +60,7 @@ def _summary(limit: int) -> dict:
     for job in queue.list(status="failed", limit=limit):
         payload = job.payload if isinstance(job.payload, dict) else {}
         title = str(payload.get("title") or payload.get("template") or "")[:200]
-        detail, _ = redact(" ".join(str(job.last_error or "").split())[:500])
+        detail = redacted_error(job.last_error)
         failed.append({
             "id": job.id,
             "what": _KIND_LABELS.get(job.kind, job.kind.replace("_", " ").capitalize()),
@@ -80,4 +87,4 @@ async def queue_summary(request: Request, limit: int = 50) -> dict:
     return await run_in_threadpool(_summary, max(1, min(int(limit), 200)))
 
 
-__all__ = ["router"]
+__all__ = ["router", "redacted_error"]
