@@ -2155,6 +2155,21 @@ _POLICY: tuple[Setting, ...] = (
 SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt_settings()
             + _GOVERNANCE + _INTEGRATIONS_MORE + _POLICY)
 
+# Rows kept in per-group modules (one module per group of settings).
+from . import (  # noqa: E402 -- the row and column types must exist first
+    settings_catalog_access,
+    settings_catalog_governance,
+    settings_catalog_integrations,
+    settings_catalog_learning,
+    settings_catalog_privacy,
+    settings_catalog_runtime,
+)
+
+for _group in (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
+               settings_catalog_privacy, settings_catalog_governance,
+               settings_catalog_integrations):
+    SETTINGS += tuple(_group.entries(S, C, Column))
+
 BY_ID: dict[str, Setting] = {s.id: s for s in SETTINGS}
 
 # Top-level tables the catalog may write; settings_store's allowlisted
