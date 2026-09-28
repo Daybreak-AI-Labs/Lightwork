@@ -303,6 +303,21 @@ def test_case_is_idempotent_exact_asset_bound_and_tenant_isolated():
         assert service.get_case(created["case_id"]) is None
 
 
+def test_case_evidence_is_listed_for_its_own_case_and_workspace_only():
+    service, _, _, _ = _service("listing")
+    with tenant_scope(tenant="alpha"):
+        first = _create(service)
+        fria = _bind_domain(service, first["case_id"], "fria")
+        annex = _bind_domain(service, first["case_id"], "annex_iv")
+        listed = service.list_case_evidence(first["case_id"])
+        assert [row["binding_id"] for row in listed] == sorted(
+            [fria["binding_id"], annex["binding_id"]]
+        )
+        assert {row["evidence_type"] for row in listed} == {"fria", "annex_iv"}
+    with tenant_scope(tenant="beta"), pytest.raises(workflow.AIConformityWorkflowStateError):
+        service.list_case_evidence(first["case_id"])
+
+
 def test_missing_sections_block_submission_and_evidence_digests_are_exact():
     service, registry, _, _ = _service("missing")
     with tenant_scope(tenant="alpha"):

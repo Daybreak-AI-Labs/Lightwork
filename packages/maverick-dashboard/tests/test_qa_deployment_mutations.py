@@ -85,7 +85,7 @@ def test_other_global_or_executable_deployments_have_the_same_safety_contract():
     assert 'if (form.dataset.inFlight === "true") return null;' in governance
     assert 'delete form.dataset.inFlight' in governance
     assert 'policyActivate.dataset.confirmationPending === "true"' in governance
-    assert "Activate policy “${policyId}” version ${version} for this tenant?" in governance
+    assert "Turn on version ${version} of “${title}” for this workspace?" in governance
     assert "Could not reach the server — check your connection and try again." in governance
 
     assert "if (btn.dataset.inFlight === 'true') return;" in store

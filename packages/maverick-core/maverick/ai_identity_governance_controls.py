@@ -2385,8 +2385,45 @@ class GovernedPurviewWritebackService:
             "live_acceptance_verified": False,
         }
 
+    def list_intents(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return this tenant's prepared intents, newest first, read-only.
 
-_AUTHORITY_REGISTRY_SCHEMA = "lightwork.identity_governance.authority-registry-record.v1"
+        The summary carries only the pseudonymous references a resume request
+        already needs; reading, executing, and compensating still re-check the
+        exact authority and capability mapping.
+        """
+
+        if not self._enabled:
+            raise IdentityGovernanceControlConfigError("purview_writeback_disabled")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be between 1 and 500")
+        if self._store is None:
+            self._store = _default_purview_store()
+        rows: list[dict[str, Any]] = []
+        for record in self._store.list(limit=limit):
+            if (
+                record.get("schema") != PURVIEW_INTENT_SCHEMA
+                or record.get("tenant_sha256") != self._tenant_sha256
+            ):
+                continue
+            rows.append(
+                {
+                    "intent_id": record.get("id"),
+                    "principal_ref": record.get("principal_ref"),
+                    "capability_provider": record.get("capability_provider"),
+                    "capability_mapping_sha256": record.get("capability_mapping_sha256"),
+                    "asset_id": record.get("asset_id"),
+                    "classification_codes": list(record.get("classification_codes") or ()),
+                    "status": record.get("status"),
+                    "revision": _record_revision(record),
+                    "created_at": record.get("created_at"),
+                }
+            )
+        rows.sort(key=lambda row: float(row.get("created_at") or 0), reverse=True)
+        return rows
+
+
+_AUTHORITY_REGISTRY_SCHEMA ="lightwork.identity_governance.authority-registry-record.v1"
 _CHANGE_REQUEST_SCHEMA = "lightwork.identity_governance.change-request.v1"
 _REGISTRY_KINDS = frozenset(
     {
@@ -2949,6 +2986,29 @@ class IdentityGovernanceAuthorityRegistry:
             "credentials_retained": False,
             "live_acceptance_verified": False,
         }
+
+    def active_payloads(self, kind: str) -> list[dict[str, Any]]:
+        """Return this tenant's active, integrity-checked payloads of one kind.
+
+        Read-only: lets an administrator pick an already-enrolled record
+        instead of typing its pseudonymous reference.  Ephemeral capability
+        mappings are never listed.
+        """
+
+        if kind not in _REGISTRY_KINDS or kind == "capability_mapping":
+            raise ValueError("authority registry kind is invalid")
+        rows = self._records.list(limit=self._max_records + 1)
+        if len(rows) > self._max_records:
+            raise IdentityGovernanceStateError("authority_registry_capacity_exceeded")
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            current = self._validate_record(row)
+            if current.get("kind") != kind or current.get("status") != "active":
+                continue
+            payload = current["payload"]
+            assert isinstance(payload, Mapping)
+            result.append(dict(payload))
+        return result
 
     def verify_integrity(self) -> dict[str, Any]:
         status = self.status()

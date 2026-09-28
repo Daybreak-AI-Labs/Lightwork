@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/security", tags=["security"])
 
+from .assurance_pickers_api import router as assurance_pickers_router  # noqa: E402
 from .governance_api import router as governance_router  # noqa: E402
 from .identity_governance_outcomes_api import (  # noqa: E402
     router as identity_governance_outcomes_router,
@@ -35,6 +36,7 @@ from .model_risk_api import router as model_risk_router  # noqa: E402
 
 router.include_router(identity_governance_outcomes_router)
 router.include_router(model_risk_router)
+router.include_router(assurance_pickers_router)
 router.include_router(governance_router)
 
 
