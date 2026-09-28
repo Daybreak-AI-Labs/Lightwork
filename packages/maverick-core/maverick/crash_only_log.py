@@ -34,7 +34,9 @@ of everything before it. This sink makes the failure mode boring:
 
 The log file is created 0600. The clock is injectable (``clock=``) so tests
 are deterministic. Stdlib-only, thread-safe (one lock around seq+write), and
-purely a library: nothing imports or enables it by default.
+nothing enables it by default. ``[logging] crash_log`` (see
+:mod:`maverick.logging_config`) keeps a crash-safe copy of warnings and errors
+through it.
 """
 from __future__ import annotations
 

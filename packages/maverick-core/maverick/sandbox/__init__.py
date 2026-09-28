@@ -335,6 +335,29 @@ def _deployment_policy(cfg, full_cfg, backend, sandbox_config):
     return {**cfg, **deployment}, {**(full_cfg or {}), **deployment}
 
 
+def _offline_policy(full_cfg: dict | None, backend) -> dict | None:
+    """The network policy's no-network rule for the work area.
+
+    When ``[security] network_policy`` is not open, or ``[sandbox]
+    network_policy = "deny-all"``, commands get no network: container and
+    micro-machine backends start without it (the Kubernetes backend verifies
+    its deny-all NetworkPolicy first), ``local`` must become a container (or
+    is refused when none is installed), and backends that cannot be kept
+    offline are refused. Only ever narrows; open leaves settings untouched.
+    """
+    from .network_policy import work_area_offline
+
+    if not work_area_offline():
+        return full_cfg
+    chosen = str(backend or "local").strip().lower()
+    if chosen == "ssh" or chosen.startswith("ep:"):
+        raise SandboxPolicyError(
+            "the network policy blocks internet access for commands, but the "
+            f"{chosen!r} work area cannot be kept offline; choose a container work area")
+    return {**(full_cfg or {}), "allow_network": False, "network": "egress-deny",
+            "require_container": True}
+
+
 def build_sandbox(
     workdir: str | Path | None = None,
     backend: str | None = None,
@@ -410,6 +433,7 @@ def _build_sandbox(
             full_cfg = {}
 
     cfg, full_cfg = _deployment_policy(cfg, full_cfg, backend, sandbox_config)
+    full_cfg = _offline_policy(full_cfg, backend or cfg.get("backend"))
 
     # Normalize the backend selector: it comes from user-typed TOML (or a CLI
     # flag) and is matched case-sensitively against the literals below, so

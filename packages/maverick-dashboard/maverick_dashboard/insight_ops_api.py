@@ -67,13 +67,31 @@ class _OwnedWorld:
         return self._world.list_episodes(goal_id=goal_id, limit=limit)
 
 
+_NOT_INSTALLED = ("Task questions need the DuckDB add-on, which is not installed on this "
+                  "server. Whoever installed Lightwork can add it (the “duckdb” add-on).")
+_TURNED_OFF = ("Task questions are turned off. A global administrator can turn them on in "
+               "Settings > All settings.")
+
+
+def _turned_on() -> bool:
+    """``[analytics] task_questions`` (on unless set to false)."""
+    try:
+        from maverick.config import load_config
+
+        section = (load_config() or {}).get("analytics") or {}
+    except Exception:  # an unreadable configuration keeps the default
+        return True
+    return not (isinstance(section, dict) and section.get("task_questions") is False)
+
+
 def _analytics(owner: str | None):
+    if not _turned_on():
+        raise HTTPException(403, _TURNED_OFF)
     try:
         from maverick.duckdb_analytics import WorldAnalytics
         return WorldAnalytics(_OwnedWorld(_world(), owner), limit=_GOAL_LIMIT, query_limit=1000)
     except ImportError as exc:
-        raise HTTPException(503, "Task questions need an add-on that is not installed on this "
-                                 "server. Whoever installed Lightwork can add it.") from exc
+        raise HTTPException(503, _NOT_INSTALLED) from exc
 
 
 def _available() -> bool:
@@ -84,7 +102,11 @@ def _available() -> bool:
 @router.get("/analytics/choices")
 async def analytics_choices(request: Request) -> dict:
     require_permission(request, "view")
-    return {"available": _available(),
+    installed, turned_on = _available(), _turned_on()
+    return {"available": installed and turned_on, "installed": installed,
+            "turned_on": turned_on,
+            "reason": "" if installed and turned_on else (_TURNED_OFF if not turned_on
+                                                          else _NOT_INSTALLED),
             "metrics": [{"value": k, "label": v} for k, v in _METRICS.items()],
             "groups": [{"value": k, "label": v} for k, v in _GROUPS.items()],
             "can_write_queries": has_global_permission(request, "admin")}

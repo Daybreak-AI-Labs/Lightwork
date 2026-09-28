@@ -43,7 +43,9 @@ def test_mirror_uploads_when_configured(monkeypatch, tmp_path):
     kw = client.put_object.call_args.kwargs
     assert kw["Bucket"] == "my-bucket"
     assert kw["Key"] == f"attach/__default__/7/{st.path.name}"  # tenant-scoped
-    assert kw["Body"] == b"world"
+    # The mirror carries exactly what is stored here (sealed in the secure posture).
+    assert kw["Body"] == st.path.read_bytes()
+    assert att.read_bytes(st.path) == b"world"
     assert kw["ContentType"] == "text/plain"
 
 
@@ -65,7 +67,7 @@ def test_s3_fetch_pulls_missing_file(monkeypatch, tmp_path):
     body.read.return_value = data
     client.get_object.return_value = {"Body": body}
     p = att.s3_fetch(9, name, root=tmp_path)
-    assert p is not None and p.read_bytes() == data
+    assert p is not None and att.read_bytes(p) == data
     assert file_lock.private_path_is_restricted(p.parent, 0o700)
     assert file_lock.private_path_is_restricted(p)
     client.get_object.assert_called_once_with(Bucket="b", Key=f"__default__/9/{name}")

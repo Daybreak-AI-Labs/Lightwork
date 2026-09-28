@@ -26,8 +26,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TypeVar
 
-from .._envparse import env_float, env_int
-
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -110,9 +108,19 @@ async def async_physical_attempt(fn: Callable[[], Awaitable[T]]) -> T:
 # 3 attempts: retries re-generate the FULL output at billed rates, so this is
 # the one same-call output-token amplifier — 5 attempts quintupled worst-case
 # spend during a provider incident for marginal extra success.
-MAX_ATTEMPTS = max(1, env_int("MAVERICK_LLM_RETRY_ATTEMPTS", 3))
-BASE_DELAY = env_float("MAVERICK_LLM_RETRY_BASE_DELAY", 1.0)
-MAX_DELAY = env_float("MAVERICK_LLM_RETRY_MAX_DELAY", 30.0)
+# Each is also a setting ([latency] retry_attempts / retry_base_delay /
+# retry_max_delay) read once here at startup; the environment still wins.
+def _retry_settings() -> tuple[int, float, float]:
+    from ..env_setting import env_or_config_float, env_or_config_int
+
+    return (
+        max(1, env_or_config_int("MAVERICK_LLM_RETRY_ATTEMPTS", "latency", "retry_attempts", 3)),
+        env_or_config_float("MAVERICK_LLM_RETRY_BASE_DELAY", "latency", "retry_base_delay", 1.0),
+        env_or_config_float("MAVERICK_LLM_RETRY_MAX_DELAY", "latency", "retry_max_delay", 30.0),
+    )
+
+
+MAX_ATTEMPTS, BASE_DELAY, MAX_DELAY = _retry_settings()
 
 
 def _retryable_exception_classes() -> tuple[type, ...]:

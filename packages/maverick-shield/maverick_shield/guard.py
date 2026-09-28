@@ -222,13 +222,23 @@ class Shield:
             required = shield_required()
         except ImportError:  # standalone shield package, without the kernel
             required = bool(safety.get("require_shield", False))
+        constitution = list(safety.get("constitution") or [])
+        try:
+            # Signed shared threat rules ([shield] federated_updates), verified
+            # again on load. Added to the operator's rules, never replacing them.
+            from maverick.shield_updates import load_verified_rules
+            constitution += load_verified_rules()
+        except ImportError:  # standalone shield package, without the kernel
+            pass
+        except Exception:  # noqa: BLE001 -- shared rules never stop the shield
+            log.warning("shared threat rules could not be loaded", exc_info=True)
         return cls(
             profile=safety.get("profile", "balanced"),
             block_threshold=safety.get("block_threshold"),
             scan_input=safety.get("scan_input", True),
             scan_tool_calls=safety.get("scan_tool_calls", True),
             scan_output=safety.get("scan_output", True),
-            constitution=safety.get("constitution"),
+            constitution=constitution or safety.get("constitution"),
             warn_if_missing=warn_if_missing,
             fail_closed=required,
         )

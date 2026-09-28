@@ -258,9 +258,29 @@ _SPEND_MIRROR_INTERVAL = env_float("MAVERICK_SPEND_MIRROR_INTERVAL", 5.0)
 # track a per-(tool,args) consecutive-failure streak and, once it hits the
 # threshold, append a one-line nudge to the tool result so the model breaks the
 # loop (change args, switch tools, rethink). Pure advice -- it never blocks a
-# call. Default on; MAVERICK_LOOP_GUARD=0 disables it.
-_LOOP_GUARD_ENABLED = os.environ.get("MAVERICK_LOOP_GUARD", "1").strip().lower() not in {"0", "false", "no", "off"}
-_LOOP_GUARD_THRESHOLD = max(2, env_int("MAVERICK_LOOP_GUARD_THRESHOLD", 3))
+# call. Default on; MAVERICK_LOOP_GUARD=0 disables it. Each knob is also a
+# setting ([agent] loop_guard / loop_guard_threshold / loop_guard_block /
+# step_budget_warning) read once here at startup; the environment still wins.
+def _loop_guard_settings() -> tuple[bool, int, int]:
+    """(enabled, nudge threshold, suppression threshold) as read at startup."""
+    from .env_setting import env_or_config_int
+
+    enabled = (_env_or_config("MAVERICK_LOOP_GUARD", "agent", "loop_guard", "1")
+               or "1").strip().lower() not in {"0", "false", "no", "off"}
+    threshold = max(2, env_or_config_int(
+        "MAVERICK_LOOP_GUARD_THRESHOLD", "agent", "loop_guard_threshold", 3))
+    block = env_or_config_int("MAVERICK_LOOP_GUARD_BLOCK", "agent", "loop_guard_block", 6)
+    return enabled, threshold, (max(block, threshold + 1) if block > 0 else 0)
+
+
+def _step_budget_warning_setting() -> int:
+    from .env_setting import env_or_config_int
+
+    return max(0, env_or_config_int(
+        "MAVERICK_STEP_BUDGET_WARNING", "agent", "step_budget_warning", 3))
+
+
+_LOOP_GUARD_ENABLED, _LOOP_GUARD_THRESHOLD, _LOOP_GUARD_BLOCK = _loop_guard_settings()
 # Suppression tier above the nudge: once the SAME call has produced the
 # byte-identical result this many times in a row — success or failure — the
 # next identical attempt is refused WITHOUT executing. Identical output N
@@ -271,16 +291,17 @@ _LOOP_GUARD_THRESHOLD = max(2, env_int("MAVERICK_LOOP_GUARD_THRESHOLD", 3))
 # immediately, so a legitimate poll loop that varies anything keeps working.
 # Clamped above the nudge threshold so advice always precedes enforcement,
 # whatever the two env knobs say. 0 disables suppression (nudges continue).
-# MAVERICK_LOOP_GUARD=0 disables the whole guard as before.
-_LOOP_GUARD_BLOCK = env_int("MAVERICK_LOOP_GUARD_BLOCK", 6)
-_LOOP_GUARD_BLOCK = (max(_LOOP_GUARD_BLOCK, _LOOP_GUARD_THRESHOLD + 1)
-                     if _LOOP_GUARD_BLOCK > 0 else 0)
+# MAVERICK_LOOP_GUARD=0 disables the whole guard as before. (Read above, in
+# _loop_guard_settings.)
 
 # Step-budget awareness: when only this many tool-using turns remain before
 # max_steps force-stops the run, the loop nudges the agent to synthesize a
 # FINAL now -- otherwise a long run can get cut off mid-work with no answer.
 # 0 disables the nudge. Tune via MAVERICK_STEP_BUDGET_WARNING.
-_STEP_BUDGET_WARNING = max(0, env_int("MAVERICK_STEP_BUDGET_WARNING", 3))
+_STEP_BUDGET_WARNING = _step_budget_warning_setting()
+
+# How many of an agent's recent tool calls speculative reads predict from.
+_SPECULATION_HISTORY = 20
 
 # W1-44: how many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
@@ -1020,6 +1041,16 @@ def _tool_call_failed(output: str) -> bool:
     return tool_result_failed(output)
 
 
+def _cascade_draft(role: str, model: str) -> str | None:
+    """The cascade's cheap first model for ``role`` (None when off)."""
+    try:
+        from .routing import cascade_draft_model
+
+        return cascade_draft_model(role, model)
+    except Exception:  # pragma: no cover -- routing never breaks agent setup
+        return None
+
+
 def _budget_error_label(e: BudgetExceeded) -> str:
     """W1-30: distinguish a genuinely unpriced model from a real cap trip.
 
@@ -1718,6 +1749,11 @@ class Agent:
         # addendum's except swallows it, and the learned guidance is silently
         # dropped from every prompt -- the feature becomes a no-op.
         self.model = model_override or model_for_role(role)
+        # Cascaded routing ([models] cascade): a role with no model of its own
+        # starts its turns on a cheaper model and moves to self.model on the
+        # kernel's low-confidence signals (see _cascade_turn_model).
+        self._cascade_draft = None if model_override else _cascade_draft(role, self.model)
+        self._cascade_escalated = False
         self.tools = self._build_tools()
         self.system = self._build_system()
         # Per-role reasoning effort (opt-in; None unless configured). Resolved
@@ -3559,6 +3595,11 @@ class Agent:
                 "evidence could not be written"
             )
 
+        _recent = getattr(self, "_recent_tool_calls", None)
+        if _recent is None:
+            _recent = self._recent_tool_calls = []
+        _recent.append((name, dict(args) if isinstance(args, dict) else {}))
+        del _recent[:-_SPECULATION_HISTORY]
         return await self._run_dispatched_tool(
             name,
             args,
@@ -3568,6 +3609,50 @@ class Agent:
             call_commitment=call_commitment,
             principal=principal,
         )
+
+    def _maybe_speculate_reads(self) -> None:
+        """Warm the tool-output cache with this agent's predictable repeat reads.
+
+        Opt-in ([tools] speculative / MAVERICK_SPECULATIVE_TOOLS) and only with
+        the tool-output cache on. Runs in the background; the budget is checked
+        before each read and a stopped budget stops speculation. Never raises.
+        """
+        try:
+            from . import speculative_tools
+            from .cache import tool as tool_cache
+
+            if not (speculative_tools.enabled() and tool_cache.enabled()):
+                return
+            predictions = speculative_tools.predict_from_history(
+                list(getattr(self, "_recent_tool_calls", None) or ()))
+            speculate = getattr(self.tools, "speculate_reads", None)
+            if not predictions or speculate is None:
+                return
+            budget = self.ctx.budget
+
+            def _budget_open() -> bool:
+                try:
+                    budget.check()
+                    return True
+                except Exception:
+                    return False
+
+            import contextvars
+
+            # Copy the context so the worker sees this run's tenant and scope,
+            # exactly as asyncio.to_thread would -- without waiting for it.
+            call_context = contextvars.copy_context()
+            loop = asyncio.get_running_loop()
+            future = loop.run_in_executor(
+                None, call_context.run,
+                lambda: speculate(predictions, budget_guard=_budget_open))
+            pending = getattr(self, "_speculation_futures", None)
+            if pending is None:
+                pending = self._speculation_futures = set()
+            pending.add(future)
+            future.add_done_callback(pending.discard)
+        except Exception:  # pragma: no cover -- speculation never breaks a turn
+            log.debug("speculative reads skipped", exc_info=True)
 
     @staticmethod
     def _tool_call_key(name: str, args: dict) -> str:
@@ -3772,9 +3857,32 @@ class Agent:
             from .speculative_exec import draft_model_for_turn
             acts = getattr(self, "_actions", None)
             last = acts[-1] if acts else ""
-            return draft_model_for_turn(self.domain, self.role, last) or self.model
+            return (draft_model_for_turn(self.domain, self.role, last)
+                    or self._cascade_turn_model())
         except Exception:  # pragma: no cover -- never break the loop
             return self.model
+
+    def _cascade_turn_model(self) -> str:
+        """The cascade's model for this turn: the cheap draft until the
+        verifier rejects an answer under the confidence threshold or this
+        agent's tool chain passes the depth threshold, then ``self.model`` for
+        the rest of the run. ``self.model`` when the cascade is off."""
+        draft = getattr(self, "_cascade_draft", None)
+        if not draft or getattr(self, "_cascade_escalated", False):
+            return self.model
+        from .routing import RouteSignal, should_escalate
+
+        rejected = bool(getattr(self, "_verifier_revision_used", False))
+        signal = RouteSignal(
+            role=self.role,
+            verifier_confidence=(getattr(self.ctx, "last_verifier_confidence", None)
+                                 if rejected else None),
+            tool_call_depth=len(getattr(self, "_actions", None) or ()),
+        )
+        if should_escalate(signal):
+            self._cascade_escalated = True
+            return self.model
+        return draft
 
     def _twin_denial(self, name: str) -> str | None:
         """The Operating-Twin pre-execution gates, first hold wins: rehearsal
@@ -5428,6 +5536,10 @@ class Agent:
                     ),
                 })
             messages.append({"role": "user", "content": tool_results})
+            # Speculative tool execution (opt-in via [tools] speculative):
+            # while the model reads these results, re-run the side-effect-free
+            # reads this agent keeps repeating so the next ask is a cache hit.
+            self._maybe_speculate_reads()
 
             if blocked:
                 return AgentResult(blocked_on_user=True, role=self.role, name=self.name)

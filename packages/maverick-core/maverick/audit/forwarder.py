@@ -77,7 +77,9 @@ def _audit_config(key: str) -> object:
     try:
         from ..config import load_config
         return ((load_config() or {}).get("audit") or {}).get(key)
-    except Exception:  # pragma: no cover -- config never blocks forwarding
+    # An unreadable config means no saved token and no plaintext opt-in, so
+    # forwarding stays authenticated or refused.
+    except Exception:  # failure-policy: best_effort
         return None
 
 

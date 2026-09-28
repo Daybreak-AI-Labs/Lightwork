@@ -4020,7 +4020,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
 - **Crash-only logging** (`crash_only_log.py`) — append-only JSONL safe to
   kill -9 at any byte: one fsync'd `os.write` per record, seq resumes after
   reopen, replay tolerates (and counts) the torn tail vs mid-file corruption,
-  gap detection; fsync policy knob for test/throughput mode.
+  gap detection; fsync policy knob for test/throughput mode. Live sink:
+  `[logging] crash_log` keeps a crash-safe copy of warnings and errors
+  (`logging_config`).
 - **Right-to-rectification** (`rectification.py`) — **built, not yet wired:
   no production code path reaches this module** (see
   `maverick.reachability`), so it is available to call but is not part of any
@@ -4586,7 +4588,9 @@ write-before-delete safety, fact-pinned rows kept hot, and `read_cold`
 (every codec, mixed dirs OK) so archives stay queryable; **speculative tool execution**
 (`speculative_tools.py`, opt-in `[tools] speculative`): pre-execute predicted
 read-only (`parallel_safe`) tool calls concurrently into the tool-output cache
-— `predict_from_history` warms only calls repeated across turns; **async
+— `predict_from_history` warms only calls repeated across turns; the agent
+loop warms them after each tool turn under the caller's cache scope and
+principal (`ToolRegistry.speculate_reads`), budget-checked; **async
 compaction** (`async_compaction.py`, opt-in `[context] async_compaction` together
 with `[context] compact`): a bounded, tenant-scoped cache reuses immutable token
 counts and lexical features of exact source text. Every call reranks the complete
@@ -4602,9 +4606,12 @@ multiplier, OK/TIGHT/OVER budget verdicts; **provider migration calculator**
 tokenizer caveat always rendered); **cross-run learning cache**
 (`learning_cache.py`, opt-in `[memory] learning_cache`): memoize *verified*
 sub-results across runs (required `verified_by` provenance, TTL + LRU cap,
-refuses to store anything the secret detector flags); **energy/CO2
-accounting** (`energy_accounting.py`, **built but unreached: nothing in
-production imports it**): clearly-labeled estimates from configurable
+refuses to store anything the secret detector flags; the orchestrator keys
+each goal by owner + title + details, briefs a repeat run with the checked
+answer as untrusted history, and stores an answer only when the answer checker
+actually ran and accepted it); **energy/CO2
+accounting** (`energy_accounting.py`; the `energy_accounting` tool's token and
+grid defaults come from its `[energy]` coefficients): clearly-labeled estimates from configurable
 Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x), disclaimer
 always rendered; **Redis tool cache** (`redis_tool_cache.py`,
 `[tools] output_cache_backend = "redis"`): cross-process/cross-host tier
@@ -4722,7 +4729,8 @@ tested without spawning py-spy.
   rejected, Ctrl-C is reserved as the unrebindable emergency exit, and a bad
   override set degrades to the stock keymap rather than an unusable one;
   `handle_key` is the pure key→action adapter the monitor/focus model
-  consume.
+  consume; `maverick monitor` loads the keymap at start (quit, refresh,
+  move/open/close plan steps, pause/follow).
 - **Achievements** (`achievements.py`): a local-only milestone ledger
   *derived from recorded history* (never self-reported; nothing leaves the
   machine) — first/10/100 completed goals, a 5+-sub-goal swarm, 3+ channels,
@@ -4740,8 +4748,10 @@ tested without spawning py-spy.
   existing controls (consent mode, review-checkpoint intervals, a budget
   multiplier over the configured cap, plan-execute-reflect topology) so one
   choice sets the whole envelope. `direct()` is pure assembly (starts
-  nothing; the hard Budget ceiling still applies at run time); profiles are
-  config-overridable and unknown profiles are refused — an autonomy level is
+  nothing; the hard Budget ceiling still applies at run time); `maverick start
+  --director <profile>` applies it to its own one-goal process, with the
+  budget clamped to the configured cap; profiles are
+  config-overridable (`[director.profiles]`, All settings) and unknown profiles are refused — an autonomy level is
   never guessed.
 - **Predictive approvals** (`predictive_approvals.py`): learns the operator's
   historical approve/deny rate per (action, risk tier) from approval history and

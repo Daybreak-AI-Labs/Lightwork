@@ -9,6 +9,13 @@ Per-goal trace context is propagated through ``contextvars`` so every
 log line emitted inside ``run_goal`` is automatically tagged with the
 goal id, conversation id, and channel without callers passing it
 through every function.
+
+Crash-safe copy (opt-in, ``[logging] crash_log`` or ``MAVERICK_CRASH_LOG=1``):
+warnings and errors are also written, one fsync'd line each, to
+``logs/crash-only.jsonl`` under Lightwork's data folder through
+:class:`maverick.crash_only_log.CrashOnlyLog`, so the records describing a
+crash survive the crash. ``[logging] crash_only_fsync = "never"`` keeps the
+format but trades per-line durability for speed. Off by default.
 """
 from __future__ import annotations
 
@@ -252,6 +259,50 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(out, separators=(",", ":"))
 
 
+class _CrashOnlyHandler(logging.Handler):
+    """Write each record as one durable line of a crash-only log."""
+
+    def __init__(self, sink) -> None:
+        super().__init__(level=logging.WARNING)
+        self._sink = sink
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._sink.append(
+                "log", level=record.levelname, logger=record.name,
+                msg=record.getMessage(), goal_id=getattr(record, "goal_id", None),
+                exc=_scrub_value(record.exc_text) if record.exc_text else None,
+            )
+        except Exception:  # pragma: no cover -- a log sink never breaks the caller
+            self.handleError(record)
+
+
+def crash_log_path():
+    """Where the crash-only copy of warnings and errors is kept."""
+    from .paths import data_dir
+
+    return data_dir("logs") / "crash-only.jsonl"
+
+
+def _crash_only_handler() -> logging.Handler | None:
+    """The crash-only sink when ``[logging] crash_log`` is on, else None."""
+    from .env_setting import env_or_config
+
+    raw = env_or_config("MAVERICK_CRASH_LOG", "logging", "crash_log", "") or ""
+    if raw.strip().lower() not in {"1", "true", "yes", "on"}:
+        return None
+    try:
+        from .crash_only_log import CrashOnlyLog
+
+        handler = _CrashOnlyHandler(CrashOnlyLog(crash_log_path()))
+    except Exception as exc:  # never block logging on the optional sink
+        logging.getLogger(__name__).warning(
+            "crash-only log unavailable: %s", type(exc).__name__)
+        return None
+    handler.addFilter(_ContextFilter())
+    return handler
+
+
 _configured = False
 
 
@@ -291,5 +342,8 @@ def configure_logging(
         root.removeHandler(h)
     root.addHandler(handler)
     root.setLevel(getattr(logging, level_name, logging.INFO))
+    crash = _crash_only_handler()
+    if crash is not None:
+        root.addHandler(crash)
 
     _configured = True

@@ -28,10 +28,12 @@ capped at :data:`MAX_ENTRIES` entries evicted LRU by last use, and writes are
 atomic (temp file + rename, mode 0600 — results may describe private
 infrastructure).
 
-Default OFF and pure-library: nothing imports this on the hot path.
-``enabled()`` reads ``MAVERICK_LEARNING_CACHE`` (env wins) or
-``[memory] learning_cache``; callers check it before wiring :func:`shared`
-in. The clock is injectable so TTL behavior is unit-testable.
+Default OFF. ``enabled()`` reads ``MAVERICK_LEARNING_CACHE`` (env wins) or
+``[memory] learning_cache``. When on, the orchestrator keys each goal by its
+owner, title and details: a run starts with the verified answer an earlier
+run of that exact task left (framed as untrusted history), and a run whose
+answer the checker accepted stores it for next time. The clock is
+injectable so TTL behavior is unit-testable.
 """
 from __future__ import annotations
 
@@ -64,8 +66,9 @@ def enabled() -> bool:
 
     ``MAVERICK_LEARNING_CACHE=1`` (env wins) or ``[memory] learning_cache``.
     """
-    if env_flag("MAVERICK_LEARNING_CACHE"):
-        return True
+    flag = env_flag("MAVERICK_LEARNING_CACHE")
+    if flag is not None:
+        return flag
     try:
         from ..config import load_config
         return bool((load_config() or {}).get("memory", {}).get("learning_cache", False))

@@ -25,7 +25,10 @@ Hard rules:
 Off by default. ``enabled()`` is the opt-in switch the integration point
 checks (``MAVERICK_SPECULATIVE_TOOLS=1`` or ``[tools] speculative = true``);
 the module itself is a library -- it never runs on its own and
-:func:`speculate` does exactly what the caller asked, when asked.
+:func:`speculate` does exactly what the caller asked, when asked. The agent
+loop is that caller: after each turn that ran tools it predicts from the
+agent's own recent calls and warms them through
+``ToolRegistry.speculate_reads`` in the background (``Agent._maybe_speculate_reads``).
 
 Distinct from :mod:`maverick.speculative` (the asyncio overlapped-coroutine
 primitive): this module is about warming the cross-turn tool cache from
@@ -47,9 +50,8 @@ from .cache import tool as tool_cache
 
 log = logging.getLogger(__name__)
 
-
-def _env_true(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+# The registry never caches a result longer than this (tools._store_bounded_cached).
+_MAX_CACHED_CHARS = 64_000
 
 
 def _cfg() -> dict:
@@ -61,9 +63,14 @@ def _cfg() -> dict:
 
 
 def enabled() -> bool:
-    """Whether speculative tool execution is on (default OFF)."""
-    if _env_true("MAVERICK_SPECULATIVE_TOOLS"):
-        return True
+    """Whether speculative tool execution is on (default OFF).
+
+    ``MAVERICK_SPECULATIVE_TOOLS`` (when set, it wins either way), else
+    ``[tools] speculative``.
+    """
+    raw = os.environ.get("MAVERICK_SPECULATIVE_TOOLS", "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
     return bool(_cfg().get("speculative", False))
 
 
@@ -94,12 +101,18 @@ def _lookup(registry: Any, name: str) -> Any:
         return None
 
 
-def _call_tool(tool: Any, args: dict[str, Any]) -> Any:
+def _call_tool(tool: Any, args: dict[str, Any], principal: str | None = None) -> Any:
     """Invoke ``tool.fn(args)`` in a worker thread; drain async fns inline.
 
     ``ToolFn`` may return an awaitable (native-async tools). Worker threads
-    have no running event loop, so ``asyncio.run`` is safe here.
+    have no running event loop, so ``asyncio.run`` is safe here. ``principal``
+    is bound for the call exactly as the registry binds it for a real one.
     """
+    if principal:
+        from .connections import bind_principal
+
+        with bind_principal(principal):
+            return _call_tool(tool, args)
     out = tool.fn(args)
     if inspect.isawaitable(out):
         async def _drain() -> Any:
@@ -114,6 +127,8 @@ def speculate(
     *,
     max_workers: int = 4,
     budget_guard: Callable[[], bool] | None = None,
+    namespace: str = "",
+    principal: str | None = None,
 ) -> SpeculationReport:
     """Pre-execute predicted tool calls so their results are already cached.
 
@@ -129,7 +144,10 @@ def speculate(
 
     Never raises: per-candidate errors land in ``report.errors``. A no-op
     when the tool-output cache is disabled, since results would have nowhere
-    to land.
+    to land. ``namespace`` and ``principal`` are the cache scope and identity
+    of the registry that would make the real call (see
+    ``ToolRegistry.speculate_reads``), so a warmed result is only ever served
+    to that same caller.
     """
     report = SpeculationReport()
     if not tool_cache.enabled():
@@ -151,7 +169,7 @@ def speculate(
         if tool is None or not tool_cache.cacheable(tool):
             report.skipped_unsafe.append(name)
             continue
-        hit, _value = tool_cache.get_cached(tool, args)
+        hit, _value = tool_cache.get_cached(tool, args, namespace=namespace)
         if hit:
             report.skipped_cached.append(name)
             continue
@@ -171,14 +189,15 @@ def speculate(
                     allowed = False  # a broken guard fails safe: stop spending
                 if not allowed:
                     break
-            futures.append((name, args, tool, pool.submit(_call_tool, tool, args)))
+            futures.append((name, args, tool, pool.submit(_call_tool, tool, args, principal)))
         for name, args, tool, fut in futures:
             try:
                 result = fut.result()
             except Exception as exc:  # speculation must never throw
                 report.errors.append((name, f"{type(exc).__name__}: {exc}"))
                 continue
-            tool_cache.store_cached(tool, args, result)
+            if isinstance(result, str) and len(result) <= _MAX_CACHED_CHARS:
+                tool_cache.store_cached(tool, args, result, namespace=namespace)
             report.executed.append(name)
     log.debug(
         "speculative tools: executed=%d cached=%d unsafe=%d errors=%d",

@@ -42,7 +42,6 @@ import hmac
 import ipaddress
 import json
 import logging
-import os
 import secrets
 import threading
 import time
@@ -51,6 +50,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 from urllib.parse import urlparse
+
+from .settings import mcp_setting
 
 log = logging.getLogger(__name__)
 
@@ -107,17 +108,14 @@ except ImportError:
 # large payload in memory before dispatch. Override via MAVERICK_MCP_MAX_BODY.
 def _max_body_bytes() -> int:
     try:
-        return max(1024, int(os.environ.get("MAVERICK_MCP_MAX_BODY", str(2 * 1024 * 1024))))
+        return max(1024, int(mcp_setting("max_body_bytes", str(2 * 1024 * 1024))))
     except ValueError:
         return 2 * 1024 * 1024
 
 
 def _max_resource_sessions() -> int:
     try:
-        configured = os.environ.get(
-            "MAVERICK_MCP_MAX_RESOURCE_SESSIONS",
-            str(_DEFAULT_MAX_RESOURCE_SESSIONS),
-        )
+        configured = mcp_setting("max_resource_sessions", str(_DEFAULT_MAX_RESOURCE_SESSIONS))
         return max(1, int(configured))
     except ValueError:
         return _DEFAULT_MAX_RESOURCE_SESSIONS
@@ -187,7 +185,7 @@ def _allowed_origins() -> set[str]:
     browser clients. The request Host header is intentionally not trusted:
     DNS rebinding makes Host attacker-controlled for this defense.
     """
-    raw = os.environ.get("MAVERICK_MCP_ALLOWED_ORIGINS", "")
+    raw = mcp_setting("allowed_origins", "") or ""
     return {
         normalized
         for origin in raw.split(",")
@@ -239,7 +237,7 @@ def _http_tasks_enabled() -> bool:
     tasks/result, and tasks/cancel only operate on the caller's own tasks.
     Set MAVERICK_MCP_HTTP_TASKS=1 to enable.
     """
-    return os.environ.get("MAVERICK_MCP_HTTP_TASKS", "").strip().lower() in (
+    return (mcp_setting("http_tasks", "") or "").strip().lower() in (
         "1", "true", "yes", "on")
 
 
@@ -281,7 +279,7 @@ def _rate_limit_per_min() -> int:
     """Requests/minute allowed per caller. Default 600; 0 disables. An authed
     caller can otherwise spam goal-spawning RPCs with unbounded concurrency."""
     try:
-        return max(0, int(os.environ.get("MAVERICK_MCP_RATE_LIMIT", "600")))
+        return max(0, int(mcp_setting("rate_limit", "600")))
     except ValueError:
         return 600
 
@@ -337,7 +335,7 @@ def _authorization_for_bearer(
     entry — so engaging the plane default-denies MCP instead of leaving it open
     on the shared bearer. No-op (auth only) when disengaged.
     """
-    expected = os.environ.get("MAVERICK_MCP_TOKEN")
+    expected = mcp_setting("token")
     given = ""
     if authorization and authorization.startswith("Bearer "):
         given = authorization[len("Bearer "):].strip()
@@ -455,7 +453,7 @@ def _heartbeat_seconds() -> float:
     """Progress-heartbeat cadence for SSE streams. Override via
     MAVERICK_MCP_SSE_HEARTBEAT (seconds)."""
     try:
-        return max(0.01, float(os.environ.get("MAVERICK_MCP_SSE_HEARTBEAT", "15")))
+        return max(0.01, float(mcp_setting("sse_heartbeat", "15")))
     except ValueError:
         return 15.0
 
@@ -463,10 +461,8 @@ def _heartbeat_seconds() -> float:
 def _max_progress_events() -> int:
     """Maximum number of progress events sent on one SSE response."""
     try:
-        return max(0, int(os.environ.get(
-            "MAVERICK_MCP_SSE_MAX_PROGRESS_EVENTS",
-            str(_DEFAULT_MAX_PROGRESS_EVENTS),
-        )))
+        return max(0, int(mcp_setting("sse_max_progress_events",
+                                      str(_DEFAULT_MAX_PROGRESS_EVENTS))))
     except ValueError:
         return _DEFAULT_MAX_PROGRESS_EVENTS
 

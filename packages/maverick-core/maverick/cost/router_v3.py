@@ -36,8 +36,10 @@ _MIN_PULLS = 2          # try each arm at least twice before exploiting
 
 
 def enabled() -> bool:
-    if env_flag("MAVERICK_ROUTING_BANDIT"):
-        return True
+    """``MAVERICK_ROUTING_BANDIT`` (either way) wins over ``[routing] bandit``."""
+    env = env_flag("MAVERICK_ROUTING_BANDIT")
+    if env is not None:
+        return env
     try:
         from ..config import load_config
         return bool(((load_config() or {}).get("routing") or {}).get("bandit", False))
@@ -193,6 +195,8 @@ def reset_shared() -> None:
     global _shared
     with _shared_lock:
         _shared = None
+    with _chosen_lock:
+        _chosen.clear()
 
 
 def pick(role: str, tier: int, viable_arms: list[str],
@@ -211,5 +215,38 @@ def pick(role: str, tier: int, viable_arms: list[str],
     return chosen or (fallback() if fallback else None)
 
 
+# The context each arm was last chosen for by the live router, so the outcome
+# of the call that follows is credited to the right task class. Arms are the
+# router's fixed provider:model rows, so this stays small.
+_chosen: dict[str, str] = {}
+_chosen_lock = threading.Lock()
+
+
+def choose_for(role: str, tier: int, viable_arms: list[str]) -> str | None:
+    """The live router's entry point (``cost.router.pick``): choose among the
+    viable arms and remember the context, so :func:`note_call` can credit
+    the outcome."""
+    chosen = pick(role, tier, viable_arms)
+    if chosen:
+        with _chosen_lock:
+            _chosen[chosen] = context_key(role, tier)
+    return chosen
+
+
+def note_call(provider: str, model: str, *, success: bool, dollars: float) -> bool:
+    """Credit one finished model call to the arm the router chose for it.
+
+    Called by ``maverick.llm`` after every provider call; a no-op (False)
+    unless the bandit is on and this arm was chosen by the router."""
+    arm = f"{provider}:{model}"
+    with _chosen_lock:
+        context = _chosen.get(arm)
+    if context is None or not enabled():
+        return False
+    shared().record_outcome(context, arm, success=bool(success),
+                            dollars=max(float(dollars or 0.0), 0.0))
+    return True
+
+
 __all__ = ["ContextualBandit", "context_key", "pick", "enabled",
-           "shared", "reset_shared", "DEFAULT_EPSILON"]
+           "shared", "reset_shared", "DEFAULT_EPSILON", "choose_for", "note_call"]

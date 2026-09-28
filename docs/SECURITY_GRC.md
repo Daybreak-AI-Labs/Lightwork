@@ -42,7 +42,9 @@ enable = false
 response_execution = false
 poll_seconds = 300
 
-# Optional, one explicit table per trusted startup-registered provider:
+# Optional, one explicit table per trusted startup-registered provider, named
+# as the provider registered itself ("example_intel" is only an example). Also
+# Settings > All settings > Security suite > Lookup services.
 [env_hunt.enrichment_sources.example_intel]
 enable = false
 
