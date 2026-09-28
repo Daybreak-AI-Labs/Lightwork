@@ -15,6 +15,11 @@
   <h1 class="page-title">Workspace Recovery</h1>
   <p class="page-subtitle">Keep a protected copy of this workspace, check it, and prove it can be restored.</p>
   <p><a class="btn btn--ghost" href="/provider-spending">Review AI spending records</a></p>
+  {% if not feature_on %}
+  <div class="panel wrec-notice" role="status"><strong>Workspace recovery is turned off.</strong>
+    <p>Saving, checking and restoring copies of this workspace all need it. A global administrator can turn on <strong>Workspace recovery</strong> under Features in Settings.</p>
+    <p><a class="btn btn--primary" href="/settings#settings-controls">Open Features in Settings</a></p></div>
+  {% endif %}
   {% if recovery_mode %}
   <div class="panel wrec-notice"><strong>Recovery mode is on</strong><p>Ordinary work and background jobs are disabled. To resume after recovery, use the desktop menu: Workspace recovery mode → Close recovery and return to work.</p></div>
   {% else %}

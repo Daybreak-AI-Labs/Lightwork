@@ -164,6 +164,51 @@
   });
 })();
 </script>
+
+<div class="section-head"><h2 id="plan-title">What a workspace's plan includes</h2></div>
+<div class="panel" id="plan-contents">
+  <form id="plan-form" class="bill-form" aria-labelledby="plan-title">
+    <label class="bill-field">Workspace
+      <select class="select" name="workspace" required>
+        {% for w in invoice_workspaces %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn btn--primary">Show the plan</button>
+  </form>
+  <p id="plan-msg" class="muted" role="status" aria-live="polite"></p>
+  <div id="plan-out"></div>
+</div>
+
+<div class="section-head"><h2 id="stripe-title">Stripe billing</h2></div>
+<div class="panel" id="stripe-billing">
+  <p class="muted">Charges a workspace's plan fee (and, when turned on, its AI usage) through Stripe, using the Stripe account already set up for this installation. Preview first; nothing is sent until you confirm.</p>
+  <p><button type="button" class="btn" id="stripe-status-run">Check Stripe billing</button></p>
+  <div id="stripe-status-out"></div>
+  <form id="stripe-form" class="bill-form" aria-labelledby="stripe-title">
+    <label class="bill-field">Workspace
+      <select class="select" name="workspace" required>
+        {% for w in invoice_workspaces %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="bill-field">Usage from
+      <input class="input" type="date" name="since">
+    </label>
+    <label class="bill-field">Usage to
+      <input class="input" type="date" name="until">
+    </label>
+    <label class="bill-field">Markup (%)
+      <input class="input" type="number" name="markup" min="0" max="1000" step="0.1" value="0">
+    </label>
+    <label class="bill-field">Minimum charge (US dollars)
+      <input class="input" type="number" name="minimum" min="0" step="0.01" value="0">
+    </label>
+    <button type="submit" class="btn btn--primary">Preview the charge</button>
+    <button type="button" class="btn" id="stripe-sync" hidden>Send to Stripe</button>
+  </form>
+  <p id="stripe-msg" class="muted" role="status" aria-live="polite"></p>
+  <div id="stripe-out"></div>
+</div>
+<script src="/static/lightwork-billing-ops.js" defer></script>
 {% endif %}
 
 <section class="panel" id="usage-reconciliation">

@@ -187,6 +187,7 @@ def register_main_components(app, supervisor):
         ("ai_inventory", "ai_inventory_scheduler", "stop_ai_inventory_scheduler", "_scheduler_thread"),
         ("ai_cost", "ai_cost_scheduler", "stop_ai_cost_scheduler", "_scheduler_thread"),
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),
+        ("services", "service_supervisor", "stop_all", "_threads"),
     ]
     for name, module_name, stop_name, thread_name in entries:
         module_key = f"{__package__}.{module_name}"

@@ -37,11 +37,15 @@ def config_findings(cfg: dict[str, Any]) -> list[Any]:
         return []
 
 
-def install_config_bytes(data: bytes, dst: Path | None = None) -> dict[str, Any]:
+def install_config_bytes(data: bytes, dst: Path | None = None, *,
+                         backup: bool = False) -> dict[str, Any]:
     """Publish ``data`` as the active config.toml (0600).
 
-    Returns ``{"path": dst, "unchanged": bool}``. The same logical file (line
-    endings aside) is a true no-op that only repairs the file's privacy.
+    Returns ``{"path": dst, "unchanged": bool, "backup": Path | None}``. The
+    same logical file (line endings aside) is a true no-op that only repairs
+    the file's privacy. With ``backup`` an existing, different file is first
+    copied to a dated ``config.toml.bak-YYYYmmdd-HHMMSS`` beside it (the same
+    naming ``maverick migrate`` uses).
     """
     from .config import config_path
     from .file_lock import atomic_write_bytes, ensure_private_directory, ensure_private_file
@@ -67,9 +71,17 @@ def install_config_bytes(data: bytes, dst: Path | None = None) -> dict[str, Any]
         # including when a cross-platform checkout changed line endings.
         # Still repair/verify custody in case an older release left wide perms.
         ensure_private_file(dst, 0o600)
-        return {"path": dst, "unchanged": True}
+        return {"path": dst, "unchanged": True, "backup": None}
+    saved = None
+    if backup and dst.is_file():
+        import shutil
+        import time
+
+        saved = dst.with_name(f"{dst.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+        shutil.copy2(dst, saved)
+        ensure_private_file(saved, 0o600)
     atomic_write_bytes(dst, data, mode=0o600)
-    return {"path": dst, "unchanged": False}
+    return {"path": dst, "unchanged": False, "backup": saved}
 
 
 __all__ = ["ConfigInstallError", "parse_config_bytes", "config_findings", "install_config_bytes"]
