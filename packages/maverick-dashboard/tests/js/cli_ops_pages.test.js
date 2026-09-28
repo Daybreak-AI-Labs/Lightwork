@@ -208,3 +208,70 @@ test('teach page learns a rule, and saving the draft needs a confirmation', asyn
   assert.match(ui.asked[0], /next version/);
   assert.equal(ui.calls.filter(c => c.url === '/api/v1/flows').length, 0, 'declining saves nothing');
 });
+
+test('a run at its first approval is kept as an example with plain, editable data descriptions', async t => {
+  const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
+  const object = props => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
+  const prepared = { expected_pause_binding: 'p'.repeat(64), allowed_tools: ['lookup'], max_days: 7,
+    suggestion: { input_schema: object({ ref: { type: 'string', maxLength: 1024 } }),
+      tool_data_schemas: { lookup: { arguments: object({ query: { type: 'string', maxLength: 1024 } }), result: object({}) } },
+      unknown_results: ['lookup'] } };
+  const ui = await page(markup, 'lightwork-learning-capture.js', (url, options) => {
+    if (url.endsWith('/episode-capture') && !options.body) return new Response('{}', { status: 404 });
+    if (url.endsWith('/suggestion')) return prepared;
+    return { status: 'enrolled', revision: 1 };
+  });
+  t.after(() => ui.w.close());
+  assert.equal(ui.$('lx-enroll').hidden, false);
+  assert.match(ui.$('lx-describe').textContent, /hasn’t seen what “lookup” gives back yet/);
+  assert.equal(ui.d.querySelectorAll('#lx-describe select').length, 5, 'every part has a kind chosen from a list');
+  const groups = Array.from(ui.d.querySelectorAll('#lx-describe fieldset'));
+  const result = groups.find(g => /gives back/.test(g.querySelector('legend').textContent));
+  result.querySelector('input[type=text]').value = 'customer_id';
+  result.querySelector('button.btn--ghost:not([aria-label^="Remove"])').click();
+  await ui.settle();
+  ui.$('lx-enroll-go').click();
+  await ui.settle();
+  assert.match(ui.asked[0], /learning example/);
+  const sent = JSON.parse(ui.calls.at(-1).options.body);
+  assert.equal(sent.expected_pause_binding, 'p'.repeat(64));
+  assert.deepEqual(sent.tool_data_schemas.lookup.result.required, ['customer_id']);
+  assert.ok(sent.retain_until > Date.now() / 1000);
+  assert.match(ui.$('lx-status').textContent, /being kept as a learning example/);
+});
+
+test('a finished example is reviewed, then learning is allowed only after a confirmation', async t => {
+  const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
+  const reviewing = { status: 'awaiting_review', revision: 4, episode_sha256: 'e'.repeat(64), retain_until: Date.now() / 1000 + 5 * 86400 };
+  const ui = await page(markup, 'lightwork-learning-capture.js', (url, options) => {
+    if (url.endsWith('/detail')) return { evidence: { inputs: { ref: '<b>A-1</b>' }, slots: [{ tool: 'lookup', arguments: { query: 'A-1' }, result: { customer_id: 'C9' } }] } };
+    if (url.endsWith('/review')) return { ...reviewing, status: 'accepted', revision: 5 };
+    if (url.endsWith('/training-grant')) return { ...reviewing, status: 'accepted', revision: 6, grant_sha256: 'g'.repeat(64) };
+    return reviewing;
+  }, { confirm: true });
+  t.after(() => ui.w.close());
+  assert.equal(ui.$('lx-review').hidden, false);
+  assert.equal(ui.d.querySelector('#lx-evidence b'), null, 'recorded values are shown as text');
+  assert.match(ui.$('lx-evidence').textContent, /Customer id|customer id/i);
+  ui.$('lx-accept').click();
+  await ui.settle();
+  assert.match(ui.$('lx-status').textContent, /Say briefly why/);
+  ui.$('lx-review-reason').value = 'Matches the real order.';
+  ui.$('lx-accept').click();
+  await ui.settle();
+  const review = JSON.parse(ui.calls.find(c => c.url.endsWith('/review') && c.options.body).options.body);
+  assert.deepEqual([review.expected_revision, review.accepted, review.reviewed], [4, true, true]);
+  assert.equal(ui.$('lx-grant').hidden, false);
+  ui.$('lx-grant-reason').value = 'Teach the order flow.';
+  ui.$('lx-grant-go').click();
+  await ui.settle();
+  assert.match(ui.$('lx-status').textContent, /Tick the box/);
+  ui.$('lx-grant-copies').checked = true;
+  ui.$('lx-grant-go').click();
+  await ui.settle();
+  assert.match(ui.asked.at(-1), /Allow new flows to learn/);
+  const grant = JSON.parse(ui.calls.find(c => c.url.endsWith('/training-grant')).options.body);
+  assert.equal(grant.retain_derived_copies, true);
+  assert.ok(grant.use_until < reviewing.retain_until);
+  assert.equal(ui.$('lx-next').hidden, false);
+});

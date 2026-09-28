@@ -8,7 +8,10 @@ role ``writer`` when chosen and connected, else the deterministic draft, like
 gaps; on approval :func:`maverick.intake.onboarding_knowledge_base` and
 :func:`maverick.intake.attach_docs_to_profile` load the documents,
 :func:`maverick.intake.save_profile` saves it (its approval and license gates
-stay) and :func:`maverick.provision.apply_approved_plan` equips it.
+stay) and :func:`maverick.provision.apply_approved_plan` equips it. Building
+missing tools calls AI on the ``writer`` model under a capped budget admitted
+like any AI request; if that budget is refused, only ready-made skills are
+added.
 
 Specialists are saved for the whole workspace, so both steps need the same
 permission as the specialist editor (``pack_editing``), the same-origin guard
@@ -32,6 +35,7 @@ from .auth import caller_principal, execution_user_id_from_request
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["business-agent-setup"])
 DRAFT_DOLLARS = 0.5
+TOOL_DOLLARS = 1.0
 MAX_DOCS = 10
 MAX_DOC_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 25 * 1024 * 1024
@@ -117,7 +121,7 @@ def _draft(spec, use_ai: bool, principal: str, actor: str) -> dict:
     return {"ran": True, "with_ai": with_ai, "agent": _public(profile, plan), "_profile": profile, "_plan": plan}
 
 
-def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str) -> dict:
+def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal: str = "") -> dict:
     from maverick.audit import AuditRefused, audit_event
     from maverick.intake import (
         IntakeSpec,
@@ -125,8 +129,6 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str) -> dict:
         onboarding_knowledge_base,
         save_profile,
     )
-    from maverick.provision import apply_approved_plan
-
     try:
         audit_event("business_agent_approved", agent="dashboard", actor=actor, agent_name=profile.name,
                     documents=len(docs))
@@ -157,13 +159,55 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str) -> dict:
     added = ""
     if plan is not None and not plan.is_empty():
         try:
-            result = apply_approved_plan(profile, plan, llm=None)
-            if result.acquired or result.generated:
-                added = "Lightwork added what it could for the missing skills."
+            added = _equip(profile, plan, principal or actor, actor)
         except Exception:
             log.warning("capability provisioning after onboarding failed", exc_info=True)
     return {"saved": True, "name": profile.name, "documents_loaded": int(loaded or 0),
             "message": " ".join(part for part in (note, added) if part)}
+
+
+def _equip(profile, plan, principal: str, actor: str) -> str:
+    """Close the pack's capability gaps. Tool generation calls AI, so it runs
+    on the ``writer`` model (as ``maverick onboard`` does) under a budget
+    admitted like any other AI request; when that budget is refused, only
+    ready-made skills are added (the no-model path)."""
+    from maverick.audit import audit_event
+    from maverick.provision import apply_approved_plan
+
+    from .viewpoints_api import _admit, _Refused
+
+    needs_model = any(g.resolution == "generate_tool" for g in plan.gaps)
+    budget = llm = settlement = None
+    refused = ""
+    if needs_model:
+        try:
+            budget = _admit(principal, TOOL_DOLLARS)
+        except _Refused as exc:
+            refused = str(exc)
+    if budget is not None:
+        from maverick.llm import LLM, model_for_role
+        from maverick.orchestrator import _QuotaUsageSettlement
+        from maverick.tenant.provider_admission import run_scope
+
+        settlement = _QuotaUsageSettlement(principal=principal, budget=budget, domain=None)
+        audit_event("business_agent_tools", agent="dashboard", actor=actor, phase="start",
+                    max_dollars=budget.max_dollars)
+        llm = LLM(model=model_for_role("writer"))
+        try:
+            with run_scope(budget, principal):
+                result = apply_approved_plan(profile, plan, llm=llm, budget=budget)
+        finally:
+            settlement.record()
+            audit_event("business_agent_tools", agent="dashboard", actor=actor, phase="end",
+                        dollars=round(float(budget.dollars), 4))
+    else:
+        result = apply_approved_plan(profile, plan, llm=None)
+    parts = []
+    if result.acquired or result.generated:
+        parts.append("Lightwork added what it could for the missing skills.")
+    if refused:
+        parts.append("No tools were built because of spending limits: " + refused)
+    return " ".join(parts)
 
 
 @router.post("/api/v1/agents/business-setup/draft", status_code=202)
@@ -216,13 +260,16 @@ async def approve_business_agent(request: Request, job_id: str, confirm: bool = 
     draft = JOBS.private_result(key, owner=owner, tenant=tenant, kind=_DRAFT)
     if not draft or draft.get("ran") is not True or "_profile" not in draft:
         raise HTTPException(404, "This draft is no longer available. Make a new draft.")
-    actor = caller_principal(request) or "local"
+    from maverick.orchestrator import _execution_principal
+
+    principal = _execution_principal(user_id=execution_user_id_from_request(request), capability=None)
+    actor = caller_principal(request) or principal
 
     def work() -> dict:
         taken = JOBS.consume(key, owner=owner, tenant=tenant, kind=_DRAFT)  # one approval per draft
         if not taken or "_profile" not in taken:
             return {"saved": False, "message": "This draft was already used. Make a new draft."}
-        return _approve(taken["_profile"], taken.get("_plan"), docs, actor)
+        return _approve(taken["_profile"], taken.get("_plan"), docs, actor, principal)
 
     try:
         job = JOBS.start(owner=owner, tenant=tenant, kind=_APPROVE, work=work)
