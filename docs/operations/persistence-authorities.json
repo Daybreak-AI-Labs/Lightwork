@@ -183,7 +183,7 @@
     "learning": 54,
     "sqlite_domain": 79,
     "configuration": 57,
-    "read_projection": 15,
+    "read_projection": 16,
     "coordinator": 1,
     "audit": 22,
     "transient": 19,
@@ -23788,6 +23788,31 @@
           "function": "_unpack_cases",
           "kind": "write_bytes",
           "expression": "target.write_bytes(archive.read(member))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/task_changes_api.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/task_changes_api.py",
+      "purpose": "Shows what changed during a task, read-only; resolves the private data and journal folders only to refuse a work folder that overlaps them. Writes nothing.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 135,
+          "function": "work_folder",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 148,
+          "function": "_journal_records",
+          "kind": "data_dir",
+          "expression": "data_dir()"
         }
       ]
     }
