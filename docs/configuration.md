@@ -109,6 +109,14 @@ block_threshold = "high"       # low | medium | high | critical
 scan_input      = true
 scan_tool_calls = true
 scan_output     = true
+# Task-start check (off by default). Lightwork reads each task's wording
+# (pay, delete, deploy, passwords, all customers, production ...) before it
+# starts. When set, tasks at or above this level wait on the dashboard's
+# Approvals page until a person approves them, and do not start if nobody
+# does within MAVERICK_CONSENT_DASHBOARD_TIMEOUT (300 s). It reads only the
+# words: every action is still checked on its own once the task runs.
+# goal_risk_require_human = "high"   # never (default) | high | medium
+# goal_risk_floor         = "low"    # low (default) | medium | high
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes

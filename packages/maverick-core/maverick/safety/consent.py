@@ -642,6 +642,38 @@ def require_consent(
     return d
 
 
+def require_person(
+    action: str,
+    *,
+    risk: str,
+    scope: str | None = None,
+    detail: str | None = None,
+    provenance: str | None = None,
+) -> ConsentDecision:
+    """A decision made by a person, for a gate an administrator turned on.
+
+    Unlike :func:`require_consent`, the deployment's automatic consent mode
+    never answers: the request goes to the dashboard's Approvals page (or, in
+    ``ask`` mode at an interactive terminal, to the terminal prompt). No
+    decision within the dashboard wait is a refusal, and the unanswered
+    request is withdrawn. ``auto-deny`` refuses at once; nothing grants
+    silently.
+    """
+    ts = time.time()
+    mode = _resolve_mode(risk)
+    if mode == "auto-deny":
+        return _emit(ConsentDecision(False, "auto", risk, ts), action, scope, detail)
+    if mode == "ask" and sys.stdin.isatty():
+        return require_consent(action, risk=risk, scope=scope, detail=detail,
+                               provenance=provenance, allow_auto_approve=False,
+                               consult_ledger=False)
+    decided = _decide_via_dashboard(action, risk, scope, detail, provenance,
+                                    withdraw_on_timeout=True)
+    if decided is not None:
+        return _emit(decided, action, scope, detail)
+    return _emit(ConsentDecision(False, "no-decision", risk, ts), action, scope, detail)
+
+
 def _dashboard_timeout() -> float:
     """How long (seconds) to wait for a dashboard approval before giving up.
 
@@ -1094,6 +1126,8 @@ def _decide_via_dashboard(
     detail: str | None,
     provenance: str | None,
     approval_card: Mapping[str, object] | None = None,
+    *,
+    withdraw_on_timeout: bool = False,
 ) -> ConsentDecision | None:
     """Park the action in the world model and poll for a dashboard decision.
 
@@ -1189,6 +1223,13 @@ def _decide_via_dashboard(
             close_world_if_owned(wm)
             return decision
         time.sleep(1.0)
+    if withdraw_on_timeout:
+        # Nobody decided in time and the caller will not act on a later vote:
+        # take the request off the Approvals page instead of leaving it there.
+        try:
+            wm.decide_approval(approval_id, "denied", decided_by="system:no-decision")
+        except Exception:  # pragma: no cover -- the refusal stands either way
+            pass
     close_world_if_owned(wm)
     return None  # timed out: caller falls back
 
@@ -1256,6 +1297,7 @@ __all__ = [
     "consume_operation_consent",
     "require_consent",
     "require_operation_consent",
+    "require_person",
     "grant_persistent",
     "revoke",
     "list_grants",

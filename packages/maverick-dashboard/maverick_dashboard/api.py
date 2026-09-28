@@ -294,12 +294,17 @@ def _active_cache_context() -> tuple[str, str]:
 
 
 def _to_goal_out(g) -> GoalOut:
+    from .plain_labels import risk_label
+
+    risk = risk_label(g) or {}
     return GoalOut(
         id=g.id,
         status=g.status,
         title=g.title,
         description=g.description,
         result=g.result,
+        risk_tier=risk.get("tier"),
+        risk_reasons=risk.get("reasons"),
     )
 
 

@@ -7523,6 +7523,11 @@ def _approval_source(provenance: str | None) -> str | None:
         return "Agent wants to change its own instructions"
     if provenance == "assessment":
         return "Assessment review"
+    if provenance == "goal_risk":
+        # A task held before it starts because its wording looks risky.
+        return "Task waiting to start"
+    if provenance == "ifc":
+        return "Sensitive data about to leave Lightwork"
     return None
 
 

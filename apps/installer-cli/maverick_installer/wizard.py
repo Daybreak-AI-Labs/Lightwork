@@ -1019,7 +1019,19 @@ def pick_safety() -> dict[str, Any]:
             "the rest of the swarm for the run)?",
             default=False,
         )
-    return {
+    # Task-start check (off by default): Lightwork reads each task's wording
+    # and, if asked, holds risky-looking tasks until a person approves them.
+    # Every action is still checked on its own either way.
+    wait = _q_select(
+        "Ask a person before starting tasks whose wording looks risky?",
+        [
+            "never  - Start tasks straight away (default).",
+            "high   - Tasks that look high risk wait for a person.",
+            "medium - Tasks that look medium or high risk wait for a person.",
+        ],
+        default="never  - Start tasks straight away (default).",
+    ).split()[0]
+    picked = {
         "profile": profile,
         "block_threshold": threshold,
         "scan_input": profile != "off",
@@ -1027,6 +1039,9 @@ def pick_safety() -> dict[str, Any]:
         "scan_output": profile != "off",
         "compartments": compartments,
     }
+    if wait in ("high", "medium"):
+        picked["goal_risk_require_human"] = wait
+    return picked
 
 
 def pick_signed_skills() -> dict[str, Any]:

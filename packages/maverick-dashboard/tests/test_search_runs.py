@@ -46,3 +46,12 @@ def test_goals_page_renders_search_box():
     assert resp.status_code == 200
     assert 'id="run-search-q"' in resp.text
     assert "/api/v1/goals/search?q=" in resp.text
+
+
+def test_tasks_whose_wording_looks_risky_carry_a_plain_label():
+    body = client.get("/api/v1/goals/search", params={"q": "billing"}).json()
+    assert body[0]["risk_tier"] == "medium" and body[0]["risk_reasons"] == "deletes or deploys"
+    quiet = client.get("/api/v1/goals/search", params={"q": "report"}).json()
+    assert quiet[0]["risk_tier"] is None
+    page = client.get("/goals").text
+    assert "Looks medium risk" in page and "its wording mentions: deletes or deploys" in page

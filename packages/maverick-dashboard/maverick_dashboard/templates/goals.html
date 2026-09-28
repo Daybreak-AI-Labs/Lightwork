@@ -69,6 +69,7 @@
     <div class="g-row" id="{{ g.id }}" data-status="{{ g.status }}">
       <span class="g-row__id">{{ (g.created_at | datetime) if g.created_at else '' }}</span>
       <span class="badge {{ g.status }}">{{ g.status | humanize }}</span>
+      {% set risk = g | risk_label %}{% if risk %}<span class="badge warn" title="Its wording mentions: {{ risk.reasons }}">Looks {{ risk.tier }} risk<span class="sr-only"> (its wording mentions: {{ risk.reasons }})</span></span>{% endif %}
       <span class="g-row__main">
         <div class="g-row__title"><a href="/chat/goal/{{ g.id }}">{{ g.title }}</a></div>
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
@@ -121,6 +122,7 @@
         return '<div class="g-row" id="' + esc(g.id) + '" data-status="' + esc(g.status) + '">' +
           '<span class="g-row__id">' + esc(when) + '</span>' +
           '<span class="badge ' + esc(g.status) + '">' + esc(label) + '</span>' +
+          (g.risk_tier ? '<span class="badge warn" title="Its wording mentions: ' + esc(g.risk_reasons || '') + '">Looks ' + esc(g.risk_tier) + ' risk<span class="sr-only"> (its wording mentions: ' + esc(g.risk_reasons || '') + ')</span></span>' : '') +
           '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + gid + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +

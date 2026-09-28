@@ -277,6 +277,29 @@ SETTINGS: tuple[Setting, ...] = (
                ("orchestrator", "The lead agent")),
       weaker=True, order=("human", "both", "orchestrator"),
       warning="An agent, not only a person, will be able to lift a safety lock."),
+    S("safety", "goal_risk_require_human", "Ask a person before starting risky-looking tasks",
+      "Lightwork reads each task's wording before it starts (words such as pay, delete, "
+      "deploy, passwords, all customers or production). Tasks that look risky enough wait "
+      "on the Approvals page until a person approves them, and do not start if nobody does "
+      "in time. It only reads the words: every action is still checked on its own once the "
+      "task is running.",
+      "select", "Safety", "never", "maverick.safety.goal_risk",
+      choices=(("medium", "Tasks that look medium or high risk"),
+               ("high", "Tasks that look high risk"),
+               ("never", "Never (default)")),
+      weaker=True, order=("medium", "high", "never"),
+      env=("MAVERICK_GOAL_RISK_REQUIRE_HUMAN",),
+      warning="Fewer tasks will wait for a person before they start.",
+      aliases="goal risk approval before start"),
+    S("safety", "goal_risk_floor", "Treat every task as at least",
+      "The lowest risk level any task is given, whatever its wording. Combined with the "
+      "setting above, this can make every task wait for a person.",
+      "select", "Safety", "low", "maverick.safety.goal_risk",
+      choices=(("high", "High risk"), ("medium", "Medium risk"),
+               ("low", "As its wording suggests (default)")),
+      weaker=True, order=("high", "medium", "low"),
+      env=("MAVERICK_GOAL_RISK_FLOOR",),
+      warning="Tasks will be treated as lower risk than before, so fewer may wait for a person."),
     S("skills", "require_signed", "Only allow signed skills",
       "Refuse saved procedures that are not signed by a trusted publisher.",
       "toggle", "Safety", False, "maverick.config", weaker=False,

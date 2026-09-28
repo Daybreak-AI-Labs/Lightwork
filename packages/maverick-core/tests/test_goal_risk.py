@@ -167,10 +167,30 @@ def test_floor_maxes_with_classified_tier():
 
 # --- require-human knob -----------------------------------------------------
 
-def test_require_human_defaults_to_high_only():
+def test_require_human_is_off_until_an_administrator_turns_it_on():
+    # Unset means no goal waits for a person, whatever its tier.
+    assert require_human_for("high") is False
+    assert require_human_for("medium") is False
+    assert require_human_for("low") is False
+
+
+def test_require_human_high_knob(monkeypatch, tmp_path):
+    _config(monkeypatch, tmp_path,
+            '[safety]\ngoal_risk_require_human = "high"\n')
     assert require_human_for("high") is True
     assert require_human_for("medium") is False
     assert require_human_for("low") is False
+
+
+def test_start_check_applies_the_floor_and_the_knob(monkeypatch, tmp_path):
+    from maverick.safety.goal_risk import plain_reasons, start_check
+    classified, effective, needs = start_check("Deploy the new pricing page to production")
+    assert (classified.tier, effective, needs) == ("high", "high", False)
+    assert plain_reasons(classified.signals) == "deletes or deploys, wide or permanent reach"
+    _config(monkeypatch, tmp_path,
+            '[safety]\ngoal_risk_floor = "medium"\ngoal_risk_require_human = "medium"\n')
+    classified, effective, needs = start_check("Summarize the meeting")
+    assert (classified.tier, effective, needs) == ("low", "medium", True)
 
 
 def test_require_human_medium_knob(monkeypatch, tmp_path):

@@ -283,8 +283,24 @@ def size(num_bytes: object) -> str:
     return f"{n:,.1f} TB"  # pragma: no cover
 
 
+def risk_label(goal) -> dict | None:
+    """``{"tier", "reasons"}`` when a task's wording looks medium or high risk.
+
+    The same lexical check the task-start gate uses; it reads only the words,
+    so the page calls it "looks ... risk" and never claims more."""
+    try:
+        from maverick.safety.goal_risk import classify_goal, plain_reasons
+        found = classify_goal(getattr(goal, "title", "") or "", getattr(goal, "description", "") or "")
+    except Exception:  # a label, never a reason for a page to fail
+        return None
+    if found.tier not in ("medium", "high"):
+        return None
+    return {"tier": found.tier, "reasons": plain_reasons(found.signals)}
+
+
 def register(env) -> None:
     """Install the label filters on a Jinja environment (idempotent)."""
+    env.filters.setdefault("risk_label", risk_label)
     env.filters.setdefault("model_label", model_label)
     env.filters.setdefault("source_label", source_label)
     env.filters.setdefault("capability_label", capability_label)

@@ -1412,6 +1412,48 @@ def _evidence_ready_goal_output(
     return str(delivery["delivered_text"])
 
 
+async def _goal_risk_gate(goal_id: int, goal: Any, *, resuming: bool) -> tuple[dict, str | None]:
+    """Classify a task from its words before it starts; hold it for a person
+    only when an administrator turned that on (``[safety]
+    goal_risk_require_human``, off by default).
+
+    Returns the fields recorded on the task's start event and, when the task
+    must not start, a plain sentence saying why."""
+    from .safety.goal_risk import plain_reasons, start_check
+
+    classified, effective, needs_person = start_check(
+        goal.title or "", getattr(goal, "description", "") or "")
+    record = {"risk_tier": classified.tier, "risk_effective": effective,
+              "risk_signals": list(classified.signals)}
+    if not needs_person or resuming:
+        return record, None
+    from .immune import twin
+    if twin.active():  # a production twin replays the run; it never asks a person
+        return record, None
+    reasons = plain_reasons(classified.signals) or "your organisation's minimum level"
+    title = (goal.title or "")[:200]
+    detail = (f"Task #{goal_id} \"{title}\" looks {effective} risk ({reasons}). "
+              "Your administrator asked that tasks like this wait for a person before "
+              "they start. Each action is still checked on its own after it starts.")
+    try:
+        from .safety.consent import require_person
+        verdict = await asyncio.to_thread(
+            require_person, "start_task", risk=effective, scope=f"task #{goal_id}",
+            detail=detail, provenance="goal_risk")
+    except Exception:  # no decision could be asked for: do not start
+        verdict = None
+    if verdict is not None and verdict.granted:
+        record["start_approved_by"] = str(getattr(verdict, "actor", "") or verdict.source)
+        return record, None
+    if verdict is not None and verdict.source not in ("no-decision", "non-tty-deny"):
+        return record, (f"A person decided not to start this task. It looks {effective} "
+                        f"risk ({reasons}).")
+    return record, (f"This task looks {effective} risk ({reasons}), so it waits for a "
+                    "person to approve it before it starts. No one approved it in time, "
+                    "so it did not start. Start it again, or ask someone who approves "
+                    "work to watch the Approvals page.")
+
+
 async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     llm: LLM,
     world: WorldModel,
@@ -1575,6 +1617,14 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
 
     if resume_episode_id is not None and not world.episode_exists(goal_id, resume_episode_id):
         raise ValueError("resume episode does not belong to this goal")
+    # After the trace context is bound: an approval request takes its task and
+    # requester from it. A resumed task was already let through once.
+    _risk_record, _risk_refusal = await _goal_risk_gate(
+        goal_id, goal, resuming=bool(resume or resume_episode_id is not None))
+    if _risk_refusal:
+        world.set_goal_status(goal_id, "blocked", result=_risk_refusal)
+        log.warning("goal #%s not started: %s", goal_id, _risk_refusal)
+        return _risk_refusal
     _lifecycle.started = True
     world.set_goal_status(goal_id, "active")
     # Success-path audit: a tamper-evident GOAL_START on the signed chain so the
@@ -1584,7 +1634,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     from .audit import EventKind, audit_event
     audit_event(EventKind.GOAL_START, goal_id=goal_id, agent="orchestrator",
                 title=goal.title,
-                description=getattr(goal, "description", None))
+                description=getattr(goal, "description", None),
+                **_risk_record)
     episode_id = resume_episode_id
     resume_agent_id = "orchestrator-0"
     if resume or resume_episode_id is not None:

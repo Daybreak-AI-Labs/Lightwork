@@ -177,6 +177,10 @@ class GoalOut(BaseModel):
     title: str
     description: str | None = None
     result: str | None = None
+    # How risky the task's wording looks ("medium"/"high"; absent when low),
+    # and why in plain words. A reading of the words, not of the actions.
+    risk_tier: str | None = None
+    risk_reasons: str | None = None
 
 
 class ScheduleIn(BaseModel):

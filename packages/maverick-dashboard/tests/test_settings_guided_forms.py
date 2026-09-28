@@ -730,3 +730,21 @@ def test_page_script_and_styles_are_served():
     assert "settings-all-groups" in script.text
     styles = client.get("/static/lightwork-settings-all.css")
     assert styles.status_code == 200 and styles.headers["content-type"].startswith("text/css")
+
+
+# ------------------------------------------------- task-start risk check
+def test_asking_a_person_before_risky_tasks_is_off_by_default_and_loosening_confirms(audit_rows):
+    from maverick.safety.goal_risk import config_floor, require_human_for
+    assert require_human_for("high") is False and config_floor() == "low"
+    turn_on = {"id": "safety.goal_risk_require_human", "value": "medium"}
+    assert _save([turn_on]).status_code == 200  # tightening needs no confirmation
+    assert require_human_for("medium") is True
+    for change in ({"id": "safety.goal_risk_require_human", "value": "never"},):
+        assert _save([change]).status_code == 409, change
+        assert _save([change], confirm=True).status_code == 200, change
+    assert require_human_for("high") is False
+    assert _save([{"id": "safety.goal_risk_floor", "value": "high"}]).status_code == 200
+    assert config_floor() == "high"
+    assert _save([{"id": "safety.goal_risk_floor", "value": "low"}]).status_code == 409
+    assert _save([{"id": "safety.goal_risk_require_human", "value": "sometimes"}],
+                 confirm=True).status_code == 400

@@ -37,10 +37,12 @@ Config (all opt-in; env wins over ``[safety]``; fail-soft ``load_config``):
     goal_risk_require_human = "high"     # "high" | "medium" | "never"
 
 ``MAVERICK_GOAL_RISK_FLOOR`` / ``MAVERICK_GOAL_RISK_REQUIRE_HUMAN`` override
-the table. With nothing configured the floor is ``"low"`` (a no-op) and only
-``high`` goals require a human — classification itself changes no behavior
-until a caller consults it. Pure library: stdlib-only, no I/O beyond the
-fail-soft config read, nothing imports it by default.
+the table. Off by default: with nothing configured the floor is ``"low"`` (a
+no-op) and no goal waits for a person. The orchestrator consults
+:func:`start_check` before a goal starts; every goal's tier is recorded on its
+start audit event. This is a lexical tripwire on the goal's words only: the
+per-action gates (tool risk, governance, ``[actions] require_approval_at``)
+still check every action whatever the goal was called.
 """
 from __future__ import annotations
 
@@ -201,25 +203,58 @@ def config_floor() -> str:
 def require_human_for(tier: str) -> bool:
     """Should a goal of ``tier`` pause for human sign-off before running?
 
-    Maps the tier to the governance decision (the REQUIRE_HUMAN gate of
-    :mod:`maverick.governance`). The knob ``[safety] goal_risk_require_human``
-    (env ``MAVERICK_GOAL_RISK_REQUIRE_HUMAN`` wins) is the *lowest* tier that
-    requires a human: ``"high"`` (default), ``"medium"`` (medium and high), or
-    ``"never"``. An unrecognized knob value falls back to ``"high"`` — a typo
-    in a safety knob must not silently disable the gate.
+    The knob ``[safety] goal_risk_require_human`` (env
+    ``MAVERICK_GOAL_RISK_REQUIRE_HUMAN`` wins) is the *lowest* tier that
+    requires a human: ``"high"``, ``"medium"`` (medium and high), or
+    ``"never"``. Unset means ``"never"``: the pause is opt-in. A value that is
+    set but unrecognized falls back to ``"high"`` — a typo in a safety knob
+    must not silently disable a gate an administrator meant to turn on.
     """
     env = os.environ.get("MAVERICK_GOAL_RISK_REQUIRE_HUMAN", "").strip().lower()
     knob = env or str(_safety_cfg().get("goal_risk_require_human", "")).strip().lower()
-    if knob == "never":
+    if knob in ("", "never"):
         return False
     if knob not in (_TIER_HIGH, _TIER_MEDIUM):
         knob = _TIER_HIGH
     return risk_rank(tier) >= risk_rank(knob)
 
 
+def start_check(title: str, description: str = "") -> tuple[GoalRisk, str, bool]:
+    """What the orchestrator consults before a goal starts.
+
+    Returns ``(classified, effective_tier, needs_person)``: the effective tier
+    is the classified tier raised to the configured floor, and
+    ``needs_person`` applies :func:`require_human_for` to it (False unless an
+    administrator turned the pause on)."""
+    classified = classify_goal(title, description)
+    floor = config_floor()
+    effective = floor if risk_rank(floor) > risk_rank(classified.tier) else classified.tier
+    return classified, effective, require_human_for(effective)
+
+
+PLAIN_SIGNALS = {
+    "money": "moves money",
+    "infra_destruction": "deletes or deploys",
+    "credentials": "handles passwords or keys",
+    "bulk_outbound": "messages many people",
+    "regulated_domain": "legal, medical or financial advice",
+    "pii_processing": "personal data",
+    "irreversible": "wide or permanent reach",
+    "deescalate:read_only": "reading or drafting only",
+}
+
+
+def plain_reasons(signals: list[str]) -> str:
+    """The fired signals in words a person reads (for labels and approvals)."""
+    return ", ".join(PLAIN_SIGNALS.get(s, s.replace("_", " ")) for s in signals)
+
+
 __all__ = [
     "GoalRisk",
+    "PLAIN_SIGNALS",
     "classify_goal",
+    "plain_reasons",
+    "start_check",
     "config_floor",
     "require_human_for",
     "SIGNALS",

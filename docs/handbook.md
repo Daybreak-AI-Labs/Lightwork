@@ -260,8 +260,10 @@ Defense in depth, each layer independent:
    egress policy (`sandbox/network_policy.py`) and an Enterprise-mode
    egress lock.
 4. **Capabilities & consent** — least privilege that only attenuates
-   downward; destructive actions gated on a human; risk auto-classified
-   before a goal runs (`safety/goal_risk.py`).
+   downward; destructive actions gated on a human. Each task's wording is
+   read for risk before it starts (`safety/goal_risk.py`) and the level is
+   recorded with the task; an administrator can make risky-looking tasks wait
+   for a person (`[safety] goal_risk_require_human`, off by default).
 5. **Killswitch** — `maverick halt` (or touching `~/.maverick/HALT`)
    aborts all running goals (`killswitch.py`); long runs can also demand a
    periodic human heartbeat (`[safety] review_checkpoint`).

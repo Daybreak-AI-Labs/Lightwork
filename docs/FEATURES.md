@@ -3785,9 +3785,13 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   unchanged/minor/major/refusal-flip, PASS verdict gated on flips + major-change
   fraction.
 - **Goal risk-tier auto-classifier** (`safety/goal_risk.py`) — deterministic
-  low/medium/high scoring of a goal before it runs (money/infra/credential/
-  bulk-comms/PII/irreversibility signals, read-only de-escalators, documented
-  weights), config floor + require-human mapping for the approval path.
+  low/medium/high scoring of a goal's wording before it runs (money/infra/
+  credential/bulk-comms/PII/irreversibility signals, read-only de-escalators,
+  documented weights). Every goal's tier is recorded on its start audit event
+  and shown on the task list. `[safety] goal_risk_require_human` (off by
+  default) holds risky-looking goals on the Approvals page until a person
+  decides; `goal_risk_floor` raises every goal to a minimum tier. A lexical
+  tripwire only: per-action gates still apply.
 - **Containment mode** (`containment.py`, opt-in `[containment]`) — lock a
   run into no-egress + ephemeral 0700 workspace: composes the registry ACL
   (denies the exfil tools; config *extends*, never replaces the default deny
