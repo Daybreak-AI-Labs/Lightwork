@@ -221,6 +221,9 @@ class Harness:
 def choice_native(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    # Retained action evidence refuses plaintext; pin encryption at rest so the
+    # fixture holds under the suite's ordinary posture as well as the secure one.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     flags = copy.deepcopy(FLAGS)
     monkeypatch.setattr(config, "get_flows", lambda: copy.deepcopy(flags))
     world_path = tmp_path / "native-choice-world.db"

@@ -219,6 +219,9 @@ def transformed_business(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("MAVERICK_CONFIG", str(configuration))
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    # The receipts these tests verify are signed; pin signing so they hold under
+    # the suite's ordinary posture as well as the secure one.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
     monkeypatch.setenv("MAVERICK_TOOL_CACHE", "0")
     monkeypatch.delenv("MAVERICK_CONFIG_OVERLAY", raising=False)
