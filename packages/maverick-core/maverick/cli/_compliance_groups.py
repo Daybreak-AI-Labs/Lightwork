@@ -841,9 +841,7 @@ def regulatory_feed_sync(rules_path: str, status: str, limit: int,
     """Run each reviewed alert through the impact bridge, idempotently."""
     import json
 
-    from ..ai_regulatory_feed import sync_alert
-    from ..finance.regulatory_change import RegulatoryChangeEngine
-    from ..paths import data_dir
+    from ..ai_regulatory_feed import sync_reviewed_alerts
 
     try:
         rules = json.loads(Path(rules_path).read_text(encoding="utf-8"))
@@ -852,33 +850,19 @@ def regulatory_feed_sync(rules_path: str, status: str, limit: int,
     if not isinstance(rules, list) or not rules:
         raise click.ClickException("rules file must be a non-empty JSON list")
     try:
-        engine = RegulatoryChangeEngine(
-            data_dir("finance_operations", "regulatory_change.sqlite3")
-        )
-        alerts = engine.list_alerts(status=status, limit=limit)
+        outcome = sync_reviewed_alerts(rules=rules, actor=actor, status=status,
+                                       limit=limit, deliver=deliver)
     except (OSError, ValueError, RuntimeError) as e:
         raise click.ClickException(f"could not list alerts: {e}") from e
-    if not alerts:
+    if not outcome["alerts"]:
         click.echo(f"no {status} regulatory alerts.")
         return
-    matched = 0
-    failures: list[str] = []
-    for alert in alerts:
-        try:
-            result = sync_alert(alert, rules=rules, actor=actor, deliver=deliver)
-        except (KeyError, ValueError, RuntimeError) as e:
-            failures.append(f"{getattr(alert, 'alert_id', '?')}: {e}")
-            continue
-        impact = result.get("impact")
-        if impact is None:
-            continue
-        matched += 1
-        notice = result.get("notice") or {}
-        staleness = result.get("staleness") or []
-        click.echo(f"  {getattr(alert, 'alert_id', '?')}: impact "
-                   f"{impact.get('id')}  stale-evidence {len(staleness)}  "
-                   f"notice {notice.get('id')} [{notice.get('status')}]")
-    click.echo(f"bridged {matched} of {len(alerts)} {status} alert(s)")
+    for row in outcome["bridged"]:
+        click.echo(f"  {row['alert_id']}: impact "
+                   f"{row['impact_id']}  stale-evidence {row['stale_evidence']}  "
+                   f"notice {row['notice_id']} [{row['notice_status']}]")
+    click.echo(f"bridged {len(outcome['bridged'])} of {outcome['alerts']} {status} alert(s)")
+    failures = outcome["failures"]
     if failures:
         for line in failures:
             click.echo(f"  FAILED {line}")
@@ -2054,10 +2038,7 @@ def vendor_questionnaire_index(rebuild, batches) -> None:
     from .. import vendor_management as vm
 
     try:
-        for index in range(batches):
-            result = vm.maintain_questionnaire_index(rebuild=rebuild and index == 0)
-            if result["ready"]:
-                break
+        result = vm.prepare_questionnaire_index(batches=batches, rebuild=rebuild)
     except (ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"ready={str(result['ready']).lower()}  scanned={result['scanned']}")

@@ -225,10 +225,7 @@ def erase_client(*, keep_audit: bool = False) -> dict:
     root = data_dir()
     removed = 0
     if root.exists():
-        for p in sorted(root.rglob("*"), key=lambda x: len(x.parts), reverse=True):
-            rel = p.relative_to(root)
-            if keep_audit and rel.parts and rel.parts[0] == "audit":
-                continue
+        for p in _erase_targets(root, keep_audit=keep_audit):
             try:
                 if p.is_file() or p.is_symlink():
                     p.unlink()
@@ -242,6 +239,43 @@ def erase_client(*, keep_audit: bool = False) -> dict:
     log.warning("client erase: removed %d path(s) under %s (keep_audit=%s)",
                 removed, root, keep_audit)
     return {"client_id": cid, "root": str(root), "removed": removed,
+            "kept_audit": keep_audit}
+
+
+def _erase_targets(root, *, keep_audit: bool):
+    """Every path :func:`erase_client` removes, deepest first."""
+    for p in sorted(root.rglob("*"), key=lambda x: len(x.parts), reverse=True):
+        rel = p.relative_to(root)
+        if keep_audit and rel.parts and rel.parts[0] == "audit":
+            continue
+        yield p
+
+
+def erase_client_preview(*, keep_audit: bool = False) -> dict:
+    """What :func:`erase_client` would remove, without removing anything.
+
+    Counts the files per top-level area of the client's data root, walking
+    exactly the paths the erase walks. Refuses unless a client is bound, like
+    the erase itself.
+    """
+    cid = client_id()
+    if not cid:
+        raise ClientBindingError(
+            "refusing to preview an erase: no client is bound (this would "
+            "target the shared root). Set MAVERICK_CLIENT_ID / [client] id first."
+        )
+    from .paths import data_dir
+    root = data_dir()
+    by_area: dict[str, int] = {}
+    files = 0
+    if root.exists():
+        for p in _erase_targets(root, keep_audit=keep_audit):
+            if p.is_file() or p.is_symlink():
+                rel = p.relative_to(root)
+                area = rel.parts[0] if len(rel.parts) > 1 else "(top level)"
+                by_area[area] = by_area.get(area, 0) + 1
+                files += 1
+    return {"client_id": cid, "files": files, "by_area": by_area,
             "kept_audit": keep_audit}
 
 
@@ -265,5 +299,6 @@ __all__ = [
     "reset_client_cache",
     "data_root",
     "erase_client",
+    "erase_client_preview",
     "status",
 ]

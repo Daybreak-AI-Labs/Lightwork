@@ -99,6 +99,7 @@
         opt.value = String(i + 1);
         opt.setAttribute('data-channel', row.channel);
         opt.setAttribute('data-user', row.user);
+        opt.setAttribute('data-name', row.person);
         opt.textContent = row.person + ' (' + row.channel_label + ', ' + row.conversations +
           (row.conversations === 1 ? ' conversation)' : ' conversations)');
         person.appendChild(opt);

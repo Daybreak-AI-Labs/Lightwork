@@ -1253,11 +1253,48 @@ def latest_checkpoint_sequence(
     return int(chain[-1].record["checkpoint_sequence"]) if chain else 0
 
 
+def list_checkpoints(
+    checkpoint_dir: Path | str,
+    *,
+    pubkey_hex: str | None = None,
+    trusted_pubkeys: Iterable[str] | None = None,
+) -> list[dict]:
+    """Every published record, oldest first, after the same signature and
+    chain checks :func:`verify_checkpoints` starts with.
+
+    Read-only. Each row carries its sequence, day, record type, committed row
+    count, creation time, its own SHA-256 and whether it is the latest record
+    for its day (the only one a retirement or supersession may name).
+    """
+    directory = Path(checkpoint_dir).expanduser().resolve()
+    if not directory.exists():
+        return []
+    trusted_keys = _trusted_key_map(
+        pubkey_hex=pubkey_hex,
+        trusted_pubkeys=trusted_pubkeys,
+    )
+    chain = _load_checkpoint_chain(directory, trusted_keys)
+    latest = {str(entry.record["day"]): entry.digest for entry in chain}
+    return [
+        {
+            "sequence": int(entry.record["checkpoint_sequence"]),
+            "day": str(entry.record["day"]),
+            "record_type": str(entry.record["record_type"]),
+            "row_count": int(entry.record["row_count"]),
+            "created_at": str(entry.record["created_at"]),
+            "sha256": entry.digest,
+            "latest_for_day": latest[str(entry.record["day"])] == entry.digest,
+        }
+        for entry in chain
+    ]
+
+
 __all__ = [
     "AuditCheckpointError",
     "CheckpointBreak",
     "CHECKPOINT_SCHEMA",
     "latest_checkpoint_sequence",
+    "list_checkpoints",
     "publish_checkpoint",
     "retire_checkpoint",
     "verify_checkpoints",

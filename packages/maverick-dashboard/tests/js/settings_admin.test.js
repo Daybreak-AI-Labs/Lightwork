@@ -10,17 +10,18 @@ function response(value, status = 200) {
   return new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json'}});
 }
 
-async function fixture(route, {confirm = true} = {}) {
+async function fixture(route, {confirm = true, typed = 'acme'} = {}) {
   const dom = new JSDOM(markup, {url: 'https://lightwork.example/settings', runScripts: 'outside-only'});
-  const {window} = dom, calls = [], confirms = [], copies = [];
+  const {window} = dom, calls = [], confirms = [], copies = [], forms = [];
   window.fetch = async (url, options = {}) => { calls.push({url, options}); return route(url, options); };
   window.mvConfirm = async (message) => { confirms.push(message); return confirm; };
+  window.mvForm = async (title, fields) => { forms.push({title, fields}); return typed === null ? null : {organisation: typed}; };
   window.mvCopy = (text) => copies.push(text);
   window.mvErrorText = (failure, action) => 'Could not ' + action + '.';
   window.mvWhen = () => 'today';
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 12; i++) await new Promise((done) => setImmediate(done)); };
-  return {window, document: window.document, calls, confirms, copies, settle};
+  return {window, document: window.document, calls, confirms, copies, forms, settle};
 }
 
 test('secret settings use the reviewed change form', () => {
@@ -114,9 +115,13 @@ test('a one-button check shows plain rows and keeps kernel wording in technical 
   assert.match(details.textContent, /at_rest/);
 });
 
-test('erasing the organisation confirms with a plain consequence and names the organisation shown', async (t) => {
+const PREVIEW = {organisation: 'acme', files: 7, keeps_activity_record: true,
+  areas: [{label: 'Tasks and conversations', files: 4}, {label: 'Saved memory', files: 3}]};
+
+test('erasing the organisation previews what goes, confirms, and needs the typed name', async (t) => {
   const ui = await fixture((url) => {
     if (url.endsWith('/client/erase')) return response({erased: true, files_removed: 4, kept_activity_record: true});
+    if (url.includes('/client/erase/preview')) return response(PREVIEW);
     return response({bound: true, organisation: 'acme', enforced: false, summary: 'This installation holds data for one organisation: acme.', technical: []});
   });
   t.after(() => ui.window.close());
@@ -126,20 +131,60 @@ test('erasing the organisation confirms with a plain consequence and names the o
   assert.ok(erase);
   erase.click();
   await ui.settle();
+  const preview = ui.calls.find((c) => c.url.includes('/client/erase/preview'));
+  assert.match(preview.url, /keep_activity_record=true/);
+  assert.match(ui.document.querySelector('[data-maintenance-out="client"]').textContent, /Tasks and conversations.*4 files.*Saved memory.*3 files/);
   assert.match(ui.confirms[0], /deleted for good and cannot be brought back/);
+  assert.match(ui.forms[0].title, /Type the organisation name/);
   const call = ui.calls.find((c) => c.url.endsWith('/client/erase'));
   assert.deepEqual(JSON.parse(call.options.body), {organisation: 'acme', keep_activity_record: true, confirm: true});
   assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /4 files removed/);
 });
 
-test('a cancelled erase sends nothing', async (t) => {
-  const ui = await fixture(() => response({bound: true, organisation: 'acme', summary: 'ok', technical: []}), {confirm: false});
+test('a mistyped organisation name erases nothing', async (t) => {
+  const ui = await fixture((url) => {
+    if (url.includes('/client/erase/preview')) return response(PREVIEW);
+    return response({bound: true, organisation: 'acme', summary: 'ok', technical: []});
+  }, {typed: 'acne'});
   t.after(() => ui.window.close());
   ui.document.querySelector('[data-maintenance-run="client"]').click();
   await ui.settle();
   [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Erase all data').click();
   await ui.settle();
   assert.equal(ui.calls.filter((c) => c.url.endsWith('/client/erase')).length, 0);
+  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /does not match/);
+});
+
+test('a cancelled erase sends nothing', async (t) => {
+  const ui = await fixture((url) => {
+    if (url.includes('/client/erase/preview')) return response(PREVIEW);
+    return response({bound: true, organisation: 'acme', summary: 'ok', technical: []});
+  }, {confirm: false});
+  t.after(() => ui.window.close());
+  ui.document.querySelector('[data-maintenance-run="client"]').click();
+  await ui.settle();
+  [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Erase all data').click();
+  await ui.settle();
+  assert.equal(ui.calls.filter((c) => c.url.endsWith('/client/erase')).length, 0);
+});
+
+test('the organisation download is prepared in the background, then offered as a link', async (t) => {
+  let polls = 0;
+  const ui = await fixture((url, options) => {
+    if (url.endsWith('/client/export') && options.method === 'POST') return response({job: 'a'.repeat(32), state: 'running'}, 202);
+    if (url.includes('/client/export/')) { polls += 1; return response({state: polls > 1 ? 'ready' : 'running', message: ''}); }
+    return response({bound: false, organisation: '', summary: 'Not set up for one organisation.', technical: []});
+  });
+  t.after(() => ui.window.close());
+  ui.window.setTimeout = (fn) => setImmediate(fn);
+  ui.document.querySelector('[data-maintenance-run="client"]').click();
+  await ui.settle();
+  [...ui.document.querySelectorAll('[data-maintenance-out="client"] button')].find((b) => b.textContent === 'Download all data').click();
+  await ui.settle(); await ui.settle();
+  const link = [...ui.document.querySelectorAll('[data-maintenance-out="client"] a')].find((a) => a.textContent === 'Save the file');
+  assert.ok(link, 'download link appears once ready');
+  assert.match(link.getAttribute('href'), /\/client\/export\/a{32}\/download$/);
+  assert.match(ui.document.querySelector('[data-maintenance-status="client"]').textContent, /ready/);
 });
 
 test('tidy up shows the counts first and removes only after confirming', async (t) => {

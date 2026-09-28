@@ -419,6 +419,9 @@ def trust_overview() -> dict[str, Any]:
             "status": reason,
             "expires_at": getattr(a, "expires_at", None),
             "revoked": bool(getattr(a, "revoked", False)),
+            # ``maverick trust show``: whether a pinned security key proves
+            # who the agent is, or only its connection secrets do.
+            "has_key": bool(getattr(a, "pubkey", "") or ""),
         })
     return {
         "enforced": bool(enforced),

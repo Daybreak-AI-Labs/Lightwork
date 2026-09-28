@@ -126,6 +126,7 @@
     function fact(label, value) { facts.appendChild(el('dt', null, label)); facts.appendChild(el('dd', null, value)); }
     fact('Signed in as', me.name);
     fact('Role', me.role);
+    if (me.workspace) fact('Workspace', me.workspace);
     fact('Departments', me.all_departments ? 'All departments' : (me.departments.join(', ') || 'None yet'));
     fact('Tools your tasks may use', me.tools + (me.blocked_tools ? ' (' + plural(me.blocked_tools, 'tool') + ' blocked)' : ''));
     fact('Riskiest action allowed', me.risk);

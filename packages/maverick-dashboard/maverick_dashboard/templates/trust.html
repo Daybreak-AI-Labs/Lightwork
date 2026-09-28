@@ -100,6 +100,7 @@
           {% elif a.active %}<span class="badge active">Active</span>
           {% else %}<span class="badge failure">{{ {'expired': 'Expired', 'not_yet_valid': 'Not started yet'}.get(a.status, 'Not active') }}</span>{% endif %}
           {% if not a.managed %}<div class="muted" style="font-size:var(--text-xs)">Set up by your installation</div>{% endif %}
+          {% if not a.has_key %}<div class="muted" style="font-size:var(--text-xs)">No security key on file</div>{% endif %}
         </td>
         <td>
           <div class="tr-actions">

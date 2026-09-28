@@ -1219,6 +1219,15 @@ app.include_router(_third_party_page_assets)
 from .trc_setup_api import router as _trc_setup_router  # noqa: E402
 
 app.include_router(_trc_setup_router)
+from .audit_ops_api import router as _audit_ops_router  # noqa: E402
+from .governance_ops_api import router as _governance_ops_router  # noqa: E402
+from .immune_ops_api import router as _immune_ops_router  # noqa: E402
+from .privacy_ops_api import router as _privacy_ops_router  # noqa: E402
+from .security_ops_api import router as _security_ops_router  # noqa: E402
+
+for _ops_router in (_audit_ops_router, _governance_ops_router, _immune_ops_router,
+                    _privacy_ops_router, _security_ops_router):
+    app.include_router(_ops_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
