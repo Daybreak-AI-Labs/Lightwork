@@ -58,6 +58,8 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     for typed in ("Snapshot ID", "Operation ID", "integrity digest", "Expected active revision", "Limit"):
         assert typed not in body
     assert 'id="sgi-entity-rows"' in body and 'id="sgi-link-rows"' in body
+    # The strict style policy blocks style attributes; the page styles live in its nonce stylesheet.
+    assert " style=" not in body.split('id="sgi-root"')[1]
     from test_support.plain_language import developer_terms
 
     assert developer_terms(body) == []

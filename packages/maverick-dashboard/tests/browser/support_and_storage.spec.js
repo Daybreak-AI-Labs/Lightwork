@@ -15,14 +15,14 @@ test('Help reviews the actual redacted support report before downloading its exa
   await page.setViewportSize({width:320,height:800});await page.goto('/help');
   await expect(page.locator('.support-scope')).toContainText('the folder locations');
   await expect(page.locator('.support-scope')).toContainText('Task names, task types and raw error messages are left out');
-  await expect(page.locator('.support-scope')).toContainText('encrypted preview on this installation for up to ten minutes');
+  await expect(page.locator('.support-scope')).toContainText('The report preview is kept, encrypted, on this installation for up to ten minutes');
   await expect(page.locator('#support-status')).toHaveText('No report has been collected.');
   const response=page.waitForResponse(r=>r.url().endsWith('/api/v1/support/preview'));
   await page.getByRole('button',{name:'Prepare support report',exact:true}).click();
   const report=await json(await response);
   await expect(page.locator('#support-result')).toBeVisible();
   await expect(page.getByRole('button',{name:'Download reviewed report',exact:true})).toBeDisabled();
-  await page.getByText('Review the redacted report',{exact:true}).click();
+  await page.getByText('Technical details: the exact file that will be downloaded',{exact:true}).click();
   expect(JSON.parse(await page.locator('#support-preview').textContent())).toEqual(report.bundle);
   const sizes=await page.locator('#support-center').evaluate(node=>({width:document.documentElement.clientWidth,right:node.getBoundingClientRect().right,scroll:node.scrollWidth,inner:node.clientWidth}));
   expect(sizes.right).toBeLessThanOrEqual(sizes.width+1);expect(sizes.scroll).toBeLessThanOrEqual(sizes.inner+1);

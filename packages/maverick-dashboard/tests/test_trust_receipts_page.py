@@ -52,6 +52,8 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     assert "python " not in body and "--key" not in body
     assert 'id="rcp-proof-form"' in body and 'id="rcp-proof-verify-form"' in body
     assert "<script>" not in body.split('id="rcp-root"')[1]   # the page CSP forbids inline script
+    # The strict style policy blocks style attributes; the page styles live in its nonce stylesheet.
+    assert " style=" not in body.split('id="rcp-root"')[1]
     from test_support.plain_language import developer_terms
 
     assert developer_terms(body) == []

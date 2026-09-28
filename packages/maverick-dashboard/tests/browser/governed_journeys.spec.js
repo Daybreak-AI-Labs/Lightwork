@@ -208,7 +208,7 @@ test('separately retained keys rehearse recognized encrypted records in a fresh 
   }
   await page.locator('#wrec-create').click();await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
   const snapshot=await page.locator('#wrec-snapshot').inputValue();
-  await page.getByText('Keep a separate copy of local encryption keys',{exact:true}).click();
+  await page.getByText("Keep a separate copy of this computer's encryption keys",{exact:true}).click();
   await page.locator('#wrec-encryption-confirm').check();
   const escrow=page.waitForEvent('download');await page.locator('#wrec-encryption-download').click();
   const custodyBytes=require('node:fs').readFileSync(await (await escrow).path());
@@ -302,7 +302,7 @@ test('recovery comparison pages real protected differences, downloads captured e
   expect(JSON.stringify(report)).not.toContain('Synthetic database content must not enter the report');
   expect(JSON.stringify(report)).not.toContain('Synthetic comparison draft body');
   const interrupted=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Synthetic comparison storage interruption'})});
-  await page.getByText('Use an existing recovery key',{exact:true}).click();
+  await page.getByText('Use a recovery key you already have',{exact:true}).click();
   await page.locator('#wrec-key-input').fill('Synthetic pending recovery key');
   await page.route('**/api/v1/recovery/snapshots/*/comparison',interrupted);
   await page.locator('#wrec-comparison-previous').click();
@@ -344,7 +344,7 @@ test('pilot preparation freezes four unrun tasks and preserves an observation af
   await form.locator('[name="evidence"]').fill('Synthetic timing sheet; no customer evidence');await form.locator('[name="note"]').fill('Partial observation; no claim of savings');
   const reject=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Synthetic interruption before save'})});
   await page.route('**/api/v1/outcome-pilots/*/cases/*',reject);
-  await form.getByRole('button',{name:'Save observation'}).click();await expect(page.locator('#op-status')).toContainText('Synthetic interruption');
+  await form.getByRole('button',{name:'Save observation'}).click();await expect(page.locator('#op-status')).toContainText('Could not save that.');await expect(page.locator('#op-status')).not.toContainText('Synthetic interruption');
   await expect(form.locator('[name="baseline_minutes"]')).toHaveValue('75');await expect(form.locator('[name="note"]')).toHaveValue('Partial observation; no claim of savings');
   await page.unroute('**/api/v1/outcome-pilots/*/cases/*',reject);
   await form.getByRole('button',{name:'Save observation'}).click();await expect(page.locator('#op-status')).toContainText('Saved.');
@@ -379,7 +379,7 @@ test('held GRC delivery clears expired access and requires fresh human confirmat
   await form.locator('[name="note"]').fill('Retain this unsaved review during a temporary interruption.');
   const interrupted=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Synthetic review interruption'})});
   await page.route('**/grc-sync/outbound/*/resolve',interrupted);
-  await page.locator('#gov-grc-confirm').click();await expect(page.locator('#gov-grc-recovery-status')).toContainText('Synthetic review interruption');
+  await page.locator('#gov-grc-confirm').click();await expect(page.locator('#gov-grc-recovery-status')).toContainText('The review could not be saved. Reload the delivery and try again; your note is kept here.');await expect(page.locator('#gov-grc-recovery-status')).not.toContainText('Synthetic review interruption');
   await expect(form.locator('[name="note"]')).toHaveValue('Retain this unsaved review during a temporary interruption.');
   await expect(page.locator('#gov-grc-comparison')).toBeEmpty();await expect(page.locator('#gov-grc-confirm')).toBeDisabled();
   await page.unroute('**/grc-sync/outbound/*/resolve',interrupted);

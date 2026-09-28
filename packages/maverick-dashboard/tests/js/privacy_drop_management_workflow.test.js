@@ -153,6 +153,19 @@ test("failures read as plain sentences without status codes", async (t) => {
   const text = ui.el("drop-status").textContent;
   assert.match(text, /Could not load the DROP requests/);
   assert.doesNotMatch(text, /503|composition|authority/);
+  assert.doesNotMatch(ui.el("drop-requests").textContent, /Loading/);
+  assert.match(ui.el("drop-requests").textContent, /Nothing to show right now/);
+});
+
+test("a turned-off feature says so instead of loading forever", async (t) => {
+  const ui = await fixture({ intercept: (c) => (c.url.pathname.endsWith("/status") ? { enabled: false, ready: false } : undefined) });
+  t.after(() => ui.window.close());
+  assert.equal(ui.calls.filter((c) => c.url.pathname.endsWith("/authority/overview")).length, 0);
+  for (const id of ["drop-requests", "drop-waiting", "drop-brokers"]) {
+    assert.doesNotMatch(ui.el(id).textContent, /Loading/);
+    assert.match(ui.el(id).textContent, /turned off/);
+  }
+  assert.match(ui.el("drop-readiness").textContent, /turned off/);
 });
 
 test("people without list access can look a request up by its number", async (t) => {

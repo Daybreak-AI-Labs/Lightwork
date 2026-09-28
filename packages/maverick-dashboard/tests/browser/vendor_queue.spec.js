@@ -78,7 +78,7 @@ for (const width of [1280, 320]) {
     await expect(page.locator('#vo-page-previous')).toBeDisabled();
     await page.locator('#vo-page-next').click();
     await expect(page.locator('#vo-page-status')).toContainText('Page 2');
-    await expect(page.locator('#vo-cases')).toContainText('reconciliation required');
+    await expect(page.locator('#vo-cases')).toContainText('Ticket result needs checking');
     await page.locator('#vo-page-next').click();
     await expect(page.locator('#vo-page-status')).toContainText('Page 3');
     await expect(page.locator('#vo-page-next')).toBeDisabled();
@@ -92,8 +92,8 @@ for (const width of [1280, 320]) {
     await page.locator('#vo-case-filter').selectOption('renewal');
     await expect(page.locator('#vo-page-status')).toContainText('renewal view');
     await expect(page.locator('#vo-cases')).toContainText('Harbor AI');
-    await expect(page.locator('#vo-cases')).toContainText('overdue');
-    await expect(page.locator('#vo-attention-summary')).toContainText('1 admitted request');
+    await expect(page.locator('#vo-cases')).toContainText('Overdue');
+    await expect(page.locator('#vo-attention-summary')).toContainText('1 request · ');
     await expect(page.locator('#vo-attention-summary')).toContainText('1 overdue renewal');
     const size = await page.evaluate(() => ({
       client: document.documentElement.clientWidth,

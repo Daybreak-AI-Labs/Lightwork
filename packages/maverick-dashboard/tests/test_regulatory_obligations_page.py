@@ -46,6 +46,8 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     assert 'id="rob-gateway-preview-state"' in body
     assert "Advanced: preview rules from an AI gateway" in body
     assert 'id="rob-action"' in body and "<select" in body
+    # The strict style policy blocks style attributes; the page styles live in its nonce stylesheet.
+    assert " style=" not in body.split('id="rob-root"')[1]
     for banned in ("maverick regulatory", "[compliance]", "profiles =", "JSON", "Tool / action",
                    "sql_query", "Vacuous", "rob-output"):
         assert banned not in body, banned
