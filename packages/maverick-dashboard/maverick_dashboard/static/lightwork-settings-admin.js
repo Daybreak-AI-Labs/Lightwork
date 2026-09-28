@@ -1,4 +1,4 @@
-/* Settings: confirmations, the "make a secret" button and the Maintenance tab. */
+/* Settings: confirmations and the Maintenance tab. */
 (function () {
   'use strict';
 
@@ -38,38 +38,6 @@
       });
     });
   });
-
-  // Make a new signing secret for other apps, show it once, offer Copy.
-  var generate = document.getElementById('webhook-generate');
-  if (generate) {
-    var box = document.getElementById('webhook-new');
-    var value = document.getElementById('webhook-new-value');
-    var status = document.getElementById('webhook-status');
-    generate.addEventListener('click', async function () {
-      if (generate.dataset.replace === 'true') {
-        var ok = await window.mvConfirm('Make a new secret? Apps using the old secret will stop working until you give them the new one.', {okText: 'Make new secret'});
-        if (!ok) return;
-      }
-      generate.disabled = true;
-      status.textContent = 'Making a secret…';
-      try {
-        var data = await call('/settings/webhooks/generate', 'POST');
-        value.value = data.secret || '';
-        box.hidden = false;
-        generate.dataset.replace = 'true';
-        generate.textContent = 'Make a new secret';
-        status.textContent = 'Secret saved. Copy it into the other app now.';
-        value.focus(); value.select();
-      } catch (failure) {
-        status.textContent = errorText(failure, 'make a secret');
-      } finally {
-        generate.disabled = false;
-      }
-    });
-    document.getElementById('webhook-copy').addEventListener('click', function () {
-      if (value.value) window.mvCopy(value.value);
-    });
-  }
 
   // ---- Maintenance tab -------------------------------------------------------
   var base = '/api/v1/admin/system';

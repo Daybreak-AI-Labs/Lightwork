@@ -10,7 +10,7 @@ templates.
 from __future__ import annotations
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
@@ -332,15 +332,6 @@ def settings_get_webhooks(request: Request) -> dict:
         state(principal=principal, authorize=authorize))
 
 
-def _webhook_secret_locked() -> bool:
-    """True when an environment-provided secret outranks the Settings value."""
-    try:
-        from maverick.secret_provider import get_secret
-        return bool(get_secret("MAVERICK_WEBHOOK_SECRET"))
-    except Exception:  # pragma: no cover -- never break the settings page
-        return False
-
-
 @router.post("/settings/webhooks")
 def settings_set_webhooks(
     request: Request,
@@ -355,30 +346,6 @@ def settings_set_webhooks(
     return _webhook_operation(request, lambda principal, authorize:
         settings_store.set_webhooks_secret(secret, action=action,
             expected_generation=expected_generation, principal=principal, authorize=authorize))
-
-
-@router.post("/settings/webhooks/generate")
-def settings_generate_webhook_secret(request: Request) -> JSONResponse:
-    """Make, save and return a new random signing secret (admin).
-
-    The value is shown once to the administrator who asked for it so they can
-    copy it into the sending app; it is sealed at rest and never displayed
-    again. Refused when an environment-provided secret would outrank it."""
-    _app()._require_same_origin(request)
-    auth.require_global_permission(request, "admin")
-    import secrets as _secrets
-
-    from maverick.secret_provider import get_secret
-
-    from maverick_dashboard import settings_store
-    if get_secret("MAVERICK_WEBHOOK_SECRET"):
-        raise HTTPException(
-            status_code=409,
-            detail="The signing secret is set on the computer running Lightwork, so it can't be changed here.",
-        )
-    value = _secrets.token_urlsafe(32)
-    settings_store.set_webhooks_secret(value)
-    return JSONResponse({"secret": value}, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/settings/models/discovery")
