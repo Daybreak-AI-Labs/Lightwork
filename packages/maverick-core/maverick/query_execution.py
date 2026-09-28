@@ -147,13 +147,31 @@ class QueryExecution:
         try:
             import psycopg
         except ImportError:
+            psycopg = None
+        if (psycopg is not None and isinstance(connection, psycopg.Connection)
+                and callable(getattr(connection, "cancel_safe", None))):
+            self.check()
+            self.cancellation_support = "postgres_statement_timeout_and_cancel_safe"
+            self.transactional = not connection.autocommit
+            self._cancel = lambda: connection.cancel_safe(timeout=2.0)
+            self._start_watcher()
+            return True
+        return self._bind_psycopg2(connection)
+
+    def _bind_psycopg2(self, connection):
+        """psycopg2 has no ``cancel_safe``, but its ``cancel()`` is the
+        thread-safe libpq cancel request, and the server-side
+        ``statement_timeout`` bounds the statement either way."""
+        try:
+            import psycopg2.extensions
+        except ImportError:
             return False
-        if not isinstance(connection, psycopg.Connection) or not callable(getattr(connection, "cancel_safe", None)):
+        if not isinstance(connection, psycopg2.extensions.connection):
             return False
         self.check()
-        self.cancellation_support = "postgres_statement_timeout_and_cancel_safe"
+        self.cancellation_support = "postgres_statement_timeout_and_cancel"
         self.transactional = not connection.autocommit
-        self._cancel = lambda: connection.cancel_safe(timeout=2.0)
+        self._cancel = connection.cancel
         self._start_watcher()
         return True
 

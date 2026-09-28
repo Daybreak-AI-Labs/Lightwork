@@ -322,3 +322,28 @@ def test_native_postgres_read_uses_bounded_server_cursor(request, monkeypatch):
         event.remove(Engine, "before_cursor_execute", inspect_cursor)
     assert cursors == [True]
     assert result["rows"] == [[1]] and result["fetched_rows"] == 2 and result["has_more"]
+
+
+def test_psycopg2_statement_deadline_and_fresh_next_query(request, monkeypatch):
+    """psycopg2 connections get the same server statement deadline and a real
+    cancel request; before, a long statement ran past the query deadline."""
+    dsn = request.getfixturevalue("postgres_test_dsn")
+    pytest.importorskip("psycopg2")
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    from psycopg.conninfo import conninfo_to_dict
+
+    params = conninfo_to_dict(dsn)
+    url = sqlalchemy.engine.URL.create("postgresql+psycopg2", username=params["user"],
+                                       password=params.get("password"), host=params["host"],
+                                       port=int(params["port"]), database=params["dbname"])
+    monkeypatch.setenv("DATABASE_URL", url.render_as_string(hide_password=False))
+    monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 0.15)
+    executions = capture_execution(monkeypatch, database_module)
+    began = time.monotonic()
+    result = database_tool().fn({"op": "query", "sql": "SELECT pg_sleep(5)"})
+    assert time.monotonic() - began < 2.5
+    assert result.startswith("ERROR:") and executions[0].finished
+    assert executions[0].cancellation_support == "postgres_statement_timeout_and_cancel"
+    monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 3)
+    subsequent = json.loads(database_tool().fn({"op": "query", "sql": "SELECT 7 AS value", "response_format": "json"}))
+    assert subsequent["rows"] == [[7]] and subsequent["complete"]
