@@ -143,3 +143,72 @@ def test_cross_checks_refuse_configurations_the_kernel_rejects():
                           "ai_cloud_agent_governance.enabled_providers": ["aws_bedrock"]})
     with pytest.raises(catalog.SettingError):
         catalog.cross_checks({"residency.strict": True, "residency.region": ""})
+
+
+def test_admin_policy_defaults_match_the_kernel():
+    from maverick import config, governed_actions, provider_cost_cap
+
+    ekko = config.get_ekko()
+    for key in ("retention_days", "enrollment_days", "min_occurrences", "min_distinct_days",
+                "capture_level"):
+        assert catalog.BY_ID[f"ekko.{key}"].default == ekko[key], key
+    assert catalog.BY_ID["actions.require_approval_at"].default == \
+        governed_actions._require_approval_at()
+    assert catalog.BY_ID["budget.provider_caps_period"].default == \
+        provider_cost_cap.period_from_config()
+    harness = config.get_self_harness()
+    for key in ("risk_limited", "auto_run", "corpus_harvest", "transfer_auto",
+                "eval_budget_dollars"):
+        assert catalog.BY_ID[f"self_harness.{key}"].default == harness[key], key
+    assert catalog.BY_ID["knowledge_access.enable"].default is config.knowledge_access_enabled()
+    assert catalog.BY_ID["candidate_promotion.enable"].default is \
+        config.candidate_promotion_enabled()
+
+
+def test_rows_are_validated_cell_by_cell():
+    import dataclasses
+
+    caps = dataclasses.replace(catalog.BY_ID["budget.provider_caps"],
+                               choices=(("anthropic", "Anthropic"),))
+    assert catalog.coerce(caps, [{"name": "anthropic", "cap": 12.5}]) == {"anthropic": 12.5}
+    for bad in ([{"name": "openai", "cap": 5}], [{"name": "anthropic", "cap": 0}],
+                [{"name": "anthropic", "cap": float("inf")}], "anthropic=5",
+                [{"name": "anthropic", "cap": 5}, {"name": "anthropic", "cap": 6}]):
+        with pytest.raises(catalog.SettingError):
+            catalog.coerce(caps, bad)
+    rules = catalog.BY_ID["eu_ai_incidents.authorities"]
+    people = dataclasses.replace(rules.columns[0], choices=(("user:ada", "Ada"),))
+    rules = dataclasses.replace(rules, columns=(people, *rules.columns[1:]))
+    assert catalog.coerce(rules, [{"principal": "user:ada", "role": "safety_officer",
+                                   "authority_refs": " a-1 , b.2 "}]) == [
+        {"principal": "user:ada", "role": "safety_officer", "authority_refs": ["a-1", "b.2"]}]
+    with pytest.raises(catalog.SettingError):
+        catalog.coerce(rules, [{"principal": "user:ada", "role": "safety_officer",
+                                "authority_refs": "bad\x1bref"}])
+
+
+def test_row_weakening_directions():
+    w = catalog.weakens
+    acl = catalog.BY_ID["security.channels"]
+    base = {"slack": {"denied_tools": ["shell"], "allowed_tools": ["read_file"],
+                      "max_risk": "medium"}}
+    tighter = {"slack": {"denied_tools": ["shell", "browser"], "allowed_tools": ["read_file"],
+                         "max_risk": "low"}, "sms": {"denied_tools": ["shell"],
+                                                     "allowed_tools": [], "max_risk": ""}}
+    assert not w(acl, base, tighter)
+    assert w(acl, base, {})
+    assert w(acl, base, {"slack": {**base["slack"], "max_risk": ""}})
+    assert w(acl, base, {"slack": {**base["slack"], "allowed_tools": []}})
+    caps = catalog.BY_ID["budget.provider_caps"]
+    assert w(caps, {"openai": 5.0}, {"openai": 6.0}) and w(caps, {"openai": 5.0}, {})
+    assert not w(caps, {"openai": 5.0}, {"openai": 4.0, "anthropic": 9.0})
+    chains = catalog.BY_ID["provider_failover.chains"]
+    assert w(chains, {}, {"a": ["b"]}) and not w(chains, {"a": ["b", "c"]}, {"a": ["b"]})
+    defaults = catalog.BY_ID["dashboard.default_suites"]
+    assert not w(defaults, None, ["finance"]) and w(defaults, ["finance"], None)
+    assert w(defaults, ["finance"], ["finance", "tax"])
+    delegation = catalog.BY_ID["approval.delegation"]
+    assert w(delegation, [], [{"delegate_to": "user:a", "min_risk": "", "tool_glob": "*"}])
+    authorities = catalog.BY_ID["eu_ai_incidents.authorities"]
+    row = {"principal": "user:a", "role": "legal_counsel", "authority_refs": ["x"]}
+    assert w(authorities, [], [row]) and not w(authorities, [row], [])

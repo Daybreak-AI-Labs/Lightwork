@@ -44,7 +44,16 @@ Controls beyond single values: ``keys`` (trusted publisher keys, added from an
 uploaded or pasted key file and shown only by fingerprint), ``table`` (a list
 of rows, e.g. usage limits per tool or reviewed tools with a risk level), and
 lists/pickers whose options come from live data (``choices_from``: people,
-tools, models, connected systems) resolved by the page at request time.
+tools, models, connected systems) resolved by the page at request time. A
+``table`` with row kind ``grid`` holds one row per chosen option (a chat app,
+an AI service, a department) with the ``columns`` described by
+:class:`Column`; ``rules`` is an ordered list of such rows (approval rules,
+incident report deciders).
+
+Settings a reader keeps but nothing in the running product consults are left
+out, so the page never offers a control that changes nothing: ``[safety]``
+goal-risk floor and quorum keys and ``[containment]`` (their library modules
+are not called by any run path yet).
 """
 from __future__ import annotations
 
@@ -68,6 +77,7 @@ GROUPS: tuple[str, ...] = (
     "Finance",
     "Security suite",
     "AI governance",
+    "People & access",
 )
 
 GROUP_INTROS: dict[str, str] = {
@@ -85,12 +95,46 @@ GROUP_INTROS: dict[str, str] = {
     "Finance": "When money movements stop for a person, which rules apply and how finance monitoring runs.",
     "Security suite": "How the environment hunter gathers security events and how often the hunters run.",
     "AI governance": "Detailed policies for the AI governance modules, the AI gateway and outbound GRC records.",
+    "People & access": "Which departments people can use, and what membership of a sign-in group gives them.",
 }
 
 CONTROLS = frozenset({
     "toggle", "select", "number", "text", "list", "secret", "multiselect", "rate",
-    "keys", "table",
+    "keys", "table", "rules",
 })
+
+COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words"})
+
+
+@dataclass(frozen=True)
+class Column:
+    """One column of a ``table`` (row kind ``grid``) or ``rules`` control.
+
+    ``select`` is a short fixed list, ``pick`` one choice from a long list the
+    page can search, ``picks`` several such choices in order, ``number`` a
+    bounded number, ``switch`` on or off, and ``words`` short references
+    separated by commas.
+    """
+
+    key: str
+    label: str
+    kind: str
+    choices: tuple[tuple[str, str], ...] = ()
+    choices_from: str = ""
+    required: bool = False
+    unique: bool = False  # rules: no two rows may share this value
+    default: object = None
+    minimum: float | None = None
+    maximum: float | None = None
+    integer: bool = False
+    unit: str = ""
+    pattern: str = ""
+    max_length: int = 128
+    max_items: int = 64
+    item_error: str = "a listed option"
+
+
+_NO_PARTIAL = object()
 
 
 @dataclass(frozen=True)
@@ -147,6 +191,21 @@ class Setting:
     # with a risk level); ``fixed_keys`` are rows other settings own.
     row_kind: str = ""
     fixed_keys: tuple[str, ...] = ()
+    # ``grid`` tables and ``rules``: the columns of each row. A grid's rows are
+    # named by an option from ``choices``/``choices_from`` (``row_label`` heads
+    # that column); with ``scalar`` the single column's value is stored as the
+    # row's value instead of a small table.
+    columns: tuple[Column, ...] = ()
+    scalar: bool = False
+    row_label: str = ""
+    add_label: str = ""
+    empty_text: str = ""
+    empty_hint: str = ""  # shown when there is nothing to add a row for
+    # How the page words an empty value when "no limit" would be wrong.
+    none_text: str = ""
+    # The default when the setting's table already holds other keys (some
+    # kernel readers keep older defaults for a partly written table).
+    partial_default: object = _NO_PARTIAL
 
     @property
     def id(self) -> str:
@@ -1738,8 +1797,340 @@ _INTEGRATIONS_MORE: tuple[Setting, ...] = (
       warning="Tools will be able to run more often."),
 )
 
+C = Column
+_RISK_CEILING = (("", "No extra limit"), ("low", "Low risk only"),
+                 ("medium", "Up to medium risk"), ("high", "Up to high risk"))
+_REF = r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}"
+# Catalog addresses never carry query text (it can hold an access token that
+# would otherwise be copied into the activity record).
+_HTTPS_PLAIN = r"https://[^\s\"'<>?#]{1,300}"
+_REVIEW_ENV = ("MAVERICK_REVIEW_CHECKPOINT_DOLLARS", "MAVERICK_REVIEW_CHECKPOINT_TOOL_CALLS",
+               "MAVERICK_REVIEW_CHECKPOINT_WALL_SECONDS")
+
+_POLICY: tuple[Setting, ...] = (
+    # ------------------------------------------------ review pauses (safety)
+    S("safety.review_checkpoint", "dollars", "Pause for a review after spending",
+      "A long task stops for a person to review it each time it has spent this much more. "
+      "Leave empty for no pause by amount.", "number", "Safety", None,
+      "maverick.review_checkpoint", subgroup="Review pauses on long tasks", minimum=0.01,
+      maximum=100000, unit="dollars", env=_REVIEW_ENV, weaker="higher", none_text="Off",
+      warning="Long tasks will run further, or without stopping, before a person reviews them."),
+    S("safety.review_checkpoint", "tool_calls", "Pause for a review after actions",
+      "A long task stops for a person to review it each time it has taken this many more "
+      "actions. Leave empty for no pause by count.", "number", "Safety", None,
+      "maverick.review_checkpoint", subgroup="Review pauses on long tasks", minimum=1,
+      maximum=100000, integer=True, unit="actions", env=_REVIEW_ENV, weaker="higher",
+      none_text="Off",
+      warning="Long tasks will run further, or without stopping, before a person reviews them."),
+    S("safety.review_checkpoint", "wall_seconds", "Pause for a review after running",
+      "A long task stops for a person to review it each time it has run this much longer. "
+      "Leave empty for no pause by time.", "number", "Safety", None,
+      "maverick.review_checkpoint", subgroup="Review pauses on long tasks", minimum=1,
+      maximum=10080, unit="minutes", scale=60, env=_REVIEW_ENV, weaker="higher",
+      none_text="Off",
+      warning="Long tasks will run further, or without stopping, before a person reviews them."),
+
+    # ------------------------------------------------------ approvals (safety)
+    S("actions", "require_approval_at", "Actions in your systems that need a person",
+      "Changes agents and outside agents make in your connected systems wait for a person "
+      "from this risk level up.", "select", "Safety", "high", "maverick.governed_actions",
+      subgroup="Approvals",
+      choices=(("low", "Every change, whatever its risk"),
+               ("medium", "Medium and high risk changes"),
+               ("high", "High risk changes only (default)")),
+      weaker=True, order=("low", "medium", "high"),
+      warning="Riskier changes in your connected systems will go ahead without a person "
+              "approving them."),
+    S("actions", "enable", "Keep a traceable record of consequential actions",
+      "Record each consequential action an agent takes, with what led to it, in a record "
+      "that shows any later change.", "toggle", "Safety", False, "maverick.governed_actions",
+      subgroup="Approvals", env=("MAVERICK_GOVERNED_ACTIONS",), weaker=False,
+      warning="Consequential actions will no longer be recorded with what led to them."),
+    S("approval", "delegation", "Who reviews which approvals",
+      "Send approvals that match a rule to the person chosen. Rules are checked from the "
+      "top and the first match wins; approvals that match no rule stay in the shared queue.",
+      "rules", "Safety", [], "maverick.approval_delegation", subgroup="Approvals",
+      columns=(
+          C("delegate_to", "Send to", "select", choices_from="people_only", required=True),
+          C("min_risk", "For risk", "select", default="",
+            choices=(("", "Any risk"), ("low", "Low and above"), ("medium", "Medium and above"),
+                     ("high", "High and above"), ("critical", "Critical only"))),
+          C("tool_glob", "For tool", "pick", choices_from="tools_any", default="*",
+            required=True),
+      ),
+      item_label="Rule", add_label="Add a rule",
+      empty_text="No rules yet, so every approval goes to the shared queue.",
+      empty_hint="Nobody has been added yet. Add people on the People page first.",
+      weaker="change", warning="Approvals will be sent to different people than before."),
+
+    # ------------------------------------------------- tools per chat app
+    S("security", "channels", "Tools allowed in each chat app",
+      "Limit what agents may do when work arrives from a particular chat app. Blocked tools "
+      "are never used there; when you list allowed tools, only those are used; the risk "
+      "limit leaves out riskier tools.", "table", "Security", {}, "maverick.safety.tool_acl",
+      subgroup="Tools per chat app", row_kind="grid", choices_from="chat_channels",
+      columns=(
+          C("denied_tools", "Blocked tools", "picks", choices_from="tools", max_items=500),
+          C("allowed_tools", "Only these tools", "picks", choices_from="tools", max_items=500),
+          C("max_risk", "Riskiest tools allowed", "select", choices=_RISK_CEILING, default=""),
+      ),
+      row_label="Chat app", item_label="Chat app", add_label="Add rules for this app",
+      empty_text="No chat app has its own tool rules yet.",
+      empty_hint="No chat apps are set up yet. Set one up on the Channels page first.",
+      weaker="acl",
+      warning="Agents will be able to use more tools, or riskier tools, when work arrives "
+              "from that chat app.", aliases="tool access channel telegram slack deny allow"),
+
+    # ------------------------------------------ spending per AI service
+    S("budget", "provider_caps", "Most to spend with each AI service",
+      "Across every task, spending with an AI service stops for the rest of the period once "
+      "it reaches its limit.", "table", "Spending & limits", {}, "maverick.provider_cost_cap",
+      subgroup="Spending per AI service", row_kind="grid", choices_from="providers",
+      scalar=True,
+      columns=(C("cap", "Most to spend", "number", minimum=0.01, maximum=10000000,
+                 unit="dollars", required=True),),
+      row_label="AI service", item_label="AI service", add_label="Add a limit",
+      empty_text="No AI service has a spending limit yet.",
+      empty_hint="No AI services are set up yet. Add one under AI service keys on the "
+                 "Settings page first.",
+      weaker="cap", warning="More can be spent with that AI service, or its limit will be removed."),
+    S("budget", "provider_caps_period", "Spending limits apply per",
+      "Whether the limits above count spending for each day or each calendar month.",
+      "select", "Spending & limits", "day", "maverick.provider_cost_cap",
+      subgroup="Spending per AI service", env=("MAVERICK_PROVIDER_CAPS_PERIOD",),
+      choices=(("day", "Day (default)"), ("month", "Calendar month")),
+      weaker=True, order=("month", "day"),
+      warning="The same limits will apply to a shorter period, so more can be spent in total."),
+
+    # ------------------------------------------------ Ekko (privacy)
+    S("ekko", "allowed_apps", "Apps Ekko may notice",
+      "People can let Ekko notice their work only in the apps chosen here. With none "
+      "chosen, the list set by your installer applies.", "multiselect", "Privacy", [],
+      "maverick.config", subgroup="Work pattern discovery (Ekko)", choices_from="ekko_apps",
+      weaker="grow", warning="Ekko will be able to notice work in more apps."),
+    S("ekko", "blocked_apps", "Apps Ekko must never notice",
+      "Blocked even if they are allowed above. Email, chat, customer and finance systems and "
+      "databases are always blocked as well.", "multiselect", "Privacy", [], "maverick.config",
+      subgroup="Work pattern discovery (Ekko)", choices_from="ekko_apps", weaker="shrink",
+      warning="Ekko may notice work in the apps you remove from this list."),
+    S("ekko", "capture_level", "How much Ekko records",
+      "What Ekko writes down about work in an allowed app.", "select", "Privacy",
+      "application_metadata", "maverick.config", subgroup="Work pattern discovery (Ekko)",
+      choices=(("application_metadata", "Only which app is in use (recommended)"),
+               ("guided", "The app, the action and the kind of document")),
+      weaker=True, order=("application_metadata", "guided"),
+      warning="Ekko will record more detail about what people do in each app."),
+    S("ekko", "retention_days", "Days Ekko keeps what it notices",
+      "How long observations stay before they are removed.", "number", "Privacy", 14,
+      "maverick.config", subgroup="Work pattern discovery (Ekko)", minimum=2, maximum=30,
+      integer=True, unit="days", weaker="higher",
+      warning="What Ekko notices will be kept for longer."),
+    S("ekko", "enrollment_days", "Longest a person can turn Ekko on for",
+      "After this many days Ekko stops until the person turns it on again.", "number",
+      "Privacy", 30, "maverick.config", subgroup="Work pattern discovery (Ekko)", minimum=1,
+      maximum=90, integer=True, unit="days", weaker="higher",
+      warning="People will be able to leave Ekko on for longer before it asks again."),
+    S("ekko", "min_occurrences", "Repeats before a task is suggested",
+      "How many times a pattern must be seen before Ekko suggests automating it.", "number",
+      "Privacy", 3, "maverick.config", subgroup="Work pattern discovery (Ekko)", minimum=2,
+      maximum=100, integer=True, unit="times"),
+    S("ekko", "min_distinct_days", "Days a pattern must appear on",
+      "A pattern must be seen on at least this many different days before it is suggested.",
+      "number", "Privacy", 2, "maverick.config", subgroup="Work pattern discovery (Ekko)",
+      minimum=2, maximum=30, integer=True, unit="days"),
+
+    # ------------------------------------ self-improving instructions (learning)
+    S("self_harness", "risk_limited", "Use the careful improvement profile",
+      "Improvements to agent instructions must pass unseen tests, repeated checks and a trial "
+      "on a small share of work before they are used.", "toggle", "Memory & learning", True,
+      "maverick.config", subgroup="Self-improving instructions", partial_default=False,
+      weaker=False, warning="Improvements to agent instructions could be adopted on weaker evidence."),
+    S("self_harness", "auto_run", "Look for improvements every night",
+      "Each night, look for recurring mistakes and test a fix for them.", "toggle",
+      "Memory & learning", True, "maverick.config", subgroup="Self-improving instructions",
+      partial_default=False),
+    S("self_harness", "eval_budget_dollars", "Most to spend testing improvements",
+      "The most one night's testing may cost. With the careful profile on, never more than "
+      "5 dollars; with it off and nothing set, there is no limit.", "number", "Memory & learning", 5.0, "maverick.config",
+      subgroup="Self-improving instructions", minimum=0.01, maximum=1000, unit="dollars",
+      weaker="higher",
+      warning="Testing improvements may cost more each night."),
+    S("self_harness", "corpus_harvest", "Learn test cases from past tasks",
+      "Turn tasks that failed and later succeeded into new test cases for improvements.",
+      "select", "Memory & learning", "off", "maverick.config",
+      subgroup="Self-improving instructions",
+      choices=(("off", "Off (default)"), ("propose", "Suggest them for a person to review"),
+               ("auto", "Add them without review")),
+      weaker=True, order=("off", "propose", "auto"),
+      warning="New test cases will be added without a person reviewing them."),
+    S("self_harness", "transfer_auto", "Share proven improvements between models",
+      "Each night, try improvements proven on one model with your other models, with the "
+      "same tests and trial.", "toggle", "Memory & learning", False, "maverick.config",
+      subgroup="Self-improving instructions"),
+    S("knowledge_access", "enable", "Governed knowledge library",
+      "Show your organisation's approved knowledge inside Lightwork, with correction, "
+      "exclusion and deletion.", "toggle", "Memory & learning", True, "maverick.config",
+      subgroup="Knowledge library", env=("MAVERICK_KNOWLEDGE_ACCESS",)),
+
+    # ----------------------------------------------------- AI governance
+    S("eu_ai_incidents", "authorities", "People who decide serious AI incident reports",
+      "Each person listed may make reporting decisions on serious AI incidents, in the role "
+      "shown, for the authorities named. Separate several authorities with commas.", "rules",
+      "AI governance", [], "maverick_dashboard.model_risk_api",
+      subgroup="Serious AI incident reports",
+      columns=(
+          C("principal", "Person", "select", choices_from="people_only", required=True,
+            unique=True),
+          C("role", "Role", "select", required=True,
+            choices=(("authorized_provider_representative", "Authorised representative"),
+                     ("incident_commander", "Incident lead"),
+                     ("legal_counsel", "Legal counsel"),
+                     ("regulatory_compliance_officer", "Regulatory compliance officer"),
+                     ("safety_officer", "Safety officer"))),
+          C("authority_refs", "Authorities", "words", required=True, pattern=_REF,
+            item_error="an authority reference of letters, numbers and dots or dashes"),
+      ),
+      item_label="Person", add_label="Add a person",
+      empty_text="Nobody can decide incident reports yet.",
+      empty_hint="Nobody has been added yet. Add people on the People page first.",
+      weaker="grow",
+      warning="The people you add or change will be able to make decisions on reports to "
+              "authorities."),
+    S("ai_cost_roi.aws", "enable", "Collect AI costs from Amazon Web Services",
+      "Read AI spending from your AWS bill. Its account details and sign-in are set on your "
+      "server.", "toggle", "AI governance", False, "maverick.ai_cost_collectors",
+      subgroup="AI cost collection"),
+    S("ai_cost_roi.azure", "enable", "Collect AI costs from Microsoft Azure",
+      "Read AI spending from your Azure bill. Its account details and sign-in are set on "
+      "your server.", "toggle", "AI governance", False, "maverick.ai_cost_collectors",
+      subgroup="AI cost collection"),
+    S("ai_cost_roi.gcp", "enable", "Collect AI costs from Google Cloud",
+      "Read AI spending from your Google Cloud bill. Its account details and sign-in are set "
+      "on your server.", "toggle", "AI governance", False, "maverick.ai_cost_collectors",
+      subgroup="AI cost collection"),
+    S("ai_cost_roi.openai", "enable", "Collect AI costs from OpenAI",
+      "Read AI spending from your OpenAI organisation. Its details and sign-in are set on "
+      "your server.", "toggle", "AI governance", False, "maverick.ai_cost_collectors",
+      subgroup="AI cost collection"),
+    S("ai_cost_roi", "collector_poll_seconds", "Collect costs every",
+      "How often turned-on cost collection runs.", "number", "AI governance", 86400.0,
+      "maverick.ai_cost_collectors", subgroup="AI cost collection", minimum=1, maximum=168,
+      unit="hours", scale=3600),
+    S("red_team_assurance", "enable", "Allow red-team test campaigns",
+      "Let administrators run planned attack tests against your agents. Its signing key is "
+      "set on your server.", "toggle", "AI governance", False, "maverick.red_team_assurance",
+      subgroup="Red-team testing"),
+    S("red_team_assurance", "max_cases", "Most test cases per campaign",
+      "The most attack tests one campaign may run.", "number", "AI governance", 12,
+      "maverick.red_team_assurance", subgroup="Red-team testing", minimum=1, maximum=32,
+      integer=True, unit="tests"),
+    S("red_team_assurance", "campaign_ttl_seconds", "Longest a campaign may run",
+      "A campaign that is not finished by then is closed.", "number", "AI governance", 604800,
+      "maverick.red_team_assurance", subgroup="Red-team testing", minimum=1, maximum=720,
+      integer=True, unit="hours", scale=3600),
+    S("red_team_assurance", "evidence_validity_seconds", "Test results count as current for",
+      "After this, a campaign's results no longer count as proof that agents resist attacks.",
+      "number", "AI governance", 7776000, "maverick.red_team_assurance",
+      subgroup="Red-team testing", minimum=1, maximum=366, integer=True, unit="days",
+      scale=86400, weaker="higher",
+      warning="Older test results will keep counting as proof that agents resist attacks."),
+    S("candidate_promotion", "enable", "Allow moving research results into use",
+      "Named administrators may review a research result, try it on a small share of work, "
+      "then put it into use or roll it back. It stays closed until your installation has a "
+      "reviewed release setup.", "toggle", "AI governance", False, "maverick.config",
+      subgroup="Moving research results into use", env=("MAVERICK_CANDIDATE_PROMOTION",),
+      weaker=True,
+      warning="Administrators will be able to change the running system with research results."),
+    S("candidate_promotion", "review_ttl_seconds", "A review approval stays valid for",
+      "How long a person's review of a research result can be used before it must be given "
+      "again.", "number", "AI governance", 3600,
+      "maverick_dashboard.candidate_promotion_composition",
+      subgroup="Moving research results into use", minimum=1, maximum=10080, integer=True,
+      unit="minutes", scale=60, weaker="higher",
+      warning="A review approval will stay usable for longer before it must be given again."),
+    S("vendor_onboarding", "reviewed_uploads", "Preview supplier uploads before use",
+      "Office files and recordings suppliers send are previewed and reviewed inside "
+      "Lightwork before they are used.", "toggle", "AI governance", True, "maverick.config",
+      subgroup="Supplier onboarding", weaker=False,
+      warning="Supplier files will no longer be previewed and reviewed before use."),
+
+    # ------------------------------------------------------ integrations
+    S("template_registries", "indexes", "Where to find goal templates",
+      "Web addresses of the catalogs goal templates can be installed from. With none listed, "
+      "the built-in catalog is used.", "list", "Integrations", [], "maverick.templates",
+      subgroup="Template and tool server catalogs", pattern=_HTTPS_PLAIN, max_length=300,
+      item_error="a secure web address without a question mark", empty_unset=True,
+      weaker="add", warning="Templates from a new catalog will be offered for install."),
+    S("mcp_registries", "indexes", "Where to find tool servers",
+      "Web addresses of the catalogs outside tool servers can be added from. With none "
+      "listed, the built-in catalog is used.", "list", "Integrations", [],
+      "maverick.mcp_registry", subgroup="Template and tool server catalogs",
+      pattern=_HTTPS_PLAIN, max_length=300,
+      item_error="a secure web address without a question mark", empty_unset=True,
+      weaker="add", warning="Tool servers from a new catalog will be offered to add."),
+    S("provider_failover", "chains", "Backup AI models",
+      "When a model's service fails, try these models next, in order.", "table",
+      "Integrations", {}, "maverick.provider_failover", subgroup="Backup AI models",
+      row_kind="grid", choices_from="models", scalar=True,
+      columns=(C("fallbacks", "Try next, in order", "picks", choices_from="models",
+                 required=True, max_items=8),),
+      row_label="When this model fails", item_label="Model", add_label="Add backups",
+      empty_text="No model has backups yet.", weaker="add",
+      warning="Requests may go to another AI service when the first one fails."),
+    S("providers.bedrock", "auth_mode", "How Lightwork signs in to Amazon Bedrock",
+      "Amazon Bedrock can use your AWS sign-in or server role, or a Bedrock access key.",
+      "select", "Integrations", "iam", "maverick.llm", subgroup="Amazon Bedrock",
+      choices=(("iam", "AWS sign-in or server role (recommended)"),
+               ("api_key", "A Bedrock access key"))),
+    S("computer_use", "monitor", "Screen agents use",
+      "Which screen agents see and control, counting from 1. Leave empty for the main "
+      "screen.", "number", "Integrations", None, "maverick.multi_monitor",
+      subgroup="Computer control", minimum=1, maximum=16, integer=True, unit="",
+      env=("MAVERICK_COMPUTER_MONITOR",), none_text="Main screen"),
+    S("computer_use", "vision_min_confidence", "How sure agents must be before clicking",
+      "Agents click an item they found by looking at the screen only when at least this sure.",
+      "number", "Integrations", 0.5, "maverick.vision_click", subgroup="Computer control",
+      minimum=1, maximum=100, unit="percent", scale=0.01, weaker="lower",
+      warning="Agents will click on screen items they are less sure they have recognised."),
+
+    # ------------------------------------------------------ people & access
+    S("dashboard", "default_suites", "Departments a person may use by default",
+      "People with no departments of their own can use only these. With none ticked, they "
+      "can use every department.", "multiselect", "People & access", [], "maverick.suite_grants",
+      subgroup="Departments", choices_from="suites", weaker="widen",
+      warning="People with no departments of their own will be able to use more departments, "
+              "or all of them."),
+    S("suites", "*", "Departments turned off",
+      "Agents from a department turned off here cannot be hired or run. Every other department "
+      "stays on.", "table", "People & access", {}, "maverick.domain", subgroup="Departments",
+      key_kind="entries", row_kind="grid", choices_from="suites", scalar=True,
+      columns=(C("on", "Turned on", "switch", default=False),),
+      row_label="Department", item_label="Department", add_label="Add a department",
+      empty_text="Every department is on."),
+    S("dashboard", "group_roles", "Roles for sign-in groups",
+      "Everyone in a group your sign-in provider shares gets this role, unless they have a "
+      "role of their own.", "table", "People & access", {}, "maverick_dashboard.scim_groups",
+      subgroup="Sign-in groups", row_kind="grid", choices_from="scim_groups", scalar=True,
+      columns=(C("role", "Role", "select", choices_from="roles", required=True),),
+      row_label="Group", item_label="Group", add_label="Add a group",
+      empty_text="No groups give a role yet.",
+      empty_hint="No groups have arrived from your sign-in provider yet.",
+      weaker="grow", warning="Members of that group will get a different role, which may let "
+                             "them do more."),
+    S("dashboard", "group_suites", "Departments for sign-in groups",
+      "Everyone in a group your sign-in provider shares may use these departments, unless "
+      "they have departments of their own.", "table", "People & access", {},
+      "maverick_dashboard.scim_groups", subgroup="Sign-in groups", row_kind="grid",
+      choices_from="scim_groups", scalar=True,
+      columns=(C("suites", "Departments", "picks", choices_from="suites", required=True),),
+      row_label="Group", item_label="Group", add_label="Add a group",
+      empty_text="No groups give departments yet.",
+      empty_hint="No groups have arrived from your sign-in provider yet.",
+      weaker="grow", warning="Members of that group will be able to use more departments."),
+)
+
 SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt_settings()
-            + _GOVERNANCE + _INTEGRATIONS_MORE)
+            + _GOVERNANCE + _INTEGRATIONS_MORE + _POLICY)
 
 BY_ID: dict[str, Setting] = {s.id: s for s in SETTINGS}
 
@@ -1770,6 +2161,8 @@ _ORDERED: tuple[tuple[str, str], ...] = (
     ("administration_document_access.default_ttl_seconds",
      "administration_document_access.max_ttl_seconds"),
     ("local_runtime.min_replicas", "local_runtime.max_replicas"),
+    # Ekko counts a pattern only on days it still keeps.
+    ("ekko.min_distinct_days", "ekko.retention_days"),
 )
 
 
@@ -1917,6 +2310,8 @@ def _coerce_value(setting: Setting, value: object) -> object:  # noqa: C901 - on
         return _coerce_keys(setting, value)
     if control == "table":
         return _coerce_table(setting, value)
+    if control == "rules":
+        return _coerce_rules(setting, value)
     raise SettingError(f"{label}: this setting cannot be changed here.")  # pragma: no cover
 
 
@@ -2025,6 +2420,10 @@ def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one 
                     or not 1 <= seconds <= 86400:
                 raise SettingError(f"{label}: enter a whole number of times and a period.")
             out[name] = f"{int(count)}/{int(seconds)}"
+        elif setting.row_kind == "grid":
+            if name not in allowed:
+                raise SettingError(f"{label}: choose each {setting.item_label.lower()} from the list.")
+            out[name] = _grid_spec(setting, row)
         elif setting.row_kind == "risk":
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name) or "__" in name:
                 raise SettingError(
@@ -2038,6 +2437,168 @@ def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one 
         else:  # pragma: no cover - guarded by _assert_consistent
             raise SettingError(f"{label}: this setting cannot be changed here.")
     return out
+
+
+def _coerce_cell(setting: Setting, column: Column, value: object) -> object:  # noqa: C901 - one branch per column kind
+    """Validate one cell of a grid or rules row."""
+    where = f"{setting.label}, {column.label.lower()}"
+    kind = column.kind
+    allowed = [v for v, _ in column.choices]
+    if kind in {"select", "pick"}:
+        if value is None:
+            value = column.default if column.default is not None else ""
+        text = value if isinstance(value, str) else None
+        if text is None or text not in allowed and not (text == "" and not column.required):
+            raise SettingError(f"{where}: choose one of the listed options.")
+        if column.required and not text:
+            raise SettingError(f"{where}: choose an option for each row.")
+        return text
+    if kind == "picks":
+        if value is None:
+            value = []
+        if not isinstance(value, list) or len(value) > column.max_items:
+            raise SettingError(f"{where}: choose at most {column.max_items}.")
+        picked: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or item not in allowed:
+                raise SettingError(f"{where}: choose from the listed options.")
+            if item not in picked:
+                picked.append(item)
+        if column.required and not picked:
+            raise SettingError(f"{where}: choose at least one for each row.")
+        return picked
+    if kind == "switch":
+        if value is None:
+            value = bool(column.default)
+        if not isinstance(value, bool):
+            raise SettingError(f"{where}: choose on or off.")
+        return value
+    if kind == "number":
+        if value is None or value == "":
+            raise SettingError(f"{where}: enter a number for each row.")
+        if not _is_number(value) or not math.isfinite(float(value)):
+            raise SettingError(f"{where}: enter a number.")
+        if column.minimum is not None and value < column.minimum:
+            raise SettingError(f"{where}: enter at least {_fmt(column.minimum)}.")
+        if column.maximum is not None and value > column.maximum:
+            raise SettingError(f"{where}: enter at most {_fmt(column.maximum)}.")
+        if column.integer:
+            if value != int(value):
+                raise SettingError(f"{where}: enter a whole number.")
+            return int(value)
+        return float(value)
+    if kind == "words":
+        if value is None:
+            value = ""
+        if isinstance(value, str):
+            value = value.split(",")
+        if not isinstance(value, list) or len(value) > column.max_items:
+            raise SettingError(f"{where}: use at most {column.max_items} entries.")
+        words: list[str] = []
+        for raw in value:
+            if not isinstance(raw, str):
+                raise SettingError(f"{where}: each entry must be text.")
+            item = raw.strip()
+            if not item:
+                continue
+            if len(item) > column.max_length or (
+                column.pattern and not re.fullmatch(column.pattern, item)
+            ):
+                raise SettingError(f"{where}: each entry must be {column.item_error}.")
+            if item not in words:
+                words.append(item)
+        if column.required and not words:
+            raise SettingError(f"{where}: enter at least one for each row.")
+        return words
+    raise SettingError(f"{setting.label}: this setting cannot be changed here.")  # pragma: no cover
+
+
+def _grid_spec(setting: Setting, row: dict) -> object:
+    """What one grid row stores: the single value, or every column's value.
+
+    Every column is written (an empty list or ``""`` included) so a value the
+    installer set for the same row cannot show through underneath.
+    """
+    cells = {c.key: _coerce_cell(setting, c, row.get(c.key)) for c in setting.columns}
+    if setting.scalar:
+        return cells[setting.columns[0].key]
+    return cells
+
+
+def _coerce_rules(setting: Setting, value: object) -> list[dict]:
+    label = setting.label
+    if value is None or value == "":
+        return []
+    if not isinstance(value, list) or len(value) > MAX_TABLE_ROWS:
+        raise SettingError(f"{label}: use at most {MAX_TABLE_ROWS} rows.")
+    out: list[dict] = []
+    for row in value:
+        if not isinstance(row, dict):
+            raise SettingError(f"{label}: each row needs its values.")
+        cells = {c.key: _coerce_cell(setting, c, row.get(c.key)) for c in setting.columns}
+        if cells in out:
+            raise SettingError(f"{label}: each row must be different.")
+        for column in setting.columns:
+            if column.unique and any(r[column.key] == cells[column.key] for r in out):
+                raise SettingError(
+                    f"{label}: each {column.label.lower()} can be listed only once."
+                )
+        out.append(cells)
+    return out
+
+
+def _rank(value: object, order: tuple[str, ...]) -> int:
+    try:
+        return order.index(str(value or ""))
+    except ValueError:
+        return len(order)
+
+
+def _acl_row(spec: object) -> tuple[list[str], list[str], str]:
+    spec = spec if isinstance(spec, dict) else {}
+    denied = [str(v) for v in spec.get("denied_tools") or [] if isinstance(v, str)]
+    allowed = [str(v) for v in spec.get("allowed_tools") or [] if isinstance(v, str)]
+    risk = spec.get("max_risk")
+    return denied, allowed, risk if risk in {"low", "medium", "high"} else ""
+
+
+def _acl_loosens(before: dict, after: dict) -> bool:
+    ceiling = ("low", "medium", "high", "")  # "" = no ceiling of its own
+    for name, spec in before.items():
+        if name not in after:
+            return True  # the app's own rules are removed
+        old_denied, old_allowed, old_risk = _acl_row(spec)
+        new_denied, new_allowed, new_risk = _acl_row(after[name])
+        if any(tool not in new_denied for tool in old_denied):
+            return True  # a blocked tool is unblocked
+        if old_allowed and (not new_allowed or any(t not in old_allowed for t in new_allowed)):
+            return True  # the allow list opened up
+        if _rank(new_risk, ceiling) > _rank(old_risk, ceiling):
+            return True  # riskier tools allowed
+    return False
+
+
+def _grid_loosens(setting: Setting, before: dict, after: dict) -> bool:
+    mode = setting.weaker
+    if mode == "acl":
+        return _acl_loosens(before, after)
+    if mode == "cap":
+        for name, cap in before.items():
+            if name not in after:
+                return True
+            if _is_number(cap) and _is_number(after[name]) and after[name] > cap:
+                return True
+        return False
+    if mode == "add":
+        for name, items in after.items():
+            old = before.get(name)
+            old_items = old if isinstance(old, list) else []
+            if name not in before or any(i not in old_items for i in items or []):
+                return True
+        return False
+    if mode == "grow":
+        return any(name not in before or before[name] != spec for name, spec in after.items())
+    return before != after
 
 
 RATE_PERIODS: tuple[tuple[int, str], ...] = (
@@ -2070,13 +2631,22 @@ def warning_lead(setting: Setting) -> str:
         return "If you raise this:"
     if setting.weaker == "change":
         return "If you change this:"
-    if setting.weaker in {"grow", "add"}:
+    if setting.weaker in {"grow", "add", "widen"}:
         return "If you add to this:"
+    if setting.weaker in {"acl", "cap"}:
+        return "If you loosen this:"
     if setting.weaker == "insecure":
         return "If you use a web address that is not secure:"
     if setting.weaker == "shrink":
         return "If you remove from this:"
     return "If you loosen this:"
+
+
+def _count(count: int, noun: str) -> str:
+    if count == 1:
+        return f"1 {noun}"
+    plural = noun + "es" if noun.endswith(("s", "x", "sh", "ch")) else noun + "s"
+    return f"{count} {plural}"
 
 
 def _fmt(number: float) -> str:
@@ -2117,28 +2687,45 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
                 return old is not None
             return old is not None and float(new) > float(old)
     if setting.control in {"list", "multiselect", "keys"}:
-        old_items = [str(v) for v in old] if isinstance(old, list) else []
-        new_items = [str(v) for v in new] if isinstance(new, list) else []
-        if setting.weaker == "add":
-            # Only a new destination sends data somewhere new; removing one
-            # sends less.
-            return any(item not in old_items for item in new_items)
-        if setting.weaker == "grow":
-            added = any(item not in old_items for item in new_items)
-            # Emptying hands the decision back to a broader default: an empty
-            # publisher list trusts any signature, an empty model list allows
-            # every model, an empty allow list falls back to the server's list.
-            return added or (bool(old_items) and not new_items)
-        if setting.weaker == "shrink":
-            return any(item not in new_items for item in old_items)
+        return _list_loosens(setting, old, new)
     if setting.control == "table":
         return _table_loosens(setting, old, new)
+    if setting.control == "rules":
+        before = old if isinstance(old, list) else []
+        after = new if isinstance(new, list) else []
+        return any(row not in before for row in after) if setting.weaker == "grow" \
+            else before != after
+    return False
+
+
+def _list_loosens(setting: Setting, old: object, new: object) -> bool:
+    old_items = [str(v) for v in old] if isinstance(old, list) else []
+    new_items = [str(v) for v in new] if isinstance(new, list) else []
+    if setting.weaker == "add":
+        # Only a new destination sends data somewhere new; removing one
+        # sends less.
+        return any(item not in old_items for item in new_items)
+    if setting.weaker == "grow":
+        added = any(item not in old_items for item in new_items)
+        # Emptying hands the decision back to a broader default: an empty
+        # publisher list trusts any signature, an empty model list allows
+        # every model, an empty allow list falls back to the server's list.
+        return added or (bool(old_items) and not new_items)
+    if setting.weaker == "shrink":
+        return any(item not in new_items for item in old_items)
+    if setting.weaker == "widen":
+        # An empty list places no restriction, so leaving it is tightening.
+        if not old_items:
+            return False
+        return not new_items or any(item not in old_items for item in new_items)
     return False
 
 
 def _table_loosens(setting: Setting, old: object, new: object) -> bool:
     before = old if isinstance(old, dict) else {}
     after = new if isinstance(new, dict) else {}
+    if setting.row_kind == "grid":
+        return _grid_loosens(setting, before, after)
     if setting.row_kind == "rate":
         for name, spec in before.items():
             if name not in after:
@@ -2178,8 +2765,10 @@ def cross_checks(effective: dict[str, object]) -> None:
     for low_id, high_id in _ORDERED:
         low, high = effective.get(low_id), effective.get(high_id)
         if _is_number(low) and _is_number(high) and float(low) > float(high):
+            high_label = BY_ID[high_id].label
             raise SettingError(
-                f"{BY_ID[low_id].label} can't be more than {BY_ID[high_id].label.lower()}."
+                f"{BY_ID[low_id].label} can't be more than "
+                f"{high_label[:1].lower() + high_label[1:]}."
             )
 
 
@@ -2197,6 +2786,8 @@ def display_value(setting: Setting, value: object) -> str:
     """Plain words for a value (never a secret's content)."""
     if setting.secret:
         return "Set" if value else "Not set"
+    if (value is None or value == "" or value == []) and setting.none_text:
+        return setting.none_text
     if value is None or value == "" or value == []:
         if setting.control in {"number", "rate"}:
             return "No limit"
@@ -2219,8 +2810,12 @@ def display_value(setting: Setting, value: object) -> str:
     if setting.control == "keys" and isinstance(value, list):
         return f"{len(value)} trusted key" + ("" if len(value) == 1 else "s")
     if setting.control == "table" and isinstance(value, dict):
+        if setting.row_kind == "grid":
+            return _count(len(value), setting.item_label.lower()) if value else "None"
         noun = "limit" if setting.row_kind == "rate" else "tool"
         return f"{len(value)} {noun}" + ("" if len(value) == 1 else "s") if value else "None"
+    if setting.control == "rules" and isinstance(value, list):
+        return _count(len(value), setting.item_label.lower()) if value else "None"
     if setting.control == "rate":
         parsed = parse_rate(value)
         if parsed is None:
@@ -2234,7 +2829,7 @@ def display_value(setting: Setting, value: object) -> str:
 
 
 __all__ = [
-    "BY_ID", "CATALOG_TOP_SECTIONS", "GROUPS", "GROUP_INTROS", "SETTINGS",
+    "BY_ID", "CATALOG_TOP_SECTIONS", "Column", "GROUPS", "GROUP_INTROS", "SETTINGS",
     "RATE_PERIODS", "RISK_LEVELS", "Setting", "SettingError", "coerce", "cross_checks",
     "display_value", "key_fingerprint", "lookup", "parse_public_key", "parse_rate",
     "warning_lead", "weakens",
@@ -2250,7 +2845,15 @@ def _assert_consistent() -> None:
         if s.warning:
             assert s.weaker is not None, s.id
         if s.control == "table":
-            assert s.row_kind in {"rate", "risk"}, s.id
+            assert s.row_kind in {"rate", "risk", "grid"}, s.id
+        if s.row_kind == "grid" or s.control == "rules":
+            assert s.columns and all(c.kind in COLUMN_KINDS for c in s.columns), s.id
+            assert not s.scalar or len(s.columns) == 1, s.id
+            for c in s.columns:
+                if c.kind in {"select", "pick", "picks"}:
+                    assert c.choices or c.choices_from, s.id
+        if s.row_kind == "grid":
+            assert s.choices or s.choices_from, s.id
         if s.key_kind == "entries":
             assert s.control == "table", s.id
         assert s.scale > 0, s.id

@@ -132,7 +132,40 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     present, value = catalog.lookup(layers["base"], setting.path)
     if present:
         return {"source": "installer", "locked": False, "value": value, "known": True}
-    return {"source": "default", "locked": False, "value": _default_of(setting), "known": True}
+    return {"source": "default", "locked": False, "value": _default_in(setting, layers),
+            "known": True}
+
+
+def _has_partial_default(setting: catalog.Setting) -> bool:
+    return setting.partial_default is not catalog._NO_PARTIAL
+
+
+def _table_written(layers: dict[str, Any], path: tuple[str, ...]) -> bool:
+    """True when any configuration layer holds keys in the table at ``path``."""
+    for layer in layers.values():
+        present, table = catalog.lookup(layer, path)
+        if present and table:
+            return True
+    return False
+
+
+def _default_in(setting: catalog.Setting, layers: dict[str, Any]) -> object:
+    """The default the kernel applies now (some readers keep an older default
+    once their table holds other keys)."""
+    if _has_partial_default(setting) and _table_written(layers, setting.path[:-1]):
+        return setting.partial_default
+    return _default_of(setting)
+
+
+def _pin_partial_defaults(writes: dict, layers: dict[str, Any]) -> None:
+    """Writing the first key of a table whose reader changes its defaults once
+    the table exists: also write those defaults, so nothing else changes."""
+    for top in {path[0] for path, value in writes.items() if value is not None}:
+        if _table_written(layers, (top,)):
+            continue
+        for setting in catalog.SETTINGS:
+            if setting.top == top and _has_partial_default(setting):
+                writes.setdefault(setting.path, _default_of(setting))
 
 
 # ------------------------------------------------------------ live choices
@@ -214,7 +247,91 @@ def _source_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one b
     if source == "tools":
         return [*TOOL_FAMILIES,
                 *((n, identity_format.humanize(n)) for n in _tool_names())]
+    if source == "tools_any":
+        return [("*", "Any tool"), *_source_choices("tools")]
+    return _more_choices(source)
+
+
+def _merged_table(name: str) -> dict:
+    from maverick import config
+
+    try:
+        table = (config.load_config() or {}).get(name) or {}
+    except Exception:  # an unreadable configuration offers nothing new
+        table = {}
+    return table if isinstance(table, dict) else {}
+
+
+def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one branch per source
+    """Live options for the admin-policy settings (people, apps, models...)."""
+    from . import identity_format
+
+    if source == "people_only":
+        return _people_choices()[1:]
+    if source == "chat_channels":
+        return [(name, catalog.CHANNEL_ALLOWLISTS.get(name, (identity_format.humanize(name),))[0])
+                for name, table in sorted(_merged_table("channels").items())
+                if isinstance(table, dict)]
+    if source == "providers":
+        from maverick import config
+
+        from . import settings_store
+
+        out: list[tuple[str, str]] = []
+        for provider in settings_store.PROVIDERS:
+            try:
+                configured = config.provider_configuration_state(provider["name"])["configured"]
+            except Exception:
+                configured = False
+            if configured:
+                out.append((provider["name"], provider["label"]))
+        known = {v for v, _ in out}
+        for name, table in sorted(_merged_table("providers").items()):
+            if isinstance(table, dict) and name not in known:
+                out.append((name, identity_format.humanize(name)))
+        return out
+    if source == "models":
+        from maverick.llm import PROVIDER_LABELS, catalog_specs
+
+        from .model_pickers import config_catalog
+
+        out = []
+        for spec in dict.fromkeys([spec for spec, _label in catalog_specs()] + config_catalog()):
+            provider, sep, model = spec.partition(":")
+            if not sep:
+                provider, model = "anthropic", spec
+            out.append((spec, f"{model} ({PROVIDER_LABELS.get(provider, identity_format.humanize(provider))})"))
+        return out
+    if source == "suites":
+        from maverick.departments import department_title
+        from maverick.suite_grants import known_suites
+
+        return sorted(((s, department_title(s)) for s in known_suites()), key=lambda c: c[1])
+    if source == "roles":
+        from . import rbac
+
+        return [(role, identity_format.role_label(role)) for role in rbac.known_roles()]
+    if source == "scim_groups":
+        from . import scim
+
+        try:
+            groups = scim._load_groups()
+        except Exception:  # an unreadable group store offers no groups
+            groups = {}
+        names = sorted({str(g.get("displayName") or "").strip() for g in groups.values()} - {""})
+        return [(name, name) for name in names]
+    if source == "ekko_apps":
+        from maverick.config import _EKKO_DEFAULT_BLOCKED_APPS
+        from maverick.work_discovery import KNOWN_APPS
+
+        from .ekko_routes import _app_name
+
+        apps = sorted(set(KNOWN_APPS) - set(_EKKO_DEFAULT_BLOCKED_APPS))
+        return sorted(((a, _app_name(a)) for a in apps), key=lambda c: c[1])
     return []
+
+
+_LAZY_SOURCES = frozenset({"tools", "tools_any"})
 
 
 def _resolved(
@@ -225,6 +342,9 @@ def _resolved(
     ``full=False`` skips the tool list, which is slow to build and which the
     page loads separately; the rows already set still get their labels.
     """
+    if setting.columns:
+        setting = dataclasses.replace(
+            setting, columns=_resolved_columns(setting, current, full=full))
     if not setting.choices_from:
         return setting
     from . import identity_format
@@ -235,6 +355,8 @@ def _resolved(
         choices = list(_source_choices(setting.choices_from))
     known = {v for v, _ in choices}
     extra = current if isinstance(current, (list, dict)) else [current]
+    if setting.control == "rules":
+        extra = []
     for value in extra:
         if value not in (None, "") and str(value) not in known:
             choices.append((str(value), identity_format.humanize(value)))
@@ -242,6 +364,47 @@ def _resolved(
     if setting.control == "table":
         choices = [c for c in choices if c[0] not in setting.fixed_keys]
     return dataclasses.replace(setting, choices=tuple(choices))
+
+
+def _cell_values(setting: catalog.Setting, current: object, column: catalog.Column) -> list:
+    """Every value a column holds now, so a saved value keeps a label."""
+    if setting.control == "rules":
+        specs = [r for r in current if isinstance(r, dict)] if isinstance(current, list) else []
+        cells = [spec.get(column.key) for spec in specs]
+    elif isinstance(current, dict):
+        cells = [spec if setting.scalar else (spec or {}).get(column.key)
+                 for spec in current.values() if setting.scalar or isinstance(spec, dict)]
+    else:
+        cells = []
+    out: list = []
+    for cell in cells:
+        out.extend(cell if isinstance(cell, list) else [cell])
+    return out
+
+
+def _resolved_columns(
+    setting: catalog.Setting, current: object, *, full: bool,
+) -> tuple[catalog.Column, ...]:
+    from . import identity_format
+
+    columns = []
+    for column in setting.columns:
+        if not column.choices_from:
+            columns.append(column)
+            continue
+        lazy = column.choices_from in _LAZY_SOURCES and not full
+        if lazy:
+            choices = [c for c in (("*", "Any tool"), *TOOL_FAMILIES)
+                       if column.choices_from == "tools_any" or c[0] != "*"]
+        else:
+            choices = list(_source_choices(column.choices_from))
+        known = {v for v, _ in choices}
+        for value in _cell_values(setting, current, column):
+            if isinstance(value, str) and value and value not in known:
+                choices.append((value, identity_format.humanize(value)))
+                known.add(value)
+        columns.append(dataclasses.replace(column, choices=tuple(choices)))
+    return tuple(columns)
 
 
 def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
@@ -272,7 +435,11 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         "subgroup": setting.subgroup,
         "item_label": setting.item_label,
         "item_hint": setting.item_hint,
+        "empty_text": setting.empty_text,
+        "add_label": setting.add_label,
     }
+    if setting.empty_hint:
+        row["empty_hint"] = setting.empty_hint
     if setting.choices_from == "people" and len(setting.choices) <= 1:
         row["empty_hint"] = "Nobody has been added yet. Add people on the People page first."
     if setting.secret:
@@ -303,7 +470,70 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         row["risks"] = [{"value": v, "label": label} for v, label in catalog.RISK_LEVELS]
         row["row_kind"] = setting.row_kind
         row["rows"] = _table_rows(setting, value)
+    if setting.columns:
+        row["grid"] = _grid_state(setting, value if state["known"] else None)
+        row["row_kind"] = row.get("row_kind") or "rules"
     return row
+
+
+def _grid_state(setting: catalog.Setting, value: object) -> dict[str, Any]:
+    """What the page needs to draw a grid or a list of rules."""
+    columns = []
+    for column in setting.columns:
+        lazy = column.choices_from in _LAZY_SOURCES
+        columns.append({
+            "key": column.key, "label": column.label, "kind": column.kind,
+            "required": column.required, "default": column.default,
+            "minimum": column.minimum, "maximum": column.maximum, "unit": column.unit,
+            "step": 1 if column.integer else "any", "max_length": column.max_length,
+            "choices": [] if lazy else [{"value": v, "label": label}
+                                        for v, label in column.choices],
+            "choices_url": (f"{API_PATH}/choices/{setting.id}?column={column.key}"
+                            if lazy else ""),
+        })
+    return {
+        "kind": "rules" if setting.control == "rules" else "grid",
+        "columns": columns,
+        "key_choices": [{"value": v, "label": label} for v, label in setting.choices],
+        "row_label": setting.row_label,
+        "item_label": setting.item_label,
+        "rows": _grid_rows(setting, value),
+    }
+
+
+def _grid_rows(setting: catalog.Setting, value: object) -> list[dict[str, Any]]:
+    labels = dict(setting.choices)
+    column_labels = {c.key: dict(c.choices) for c in setting.columns}
+    if setting.control == "rules":
+        entries = [(None, spec) for spec in value if isinstance(spec, dict)] \
+            if isinstance(value, list) else []
+    else:
+        entries = sorted(value.items()) if isinstance(value, dict) else []
+    rows = []
+    for name, spec in entries:
+        cells: dict[str, Any] = {}
+        for column in setting.columns:
+            if setting.scalar:
+                cell = spec
+            else:
+                cell = spec.get(column.key) if isinstance(spec, dict) else None
+            if cell is None:
+                cell = [] if column.kind == "picks" else column.default
+            if column.kind == "picks":
+                items = cell if isinstance(cell, list) else [cell]
+                cell = [{"value": str(v), "label": column_labels[column.key].get(str(v), str(v))}
+                        for v in items if v not in (None, "")]
+            elif column.kind == "words":
+                cell = ", ".join(str(v) for v in cell) if isinstance(cell, list) else str(cell or "")
+            elif column.kind in {"select", "pick"}:
+                cell = {"value": str(cell or ""),
+                        "label": column_labels[column.key].get(str(cell or ""), str(cell or ""))}
+            cells[column.key] = cell
+        entry: dict[str, Any] = {"cells": cells}
+        if name is not None:
+            entry.update(name=name, label=labels.get(name, name))
+        rows.append(entry)
+    return rows
 
 
 def _table_rows(setting: catalog.Setting, value: object) -> list[dict[str, Any]]:
@@ -329,8 +559,8 @@ def _form_value(setting: catalog.Setting, value: object) -> object:
     if setting.control == "number" and setting.scale != 1.0 and catalog._is_number(value):
         shown = round(float(value) / setting.scale, 4)
         return int(shown) if shown == int(shown) else shown
-    if setting.control in {"keys", "table"}:
-        return None  # carried by ``keys`` / ``rows``
+    if setting.control in {"keys", "table", "rules"}:
+        return None  # carried by ``keys`` / ``rows`` / ``grid``
     return value
 
 
@@ -437,17 +667,25 @@ class CatalogUpdate(BaseModel):
 
 
 @router.get(API_PATH + "/choices/{setting_id}")
-async def catalog_choices(request: Request, setting_id: str) -> JSONResponse:
-    """The options of one setting whose list is too long to put in the page."""
+async def catalog_choices(
+    request: Request, setting_id: str, column: str = "",
+) -> JSONResponse:
+    """The options of one setting (or one column of its rows) whose list is
+    too long to put in the page."""
     auth.require_global_permission(request, "admin")
     setting = catalog.BY_ID.get(setting_id)
-    if setting is None or not setting.choices_from:
+    wanted = next((c for c in setting.columns if c.key == column), None) \
+        if setting is not None and column else None
+    if setting is None or (column and (wanted is None or not wanted.choices_from)) \
+            or (not column and not setting.choices_from):
         return JSONResponse({"detail": "That setting has no list of options.",
                              "message": "That setting has no list of options."},
                             status_code=404)
     resolved = await run_in_threadpool(_resolved, setting)
+    choices = (next(c for c in resolved.columns if c.key == column).choices
+               if column else resolved.choices)
     return JSONResponse(
-        {"choices": [{"value": v, "label": label} for v, label in resolved.choices]},
+        {"choices": [{"value": v, "label": label} for v, label in choices]},
         headers={"Cache-Control": "no-store"},
     )
 
@@ -504,7 +742,12 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         if item.reset:
             default = _default_of(setting)
             base_present, base_value = catalog.lookup(layers["base"], setting.path)
-            if (not setting.secret and base_present and default is not None
+            if _has_partial_default(setting):
+                # Removing the value could let an older default apply: write
+                # the default itself.
+                writes[setting.path] = default
+                new = default
+            elif (not setting.secret and base_present and default is not None
                     and base_value != default):
                 # The installer chose something else: write the default so the
                 # setting really returns to it.
@@ -537,6 +780,8 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         catalog.cross_checks(prospective)
     except catalog.SettingError as exc:
         raise _Refused(400, str(exc)) from exc
+    if writes:
+        _pin_partial_defaults(writes, layers)
     return writes, changes, weakening, layers
 
 

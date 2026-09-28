@@ -87,7 +87,7 @@
            {% if s.subgroup %}data-subgroup="{{ s.subgroup_slug }}"{% endif %}
            data-search="{{ (s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ g.name ~ ' ' ~ s.subgroup) | lower }}">
         <div class="settings-all-about-row">
-          {% if s.control in ['multiselect', 'toggle', 'rate', 'keys', 'table', 'list'] %}
+          {% if s.control in ['multiselect', 'toggle', 'rate', 'keys', 'table', 'list', 'rules'] %}
           <span class="settings-all-label" id="{{ cid }}-label">{{ s.label }}</span>
           {% else %}
           <label class="settings-all-label" id="{{ cid }}-label" for="{{ cid }}">{{ s.label }}</label>
@@ -191,6 +191,38 @@
                 </label>
                 <button class="btn btn--ghost" type="button" data-key-add>Add this key</button>
               </details>
+            </div>
+          {% elif s.grid %}
+            {% set grid_rows = s.grid.kind == 'grid' %}
+            <div class="settings-all-grid" data-grid data-grid-state='{{ s.grid | tojson }}'>
+              <table class="settings-all-rows" aria-labelledby="{{ cid }}-label">
+                <thead><tr>
+                  {% if grid_rows %}<th scope="col">{{ s.grid.row_label }}</th>{% endif %}
+                  {% for c in s.grid.columns %}<th scope="col">{{ c.label }}</th>{% endfor %}
+                  <th scope="col"><span class="sr-only">Remove</span></th>
+                </tr></thead>
+                <tbody data-grid-body></tbody>
+              </table>
+              <p class="muted" data-grid-empty>{{ s.empty_text }}</p>
+              {% if s.grid.key_choices or not grid_rows %}
+              <div class="settings-all-table-add">
+                {% if grid_rows %}
+                <label class="settings-all-field" for="{{ cid }}">{{ s.grid.row_label }}
+                  <select class="select" id="{{ cid }}" data-grid-newkey aria-describedby="{{ cid }}-help">
+                    <option value="">Choose one</option>
+                    {% for k in s.grid.key_choices %}<option value="{{ k.value }}">{{ k.label }}</option>{% endfor %}
+                  </select>
+                </label>
+                <button class="btn btn--ghost" type="button" data-grid-add>{{ s.add_label }}</button>
+                {% else %}
+                <button class="btn btn--ghost" type="button" data-grid-add id="{{ cid }}"
+                        aria-describedby="{{ cid }}-help">{{ s.add_label }}</button>
+                {% endif %}
+              </div>
+              {% endif %}
+              {% if s.empty_hint and ((grid_rows and not s.grid.key_choices) or (not grid_rows and s.grid.columns[0].choices | length == 0)) %}
+              <p class="muted" data-grid-hint>{{ s.empty_hint }}</p>
+              {% endif %}
             </div>
           {% elif s.control == 'table' %}
             <div class="settings-all-table" data-table data-row-kind="{{ s.row_kind }}"
