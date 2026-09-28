@@ -462,12 +462,41 @@ function chooseCustody(h, size) {
   let value = 'synthetic-file-selection';
   Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
   Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
-  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: require('node:crypto').webcrypto.subtle });
+  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: trackedSubtle() });
   input.dispatchEvent(new h.dom.window.Event('change'));
   return file;
 }
 function confirmCustody(h) { h.get('custody-confirm').checked = true; h.get('custody-confirm').dispatchEvent(new h.dom.window.Event('change')); }
-async function settleCustody() { for (let i = 0; i < 5; i++) await tick(); }
+// Hashing a chosen file uses WebCrypto, which finishes on the thread pool
+// rather than within a fixed number of ticks; under load it can take longer.
+// Count the page's in-flight WebCrypto calls and wait for them to finish.
+const cryptoInFlight = { count: 0 };
+function trackedSubtle() {
+  const real = require('node:crypto').webcrypto.subtle;
+  return new Proxy(real, {
+    get(target, key) {
+      const value = target[key];
+      if (typeof value !== 'function') return value;
+      return (...args) => {
+        cryptoInFlight.count++;
+        return Promise.resolve(value.apply(target, args)).finally(() => { cryptoInFlight.count--; });
+      };
+    },
+  });
+}
+async function settleCustody() {
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < 5; i++) await tick();
+    const deadline = Date.now() + 5000;
+    while (cryptoInFlight.count > 0 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  for (let i = 0; i < 5; i++) await tick();
+}
+async function waitForCustody(predicate) {
+  const deadline = Date.now() + 5000;
+  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  await settleCustody();
+}
 
 test('custody rehearsal requires a user file and fresh consent, binds inspected snapshot and uploaded bytes, and never autoexports keys', async () => {
   const h = await harness(async url => url.endsWith('/inspect') ? { id: 'snapshot-a', sha256: 'a'.repeat(64) } : url.endsWith('/custody-test') ? custodyReport() : {}, { live_restore_available: false });
@@ -682,7 +711,7 @@ function chooseCustodyInstall(h, bytes = custodyBytes) {
   let value = 'synthetic-install-selection';
   Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
   Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
-  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: require('node:crypto').webcrypto.subtle });
+  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: trackedSubtle() });
   input.dispatchEvent(new h.dom.window.Event('change'));
   return file;
 }
@@ -745,7 +774,8 @@ test('key installation rechecks the exact tested ZIP and binds snapshot, report 
   assert.equal(h.calls.some(call => call.url.endsWith('/retained-keys/install')), false);
   h.get('custody-install-confirm').checked = true;
   h.get('custody-install-confirm').dispatchEvent(new h.dom.window.Event('change'));
-  h.get('custody-install').click(); h.get('custody-install').click(); await settleCustody();
+  h.get('custody-install').click(); h.get('custody-install').click();
+  await waitForCustody(() => h.calls.some(call => call.url.endsWith('/retained-keys/install')));
   const calls = h.calls.filter(call => call.url.endsWith('/retained-keys/install'));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init.body, file);
@@ -768,7 +798,8 @@ test('a different key ZIP cannot reuse retained-key evidence or send an install 
   chooseCustodyInstall(h, Buffer.from('different key bytes'));
   h.get('custody-install-confirm').checked = true;
   h.get('custody-install-confirm').dispatchEvent(new h.dom.window.Event('change'));
-  h.get('custody-install').click(); await settleCustody();
+  h.get('custody-install').click();
+  await waitForCustody(() => /does not match/.test(h.get('status').textContent));
   assert.equal(h.calls.some(call => call.url.endsWith('/retained-keys/install')), false);
   assert.match(h.get('status').textContent, /does not match the signed retained-key test/);
   assert.equal(h.get('custody-install-file').value, '');
