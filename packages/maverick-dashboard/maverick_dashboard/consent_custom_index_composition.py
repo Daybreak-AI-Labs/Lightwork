@@ -370,11 +370,13 @@ def _store_path(app: Any, *, tenant_id: str, request: object) -> Path:
 
 
 def _source_database_ready(path: Path) -> bool:
-    if not path.is_file():
-        return False
+    from maverick import consent_storage
+
     try:
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+        connection = consent_storage.read_only_connection(path)
+        if connection is None:
+            return False
+        try:
             names = {
                 str(row[0])
                 for row in connection.execute(
@@ -382,7 +384,9 @@ def _source_database_ready(path: Path) -> bool:
                     "AND name IN ('catalogs','profile_values')"
                 ).fetchall()
             }
-    except (OSError, sqlite3.Error, ValueError):
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error, ValueError, consent_storage.ConsentStorageError):
         return False
     return names == {"catalogs", "profile_values"}
 

@@ -165,9 +165,9 @@ class ConsentPublishingWebsiteAuthorityResolver:
     ) -> web.WebsitePublishingAuthority:
         tenant = canonical_tenant_id(tenant_id)
         try:
-            from maverick import consent_publishing
+            from maverick import consent_publishing, consent_storage
 
-            if not self.path.is_file():
+            if not consent_storage.store_exists(self.path):
                 raise ConsentWebPublishSettingsCompositionError(
                     "web_publish_settings_publishing_authority_unavailable"
                 )
@@ -332,10 +332,16 @@ def _build_store(
 
 
 def _publishing_database_ready(path: Path) -> bool:
-    if not path.is_file():
+    from maverick import consent_storage
+
+    try:
+        connection = consent_storage.read_only_connection(path)
+    except (OSError, sqlite3.DatabaseError, consent_storage.ConsentStorageError):
+        return False
+    if connection is None:
         return False
     try:
-        with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as connection:
+        with connection:
             rows = connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
                 "('publishing_meta','publishing_properties','consent_publications',"
@@ -354,6 +360,8 @@ def _publishing_database_ready(path: Path) -> bool:
             quick = connection.execute("PRAGMA quick_check").fetchone()
     except (OSError, sqlite3.DatabaseError):
         return False
+    finally:
+        connection.close()
     return (
         version is not None
         and str(version[0]) == "2"

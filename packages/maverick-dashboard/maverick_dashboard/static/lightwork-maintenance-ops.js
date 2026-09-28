@@ -462,6 +462,41 @@
     } catch (failure) { say('task-records', await failText(failure, 'cancel the move')); }
   };
 
+  var consentMove = q('[data-ops-run="consent-move"]');
+  function consentTable(rows) {
+    return table(['Workspace', 'Consent records', 'How many', 'Result'], rows.map(function (r) {
+      return [r.workspace, r.store, r.records.toLocaleString(), r.result];
+    }));
+  }
+  runners.consent = async function () {
+    say('consent', 'Checking…');
+    if (consentMove) consentMove.hidden = true;
+    try {
+      var data = await call(BASE + '/consent-records');
+      if (consentMove) consentMove.hidden = !data.ready;
+      show('consent', [para(data.summary), data.stores.length ? consentTable(data.stores) : null]);
+      say('consent', '');
+    } catch (failure) { say('consent', await failText(failure, 'check the consent records')); }
+  };
+  runners['consent-move'] = async function () {
+    if (!await confirmed('Copy the consent records into the shared database? Parts the shared database already holds other records for are left out, and the files on this computer are kept.', 'Copy')) return;
+    if (consentMove) consentMove.hidden = true;
+    say('consent', 'Copying consent records…');
+    try {
+      var data = await call(BASE + '/consent-records/move', 'POST', {confirm: true});
+      await follow(data.job, 'consent', function (result) {
+        var nodes = [para(result.summary)];
+        if (result.refused && result.refused.length) {
+          nodes.push(table(['Workspace', 'Consent records', 'Why they were not copied'], result.refused.map(function (r) {
+            return [r.workspace, r.store, r.reason];
+          })));
+        }
+        show('consent', nodes);
+        say('consent', 'Done.');
+      });
+    } catch (failure) { say('consent', await failText(failure, 'copy the consent records')); }
+  };
+
   // ---- tidy up old records in every workspace ------------------------------------
   var cleanupGo = q('[data-ops-run="cleanup-all-go"]');
   function periods() {

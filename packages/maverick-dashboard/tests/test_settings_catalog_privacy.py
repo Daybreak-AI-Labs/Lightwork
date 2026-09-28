@@ -113,6 +113,9 @@ SAMPLES: dict[str, object] = {
     f"{_SRC}.providers.servicenow_users.capabilities": ["verify_delete"],
     "compliance.profiles": ["gdpr"],
     "data_use_governance.enforcement.retry_base_seconds": 0.5,
+    "consent_preferences.storage.backend": "postgres",
+    "consent_preferences.storage.dsn": "postgresql://consent@db.example.com:5432/consent",  # pragma: allowlist secret
+    "consent_preferences.storage.dsn_secret_ref": "$ACME_CONSENT_DSN",  # pragma: allowlist secret
 }
 
 # Other settings a switch needs before the module's reader accepts it.
@@ -130,6 +133,8 @@ NEEDS: dict[str, dict[str, object]] = {
     f"{_NOTICE}.scheduler_enable": {f"{_NOTICE}.enable": True,
                                     f"{_NOTICE}.active_tenants": ["default"]},
     f"{_SRC}.enable": {f"{_GRAPH}.enable": True, **_GRAPH_FIELDS},
+    "consent_preferences.storage.backend": {
+        "consent_preferences.storage.dsn": SAMPLES["consent_preferences.storage.dsn"]},
 }
 for _key, _name, _pattern, _example in privacy._RIGHTS_SOURCES:
     _base = f"{_SRC}.providers.{_key}"
@@ -167,6 +172,13 @@ def _isolated(tmp_path, monkeypatch, request):
                  "MAVERICK_COMPLIANCE_PROFILES", "MAVERICK_TENANT"):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
+    from maverick import consent_storage
+
+    # Saving the shared consent database checks its driver is installed; these
+    # tests cover the settings, not the optional driver.
+    monkeypatch.setattr(consent_storage, "driver_available", lambda: True)
+    for name in (consent_storage.BACKEND_ENV, consent_storage.DEFAULT_DSN_ENV):
+        monkeypatch.delenv(name, raising=False)
     setting = getattr(getattr(request, "node", None), "callspec", None)
     chosen = setting.params.get("setting") if setting is not None else None
     if chosen is not None and chosen.id.startswith(_NOTICE):
@@ -240,8 +252,8 @@ def _invalid(setting) -> list:
         return [setting.minimum - 1, setting.maximum + 1, "many"]
     if setting.control in {"text", "secret"}:
         return ["not valid !"]
-    if setting.control == "multiselect":
-        return [["nope"]]
+    if setting.control in {"multiselect", "select"}:
+        return [["nope"]] if setting.control == "multiselect" else ["nope"]
     assert setting.control == "list", setting.id
     return [["not valid !"]]
 
@@ -268,7 +280,7 @@ def test_privacy_rows_are_grouped_and_plain():
 
 def test_every_key_name_row_is_a_sealed_secret():
     names = [s for s in ROWS if s.key.endswith(("_ref", "_secret_env", "_token_env", "_salt"))]
-    assert len(names) == 19
+    assert len(names) == 20
     assert all(s.control == "secret" for s in names), [s.id for s in names if not s.secret]
 
 

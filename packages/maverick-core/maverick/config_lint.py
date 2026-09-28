@@ -1032,6 +1032,7 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     },
     ("consent_preferences", "storage"): {
         "backend",
+        "dsn",
         "dsn_secret_ref",
     },
     ("consent_preferences", "edge_cache"): {
@@ -4427,16 +4428,18 @@ def _lint_product_governance_contracts(  # noqa: C901
                     "consent storage backend must be 'sqlite' or 'postgres'",
                 )
             )
-        if backend == "postgres":
-            secret_ref = storage.get("dsn_secret_ref")
-            if not isinstance(secret_ref, str) or not secret_ref.strip().startswith("$"):
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.storage",
-                        "dsn_secret_ref",
-                        "Postgres consent storage requires an environment-backed dsn_secret_ref",
-                    )
+        secret_ref = storage.get("dsn_secret_ref", _MISSING)
+        if secret_ref is not _MISSING and secret_ref not in ("", None) and (
+            not isinstance(secret_ref, str)
+            or not re.fullmatch(r"\$?[A-Z][A-Z0-9_]{2,63}", secret_ref.strip())
+        ):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.storage",
+                    "dsn_secret_ref",
+                    "consent storage dsn_secret_ref must name an environment variable",
                 )
+            )
 
     findings.extend(_lint_consent_delivery_destinations(cfg))
 

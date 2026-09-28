@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from maverick import consent_storage
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 from maverick.paths import canonical_tenant_id
 from pydantic import BaseModel, ConfigDict, Field
@@ -650,10 +651,14 @@ class PublicPromptAssignmentStore:
                 COMMIT;
                 """
             )
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30.0)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA secure_delete=ON")

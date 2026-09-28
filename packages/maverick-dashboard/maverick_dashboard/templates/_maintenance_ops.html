@@ -101,6 +101,14 @@
     </form>
     <p class="muted" role="status" aria-live="polite" data-ops-status="task-records"></p>
     <div data-ops-out="task-records"></div>
+    <h3 id="ops-consent-title">Consent records</h3>
+    <p class="muted">Copies each workspace's consent records from files on this computer into the shared consent database chosen in <a href="/settings/all">All settings</a>. Choosing that database doesn't move anything by itself, so run this after Lightwork restarts. Each part is copied whole or not at all, only where the shared database is still empty, and the files here are kept. Safe while Lightwork is running.</p>
+    <p class="settings-row-form">
+      <button type="button" class="btn" data-ops-run="consent">See what would be copied</button>
+      <button type="button" class="btn btn--primary" data-ops-run="consent-move" hidden>Copy consent records</button>
+    </p>
+    <p class="muted" role="status" aria-live="polite" data-ops-status="consent"></p>
+    <div data-ops-out="consent"></div>
   </div>
 
   <div class="section-head" data-settings-group="maintenance"><h2 id="ops-upkeep-title">Upkeep</h2></div>

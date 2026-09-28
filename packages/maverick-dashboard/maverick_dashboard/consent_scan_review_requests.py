@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from maverick import consent_storage
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 
 _STATUSES = frozenset({"pending", "approved", "withdrawn"})
@@ -62,11 +63,15 @@ class ScanReviewRequestStore:
                 "decided_at REAL, record_sha256 TEXT NOT NULL, "
                 "PRIMARY KEY (tenant, request_id))"
             )
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     @contextlib.contextmanager
     def _connect(self):
-        connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")

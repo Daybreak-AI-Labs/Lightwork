@@ -1045,6 +1045,7 @@ jobs:
           packages/maverick-core/tests/test_postgres_fact_history.py
           packages/maverick-core/tests/test_postgres_facts_trust.py
           packages/maverick-core/tests/test_postgres_governed_records_capacity.py
+          packages/maverick-core/tests/test_consent_storage.py
       - name: Test database connection recovery under secure defaults
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"

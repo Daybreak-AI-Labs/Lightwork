@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -249,7 +250,10 @@ class ConsentCustomIndexStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30.0)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -340,7 +344,8 @@ class ConsentCustomIndexStore:
                 raise ConsentCustomIndexIntegrityError(
                     "consent custom-index database schema is unsupported"
                 )
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     def _actor(self) -> str:
         actor = self._principal_resolver()

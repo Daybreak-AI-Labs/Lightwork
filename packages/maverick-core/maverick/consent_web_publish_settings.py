@@ -29,6 +29,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -711,7 +712,8 @@ class WebPublishSettingsStore:
             ensure_private_directory(self.path.parent)
             with self._schema_lock, self._connect(initializing=True) as connection:
                 self._create_schema(connection)
-            ensure_private_file(self.path)
+            if not consent_storage.shared():
+                ensure_private_file(self.path)
         except WebPublishSettingsError:
             raise
         except (OSError, PermissionError, sqlite3.DatabaseError) as exc:
@@ -721,7 +723,10 @@ class WebPublishSettingsStore:
 
     def _connect(self, *, initializing: bool = False) -> sqlite3.Connection:
         try:
-            connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+            if consent_storage.shared():
+                connection = consent_storage.connect(self.path, timeout=30)
+            else:
+                connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA busy_timeout=30000")

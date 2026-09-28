@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 
 SCHEMA_VERSION = 1
@@ -685,10 +686,14 @@ class TrustCenterBrandingStore:
         ensure_private_directory(self.path.parent)
         with self._connect() as connection:
             self._create_schema(connection)
-        ensure_private_file(self.path, 0o600)
+        if not consent_storage.shared():
+            ensure_private_file(self.path, 0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(str(self.path), timeout=30, isolation_level=None)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30)
+        else:
+            connection = sqlite3.connect(str(self.path), timeout=30, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

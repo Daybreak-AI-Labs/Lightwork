@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -817,24 +818,27 @@ class ConsentDeliveryStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(
-                    self.path,
-                    os.O_RDWR | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                )
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(
-            str(self.path),
-            timeout=10.0,
-            isolation_level=None,
-        )
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(
+                        self.path,
+                        os.O_RDWR | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                    )
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(
+                str(self.path),
+                timeout=10.0,
+                isolation_level=None,
+            )
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")

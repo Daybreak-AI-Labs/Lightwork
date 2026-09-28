@@ -258,6 +258,19 @@ def status(request: Request) -> dict:
     return result
 
 
+@router.get("/background-checks")
+async def background_checks(request: Request) -> dict:
+    """The background data-use checks: on or off, next pass, recent results."""
+    require_global_permission(request, "admin")
+    from . import data_use_scheduler
+
+    try:
+        return await run_in_threadpool(data_use_scheduler.status)
+    except Exception as exc:  # noqa: BLE001 - unreadable settings or job store
+        raise HTTPException(status_code=503,
+                            detail="The background data-use checks could not be read.") from exc
+
+
 @router.get("/records/{record_type}")
 async def list_records(
     request: Request,

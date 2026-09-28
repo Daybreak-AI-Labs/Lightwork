@@ -129,15 +129,19 @@ class StockSuiteAuditCaptureProvider:
             raise SuiteAuditCaptureError("source_integrity_unverified") from exc
 
     def _consent_preferences(self, tenant_id: str) -> tuple[SourceRecord, ...]:
+        from maverick import consent_storage
         from maverick.consent_preferences import ConsentPreferenceStore
 
-        path = self._required_path(
-            data_dir(
-                "consent_preferences",
-                "consent-preferences.sqlite3",
-                tenant=tenant_id,
-            )
+        path = data_dir(
+            "consent_preferences",
+            "consent-preferences.sqlite3",
+            tenant=tenant_id,
         )
+        if consent_storage.shared():
+            if not consent_storage.store_exists(path):
+                raise SuiteAuditCaptureError("source_history_unavailable")
+        else:
+            path = self._required_path(path)
         try:
             return ConsentPreferenceStore(path).unified_audit_records(tenant_id)
         except (KeyboardInterrupt, SystemExit):

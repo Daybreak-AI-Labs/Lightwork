@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from . import consent_storage
 from .consent_scan_inventory import ConsentScanInventory, ConsentScanInventoryError
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
@@ -777,7 +778,8 @@ class ConsentScanNoticeProposalStore:
         self._approval_ttl = approval_ttl_seconds
         ensure_private_directory(path.parent)
         self._initialize()
-        ensure_private_file(path)
+        if not consent_storage.shared():
+            ensure_private_file(path)
 
     @staticmethod
     def product_boundaries() -> dict[str, bool]:
@@ -806,7 +808,10 @@ class ConsentScanNoticeProposalStore:
     @contextlib.contextmanager
     def _connect(self):
         with cross_process_lock(self._lock_path):
-            connection = sqlite3.connect(self._path, timeout=30.0)
+            if consent_storage.shared():
+                connection = consent_storage.connect(self._path, timeout=30.0, implicit_transactions=True)
+            else:
+                connection = sqlite3.connect(self._path, timeout=30.0)
             connection.row_factory = sqlite3.Row
             try:
                 connection.execute("PRAGMA foreign_keys = ON")
