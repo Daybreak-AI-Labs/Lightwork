@@ -730,13 +730,12 @@ def license_issue(customer: str, tier: str, edition: str, suites: tuple,
     deployment is entitled to (``set`` is an alias). The signing key comes from
     MAVERICK_LICENSE_PRIVATE_KEY (never config, never the repo) and is never
     echoed."""
-    import json as _json
-
     from ..entitlements import (
         DEFAULT_GRACE_DAYS,
-        _default_license_path,
-        _trusted_pubkeys,
         build_license_payload,
+        install_license,
+        key_trusted,
+        license_text,
         publisher_private_key,
         sign_license,
     )
@@ -763,19 +762,16 @@ def license_issue(customer: str, tier: str, edition: str, suites: tuple,
                    f"that MAVERICK_LICENSE_PRIVATE_KEY is valid Ed25519 hex.",
                    err=True)
         sys.exit(2)
-    text = _json.dumps(doc, indent=2) + "\n"
     if to_stdout:
-        click.echo(text, nl=False)
+        click.echo(license_text(doc), nl=False)
     else:
-        path = Path(out).expanduser() if out else _default_license_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path = install_license(doc, out)
         click.echo(f"wrote signed license -> {path}")
     click.echo(f"  {customer} · tier={tier} · suites={list(suites) or '—'} · "
                f"key_id={doc['key_id'][:16]}…")
     # A license signed by a key the deployment doesn't trust grants nothing, so
     # warn instead of letting the operator think paid features are now on.
-    if doc["key_id"].lower() not in _trusted_pubkeys():
+    if not key_trusted(doc["key_id"]):
         click.echo(
             "  NOTE: this signing key is not in the deployment trust anchor "
             "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); paid "

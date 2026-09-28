@@ -8,6 +8,7 @@ from maverick.finance.sod_linter import (
     assert_no_conflicts,
     classify_duty,
     lint_compartment,
+    lint_finance_roster,
     lint_roster,
 )
 
@@ -76,3 +77,22 @@ def test_assert_no_conflicts():
                          allow_tools=["stage_journal_entry", "wire_transfer"])]
     with pytest.raises(SoDViolation):
         assert_no_conflicts(bad)
+
+
+def test_lint_finance_roster_checks_builtin_and_workspace_finance_packs(tmp_path, monkeypatch):
+    # The shared check behind `maverick finance lint-sod` and the dashboard
+    # button: shipped finance packs are clean; a workspace pack is included,
+    # and packs outside finance are not.
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    packs, conflicts = lint_finance_roster()
+    assert packs and all(name.startswith("finance_") for name in packs)
+    assert conflicts == []
+    (tmp_path / "finance_desk.toml").write_text(
+        'name = "finance_desk"\nallow_tools = ["stage_payment_batch", "release_payment"]\n',
+        encoding="utf-8")
+    (tmp_path / "ops_desk.toml").write_text(
+        'name = "ops_desk"\nallow_tools = ["stage_payment_batch", "release_payment"]\n',
+        encoding="utf-8")
+    packs2, conflicts2 = lint_finance_roster()
+    assert len(packs2) == len(packs) + 1 and "ops_desk" not in packs2
+    assert [c.compartment for c in conflicts2] == ["finance_desk"]

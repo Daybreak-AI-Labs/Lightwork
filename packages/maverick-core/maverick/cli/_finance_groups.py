@@ -75,12 +75,8 @@ def finance_status_cmd(fmt: str, strict: bool) -> None:
 @finance_grp.command("lint-sod")
 def finance_lint_sod_cmd() -> None:
     """Lint the finance roster for segregation-of-duties conflicts (CI gate)."""
-    from ..domain import builtin_dir, load_domains, user_dir
-    from ..finance.sod_linter import lint_roster
-    packs = {n: p for n, p in {**load_domains(builtin_dir()),
-                               **load_domains(user_dir())}.items()
-             if n.startswith("finance_")}
-    conflicts = lint_roster(packs)
+    from ..finance.sod_linter import lint_finance_roster
+    packs, conflicts = lint_finance_roster()
     if not conflicts:
         click.echo(f"OK: {len(packs)} finance packs are segregation-of-duties clean.")
         return

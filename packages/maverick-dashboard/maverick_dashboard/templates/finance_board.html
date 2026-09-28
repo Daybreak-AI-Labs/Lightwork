@@ -87,6 +87,9 @@
     <p class="fb-sub">Checks that no single AI team both records, approves, holds and
       reconciles money.</p>
     <div id="fb-sod"></div>
+    <p><button type="button" class="btn" id="fb-sod-check">Check separation of duties</button></p>
+    <p class="fb-note" role="status" aria-live="polite" id="fb-sod-check-status"></p>
+    <div id="fb-sod-check-out"></div>
   </section>
 </div>
 
@@ -232,4 +235,5 @@
   load();
 })();
 </script>
+<script src="/static/lightwork-finance-sod-check.js"></script>
 {% endblock %}
