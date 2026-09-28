@@ -5140,10 +5140,22 @@ async def download_goal_attachment(
     media_type = match.mime or "application/octet-stream"
     if not await run_in_threadpool(is_sealed_file, path):
         return FileResponse(path, media_type=media_type, headers=headers)
-    try:
+    from .decrypt_budget import BUDGET, DecryptBusy
+
+    def _open_within_budget() -> bytes:
         # GCM authenticates the whole (size-capped) blob before any byte is
-        # released, so a sealed attachment is decrypted in full, never streamed.
-        content = await run_in_threadpool(read_bytes, path)
+        # released, so a sealed attachment is decrypted in full, never
+        # streamed; a shared budget bounds how many are held at once.
+        with BUDGET.reserve(2 * path.stat().st_size):
+            return read_bytes(path)
+
+    try:
+        content = await run_in_threadpool(_open_within_budget)
+    except DecryptBusy as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Several large files are being prepared right now. Try again in a minute.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=409, detail="attachment could not be opened here") from exc
     return Response(content=content, media_type=media_type, headers=headers)
