@@ -175,6 +175,52 @@ class QueryExecution:
         self._start_watcher()
         return True
 
+    def bind_mysql(self, connection):
+        """pymysql (MySQL or MariaDB): a server-side statement limit plus a real
+        cancel, which is ``KILL QUERY`` sent over a second, short-lived
+        connection with the same credentials (the driver has no cancel)."""
+        try:
+            import pymysql.connections
+        except ImportError:
+            return False
+        if not isinstance(connection, pymysql.connections.Connection):
+            return False
+        self.check()
+        self.cancellation_support = "mysql_statement_timeout_and_kill_query"
+        self.transactional = not connection.get_autocommit()
+        thread_id = int(connection.thread_id())
+        # Mirror the statement connection: SSL only when it required SSL (a
+        # default pymysql connection merely prefers it, and passing its context
+        # would make SSL mandatory for the cancel connection).
+        ssl_required = getattr(connection, "_ssl_required", connection.ssl)
+
+        def kill_query():
+            import pymysql
+
+            other = pymysql.connect(
+                host=connection.host, port=connection.port, user=connection.user,
+                password=connection.password, unix_socket=connection.unix_socket,
+                ssl=connection.ctx if ssl_required else None,
+                bind_address=connection.bind_address, connect_timeout=2,
+                read_timeout=5, write_timeout=5)
+            try:
+                with other.cursor() as cursor:
+                    cursor.execute(f"KILL QUERY {thread_id:d}")
+            finally:
+                other.close()
+
+        self._cancel = kill_query
+        self._start_watcher()
+        return True
+
+    def mysql_timeout_statement(self, connection) -> str:
+        """The session statement limit for the remaining time (MariaDB takes
+        seconds for any statement; MySQL takes milliseconds, for reads)."""
+        milliseconds = max(1, math.ceil(self.remaining() * 1000))
+        if "mariadb" in str(connection.get_server_info()).lower():
+            return f"SET SESSION max_statement_time = {milliseconds / 1000:.3f}"
+        return f"SET SESSION max_execution_time = {milliseconds}"
+
     def _start_watcher(self):
         self._watcher = threading.Thread(target=self._watch, name="lightwork-query-cancel", daemon=True)
         self._watcher.start()

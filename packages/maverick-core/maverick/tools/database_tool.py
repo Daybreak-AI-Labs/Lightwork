@@ -303,6 +303,8 @@ def _prepare_query_driver(conn, execution):
         milliseconds = max(1, math.ceil(execution.remaining() * 1000))
         local = "LOCAL " if execution.transactional else ""
         conn.exec_driver_sql(f"SET {local}statement_timeout = {milliseconds}").close()
+    elif execution.bind_mysql(raw):
+        conn.exec_driver_sql(execution.mysql_timeout_statement(raw)).close()
 
 
 def _query_connection(conn, sql, limit, needs_confirm, response_format, execution):

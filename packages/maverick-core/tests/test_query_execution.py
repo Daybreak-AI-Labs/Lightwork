@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -347,3 +348,61 @@ def test_psycopg2_statement_deadline_and_fresh_next_query(request, monkeypatch):
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 3)
     subsequent = json.loads(database_tool().fn({"op": "query", "sql": "SELECT 7 AS value", "response_format": "json"}))
     assert subsequent["rows"] == [[7]] and subsequent["complete"]
+
+
+_SLOW_MYSQL_READ = ("SELECT COUNT(*) FROM information_schema.columns a, "
+                    "information_schema.columns b, information_schema.columns c")
+
+
+def _configure_mysql(monkeypatch):
+    url = os.environ.get("MAVERICK_MYSQL_TEST_URL", "")
+    if not url:
+        pytest.skip("MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)")
+    pytest.importorskip("pymysql")
+    pytest.importorskip("sqlalchemy")
+    monkeypatch.setenv("DATABASE_URL", url)
+
+
+def _mysql_read_is_stopped(monkeypatch):
+    monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 0.3)
+    executions = capture_execution(monkeypatch, database_module)
+    began = time.monotonic()
+    result = database_tool().fn({"op": "query", "sql": _SLOW_MYSQL_READ})
+    assert time.monotonic() - began < 5
+    assert result.startswith("ERROR:") and executions[0].finished
+    assert executions[0].cancellation_support == "mysql_statement_timeout_and_kill_query"
+    monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 5)
+    subsequent = json.loads(database_tool().fn({"op": "query", "sql": "SELECT 7 AS value",
+                                                "response_format": "json"}))
+    assert subsequent["rows"] == [[7]] and subsequent["complete"]
+
+
+def test_mysql_statement_deadline_and_fresh_next_query(monkeypatch):
+    """Before, a MySQL/MariaDB read ran on past the query deadline."""
+    _configure_mysql(monkeypatch)
+    _mysql_read_is_stopped(monkeypatch)
+
+
+def test_mysql_kill_query_alone_stops_a_read(monkeypatch):
+    _configure_mysql(monkeypatch)
+    # No server-side limit: the cancel request alone must stop the statement.
+    monkeypatch.setattr(QueryExecution, "mysql_timeout_statement",
+                        lambda self, connection: "SELECT 1")
+    _mysql_read_is_stopped(monkeypatch)
+
+
+def test_mysql_server_limit_alone_stops_a_read(monkeypatch):
+    _configure_mysql(monkeypatch)
+    bind = QueryExecution.bind_mysql
+
+    def unreachable():
+        raise OSError("cancel connection refused")
+
+    def bind_without_cancel(self, connection):
+        bound = bind(self, connection)
+        self._cancel = unreachable
+        return bound
+
+    # The cancel cannot connect: the server's own statement limit must hold.
+    monkeypatch.setattr(QueryExecution, "bind_mysql", bind_without_cancel)
+    _mysql_read_is_stopped(monkeypatch)
