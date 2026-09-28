@@ -1655,8 +1655,12 @@ class LLM:
     Drop-in replacement for the previous anthropic-only LLM class.
     """
 
-    def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, api_key: str | None = None):
+        # No model named: resolve the "default" role like any other (kernel
+        # rule 2), so the dashboard's default-model pin, [models] default, the
+        # --model flag and the admin allow-list reach background runs. With
+        # nothing configured this is DEFAULT_MODEL, as before.
+        self.model = model or model_for_role("default")
         self._anthropic_api_key = api_key  # legacy back-compat
         # Compatibility/debug view: latest client created for each provider.
         self._clients: dict[str, Any] = {}

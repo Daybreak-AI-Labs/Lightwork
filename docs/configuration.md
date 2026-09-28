@@ -92,6 +92,10 @@ revisor         = "anthropic:claude-opus-4-8"
 verifier        = "anthropic:claude-sonnet-4-6"
 summarizer      = "anthropic:claude-haiku-4-5"
 skill_distiller = "anthropic:claude-sonnet-4-6"
+# Work that names no role (background runs started from the dashboard, MCP,
+# the GitHub app, agent-to-agent tasks) uses "default". Unset, it follows the
+# dashboard's default-model choice, then claude-sonnet-4-6.
+# default       = "anthropic:claude-sonnet-4-6"
 
 [budget]
 # Omitted task limits stay unset. These examples are explicit opt-in limits.
