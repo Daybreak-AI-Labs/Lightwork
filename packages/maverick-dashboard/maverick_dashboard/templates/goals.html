@@ -8,25 +8,22 @@
   .g-bar{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
   .g-bar__search{ margin-inline-start: auto; min-width: 0; max-width: 100%; flex: 1 1 16rem; }
   .g-list{ display: flex; flex-direction: column; gap: var(--space-2); }
-  .g-row{ display: flex; align-items: center; gap: var(--space-3);
+  .g-row{ display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
     border: 1px solid var(--glass-border, var(--border)); border-radius: var(--radius-lg);
     background: var(--glass-soft, var(--surface-1)); box-shadow: var(--glass-edge);
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     padding: var(--space-3) var(--space-4); }
-  .g-row__id{ font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-sm); flex: none; width: 6.5rem; }
+  .g-row__id{ font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-sm); flex: 0 0 auto; min-width: 0; }
   .g-filters{ display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); }
-  .g-row__main{ flex: 1; min-width: 0; }
+  .g-row__main{ flex: 1 1 12rem; min-width: 0; }
   .g-row__title{ font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g-row__desc{ color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .g-row__actions{ display: flex; gap: var(--space-2); flex: none; opacity: 0.72; }
+  .g-row__actions{ display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 0 1 auto; min-width: 0; margin-inline-start: auto; opacity: 0.72; }
   .g-row__actions a{ font-size: var(--text-sm); color: var(--muted); }
   .g-row__actions a:hover{ color: var(--brand-hi); }
   .g-row:hover .g-row__actions{ opacity: 1; }
   @media(max-width:540px){
-    .g-row{flex-wrap:wrap}
-    .g-row__id{width:auto}
     .g-row__main{flex-basis:100%;order:2}
-    .g-row__actions{margin-inline-start:auto;flex-wrap:wrap;min-width:0}
   }
   .g-empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
     border: 1px dashed var(--glass-border, var(--border)); border-radius: var(--radius-lg);

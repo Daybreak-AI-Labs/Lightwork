@@ -2,11 +2,11 @@
 {% block title %}Regulations and Rules · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .rob-shell { display: grid; gap: var(--space-4); min-width: 0; }
+  .rob-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); min-width: 0; }
   .rob-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
   .rob-row--end { align-items: end; }
   .rob-row label { display: flex; flex-direction: column; gap: .25rem; }
-  .rob-metrics { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); margin-top: .75rem; }
+  .rob-metrics { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); margin-top: .75rem; }
   .rob-metric { border: 1px solid var(--border); border-radius: 8px; padding: .7rem .9rem; }
   .rob-metric strong { display: block; font-size: var(--text-xl); }
   .rob-metric span { color: var(--muted); font-size: var(--text-sm); }
@@ -16,6 +16,7 @@
                     border: 1px solid var(--border); border-radius: 8px; padding: .6rem .8rem; }
   .rob-verdict { font-size: var(--text-xl); font-weight: var(--font-bold); margin: .5rem 0 0; }
   .rob-problems { margin: .4rem 0 0; padding-left: 1.2rem; }
+  .rob-flush-top { margin-top: 0; }
 </style>
 {% endblock %}
 {% block content %}
@@ -46,7 +47,7 @@
   <section aria-labelledby="rob-library-title">
     <div class="section-head"><h2 id="rob-library-title">Regulations</h2></div>
     <div class="panel">
-      <p class="muted" style="margin-top: 0;">Choose a regulation to see its rules.{% if rob_can_admin %} Turning one on takes effect right away.{% endif %} To turn a regulation off, ask the person who installed Lightwork.</p>
+      <p class="muted rob-flush-top">Choose a regulation to see its rules.{% if rob_can_admin %} Turning one on takes effect right away.{% endif %} To turn a regulation off, ask the person who installed Lightwork.</p>
       <ul class="rob-library" id="rob-library"><li>Loading…</li></ul>
     </div>
   </section>
@@ -90,7 +91,7 @@
   <section aria-labelledby="rob-updates-title">
     <div class="section-head"><h2 id="rob-updates-title">Regulatory updates</h2></div>
     <div class="panel">
-      <p class="muted" style="margin-top: 0;">Notices about rule changes that affect your customers, and evidence that needs refreshing because a rule changed.</p>
+      <p class="muted rob-flush-top">Notices about rule changes that affect your customers, and evidence that needs refreshing because a rule changed.</p>
       <div id="rob-updates" role="status" aria-live="polite"><p class="muted">Loading…</p></div>
     </div>
   </section>

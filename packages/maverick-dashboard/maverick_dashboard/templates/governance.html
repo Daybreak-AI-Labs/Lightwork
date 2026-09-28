@@ -3,11 +3,13 @@
 {% block title %}Governance workspace · Lightwork{% endblock %}
 {% block content %}
 <style>
-  .gov-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(22rem,1fr)); gap:var(--space-4); }
-  .gov-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:var(--space-3); margin:var(--space-3) 0; align-items:end; }
+  .gov-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); gap:var(--space-4); }
+  .gov-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap:var(--space-3); margin:var(--space-3) 0; align-items:end; }
   .gov-form label { display:flex; flex-direction:column; gap:var(--space-1); font-size:var(--text-sm); }
   .gov-form label.gov-check { flex-direction:row; align-items:center; gap:var(--space-2); }
   .gov-form__wide { grid-column:1 / -1; }
+  /* Held-delivery comparisons carry long record numbers and fingerprints: wrap them so phones never scroll sideways. */
+  #gov-grc-comparison { min-width:0; max-width:100%; overflow-wrap:anywhere; }
   .gov-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; }
   .gov-table { overflow-x:auto; }
   .gov-table caption { text-align:left; color:var(--muted); padding:0 0 var(--space-2); }
