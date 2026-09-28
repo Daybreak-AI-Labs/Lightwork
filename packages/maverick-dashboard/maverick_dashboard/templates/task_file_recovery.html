@@ -31,6 +31,19 @@
       Tasks run on another computer, and very old runs, can't be restored here.</p>
   </details>
 </section>
+<section id="task-changes" class="tf-wrap panel" data-goal="{{ goal.id }}" aria-labelledby="tc-title">
+  <h2 id="tc-title">What changed during this task</h2>
+  <p class="tf-flush">See each file in this task's work folder as it was before the task first changed it, next to how it is now.
+    Lightwork keeps only those two points, so in-between versions can't be compared. Looking changes nothing.</p>
+  <button id="tc-show" class="btn btn--primary" type="button">Show what changed</button>
+  <p id="tc-status" role="status" aria-live="polite" tabindex="-1"></p>
+  <div id="tc-files"></div>
+  <details class="tf-about"><summary>What this can show</summary>
+    <p>Only files inside this task's own work folder that the task changed with its file tools while "Keep a copy before files change" was on.
+      Files reached through a shortcut link, or kept outside the work folder, are never shown. Up to 100 files, each up to 256 KB and 4,000 lines;
+      files that aren't text are listed without their content. Commands the task ran are not included.</p>
+  </details>
+</section>
 <style>
   .tf-wrap{max-width:900px;margin-inline:auto;min-width:0}.tf-flush{margin:0}
   #task-files p,#task-files h1,#task-files h2,#task-files button{overflow-wrap:anywhere}
@@ -38,6 +51,14 @@
   #task-files button{white-space:normal;max-width:100%;margin-block:var(--space-2)}#tf-files article{min-width:0;border:1px solid var(--border);padding:var(--space-3);margin-block:var(--space-3);border-radius:var(--radius-md)}
   #tf-files h2{font-size:var(--text-md,1rem);margin-top:0}
   #tf-files pre{max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#tf-files code{overflow-wrap:anywhere;word-break:break-all}
+  #task-changes{margin-block:var(--space-4)}#task-changes h2,#task-changes p,#task-changes button{overflow-wrap:anywhere}#task-changes button{white-space:normal;max-width:100%}
+  #tc-files article{min-width:0;border:1px solid var(--border);padding:var(--space-3);margin-block:var(--space-3);border-radius:var(--radius-md)}
+  #tc-files h3{font-size:var(--text-md,1rem);margin:0 0 var(--space-2)}
+  .tc-diff{max-height:360px;overflow:auto;font-family:var(--font-mono,monospace);font-size:var(--text-sm,.875rem);white-space:pre-wrap;overflow-wrap:anywhere}
+  .tc-line{padding-inline-start:var(--space-2);border-inline-start:3px solid transparent}
+  .tc-line--add{border-inline-start-color:var(--success)}.tc-line--remove{border-inline-start-color:var(--danger)}
+  .tc-line--gap{color:var(--muted)}
 </style>
 <script src="/static/lightwork-task-file-recovery.js"></script>
+<script src="/static/lightwork-task-changes.js"></script>
 {% endblock %}
