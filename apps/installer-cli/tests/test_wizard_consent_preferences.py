@@ -52,7 +52,6 @@ def test_pick_assessments_can_enable_consent_preferences(monkeypatch):
         "enable": True,
         "publishing": {
             "enable": True,
-            "require_signed_publications": True,
             "web_settings": {
                 "enable": True,
                 "retention_seconds": 31_536_000,

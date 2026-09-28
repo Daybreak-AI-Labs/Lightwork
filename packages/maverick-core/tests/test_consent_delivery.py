@@ -1177,3 +1177,49 @@ def test_list_destinations_is_tenant_scoped_and_bounded(tmp_path: Path) -> None:
     assert [
         item["destination_id"] for item in store.list_destinations("tenant-b")["items"]
     ] == ["other"]
+
+
+def _delivery_settings(monkeypatch: pytest.MonkeyPatch, **values: object) -> None:
+    monkeypatch.setattr(
+        config, "load_config", lambda *a, **k: {"consent_preferences": {"delivery": values}}
+    )
+
+
+def test_installation_retry_defaults_apply_to_destinations_that_choose_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path / "delivery.db")
+    store.enroll_destination(
+        "tenant-a", destination_id="before", origin="https://consent.example.test",
+        signing_key_id="key-1", idempotency_key="enroll-before",
+    )
+    unset = store.destination("tenant-a", "before")
+    assert (unset["max_attempts"], unset["base_backoff_seconds"],
+            unset["max_backoff_seconds"]) == (6, 5.0, 3600.0)
+    _delivery_settings(monkeypatch, max_attempts=4, retry_base_seconds=9,
+                       retry_max_seconds=90)
+    store.enroll_destination(
+        "tenant-a", destination_id="after", origin="https://consent.example.test",
+        signing_key_id="key-1", idempotency_key="enroll-after",
+    )
+    chosen = store.destination("tenant-a", "after")
+    assert (chosen["max_attempts"], chosen["base_backoff_seconds"],
+            chosen["max_backoff_seconds"]) == (4, 9.0, 90.0)
+    # A destination may ask for fewer tries, never more than the installation's.
+    store.enroll_destination(
+        "tenant-a", destination_id="asks-more", origin="https://consent.example.test",
+        signing_key_id="key-1", idempotency_key="enroll-more", max_attempts=20,
+    )
+    assert store.destination("tenant-a", "asks-more")["max_attempts"] == 4
+
+
+def test_installation_try_limit_also_holds_existing_destinations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path / "delivery.db", clock)
+    _enroll(store, max_attempts=5)
+    _enqueue(store, _change("event-1"), key="enqueue-1")
+    _delivery_settings(monkeypatch, max_attempts=1)
+    claim = store.claim("tenant-a", worker_id="worker-1")[0]
+    assert store.fail_claim(claim, error_code="remote_unavailable")["state"] == "dead_letter"

@@ -226,8 +226,8 @@
       if (state.destinations.some(function (d) { return d.destination_id === id; })) { CW.say(status, "A destination with that name already exists.", true); return; }
       try {
         await call("/destinations/" + encodeURIComponent(id), {method: "POST", json: {origin: origin, signing_key_id: f.signing_key_id.value,
-          idempotency_key: f.idempotency_key.value || CW.reference(), max_attempts: Number(f.max_attempts.value), base_backoff_seconds: 5.0,
-          max_backoff_seconds: 3600.0, default_retention_seconds: Number(f.retention.value)}});
+          idempotency_key: f.idempotency_key.value || CW.reference(), max_attempts: Number(f.max_attempts.value),
+          default_retention_seconds: Number(f.retention.value)}});
         destinationForm.hidden = true; await loadDestinations(); CW.say(status, "Added " + name + ".");
       } catch (error) { CW.fail(status, error, "add the destination"); }
     });

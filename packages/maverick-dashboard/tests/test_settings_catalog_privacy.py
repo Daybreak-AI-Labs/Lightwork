@@ -112,6 +112,7 @@ SAMPLES: dict[str, object] = {
     f"{_SRC}.providers.servicenow_users.credential_ref": "secret:SERVICENOW_RIGHTS_TOKEN",
     f"{_SRC}.providers.servicenow_users.capabilities": ["verify_delete"],
     "compliance.profiles": ["gdpr"],
+    "data_use_governance.enforcement.retry_base_seconds": 0.5,
 }
 
 # Other settings a switch needs before the module's reader accepts it.
@@ -137,8 +138,25 @@ for _key, _name, _pattern, _example in privacy._RIGHTS_SOURCES:
                                           "capabilities")}
 
 
+_TARGET_TOML = (
+    "[privacy_automation.notice_governance.publication_runtime.bindings.primary]\n"
+    'tenant_id = "{tenant}"\nnotice_id = "privacy-main"\n'
+    'consent_publication_ref = "consent-binding:1"\nproperty_id = "property-main"\n'
+    'rule_group_id = "production-rules"\nrule_group_version = 1\n'
+    'notice_resource_id = "privacy-notice"\nnotice_resource_version = 1\n'
+)
+
+
+def _installer_config(text: str) -> None:
+    from maverick import config
+
+    config.config_path().parent.mkdir(parents=True, exist_ok=True)
+    config.config_path().write_text(text, encoding="utf-8")
+    config.reset_config_cache()
+
+
 @pytest.fixture(autouse=True)
-def _isolated(tmp_path, monkeypatch):
+def _isolated(tmp_path, monkeypatch, request):
     from maverick import config, world_model
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
@@ -149,6 +167,14 @@ def _isolated(tmp_path, monkeypatch):
                  "MAVERICK_COMPLIANCE_PROFILES", "MAVERICK_TENANT"):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
+    setting = getattr(getattr(request, "node", None), "callspec", None)
+    chosen = setting.params.get("setting") if setting is not None else None
+    if chosen is not None and chosen.id.startswith(_NOTICE):
+        # Publishing workspaces and targets match one to one (set by the installer here).
+        active = "" if chosen.id.endswith("active_tenants") else (
+            "[privacy_automation.notice_governance.publication_runtime]\n"
+            'active_tenants = ["default"]\n')
+        _installer_config(active + _TARGET_TOML.format(tenant="default"))
     yield
     config.reset_config_cache()
 
@@ -273,9 +299,14 @@ def test_row_saves_reads_back_and_reaches_load_config(setting, audit_rows):
             if (a["section"], a["key"]) == (setting.section, setting.key)]
     assert len(mine) == 1 and mine[0]["kind"] == "setting_changed" and mine[0]["_global"]
     # Reset gives the default back and is recorded too.
+    needs = [] if setting.id.startswith(_NOTICE) else list(NEEDS.get(setting.id, {}))
     r = client.post(API, json={"changes": [{"id": setting.id, "reset": True}]
-                               + [{"id": k, "reset": True} for k in NEEDS.get(setting.id, {})],
+                               + [{"id": k, "reset": True} for k in needs],
                                "confirm": True})
+    if setting.id == f"{_NOTICE}.active_tenants":
+        # The workspace still has a publishing target, so it must keep publishing.
+        assert r.status_code == 400 and "publishing target" in r.json()["message"]
+        return
     assert r.status_code == 200, r.text
     assert not _lookup(_loaded(), setting)[0]
 
@@ -296,9 +327,15 @@ def _weaken(setting):
         return (None, True) if setting.weaker is True else (True, False)
     if setting.control == "number":
         shown = _shown_default(setting)
+        if shown is None:  # "no limit" by default: set one, then raise it
+            return (setting.minimum, setting.minimum + 1)
         if setting.weaker == "lower":
+            if shown - 1 < setting.minimum:
+                return (shown + 1, shown)
             return (None, shown - 1)
-        return (None, (shown if shown is not None else setting.minimum) + 1)
+        if shown + 1 > setting.maximum:
+            return (shown - 1, shown)
+        return (None, shown + 1)
     if setting.weaker == "shrink":
         return (["gdpr", "eu_ai_act"], ["gdpr"])
     return (None, _sample(setting))
@@ -631,17 +668,9 @@ def test_privacy_automation_settings_reach_their_modules(audit_rows):
 
 
 def test_notice_publishing_reads_the_saved_workspaces(audit_rows):
-    from maverick import config
     from maverick_dashboard.privacy_notice_publication_composition import settings_from_config
 
-    config.config_path().parent.mkdir(parents=True, exist_ok=True)
-    config.config_path().write_text(
-        "[privacy_automation.notice_governance.publication_runtime.bindings.primary]\n"
-        'tenant_id = "acme"\nnotice_id = "privacy-main"\n'
-        'consent_publication_ref = "consent-binding:1"\nproperty_id = "property-main"\n'
-        'rule_group_id = "production-rules"\nrule_group_version = 1\n'
-        'notice_resource_id = "privacy-notice"\nnotice_resource_version = 1\n',
-        encoding="utf-8")
+    _installer_config(_TARGET_TOML.format(tenant="acme"))
     _modules_on("privacy_automation", "privacy_automation.notice_governance",
                 "consent_preferences", "consent_preferences.publishing")
     r = _save({f"{_NOTICE}.enable": True, f"{_NOTICE}.active_tenants": ["acme"],
@@ -728,3 +757,270 @@ def test_cross_checks_mirror_the_readers(values, words):
 
 def test_data_map_key_is_left_to_the_integrations_rows():
     assert not any(row.id.startswith("data_map.") for row in ROWS)
+
+
+# ------------------------------- installation defaults and caps (wave 2)
+def test_consent_script_cache_follows_the_edge_cache_settings(audit_rows):
+    _modules_on("consent_preferences", "consent_preferences.publishing",
+                "consent_preferences.public_api")
+    assert client.get("/api/v1/public/consent/sdk.js").headers["cache-control"] == \
+        "public, max-age=300"
+    assert _save({"consent_preferences.edge_cache.enable": True,
+                  "consent_preferences.edge_cache.max_age_seconds": 60,
+                  "consent_preferences.edge_cache.stale_if_error_seconds": 24}).status_code == 200
+    assert client.get("/api/v1/public/consent/sdk.js").headers["cache-control"] == \
+        "public, max-age=3600, stale-if-error=86400"
+    # Settings and people's choices are never cached.
+    from maverick_dashboard.consent_public_api import _set_private_response_headers
+    from starlette.responses import Response
+
+    response = Response()
+    _set_private_response_headers(response)
+    assert response.headers["cache-control"] == "no-store, private"
+
+
+def test_public_consent_service_limits_follow_the_settings(audit_rows):
+    from maverick_dashboard import consent_public_api as public
+
+    _modules_on("consent_preferences", "consent_preferences.publishing",
+                "consent_preferences.public_api")
+    body = b"{" + b" " * (70 * 1024) + b"}"
+    headers = {"Content-Type": "application/json"}
+    path = "/api/v1/public/consent/profiles/bootstrap"
+    assert client.post(path, content=body, headers=headers).status_code == 413
+    assert public._response_byte_limit() == 256 * 1024
+    assert public.configured_requests_per_minute() is None
+    assert _save({"consent_preferences.public_api.max_request_bytes": 128,
+                  "consent_preferences.public_api.max_response_bytes": 2,
+                  "consent_preferences.public_api.requests_per_minute": 2},
+                 confirm=True).status_code == 200
+    # Past the body cap now; refused for having no sign-in key instead.
+    assert client.post(path, content=body, headers=headers).status_code == 401
+    assert public._response_byte_limit() == 2 * 1024
+    with pytest.raises(Exception, match="503"):
+        public._bounded_response({"text": "x" * 4096})
+    limiter = public.PublicConsentRateLimiter(
+        limit_source=public.configured_requests_per_minute)
+    limiter("client", "configuration")
+    limiter("client", "configuration")
+    with pytest.raises(public.PublicConsentRateLimitExceeded):
+        limiter("client", "configuration")
+
+
+class _FakeConsentStore:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def list_profiles(self, tenant_id, *, limit):
+        self.calls.append(("profiles", limit))
+        return {"items": []}
+
+    def export_profile(self, tenant_id, profile_id, *, actor_sha256, access_purpose,
+                       receipt_limit):
+        self.calls.append(("receipts", receipt_limit))
+        return {"receipts": []}
+
+
+def test_consent_records_page_sizes_and_body_limit_follow_the_settings(monkeypatch,
+                                                                       audit_rows):
+    from maverick_dashboard import consent_preferences_api as api
+
+    store = _FakeConsentStore()
+    monkeypatch.setattr(api, "_ops", lambda: SimpleNamespace())
+    monkeypatch.setattr(api, "_tenant_id", lambda: "default")
+    monkeypatch.setattr(api, "_store", lambda tenant: store)
+
+    async def direct(ops, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(api, "_call", direct)
+    export = "/api/v1/consent/profiles/p-1/export?access_purpose=review"
+    assert client.get("/api/v1/consent/profiles").status_code == 200
+    assert client.get("/api/v1/consent/profiles?limit=400").status_code == 200
+    assert client.get(export).status_code == 200
+    assert store.calls == [("profiles", 100), ("profiles", 400), ("receipts", 500)]
+    assert _save({"consent_preferences.limits.profile_page_size": 20,
+                  "consent_preferences.limits.receipt_page_size": 50,
+                  "consent_preferences.limits.request_body_bytes": 1},
+                 confirm=True).status_code == 200
+    store.calls.clear()
+    client.get("/api/v1/consent/profiles")
+    client.get("/api/v1/consent/profiles?limit=400")
+    client.get(export)
+    assert store.calls == [("profiles", 20), ("profiles", 20), ("receipts", 50)]
+    big = client.post("/api/v1/consent/policies", content=b"{" + b" " * 2048 + b"}",
+                      headers={"Content-Type": "application/json"})
+    assert big.status_code == 413
+
+
+def test_analytics_settings_reach_the_consent_reports(audit_rows):
+    from maverick.consent_analytics import analytics_limits
+
+    assert analytics_limits() == (10, 2, None)
+    assert _save({"consent_preferences.analytics.min_cohort_size": 20,
+                  "consent_preferences.analytics.retention_days": 90}).status_code == 200
+    assert analytics_limits() == (20, 20, 90)
+    r = _save({"consent_preferences.analytics.min_cohort_size": 5})
+    assert r.status_code == 409  # a smaller group can single people out
+
+
+def test_delivery_and_scan_settings_reach_their_modules(audit_rows):
+    from maverick.consent_delivery import delivery_retry_settings
+    from maverick.consent_scanner import ScanLimits, capped_scan_limits, scan_limit_settings
+
+    assert delivery_retry_settings() == (6, 20, 5.0, 3600.0)
+    assert scan_limit_settings() == {}
+    r = _save({"consent_preferences.delivery.max_attempts": 3,
+               "consent_preferences.delivery.retry_base_seconds": 10,
+               "consent_preferences.delivery.retry_max_seconds": 600,
+               "consent_preferences.scanner.max_pages": 40,
+               "consent_preferences.scanner.interval_seconds": 60})
+    assert r.status_code == 200, r.text
+    assert delivery_retry_settings() == (3, 3, 10.0, 600.0)
+    assert scan_limit_settings() == {"max_pages": 40, "interval_seconds": 3600}
+    assert capped_scan_limits(ScanLimits(max_pages=500)).max_pages == 40
+    r = _save({"consent_preferences.delivery.retry_base_seconds": 900})
+    assert r.status_code == 400 and "First wait before trying again" in r.json()["message"]
+
+
+def test_data_use_retry_waits_reach_the_provider_runtime(audit_rows):
+    from maverick_dashboard.data_use_provider_runtime import _retry_waits
+
+    assert _retry_waits({}) == (0.25, 1.0)
+    # Values older installers wrote (never applied) keep the built-in waits.
+    assert _retry_waits({"retry_base_seconds": 30, "retry_max_seconds": 300}) == (0.25, 1.0)
+    assert _save({"data_use_governance.enforcement.retry_base_seconds": 0.5,
+                  "data_use_governance.enforcement.retry_max_seconds": 4}).status_code == 200
+    enforcement = _loaded()["data_use_governance"]["enforcement"]
+    assert _retry_waits(enforcement) == (0.5, 4.0)
+    from maverick.data_use_provider_adapters import ProviderLimits
+
+    limits = ProviderLimits(retry_base_seconds=0.5, retry_max_seconds=4.0)
+    adapter = SimpleNamespace(_limits=limits)
+    from maverick.data_use_provider_adapters import _NativeProviderAdapter
+
+    delays = [_NativeProviderAdapter._retry_delay(adapter, n) for n in (1, 2, 3, 4)]
+    assert delays == [0.5, 1.0, 2.0, 4.0]
+
+
+def test_data_use_limits_and_compiler_settings_are_read(audit_rows):
+    from maverick.data_use_governance import data_use_limits
+    from maverick.data_use_policy_compiler import compiler_limits
+
+    assert data_use_limits() == {} and compiler_limits() == (256, None)
+    assert _save({"data_use_governance.limits.max_assets": 10,
+                  "data_use_governance.limits.max_context_age_seconds": 2,
+                  "data_use_governance.compiler.max_operations": 50,
+                  "data_use_governance.compiler.max_row_filter_nodes": 64}).status_code == 200
+    assert data_use_limits() == {"max_assets": 10, "max_context_age_seconds": 2 * 86400}
+    assert compiler_limits() == (64, 50)
+
+
+# ------------------------------------------------ four-eyes on provider writes
+@pytest.fixture()
+def provider_write(monkeypatch):
+    """A data platform connection whose writes are recorded, not sent."""
+    from maverick import data_use_provider_adapters as ops
+    from maverick_dashboard import auth
+    from maverick_dashboard import data_use_provider_api as api
+
+    applied: list[str] = []
+    who = {"principal": "user:alice"}
+    settings = {"require_four_eyes": True}
+
+    class Adapter:
+        def apply_control_ir(self, control_ir, *, idempotency_sha256):
+            applied.append(idempotency_sha256)
+            return {"state": "completed"}
+
+        rollback_control_ir = apply_control_ir
+
+    async def compile_ir(*_args, **_kwargs):
+        return "compiled"
+
+    monkeypatch.setattr(api, "_provider_ops", lambda provider_id: ops)
+    monkeypatch.setattr(api, "_tenant_id", lambda: "default")
+    monkeypatch.setattr(api, "_binding_store", lambda ops_, tenant: SimpleNamespace(
+        get_binding=lambda tenant_id, binding_id: {"provider_id": "snowflake"}))
+    monkeypatch.setattr(api, "_config", lambda: {
+        "data_use_governance": {"enforcement": dict(settings)}})
+    monkeypatch.setattr(api, "_provider_audit_required", lambda config: False)
+    monkeypatch.setattr(api, "_adapter", lambda request, **kwargs: Adapter())
+    monkeypatch.setattr(api, "_compile", compile_ir)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: who["principal"])
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "admin")
+    rbac.set_role("user:bob", "admin")
+    return SimpleNamespace(applied=applied, who=who, settings=settings)
+
+
+def _apply(body):
+    return client.post("/api/v1/data-use/providers/snowflake/bindings/orders/decisions/"
+                       "dec-1/apply", json=body)
+
+
+def test_four_eyes_off_keeps_writes_immediate(provider_write):
+    provider_write.settings["require_four_eyes"] = False
+    r = _apply({"expected_decision_sha256": "a" * 64, "idempotency_key": "once"})
+    assert r.status_code == 200 and len(provider_write.applied) == 1
+
+
+def test_four_eyes_needs_a_second_different_person(provider_write):
+    from maverick_dashboard._shared import _world
+
+    body = {"expected_decision_sha256": "a" * 64, "idempotency_key": "change-1"}
+    first = _apply(body)
+    assert first.status_code == 202 and first.json()["state"] == "approval_required"
+    approval_id = first.json()["approval_id"]
+    assert provider_write.applied == []
+    waiting = _apply({**body, "approval_id": approval_id})
+    assert waiting.status_code == 202 and waiting.json()["state"] == "approval_pending"
+    # Approving your own request does not count.
+    assert _world().decide_approval(approval_id, "approved", decided_by="user:alice")
+    assert _apply({**body, "approval_id": approval_id}).status_code == 403
+    assert provider_write.applied == []
+    second = _apply(body).json()["approval_id"]
+    assert _world().decide_approval(second, "approved", decided_by="user:bob")
+    # The approval covers only this exact change.
+    other = {"expected_decision_sha256": "b" * 64, "idempotency_key": "change-1",
+             "approval_id": second}
+    assert _apply(other).status_code == 409
+    done = _apply({**body, "approval_id": second})
+    assert done.status_code == 200 and len(provider_write.applied) == 1
+
+
+def test_four_eyes_refuses_when_nobody_is_signed_in(provider_write):
+    provider_write.who["principal"] = None
+    r = _apply({"expected_decision_sha256": "a" * 64, "idempotency_key": "change-2"})
+    assert r.status_code == 403 and provider_write.applied == []
+
+
+def test_four_eyes_setting_is_saved_and_turning_it_off_is_confirmed(audit_rows):
+    assert _save({"data_use_governance.enforcement.require_four_eyes": True}).status_code == 200
+    assert _loaded()["data_use_governance"]["enforcement"]["require_four_eyes"] is True
+    assert _save({"data_use_governance.enforcement.require_four_eyes": False}).status_code \
+        == 409
+
+
+def test_turning_delivery_off_is_clean_with_installer_services_listed(audit_rows):
+    from maverick.consent_delivery_destinations import build_consent_destination_registry
+
+    _installer_config(
+        "[consent_preferences.delivery.destinations]\n"
+        'enable = true\nenabled_providers = ["salesforce"]\n'
+        "[consent_preferences.delivery.destinations.salesforce]\n"
+        'destination_id = "sf-main"\norigin = "https://acme.my.salesforce.com"\n'
+        'credential_secret_ref = "$MAVERICK_SALESFORCE_CONSENT_TOKEN"\n'
+        "credential_revision = 1\n"
+        'api_version = "v65.0"\nobject_api_name = "Lightwork_Consent_Event__c"\n'
+        'external_id_field = "Lightwork_Message_Id__c"\n'
+        'payload_digest_field = "Lightwork_Payload_SHA256__c"\n')
+    assert build_consent_destination_registry(_loaded(), "default").status()["enabled"]
+    # The installer's list stays ticked; turning sending off is still clean.
+    assert _save({f"{_DEST}.enable": False}).status_code == 200
+    loaded = _loaded()
+    assert loaded["consent_preferences"]["delivery"]["destinations"]["enabled_providers"] == [
+        "salesforce"]
+    status = build_consent_destination_registry(loaded, "default").status()
+    assert status["enabled"] is False and status["destinations"] == []

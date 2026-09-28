@@ -2100,7 +2100,6 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "enable": True,
             "publishing": {
                 "enable": consent_publishing,
-                "require_signed_publications": True,
                 **(
                     {
                         "web_settings": {
@@ -2714,8 +2713,6 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
                 "enable": True,
                 "require_four_eyes": True,
                 "max_attempts": 3,
-                "retry_base_seconds": 30,
-                "retry_max_seconds": 300,
             }
             data_use_product[str(data_use_native["provider"])] = data_use_native["section"]
             provider_audit_config: dict[str, Any] = {

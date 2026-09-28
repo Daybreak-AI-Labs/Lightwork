@@ -12,6 +12,7 @@ or building this runtime never opens a socket and never resolves a secret.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 import re
@@ -38,6 +39,7 @@ from maverick.data_use_provider_adapters import (
 )
 
 _PROVIDERS = frozenset({"snowflake", "databricks"})
+_LOG = logging.getLogger(__name__)
 _SECRET_REF_RE = re.compile(r"\$(?:\{([A-Z][A-Z0-9_]{0,127})\}|([A-Z][A-Z0-9_]{0,127}))\Z")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _monotonic = time.monotonic
@@ -350,12 +352,41 @@ def provider_limits(config: Mapping[str, Any], provider_id: object) -> ProviderL
     enforcement = _root(config).get("enforcement")
     if not isinstance(enforcement, Mapping):
         raise DataUseProviderConfigError("data-use enforcement configuration is unavailable")
+    base, longest = _retry_waits(enforcement)
     return ProviderLimits(
         timeout_seconds=float(section.get("timeout_seconds", 10)),
         max_response_bytes=int(section.get("max_response_bytes", 64 * 1024)),
         max_attempts=int(enforcement.get("max_attempts", 3)),
         max_polls=min(5, int(enforcement.get("max_attempts", 3))),
+        retry_base_seconds=base,
+        retry_max_seconds=longest,
     )
+
+
+def _retry_waits(enforcement: Mapping[str, Any]) -> tuple[float, float]:
+    """In-request retry waits from ``[data_use_governance.enforcement]``.
+
+    Retries happen inside one request, so the waits are seconds, not minutes:
+    the base must be 0.05-10 and the longest 0.25-60. A value outside that
+    range (older installers wrote 30 and 300, which were never applied) is
+    ignored so the historical 0.25 s / 1 s waits stay in force.
+    """
+    def pick(key: str, lower: float, upper: float, default: float) -> float:
+        value = enforcement.get(key)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or not lower <= float(value) <= upper
+        ):
+            if value is not None:
+                _LOG.warning("ignoring data-use enforcement %s outside %s-%s", key, lower, upper)
+            return default
+        return float(value)
+
+    base = pick("retry_base_seconds", 0.05, 10.0, 0.25)
+    longest = pick("retry_max_seconds", 0.25, 60.0, 1.0)
+    return base, max(base, longest)
 
 
 def adapter_authority_sha256(*, tenant_id: str, provider_id: str, binding_id: str) -> str:

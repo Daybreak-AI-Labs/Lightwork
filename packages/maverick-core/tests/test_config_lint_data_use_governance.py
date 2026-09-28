@@ -54,8 +54,10 @@ def test_native_provider_requires_exact_origin_and_secret_reference():
                     "enable": True,
                     "require_four_eyes": True,
                     "max_attempts": 3,
-                    "retry_base_seconds": 30,
-                    "retry_max_seconds": 300,
+                    # In-request retry waits (seconds); older installers wrote
+                    # 30 and 300, which the runtime never applied.
+                    "retry_base_seconds": 0.5,
+                    "retry_max_seconds": 2.0,
                 },
                 "snowflake": {
                     "enable": True,

@@ -416,6 +416,10 @@ class ProviderLimits:
     max_response_bytes: int = 64 * 1024
     max_attempts: int = 3
     max_polls: int = 3
+    # In-request wait before retrying a request that provably was not sent:
+    # base * 2**(attempt-1), never more than retry_max_seconds.
+    retry_base_seconds: float = 0.25
+    retry_max_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         if (
@@ -437,6 +441,19 @@ class ProviderLimits:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5:
                 raise DataUseProviderConfigError(f"{name} is outside its range")
+        for name, value, lower, upper in (
+            ("retry_base_seconds", self.retry_base_seconds, 0.05, 10.0),
+            ("retry_max_seconds", self.retry_max_seconds, 0.25, 60.0),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not lower <= float(value) <= upper
+            ):
+                raise DataUseProviderConfigError(f"{name} is outside its range")
+        if float(self.retry_max_seconds) < float(self.retry_base_seconds):
+            raise DataUseProviderConfigError("retry_max_seconds is below retry_base_seconds")
         object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
 
 
@@ -2203,7 +2220,7 @@ class _NativeProviderAdapter:
                     }
                 )
                 if attempt < self._limits.max_attempts:
-                    self._sleep(min(0.25 * (2 ** (attempt - 1)), 1.0))
+                    self._sleep(self._retry_delay(attempt))
                     continue
                 raise DataUseProviderUnavailable(
                     "provider request was not sent after bounded retries",
@@ -2218,7 +2235,7 @@ class _NativeProviderAdapter:
                             "dispatch": "transport_unknown_read_only",
                         }
                     )
-                    self._sleep(min(0.25 * (2 ** (attempt - 1)), 1.0))
+                    self._sleep(self._retry_delay(attempt))
                     continue
                 error_type = (
                     DataUseProviderUnavailable if safe_read else DataUseProviderAmbiguousEffect
@@ -2235,7 +2252,7 @@ class _NativeProviderAdapter:
                             "dispatch": "transport_error_read_only",
                         }
                     )
-                    self._sleep(min(0.25 * (2 ** (attempt - 1)), 1.0))
+                    self._sleep(self._retry_delay(attempt))
                     continue
                 error_type = (
                     DataUseProviderUnavailable if safe_read else DataUseProviderAmbiguousEffect
@@ -2312,7 +2329,7 @@ class _NativeProviderAdapter:
                 if (
                     safe_read or snowflake_idempotent_retry
                 ) and attempt < self._limits.max_attempts:
-                    self._sleep(min(0.25 * (2 ** (attempt - 1)), 1.0))
+                    self._sleep(self._retry_delay(attempt))
                     continue
                 if safe_read:
                     raise DataUseProviderUnavailable(
@@ -2453,6 +2470,10 @@ class _NativeProviderAdapter:
             if _DIGEST_RE.fullmatch(candidate):
                 return candidate
         return None
+
+    def _retry_delay(self, attempt: int) -> float:
+        limits = self._limits
+        return min(limits.retry_base_seconds * (2 ** (attempt - 1)), limits.retry_max_seconds)
 
     @staticmethod
     def _poll_delay(response: ProviderHttpResponse, poll_index: int) -> float:

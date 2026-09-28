@@ -1750,10 +1750,9 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
         1_048_576,
     ),
     (("data_use_governance", "compiler"), "max_operations"): (1, 10_000),
-    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 1_000),
+    # Native adapters accept row filters of at most 256 parts.
+    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 256),
     (("data_use_governance", "enforcement"), "max_attempts"): (1, 5),
-    (("data_use_governance", "enforcement"), "retry_base_seconds"): (1, 3_600),
-    (("data_use_governance", "enforcement"), "retry_max_seconds"): (1, 86_400),
     (("data_use_governance", "provider_audit"), "audit_window_seconds"): (
         60,
         604_800,
@@ -2025,6 +2024,9 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
 _NESTED_NUMBER_BOUNDS: dict[
     tuple[tuple[str, ...], str], tuple[float, float]
 ] = {
+    # Data-use enforcement retries wait inside one request (seconds, not minutes).
+    (("data_use_governance", "enforcement"), "retry_base_seconds"): (0.05, 10.0),
+    (("data_use_governance", "enforcement"), "retry_max_seconds"): (0.25, 60.0),
     (
         ("privacy_automation", "data_discovery", "adapters"),
         "timeout_seconds",
@@ -2573,14 +2575,8 @@ def _lint_consent_delivery_destinations(cfg: dict) -> list[Finding]:  # noqa: C9
                     "enabled consent destinations require a unique non-empty closed provider list",
                 )
             )
-    elif raw_enabled not in ([], _MISSING):
-        findings.append(
-            _nested_error(
-                section_name,
-                "enabled_providers",
-                "disabled consent destinations cannot select provider adapters",
-            )
-        )
+    # Disabled with services still listed is a clean off: the runtime keeps
+    # the list but binds and sends nothing.
 
     common = {
         "destination_id",

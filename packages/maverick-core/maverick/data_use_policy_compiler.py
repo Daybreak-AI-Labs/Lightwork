@@ -30,6 +30,8 @@ from .data_use_governance import (
     DataUseMissingAuthority,
     DataUseNotFound,
     DataUseStaleAuthority,
+    DataUseValidationError,
+    data_use_limits,
 )
 
 CONTROL_IR_SCHEMA = "lightwork.data-use.control-ir.v1"
@@ -222,13 +224,45 @@ def _literal(value: object, field_type: str, label: str) -> object:
     raise DataUseUnsupportedType(f"{label} uses unsupported type {field_type}")
 
 
+def compiler_limits(config: Mapping[str, Any] | None = None) -> tuple[int, int | None]:
+    """``(row-filter parts, operations)`` from ``[data_use_governance.compiler]``.
+
+    ``max_row_filter_nodes`` lowers the built-in 256-part row-filter bound
+    (the native adapters accept no more than 256, so it can only be lowered).
+    ``max_operations`` caps how many controls one decision may compile to;
+    unset means no cap beyond the policy bounds (the historical behaviour).
+    """
+    if config is None:
+        from .config import load_config
+
+        config = load_config() or {}
+    root = config.get("data_use_governance") if isinstance(config, Mapping) else None
+    section = root.get("compiler") if isinstance(root, Mapping) else None
+    section = section if isinstance(section, Mapping) else {}
+    nodes, operations = _MAX_AST_NODES, None
+    for key, upper in (("max_row_filter_nodes", _MAX_AST_NODES), ("max_operations", 10_000)):
+        if key not in section:
+            continue
+        value = section[key]
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper:
+            raise DataUseCompilationValidationError(
+                f"data-use compiler {key} must be between 1 and {upper}"
+            )
+        if key == "max_row_filter_nodes":
+            nodes = value
+        else:
+            operations = value
+    return nodes, operations
+
+
 class _AstBudget:
-    def __init__(self) -> None:
+    def __init__(self, max_nodes: int = _MAX_AST_NODES) -> None:
         self.nodes = 0
+        self.max_nodes = max_nodes
 
     def consume(self, depth: int) -> None:
         self.nodes += 1
-        if depth > _MAX_AST_DEPTH or self.nodes > _MAX_AST_NODES:
+        if depth > _MAX_AST_DEPTH or self.nodes > self.max_nodes:
             raise DataUseUnsafeFilter("row-filter AST exceeds its complexity bound")
 
 
@@ -268,14 +302,23 @@ def _field_expression(
     raise DataUseUnsafeFilter("row-filter expression contains unknown fields")
 
 
-def normalize_row_filter_ast(value: object, field_types: Mapping[str, str]) -> dict[str, Any]:
-    """Validate and normalize the closed, non-SQL row-filter AST."""
+def normalize_row_filter_ast(
+    value: object,
+    field_types: Mapping[str, str],
+    *,
+    max_nodes: int | None = None,
+) -> dict[str, Any]:
+    """Validate and normalize the closed, non-SQL row-filter AST.
+
+    ``max_nodes`` defaults to the installation's row-filter bound
+    (:func:`compiler_limits`).
+    """
 
     normalized_types = {
         _identifier(key, "field identifier"): _identifier(field_type, "field type")
         for key, field_type in field_types.items()
     }
-    budget = _AstBudget()
+    budget = _AstBudget(compiler_limits()[0] if max_nodes is None else max_nodes)
 
     def visit(node: object, depth: int) -> dict[str, Any]:
         budget.consume(depth)
@@ -468,6 +511,10 @@ class DataUsePolicyCompiler:
         kinds = [item.get("context_kind") for item in values if isinstance(item, Mapping)]
         if sorted(kinds) != sorted(CONTEXT_KINDS) or len(values) != len(CONTEXT_KINDS):
             raise DataUseMissingAuthority("all four independent decision contexts are required")
+        try:
+            max_age = data_use_limits().get("max_context_age_seconds")
+        except DataUseValidationError as exc:
+            raise DataUseCompilationValidationError(str(exc)) from exc
         source_roots: set[str] = set()
         for context in values:
             if not isinstance(context, Mapping):
@@ -483,7 +530,10 @@ class DataUsePolicyCompiler:
             )
             _digest(context.get("reviewer_authority_sha256"), "reviewer authority")
             _identifier(context.get("reviewer_id"), "reviewer_id")
-            if _timestamp(context.get("fresh_until"), "fresh_until") <= now:
+            if _timestamp(context.get("fresh_until"), "fresh_until") <= now or (
+                max_age is not None
+                and now - _timestamp(context.get("observed_at"), "observed_at") > max_age
+            ):
                 raise DataUseCompilationStale("decision context is stale")
             semantic = _without_record_metadata(context, "context_sha256")
             actual = _digest(context.get("context_sha256"), "context_sha256")
@@ -836,6 +886,11 @@ class DataUsePolicyCompiler:
         ]
         if not desired:
             raise DataUseCompilationValidationError("decision controls are empty")
+        most_operations = compiler_limits()[1]
+        if most_operations is not None and len(desired) > most_operations:
+            raise DataUseCompilationValidationError(
+                "decision compiles to more operations than this installation allows"
+            )
         desired.sort(
             key=lambda item: (
                 item["asset_id"],
@@ -1043,6 +1098,7 @@ __all__ = [
     "DataUseUnsafeFilter",
     "DataUseUnsupportedType",
     "NativeDataUseControlAdapter",
+    "compiler_limits",
     "normalize_row_filter_ast",
     "thaw_control_ir",
 ]
