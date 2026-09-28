@@ -590,6 +590,21 @@ def sync_tenant(tenant_id: str, *, client: StripeClient | None = None,
     return result
 
 
+def sync_tenant_for_period(tenant_id: str, card, *, since: str | None = None,
+                           until: str | None = None,
+                           client: StripeClient | None = None) -> dict:
+    """What ``maverick billing stripe-sync`` does for one tenant and period.
+
+    The period's usage is rated under ``card`` only when metered billing is on
+    (otherwise only the platform-fee subscription is ensured), then
+    :func:`sync_tenant` runs. Raises what :func:`sync_tenant` raises."""
+    invoice = None
+    if bill_metered_usage():
+        from .billing import generate_invoice
+        invoice = generate_invoice(tenant_id, card, since=since, until=until)
+    return sync_tenant(tenant_id, client=client, invoice=invoice)
+
+
 def preview_charges(tenant_id: str, card, *, since: str | None = None,
                     until: str | None = None) -> dict:
     """Dry-run: what a sync WOULD charge -- with no network calls at all.

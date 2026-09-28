@@ -89,3 +89,26 @@ def verify_release_metrics_runtime() -> None:
                  "maverick_tool_latency_budget_breaches"):
         if f"# HELP {name} " not in rendered:
             raise RuntimeError(f"release metrics collector did not export {name}")
+
+
+def verify_full_release_runtime() -> int:
+    """Run every packaged-feature check ``maverick release-runtime-check`` runs.
+
+    Providers, document parsers and worker source, offline SQL with the bundled
+    PostgreSQL driver, MathML and metrics. Returns the bundled libpq version
+    number; raises the first failing check's exception unchanged.
+    """
+    from . import providers
+    from .tools import document_processing
+
+    providers.verify_release_runtime()
+    document_processing.verify_release_document_runtime()
+    libpq_version = verify_release_database_runtime()
+    verify_release_mathml_runtime()
+    verify_release_metrics_runtime()
+    return libpq_version
+
+
+def libpq_label(libpq_version: int) -> str:
+    """``major.minor`` of a libpq version number (e.g. 160004 -> "16.4")."""
+    return f"{libpq_version // 10000}.{libpq_version % 10000}"
