@@ -43,14 +43,23 @@ def better(candidate: list[Rule], current: list[Rule], events: list[Event], *,
     return ok, {"candidate": new, "current": old}
 
 
-def contradictions(rules: list[Rule]) -> list[tuple[str, str, dict]]:
-    """(forbidding rule, requiring rule, a condition under which both apply)."""
+def contradictions(rules: list[Rule], *, limit: int | None = None) -> list[tuple[str, str, dict]]:
+    """(forbidding rule, requiring rule, a condition under which both apply).
+
+    ``limit`` stops after that many pairs, so a large rule set with many
+    conflicts cannot keep a caller busy listing all of them."""
+    requires: dict[object, list[Rule]] = {}
+    for r in rules:
+        if r["modality"] == "require":
+            requires.setdefault(r["action"], []).append(r)
     out = []
     for f in rules:
-        for r in rules:
-            if (f["modality"], r["modality"]) != ("forbid", "require") or f["action"] != r["action"]:
-                continue
+        if f["modality"] != "forbid":
+            continue
+        for r in requires.get(f["action"], ()):
             a, b = f.get("when", {}), r.get("when", {})
             if all(a[k] == b[k] for k in a.keys() & b.keys()):
                 out.append((f["id"], r["id"], {**a, **b}))
+                if limit is not None and len(out) >= limit:
+                    return out
     return out

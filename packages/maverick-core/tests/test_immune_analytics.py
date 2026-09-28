@@ -76,6 +76,9 @@ def test_contradictions_need_compatible_conditions():
              {"id": "tax", "action": "delete_record", "modality": "forbid", "when": {"erasure_request": False}}]
     assert policy.contradictions(rules) == [
         ("hold", "gdpr", {"legal_hold": True, "erasure_request": True})]
+    both = rules + [{"id": "hold2", "action": "delete_record", "modality": "forbid", "when": {}}]
+    assert [pair[0] for pair in policy.contradictions(both)] == ["hold", "hold2"]
+    assert [pair[0] for pair in policy.contradictions(both, limit=1)] == ["hold"]
 
 
 def test_learning_envelope_marks_substantial_modifications():

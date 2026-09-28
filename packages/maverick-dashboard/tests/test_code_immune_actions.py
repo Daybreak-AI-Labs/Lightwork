@@ -264,6 +264,13 @@ def test_drills_recordings_and_rules(client, monkeypatch):
     assert out["contradictions"] == [{"forbidding": "no-wire", "requiring": "must-wire",
                                       "when": "Region is eu"}]
     assert client.post("/api/v1/immune/rules/check", json={"rules": [{"x": 1}]}).status_code == 422
+    # A large conflicting rule set is refused past the size cap and, below it,
+    # listing stops at the first 200 conflicts.
+    many = [{"id": f"r{i}", "modality": "forbid" if i % 2 else "require", "action": "x", "when": {}}
+            for i in range(2001)]
+    assert client.post("/api/v1/immune/rules/check", json={"rules": many}).status_code == 422
+    out = client.post("/api/v1/immune/rules/check", json={"rules": many[:2000]}).json()
+    assert out["rules"] == 2000 and len(out["contradictions"]) == 200
     _as(monkeypatch, "auditor")
     assert client.post("/api/v1/immune/twin/41/replay").status_code == 403
     assert client.post("/api/v1/immune/awareness", json={"goal_ids": [41]}).status_code == 403

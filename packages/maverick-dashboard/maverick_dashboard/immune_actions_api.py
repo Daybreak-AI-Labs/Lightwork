@@ -43,8 +43,12 @@ class AwarenessIn(BaseModel):
     goal_ids: list[int] = Field(min_length=1, max_length=10)
 
 
+_MAX_RULES = 2000
+_MAX_FINDINGS = 200
+
+
 class RulesIn(BaseModel):
-    rules: list[dict] = Field(max_length=_MAX_DOC_ITEMS)
+    rules: list[dict] = Field(max_length=_MAX_RULES)
 
 
 class DossierIn(BaseModel):
@@ -270,20 +274,21 @@ async def check_rules(request: Request, body: RulesIn) -> dict:
     require_permission(request, "audit")
     from maverick.immune import policy
     try:
-        found = policy.contradictions(body.rules)
+        # Off the event loop: a large rule set is compared pair by pair.
+        found = await run_in_threadpool(policy.contradictions, body.rules, limit=_MAX_FINDINGS)
     except (KeyError, TypeError, AttributeError) as exc:
         raise HTTPException(status_code=422, detail="That file is not a rule set Lightwork can read.") from exc
     return {"rules": len(body.rules), "contradictions": [
         {"forbidding": str(f), "requiring": str(r),
          "when": ", ".join(f"{_plain_problem(k)} is {v}" for k, v in sorted(w.items()))}
-        for f, r, w in found[:200]]}
+        for f, r, w in found]}
 
 @router.post("/immune/title/check")
 async def title_check(request: Request, body: DossierIn) -> dict:
     require_permission(request, "audit")
     from maverick.immune import title
     try:
-        problems = title.problems(body.dossier)
+        problems = await run_in_threadpool(title.problems, body.dossier)
     except (KeyError, TypeError, AttributeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="That file is not a discovery record Lightwork can read.") from exc
     return {"problems": [_plain_problem(p) for p in problems[:200]]}
