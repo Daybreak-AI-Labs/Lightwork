@@ -31,7 +31,7 @@ import threading
 import time
 from typing import Any, Protocol
 
-from ._envparse import env_float, env_int
+from ._envparse import env_float
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +45,21 @@ log = logging.getLogger(__name__)
 #     queues anyone. Both are env-overridable.
 #
 # BoundedSemaphore(0) raises ValueError, so clamp to at least 1.
-MAX_CONCURRENT_GOALS = max(1, env_int("MAVERICK_MAX_CONCURRENT_GOALS", 16))
-MAX_CONCURRENT_GOALS_PER_PRINCIPAL = max(
-    1, env_int("MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL", 3))
+# Also settings ([agent] max_concurrent_goals / max_concurrent_goals_per_principal),
+# read once here at startup; the environment still wins.
+def _concurrency_settings() -> tuple[int, int]:
+    from .env_setting import env_or_config_int
+
+    return (
+        max(1, env_or_config_int(
+            "MAVERICK_MAX_CONCURRENT_GOALS", "agent", "max_concurrent_goals", 16)),
+        max(1, env_or_config_int(
+            "MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL", "agent",
+            "max_concurrent_goals_per_principal", 3)),
+    )
+
+
+MAX_CONCURRENT_GOALS, MAX_CONCURRENT_GOALS_PER_PRINCIPAL = _concurrency_settings()
 _run_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_GOALS)
 _inflight_lock = threading.Lock()
 _inflight_count = 0
@@ -173,7 +185,14 @@ def _optional_limit(name: str) -> float | None:
 
 DEFAULT_MAX_DOLLARS = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
 DEFAULT_MAX_WALL_SECONDS = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
-DEFAULT_MAX_DEPTH = env_int("MAVERICK_DEFAULT_MAX_DEPTH", 3)
+def _default_max_depth_setting() -> int:
+    """``[swarm] default_max_depth`` (env ``MAVERICK_DEFAULT_MAX_DEPTH`` wins)."""
+    from .env_setting import env_or_config_int
+
+    return env_or_config_int("MAVERICK_DEFAULT_MAX_DEPTH", "swarm", "default_max_depth", 3)
+
+
+DEFAULT_MAX_DEPTH = _default_max_depth_setting()
 
 
 class TaskLimitConfigError(ValueError):

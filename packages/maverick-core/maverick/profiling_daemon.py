@@ -17,10 +17,12 @@ py-spy must attach to the live PID on the host, so it runs there by design.
 The command runner is injected, so tests exercise the scheduling without
 spawning py-spy.
 
-Opt-in via ``[perf] profiling`` (``enabled = true`` / ``interval_seconds`` /
-``duration_seconds`` / ``format``); env ``MAVERICK_PROFILING=1`` enables it.
-Off by default — nothing samples a process that didn't ask for it.
-``python -m maverick.profiling_daemon`` runs it standalone.
+Opt-in via ``[perf.profiling]`` (``enabled = true`` / ``interval_seconds`` /
+``duration_seconds`` / ``format``); env ``MAVERICK_PROFILING`` wins either way.
+Off by default — nothing samples a process that didn't ask for it. When it is
+on, the dashboard starts it against its own process (see
+``maverick_dashboard.background_programs``); ``python -m
+maverick.profiling_daemon`` still runs it standalone.
 """
 from __future__ import annotations
 
@@ -58,24 +60,24 @@ class ProfilingConfig:
 
 
 def config_from_env() -> ProfilingConfig:
-    """Build the config from ``[perf] profiling`` (env wins)."""
-    enabled = os.environ.get("MAVERICK_PROFILING", "").strip().lower() in {
-        "1", "true", "yes", "on"}
+    """Build the config from ``[perf.profiling]`` (each env variable wins)."""
+    raw = os.environ.get("MAVERICK_PROFILING", "").strip().lower()
+    enabled = raw in {"1", "true", "yes", "on"}
     interval = _envf("MAVERICK_PROFILING_INTERVAL", DEFAULT_INTERVAL)
     duration = _envf("MAVERICK_PROFILING_DURATION", DEFAULT_DURATION)
     fmt = os.environ.get("MAVERICK_PROFILING_FORMAT", "").strip().lower()
-    if not enabled or not fmt:
-        try:
-            from .config import load_config
-            cfg = ((load_config() or {}).get("perf") or {}).get("profiling") or {}
-            enabled = enabled or bool(cfg.get("enabled", False))
-            interval = _envf("MAVERICK_PROFILING_INTERVAL",
-                             float(cfg.get("interval_seconds", interval)))
-            duration = _envf("MAVERICK_PROFILING_DURATION",
-                             float(cfg.get("duration_seconds", duration)))
-            fmt = fmt or str(cfg.get("format", "")).strip().lower()
-        except Exception:  # pragma: no cover -- config never blocks startup
-            pass
+    try:
+        from .config import load_config
+        cfg = ((load_config() or {}).get("perf") or {}).get("profiling") or {}
+        if not raw:
+            enabled = bool(cfg.get("enabled", False))
+        interval = _envf("MAVERICK_PROFILING_INTERVAL",
+                         float(cfg.get("interval_seconds", interval)))
+        duration = _envf("MAVERICK_PROFILING_DURATION",
+                         float(cfg.get("duration_seconds", duration)))
+        fmt = fmt or str(cfg.get("format", "")).strip().lower()
+    except Exception:  # pragma: no cover -- config never blocks startup
+        pass
     fmt = fmt if fmt in _FORMATS else "speedscope"
     return ProfilingConfig(
         enabled=enabled,

@@ -83,7 +83,7 @@
       try {
         var choices = await request('/api/v1/analytics/choices');
         if (!choices.available) {
-          say(status, 'Task questions need an add-on that is not installed on this server. Whoever installed Lightwork can add it.');
+          say(status, choices.reason || 'Task questions need an add-on that is not installed on this server. Whoever installed Lightwork can add it.');
           return;
         }
         choices.metrics.forEach(function (m) { option(form.elements.metric, m.value, m.label); });

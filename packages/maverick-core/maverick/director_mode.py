@@ -22,9 +22,12 @@ exist, instead of the operator hand-tuning five knobs per goal:
 
 :func:`direct` is pure assembly — it returns the goal spec + envelope (env
 overrides, checkpoint policy, budget) and **starts nothing**; the caller
-(CLI, dashboard, channel handler) applies it. Profiles are overridable via
-``[director.profiles.<name>]`` config; unknown profiles are refused (an
-autonomy level must never be guessed).
+applies it. ``maverick start --director <profile> "<outcome>"`` does, for its
+own one-goal process (the consent mode and checkpoints are process-wide, so a
+shared server cannot apply them to one goal without a per-task consent
+override). Profiles are overridable via ``[director.profiles.<name>]`` config
+(Settings > All settings); unknown profiles are refused (an autonomy level
+must never be guessed).
 """
 from __future__ import annotations
 
@@ -96,6 +99,11 @@ def _profile(name: str) -> dict[str, Any]:
                 merged[key] = override[key]
         if isinstance(override.get("checkpoint"), dict):
             merged["checkpoint"].update(override["checkpoint"])
+        # The All settings table stores each profile's checkpoint as flat
+        # ``dollars`` / ``tool_calls`` cells.
+        for key in ("dollars", "tool_calls"):
+            if key in override:
+                merged["checkpoint"][key] = override[key]
     except Exception:  # pragma: no cover -- config never blocks assembly
         pass
     return merged

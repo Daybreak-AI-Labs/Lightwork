@@ -15,10 +15,84 @@ built-in HTTP tools/connectors and ``tenant.egress`` consult this decision
 before dialing a host. There is NO packet-level (iptables/nftables) firewall
 backend yet, so a tool that bypasses the HTTP layer (e.g. raw shell) is not
 constrained by this policy. The decision is unit-tested in isolation.
+
+**Network posture** (``[security] network_policy``, Settings > All settings):
+``"open"`` (the default, and what an unset key means), ``"allowlist"`` or
+``"deny-all"``. It is enforced, never just displayed, and only ever narrows
+what the rules above allow:
+
+* ``deny-all`` -- the web tools (:data:`WEB_TOOLS`) are removed from every
+  agent's tool list, and the work area gets no network (see
+  :func:`work_area_offline`).
+* ``allowlist`` -- web requests reach only hosts on an approved list (a tool's
+  ``allow_egress`` or ``[egress] allow``; with no list nothing is approved),
+  the web tools that cannot be held to a list (:data:`UNLISTABLE_TOOLS`) are
+  removed, and the work area gets no network.
+* A value this module does not know fails closed to ``deny-all``.
+
+``[sandbox] network_policy = "deny-all"`` asserts the same no-network rule for
+the work area alone (the Kubernetes backend then verifies its deny-all
+NetworkPolicy before every command).
 """
 from __future__ import annotations
 
+import logging
 from fnmatch import fnmatch
+
+log = logging.getLogger(__name__)
+
+# Tools whose purpose is reaching arbitrary internet hosts.
+WEB_TOOLS = frozenset({"http_fetch", "web_search", "browser", "websocket", "webrtc"})
+# Web tools that talk to services chosen by the tool, not to a host the
+# request names, so an approved-host list cannot hold them.
+UNLISTABLE_TOOLS = frozenset({"web_search", "webrtc"})
+_DENY_ALL = frozenset({"deny-all", "deny_all", "deny", "blocked", "none-allowed"})
+_ALLOWLIST = frozenset({"allowlist", "allow-list", "allow_list"})
+_OPEN = frozenset({"", "open", "allow", "allow-all", "allow_all"})
+
+
+def _config(config: dict | None) -> dict:
+    if config is not None:
+        return config
+    try:
+        from ..config import load_config
+        return load_config() or {}
+    except Exception:  # an unreadable config fails closed below
+        return {"security": {"network_policy": "?"}}
+
+
+def network_posture(config: dict | None = None) -> str:
+    """``"open"``, ``"allowlist"`` or ``"deny-all"`` from ``[security] network_policy``."""
+    section = _config(config).get("security") or {}
+    raw = str((section.get("network_policy") if isinstance(section, dict) else "?") or "")
+    value = raw.strip().lower()
+    if value in _OPEN:
+        return "open"
+    if value in _ALLOWLIST:
+        return "allowlist"
+    if value not in _DENY_ALL:
+        log.warning("unknown [security] network_policy %r; blocking network access", raw)
+    return "deny-all"
+
+
+def denied_tools(config: dict | None = None) -> frozenset[str]:
+    """The web tools the network posture removes from agents' tool lists."""
+    posture = network_posture(config)
+    if posture == "deny-all":
+        return WEB_TOOLS
+    if posture == "allowlist":
+        return UNLISTABLE_TOOLS
+    return frozenset()
+
+
+def work_area_offline(config: dict | None = None) -> bool:
+    """Whether the work area must have no network (posture or ``[sandbox] network_policy``)."""
+    cfg = _config(config)
+    if network_posture(cfg) != "open":
+        return True
+    sandbox = cfg.get("sandbox") or {}
+    value = str((sandbox.get("network_policy") if isinstance(sandbox, dict) else "") or "")
+    return value.strip().lower() in _DENY_ALL
 
 
 def load_policy() -> dict:
@@ -97,4 +171,5 @@ def describe(tool: str, policy: dict | None = None) -> str:
     return f"{tool}: " + (", ".join(parts) or "unrestricted")
 
 
-__all__ = ["load_policy", "host_allowed", "describe"]
+__all__ = ["UNLISTABLE_TOOLS", "WEB_TOOLS", "denied_tools", "describe", "host_allowed",
+           "load_policy", "network_posture", "work_area_offline"]

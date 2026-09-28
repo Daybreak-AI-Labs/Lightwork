@@ -37,6 +37,17 @@ The kernel reads `requires`, intersects it with the operator's grant (CLAUDE.md
 rule #5 — a config knob gates every capability), and refuses to load a plugin
 that demands more than it's granted, with a clear message.
 
+> **As shipped:** `requires` is a key of the plugin's own manifest
+> (`maverick-plugin.toml`), not of the operator's config, so there is no
+> `[capabilities] requires` setting to change. The released manifest spells
+> permissions as `[plugin.permissions]` (see `docs/plugin-api-v2.md`); this RFC
+> form is honoured too (`plugin_manifest.py`): `net:egress` maps to `network`,
+> `fs:write` to `fs_write`, `proc:exec` to `subprocess`, `env:NAME` to a
+> sensitive variable, and any other requirement (`tool:http_fetch`, ...) must be
+> granted by exactly that name. The operator's grant is `[plugins] grant` and
+> `[plugins] enforce_permissions` ("What plugins may do" on Settings > All
+> settings); a plugin asking for anything not granted is not loaded.
+
 ### Surfaces a plugin can register
 
 `tools`, `hooks` (`PreToolUse`/`PostToolUse`/`UserPromptSubmit`), `channels`,

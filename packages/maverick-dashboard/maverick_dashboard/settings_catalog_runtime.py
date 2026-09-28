@@ -32,7 +32,22 @@ _SEVERITIES = (("medium", "Medium"), ("high", "High (default)"), ("critical", "C
 
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column kept for the shared signature
     return (_models(S, C) + _providers(S) + _work_area(S, C) + _safety(S, C)
-            + _tools(S, C) + _memory(S) + _diagnostics(S, C) + _switches(S))
+            + _tools(S, C) + _memory(S) + _diagnostics(S, C) + _switches(S)
+            + _wired(S, C) + _background(S) + _startup_limits(S) + _tool_server(S))
+
+
+def cross_checks(effective: dict, by_id: dict, error: type) -> None:  # noqa: ARG001
+    """Refuse values the kernel would reject or cannot honour yet."""
+    if effective.get("ekko.provider_egress") is True:
+        raise error("Send Ekko's findings to an AI service: this can't be turned on yet. Ekko "
+                    "has no reviewed way to send what it notices off this computer, so it "
+                    "stays off.")
+    keys = effective.get("tui.keys")
+    if isinstance(keys, dict) and keys:
+        from maverick import keymap
+
+        if keymap.validate({**keymap.DEFAULTS, **{k: str(v).lower() for k, v in keys.items()}}):
+            raise error("Keys in the terminal view: two actions can't share one key.")
 
 
 def _models(S, C) -> tuple:
@@ -1223,6 +1238,7 @@ def _switches(S) -> tuple:
     )
 
 
+<<<<<<< HEAD
 def cross_checks(effective: dict, by_id: dict, error: type) -> None:
     """Voice unlock can't be turned on until it can actually check voices."""
     if effective.get("voice.biometric_unlock") is not True:
@@ -1234,3 +1250,461 @@ def cross_checks(effective: dict, by_id: dict, error: type) -> None:
     reason = voice_unlock.readiness(str(effective.get("voice.speaker_model_path") or ""))
     if reason:
         raise error(f"{by_id['voice.biometric_unlock'].label}: {reason}")
+=======
+_KEY = r"[!-~]|[Ff]([1-9]|1[0-2])|up|down|left|right|tab|enter|esc"
+_MODEL_NAME = r"([A-Za-z0-9][A-Za-z0-9_.-]{0,95}/)?[A-Za-z0-9][A-Za-z0-9_.-]{0,95}"
+_ORIGIN = r"https?://[A-Za-z0-9.\[\]:-]{1,253}(:[0-9]{1,5})?"
+_CONSENT = (("ask", "Ask a person each time"), ("dashboard", "Wait on the Approvals page"),
+            ("auto-deny", "Refuse them all"), ("auto-approve", "Allow them all"))
+
+
+def _wired(S, C) -> tuple:
+    """Settings whose code already existed but that nothing used to call."""
+    return (
+        S("memory", "learning_cache", "Reuse checked answers to repeated tasks",
+          "When the same person gives exactly the same task again, start from the answer an "
+          "earlier run produced and the answer checker accepted, instead of searching again. "
+          "Answers holding a password or key are never kept.", "toggle", "Memory & learning",
+          False, "maverick.cache.learning", subgroup="Recall of past work",
+          env=("MAVERICK_LEARNING_CACHE",)),
+        S("tools", "speculative", "Look up repeated reads ahead of time",
+          "While an agent thinks, repeat the look-ups it keeps making, such as reading a file it "
+          "just changed, so the answer is ready when it asks. Only reads, never changes, and "
+          "only with reusing tool results turned on.", "toggle", "Performance", False,
+          "maverick.speculative_tools", subgroup="Reusing tool results",
+          env=("MAVERICK_SPECULATIVE_TOOLS",)),
+        S("energy", "wh_per_1k_tokens", "Electricity per 1,000 words of AI text",
+          "Used by energy estimates, in watt-hours for every 1,000 tokens. Leave the standard "
+          "figure unless you know your AI service's own.", "number", "Performance", 0.3,
+          "maverick.energy_accounting", subgroup="Energy estimates", minimum=0.001,
+          maximum=100, step=0.01, unit="watt-hours", env=("MAVERICK_ENERGY_WH_PER_1K_TOKENS",)),
+        S("energy", "grid_co2_g_per_kwh", "Carbon per unit of electricity",
+          "Used by energy estimates: grams of carbon dioxide for each kilowatt-hour where your "
+          "AI service runs. The standard figure is a world average.", "number", "Performance",
+          400.0, "maverick.energy_accounting", subgroup="Energy estimates", minimum=1,
+          maximum=2000, step=1, unit="grams", env=("MAVERICK_ENERGY_GRID_CO2_G_PER_KWH",)),
+        S("logging", "crash_log", "Keep a crash-safe copy of warnings and errors",
+          "Also write every warning and error, one line at a time, to a file that survives the "
+          "server stopping suddenly, so the reason for a crash is not lost.", "toggle",
+          "Performance", False, "maverick.logging_config", subgroup="Error reporting",
+          restart=True, env=("MAVERICK_CRASH_LOG",)),
+        S("logging", "crash_only_fsync", "Save the crash-safe copy",
+          "How each line of the crash-safe copy reaches the disk.", "select", "Performance",
+          "always", "maverick.crash_only_log", subgroup="Error reporting",
+          choices=(("always", "At once, line by line (default)"),
+                   ("never", "When the computer gets round to it (faster)")),
+          restart=True, env=("MAVERICK_CRASH_ONLY_FSYNC",), weaker=True,
+          order=("always", "never"),
+          warning="The last lines written before a crash may be lost."),
+        S("tui", "keys", "Keys in the terminal view",
+          "Change the keys the terminal view of a running task answers to. Use one letter, "
+          "number or sign, or up, down, left, right, tab, enter, esc or f1 to f12. Ctrl-C always "
+          "quits.", "table", "Performance", {}, "maverick.keymap", subgroup="Terminal view",
+          row_kind="grid",
+          choices=(("quit", "Quit"), ("refresh", "Refresh now"),
+                   ("expand", "Open the chosen step"), ("collapse", "Close the chosen step"),
+                   ("focus_next", "Next step"), ("focus_prev", "Previous step"),
+                   ("toggle_follow", "Pause or follow the task")),
+          scalar=True, columns=(C("key", "Key", "text", required=True, pattern=_KEY,
+                                  max_length=5, item_error="one key such as q, up or f5"),),
+          row_label="Action", item_label="Action", add_label="Change a key",
+          empty_text="Every action uses its standard key.", restart=True,
+          env=("MAVERICK_TUI_KEYS",)),
+        S("security", "network_policy", "Internet for agents' web tools and commands",
+          "Open lets the other rules decide. Only approved websites limits the web tools to the "
+          "addresses listed as allowed and gives commands no internet. Blocked removes the web "
+          "tools and gives commands no internet.", "select", "Security", "",
+          "maverick.sandbox.network_policy", subgroup="Outbound connections",
+          choices=(("", "Open (default)"), ("allowlist", "Only approved websites"),
+                   ("deny-all", "Blocked")),
+          weaker=True, order=("deny-all", "allowlist", ""),
+          warning="Agents' web tools and commands will be able to reach more of the internet.",
+          aliases="network policy egress internet offline"),
+        S("sandbox", "network_policy", "Never give commands internet",
+          "Keep the work area offline whatever else is chosen. A cluster work area checks its "
+          "no-internet rule before every command and refuses to run without it.", "select",
+          "Protected work area", "", "maverick.sandbox.network_policy", subgroup="Work area",
+          choices=(("", "Use the work area's own setting (default)"),
+                   ("deny-all", "Never, checked before each command")),
+          weaker=True, order=("deny-all", ""),
+          warning="Commands may be able to reach the internet again."),
+        S("ekko", "provider_egress", "Send Ekko's findings to an AI service",
+          "Not available yet: Ekko has no reviewed way to send what it notices off this "
+          "computer, so this stays off and turning it on is refused.", "toggle", "Privacy",
+          False, "maverick.config", subgroup="Work pattern discovery (Ekko)", weaker=True,
+          warning="What Ekko notices would be sent to an AI service."),
+        S("env_hunt", "enrichment_sources", "Lookup services for security findings",
+          "Turn on the lookup services, such as a threat information feed, that your server has "
+          "added, by the name it added them under. The Security page shows which ones are "
+          "ready.", "table", "Security suite", {}, "maverick_dashboard.security_api",
+          subgroup="Lookup services", row_kind="named",
+          columns=(C("enable", "Use it", "switch", default=True),),
+          pattern=r"[a-z0-9][a-z0-9_.-]{0,119}",
+          item_error="lowercase letters, numbers, dots, dashes and underscores",
+          row_label="Service name", item_label="Service", add_label="Add a lookup service",
+          empty_text="No lookup services are turned on.", weaker="grow",
+          warning="Details of security findings will be sent to the lookup services you turn on."),
+        S("memory", "weaviate_grpc_host", "Weaviate fast-connection address",
+          "The address of your Weaviate server's fast connection, when it differs from the "
+          "address above. Leave empty to use the same one.", "text", "Memory & learning", "",
+          "maverick.vector_store.weaviate_store", subgroup="Recall of past work",
+          pattern=r"([A-Za-z0-9.-]{1,253})?", max_length=253,
+          env=("MAVERICK_WEAVIATE_GRPC_HOST",), weaker="change",
+          warning="Summaries of past tasks will be sent to a different address."),
+        S("memory", "weaviate_grpc_port", "Weaviate fast-connection port",
+          "Leave empty for the standard port.", "number", "Memory & learning", None,
+          "maverick.vector_store.weaviate_store", subgroup="Recall of past work", minimum=1,
+          maximum=65535, integer=True, unit="port", none_text="Standard port",
+          env=("MAVERICK_WEAVIATE_GRPC_PORT",)),
+        S("memory", "weaviate_vectorizer", "How Weaviate reads summaries",
+          "The service your Weaviate server uses to turn summaries into searchable meaning. It "
+          "must be turned on in your Weaviate server.", "select", "Memory & learning", "",
+          "maverick.vector_store.weaviate_store", subgroup="Recall of past work",
+          choices=(("", "Weaviate's own text model (default)"),
+                   ("text2vec-openai", "OpenAI"), ("text2vec-ollama", "Ollama"),
+                   ("text2vec-cohere", "Cohere"), ("text2vec-huggingface", "Hugging Face"),
+                   ("none", "None, Lightwork supplies them")),
+          env=("MAVERICK_WEAVIATE_VECTORIZER",), weaker="change",
+          warning="Summaries of past tasks may be sent to a different service to be read."),
+        S("models", "embed", "Model for comparing text by meaning",
+          "The local model the text-comparison tool downloads and uses. Leave empty for the "
+          "standard small English model.", "text", "AI models", "", "maverick.tools.embeddings",
+          subgroup="Model choices", pattern=r"(" + _MODEL_NAME + r")?", max_length=193,
+          env=("MAVERICK_EMBED_MODEL",), weaker="change",
+          warning="A different model will be downloaded and run on this server."),
+        S("models", "clap", "Model for recognising sounds",
+          "The local model the sound-recognition tool downloads and uses. Leave empty for the "
+          "standard one.", "text", "AI models", "", "maverick.tools.audio_understanding",
+          subgroup="Model choices", pattern=r"(" + _MODEL_NAME + r")?", max_length=193,
+          env=("MAVERICK_CLAP_MODEL",), weaker="change",
+          warning="A different model will be downloaded and run on this server."),
+        S("replay", "record", "Record every task step by step",
+          "Keep a tamper-evident record of each task's steps so it can be replayed later. The "
+          "records can hold parts of the tasks.", "toggle", "Performance", False,
+          "maverick.replay.trace", subgroup="Task recordings", env=("MAVERICK_TRACE_DIR",),
+          weaker=True, warning="A record of every task's steps, which can hold parts of the "
+                               "tasks, will be kept on this server."),
+        S("replay", "trace_dir", "Folder for task recordings",
+          "Where the recordings are kept. Leave empty to keep them in Lightwork's own folder.",
+          "path", "Performance", "", "maverick.replay.trace", subgroup="Task recordings",
+          path_kind="folder", path_writable=True, max_length=400, env=("MAVERICK_TRACE_DIR",)),
+        S("analytics", "task_questions", "Answer questions about past tasks",
+          "Offer the questions about spending, tasks and tokens on the Insights page. They need "
+          "the DuckDB add-on installed on the server.", "toggle", "Performance", True,
+          "maverick_dashboard.insight_ops_api", subgroup="Insights"),
+        S("director", "profiles", "Director mode autonomy levels",
+          "What each autonomy level means when a task is started in director mode from the "
+          "command line: how actions that can't be undone are handled, when a person reviews "
+          "the work, and what share of the spending limit it may use. It never goes above the "
+          "spending limit.", "table", "Safety", {}, "maverick.director_mode",
+          subgroup="Director mode", row_kind="grid",
+          choices=(("supervised", "Supervised"), ("semi", "Partly on its own"),
+                   ("autonomous", "On its own")),
+          columns=(
+              C("consent_mode", "Actions that can't be undone", "select", choices=_CONSENT,
+                required=True),
+              C("budget_multiplier", "Share of the spending limit", "number", minimum=0.1,
+                maximum=10, unit="times", required=True),
+              C("dollars", "Review after spending", "number", minimum=0.01, maximum=100000,
+                unit="dollars", required=True),
+              C("tool_calls", "Review after actions", "number", minimum=1, maximum=100000,
+                integer=True, unit="actions", required=True),
+          ),
+          row_label="Autonomy level", item_label="Autonomy level", add_label="Change a level",
+          empty_text="Every level uses its standard meaning.", weaker="change",
+          warning="Director runs at this level may ask for fewer approvals or be reviewed less "
+                  "often."),
+    )
+
+
+def _background(S) -> tuple:
+    """Programs the dashboard starts, and stops, with itself when they are on."""
+    grp, programs, proxy = "Server & deployment", "Background programs", "Model proxy"
+    return (
+        S("perf.profiling", "enabled", "Record where the server spends its time",
+          "Start a sampling program with the dashboard that regularly records where this "
+          "server's time goes and saves the results in Lightwork's folder. It needs the py-spy "
+          "program installed.", "toggle", grp, False, "maverick.profiling_daemon",
+          subgroup=programs, restart=True, env=("MAVERICK_PROFILING",)),
+        S("perf.profiling", "interval_seconds", "Record every",
+          "How long to wait between recordings.", "number", grp, 300.0,
+          "maverick.profiling_daemon", subgroup=programs, minimum=10, maximum=86400,
+          integer=True, unit="seconds", restart=True, env=("MAVERICK_PROFILING_INTERVAL",)),
+        S("perf.profiling", "duration_seconds", "Length of each recording",
+          "How long each recording lasts.", "number", grp, 30.0, "maverick.profiling_daemon",
+          subgroup=programs, minimum=1, maximum=600, integer=True, unit="seconds",
+          restart=True, env=("MAVERICK_PROFILING_DURATION",)),
+        S("perf.profiling", "format", "Recording format",
+          "The kind of file each recording is saved as.", "select", grp, "speedscope",
+          "maverick.profiling_daemon", subgroup=programs,
+          choices=(("speedscope", "Speedscope file (default)"), ("flamegraph", "Flame picture"),
+                   ("raw", "Plain text")), restart=True, env=("MAVERICK_PROFILING_FORMAT",)),
+        S("ebpf_monitor", "enable", "Watch the programs agents start",
+          "Start a monitor with the dashboard that follows every program Lightwork starts and "
+          "warns about risky system requests. It needs the server's administrator account and "
+          "the bpftrace program; without them it stops at once and says why.", "toggle", grp,
+          False, "maverick.ebpf_monitor", subgroup=programs, restart=True),
+        S("model_proxy", "enable", "Run the model proxy",
+          "Start the model proxy with the dashboard. It holds the AI service key in a separate "
+          "program, so agents never see it. The key itself is set on the server, not here.",
+          "toggle", grp, False, "maverick_dashboard.background_programs", subgroup=proxy,
+          restart=True, weaker=True,
+          warning="A program that forwards AI requests will listen on this server."),
+        S("model_proxy", "upstream", "AI service the proxy forwards to",
+          "The secure address of the AI service, such as https://api.anthropic.com.", "text",
+          grp, "", "maverick.model_proxy", subgroup=proxy, pattern=_ADDRESS, max_length=320,
+          restart=True, env=("MAVERICK_PROXY_UPSTREAM",), weaker="change",
+          warning="AI requests sent through the proxy will go to a different service."),
+        S("model_proxy", "listen", "Where the proxy listens",
+          "The address and port, such as 127.0.0.1:8765. Leave empty for this computer only, "
+          "port 8765.", "text", grp, "", "maverick.model_proxy", subgroup=proxy,
+          pattern=r"([A-Za-z0-9.\[\]:-]{1,253}:[0-9]{1,5})?", max_length=260, restart=True,
+          env=("MAVERICK_PROXY_LISTEN",), weaker="change",
+          warning="Other computers may be able to reach the proxy."),
+        S("model_proxy", "auth_style", "How the proxy sends the key",
+          "Use the style the AI service expects.", "select", grp, "bearer",
+          "maverick.model_proxy", subgroup=proxy,
+          choices=(("bearer", "Bearer sign-in (default)"), ("x-api-key", "Key header (Claude)")),
+          restart=True, env=("MAVERICK_PROXY_AUTH_STYLE",)),
+        S("model_proxy", "client_token", "Password agents give the proxy",
+          "Agents must send this password to use the proxy. It is stored sealed and never shown "
+          "again.", "secret", grp, "", "maverick.model_proxy", subgroup=proxy, max_length=500,
+          restart=True, env=("MAVERICK_PROXY_CLIENT_TOKEN",)),
+        S("model_proxy", "allowed_routes", "Requests the proxy passes on",
+          "Leave all unticked for the standard AI requests.", "multiselect", grp, [],
+          "maverick.model_proxy", subgroup=proxy,
+          choices=(("POST /v1/messages", "Claude messages"),
+                   ("POST /v1/messages/count_tokens", "Claude token counts"),
+                   ("POST /v1/chat/completions", "Chat answers"),
+                   ("POST /v1/responses", "Responses"),
+                   ("POST /v1/completions", "Text completions"),
+                   ("POST /v1/embeddings", "Text comparison")),
+          restart=True, env=("MAVERICK_PROXY_ALLOWED_ROUTES",), weaker="change",
+          warning="The proxy will pass on a different set of requests."),
+    )
+
+
+def _startup_limits(S) -> tuple:
+    """Limits the kernel reads once when it starts (the environment still wins)."""
+    how, length = "How agents work", "Conversation length"
+    return (
+        S("agent", "loop_guard", "Stop agents repeating the same action",
+          "When an agent keeps making exactly the same request and getting the same result, "
+          "tell it to change course, and in the end refuse the repeat.", "toggle", "AI models",
+          True, "maverick.agent", subgroup=how, restart=True, env=("MAVERICK_LOOP_GUARD",),
+          weaker=False, warning="Agents that repeat the same action will no longer be stopped, "
+                                "which can waste money."),
+        S("agent", "loop_guard_threshold", "Repeats before an agent is told to change course",
+          "How many identical requests in a row an agent may make before it is told to try "
+          "something else.", "number", "AI models", 3, "maverick.agent", subgroup=how,
+          minimum=2, maximum=50, integer=True, unit="repeats", restart=True,
+          env=("MAVERICK_LOOP_GUARD_THRESHOLD",)),
+        S("agent", "loop_guard_block", "Repeats before the request is refused",
+          "After this many identical requests with the same result, the next one is refused. "
+          "Zero only tells the agent and never refuses.", "number", "AI models", 6,
+          "maverick.agent", subgroup=how, minimum=0, maximum=100, integer=True,
+          unit="repeats", restart=True, env=("MAVERICK_LOOP_GUARD_BLOCK",)),
+        S("agent", "step_budget_warning", "Warn an agent this many steps before its limit",
+          "Tell an agent to give its answer when only this many steps are left. Zero never "
+          "warns.", "number", "AI models", 3, "maverick.agent", subgroup=how, minimum=0,
+          maximum=100, integer=True, unit="steps", restart=True,
+          env=("MAVERICK_STEP_BUDGET_WARNING",)),
+        S("agent", "max_concurrent_goals", "Tasks running at once on this server",
+          "The most tasks this server runs at the same time. More wait their turn.", "number",
+          "Performance", 16, "maverick.runner", subgroup="Running tasks", minimum=1,
+          maximum=1000, integer=True, unit="tasks", restart=True,
+          env=("MAVERICK_MAX_CONCURRENT_GOALS",)),
+        S("agent", "max_concurrent_goals_per_principal", "Tasks running at once for one person",
+          "The most tasks one person can have running at the same time, so nobody holds up "
+          "everyone else.", "number", "Performance", 3, "maverick.runner",
+          subgroup="Running tasks", minimum=1, maximum=100, integer=True, unit="tasks",
+          restart=True, env=("MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL",)),
+        S("latency", "retry_attempts", "Tries for each AI request",
+          "How many times a failed request to an AI service is tried in all. Every try is "
+          "billed.", "number", "Performance", 3, "maverick.retry", subgroup="AI service requests",
+          minimum=1, maximum=10, integer=True, unit="tries", restart=True,
+          env=("MAVERICK_LLM_RETRY_ATTEMPTS",), weaker="higher",
+          warning="Failed AI requests will be tried more times, and each try is billed."),
+        S("latency", "retry_base_delay", "First wait before trying again",
+          "The wait before the first retry; later waits grow from it.", "number", "Performance",
+          1.0, "maverick.retry", subgroup="AI service requests", minimum=0, maximum=60,
+          step=0.5, unit="seconds", restart=True, env=("MAVERICK_LLM_RETRY_BASE_DELAY",)),
+        S("latency", "retry_max_delay", "Longest wait before trying again", "The longest wait "
+          "between two tries.", "number", "Performance", 30.0, "maverick.retry",
+          subgroup="AI service requests", minimum=1, maximum=600, unit="seconds", restart=True,
+          env=("MAVERICK_LLM_RETRY_MAX_DELAY",)),
+        S("swarm", "max_fanout", "Helpers one agent may start at once",
+          "The most helper agents a single request can start together.", "number", "AI models",
+          8, "maverick.tools.spawn", subgroup=how, minimum=1, maximum=64, integer=True,
+          unit="helpers", restart=True, env=("MAVERICK_MAX_SWARM_FANOUT",), weaker="higher",
+          warning="One agent will be able to start more helpers at once, which costs more."),
+        S("swarm", "default_max_depth", "Levels of helpers under a task",
+          "How many levels of helpers under helpers a task may use when none is chosen.",
+          "number", "AI models", 3, "maverick.runner", subgroup=how, minimum=1, maximum=10,
+          integer=True, unit="levels", restart=True, env=("MAVERICK_DEFAULT_MAX_DEPTH",)),
+        S("verification", "confidence_accept", "How sure the checker must be to accept",
+          "The answer checker accepts an answer when it is at least this sure, from 0 to 1.",
+          "number", "AI models", 0.75, "maverick.verifier", subgroup="Checking answers",
+          minimum=0, maximum=1, step=0.05, unit="score", restart=True,
+          env=("MAVERICK_VERIFIER_CONFIDENCE",), weaker="lower",
+          warning="The answer checker will accept answers it is less sure about."),
+        S("verification", "disagreement_high", "Disagreement that brings in more checkers",
+          "When the first answers disagree at least this much, from 0 to 1, more are compared.",
+          "number", "AI models", 0.5, "maverick.verifier", subgroup="Checking answers",
+          minimum=0, maximum=1, step=0.05, unit="score", restart=True,
+          env=("MAVERICK_DISAGREEMENT_HIGH",)),
+        S("compaction", "keep_recent", "Recent turns never shortened",
+          "The newest turns of a conversation are always kept whole.", "number", "AI models", 4,
+          "maverick.compaction", subgroup=length, minimum=1, maximum=100, integer=True,
+          unit="turns", restart=True, env=("MAVERICK_COMPACT_KEEP_RECENT",)),
+        S("compaction", "digest_every", "Summarise older turns every",
+          "How often older turns are folded into a summary.", "number", "AI models", 10,
+          "maverick.compaction", subgroup=length, minimum=1, maximum=1000, integer=True,
+          unit="turns", restart=True, env=("MAVERICK_COMPACT_DIGEST_EVERY",)),
+        S("compaction", "max_tool_bytes", "Longest older tool result kept",
+          "Older tool results are cut to this many characters when a conversation is "
+          "shortened.", "number", "AI models", 2048, "maverick.compaction", subgroup=length,
+          minimum=256, maximum=1048576, integer=True, unit="characters", restart=True,
+          env=("MAVERICK_COMPACT_MAX_TOOL_BYTES",)),
+        S("compaction", "max_total_bytes", "Most text kept in a conversation",
+          "When a conversation grows past this many characters, older results are shortened "
+          "too. Zero never shortens for size.", "number", "AI models", 200000,
+          "maverick.compaction", subgroup=length, minimum=0, maximum=10000000, integer=True,
+          unit="characters", restart=True, env=("MAVERICK_COMPACT_MAX_TOTAL_BYTES",)),
+        S("attachments", "max_file_bytes", "Largest attachment",
+          "Bigger files are refused.", "number", "Privacy", 104857600, "maverick.attachments",
+          subgroup="Attachments", minimum=1, maximum=10240, integer=True, scale=1048576,
+          unit="MB", restart=True, env=("MAVERICK_ATTACH_MAX_FILE_BYTES",)),
+        S("attachments", "max_goal_bytes", "Most attachments for one task",
+          "All of one task's attachments together may not be bigger than this.", "number",
+          "Privacy", 524288000, "maverick.attachments", subgroup="Attachments", minimum=1,
+          maximum=102400, integer=True, scale=1048576, unit="MB", restart=True,
+          env=("MAVERICK_ATTACH_MAX_GOAL_BYTES",)),
+        S("tools", "openapi_spec_max_bytes", "Largest service description read",
+          "Descriptions of outside services bigger than this are refused.", "number",
+          "Performance", 10000000, "maverick.tools.openapi_runner",
+          subgroup="Connected services", minimum=1, maximum=500, integer=True,
+          scale=1000000, unit="MB", restart=True, env=("MAVERICK_OPENAPI_SPEC_MAX_BYTES",)),
+        S("tools", "openapi_call_max_bytes", "Largest reply from an outside service",
+          "Replies bigger than this are cut off.", "number", "Performance", 1000000,
+          "maverick.tools.openapi_runner", subgroup="Connected services", minimum=1,
+          maximum=100, integer=True, scale=1000000, unit="MB", restart=True,
+          env=("MAVERICK_OPENAPI_CALL_MAX_BYTES",)),
+        S("models", "openai_max_tools", "Most tools offered to OpenAI-style models",
+          "OpenAI-style services refuse requests offering more tools than this.", "number",
+          "AI models", 128, "maverick.providers.openai_provider", subgroup="Model choices",
+          minimum=1, maximum=1024, integer=True, unit="tools", restart=True,
+          env=("MAVERICK_OPENAI_MAX_TOOLS",)),
+    )
+
+
+def _tool_server(S) -> tuple:
+    """The tool server for outside apps (``maverick mcp``): the ``[mcp]`` section."""
+    grp, sub = "Integrations", "Tool server for outside apps"
+    common = {"subgroup": sub, "aliases": "mcp tool server"}
+    return (
+        S("mcp", "token", "Password for outside apps",
+          "The shared password outside apps send to use Lightwork's tools over the network. It "
+          "is stored sealed and never shown again.", "secret", grp, "", "maverick_mcp.settings",
+          max_length=500, env=("MAVERICK_MCP_TOKEN",), weaker="change",
+          warning="Apps using the old password will be refused, and anyone with the new one "
+                  "can use Lightwork's tools.", **common),
+        S("mcp", "allowed_origins", "Web pages that may call the tool server",
+          "Web page addresses, besides this computer, allowed to call the tool server from a "
+          "browser.", "list", grp, [], "maverick_mcp.settings", item_label="Web address",
+          item_hint="https://gateway.example.com", pattern=_ORIGIN,
+          item_error="a web address such as https://gateway.example.com", max_items=50,
+          env=("MAVERICK_MCP_ALLOWED_ORIGINS",), weaker="grow",
+          warning="Web pages at these addresses will be able to call the tool server.",
+          **common),
+        S("mcp", "http_tasks", "Let outside apps start long tasks over the network",
+          "Outside apps connected over the network may start tasks that keep running and "
+          "collect the result later.", "toggle", grp, False, "maverick_mcp.settings",
+          restart=True, env=("MAVERICK_MCP_HTTP_TASKS",), **common),
+        S("mcp", "rate_limit", "Requests each app may make per minute",
+          "Zero means no limit.", "number", grp, 600, "maverick_mcp.settings", minimum=0,
+          maximum=100000, integer=True, unit="requests", env=("MAVERICK_MCP_RATE_LIMIT",),
+          weaker="higher", warning="Outside apps will be able to send more requests.",
+          **common),
+        S("mcp", "max_body_bytes", "Largest request from an app",
+          "Bigger requests are refused.", "number", grp, 2097152, "maverick_mcp.settings",
+          minimum=1, maximum=65536, integer=True, scale=1024, unit="KB",
+          env=("MAVERICK_MCP_MAX_BODY",), **common),
+        S("mcp", "max_resource_sessions", "Apps watching for changes at once",
+          "The most connections that may watch Lightwork's records for changes at once.",
+          "number", grp, 1024, "maverick_mcp.settings", minimum=1, maximum=100000,
+          integer=True, unit="connections", env=("MAVERICK_MCP_MAX_RESOURCE_SESSIONS",),
+          **common),
+        S("mcp", "sse_heartbeat", "Progress message every",
+          "How often a long request tells the app it is still working.", "number", grp, 15.0,
+          "maverick_mcp.settings", minimum=1, maximum=300, unit="seconds",
+          env=("MAVERICK_MCP_SSE_HEARTBEAT",), **common),
+        S("mcp", "sse_max_progress_events", "Progress messages per request",
+          "The most progress messages one request sends.", "number", grp, 240,
+          "maverick_mcp.settings", minimum=0, maximum=100000, integer=True, unit="messages",
+          env=("MAVERICK_MCP_SSE_MAX_PROGRESS_EVENTS",), **common),
+        S("mcp", "max_dollars", "Most one app task may spend",
+          "Tasks started by outside apps stop at this amount. Leave empty to use the normal "
+          "spending limit.", "number", grp, None, "maverick_mcp.settings", minimum=0.01,
+          maximum=100000, step=0.01, unit="dollars", none_text="The normal spending limit",
+          env=("MAVERICK_MCP_MAX_DOLLARS",), weaker="higher",
+          warning="Tasks started by outside apps will be able to spend more.", **common),
+        S("mcp", "max_wall_seconds", "Longest one app task may run",
+          "Tasks started by outside apps stop after this long. Leave empty to use the normal "
+          "time limit.", "number", grp, None, "maverick_mcp.settings", minimum=1,
+          maximum=86400, integer=True, unit="seconds", none_text="The normal time limit",
+          env=("MAVERICK_MCP_MAX_WALL_SECONDS",), weaker="higher",
+          warning="Tasks started by outside apps will be able to run for longer.", **common),
+        S("mcp", "max_depth", "Levels of helpers in an app task",
+          "The most levels of helpers a task started by an outside app may use.", "number",
+          grp, 3, "maverick_mcp.settings", minimum=1, maximum=10, integer=True,
+          unit="levels", env=("MAVERICK_MCP_MAX_DEPTH",), **common),
+        S("mcp", "elicitation_timeout", "Wait for a person's answer for",
+          "How long an app task waits for a person to answer a question before leaving it to "
+          "be answered later.", "number", grp, 300.0, "maverick_mcp.settings", minimum=1,
+          maximum=86400, unit="seconds", env=("MAVERICK_MCP_ELICITATION_TIMEOUT",), **common),
+        S("mcp", "max_elicit_rounds", "Questions one app task may ask",
+          "The most questions a task started by an outside app may ask a person.", "number",
+          grp, 8, "maverick_mcp.settings", minimum=1, maximum=64, integer=True,
+          unit="questions", env=("MAVERICK_MCP_MAX_ELICIT_ROUNDS",), **common),
+        S("mcp", "elicit_allowed_hosts", "Websites an app task may send a person to",
+          "When a task asks a person to sign in somewhere, only these websites may be used. "
+          "Leave empty to allow any secure website.", "list", grp, [], "maverick_mcp.server",
+          item_label="Website", item_hint="accounts.google.com", pattern=_HOST,
+          item_error="a website such as accounts.google.com", max_items=100,
+          env=("MAVERICK_MCP_ELICIT_ALLOWED_HOSTS",), weaker="shrink",
+          warning="Tasks will be able to send people to more websites.", **common),
+        S("mcp", "max_tasks", "Long tasks kept at once",
+          "The most long tasks the tool server keeps at once.", "number", grp, 256,
+          "maverick_mcp.settings", minimum=1, maximum=100000, integer=True, unit="tasks",
+          restart=True, env=("MAVERICK_MCP_MAX_TASKS",), **common),
+        S("mcp", "max_tasks_per_owner", "Long tasks kept for one app",
+          "The most long tasks one app may have at once. It can't be more than the number "
+          "above.", "number", grp, 32, "maverick_mcp.settings", minimum=1, maximum=100000,
+          integer=True, unit="tasks", restart=True, env=("MAVERICK_MCP_MAX_TASKS_PER_OWNER",),
+          **common),
+        S("mcp", "task_ttl_ms", "Keep a finished long task for",
+          "How long a long task's result is kept when the app does not say.", "number", grp,
+          3600000, "maverick_mcp.settings", minimum=1, maximum=604800, integer=True,
+          scale=1000, unit="seconds", restart=True, env=("MAVERICK_MCP_TASK_TTL_MS",),
+          **common),
+        S("mcp", "task_max_ttl_ms", "Longest an app may keep a long task",
+          "The longest an app may ask for a long task's result to be kept.", "number", grp,
+          86400000, "maverick_mcp.settings", minimum=1, maximum=604800, integer=True,
+          scale=1000, unit="seconds", restart=True, env=("MAVERICK_MCP_TASK_MAX_TTL_MS",),
+          **common),
+        S("mcp", "task_poll_ms", "Suggested wait between checks",
+          "How often apps are told to check a long task.", "number", grp, 1000,
+          "maverick_mcp.settings", minimum=50, maximum=3600000, integer=True,
+          unit="milliseconds", restart=True, env=("MAVERICK_MCP_TASK_POLL_MS",), **common),
+        S("mcp", "task_result_block_ms", "Longest wait for a long task's result",
+          "How long one request for a result may wait before answering that it is not ready.",
+          "number", grp, 60000, "maverick_mcp.settings", minimum=1, maximum=600,
+          integer=True, scale=1000, unit="seconds", restart=True,
+          env=("MAVERICK_MCP_TASK_RESULT_BLOCK_MS",), **common),
+        S("mcp", "task_workers", "Long tasks worked on at once",
+          "How many long tasks the tool server works on at the same time.", "number", grp, 4,
+          "maverick_mcp.settings", minimum=1, maximum=64, integer=True, unit="tasks",
+          restart=True, env=("MAVERICK_MCP_TASK_WORKERS",), **common),
+    )
+>>>>>>> pr2519-fixes
