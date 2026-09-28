@@ -1667,14 +1667,12 @@ def answer_question(
     qs = w.open_questions(goal_id=goal_id)
     if not any(q.id == payload.question_id for q in qs):
         raise HTTPException(status_code=404, detail="no such open question for this goal")
-    w.answer(payload.question_id, answer)
     # Close the human-in-the-loop turn here. ``ask_user`` parks the goal as
     # 'blocked' with no result; once every question it filed has an answer,
     # the run picks back up on its own (the resumed brief carries the Q&A, see
     # orchestrator.qa_block) instead of sitting blocked until someone finds
     # the Resume button. A goal that is still running keeps running.
-    if g.status == "blocked" and not w.open_questions(goal_id=goal_id):
-        _requeue_goal(request, bg, goal_id)
+    _requeue_goal(request, bg, goal_id, answer_question=(payload.question_id, answer))
 
 
 @router.post(
@@ -6402,6 +6400,28 @@ def _run_out(run) -> dict:
             else:
                 d["approval_card_status"] = "current"
         d["human"] = human
+        if run.cursor == "teaching_review":
+            # The ordinary payload preview may truncate nested options. Expose
+            # an exact, validated teaching question only on owned run detail,
+            # after approval integrity checks; never bypass secret redaction.
+            from maverick.flow import recipe_flow, store
+
+            if d.get("approval_card_status") == "current":
+                try:
+                    pinned = store.load_flow_snapshot(run.definition_digest)
+                    if pinned.recipe_teaching is None:
+                        raise ValueError("not a teaching flow")
+                    d["teaching_review"] = {"status": "unavailable"}
+                    recipe_flow.validate_flow(pinned)
+                    question = recipe_flow.validate_teaching_question(pinned.learned_recipe, run.data)
+                    safe_question = redact(question)
+                    if safe_question != question:
+                        d["teaching_review"] = {"status": "redacted"}
+                    else:
+                        d["teaching_review"] = {"status": "current", "question": safe_question}
+                except Exception:
+                    # Do not surface raw observations or unverified options.
+                    pass
     return d
 
 
@@ -7105,6 +7125,41 @@ def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     return {**f.to_dict(), **_flow_publication_fields(flow_id)}
 
 
+@router.get("/flows/{flow_id}/published")
+def get_published_flow_endpoint(request: Request, flow_id: str) -> dict:
+    """Review the exact published inputs and capture its publication epoch."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    draft = store.load_flow(flow_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, draft)
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release failed integrity checks",
+        ) from exc
+    if published is None:
+        raise HTTPException(
+            status_code=409,
+            detail="flow is not published; publish the reviewed draft before a live run",
+        )
+    flow, release = published
+    _assert_flow_access(request, flow)
+    return {
+        "flow": flow.to_dict(),
+        "release_id": str(release["release_id"]),
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+        "published_at": release.get("published_at"),
+    }
+
+
 @router.delete("/flows/{flow_id}", status_code=204)
 def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     require_permission(request, "operate")
@@ -7163,6 +7218,12 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
         )
     flow, release = published
     _assert_flow_access(request, flow)
+    expected_release_id = payload.expected_release_id or str(release["release_id"])
+    if expected_release_id != str(release["release_id"]):
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release changed since preview; review it before running",
+        )
     owner = _supervisor(request)
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
     # the flow declares none): reject a missing required input or a bad number/date
@@ -7185,7 +7246,7 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
             channel="api" if execution_user_id_from_request(request) else None,
             user_id=execution_user_id_from_request(request),
             allowed_suites=caller_suites(request),
-            expected_revision=str(release["release_id"]),
+            expected_revision=expected_release_id,
         )
     except store.FlowSnapshotError as exc:
         # Snapshot internals may include object paths/digests. The caller only
@@ -10238,13 +10299,9 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     when the feature is on."""
     require_permission(request, "operate")
     _require_event_triggers()
-    from maverick.paths import current_tenant_id
-
     from maverick_dashboard import event_poll
-    from maverick_dashboard.app import _run_trigger_goal_in_tenant
 
     principal = caller_principal(request) or ""
-    tenant = current_tenant_id() or ""
     triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
@@ -10259,19 +10316,8 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     ]
 
     def _fire(goal_id: int) -> None:
-        goal = _world().get_goal(goal_id)
-        if goal is None:
-            raise RuntimeError("event-created goal is unavailable")
-        owner, user_id, allowed_suites = stored_automation_identity(goal.owner)
-        bg.add_task(
-            _run_trigger_goal_in_tenant,
-            goal_id,
-            None,
-            None,
-            tenant=tenant,
-            owner=owner,
-            allowed_suites=allowed_suites,
-        )
+        from maverick_dashboard.automation_queue import enqueue_event_goal
+        enqueue_event_goal(goal_id)
 
     def _fire_flow(
         flow_id: str,
@@ -10280,6 +10326,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         idem_key: str = "",
         origin: str = "manual",
         expected_revision: str = "",
+        legacy_event: dict | None = None,
     ) -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
@@ -10298,11 +10345,13 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
             user_id=user_id,
             allowed_suites=allowed_suites,
             expected_revision=expected_revision,
+            legacy_event=legacy_event,
         )
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(
-            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow
+            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow,
+            fire_is_durable=True,
         )
     )
     return {"polled": len(results), "triggers": results}
@@ -11765,6 +11814,9 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     result = public_context(context_for_page(page), permissions)
     configured = bool(_any_provider_key_set())
     result["model_provider_configured"] = configured
+    from maverick.config import get_features
+
+    result["operations_enabled"] = get_features().get("copilot_operations") is True
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions)
     return result
@@ -12323,6 +12375,7 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     if len(pattern) > 200:
         raise HTTPException(status_code=400, detail="pattern too long")
     from maverick.audit import default_audit_log, iter_events
+    from maverick.audit.segments import ReadReport
 
     from maverick_dashboard.app import safe_audit_day
 
@@ -12337,10 +12390,11 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     audit_dir = default_audit_log().audit_dir
 
     def _scan() -> dict:
+        report = ReadReport()
         matches: list[dict] = []
         scanned = 0
         total_matches = 0
-        for event in iter_events(day=effective_day, audit_dir=audit_dir):
+        for event in iter_events(day=effective_day, audit_dir=audit_dir, report=report):
             scanned += 1
             if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
                 total_matches += 1
@@ -12352,7 +12406,8 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
             "total_matches": total_matches,
             "returned": len(matches),
             "truncated": total_matches > len(matches),
-            "scan_complete": True,
+            "scan_complete": report.finished and report.failures == 0,
+            "read_report": report.as_dict(),
             "scope": {"day": effective_day},
         }
 
@@ -14569,19 +14624,7 @@ def resume_goal(
     _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
 
 
-def _requeue_goal(
-    request: Request,
-    bg: BackgroundTasks,
-    goal_id: int,
-    *,
-    max_dollars: float | None = None,
-) -> None:
-    """Flip a parked goal back to 'pending' and hand it to the runner.
-
-    Shared by the explicit Resume button and by answering the last open
-    question, so both paths pass the same admission gate and the same
-    execution identity / suite scoping into the run.
-    """
+def _require_goal_restart_admission(goal_id: int) -> None:
     from maverick.outcome_pilot_start_gate import (
         OutcomePilotAdmissionRequired,
         require_work_item_admission,
@@ -14603,12 +14646,42 @@ def _requeue_goal(
                 ),
             },
         ) from exc
-    _world().set_goal_status(goal_id, "pending", result=None)
+
+
+def _requeue_goal(
+    request: Request,
+    bg: BackgroundTasks,
+    goal_id: int,
+    *,
+    max_dollars: float | None = None,
+    answer_question: tuple[int, str] | None = None,
+) -> None:
+    """Reserve a restart before dispatch, preserving chat/clarification state."""
+    from maverick.attachment_submissions import SubmissionConflict
+    from maverick.chat_threads import ChatThreads
+
+    world = _world()
+    try:
+        if answer_question is None:
+            _require_goal_restart_admission(goal_id)
+            conversation_id = ChatThreads(world).resume(goal_id)
+        else:
+            outcome = ChatThreads(world).answer(
+                goal_id, *answer_question, require_admission=lambda: _require_goal_restart_admission(goal_id))
+            if not outcome.admitted:
+                return
+            conversation_id = outcome.conversation_id
+    except SubmissionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     budget_options = {"max_dollars": max_dollars} if max_dollars is not None else {}
+    if conversation_id is not None:
+        budget_options["conversation_id"] = conversation_id
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -15136,6 +15209,9 @@ from .ai_evidence_analysis_authority_api import (  # noqa: E402
     router as ai_evidence_analysis_authority_router,
 )
 from .ai_governance_loop_api import router as ai_governance_loop_router  # noqa: E402
+from .api_flow_action_episodes import router as flow_action_episodes_router  # noqa: E402
+from .api_flow_operator_review import router as flow_operator_review_router  # noqa: E402
+from .api_flow_recipe_lineage import router as flow_recipe_lineage_router  # noqa: E402
 from .assessment_evidence_autopopulation_api import (  # noqa: E402
     router as assessment_evidence_autopopulation_router,
 )
@@ -15170,6 +15246,7 @@ from .consent_web_publish_settings_api import (  # noqa: E402
 from .consumer_trust_center_authority_api import (  # noqa: E402
     router as consumer_trust_center_authority_router,
 )
+from .copilot_operations import router as copilot_operations_router  # noqa: E402
 from .data_use_governance_api import router as data_use_governance_router  # noqa: E402
 from .data_use_provider_api import router as data_use_provider_router  # noqa: E402
 from .data_use_provider_audit_api import (  # noqa: E402
@@ -15228,6 +15305,10 @@ from .trc_continuous_evidence_api import (  # noqa: E402
 from .trust_center_branding_api import router as trust_center_branding_router  # noqa: E402
 
 router.include_router(ai_governance_loop_router)
+router.include_router(flow_action_episodes_router)
+router.include_router(copilot_operations_router)
+router.include_router(flow_recipe_lineage_router)
+router.include_router(flow_operator_review_router)
 router.include_router(ai_cloud_agent_governance_router)
 router.include_router(ai_evidence_analysis_router)
 router.include_router(ai_evidence_analysis_authority_router)

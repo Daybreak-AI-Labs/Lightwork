@@ -488,6 +488,16 @@ def _default_record(kind: str, **kw: Any) -> None:
         log.warning("federation: audit record failed: %s", e)
 
 
+def _acceptance_record(kind: str, *, agent="federation", goal_id=None, **payload) -> bool:
+    """An actual sink acknowledgment, with no fallback from configured signing."""
+    from .audit import AuditEvent, default_audit_log
+    sink = default_audit_log()
+    event = AuditEvent(ts=time.time(), kind=kind, agent=agent, goal_id=goal_id, payload=payload)
+    if sink.signing_enabled:
+        return sink.record_strict_signed(event)
+    return sink.record(event)
+
+
 def _redact(text: str) -> str:
     """Strip detectable secrets from one field or fail closed."""
     try:
@@ -723,6 +733,9 @@ class DelegateOutcome:
     accepted: bool
     goal_id: int | None = None  # the PEER-local goal id, when accepted
     reason: str = ""
+    outcome_state: str = "rejected"
+    audit_state: str = "unknown"
+    execution_state: str = "unknown"
 
 
 class FederationNode:
@@ -928,17 +941,31 @@ class FederationNode:
             reply = self._call(peer, "DelegateGoal", payload)
         except Exception as e:
             log.warning("federation: delegation to %s failed: %s", peer.name, e)
-            reply = {"accepted": False, "reason": f"transport error: {e}"}
+            reply = {"accepted": False, "reason": f"transport error: {e}",
+                     "outcome_state": "unknown"}
         accepted = bool(reply.get("accepted"))
         goal_id = _to_int(reply.get("goal_id")) or None
         reason = str(reply.get("reason") or "")
+        outcome_state = str(reply.get("outcome_state") or ("accepted" if accepted else "rejected"))
+        if outcome_state not in {"accepted", "rejected", "pending", "unknown"}:
+            outcome_state = "unknown"
+        if (not isinstance(reply.get("accepted"), bool) or
+                (outcome_state == "accepted" and (not accepted or goal_id is None))):
+            outcome_state = "unknown"
+        accepted = accepted and outcome_state == "accepted"
+        audit_state = str(reply.get("audit_state") or "unknown")
+        execution_state = str(reply.get("execution_state") or "unknown")
         self._record(
             EventKind.FEDERATION_DELEGATE, agent="federation",
             peer_node=peer.name, correlation_id=corr, direction="sent",
-            accepted=accepted, remote_goal_id=goal_id, reason=reason,
+            accepted=accepted if outcome_state in {"accepted", "rejected"} else None,
+            remote_goal_id=goal_id, reason=reason, outcome_state=outcome_state,
+            audit_state=audit_state, execution_state=execution_state, phase="response_observed",
         )
         return DelegateOutcome(peer=peer.name, correlation_id=corr,
-                               accepted=accepted, goal_id=goal_id, reason=reason)
+                               accepted=accepted, goal_id=goal_id, reason=reason,
+                               outcome_state=outcome_state, audit_state=audit_state,
+                               execution_state=execution_state)
 
     def status(self, peer_name: str, goal_id: int) -> tuple[str, str]:
         """Poll a delegated goal -> ``(status, result)``; ``("unknown", "")``
@@ -985,6 +1012,7 @@ class FederationService:
         self._grant = local_grant
         self._goal_service = goal_service
         self._record = record or _default_record
+        self._acceptance_record = record if record is not None else _acceptance_record
         self._state = _federation_state(state_path)
         # Per-peer correlation ids are the idempotency namespace for goal
         # creation. The cache is service-local, bounded, and concurrency-safe;
@@ -1338,42 +1366,28 @@ class FederationService:
             request_digest = self._delegation_digest(payload)
         except (TypeError, ValueError, UnicodeError):
             return self._refuse_recorded(peer, corr, "delegation payload is invalid")
-        claim, correlation_key, cached = self._claim_correlation(
-            peer, corr, request_digest,
-        )
-        if claim == "cached":
-            assert cached is not None
-            return cached
-        if claim == "conflict":
+        # Old completed/in-progress receipts must never be reinterpreted as a
+        # fresh held reservation after upgrading. They cannot prove the audit
+        # or pinned dispatch contract that this version now requires.
+        try:
+            legacy, cached = self._state.correlation_result(peer.name, corr, request_digest)
+        except (OSError, sqlite3.Error, ValueError):
+            return {"accepted": False, "goal_id": 0, "outcome_state": "unknown",
+                    "reason": "legacy correlation state unavailable; retry the same correlation_id"}
+        if legacy == "cached":
+            return {**cached, "outcome_state": "accepted" if cached.get("accepted") else "rejected",
+                    "audit_state": "unknown", "execution_state": "unknown"}
+        if legacy == "conflict":
             return self._refuse_recorded(
                 peer, corr,
                 "correlation_id was already used with different delegation content",
             )
-        if claim in {"busy", "capacity", "unavailable"}:
-            reason = (
-                "correlation_id is already in progress"
-                if claim == "busy"
-                else (
-                    "correlation replay ledger capacity is full"
-                    if claim == "capacity"
-                    else "correlation replay ledger is unavailable"
-                )
-            )
-            return self._refuse_recorded(peer, corr, reason)
-
-        def finish(result: dict[str, Any]) -> dict[str, Any]:
-            self._finish_correlation(correlation_key, result)
-            return result
-
-        # Per-peer accepted-delegation rate cap: each admitted delegation spawns
-        # a goal run, so charge the peer only after trust-plane and signed-
-        # identity checks succeed. Token-only/invalid signatures must not be
-        # able to consume the legitimate signed delegation quota.
-        if not _fed_rate_ok(f"peer:{peer.name}"):
-            self._release_correlation(correlation_key)
-            return self._refuse_recorded(peer, corr, "rate limit exceeded")
+        if legacy == "busy":
+            return {"accepted": False, "goal_id": 0, "outcome_state": "unknown",
+                    "reason": "legacy execution outcome unknown; automatic replay is prohibited"}
 
         deadline_ms = _to_int(payload.get("deadline_ms"))
+        from .federation_admission import FederationAdmissionRejected
         # Clamp the run's budget to the peer's registry ceiling (down only):
         # both wall-clock AND dollars. max_dollars was previously parsed and
         # advertised but enforced nowhere — wire it into the delegated run.
@@ -1382,41 +1396,25 @@ class FederationService:
                 decision.agent,
                 max_wall_seconds=(deadline_ms / 1000.0) if deadline_ms > 0 else None,
             )
-            if capped_wall is not None:
-                deadline_ms = int(capped_wall * 1000.0)
-            goal_id = int(self._goals().start_goal(
-                str(payload.get("goal_title") or ""),
-                str(payload.get("goal_description") or ""),
+            return self._goals().accept_federation(
+                peer=peer.name, correlation=corr, digest=request_digest,
+                title=str(payload.get("goal_title") or ""),
+                description=str(payload.get("goal_description") or ""),
                 max_dollars=capped_dollars,
-                max_wall_seconds=(deadline_ms / 1000.0) if deadline_ms > 0 else None,
-                channel="federation",
-                user_id=f"federation:{peer.name}",
-                # Stamp the delegating peer as the owner so a later GoalStatus
-                # poll can be scoped to it — one peer must not read another
-                # peer's (or a locally created goal's) status/result.
-                owner=f"federation:{peer.name}",
+                max_wall_seconds=capped_wall,
                 capability=negotiation.granted,
-            ))
-        except ValueError as e:  # e.g. empty title
-            return finish(self._refuse_recorded(peer, corr, str(e)))
+                record=self._acceptance_record,
+                admit_new=lambda: _fed_rate_ok(f"peer:{peer.name}"),
+            )
+        except FederationAdmissionRejected as e:
+            return self._refuse_recorded(peer, corr, str(e))
         except Exception:
             log.exception(
                 "federation: delegated goal creation failed for peer %s",
                 peer.name,
             )
-            return finish(self._refuse_recorded(
-                peer, corr, "delegated goal creation unavailable",
-            ))
-        result = {"accepted": True, "goal_id": goal_id, "reason": ""}
-        # Publish the result before optional audit seams run, so a recorder
-        # failure can never reopen goal creation to a retry.
-        finish(result)
-        self._record(
-            EventKind.FEDERATION_DELEGATE, agent="federation", goal_id=goal_id,
-            peer_node=peer.name, correlation_id=corr, direction="received",
-            accepted=True, reason="",
-        )
-        return result
+            return {"accepted": False, "goal_id": 0, "outcome_state": "unknown",
+                    "reason": "delegation admission unavailable; retry the same correlation_id"}
 
     def goal_status(self, payload: dict[str, Any]) -> dict[str, Any]:
         peer = self._authenticate(payload)
@@ -1435,7 +1433,7 @@ class FederationService:
 
     @staticmethod
     def _refuse(reason: str) -> dict[str, Any]:
-        return {"accepted": False, "goal_id": 0, "reason": reason}
+        return {"accepted": False, "goal_id": 0, "reason": reason, "outcome_state": "rejected"}
 
     def _refuse_recorded(self, peer: Peer, corr: str, reason: str) -> dict[str, Any]:
         """Refuse, recording our "received" half so the caller's "sent" row
@@ -1464,6 +1462,36 @@ def _require_grpc():
     return grpc
 
 
+def _validate_stub_contract(pb2) -> None:
+    """Refuse an old installed descriptor before opening any transport.
+
+    Numeric field types are the protobuf descriptor wire constants (bool=8,
+    int64=3, string=9). Checking descriptors requires no protobuf import and
+    never tries to replace a message already registered in its default pool.
+    """
+    descriptor = getattr(getattr(pb2, "DelegateResult", None), "DESCRIPTOR", None)
+    fields = getattr(descriptor, "fields_by_name", {})
+    required = (
+        ("accepted", 1, 8), ("goal_id", 2, 3), ("reason", 3, 9),
+        ("outcome_state", 4, 9), ("audit_state", 5, 9), ("execution_state", 6, 9),
+    )
+    for name, number, field_type in required:
+        field = fields.get(name)
+        # Older descriptors expose label; newer implementations expose the
+        # equivalent boolean cardinality properties without label.
+        label = getattr(field, "label", None)
+        optional = label == 1 if label is not None else (
+            getattr(field, "is_repeated", None) is False
+            and getattr(field, "is_required", None) is False
+        )
+        if (getattr(field, "number", None) != number or
+                getattr(field, "type", None) != field_type or not optional):
+            raise FederationError(
+                "incompatible generated federation stubs: DelegateResult schema is stale or invalid; "
+                "rebuild with `maverick gen-stubs` and restart the process before serving or dialing peers"
+            )
+
+
 def _load_stubs():
     """Import the generated pb2 modules, generating them first if absent.
 
@@ -1473,14 +1501,18 @@ def _load_stubs():
     (``from maverick.grpc_api import federation_pb2 ...``) from anywhere.
     """
     try:
-        from .grpc_api import federation_pb2, federation_pb2_grpc  # type: ignore
-        return federation_pb2, federation_pb2_grpc
+        from .grpc_api import federation_pb2  # type: ignore
     except ImportError:
         from .grpc_stubs import guard_runtime_generation
         guard_runtime_generation("federation.proto")
         _generate_stubs()
-        from .grpc_api import federation_pb2, federation_pb2_grpc  # type: ignore
-        return federation_pb2, federation_pb2_grpc
+        from .grpc_api import federation_pb2  # type: ignore
+    _validate_stub_contract(federation_pb2)
+    # Validate an existing message module even when its companion grpc module
+    # is missing. Generating first could overwrite files under an old message
+    # already registered in protobuf's process-global descriptor pool.
+    from .grpc_api import federation_pb2_grpc  # type: ignore
+    return federation_pb2, federation_pb2_grpc
 
 
 def _generate_stubs() -> None:
@@ -1586,7 +1618,10 @@ class _GrpcTransport:
                 key_id=str(payload.get("key_id") or ""),
                 created_at=float(payload.get("created_at") or 0.0),
             ), timeout=timeout)
-            return {"accepted": r.accepted, "goal_id": r.goal_id, "reason": r.reason}
+            return {"accepted": r.accepted, "goal_id": r.goal_id, "reason": r.reason,
+                    "outcome_state": getattr(r, "outcome_state", ""),
+                    "audit_state": getattr(r, "audit_state", ""),
+                    "execution_state": getattr(r, "execution_state", "")}
         if method == "GoalStatus":
             r = stub.GoalStatus(pb2.StatusRequest(
                 goal_id=_to_int(payload.get("goal_id")), auth_token=token,
@@ -1643,6 +1678,9 @@ def _servicer(service: FederationService, pb2, pb2_grpc):
                 accepted=bool(reply.get("accepted")),
                 goal_id=_to_int(reply.get("goal_id")),
                 reason=str(reply.get("reason") or ""),
+                outcome_state=str(reply.get("outcome_state") or ""),
+                audit_state=str(reply.get("audit_state") or ""),
+                execution_state=str(reply.get("execution_state") or ""),
             )
 
         def GoalStatus(self, request, context):

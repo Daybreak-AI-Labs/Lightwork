@@ -117,6 +117,7 @@ FEATURE_DEFAULTS = {
     "workflow_readiness": True,
     "project_reviews": False,
     "outcome_measurement": False,
+    "copilot_operations": False,
     "guided_onboarding": True,
     "action_center": True,
     "draft_recovery": True,
@@ -152,6 +153,7 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
+    "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
     "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",
@@ -886,20 +888,12 @@ def clear_provider(name: str) -> None:
         _write(data)
 
 
-def set_webhooks_secret(secret: str | None) -> None:
-    """Set (or clear, when empty) the inbound/outbound webhook signing secret
-    in the dashboard overlay -- the same [webhooks] secret knob operators set
-    in config; the MAVERICK_WEBHOOK_SECRET env var still takes precedence."""
-    with _locked():
-        data = _load_overlay_for_update()
-        cleaned = (secret or "").strip()
-        if cleaned:
-            data.setdefault("webhooks", {})["secret"] = cleaned
-        else:
-            (data.get("webhooks") or {}).pop("secret", None)
-            if not data.get("webhooks"):
-                data.pop("webhooks", None)
-        _write(data)
+def set_webhooks_secret(secret: str, *, expected_generation: str, principal: str,
+                        authorize, action: str = "set") -> dict:
+    """Rotate only a reviewed effective generation; never silently save a shadow key."""
+    from .webhook_settings import rotate
+    return rotate(secret=secret, action=action, expected_generation=expected_generation,
+                  principal=principal, authorize=authorize)
 
 
 def set_model_discovery(enabled: bool) -> None:
@@ -957,6 +951,20 @@ def set_catalog_indexes(urls) -> None:
 def set_toggle(section: str, name: str, enabled: bool) -> None:
     """Override a [capabilities] or [features] flag in the overlay."""
     set_toggles(section, {name: enabled})
+
+
+class FeatureSettingNotEffective(ValueError):
+    """A higher-priority source still controls a dashboard-saved feature."""
+
+
+def assert_effective_copilot_operations(enabled: bool) -> None:
+    """Never report this optional action as enabled after a shadow overlay save."""
+    from maverick import config
+
+    if config.get_features().get("copilot_operations") is not bool(enabled):
+        raise FeatureSettingNotEffective(
+            "Copilot actions are controlled by another setting. The requested change is not active."
+        )
 
 
 def set_toggles(section: str, updates: dict[str, bool]) -> None:

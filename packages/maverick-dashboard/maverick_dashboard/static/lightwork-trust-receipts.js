@@ -30,10 +30,10 @@
   var STATUS = { HOLDS: "Passed", FAILS: "Failed", INDETERMINATE: "Couldn't check", NOT_APPLICABLE: "Not needed" };
   var STATUS_BADGE = { HOLDS: "ok", FAILS: "danger", INDETERMINATE: "warn", NOT_APPLICABLE: "idle" };
   var DEPTH = {
-    signed: "Genuine.",
-    chained: "Genuine, and nothing was removed after it.",
-    anchored: "Genuine, nothing removed after it, and it matches a published checkpoint.",
-    corroborated: "Genuine, and it matches this installation's own records.",
+    signed: "The recorded row verifies against the issuer's key.",
+    chained: "The recorded row is linked to a signed commitment.",
+    anchored: "The commitment matches a separately supplied checkpoint.",
+    corroborated: "The receipt matches this installation's current records.",
     unverified: "It could not be confirmed."
   };
 
@@ -99,7 +99,7 @@
   async function loadStatus() {
     status = await json("/status");
     say("rcp-key-id", status.key_id ? "Ready" : "Missing");
-    say("rcp-custody", status.key_custody === "offhost" ? "Kept separately" : "On this computer");
+    say("rcp-custody", status.key_custody === "offhost" ? "Supplied from elsewhere; used here" : "On this computer");
     say("rcp-days", String(status.days.length));
     say("rcp-pubkey", status.pubkey || "There is no key yet.");
     say("rcp-verifier-sha", status.verifier_sha256 || "—");
@@ -112,10 +112,10 @@
         "Receipts can't be created until the signing key is available. Ask your IT team to check it.");
     } else if (status.key_custody === "colocated") {
       mark("warn", "On", "Receipts are signed",
-        "Your signing key is stored on this computer. For stronger proof, ask your IT team to store it separately.");
+        "A process with access to this key can re-sign history. Retain checkpoints independently to detect later changes to committed records.");
     } else {
-      mark("ok", "On", "Receipts are signed with a separately stored key",
-        "Nobody on this computer could have re-signed the activity record.");
+      mark("warn", "On", "Receipts are signed with an externally supplied key",
+        "The signing process can still use this key to re-sign history. Retain checkpoints independently to detect later changes to committed records.");
     }
     daySelect.textContent = "";
     if (!status.days.length) {

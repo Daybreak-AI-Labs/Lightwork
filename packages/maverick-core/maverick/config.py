@@ -1048,6 +1048,7 @@ def get_features() -> dict:
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
         "project_reviews": cfg.get("project_reviews", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
+        "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
     }
@@ -3119,6 +3120,8 @@ def get_flows() -> dict:
     default deployment is unaffected.
     """
     cfg = load_config().get("flows", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
     try:
         max_node_retries = int(cfg.get("max_node_retries", 5) or 5)
     except (TypeError, ValueError):
@@ -3136,6 +3139,37 @@ def get_flows() -> dict:
         # this key here auto_apply could never be read from config (only the env
         # var / a monkeypatch), so the [flows] auto_apply knob was inert.
         "auto_apply": bool(cfg.get("auto_apply", False)),
+        # Reviewed, bounded pure operators may replace an agent result only on
+        # agreement inside their declared input domain. Explicit boolean opt-in.
+        "learned_operators": _strict_config_bool(cfg, "learned_operators", False),
+        # Composed pure expressions need a separate runtime opt-in.
+        "composed_operators": _strict_config_bool(cfg, "composed_operators", False),
+        # Reviewed action sequences keep native authorization and explicit gates.
+        "action_recipes": _strict_config_bool(cfg, "action_recipes", False),
+        # Expressions learned across action results require an independent opt-in.
+        "action_recipe_transforms": _strict_config_bool(cfg, "action_recipe_transforms", False),
+        # Inferring control flow needs its own opt-in in addition to expressions.
+        "action_recipe_choices": _strict_config_bool(cfg, "action_recipe_choices", False),
+        "action_recipe_teaching": _strict_config_bool(cfg, "action_recipe_teaching", False),
+        # Bounded next-action/completion learning requires verified lineage and
+        # strict signed execution receipts; enabling it never enables signing.
+        "action_workflow_learning": _strict_config_bool(cfg, "action_workflow_learning", False),
+        # Inferred integer history accumulators need a separate explicit opt-in.
+        "action_workflow_memory_learning": _strict_config_bool(cfg, "action_workflow_memory_learning", False),
+        # Retaining native business examples requires a separate explicit opt-in.
+        "action_episode_capture": _strict_config_bool(cfg, "action_episode_capture", False),
+        "action_recipe_lineage": _strict_config_bool(cfg, "action_recipe_lineage", False),
+        # Malformed restrictions must not quietly enable unprovenanced recipes.
+        "require_action_recipe_lineage": _strict_config_bool(
+            cfg, "require_action_recipe_lineage", False, invalid=True),
+        # Preserve malformed policy for the trust validator to reject. Silently
+        # discarding a malformed revocation list would restore revoked keys.
+        "action_evidence_issuer": cfg.get("action_evidence_issuer", ""),
+        "action_evidence_revoked_keys": cfg.get("action_evidence_revoked_keys", []),
+        # Stored distinguishing questions and reviewed answers are a separate
+        # opt-in; preparing a draft does not enable its execution/publication.
+        "learned_operator_questions": _strict_config_bool(
+            cfg, "learned_operator_questions", False),
         # Per-node action/agent retries are useful for transient failures, but
         # must stay bounded because every retry may invoke tools/providers. Env
         # MAVERICK_FLOW_MAX_NODE_RETRIES can override this at runtime; the flow

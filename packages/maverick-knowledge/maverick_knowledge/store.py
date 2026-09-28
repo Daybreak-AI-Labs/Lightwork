@@ -44,6 +44,13 @@ class VectorStore(Protocol):
         """Atomically bind immutable document provenance and embedding identity."""
         ...
 
+    def replace_source_with_identity(
+        self, collection: str, items: list[tuple[str, str, list[float], dict]], fingerprint: str,
+        *, source: str, snapshot: list[StoredChunk],
+    ) -> None:
+        """Compare the prior source and atomically publish its complete revision."""
+        ...
+
     def search(self, collection: str, vector: list[float], k: int = 5) -> list[Match]: ...
 
     def delete_collection(self, collection: str) -> None: ...
@@ -105,6 +112,22 @@ def _document_publication(items: list, existing: list[StoredChunk]) -> list:
     ]
 
 
+def _source_replacement_removals(
+    items: list, existing: list[StoredChunk], source: str, snapshot: list[StoredChunk],
+) -> list[str]:
+    """Validate a staged replacement under the same fence as publication."""
+    if not source or not items or any(meta.get("source") != source for _, _, _, meta in items):
+        raise ValueError("knowledge source replacement requires one nonempty source")
+    current = sorted(
+        (row for row in existing if row.meta.get("source") == source),
+        key=lambda row: row.chunk_id,
+    )
+    if current != sorted(snapshot, key=lambda row: row.chunk_id):
+        raise RuntimeError("knowledge source changed during replacement; retry")
+    incoming = {cid for cid, _, _, _ in items}
+    return [row.chunk_id for row in current if row.chunk_id not in incoming]
+
+
 class SqliteVectorStore:
     """Brute-force cosine over vectors stored as JSON in SQLite.
 
@@ -145,6 +168,16 @@ class SqliteVectorStore:
 
     def add_with_identity(self, collection, items, fingerprint: str) -> None:
         """Bind document provenance and identity in one publication transaction."""
+        self._publish_with_identity(collection, items, fingerprint)
+
+    def replace_source_with_identity(
+        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk],
+    ) -> None:
+        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot)
+
+    def _publish_with_identity(
+        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None,
+    ) -> None:
         with self._lock, self._db:
             self._db.execute("BEGIN IMMEDIATE")
             rows = self._db.execute(
@@ -157,13 +190,22 @@ class SqliteVectorStore:
                 meta = json.loads(raw_meta)
                 if meta.get("embedding_fingerprint") != fingerprint:
                     raise RuntimeError("knowledge collection changed embedding identity; reindex required")
-                if cid in chunk_ids or meta.get("doc_sha256") in documents:
+                if (cid in chunk_ids or meta.get("doc_sha256") in documents
+                        or (source is not None and meta.get("source") == source)):
                     existing.append(StoredChunk(cid, text, meta))
+            removed = (
+                _source_replacement_removals(items, existing, source, snapshot)
+                if source is not None else []
+            )
             pending = _document_publication(items, existing)
             self._db.executemany(
                 "INSERT INTO chunks VALUES (?,?,?,?,?)",
                 [(collection, cid, text, json.dumps(vec), json.dumps(meta))
                  for cid, text, vec, meta in pending],
+            )
+            self._db.executemany(
+                "DELETE FROM chunks WHERE collection = ? AND id = ?",
+                [(collection, cid) for cid in removed],
             )
 
     def search(self, collection, vector, k: int = 5) -> list[Match]:
@@ -505,6 +547,16 @@ class PgVectorStore:
                     (json.dumps([self._namespace, collection]),))
 
     def add_with_identity(self, collection, items, fingerprint: str) -> None:
+        self._publish_with_identity(collection, items, fingerprint)
+
+    def replace_source_with_identity(
+        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk],
+    ) -> None:
+        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot)
+
+    def _publish_with_identity(
+        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None,
+    ) -> None:
         def dispatch():
             with self._lock, self._db.transaction(), self._db.cursor() as cur:
                 self._collection_fence(cur, collection)
@@ -518,19 +570,29 @@ class PgVectorStore:
                 rows = cur.execute(
                     f"SELECT id, text, meta FROM {self._table} "
                     "WHERE namespace = %s AND collection = %s "
-                    "AND (id = ANY(%s) OR meta ->> 'doc_sha256' = ANY(%s)) FOR UPDATE",
+                    "AND (id = ANY(%s) OR meta ->> 'doc_sha256' = ANY(%s) "
+                    "OR meta ->> 'source' = %s) FOR UPDATE",
                     (self._namespace, collection, [item[0] for item in items],
-                     list({item[3]["doc_sha256"] for item in items})),
+                     list({item[3]["doc_sha256"] for item in items}), source),
                 ).fetchall()
-                pending = _document_publication(
-                    items, [StoredChunk(cid, text, dict(meta)) for cid, text, meta in rows],
+                existing = [StoredChunk(cid, text, dict(meta)) for cid, text, meta in rows]
+                removed = (
+                    _source_replacement_removals(items, existing, source, snapshot)
+                    if source is not None else []
                 )
+                pending = _document_publication(items, existing)
                 cur.executemany(
                     f"INSERT INTO {self._table} (namespace, collection, id, text, embedding, meta) "
                     "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb)",
                     [(self._namespace, collection, cid, text, _to_pgvector(vec), json.dumps(meta))
                      for cid, text, vec, meta in pending],
                 )
+                if removed:
+                    cur.execute(
+                        f"DELETE FROM {self._table} WHERE namespace = %s AND collection = %s "
+                        "AND id = ANY(%s)",
+                        (self._namespace, collection, removed),
+                    )
         with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
                                operation="knowledge-identity-fenced-add") as call:
             call(dispatch)

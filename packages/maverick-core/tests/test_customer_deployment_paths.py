@@ -30,6 +30,49 @@ def load(relative):
     return module
 
 
+@pytest.mark.skipif(not BASH or not Path(BASH).is_file(), reason="existing Bash runtime unavailable")
+@pytest.mark.parametrize("mode", ["ready", "missing", "render-failed"])
+def test_vps_service_uses_application_python_and_preserves_unit_on_failure(tmp_path, mode):
+    # Execute the actual install_service function with filesystem/systemctl
+    # commands intercepted into a disposable tree; never touch the host unit.
+    source = (ROOT / "deploy/vps/install.sh").read_text(encoding="utf-8")
+    function = source[source.index("install_service() {"):source.index("\nmain() {")]
+    fixture = r'''
+set -euo pipefail
+cd "$1"
+TARGET_USER=fixture
+TARGET_HOME="$PWD/service home"
+mkdir -p "$PWD/venvs/maverick-agent/bin"
+if [[ "$2" != missing ]]; then
+  printf '#!/bin/sh\nexit 0\n' > "$PWD/venvs/maverick-agent/bin/python"
+  chmod +x "$PWD/venvs/maverick-agent/bin/python"
+fi
+printf 'original unit\n' > published-unit
+MODE="$2"
+log() { :; }
+run_as_user() {
+  if [[ "$1" == pipx ]]; then printf '%s\n' "$PWD/venvs"; return 0; fi
+  [[ "$1" == "$PWD/venvs/maverick-agent/bin/python" ]] || return 91
+  [[ "$2" == /opt/maverick/deploy/vps/render_service.py ]] || return 92
+  printf '%s\n' "$1" > interpreter-used
+  [[ "$MODE" != render-failed ]] || return 93
+  printf 'rendered unit\n'
+}
+mktemp() { command mktemp "$PWD/render.XXXXXX"; }
+mv() { command mv -f -- "$3" "$PWD/published-unit"; }
+systemctl() { printf '%s\n' "$*" >> systemctl-calls; }
+'''
+    script = tmp_path / "fixture.sh"
+    script.write_text(fixture + "\n" + function + "\ninstall_service\n", encoding="utf-8")
+    env = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC"}}
+    result = subprocess.run([BASH, "--noprofile", "--norc", str(script), str(tmp_path), mode],
+                            env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == (0 if mode == "ready" else 1), result.stderr
+    assert (tmp_path / "published-unit").read_text() == ("rendered unit\n" if mode == "ready" else "original unit\n")
+    assert (tmp_path / "systemctl-calls").exists() == (mode == "ready")
+    assert (tmp_path / "interpreter-used").exists() == (mode != "missing")
+
+
 @pytest.mark.parametrize("override,configured,expected", [
     ("/requested/task-b", "/configured/task-a", "/requested/task-b"),
     (PurePosixPath("/requested/space name"), "/configured/task-a", "/requested/space name"),

@@ -23,10 +23,11 @@ def test_json_submission_is_recorded_and_pollable(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().post("/form/signup", json={"email": "a@b.com", "plan": "pro"})
     assert r.status_code == 201 and r.json()["seq"] == 1
-    # a form event source polling the same token sees it as a new event
+    # The first poll records the existing submission without replaying it.
     from maverick import automation_events as ev
     base = ev.get_source("form").poll({"token": "signup"}, "")   # baseline
-    assert base.cursor == "1"
+    assert base.events == []
+    assert ev._decode_cursor(base.cursor, "form", base.cursor_format) == "1"
 
 
 def test_form_submission_fires_after_baseline(monkeypatch, tmp_path):

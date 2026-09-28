@@ -147,6 +147,19 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "visibility_reset": "access",
     }.get(saved, "")
     from maverick_dashboard import rbac, ui_visibility
+
+    from .webhook_settings import WebhookSettingsConflict, WebhookSettingsUnavailable
+    from .webhook_settings import state as webhook_state
+
+    # Render only the safe current state; the browser obtains a fresh reviewed
+    # generation before it can submit any change.
+    try:
+        webhook_configured = webhook_state(
+            principal=auth.caller_principal(request) or "local-operator",
+            authorize=lambda: auth.require_global_permission(request, "admin"),
+        )["configured"]
+    except (WebhookSettingsConflict, WebhookSettingsUnavailable):
+        webhook_configured = None
     return _app().templates.TemplateResponse(request, "settings.html", {
         "visibility_matrix": ui_visibility.matrix(),
         "visibility_roles": list(rbac.known_roles()),
@@ -163,9 +176,8 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "default_budget": DEFAULT_MAX_DOLLARS,
         "task_limits_enabled": (task_limits_override() if task_limits_override() is not None
                                 else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
-        "webhook_configured": _webhook_secret_configured(),
-        "webhook_locked": _webhook_secret_locked(),
         "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
+        "webhook_configured": webhook_configured,
         "saved": saved_msg,
         "saved_section": saved_section,
     })
@@ -297,14 +309,27 @@ def _refresh_models_quietly(provider: str) -> None:
         pass
 
 
-def _webhook_secret_configured() -> bool:
-    """Whether inbound webhooks currently have a signing secret (env, config,
-    or the dashboard overlay) -- reported as a boolean only, never the value."""
+def _webhook_operation(request: Request, operation):
+    from .webhook_settings import WebhookSettingsConflict, WebhookSettingsUnavailable
+
+    auth.require_global_permission(request, "admin")
+    principal = auth.caller_principal(request) or "local-operator"
     try:
-        from maverick.webhooks import inbound_secret
-        return bool(inbound_secret())
-    except Exception:  # pragma: no cover -- never break the settings page
-        return False
+        return operation(principal, lambda: auth.require_global_permission(request, "admin"))
+    except WebhookSettingsConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WebhookSettingsUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/settings/webhooks")
+def settings_get_webhooks(request: Request) -> dict:
+    """Current effective ownership and an opaque, caller-bound review token."""
+    from .webhook_settings import state
+    return _webhook_operation(request, lambda principal, authorize:
+        state(principal=principal, authorize=authorize))
 
 
 def _webhook_secret_locked() -> bool:
@@ -320,17 +345,16 @@ def _webhook_secret_locked() -> bool:
 def settings_set_webhooks(
     request: Request,
     secret: str = Form(""),
-) -> RedirectResponse:
-    """Set or clear the webhook signing secret from the settings page (admin).
-    Saved to the dashboard config overlay (0600), never the operator's config
-    file; an env-provided secret still wins. Global-admin gated: this HMAC
-    secret guards every auth-exempt inbound webhook endpoint deployment-wide,
-    so a tenant-scoped admin must not be able to set/rotate it."""
+    expected_generation: str = Form(""),
+    action: str = Form("set"),
+) -> dict:
+    """Confirm a reviewed rotation against the actual runtime secret resolver."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
-    settings_store.set_webhooks_secret(secret)
-    return RedirectResponse("/settings?saved=webhooks", status_code=303)
+    return _webhook_operation(request, lambda principal, authorize:
+        settings_store.set_webhooks_secret(secret, action=action,
+            expected_generation=expected_generation, principal=principal, authorize=authorize))
 
 
 @router.post("/settings/webhooks/generate")
@@ -487,10 +511,15 @@ async def settings_set_features(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     form = await request.form()
+    selected = {name: name in form for name in settings_store.FEATURE_DEFAULTS}
     try:
-        await run_in_threadpool(settings_store.set_toggles, "features", {
-            name: name in form for name in settings_store.FEATURE_DEFAULTS
-        })
+        await run_in_threadpool(settings_store.set_toggles, "features", selected)
+        await run_in_threadpool(
+            settings_store.assert_effective_copilot_operations,
+            selected["copilot_operations"],
+        )
+    except settings_store.FeatureSettingNotEffective as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,

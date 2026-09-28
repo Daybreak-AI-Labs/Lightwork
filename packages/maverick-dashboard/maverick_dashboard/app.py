@@ -5795,12 +5795,12 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     from .api import _binder_payload
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
-    b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    generated = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
     from .audit_actions_api import kind_label
 
     return templates.TemplateResponse(
         request, "audit_binder.html",
-        {"b": b, "days": b["window_days"], "kind_label": kind_label},
+        {"b": b, "days": b["window_days"], "generated": generated, "kind_label": kind_label},
     )
 
 
@@ -8614,16 +8614,11 @@ def chat_page(request: Request) -> HTMLResponse:
 # turns into the brief exactly as it does for a channel session (see
 # orchestrator.qa_block / history_block). The web conversation's user_id is
 # "<owner>/<root goal id>", which keeps threads apart per person and per chat.
-_THREAD_CHANNEL = "web"
 _THREAD_LIST_LIMIT = 25
 
 
 def _thread_root_id(goal) -> int:
     return int(goal.parent_id) if goal.parent_id else int(goal.id)
-
-
-def _thread_conversation(w, owner: str, root_id: int):
-    return w.get_or_create_conversation(_THREAD_CHANNEL, f"{owner or 'local'}/{root_id}")
 
 
 def _turn_text(title: str, description: str) -> str:
@@ -8635,30 +8630,43 @@ def _turn_text(title: str, description: str) -> str:
 
 def _chat_threads(request: Request, w, *, active_root: int | None = None) -> list[dict]:
     """The caller's recent chats (root goals) for the sidebar, newest first."""
+    from maverick.chat_threads import ChatThreads
+
     try:
         goals = w.conversation_summaries(owner=goal_owner_filter(request), limit=_THREAD_LIST_LIMIT)
     except Exception:  # pragma: no cover -- the sidebar must never 500 a page
         return []
     threads: list[dict] = []
     for g in goals:
+        target_id = ChatThreads(w).latest(g.id)
+        target = w.goal_stream_state(target_id)
+        if target is None:
+            continue
+        assert_goal_access(request, target)
         threads.append({
-            "id": g.id, "title": g.title, "status": g.status,
+            "id": g.id, "target_id": target_id, "title": g.title, "status": target.status,
             "active": g.id == active_root, "updated_at": g.updated_at,
         })
     return threads
 
 
-def _thread_turns(w, goal, root) -> list:
+def _thread_turns(w, goal) -> list:
     """Earlier turns of the goal's thread (older goals' messages and answers),
     for the page to render above the live turn. Never blocks the page."""
     try:
-        conv = _thread_conversation(w, root.owner, root.id)
-        turns = w.recent_turns(conv.id, limit=200)
+        from maverick.chat_threads import ChatThreads
+
+        chat = ChatThreads(w)
+        binding = chat.binding(goal.id)
+        if binding is None:
+            return []
+        member_ids = {int(row[0]) for row in chat.members(binding)}
+        turns = w.recent_turns(binding.conversation_id, limit=200)
     except Exception:  # pragma: no cover -- history is additive, not load-bearing
         return []
     return [
         t for t in turns
-        if t.goal_id != goal.id and (t.goal_id is None or t.goal_id < goal.id)
+        if t.goal_id in member_ids and t.goal_id < goal.id
     ]
 
 
@@ -8678,17 +8686,12 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     bg.add_task(dispatch, _world(), receipt, run_goal_in_background_async, goal_id, **kwargs)
 
 
-def _open_thread_turn(w, owner: str, root_id: int, goal_id: int, text: str) -> int | None:
-    """Record the person's message on the thread's conversation and return the
-    conversation id the run should carry. History is best-effort: a store that
-    cannot take the turn must not stop the goal from running."""
-    try:
-        conv = _thread_conversation(w, owner, root_id)
-        w.append_turn(conv.id, "user", text, goal_id=goal_id)
-        return int(conv.id)
-    except Exception:  # pragma: no cover -- never block a run on history
-        log.warning("chat thread turn write failed for goal #%s", goal_id, exc_info=True)
-        return None
+def _submission_conversation(w, receipt) -> int | None:
+    """Resolve persisted membership, including receipts from older versions."""
+    from maverick.chat_threads import ChatThreads
+
+    binding = ChatThreads(w).binding(receipt["goal_id"])
+    return binding.conversation_id if binding else None
 
 
 # The dashboard lands on the chat page (the primary working surface), so the
@@ -8739,11 +8742,11 @@ async def chat_send(
     from .attachment_submission import submit
 
     receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
-                           owner=owner, title=title, description=description)
+                           owner=owner, title=title, description=description,
+                           chat_text=_turn_text(title, description))
     goal_id = receipt["goal_id"]
     # The first message opens a chat thread: this goal is its root.
-    conversation_id = (_open_thread_turn(w, owner, goal_id, goal_id, _turn_text(title, description))
-                       if receipt.get("created") else _thread_conversation(w, owner, goal_id).id)
+    conversation_id = _submission_conversation(w, receipt)
     _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id, receipt=receipt)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
@@ -8789,19 +8792,20 @@ async def chat_reply(
         )
     root_id = _thread_root_id(parent)
     root = parent if root_id == parent.id else (w.get_goal(root_id) or parent)
+    assert_goal_access(request, root)
     title = message.splitlines()[0].strip()[:GOAL_TITLE_MAX_LENGTH] or message[:GOAL_TITLE_MAX_LENGTH]
     from .attachment_submission import submit
 
     receipt = await submit(
         w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
         title=title, description=message, parent_id=root_id,
-        owner=caller_principal(request) or root.owner or "",
+        owner=root.owner or "",
         domain=root.domain or "",
         project_id=root.project_id,
+        chat_text=message, chat_root_id=root_id,
     )
     new_id = receipt["goal_id"]
-    conversation_id = (_open_thread_turn(w, root.owner, root_id, new_id, message)
-                       if receipt.get("created") else _thread_conversation(w, root.owner, root_id).id)
+    conversation_id = _submission_conversation(w, receipt)
     _dispatch_goal(request, bg, new_id, conversation_id=conversation_id, receipt=receipt)
     return RedirectResponse(f"/chat/goal/{new_id}", status_code=303)
 
@@ -8835,7 +8839,7 @@ async def recover_chat_submission(request: Request, bg: BackgroundTasks, goal_id
     if any((r["filename"], r["mime"], r["size_bytes"], r["sha256"]) not in records
            for r in receipt["detail"]["manifest"]):
         raise HTTPException(status_code=409, detail="The attachment batch is incomplete. Resubmit the original form and files to recover it.")
-    conversation_id = _thread_conversation(w, goal.owner, _thread_root_id(goal)).id
+    conversation_id = _submission_conversation(w, receipt)
     _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id, receipt=receipt)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
@@ -9918,7 +9922,9 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         share_links = []
     root_id = _thread_root_id(g)
     root = g if root_id == g.id else (w.get_goal(root_id) or g)
+    assert_goal_access(request, root)
     from maverick.attachment_submissions import SubmissionStore
+    from maverick.chat_threads import ChatThreads
     from maverick.runner import configured_max_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
@@ -9940,7 +9946,8 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
                 f"{spend_ceiling:,.2f}" if spend_ceiling is not None else ""
             ),
             "thread_title": root.title,
-            "thread_turns": _thread_turns(w, g, root),
+            "latest_chat_goal_id": ChatThreads(w).latest(g.id),
+            "thread_turns": _thread_turns(w, g),
             "threads": _chat_threads(request, w, active_root=root_id),
             "run_open": g.status not in TERMINAL_RUN_STATUSES and g.status != "draft",
             "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
@@ -10552,6 +10559,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-record-search.css")
 @app.get("/static/lightwork-grc-recovery.js")
 @app.get("/static/lightwork-workspace-recovery.js")
+@app.get("/static/lightwork-webhook-settings.js")
 @app.get("/static/lightwork-workspace-recovery.css")
 @app.get("/static/lightwork-action-center.js")
 @app.get("/static/lightwork-outcome-accounting.js")

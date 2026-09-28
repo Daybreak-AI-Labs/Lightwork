@@ -1994,7 +1994,9 @@ class GovernedRecordStore:
                         ),
                         record_sha256=str(pending.get("record_sha256") or ""),
                     )
-                    if not ok:
+                    # Only the writer's explicit acknowledgement confirms
+                    # delivery; malformed truthy results must retain the outbox.
+                    if ok is not True:
                         raise RuntimeError("audit writer refused governed event")
                 except Exception as exc:  # noqa: BLE001 - receipt stays durable
                     log.error(

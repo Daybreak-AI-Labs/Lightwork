@@ -58,8 +58,8 @@ CONTRACT_TYPES = frozenset({"AuditRefused"})
 #: Handler types that look like the contract but are only half of it.
 PARTIAL_TYPES = frozenset({"AuditWriteRefused", "OffHostSigningRequiredError"})
 
-#: Broad handlers that swallow a refusal unless the contract is re-raised first.
-BROAD_TYPES = frozenset({"Exception", "BaseException"})
+#: Known superclasses of AuditRefused; each can catch it before a typed handler.
+BROAD_TYPES = frozenset({"RuntimeError", "Exception", "BaseException"})
 
 SEARCH_ROOTS = ("packages", "apps", "benchmarks")
 
@@ -99,6 +99,36 @@ def _handler_names(handler: ast.ExceptHandler) -> set[str]:
         elif isinstance(n, ast.Attribute):
             out.add(n.attr)
     return out
+
+
+def _handler_reraises(handler: ast.ExceptHandler) -> bool:
+    """Recognize a reachable re-raise of the exception this handler caught.
+
+    This is a conservative syntax check, not a control-flow interpreter. A
+    straight-line prefix (for example logging) followed by bare ``raise`` or
+    ``raise <unchanged caught name>`` qualifies. Returns, replacement exceptions
+    and compound control flow require review rather than receiving credit for
+    an arbitrary Raise node somewhere in the handler.
+    """
+    caught_name = handler.name
+    prefix_types = (ast.Expr, ast.Assign, ast.AnnAssign, ast.AugAssign,
+                    ast.Delete, ast.Pass, ast.Import, ast.ImportFrom)
+    for stmt in handler.body:
+        if isinstance(stmt, ast.Raise):
+            return stmt.exc is None or (
+                isinstance(stmt.exc, ast.Name) and stmt.exc.id == caught_name
+            )
+        if not isinstance(stmt, prefix_types):
+            return False
+        for node in ast.walk(stmt):
+            if isinstance(node, (ast.Yield, ast.YieldFrom)):
+                return False
+            if (isinstance(node, ast.Name) and node.id == caught_name
+                    and isinstance(node.ctx, (ast.Store, ast.Del))):
+                caught_name = None
+            if isinstance(node, ast.alias) and (node.asname or node.name) == caught_name:
+                caught_name = None
+    return False
 
 
 def _imports_audit_writer(tree: ast.AST) -> bool:
@@ -195,31 +225,29 @@ def scan_file(path: Path) -> list[dict]:
         if not covered:
             continue
 
-        honours = False
-        broad: list[str] = []
-        partial: list[str] = []
-        for h in node.handlers:
-            names = _handler_names(h)
-            if names & CONTRACT_TYPES:
-                # A re-raising contract handler must come BEFORE the broad one;
-                # Python matches in order, so a later handler never sees it.
-                if any(isinstance(s, ast.Raise) for s in h.body):
-                    honours = True
-                continue
-            if names & PARTIAL_TYPES:
-                partial.extend(sorted(names & PARTIAL_TYPES))
-            if names & BROAD_TYPES:
-                broad.extend(sorted(names & BROAD_TYPES))
+        handlers = [(h, _handler_names(h)) for h in node.handlers]
+        swallowed: set[str] = set()
+        partial = {name for _, names in handlers for name in names & PARTIAL_TYPES}
+        for refusal in CONTRACT_TYPES | PARTIAL_TYPES:
+            for handler, names in handlers:
+                if not (names & (CONTRACT_TYPES | BROAD_TYPES) or refusal in names):
+                    continue
+                # Python runs only the first matching handler. Neither a later
+                # base-class re-raise nor a sibling's handler can repair a
+                # refusal already swallowed here.
+                if not _handler_reraises(handler):
+                    swallowed.update(names & (CONTRACT_TYPES | PARTIAL_TYPES | BROAD_TYPES))
+                break
 
-        if not broad or honours:
+        if not swallowed:
             continue
         for line in covered:
             out.append({
                 "file": _rel(path),
                 "func": _func_at(spans, line),
                 "line": line,
-                "catches": sorted(set(broad)),
-                "partial": sorted(set(partial)),
+                "catches": sorted(swallowed),
+                "partial": sorted(partial),
             })
     return out
 

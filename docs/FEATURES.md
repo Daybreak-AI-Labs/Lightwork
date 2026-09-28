@@ -19,6 +19,24 @@ here.
 
 ## Agent kernel & orchestration
 
+- **Guided restored-connection review** — recovery uses ordinary outcome,
+  evidence and date controls instead of editing a data object. Recovery Copilot
+  hosts the same current-authority form locally. Interrupted recording can
+  finish the exact retained review without repeating old work; normal startup
+  still requires separate completion. Manual source-position selection and
+  whole-platform Copilot coverage remain incomplete. See
+  [review boundaries](recovery-connected-services.md).
+
+- **First global Copilot action** — on a workflow run, Copilot can check the
+  current learning example and open the same protected stop-use form as the
+  page. The signed-in person enters a reason and confirms; the native service
+  rechecks current authority and example revision and reports confirmed or
+  audit-pending results. The closed catalog is default-off under
+  `[features] copilot_operations` and appears in Settings and the installer.
+  Direct page withdrawal does not depend on this flag. This covers one
+  operation, not all post-install work; see
+  [operation coverage](post-install-operation-coverage.md).
+
 - **Bounded audit reads and explicit coverage** — live tails seek a bounded
   suffix; newly sealed history uses authenticated 1 MiB frames without changing
   signed bytes. Export supports separate coverage receipts and optional segment
@@ -568,7 +586,11 @@ here.
   --ledger]`) — replays past goals against learned-state snapshots to detect
   when the forgetting loops silently cost coverage: gained / regressed /
   unchanged, deterministically, with no agent re-runs. `--strict` is a
-  learning-regression CI gate; `--ledger` appends a tamper-evident row.
+  learning-regression CI gate; `--ledger` writes an aggregate local summary
+  and a separate audit event. The summary itself is unsigned; audit signing
+  depends on deployment settings. Incomplete recording exits non-zero and
+  warns that the summary may already exist before a retry. Coverage changes
+  alone do not demonstrate improved task outcomes.
 - **Workforce value report** (`workforce_value.py`, `maverick proof
   [--fleet]`) — deliverables completed, agent cost vs human baseline →
   cost avoided + ROI, the capability improvement curve from the hindsight
@@ -1790,8 +1812,12 @@ here.
   under `deny_actions` for `agent:finance-1` at T", "`read_file` ran") that an
   auditor, regulator or a customer's customer verifies offline with a public key
   obtained out of band. An executed/failed tool claim is available only when a
-  signed call and terminal-result row carry the same recomputed commitment; a
-  call row on its own proves only a recorded dispatch attempt. The call row and
+  signed call and terminal-result row carry the same recomputed commitment;
+  `execution_unknown` dispositions remain unknown even with a matching pair.
+  Previously exported v2 receipts that incorrectly labeled such rows as
+  executed or failed must be regenerated from the original signed rows; the
+  corrected verifier rejects the inconsistent claim without changing history.
+  A call row on its own proves only a recorded dispatch attempt. The call row and
   its input summary are omitted by default and require the explicit bounded
   `--include-execution-pair` disclosure. The receipt always embeds the claim
   row; `--include-chain` additionally embeds every following row up to the tip,
@@ -1810,8 +1836,11 @@ here.
   with the issuer's mutable checkpoint directory, but does not independently
   anchor history. The minter refuses a broken chain, never mutates the audit
   files, publishes through a byte-exact exclusive two-phase protocol, and stamps
-  `issuer.key_custody` so a co-located key is reported as integrity rather than
-  tamper-evidence. The verifier accepts role-scoped trust inputs for the receipt
+  `issuer.key_custody` to distinguish key sources. The historical `offhost`
+  value means externally supplied: injected and KMS-unwrapped private keys
+  remain available to the local signing process. It does not establish isolated
+  signing or resistance to an actor able to use that key. The verifier accepts
+  role-scoped trust inputs for the receipt
   envelope, historical audit rows, checkpoints, and the anchor ledger without
   claiming that a deployment uses physically distinct keys. Envelope and
   checkpoint key windows are evaluated at verification time; historical row and
@@ -1940,8 +1969,10 @@ here.
   **graduates** the action from "a human approves" to "policy auto-approves"
   — implemented as a revocable standing consent-ledger grant the existing
   approval path already honours — and one miss by ANY agent **demotes
-  instantly** (revoke-before-record, retried on every later miss plus a
-  stale-grant sweep each reconcile, so authority never outruns evidence).
+  the local action state** (withdrawal attempted before recording, retried on
+  every later miss plus a stale-grant sweep each reconcile). Standing consent
+  withdrawal is scoped to the current identity and policy; a demoted local
+  action state does not establish that every identity's grant was withdrawn.
   Interlocks fail toward the human: no graduation while `calibration` is
   frozen or a learning HALT is active, `max_auto_risk` defaults to `medium`
   (graduating irreversible high-risk types is an explicit operator decision;
@@ -1949,7 +1980,11 @@ here.
   unknown level ranks above every ceiling), and `require_reversible` demands
   every card declare an inverse. Disabling the feature stops evidence and
   demotion but not grants already minted — `maverick earned-autonomy --revoke
-  ACTION` is the incident-response path and works while disabled. `run_saga`
+  ACTION` works while disabled, confirms current-authority withdrawal and
+  local recording separately, and reports incomplete results non-zero.
+  Other identities' grants require separate withdrawal. The central audit
+  remains best-effort and records both withdrawal and local-record outcomes
+  when available. `run_saga`
   is the compensating half: steps ship their undo, an irreversible step
   refuses to start, and a mid-saga failure rolls the completed prefix back in
   reverse. **Shadow Mode** (`shadow_execute`) is the centerpiece that ties it
@@ -2058,6 +2093,113 @@ here.
   See
   [`ekko-work-discovery.md`](./ekko-work-discovery.md).
 
+- **Bounded learned pure operators** (opt-in `[flows] learned_operators`) —
+  reviewed scalar examples retain the complete matching expression set from a
+  fixed grammar; an attached agent node uses a learned value only on in-domain
+  agreement, otherwise retaining its original agent fallback. File-only
+  `maverick flow operator` commands learn, refine, inspect, attach and remove
+  draft artifacts; agreement is not verified correctness or action authority.
+  Bounded distinguishing questions expose ambiguity for reviewed labels;
+  `[flows] learned_operator_questions` separately enables authenticated,
+  tenant-owned review records and unpublished refinement drafts with audit
+  recovery. Exhausted search does not imply equivalent candidates.
+  `learn-composed` infers bounded multi-operation scalar expressions from
+  reviewed end-to-end examples, retaining all matching expression trees in a
+  packed graph. The same refinement, question and draft paths handle both
+  artifact schemas. Composed execution also requires `[flows] composed_operators`;
+  incomplete prediction or disagreement preserves the original agent fallback.
+  See [usage and limits](./learned-operators.md).
+
+- **Learned action dataflow** (`maverick.flow.action_recipe`,
+  `[flows] action_recipes`) — infer all matching typed input, earlier-result and
+  constant argument bindings from reviewed straight-line action episodes.
+  `maverick flow recipe learn/refine/draft` produces reviewable native flows with
+  an approval before each action. Fresh runtime IDs remain data dependencies;
+  disagreement stops the sequence without repeating completed work.
+  Explicit `learn --transforms --domain ...` learns bounded arithmetic/text/
+  conditional argument expressions with all consistent candidates retained,
+  up to six eligible source fields per step and eight total argument leaves.
+  Default-off `[flows] action_recipe_transforms` additionally gates v2 execution;
+  native action approvals and authority remain required. Float/null values keep
+  copy-only semantics. Explicit `learn --choices --domain ...` learns a Boolean
+  guard and argument relationships for one shared action followed by one of two
+  demonstrated terminal tools, from at least four episodes with two per outcome.
+  All consistent guards remain; the default mode stops on disagreement after
+  the shared action without replay. Default-off `[flows] action_recipe_choices` requires both
+  recipe and transform opt-ins. Verified learning also accepts `--choices`;
+  existing refinement and draft paths preserve the choice artifact. This bounded
+  topology does not learn arbitrary tool order, nested branches or loops.
+  Separate `learn-workflow-verified` learns next actions and completion from
+  signed reviewed histories with varied counts and repeated tools, within an
+  explicit last-tool/latest-results representation. The strict default-off
+  `[flows] action_workflow_learning` also requires recipe, transform and lineage
+  opt-ins and an actual governed reference. The authenticated
+  `/flows/recipe-lineage/learn-workflow-verified` route learns and admits using
+  current source/owner authority; CLI output remains unadmitted. Bounds include
+  eight executed actions, eight tools, 32 episodes/states, 12 source leaves per
+  state and two operations per expression. All consistent alternatives remain;
+  uncertainty stops work. This is not hidden-policy inference, unrestricted
+  loops, cost-optimal evidence acquisition or proof of business correctness.
+  Workflow execution requires strictly persisted signed receipts, separately
+  from source-bundle verification. Unavailable signing or persistence refuses
+  further execution; receipt failure after an effect quarantines the run without
+  replaying that effect. Enabling workflow learning does not configure global
+  audit signing or install its dependencies. This does not make every product
+  audit event signed or local storage immutable.
+  Separate `learn-memory-verified` and the matching authenticated
+  `/flows/recipe-lineage/learn-memory-verified` route infer a bounded integer
+  history accumulator alongside those next-action and argument expressions.
+  The complete family includes no memory, zero/input initialization and one
+  fixed retain/replace/add/subtract/min/max update program over one selected
+  tool result field. All consistent models and their own expression alternatives
+  remain; every interpretation must agree before execution. The strict default-off
+  `[flows] action_workflow_memory_learning` additionally requires the workflow
+  opt-in and its dependencies, including the same mandatory signed execution
+  receipts. Shared search/history budgets and integer overflow
+  cause refusal; they never select an incomplete set of alternatives. This is
+  one bounded integer cell, not arbitrary hidden-state or business-policy inference.
+  Explicit `draft`/`draft-verified --teach-choices` and the governed draft API's
+  strict `teaching: true` option add human continuation review on a real completed
+  prefix. Both branches' arguments must agree; the chosen terminal still needs
+  separate native approval. Default-off `[flows] action_recipe_teaching` requires
+  the recipe/transform/choice/lineage flags and an actual governed reference,
+  including when general require-lineage policy is off. Inspection markers grant
+  no execution authority and never reopen indeterminate runs. Optional
+  in-memory capture admits only successful native governed action observations,
+  with source-run/definition/call provenance and explicit local review export.
+  Separate `[flows] action_episode_capture` enrollment retains encrypted native
+  evidence across ordinary approval pauses, with declared data bounds, expiry
+  and authenticated human review before export. Learning consent is separate
+  from execution approval. Ordinary capture requires straight-line source flows;
+  a separate teaching family admits only the exact human-choice topology and
+  binds its actual prefix, authenticated selection and native terminal. An
+  agreement-only teaching run cannot supply a new human label. Complete teaching
+  bundles still need separate suitability review, copied-data grant and signed
+  export before verified refinement; no automatic publication follows. This does not
+  learn agent policies. Raw `learn/refine` files remain operator assertions. The separate
+  default-off `[flows] action_recipe_lineage` path signs authenticated reviewed
+  bundles, verifies them against independent issuer/tenant key trust and retains
+  complete training lineage in a package. Authenticated governed admission and
+  draft export bind that package to native decision receipts; current source,
+  review, key and grant eligibility are checked before each proposed action and
+  dispatch. `[flows] require_action_recipe_lineage` can require this path for all
+  learned recipes. Grants expire no later than the original capture deadline
+  (at most seven days); no renewal route is included. Service signatures are not
+  personal reviewer signatures or proof of business correctness. Offline
+  verification reports live status as unchecked, and expiry does not erase
+  downloaded or derived Flow copies. Preserve complete packages and bundles.
+  The run page's **Learning example** card lets an authorized human stop future
+  governed use with an ordinary reason and confirmation form. Restricted
+  withdrawal preparation and withdrawal remain available while execution or
+  learning is disabled, retaining current ownership, source, retention, revision
+  and audit checks. Pending recording is not success; withdrawal does not undo
+  business work or erase exported copies. This completes the withdrawal control,
+  not the wider learning lifecycle or its Copilot operations.
+  See [usage, controls and limits](./learned-action-recipes.md). These engine and
+  API capabilities do not yet have a complete nontechnical dashboard journey;
+  [customer experience acceptance](./learned-capabilities-product-contract.md)
+  defines the remaining setup, teaching, consent, use and recovery requirements.
+
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
   deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
   foreach / while / parallel / approval / delay / wait_event / scope (try-catch) /
@@ -2163,6 +2305,39 @@ here.
   token; `POST /flow/approve` resumes) so a human clears it without a dashboard
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
+
+  The administrator's connected-automation settings show the effective signing
+  configuration. Reviewed changes recheck current authority and settings,
+  verify the incoming and outgoing resolvers separately, and restore the local
+  configuration when a write cannot be confirmed. The ordinary form reports
+  uncertain outcomes and clears a prior account's credential entry. External
+  secret ownership transfer, independent outgoing-only rotation and durable
+  settings audit history remain open; see the
+  [post-install coverage register](./post-install-operation-coverage.md).
+
+  Polled batches are retained in the tenant world database before dispatch,
+  using the configured at-rest encryption. A failed queue reservation or cursor
+  write retries that retained batch even if the feed no longer contains it.
+  Template events commit their goals and admission receipts together, and both
+  manual polling and scheduled polling publish through the durable queue. Queue
+  admission receipts survive completed-job cleanup. This prevents automatic
+  duplicate admission; it does not make an external service's effects reversible.
+  An unconfirmed non-idempotent callback remains held for reconciliation.
+
+  Source cursors distinguish an initialized empty feed from a new trigger, so
+  its first later item runs. Stored cursor-format metadata preserves legacy raw
+  IDs, including IDs resembling the new envelope format. Flow admission uses
+  the exact source identity rather than truncated display fields. During cursor
+  migration, an existing legacy flow run is reused only when its retained fields
+  establish the same identity; ambiguous truncated records require reconciliation.
+  File batches drain timestamp ties, including new arrivals at the current
+  boundary. A boundary holds at most 4,096 file identities; overflow is reported
+  before advancing, and files arriving with timestamps older than an already
+  advanced boundary remain historical. Legacy timestamps cannot reconstruct
+  files previously skipped by an older installation. IMAP initialization reads
+  the complete UID high-water without fetching historical message bodies;
+  UIDVALIDITY changes establish a new baseline. Provider-wide OAuth vault
+  authorizations and token rotations are serialized across local processes.
 
 - **Migration fidelity** (`automation_import.to_flow`) — a per-source
   `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
@@ -2943,6 +3118,17 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   in exactly the convention `audit/federation.py` cross-verifies — a dropped
   half is detectable. The protocol layer runs over any `call(method, payload)`
   transport; the gRPC binding is a thin `[grpc]` adapter (live-smoked).
+  New inbound requests atomically reserve one held goal and a sealed, pinned
+  execution contract in the existing SQLite/PostgreSQL world admission ledger.
+  The required audit acknowledgment precedes dispatch. Same-correlation retries
+  repair pending audit/release phases; a claimed dispatch is never automatically
+  repeated after a crash. Additive response fields distinguish pending, accepted,
+  and unknown outcomes from refusal; acceptance does not prove completed work.
+  Current policy can hold a previously pinned grant, but cannot broaden it.
+  Recovery requires the peer to retry the same correlation; there is no automatic
+  startup drain. Retained receipts, including erased-goal tombstones, count
+  toward the existing 250,000-per-tenant / 50,000-per-peer capacity limits.
+  These limits no longer imply TTL eviction that could reopen old work.
 - **Agent Trust Plane** (`agent_trust.py`, engaged by enterprise mode or
   `[agent_trust] enforce = true` / `MAVERICK_AGENT_TRUST=1`) — the *single*
   registry + decision point for talking to **external** agents, unifying what
@@ -3708,10 +3894,15 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `MAVERICK_PROXY_ALLOWED_ROUTES`).
 - **Audit & compliance** — signed append-only audit log (`maverick audit verify`), **federated
   audit-log verification** (`audit/federation.py`) — over a set of nodes/tenants
-  whose signed logs reference each other (delegation, A2A handoff), confirms
-  every cross-node reference is *reciprocated* (a node can't drop its half to
-  hide an action) on top of each node's own chain/anchor check; an
-  unreciprocated or forged link is reported with the missing counterpart,
+  whose signed logs reference each other (delegation, A2A handoff), checks
+  reciprocal references extracted from the same per-segment snapshots whose
+  signatures were verified. Supplied decoded rows must match those snapshots;
+  missing counterparts, conflicting acceptance/goal identities, and unresolved
+  or malformed delegation outcomes prevent a consistent report. Generic
+  references establish reciprocity only; acceptance does not prove completed
+  work. Anchors are checked separately against current files; this is not an
+  atomic multi-day snapshot or independent checkpoint proof. Missing evidence
+  cannot establish the actions that were never recorded. Includes
   date-windowed **SIEM export**, **WORM export** (`audit/worm.py`, `maverick audit
   worm push`) — ships closed day-files to S3 Object-Lock (COMPLIANCE/GOVERNANCE)
   or a local read-only mirror with a retention lock, so the historical trail is

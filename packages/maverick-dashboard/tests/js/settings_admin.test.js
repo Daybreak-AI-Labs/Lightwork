@@ -23,32 +23,19 @@ async function fixture(route, {confirm = true} = {}) {
   return {window, document: window.document, calls, confirms, copies, settle};
 }
 
-test('make a secret shows it once and copies it', async (t) => {
-  const ui = await fixture(() => response({secret: 'abc123-secret'}));  // pragma: allowlist secret
-  t.after(() => ui.window.close());
-  ui.document.getElementById('webhook-generate').dataset.replace = 'false';
-  ui.document.getElementById('webhook-generate').click();
-  await ui.settle();
-  assert.equal(ui.calls[0].url, '/settings/webhooks/generate');
-  assert.equal(ui.calls[0].options.method, 'POST');
-  assert.equal(ui.document.getElementById('webhook-new').hidden, false);
-  assert.equal(ui.document.getElementById('webhook-new-value').value, 'abc123-secret');  // pragma: allowlist secret
-  ui.document.getElementById('webhook-copy').click();
-  assert.deepEqual(ui.copies, ['abc123-secret']);  // pragma: allowlist secret
-  // Replacing an existing secret asks first.
-  ui.document.getElementById('webhook-generate').click();
-  await ui.settle();
-  assert.match(ui.confirms[0], /stop working/);
+test('secret settings use the reviewed change form', () => {
+  assert.match(markup, /id="wh-form"/);
+  assert.match(markup, /id="wh-confirm"[^>]*disabled/);
+  assert.match(markup, /id="wh-secret"[^>]*type="password"/);
+  assert.doesNotMatch(markup, /id="webhook-generate"/);
 });
 
-test('a failed secret request reads as a plain sentence', async (t) => {
+test('secret changes cannot bypass review through the general settings controls', async (t) => {
   const ui = await fixture(() => response({detail: 'boom'}, 500));
   t.after(() => ui.window.close());
-  ui.document.getElementById('webhook-generate').dataset.replace = 'false';
-  ui.document.getElementById('webhook-generate').click();
-  await ui.settle();
-  assert.equal(ui.document.getElementById('webhook-status').textContent, 'Could not make a secret.');
-  assert.equal(ui.document.getElementById('webhook-new').hidden, true);
+  assert.equal(ui.document.getElementById('webhook-generate'), null);
+  assert.equal(ui.document.getElementById('wh-save').disabled, true);
+  assert.equal(ui.calls.length, 0);
 });
 
 test('readiness check lists each switch with a fix button', async (t) => {

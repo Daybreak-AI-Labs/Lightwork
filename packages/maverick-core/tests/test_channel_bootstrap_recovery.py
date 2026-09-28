@@ -6,6 +6,7 @@ import copy
 import json
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -223,3 +224,82 @@ def test_supported_channel_readback_completes_restore_without_replaying_old_rece
     poll = GovernedRecordStore("channel-poll-cursors", "chp", "channel_poll_cursor").get("chp-" + "b" * 56)
     assert poll["watermark"] == "100" and poll["cursor"] is None
     assert poll["restore_hold"]["prior_checkpoint"]["watermark"] == "5"
+
+
+@pytest.mark.parametrize("encrypted", [False, True])
+def test_native_form_review_survives_marker_interruption_without_replaying(monkeypatch, tmp_path, encrypted):
+    source = _select_home(monkeypatch, tmp_path / "source")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1" if encrypted else "0")
+    recovery_key = recovery.configure_key()["key"]
+    identity = "chd-" + "b" * 56
+    _record(source, "channel-deliveries", {"id": identity, "revision": 1, "channel": "slack",
+        "account_sha256": "c" * 64, "external_id": "event", "execution_id": "work",
+        "execution": "execution_unknown", "delivery": "delivery_unknown", "chunks": {}}, encrypted=encrypted)
+    snapshot = recovery.create()
+    exported = tmp_path / "forms-source.tgz"
+    file_lock.atomic_create_bytes(exported, recovery.download_path(snapshot["id"]).read_bytes())
+    custody = recovery.export_encryption_keys() if encrypted else None
+    target = _select_home(monkeypatch, tmp_path / "target")
+    recovery.configure_key(imported=recovery_key)
+    imported = recovery.import_archive(exported)
+    recovery.prepare_bootstrap(isolated=True, actor="admin", source_offline=True)
+    if encrypted:
+        report = recovery.test_key_custody(imported["id"], custody, expected_sha256=imported["sha256"], actor="admin")
+        recovery.install_retained_keys(imported["id"], custody, expected_sha256=imported["sha256"],
+            report_id=report["report_id"], isolated=True, actor="admin")
+    review = recovery.prepare_restore(imported["id"], isolated=True, actor="admin")
+    recovery.apply_restore(review["review"], review["target"], isolated=True, actor="admin")
+    item = recovery.reconciliation_status(actor="admin")["items"][0]
+    assert item["channel_review"]["source_label"] == "Slack"
+    answers = {"kind": "message", "checked_at": datetime.now(timezone.utc).isoformat(),
+               "evidence_reference": "reviewed-source-123", "execution": "recorded", "delivery": "absent", "chunks": {}}
+    options = dict(evidence_reference=None, isolated=True, actor="admin", channel_answers=answers,
+                   expected_review_token=item["channel_review"]["review_token"])
+    for change in ({"actor": "someone-else"}, {"isolated": False}, {"expected_review_token": "0" * 64}):
+        with pytest.raises(recovery.RecoveryError):
+            recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **{**options, **change})
+    # The token check must happen against the authenticated marker under the lock.
+    reader = recovery._read_bootstrap
+    with monkeypatch.context() as patch:
+        patch.setattr(recovery, "_read_bootstrap", lambda **kw: {**reader(**kw), "bootstrap_id": "different"})
+        with pytest.raises(recovery.RecoveryError, match="changed"):
+            recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **options)
+    with monkeypatch.context() as patch:
+        def interrupt(_body):
+            raise OSError("synthetic publication interruption")
+        patch.setattr(recovery, "_write_bootstrap", interrupt)
+        with pytest.raises(OSError):
+            recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **options)
+    interrupted_bytes = (target / "channel-deliveries" / (identity + ".json")).read_bytes()
+    current = recovery.reconciliation_status(actor="admin")
+    pending = current["items"][0]["channel_review"]
+    assert current["unresolved"] == 1 and pending["status"] == "recording_incomplete"
+    assert pending["review_token"] == options["expected_review_token"]
+    # A damaged interrupted channel must not hide the whole review inventory.
+    from maverick import channel_recovery
+
+    marker = recovery._read_bootstrap(actor="admin")
+    decryptor = recovery._bootstrap_record_decryptor(marker) if encrypted else None
+    record_path = target / "channel-deliveries" / (identity + ".json")
+    record, raw, sealed = channel_recovery._load(record_path, decryptor=decryptor, tenant="acme", workspace=target)
+    record["chunks"] = []
+    channel_recovery._write(record_path, record, raw, sealed, decryptor=decryptor, tenant="acme", workspace=target)
+    damaged = recovery.reconciliation_status(actor="admin")
+    assert damaged["unresolved"] == 1 and len(damaged["items"]) == 1
+    assert damaged["items"][0]["channel_review"]["status"] == "unavailable"
+    for submitted in (answers, pending["retry_answers"]):
+        with pytest.raises(recovery.RecoveryError):
+            recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed",
+                **{**options, "channel_answers": submitted})
+    file_lock.atomic_write_bytes(record_path, interrupted_bytes)
+    result = recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed",
+        **{**options, "channel_answers": pending["retry_answers"]})
+    assert result["state"] == "resolved" and result["item_id"] == item["id"]
+    assert result["automatic_replay_blocked"] and result["normal_start_blocked"]
+    assert (target / "channel-deliveries" / (identity + ".json")).read_bytes() == interrupted_bytes
+    assert recovery.resolve_reconciliation(item["id"], "channel_readback_confirmed", **options)["state"] == "resolved"
+    assert recovery.reconciliation_status(actor="admin")["items"][0]["channel_review"]["status"] == "recorded"
+    with pytest.raises(recovery.RecoveryError):
+        recovery.assert_bootstrap_start_allowed()
+    assert recovery.complete_reconciliation(isolated=True, actor="admin")["state"] == "completed"
+    recovery.assert_bootstrap_start_allowed()

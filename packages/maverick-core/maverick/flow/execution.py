@@ -22,6 +22,15 @@ from typing import Any
 
 from ..tool_results import tool_result_failed
 from . import node_outcomes, store
+from .action_episodes import (
+    ActionEpisodeCapture,
+    action_capture_scope,
+    begin_capture,
+    finish_capture,
+    native_authorized,
+    native_completed,
+    resume_capture,
+)
 from .ir import Flow, FlowNode
 from .runner import (
     PAUSED_STATUSES,
@@ -254,7 +263,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             budget_limit_dollars: float | None = None,
             inputs: dict | None = None, record_outcomes: bool = True,
             agent_budget_dollars: float = DEFAULT_AGENT_BUDGET, origin: str = "manual",
-            now: Callable[[], float] | None = None) -> store.FlowRun:
+            now: Callable[[], float] | None = None,
+            episode_capture: ActionEpisodeCapture | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
     (so a caller can hand it back for polling); ``decision`` is the human verdict
@@ -262,6 +272,11 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     ``record_outcomes=False`` (a dry run) still traces per-node status for the
     overlay but does NOT ground outcomes -- a mock run's fake successes must not
     pollute the self-rewrite signal."""
+    # The persisted definition and approved data must describe what executes,
+    # even if the original caller edits its objects while a review is pending.
+    flow = copy.deepcopy(flow)
+    data = copy.deepcopy(data)
+    inputs = copy.deepcopy(inputs)
     resume = None
     prior = None
     definition_digest = ""
@@ -370,6 +385,10 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 allowed_verdicts = {"approved", "rejected"}
                 if paused is not None:
                     allowed_verdicts.update(str(v) for v in paused.choices)
+                if flow.recipe_teaching is not None and prior.cursor == "teaching_review":
+                    # Selecting a continuation is distinct from approving it.
+                    # Refuse generic approval while retaining the current pause.
+                    allowed_verdicts = {"route:0", "route:1", "rejected"}
                 if not verdict or verdict not in allowed_verdicts:
                     raise ValueError("an explicit valid approval decision is required")
                 approval_actor = str(decided_by or "").strip()
@@ -519,7 +538,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # Write a "running" state before executing so a long run is distinguishable
     # from a stuck "queued" one on the dashboard (a fresh, non-resume run only).
     if not resume_run_id:
-        store.save_run(store.FlowRun(
+        running = store.FlowRun(
             run_id=rid, flow_id=flow.id, status=STATUS_RUNNING, owner=owner,
             data=dict(data or {}), origin=run_origin,
             created=(placeholder.created if placeholder else 0.0),
@@ -535,7 +554,28 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             execution_channel=execution_channel,
             execution_user_id=execution_user_id,
             allowed_suites=allowed_suites,
-        ))
+        )
+        store.save_run(running)
+
+    if resume_run_id and prior is not None:
+        # Enrollment is loaded by the authoritative tenant/run identity only.
+        # Native approval validation above has succeeded; the saved pause is
+        # still intact here, before any durable resuming claim or tool effect.
+        durable_capture = resume_capture(
+            flow, copy.deepcopy(prior), initial_data=copy.deepcopy(prior.input_data),
+            submitted_inputs=copy.deepcopy(submitted_inputs), from_failure=from_failure,
+            expired=expired, decision=str(decision or ""),
+            decided_by=approval_actor,
+            approval_binding_sha256=approval_check_binding,
+            approval_authority_binding_sha256=approval_authority_binding_sha256,
+            decision_attestation=approval_decision_attestation,
+        )
+        if durable_capture is not None:
+            episode_capture = durable_capture
+    begin_capture(
+        episode_capture, flow, prior if resume_run_id else running,
+        initial_data=dict(data or {}), resumed=bool(resume_run_id),
+    )
 
     def _resolve_pinned_flow(flow_ref: str) -> Flow | None:
         if flow_ref in subflow_digests:
@@ -555,7 +595,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     approval_effect_claimed = False
     approval_effect_claim_lock = _threading.Lock()
 
-    def _run_action(node: FlowNode, params: dict, action_data: dict):
+    def _dispatch_action(node: FlowNode, params: dict, action_data: dict):
         nonlocal approval_effect_claimed
         if not approval_resume or approval_snapshot is None:
             return action_runner(node.tool, params, action_data)
@@ -596,8 +636,13 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                     approval_effect_claimed = True
             return action_runner(node.tool, params, action_data)
 
+    def _run_action(node: FlowNode, params: dict, action_data: dict):
+        with action_capture_scope(episode_capture, node):
+            return _dispatch_action(node, params, action_data)
+
     res = run_flow(
         flow,
+        run_id=rid,
         agent_fn=lambda node, brief, d: _timed(node.id, lambda: _call_agent(
             agent_runner,
             brief,
@@ -765,6 +810,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         allowed_suites=allowed_suites,
     )
     store.save_run(run)
+    finish_capture(episode_capture, run)
     # Learn the shape of this flow's output keys from a REAL run's data (never a
     # dry run -- mock executors produce placeholder shapes), so the designer's
     # data pills can offer nested keys. Field names + types only; best-effort.
@@ -905,6 +951,7 @@ def default_action_runner(
             call_id=call_id,
         )
         authorized = False
+        observation = None
 
         def audit_result(
             status: str,
@@ -960,6 +1007,10 @@ def default_action_runner(
             if t is None:
                 result = f"ERROR: no such tool {tool!r}"
             else:
+                observation = native_authorized(
+                    tool, params, call_id=call_id, principal=user_id,
+                    input_schema=getattr(t, "input_schema", None),
+                )
                 # Go through the registry's authoritative dispatch path: it owns the
                 # ToolFn(args_dict) contract, sync/async/generator normalization,
                 # tracing, cache invalidation and retry-safety policy.
@@ -1049,6 +1100,7 @@ def default_action_runner(
                     "retry automatically",
                     0.0,
                 )
+            native_completed(observation, result, terminal_recorded=(result_recorded is True and ok))
         return (result, 1.0 if ok else 0.0)
     return run
 

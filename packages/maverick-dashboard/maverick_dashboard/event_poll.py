@@ -4,8 +4,9 @@ Shared by the HTTP endpoint (``POST /api/v1/event-triggers/poll``) and the
 background automation scheduler (app lifespan). Each polls its sources, fires
 the bound template per new event -- the event's fields filling the template's
 declared params -- and advances the cursor at most once. ``fire(goal_id)``
-schedules the actual run: a FastAPI BackgroundTask in the request path, a daemon
-thread in the scheduler.
+schedules the actual run through the same durable, idempotent queue in both
+the request path and the scheduler. Observed event batches remain durable until
+delivery and cursor disposition complete.
 """
 from __future__ import annotations
 
@@ -137,13 +138,64 @@ def _safe_error(exc: BaseException, *, fallback: str = "operation failed") -> st
     return message or fallback
 
 
-def _fire_template(world, trig, tpl, events, owner, fire, summary) -> None:
+def _trigger_key(trig: dict) -> str:
+    import hashlib
+    import json
+    # Include creation identity AND approved binding. Recreating/editing a
+    # trigger is a new admission namespace, while cursor/cadence updates are not.
+    fields = ("name", "created", "tenant", "owner", "source", "config", "params",
+              "template", "template_revision", "flow", "flow_owner", "flow_revision")
+    encoded = json.dumps({k: trig.get(k) for k in fields}, sort_keys=True,
+                         separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _publish_cursor(trig, cursor, cursor_format=1):
+    from maverick_dashboard import event_triggers_store
+    if not event_triggers_store.set_cursor(
+        trig["name"], cursor, tenant=str(trig.get("tenant") or ""),
+        expected_cursor=trig["cursor"], expected_generation=_trigger_key(trig),
+        cursor_format=cursor_format,
+        accept_peer_progress=True,
+    ):
+        raise RuntimeError("trigger changed during polling; cursor publication refused")
+    trig["_cursor_publication_completed"] = True
+
+
+def _dispatch_admission(world, key, goal_id, state, fire, summary, durable):
+    from maverick import event_admission
+    if state in {"delivered", "retired"}:
+        return
+    if world.get_goal(goal_id) is None:
+        # Erasure is authoritative. Keep a terminal tombstone, rather than
+        # recreating erased work or starving every future event on the trigger.
+        event_admission.transition(world, key, state, "retired")
+        summary["notes"].append(f"retired delivery for removed goal {goal_id}")
+        return
+    if state == "dispatching":
+        raise event_admission.EventDispatchUncertain(
+            "event dispatch outcome is unconfirmed; reconcile the existing goal")
+    if not durable and not event_admission.transition(world, key, "pending", "dispatching"):
+        raise event_admission.EventDispatchUncertain("event dispatch is already claimed")
+    # Production dispatch is a permanent, transactional queue admission keyed by
+    # tenant+goal. It can safely retry even when acknowledgement was lost. Other
+    # callbacks remain held on an exception; never infer safety from an error.
+    fire(goal_id)
+    event_admission.transition(world, key, "pending" if durable else "dispatching", "delivered")
+    if goal_id not in summary["fired"]:
+        summary["fired"].append(goal_id)
+
+
+def _fire_template(world, trig, tpl, events, owner, fire, summary, durable=False,
+                   event_ids=None) -> None:
     """Render the bound template per event (event fields fill DECLARED params)
     and fire a goal. Mutates ``summary``."""
     from maverick_dashboard import trigger_events_store
     name = trig["name"]
     declared = set(tpl.params)
-    for event in events:
+    trigger_key = _trigger_key(trig)
+    entries = []
+    for index, event in enumerate(events):
         params = dict(trig.get("params") or {})
         for k, v in event.items():      # event fields fill DECLARED params only
             if k in declared:
@@ -160,52 +212,84 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary) -> None:
                 note=detail,
             )
             continue
-        goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
-        world.record_goal_origin(goal_id, "event", name)
-        fire(goal_id)
-        summary["fired"].append(goal_id)
+        key = _event_key(trigger_key, event, event_ids[index] if event_ids is not None else None)
+        entries.append((key, title[:200], description[:8000]))
+    from maverick import event_admission
+    admissions = event_admission.admit_batch(
+        world, entries, owner=owner, origin=name, trigger_key=trigger_key)
+    for key, goal_id, state in admissions:
+        _dispatch_admission(world, key, goal_id, state, fire, summary, durable)
 
 
-def _event_key(name: str, event: dict) -> str:
+def _event_key(name: str, event: dict, event_id: str | None = None) -> str:
     """A stable idempotency key for an event: the trigger name + the event's own
     id (or a hash of its fields), so a re-delivered event doesn't fire twice."""
     import hashlib
     import json as _json
-    eid = event.get("id") or event.get("guid") or event.get("uid")
+    eid = event_id
     if eid is None:
-        # A dedup fingerprint, not a security digest -> usedforsecurity=False.
-        digest = hashlib.sha1(_json.dumps(event, sort_keys=True, default=str).encode(),
-                              usedforsecurity=False)
-        eid = digest.hexdigest()[:16]
-    return f"{name}:{eid}"
+        eid = event.get("id", event.get("guid", event.get("uid")))
+    if eid is None:
+        eid = _json.dumps(event, sort_keys=True, default=str)
+    encoded = _json.dumps([name, eid], separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def _fire_flow(trig, events, owner, fire_flow, summary) -> None:
+def _fire_flow(trig, events, owner, fire_flow, summary, event_ids=None, durable=False) -> None:
     """Start a flow run per event, with the event's fields as the run's data
     (the trigger's ``params`` are defaults). Each fire carries an idempotency key
     so a re-delivered event is deduplicated. Mutates ``summary``; run ids land in
     ``summary['fired_flows']``."""
     flow_id = trig["flow"]
-    for event in events:
+    for index, event in enumerate(events):
         data = dict(trig.get("params") or {})
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
             data[str(k)] = v if isinstance(v, (int, float, bool)) else str(v)[:2000]
-        run_id = fire_flow(flow_id, data, owner, _event_key(trig["name"], event),
+        # Preserve already released flow idempotency keys. Flow admission has
+        # its own owner/release scope; changing its key format during this
+        # template repair would make a pre-upgrade flow retry executable again.
+        import hashlib
+        import json
+        legacy_id = event.get("id") or event.get("guid") or event.get("uid")
+        if legacy_id is None:
+            legacy_id = hashlib.sha1(json.dumps(event, sort_keys=True, default=str).encode(),
+                                     usedforsecurity=False).hexdigest()[:16]
+        legacy_key = f"{trig['name']}:{legacy_id}"
+        key = legacy_key
+        options = {}
+        if event_ids is not None:
+            key = _event_key(_trigger_key(trig), event, event_ids[index])
+            if durable and not trig.get("cursor_format"):
+                source = trig.get("source")
+                field = ("number" if source == "github_issues" else "_seq" if source == "form"
+                         else "uid" if source == "imap_email" else
+                         str((trig.get("config") or {}).get("id_field") or "id"))
+                fields = ("path", "mtime", "size") if source == "file_dir" else (field,)
+                identity = {k: str(event[k]) for k in fields if k in event}
+                complete = len(identity) == len(fields) and all(len(v) < 2000 for v in identity.values())
+                if source not in {"file_dir", "imap_email"}:
+                    complete = complete and identity.get(field) == event_ids[index]
+                options["legacy_event"] = {"key": legacy_key, "identity": identity if complete else None}
+        run_id = fire_flow(flow_id, data, owner, key,
                            f"event:{trig['name']}",
-                           expected_revision=str(trig.get("flow_revision") or ""))
+                           expected_revision=str(trig.get("flow_revision") or ""), **options)
         if run_id:
             summary["fired_flows"].append(run_id)
 
 
-def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
+def _deliver(world, trig, res, owner, fire, fire_flow, summary, durable=False) -> bool:
     """Dispatch a trigger's new events to its target (bound flow, else template).
     Returns False when nothing was delivered and the caller must NOT advance the
     cursor past these events (missing target, or no flow dispatcher wired);
     otherwise True. The missing-target cases advance the cursor themselves so a
     permanent backlog can't wedge the trigger."""
-    from maverick_dashboard import event_triggers_store, trigger_events_store
+    from maverick_dashboard import trigger_events_store
     name = trig["name"]
-    tenant = str(trig.get("tenant") or "")
+    event_ids = getattr(res, "event_ids", None)
+    if event_ids is not None and (len(event_ids) != len(res.events)
+                                 or any(not isinstance(eid, str) or not eid for eid in event_ids)
+                                 or len(set(event_ids)) != len(event_ids)):
+        raise ValueError("event source returned invalid delivery identities")
     if trig.get("flow"):
         from maverick.flow import store as flow_store
 
@@ -233,7 +317,7 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
             # A deleted/recreated target is not the target that was approved at
             # trigger creation. Advance past this batch so an ABA replacement
             # cannot accumulate an unbounded replay backlog.
-            event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)
+            _publish_cursor(trig, res.cursor, res.cursor_format)
             trigger_events_store.record(
                 name,
                 owner,
@@ -247,7 +331,7 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
             # dispatcher is available rather than silently advancing past them.
             summary["notes"].append("flow firing unavailable in this context")
             return False
-        _fire_flow(trig, res.events, owner, fire_flow, summary)
+        _fire_flow(trig, res.events, owner, fire_flow, summary, event_ids, durable)
         return True
     try:
         from maverick_dashboard.triggers_store import bound_template
@@ -256,7 +340,7 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
     except ValueError as e:
         detail = _safe_error(e, fallback="template unavailable")
         summary["notes"].append(f"template unavailable: {detail}")
-        event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)
+        _publish_cursor(trig, res.cursor, res.cursor_format)
         trigger_events_store.record(
             name,
             owner,
@@ -264,23 +348,25 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
             note=detail,
         )
         return False
-    _fire_template(world, trig, tpl, res.events, owner, fire, summary)
+    _fire_template(world, trig, tpl, res.events, owner, fire, summary, durable, event_ids)
     return True
 
 
 def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                   fire: Callable[[int], None],
-                  fire_flow: Callable[..., Any] | None = None) -> list[dict]:
+                  fire_flow: Callable[..., Any] | None = None,
+                  fire_is_durable: bool = False) -> list[dict]:
     """Poll each trigger and fire its target (template->goal, or flow) per new
     event. Returns a summary per trigger: ``{name, new_events, fired: [goal_id...],
     fired_flows: [run_id...], notes, poll_error}``. Never raises for a single bad
     trigger -- it's recorded in that trigger's notes + ``poll_error`` and the batch
     continues. ``fire_flow(flow_id, data, owner) -> run_id`` starts a flow run."""
-    from maverick.automation_events import EventSourceError, poll_source
+    from maverick import event_admission
+    from maverick.automation_events import EventSourceError, PollResult, poll_source
     from maverick.paths import reset_tenant, set_tenant
     from maverick.tenant.registry import assert_tenant_active
 
-    from maverick_dashboard import event_triggers_store, trigger_events_store
+    from maverick_dashboard import trigger_events_store
     from maverick_dashboard.auth import (
         AutomationAuthorizationError,
         auth_genuinely_off,
@@ -320,7 +406,25 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 # A world/model store is tenant-scoped. Resolve a factory only
                 # after the durable trigger tenant has been restored.
                 active_world = world() if callable(world) else world
-                res = poll_source(trig["source"], admitted_config, trig["cursor"])
+                if not trig.get("flow"):
+                    for key, goal_id, state in event_admission.pending(active_world, _trigger_key(trig)):
+                        _dispatch_admission(active_world, key, goal_id, state,
+                                            fire, summary, fire_is_durable)
+                generation = _trigger_key(trig)
+                batch = event_admission.poll_batch(active_world, generation)
+                if batch is None:
+                    admitted_config["_lightwork_cursor_format"] = int(trig.get("cursor_format") or 0)
+                    res = poll_source(trig["source"], admitted_config, trig["cursor"])
+                    if res.events:
+                        batch = event_admission.poll_batch(active_world, generation, {
+                            "events": res.events, "event_ids": getattr(res, "event_ids", None),
+                            "cursor": res.cursor, "cursor_format": getattr(res, "cursor_format", 0),
+                            "before_cursor": trig["cursor"], "before_format": trig.get("cursor_format", 0),
+                        })
+                if batch is not None:
+                    res = PollResult(events=batch["events"], cursor=batch["cursor"],
+                                     event_ids=batch["event_ids"], cursor_format=batch["cursor_format"])
+                    trig = {**trig, "cursor": batch["before_cursor"], "cursor_format": batch["before_format"]}
             except (EventSourceAdmissionError, EventSourceError) as e:
                 detail = _safe_error(e, fallback="event source unavailable")
                 summary["poll_error"] = True
@@ -344,13 +448,17 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 continue
             summary["new_events"] = len(res.events)
             if not _deliver(
-                active_world, trig, res, owner, fire, fire_flow, summary
+                active_world, trig, res, owner, fire, fire_flow, summary, fire_is_durable
             ):
+                if batch is not None and trig.get("_cursor_publication_completed"):
+                    event_admission.complete_poll_batch(active_world, generation, batch["batch_digest"])
                 continue
             # Only touch the store when the cursor actually moved -- an idle poll
             # (no new items) shouldn't rewrite the whole trigger file every tick.
-            if res.cursor != trig["cursor"]:
-                event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)
+            if res.cursor != trig["cursor"] or res.cursor_format != trig.get("cursor_format", 0):
+                _publish_cursor(trig, res.cursor, res.cursor_format)
+            if batch is not None:
+                event_admission.complete_poll_batch(active_world, generation, batch["batch_digest"])
             if summary["fired"] or summary["fired_flows"]:
                 trigger_events_store.record(name, owner, trigger_events_store.FIRED,
                                             new_events=summary["new_events"],

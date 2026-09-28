@@ -41,6 +41,10 @@ class PollResult:
     """
     events: list[dict] = field(default_factory=list)
     cursor: str = ""
+    # Source-controlled identities live outside customer-editable event fields.
+    # None keeps the legacy custom-source contract; built-ins supply exact IDs.
+    event_ids: list[str] | None = None
+    cursor_format: int = 1
 
 
 @runtime_checkable
@@ -92,6 +96,29 @@ def enabled() -> bool:
 _MAX_EVENTS = 25  # per poll, so a backlog can't spawn an unbounded goal burst
 _MAX_HTTP_JSON_BYTES = 2 * 1024 * 1024  # bound external feed bodies before JSON parse
 _MAX_HTTP_TEXT_BYTES = 1024 * 1024  # RSS/Atom bodies are small; cap hostile feeds
+_CURSOR_PREFIX = "lightwork:cursor:v1:"
+_MAX_FILE_BOUNDARY_IDS = 4096
+
+
+def _encode_cursor(kind: str, value: Any) -> str:
+    return _CURSOR_PREFIX + json.dumps([kind, value], separators=(",", ":"))
+
+
+def _decode_cursor(cursor: str, kind: str, cursor_format: int | None = None) -> Any:
+    """Decode one envelope only; legacy non-envelope cursors retain their ID.
+
+    Wrapping IDs, including IDs that look like envelopes, keeps initialized
+    empty distinct from every newly persisted provider ID.
+    """
+    if cursor_format == 0 or not cursor.startswith(_CURSOR_PREFIX):
+        return cursor
+    try:
+        result = json.loads(cursor[len(_CURSOR_PREFIX):])
+        if not isinstance(result, list) or len(result) != 2 or result[0] != kind:
+            raise ValueError
+        return result[1]
+    except (ValueError, TypeError) as exc:
+        raise EventSourceError("invalid or incompatible event cursor") from exc
 
 
 def _dig(obj: Any, path: str) -> Any:
@@ -126,7 +153,7 @@ def _flatten(item: dict, *, prefix: str = "", out: dict | None = None, depth: in
 
 
 def diff_new_items(items: list[dict], cursor: str, id_field: str, *,
-                   newest_first: bool = True) -> PollResult:
+                   newest_first: bool = True, cursor_format: int | None = None) -> PollResult:
     """Given the raw items a source returned, compute the new ones vs ``cursor``.
 
     ``cursor`` is the id of the newest item seen at the last poll. First poll
@@ -135,18 +162,24 @@ def diff_new_items(items: list[dict], cursor: str, id_field: str, *,
     are new; they're returned oldest-first and the cursor advances to the newest.
     Items are flattened to ``a.b`` param-friendly dicts and bounded.
     """
+    prior = _decode_cursor(cursor, "feed", cursor_format) if cursor else None
+    if prior is not None and not isinstance(prior, str):
+        raise EventSourceError("invalid feed cursor")
     ordered = list(items) if newest_first else list(reversed(items))  # newest-first
 
     def _id(it: dict) -> str:
-        return str(_dig(it, id_field) or "")
+        value = _dig(it, id_field)
+        return "" if value is None else str(value)
 
     ids = [_id(it) for it in ordered]
-    newest = ids[0] if ids else cursor
+    if any(not iid for iid in ids) or len(set(ids)) != len(ids):
+        raise EventSourceError("feed items require nonempty unique IDs")
+    newest = ids[0] if ids else prior
     if not cursor:
-        return PollResult(events=[], cursor=newest)   # baseline only
+        return PollResult(events=[], cursor=_encode_cursor("feed", newest))
     fresh: list[dict] = []
     for it, iid in zip(ordered, ids, strict=False):
-        if iid and iid == cursor:
+        if iid == prior:
             break                                       # reached last-seen
         fresh.append(it)
     fresh.reverse()                                     # oldest-first for firing
@@ -155,9 +188,11 @@ def diff_new_items(items: list[dict], cursor: str, id_field: str, *,
     # subsequent polls instead of the older items being skipped and lost.
     fresh = fresh[:_MAX_EVENTS]
     if not fresh:
-        return PollResult(events=[], cursor=newest)
+        return PollResult(events=[], cursor=_encode_cursor("feed", prior))
     next_cursor = _id(fresh[-1]) or newest
-    return PollResult(events=[_flatten(it) for it in fresh], cursor=next_cursor)
+    events = [_flatten(it) for it in fresh]
+    return PollResult(events=events, cursor=_encode_cursor("feed", next_cursor),
+                      event_ids=[_id(item) for item in fresh])
 
 
 # ---- built-in source: poll a JSON HTTP endpoint ----------------------------
@@ -311,7 +346,8 @@ class HttpJsonSource:
             pages += 1
             nxt = _dig(body, next_path) if next_path else None
             page_url = _same_origin_url(url, str(nxt)) if (nxt and next_path) else None
-        return diff_new_items(items, cursor, id_field, newest_first=newest_first)
+        return diff_new_items(items, cursor, id_field, newest_first=newest_first,
+                              cursor_format=config.get("_lightwork_cursor_format"))
 
 
 register("http_json", HttpJsonSource)
@@ -369,7 +405,8 @@ class RssSource:
     def poll(self, config: dict, cursor: str) -> PollResult:
         url, id_field, headers = _base_config(config, "rss")
         items = _parse_feed(_http_get_text(url, headers=headers))
-        return diff_new_items(items, cursor, id_field, newest_first=True)
+        return diff_new_items(items, cursor, id_field, newest_first=True,
+                              cursor_format=config.get("_lightwork_cursor_format"))
 
 
 register("rss", RssSource)
@@ -495,7 +532,8 @@ class GithubIssuesSource:
             raise EventSourceError("GitHub did not return an issue array")
         # The issues endpoint also lists PRs; drop them. Dedup by issue number.
         items = [it for it in items if isinstance(it, dict) and "pull_request" not in it]
-        return diff_new_items(items, cursor, "number", newest_first=True)
+        return diff_new_items(items, cursor, "number", newest_first=True,
+                              cursor_format=config.get("_lightwork_cursor_format"))
 
 
 register("github_issues", GithubIssuesSource)
@@ -517,9 +555,11 @@ def _list_dir_files(path: str, glob: str, recursive: bool) -> list:
 class FileDirSource:
     """Watch a directory and fire when a new file appears. ``config``:
     ``{path, glob?, recursive?}`` (glob default ``*``). Dedup is by modification
-    time -- the cursor is the newest mtime fired, and only files strictly newer
-    fire next -- so a deleted file never causes a replay (unlike id-walking) and
-    a backlog drains oldest-first. Each event carries ``{path, name, size, mtime}``."""
+    time and identity at its boundary. Tied batches drain across polls, including
+    newly arriving files at the current boundary. Older preserved timestamps
+    are historical once the boundary advances. The bounded boundary ledger
+    refuses overflow instead of silently losing files. Each event carries
+    ``{path, name, size, mtime}``."""
     source = "file_dir"
 
     def poll(self, config: dict, cursor: str) -> PollResult:
@@ -529,30 +569,67 @@ class FileDirSource:
         glob = str((config or {}).get("glob") or "*")
         recursive = bool((config or {}).get("recursive", False))
         files = _list_dir_files(path, glob, recursive)
+        import hashlib
+        import math
+
+        prior = _decode_cursor(cursor, "files", config.get("_lightwork_cursor_format")) if cursor else None
+        seen: set[str] = set()
+        legacy = isinstance(prior, str)
         try:
-            since = float(cursor) if cursor else None
-        except (TypeError, ValueError):
-            since = None
+            if legacy:
+                stamp = float(prior)
+                if not math.isfinite(stamp) or stamp < 0:
+                    raise ValueError
+                since = int(stamp * 1_000_000_000)
+            elif prior is None:
+                since = None
+            else:
+                since, identities = prior
+                if (type(since) is not int or since < 0
+                        or not isinstance(identities, list)
+                        or len(identities) > _MAX_FILE_BOUNDARY_IDS
+                        or any(not isinstance(x, str) or len(x) != 64 for x in identities)):
+                    raise ValueError
+                seen = set(identities)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise EventSourceError("invalid file cursor") from exc
         stamped = []
         for p in files:
             try:
                 st = p.stat()
             except OSError:  # pragma: no cover -- file vanished mid-scan
                 continue
-            stamped.append((st.st_mtime, p, st.st_size))
-        stamped.sort(key=lambda t: t[0])                 # oldest-first
-        # A non-empty baseline cursor even for an empty dir ("0"), so the NEXT
-        # poll isn't re-treated as a baseline and the first file to land fires.
-        newest = str(stamped[-1][0]) if stamped else (cursor or "0")
+            identity = hashlib.sha256(json.dumps(
+                [str(p), st.st_mtime_ns, st.st_size], ensure_ascii=True,
+                separators=(",", ":")).encode()).hexdigest()
+            stamped.append((st.st_mtime_ns, str(p), p, st.st_size, identity, st.st_mtime))
+        stamped.sort(key=lambda row: (row[0], row[1]))
         if since is None:
-            return PollResult(events=[], cursor=newest)  # baseline: don't replay history
-        fresh = [(m, p, sz) for (m, p, sz) in stamped if m > since]
+            since = stamped[-1][0] if stamped else 0
+            seen = {row[4] for row in stamped if row[0] == since}
+            if len(seen) > _MAX_FILE_BOUNDARY_IDS:
+                raise EventSourceError("file timestamp boundary exceeds safe cursor capacity")
+            return PollResult(cursor=_encode_cursor("files", [since, sorted(seen)]))
+        # A legacy high-water was written from stat.st_mtime. Comparing its
+        # rounded float to integer nanoseconds can replay the very same file.
+        fresh = [row for row in stamped if (row[5] > stamp if legacy else (
+            row[0] > since or (row[0] == since and row[4] not in seen)))]
         fresh = fresh[:_MAX_EVENTS]
         if not fresh:
-            return PollResult(events=[], cursor=newest)
-        events = [_flatten({"id": str(p), "path": str(p), "name": p.name,
-                            "size": sz, "mtime": m}) for (m, p, sz) in fresh]
-        return PollResult(events=events, cursor=str(fresh[-1][0]))
+            # Do not regress after deletion, or turn legacy's fully-consumed
+            # timestamp into an empty seen set which would replay old ties.
+            return PollResult(cursor=cursor, cursor_format=0 if legacy else 1)
+        boundary = fresh[-1][0]
+        next_seen = seen.copy() if boundary == since else set()
+        next_seen.update(row[4] for row in fresh if row[0] == boundary)
+        if len(next_seen) > _MAX_FILE_BOUNDARY_IDS:
+            raise EventSourceError("file timestamp boundary exceeds safe cursor capacity")
+        events = [_flatten({"id": path_text if legacy else identity, "path": path_text, "name": p.name,
+                            "size": sz, "mtime": legacy_mtime if legacy else m / 1_000_000_000})
+                  for (m, path_text, p, sz, identity, legacy_mtime) in fresh]
+        return PollResult(events=events,
+                          cursor=_encode_cursor("files", [boundary, sorted(next_seen)]),
+                          event_ids=[row[4] for row in fresh])
 
 
 register("file_dir", FileDirSource)
@@ -582,7 +659,8 @@ def _email_body_text(msg) -> str:
     return ""
 
 
-def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
+def _fetch_imap(config: dict, since_uid: int | None,
+                uidvalidity: str | None = None) -> tuple[list[dict], int, str]:
     """Fetch messages with UID > ``since_uid`` from an IMAP mailbox. Returns
     ``(messages, highest_uid)`` where each message is a flat header dict. The
     password is read from the env var named by ``password_env`` (never stored in
@@ -610,21 +688,38 @@ def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
     cls = imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
     conn = cls(host, port)
     try:
-        conn.login(user, password)
-        conn.select(mailbox, readonly=True)
+        typ, _ = conn.login(user, password)
+        if typ != "OK":
+            raise EventSourceError("IMAP login failed")
+        typ, _ = conn.select(mailbox, readonly=True)
+        if typ != "OK":
+            raise EventSourceError("IMAP mailbox selection failed")
+        _, validity_data = conn.response("UIDVALIDITY")
+        validity = (validity_data[0].decode("ascii")
+                    if validity_data and validity_data[0] else "")
+        if not validity.isdigit() or int(validity) <= 0:
+            raise EventSourceError("IMAP mailbox did not confirm UIDVALIDITY")
+        baseline = since_uid is None or (uidvalidity is not None and validity != uidvalidity)
+        since = 0 if baseline else since_uid
         # UID search for anything above the last-seen uid; first poll sees all
         # and just records the high-water mark (baseline, no replay).
-        typ, data = conn.uid("search", None, f"UID {since_uid + 1}:*")
-        uids = [int(x) for x in (data[0].split() if data and data[0] else []) if int(x) > since_uid]
+        typ, data = conn.uid("search", None, f"UID {since + 1}:*")
+        if typ != "OK":
+            raise EventSourceError("IMAP UID search failed")
+        uids = [int(x) for x in (data[0].split() if data and data[0] else []) if int(x) > since]
+        if baseline:
+            # Search covers the complete UID set, but never fetch historical
+            # bodies/headers. A UIDVALIDITY reset establishes a fresh baseline.
+            return [], max(uids, default=0), validity
         msgs: list[dict] = []
-        highest = since_uid
+        highest = since
         for uid in sorted(uids)[:_MAX_EVENTS]:
             typ, mdata = conn.uid("fetch", str(uid), fetch_spec)
-            if not mdata or not isinstance(mdata[0], tuple):
-                continue
+            if typ != "OK" or not mdata or not isinstance(mdata[0], tuple):
+                raise EventSourceError("IMAP message fetch failed; cursor retained")
             msg = email.message_from_bytes(mdata[0][1])
             rec = {
-                "id": str(uid), "uid": uid,
+                "id": f"{validity}:{uid}", "uid": uid,
                 "from": parseaddr(msg.get("From", ""))[1],
                 "subject": str(msg.get("Subject", "")),
                 "date": str(msg.get("Date", "")),
@@ -634,7 +729,7 @@ def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
                 rec["body"] = _email_body_text(msg)
             msgs.append(rec)
             highest = max(highest, uid)
-        return msgs, highest
+        return msgs, highest, validity
     finally:
         try:
             conn.logout()
@@ -653,15 +748,28 @@ class ImapEmailSource:
     source = "imap_email"
 
     def poll(self, config: dict, cursor: str) -> PollResult:
+        validity = None
         try:
-            since = int(cursor) if cursor else 0
-        except (TypeError, ValueError):
-            since = 0
-        msgs, highest = _fetch_imap(config or {}, since)
-        if not cursor:
-            return PollResult(events=[], cursor=str(highest))   # baseline
-        events = [_flatten(m) for m in msgs]
-        return PollResult(events=events, cursor=str(highest))
+            raw = _decode_cursor(cursor, "imap", config.get("_lightwork_cursor_format")) if cursor else None
+            if isinstance(raw, list) and len(raw) == 2:
+                validity, since = raw
+                if not isinstance(validity, str) or not validity.isdigit():
+                    raise ValueError
+            else:
+                since = int(raw) if raw is not None else None
+            if since is not None and (type(since) is not int or since < 0):
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise EventSourceError("invalid IMAP cursor") from exc
+        msgs, highest, current_validity = _fetch_imap(config or {}, since, validity)
+        # The first batch after a legacy cursor retains its released flow key
+        # (bare UID). A failed cursor publication retries the same old key;
+        # versioned cursors subsequently scope flow IDs by UIDVALIDITY.
+        legacy = isinstance(raw, str)
+        events = [_flatten({**m, "id": str(m["uid"]) if legacy else m["id"]}) for m in msgs]
+        return PollResult(events=events,
+                          cursor=_encode_cursor("imap", [current_validity, highest]),
+                          event_ids=[f"{current_validity}:{m['uid']}" for m in msgs])
 
 
 register("imap_email", ImapEmailSource)
@@ -684,8 +792,10 @@ class FormSource:
         if not token:
             raise EventSourceError("form source needs a 'token'")
         from . import form_store
-        events, new_cursor = form_store.since(token, cursor or "")
-        return PollResult(events=[_flatten(e) for e in events], cursor=new_cursor)
+        raw = _decode_cursor(cursor, "form", config.get("_lightwork_cursor_format")) if cursor else ""
+        events, new_cursor = form_store.since(token, raw)
+        return PollResult(events=[_flatten(e) for e in events], cursor=_encode_cursor("form", new_cursor),
+                          event_ids=[str(e["_seq"]) for e in events])
 
 
 register("form", FormSource)

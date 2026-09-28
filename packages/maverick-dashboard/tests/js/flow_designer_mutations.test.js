@@ -91,6 +91,65 @@ function fixture(fetchImpl) {
 
 async function turn() { await new Promise((resolve) => setImmediate(resolve)); }
 
+test('actual API load and save retain recipe evidence and typed step zero', () => {
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
+  const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
+  const context = { document: { getElementById() { return null; } },
+    renderCrumbs() {}, syncScheduleControls() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
+    nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
+  const loadStart = source.indexOf('  function fromApiFlow(');
+  const loadEnd = source.indexOf('  function autoLayout(', loadStart);
+  const saveStart = source.indexOf('  function toApiFlow(');
+  const saveEnd = source.indexOf('  function syncScheduleControls(', saveStart);
+  vm.runInNewContext(source.slice(loadStart, loadEnd) + source.slice(saveStart, saveEnd), context);
+  const original = { id: 'recipe', name: 'Learned', start: 'action_0',
+    learned_recipe: { schema: 'lightwork.action-recipe.v1', episodes: [{ id: 'evidence' }] },
+    recipe_lineage: { id: 'admitted-source', package_sha256: 'reviewed-package' },
+    nodes: [{ id: 'action_0', kind: 'action', tool: 'lookup', recipe_step: 0 }] };
+  context.fromApiFlow(original, true);
+  original.learned_recipe.episodes[0].id = 'caller mutation';
+  original.recipe_lineage.id = 'caller mutation';
+  const savedRecipe = context.toApiFlow();
+  assert.equal(savedRecipe.learned_recipe.episodes[0].id, 'evidence');
+  assert.equal(savedRecipe.recipe_lineage.id, 'admitted-source');
+  assert.equal(savedRecipe.nodes[0].recipe_step, 0);
+});
+
+test('actual API load and save retain choice guard, both branches and admission reference', () => {
+  const source = fs.readFileSync(path.resolve(__dirname,
+    "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
+  const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
+  const context = { document: { getElementById() { return null; } },
+    renderCrumbs() {}, syncScheduleControls() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
+    nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
+  const loadStart = source.indexOf('  function fromApiFlow(');
+  const loadEnd = source.indexOf('  function autoLayout(', loadStart);
+  const saveStart = source.indexOf('  function toApiFlow(');
+  const saveEnd = source.indexOf('  function syncScheduleControls(', saveStart);
+  vm.runInNewContext(source.slice(loadStart, loadEnd) + source.slice(saveStart, saveEnd), context);
+  const original = { id: 'choice', name: 'Learned choice', start: 'choice',
+    learned_recipe: { schema: 'lightwork.action-choice.v1',
+      guard: { artifact: { artifact_sha256: 'guard', candidate_count: 2 } },
+      branches: [{ route: '0', tool: 'approve' }, { route: '1', tool: 'review' }] },
+    recipe_lineage: { id: 'admitted-choice', package_sha256: 'signed-teachers' },
+    nodes: [{ id: 'choice', kind: 'switch', condition: '_recipe_choice.route',
+      cases: [{ value: '0', to: 'approve' }, { value: '1', to: 'review' }] },
+      { id: 'approve', kind: 'action', tool: 'approve', recipe_step: 1 },
+      { id: 'review', kind: 'action', tool: 'review', recipe_step: 1 }] };
+  const expected = JSON.parse(JSON.stringify(original));
+  context.fromApiFlow(original, true);
+  original.learned_recipe.guard.artifact.candidate_count = 1;
+  original.learned_recipe.branches.pop();
+  original.recipe_lineage.id = 'changed';
+  const savedChoice = JSON.parse(JSON.stringify(context.toApiFlow()));
+  assert.deepEqual(savedChoice.learned_recipe, expected.learned_recipe);
+  assert.deepEqual(savedChoice.recipe_lineage, expected.recipe_lineage);
+  assert.deepEqual(savedChoice.nodes[0].cases, expected.nodes[0].cases);
+  assert.equal(savedChoice.nodes[0].condition, '_recipe_choice.route');
+  assert.deepEqual(savedChoice.nodes.slice(1).map(n => [n.tool, n.recipe_step]), [['approve', 1], ['review', 1]]);
+});
+
 for (const bad of [response({}, { invalid: true }), response({}), response(null), response(saved({ id: "another-flow" }))]) {
   test(`save preserves the dirty draft when its receipt is invalid: ${JSON.stringify(bad)}`, async () => {
     const ui = fixture(async () => bad);

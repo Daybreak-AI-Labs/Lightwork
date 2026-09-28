@@ -1269,23 +1269,21 @@ def _emit(
     scope: str | None,
     detail: str | None,
 ) -> ConsentDecision:
-    """Log the consent decision to the audit log (fail-safe)."""
-    try:
-        from ..audit import EventKind, record
-        record(
-            EventKind.CONSENT_PROMPT,
-            action=action, risk=decision.risk,
-            scope=scope, detail=detail,
-        )
-        record(
-            EventKind.CONSENT_RESULT,
-            action=action,
-            decision="approve" if decision.granted else "deny",
-            source=decision.source,
-            decided_by=decision.actor,
-        )
-    except Exception:  # pragma: no cover -- never crash on audit
-        pass
+    """Record consent; a required audit refusal must not release approval."""
+    from ..audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.CONSENT_PROMPT,
+        action=action, risk=decision.risk,
+        scope=scope, detail=detail,
+    )
+    audit_event(
+        EventKind.CONSENT_RESULT,
+        action=action,
+        decision="approve" if decision.granted else "deny",
+        source=decision.source,
+        decided_by=decision.actor,
+    )
     return decision
 
 

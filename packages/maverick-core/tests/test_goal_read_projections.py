@@ -132,6 +132,6 @@ def test_sidebar_calls_root_summary_query_with_active_selection(world, monkeypat
     monkeypatch.setattr(app, "goal_owner_filter", lambda _request: "alice")
     monkeypatch.setattr(world, "list_goals", lambda **_kwargs: pytest.fail("sidebar loaded complete goals"))
     assert app._chat_threads(None, world, active_root=root)[0] == {
-        "id": root, "title": "Root", "status": "pending", "active": True,
+        "id": root, "target_id": root, "title": "Root", "status": "pending", "active": True,
         "updated_at": world.get_goal(root).updated_at,
     }

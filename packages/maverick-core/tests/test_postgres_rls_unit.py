@@ -561,6 +561,21 @@ def test_preflight_passes_when_no_null_rows(monkeypatch):
     world._preflight_rls_or_die()  # no raise
 
 
+def test_preflight_refuses_boot_on_empty_tenant_event_batches(monkeypatch):
+    monkeypatch.setattr(postgres, "_rls_explicitly_set", lambda: False)
+    monkeypatch.setattr(
+        "maverick.world_model_backends.pg_rls.preflight",
+        lambda conn: {"tables": {"event_trigger_batches": {
+            "null_tenant_rows": 0, "empty_tenant_rows": 1,
+        }}},
+    )
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    world._pool = None
+    world.conn = object()
+    with pytest.raises(RuntimeError, match="event_trigger_batches=1"):
+        world._preflight_rls_or_die()
+
+
 def test_preflight_skipped_when_explicitly_opted_in(monkeypatch):
     # Explicit MAVERICK_PG_RLS=1 keeps the old fail-closed path: no boot refusal
     # even with NULL rows present (operator knowingly opted in).

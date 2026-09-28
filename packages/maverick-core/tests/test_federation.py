@@ -6,9 +6,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from maverick import federation
+from maverick import federation_admission as admission
 from maverick.audit import federation as fed_audit
 from maverick.capability import Capability
 from maverick.federation import (
@@ -20,6 +22,9 @@ from maverick.federation import (
     Peer,
     load_peers,
 )
+from maverick.grpc_api.service import GoalService
+from maverick.paths import data_dir
+from maverick.world_model import WorldModel
 
 # ---- fakes ----------------------------------------------------------------
 
@@ -33,27 +38,29 @@ class _Recorder:
 
     def __call__(self, kind, *, agent="system", goal_id=None, **payload):
         self.rows.append({"kind": kind, "agent": agent, "goal_id": goal_id, **payload})
+        return True
 
 
-class _Goals:
-    """Fake of grpc_api.service.GoalService (the world/dispatcher seam)."""
+class _Goals(GoalService):
+    """Native durable admission/status with a synchronous model-free dispatcher."""
 
     def __init__(self):
         self.started = []
+        self.path = data_dir().parent / f"test-federation-{uuid4().hex}" / "world.db"
+        super().__init__(world_factory=lambda: WorldModel(self.path),
+                         dispatch=self._run, spawn=lambda fn: fn())
 
-    def start_goal(self, title, description="", **kw):
-        if not title.strip():
-            raise ValueError("title is required")
-        self.started.append({"title": title, "description": description, **kw})
-        return len(self.started)
-
-    def status(self, goal_id):
-        if not 1 <= goal_id <= len(self.started):
-            return None
-        row = self.started[goal_id - 1]
-        return SimpleNamespace(goal_id=goal_id, status="done",
-                               result=f"did: {row['title']}",
-                               owner=row.get("owner", ""))
+    def _run(self, goal_id, **kw):
+        with WorldModel(self.path) as world:
+            admission.require_execution(
+                world, goal_id, capability=kw["capability"],
+                max_dollars=kw["max_dollars"],
+                max_wall_seconds=kw["max_wall_seconds"], consume=True,
+            )
+            goal = world.get_goal(goal_id)
+            self.started.append({"title": goal.title, "description": goal.description,
+                                 "owner": goal.owner, **kw})
+            world.set_goal_status(goal_id, "done", result=f"did: {goal.title}")
 
 
 def _service(**kw):
@@ -367,6 +374,9 @@ class _Pb2:
         accepted: bool
         goal_id: int
         reason: str
+        outcome_state: str = ""
+        audit_state: str = ""
+        execution_state: str = ""
 
     @dataclass
     class StatusReply:

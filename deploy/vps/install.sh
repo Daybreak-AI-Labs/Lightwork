@@ -152,11 +152,20 @@ run_wizard() {
 
 install_service() {
   log "Installing systemd unit (User=${TARGET_USER}, home=${TARGET_HOME})..."
+  # The system Python may be 3.10 without tomli. The verified application
+  # environment already contains the renderer's declared dependencies.
+  local venvs service_python
+  venvs="$(run_as_user pipx environment --value PIPX_LOCAL_VENVS)" || return 1
+  service_python="$venvs/maverick-agent/bin/python"
+  [[ -x "$service_python" ]] || {
+    echo "Verified application Python is missing at $service_python" >&2
+    return 1
+  }
   # Read and provision the selected workspace as the service account. Publish
   # only a completely rendered unit, retaining the previous unit on failure.
   local rendered_unit
   rendered_unit="$(mktemp /etc/systemd/system/.maverick.service.XXXXXX)"
-  if ! run_as_user python3 /opt/maverick/deploy/vps/render_service.py \
+  if ! run_as_user "$service_python" /opt/maverick/deploy/vps/render_service.py \
       --user "$TARGET_USER" --home "$TARGET_HOME" > "$rendered_unit"; then
     rm -f -- "$rendered_unit"
     echo "Workspace validation failed; the service was not enabled." >&2

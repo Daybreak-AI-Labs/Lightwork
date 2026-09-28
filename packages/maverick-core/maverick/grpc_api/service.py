@@ -165,6 +165,101 @@ class GoalService:
         self._spawn(_run)
         return goal_id
 
+    def accept_federation(self, *, peer: str, correlation: str, digest: str,
+                          title: str, description: str, capability,
+                          max_dollars, max_wall_seconds, record, admit_new=None) -> dict:
+        """Reserve, audit, and dispatch once; retries recover only before claim.
+
+        ``record`` must return literal True after accepting the stable receipt.
+        A custom dispatcher must execute synchronously inside the captured
+        context, just as the built-in runner does here. No startup drain is
+        implied: the peer retries this same correlation to repair a held row.
+        """
+        import contextvars
+
+        from .. import federation_admission as admission
+        from ..audit import EventKind
+        from ..runner import clamp_task_limit, configured_max_dollars, configured_max_wall_seconds
+        max_dollars = clamp_task_limit(max_dollars, configured_max_dollars())
+        max_wall_seconds = clamp_task_limit(max_wall_seconds, configured_max_wall_seconds())
+        world = self._world_factory()
+        try:
+            reservation = admission.reserve(
+                world, peer=peer, correlation=correlation, digest=digest,
+                title=title, description=description, capability=capability,
+                max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
+                admit_new=admit_new,
+            )
+            current = admission.state(world, reservation)
+            if current == admission.RETIRED:
+                return {"accepted": False, "goal_id": reservation.goal_id,
+                        "outcome_state": "unknown", "audit_state": "unknown",
+                        "execution_state": "unknown", "reason": "goal was erased; replay is prohibited"}
+            if current in {admission.HELD, admission.READY} and not admission.current_ceiling_allows(
+                reservation, capability=capability, max_dollars=max_dollars,
+                max_wall_seconds=max_wall_seconds,
+            ):
+                return {"accepted": current == admission.READY, "goal_id": reservation.goal_id,
+                        "outcome_state": "accepted" if current == admission.READY else "pending",
+                        "audit_state": "accepted" if current == admission.READY else "pending",
+                        "execution_state": "held", "reason": "pinned authority exceeds current policy or expired"}
+            if current == admission.HELD:
+                contract = reservation.contract
+                try:
+                    acknowledged = record(
+                        EventKind.FEDERATION_DELEGATE, agent="federation",
+                        goal_id=reservation.goal_id, peer_node=contract["peer"],
+                        correlation_id=contract["correlation"], direction="received",
+                        accepted=True, reason="", outcome_state="accepted",
+                        phase="acceptance_authorized", event_id=contract["event_id"],
+                        occurred_at=contract["occurred_at"],
+                        request_digest=contract["request_digest"],
+                    ) is True
+                except Exception:
+                    # The reservation remains held even if the sink appended
+                    # before losing its ack. Its append-once identity repairs
+                    # that boundary on the next same-correlation request.
+                    log.warning("federation acceptance audit is pending", exc_info=True)
+                    acknowledged = False
+                if not acknowledged:
+                    return {"accepted": False, "goal_id": reservation.goal_id,
+                            "outcome_state": "pending", "audit_state": "pending",
+                            "execution_state": "held",
+                            "reason": "audit acceptance pending; retry the same correlation_id"}
+                admission.acknowledge(world, reservation)
+                current = admission.state(world, reservation)
+            claimed = current == admission.READY and admission.claim(world, reservation)
+        finally:
+            _close(world)
+        result = {"accepted": True, "goal_id": reservation.goal_id,
+                  "outcome_state": "accepted", "audit_state": "accepted",
+                  "execution_state": "unknown", "reason": ""}
+        if not claimed:
+            if current == admission.READY:
+                result["execution_state"] = "not_started"
+                result["reason"] = "execution was not claimed; inspect the goal status"
+            else:
+                result["reason"] = "execution previously claimed; automatic replay is prohibited"
+            return result
+        context = contextvars.copy_context()
+
+        def run():
+            with admission.execution_scope(reservation):
+                kwargs = admission.execution_kwargs(reservation)
+                if self._dispatch is _default_dispatch:
+                    from ..runner import run_goal_in_thread
+                    return run_goal_in_thread(reservation.goal_id, **kwargs)
+                return self._dispatch(reservation.goal_id, **kwargs)
+
+        try:
+            self._spawn(lambda: context.run(run))
+        except Exception:
+            log.exception("federation dispatch acknowledgement unavailable")
+            result["reason"] = "dispatch outcome unknown; automatic replay is prohibited"
+        else:
+            result["execution_state"] = "dispatched"
+        return result
+
     def stream_episode(
         self,
         goal_id: int,
@@ -244,6 +339,12 @@ class GoalService:
         try:
             goal = self._goal_for_owner(world, goal_id, expected_owner)
             if goal is None:
+                return None
+            from ..federation_admission import FederationAdmissionRequired, require_execution
+            try:
+                require_execution(world, goal_id, capability=capability,
+                                  max_dollars=max_dollars, max_wall_seconds=max_wall_seconds)
+            except FederationAdmissionRequired:
                 return None
             bound_execution = (
                 getattr(goal, "execution_principal", "") or ""

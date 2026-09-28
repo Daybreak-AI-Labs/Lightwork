@@ -128,6 +128,7 @@ def list_triggers() -> list[dict]:
             "config": _decode_obj(t.get("config")),
             "params": {str(k): str(v) for k, v in _decode_obj(t.get("params")).items()},
             "cursor": str(t.get("cursor") or ""),
+            "cursor_format": int(t.get("cursor_format") or 0),
             "owner": str(t.get("owner") or ""),
             "tenant": str(t.get("tenant") or ""),
             "interval_seconds": int(t.get("interval_seconds") or 0),
@@ -166,6 +167,7 @@ def _dump(triggers: list[dict]) -> str:
         lines.append(f"config = {json.dumps(json.dumps(t.get('config') or {}, sort_keys=True))}")
         lines.append(f"params = {json.dumps(json.dumps(t.get('params') or {}, sort_keys=True))}")
         lines.append(f"cursor = {json.dumps(str(t.get('cursor') or ''))}")
+        lines.append(f"cursor_format = {int(t.get('cursor_format') or 0)}")
         lines.append(f"owner = {json.dumps(str(t.get('owner') or ''))}")
         lines.append(f"tenant = {json.dumps(str(t.get('tenant') or ''))}")
         lines.append(f"interval_seconds = {int(t.get('interval_seconds') or 0)}")
@@ -243,6 +245,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             "config": dict(config or {}),
             "params": {str(k): str(v) for k, v in (params or {}).items()},
             "cursor": cursor or (prior["cursor"] if prior else ""),
+            "cursor_format": 0 if cursor or prior is None else int(prior.get("cursor_format") or 0),
             # Preserve the prior owner on a re-save that doesn't pass one, like
             # cursor/created, so an update can't silently orphan the trigger.
             "owner": str(owner) if owner else (prior["owner"] if prior else ""),
@@ -258,7 +261,11 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
     return rec
 
 
-def set_cursor(name: str, cursor: str, *, tenant: str | None = None) -> bool:
+def set_cursor(name: str, cursor: str, *, tenant: str | None = None,
+               expected_cursor: str | None = None,
+               expected_generation: str | None = None,
+               cursor_format: int | None = None,
+               accept_peer_progress: bool = False) -> bool:
     """Advance a trigger's cursor after a poll. Returns False if it's gone.
     Skips the rewrite when the cursor is unchanged, so an idle poll (no new
     items) doesn't rewrite the whole store every tick."""
@@ -269,8 +276,19 @@ def set_cursor(name: str, cursor: str, *, tenant: str | None = None) -> bool:
         if len(matches) != 1:
             return False
         match = matches[0]
-        if match["cursor"] != cursor:
+        if expected_generation is not None:
+            from .event_poll import _trigger_key
+            if _trigger_key(match) != expected_generation:
+                return False
+        if expected_cursor is not None and match["cursor"] != expected_cursor:
+            # Only a caller which finished every retained delivery may retire
+            # a stale batch. Preserve the peer's cursor AND format atomically;
+            # source IDs are opaque and cannot be ordered to guess which won.
+            return match["cursor"] == cursor or accept_peer_progress
+        if match["cursor"] != cursor or (cursor_format is not None and match.get("cursor_format", 0) != cursor_format):
             match["cursor"] = cursor
+            if cursor_format is not None:
+                match["cursor_format"] = cursor_format
             _write(triggers)
         return True
 

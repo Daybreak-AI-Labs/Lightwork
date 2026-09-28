@@ -132,3 +132,47 @@ def test_writer_rejects_conflicting_chunk_without_partial_batch(publication_stor
     with pytest.raises(RuntimeError, match="different provenance"):
         second.store.add_with_identity("records", incoming, row.meta["embedding_fingerprint"])
     assert second.store.read_collection("records", limit=100) == before
+
+
+def test_staged_source_revision_cannot_overwrite_a_concurrent_revision(publication_stores, monkeypatch):
+    delayed, winner = map(_base, publication_stores)
+    winner.ingest_text("records", TEXT, source="policy.txt")
+    staged = threading.Event()
+    published = threading.Event()
+    embed = delayed.embedder.embed
+
+    def wait_for_winner(texts):
+        staged.set()
+        assert published.wait(timeout=15)
+        return embed(texts)
+
+    monkeypatch.setattr(delayed.embedder, "embed", wait_for_winner)
+    revision = TEXT + " The accepted revision adds a new retention requirement."
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        later = executor.submit(
+            delayed.ingest_text, "records", TEXT + " A stale staged revision.",
+            source="policy.txt", replace_source=True,
+        )
+        try:
+            assert staged.wait(timeout=15)
+            count = winner.ingest_text("records", revision, source="policy.txt", replace_source=True)
+            accepted = winner.store.read_collection("records", limit=100)
+        finally:
+            published.set()
+        with pytest.raises(RuntimeError, match="source changed during replacement"):
+            later.result(timeout=20)
+    assert delayed.store.read_collection("records", limit=100) == accepted
+    assert len(accepted) == count
+    assert winner.exact_document("records", hashlib.sha256(revision.encode()).hexdigest())["text"] == revision
+    with pytest.raises(LookupError):
+        winner.exact_document("records", DIGEST)
+
+
+def test_source_replacement_cannot_claim_another_documents_provenance(publication_stores):
+    first, second = map(_base, publication_stores)
+    first.ingest_text("records", TEXT, source="accepted.txt", subject="subject:accepted")
+    first.ingest_text("records", "The old reference awaiting replacement.", source="revised.txt")
+    before = first.store.read_collection("records", limit=100)
+    with pytest.raises(RuntimeError, match="different provenance"):
+        second.ingest_text("records", TEXT, source="revised.txt", replace_source=True)
+    assert second.store.read_collection("records", limit=100) == before
