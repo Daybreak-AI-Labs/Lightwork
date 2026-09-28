@@ -515,6 +515,24 @@ class LinearPRM:
             return self._fallback.score(ctx)
 
 
+def _prm_setting(env_name: str, config_key: str) -> str | None:
+    """One PRM value: the environment variable when set, else the
+    ``[self_improvement]`` config value. Never raises."""
+    value = os.environ.get(env_name)
+    if value is not None and value.strip():
+        return value
+    try:
+        from .config import load_config
+
+        section = (load_config() or {}).get("self_improvement") or {}
+        configured = section.get(config_key) if isinstance(section, dict) else None
+    except Exception:  # pragma: no cover -- config never breaks PRM selection
+        return None
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    return None
+
+
 def build_from_env(*, recovery_controller=None) -> ProcessRewardModel:
     """Resolve the PRM backend from env / config.
 
@@ -530,26 +548,30 @@ def build_from_env(*, recovery_controller=None) -> ProcessRewardModel:
     write-ahead PREPARE for their stable path has reconciled; absent an explicit
     controller, the process-wide self-improvement controller is used.
 
+    Each value can also come from ``[self_improvement] prm_backend`` /
+    ``prm_endpoint`` / ``prm_api_key`` / ``prm_path`` (Settings > All
+    settings); a set environment variable wins over its config value.
+
     Default: NullPRM (preserves pre-Wave-7c behavior).
     """
-    kind = os.environ.get("MAVERICK_PRM", "null").strip().lower()
+    kind = str(_prm_setting("MAVERICK_PRM", "prm_backend") or "null").strip().lower()
     if kind == "heuristic":
         return HeuristicPRM()
     if kind == "remote":
-        endpoint = os.environ.get("MAVERICK_PRM_ENDPOINT")
+        endpoint = _prm_setting("MAVERICK_PRM_ENDPOINT", "prm_endpoint")
         if not endpoint:
             log.warning("PRM=remote but MAVERICK_PRM_ENDPOINT unset; falling back to heuristic")
             return HeuristicPRM()
         return RemotePRM(endpoint=endpoint,
-                         api_key=os.environ.get("MAVERICK_PRM_API_KEY"))
+                         api_key=_prm_setting("MAVERICK_PRM_API_KEY", "prm_api_key"))
     if kind == "learned":
-        path = os.environ.get("MAVERICK_PRM_PATH")
+        path = _prm_setting("MAVERICK_PRM_PATH", "prm_path")
         if not path:
             log.warning("PRM=learned but MAVERICK_PRM_PATH unset; falling back to heuristic")
             return HeuristicPRM()
         return LearnedPRM(model_dir=path)
     if kind == "linear":
-        path = os.environ.get("MAVERICK_PRM_PATH")
+        path = _prm_setting("MAVERICK_PRM_PATH", "prm_path")
         if not path:
             log.warning("PRM=linear but MAVERICK_PRM_PATH unset; falling back to heuristic")
             return HeuristicPRM()

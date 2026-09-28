@@ -14895,6 +14895,43 @@ def outcomes_api(request: Request, top: int = 0) -> dict:
     }
 
 
+def _learning_components(subsystems: list[dict], on_by_key: dict) -> list[dict]:
+    """One row per learning system for its own switch on the Learning page.
+
+    ``on`` is the live state; ``wanted`` what this installation's settings ask
+    for (it differs when a system waits on another one, ``waiting_on``);
+    ``managed`` means a deployment variable decides and the switch is locked.
+    """
+    from maverick.config import governed_learning_default, load_config
+
+    try:
+        cfg = load_config() or {}
+    except Exception:  # pragma: no cover -- the status view never 500s on config
+        cfg = {}
+    labels = {s["key"]: s["label"] for s in subsystems}
+    rows = []
+    for s in subsystems:
+        on = bool(on_by_key.get(s["key"], False))
+        managed = bool(s.get("env")) and s["env"] in os.environ
+        section = cfg.get(s["section"]) if isinstance(cfg.get(s["section"]), dict) else {}
+        raw = section.get(s["config_key"])
+        wanted = on if managed else (raw if isinstance(raw, bool) else governed_learning_default())
+        needs = s.get("needs")
+        waiting = bool(wanted and not on and needs and not on_by_key.get(needs, False))
+        rows.append({
+            "key": s["key"],
+            "label": s["label"],
+            "description": s.get("description", ""),
+            "section": s["section"],
+            "on": on,
+            "wanted": bool(wanted),
+            "managed": managed,
+            "waiting_on": labels.get(needs, "") if waiting else "",
+            "how": s["how"],
+        })
+    return rows
+
+
 def _learning_snapshot(request: Request) -> dict:
     """Learning-engine status + accumulated moat. Shared by the JSON endpoint
     and the /learning page so both render identical numbers."""
@@ -14960,15 +14997,7 @@ def _learning_snapshot(request: Request) -> dict:
         "reward_audit": reasoning_reward.audit_rewards_enabled(),
         "jit_rl": jit_rl.enabled(),
     }
-    components = [
-        {
-            "key": s["key"],
-            "label": s["label"],
-            "on": on_by_key.get(s["key"], False),
-            "how": s["how"],
-        }
-        for s in LEARNING_SUBSYSTEMS
-    ]
+    components = _learning_components(LEARNING_SUBSYSTEMS, on_by_key)
 
     w = _world()
     owner = goal_owner_filter(request)
@@ -15062,15 +15091,32 @@ def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
     same one [capabilities]/[features]/providers use, all admin-gated), which
     ``load_config`` merges for every tenant and worker -- not an owner-scoped
     action, so an operator must not flip it (e.g. force-enable trajectory
-    capture deployment-wide, or disable the whole learning loop)."""
+    capture deployment-wide, or disable the whole learning loop).
+
+    With ``subsystem`` set, only that learning system is switched (its own
+    switch on the Learning page); the blanket call still switches every one,
+    so it can always turn the whole loop off again."""
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
+    actor = caller_principal(request) or "local"
     try:
-        settings_store.set_learning(
-            payload.enabled,
-            actor=caller_principal(request) or "local",
-        )
+        if payload.subsystem is None:
+            settings_store.set_learning(payload.enabled, actor=actor)
+        else:
+            spec = next((s for s in settings_store.LEARNING_SUBSYSTEMS
+                         if s["key"] == payload.subsystem), None)
+            if spec is None:
+                raise HTTPException(status_code=400,
+                                    detail="That learning system is not available here.")
+            if spec.get("env") and spec["env"] in os.environ:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"“{spec['label']}” is set by your server's deployment "
+                           "settings, so it can't be changed here.",
+                )
+            settings_store.set_learning_subsystem(
+                payload.subsystem, payload.enabled, actor=actor)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     from maverick.config import reset_config_cache

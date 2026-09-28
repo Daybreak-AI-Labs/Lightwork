@@ -307,8 +307,10 @@ class EventTriggerOut(BaseModel):
 
 class LearningToggleIn(BaseModel):
     """Turn the whole self-learning loop on/off from the dashboard (writes the
-    learning knobs to the config overlay)."""
+    learning knobs to the config overlay), or only the one learning system
+    named by ``subsystem`` (a key of ``LEARNING_SUBSYSTEMS``)."""
     enabled: bool
+    subsystem: str | None = Field(default=None, max_length=64)
 
 
 class DgmToggleIn(BaseModel):
