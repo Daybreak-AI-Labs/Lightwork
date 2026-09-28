@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_permission
+from .auth import assert_goal_access, can_access_goal, require_permission
 
 router = APIRouter(
     prefix="/security/governance/agent-actions", tags=["governance-agent-actions"]
@@ -78,6 +78,15 @@ async def goal_lineage(request: Request, goal_id: int) -> dict[str, object]:
         raise HTTPException(status_code=422, detail="task number is out of range")
     from maverick import governed_actions
 
+    from .api import _world
+
+    goal = await run_in_threadpool(_world().get_goal, goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="no such task")
+    # The same owner check as the task itself: a task someone may not open
+    # does not show its recorded actions or sources either.
+    assert_goal_access(request, goal)
+
     def _read() -> tuple[list[dict], str]:
         return (
             governed_actions.load_lineage(goal_id),
@@ -116,8 +125,23 @@ async def impact(
     selected = _name(name, "name")
     from maverick import governed_actions
 
+    from .api import _world
+
+    def _visible_hits() -> list[dict]:
+        world = _world()
+        allowed: dict[object, bool] = {}
+        visible = []
+        for hit in governed_actions.impact_of(selected, kind=kind):
+            goal_id = hit.get("goal_id")
+            if goal_id not in allowed:
+                goal = world.get_goal(goal_id) if isinstance(goal_id, int) else None
+                allowed[goal_id] = goal is not None and can_access_goal(request, goal)
+            if allowed[goal_id]:
+                visible.append(hit)
+        return visible
+
     try:
-        hits = await run_in_threadpool(governed_actions.impact_of, selected, kind=kind)
+        hits = await run_in_threadpool(_visible_hits)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="impact search is unavailable") from exc
     return {

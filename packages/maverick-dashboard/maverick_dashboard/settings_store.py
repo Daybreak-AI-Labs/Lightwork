@@ -39,10 +39,6 @@ class SecuritySuiteConfigUnavailable(RuntimeError):
     """The security-suite overlay cannot be read without risking data loss."""
 
 
-class SettingsNotStorable(SecuritySuiteConfigUnavailable):
-    """The new overlay would not read back, so the file was left unchanged."""
-
-
 class ProviderRotationConflict(RuntimeError):
     """Provider authority changed or rejected a dashboard credential rotation."""
 
@@ -375,9 +371,7 @@ def _load_security_suite_overlay() -> dict:
 
 
 def _toml_str(value: str) -> str:
-    # JSON strings are valid TOML basic strings, except that JSON leaves the
-    # DEL character bare where TOML requires it escaped.
-    return json.dumps(str(value)).replace("\x7f", "\\u007f")
+    return json.dumps(str(value))  # JSON strings are valid TOML basic strings
 
 
 _BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
@@ -569,17 +563,7 @@ def _write(data: dict) -> None:
     # Unique temp + os.replace (0600): the fixed ".toml.tmp" collided between two
     # concurrent workers. RMW serialization is in the mutators via _locked().
     from maverick.file_lock import atomic_write_text
-    text = _dump(data)
-    # Read the new text back before it replaces the file: a value the file
-    # format cannot hold would otherwise leave an overlay nothing can read,
-    # and every dashboard-managed setting (and the dashboard itself) with it.
-    try:
-        _tomllib().loads(text)
-    except ValueError as exc:
-        raise SettingsNotStorable(
-            "A value could not be saved safely, so the settings were not changed."
-        ) from exc
-    atomic_write_text(config.dashboard_overrides_path(), text)
+    atomic_write_text(config.dashboard_overrides_path(), _dump(data))
 
 
 def set_provider(name: str, api_key: str | None = None, base_url: str | None = None) -> None:

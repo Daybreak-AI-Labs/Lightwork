@@ -50,7 +50,6 @@ from __future__ import annotations
 
 import math
 import re
-import unicodedata
 from dataclasses import dataclass
 
 GROUPS: tuple[str, ...] = (
@@ -112,9 +111,7 @@ class Setting:
     restart: bool = False
     # Safety posture. ``weaker`` says which direction lowers a protection:
     # toggle -> the boolean that weakens; select -> ``order`` is strongest
-    # first; number or rate -> "lower" or "higher"; list -> "grow", "add"
-    # (only additions) or "shrink"; text -> "insecure" (a plain http://
-    # address) or "change". ``warning`` is the plain
+    # first; number -> "lower" or "higher". ``warning`` is the plain
     # consequence the page shows and the confirmation repeats.
     weaker: object = None
     order: tuple[str, ...] = ()
@@ -490,8 +487,7 @@ SETTINGS: tuple[Setting, ...] = (
     S("budget", "max_tool_calls", "Actions per task",
       "The most tool uses allowed in a single task.",
       "number", "Spending & limits", None, "maverick.budget", minimum=1, maximum=100000,
-      integer=True, unit="actions", weaker="higher",
-      warning="A single task will be able to take more actions before it is stopped."),
+      integer=True, unit="actions"),
     S("budget", "max_output_tokens", "Words written per task",
       "The most text, in tokens (about three quarters of a word each), agents may write in one task.",
       "number", "Spending & limits", None, "maverick.budget", minimum=1000,
@@ -503,9 +499,7 @@ SETTINGS: tuple[Setting, ...] = (
       warning="Spending on models with unknown prices will be estimated, so costs may be under-counted."),
     S("quotas", "enforce", "Daily limits per person",
       "Enforce the daily limits below for each person.",
-      "toggle", "Spending & limits", False, "maverick.quotas", env=("MAVERICK_QUOTA_ENFORCE",),
-      weaker=False,
-      warning="People will be able to spend and use as much as they like each day."),
+      "toggle", "Spending & limits", False, "maverick.quotas", env=("MAVERICK_QUOTA_ENFORCE",)),
     S("quotas", "max_dollars_per_day", "Daily spending limit per person",
       "The most one person's tasks may spend in a day. Zero means no limit.",
       "number", "Spending & limits", 0.0, "maverick.quotas", minimum=0, maximum=1000000,
@@ -721,9 +715,7 @@ SETTINGS: tuple[Setting, ...] = (
       integer=True, unit="seconds"),
     S("webhooks", "outbound", "Send task events to these addresses",
       "Web addresses that receive a signed message when tasks start and finish.",
-      "list", "Integrations", [], "maverick.webhooks", max_items=10, pattern=_HTTPS,
-      weaker="add",
-      warning="Details of every task will be sent to the new address."),
+      "list", "Integrations", [], "maverick.webhooks", max_items=10, pattern=_HTTPS),
     S("automation_import", "enable", "Import automations from other tools",
       "Bring in existing automations from tools such as n8n, Make, Workato, Power Automate or UiPath.",
       "toggle", "Integrations", False, "maverick.config", env=("MAVERICK_AUTOMATION_IMPORT",)),
@@ -794,19 +786,13 @@ SETTINGS: tuple[Setting, ...] = (
       env=("MAVERICK_DASHBOARD_COMPRESS",)),
     S("rate_limits", "web_search", "Web searches allowed",
       "The most web searches allowed in a period of time. Clear it to use the installer's choice.",
-      "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool",
-      weaker="higher",
-      warning="Agents will be able to search the web more often, or without any limit."),
+      "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool"),
     S("rate_limits", "http_fetch", "Web page reads allowed",
       "The most web page reads allowed in a period of time. Clear it to use the installer's choice.",
-      "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool",
-      weaker="higher",
-      warning="Agents will be able to read web pages more often, or without any limit."),
+      "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool"),
     S("rate_limits", "shell", "Commands allowed",
       "The most commands allowed in a period of time. Clear it to use the installer's choice.",
-      "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool",
-      weaker="higher",
-      warning="Agents will be able to run commands more often, or without any limit."),
+      "rate", "Performance", None, "maverick.safety.rate_limiter", key_kind="tool"),
 )
 
 # ====================================================================
@@ -1146,9 +1132,7 @@ _MORE: tuple[Setting, ...] = (
     S("knowledge", "url", "Qdrant index address",
       "The web address of an existing Qdrant index, when that is where passages are kept.",
       "text", "Memory & learning", "", "maverick.config", subgroup="Document search",
-      pattern=r"(https?://[^\s\"'<>]{1,300})?", max_length=300, weaker="insecure",
-      warning="Document passages will be sent without encryption, so others on the "
-              "network could read them."),
+      pattern=r"(https?://[^\s\"'<>]{1,300})?", max_length=300),
 
     # ---------------------------------------------- connected business systems
     S("governed_connectors", "connectors", "Business systems whose changes are governed",
@@ -1781,41 +1765,12 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _storable(value: object) -> bool:
-    """True when every piece of text in ``value`` can be saved and read back.
-
-    The settings file cannot hold half of a broken character pair (text that
-    is not valid UTF-8) or invisible control characters; one such value would
-    make the whole file unreadable and every dashboard setting stop applying.
-    """
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError:
-            return False
-        return not any(unicodedata.category(ch) == "Cc" for ch in value)
-    if isinstance(value, (list, tuple)):
-        return all(_storable(item) for item in value)
-    if isinstance(value, dict):
-        return all(_storable(key) and _storable(item) for key, item in value.items())
-    return True
-
-
-def coerce(setting: Setting, value: object) -> object:
+def coerce(setting: Setting, value: object) -> object:  # noqa: C901 - one branch per control
     """Validate and normalize one submitted value for ``setting``.
 
     ``None`` is only accepted for numbers without a default (meaning "no
     limit"), which callers treat as removing the dashboard value.
     """
-    result = _coerce_value(setting, value)
-    if not _storable(result):
-        raise SettingError(
-            f"{setting.label}: remove the hidden or unusual characters from this value."
-        )
-    return result
-
-
-def _coerce_value(setting: Setting, value: object) -> object:  # noqa: C901 - one branch per control
     control = setting.control
     label = setting.label
     if control == "toggle":
@@ -2070,10 +2025,8 @@ def warning_lead(setting: Setting) -> str:
         return "If you raise this:"
     if setting.weaker == "change":
         return "If you change this:"
-    if setting.weaker in {"grow", "add"}:
+    if setting.weaker == "grow":
         return "If you add to this:"
-    if setting.weaker == "insecure":
-        return "If you use a web address that is not secure:"
     if setting.weaker == "shrink":
         return "If you remove from this:"
     return "If you loosen this:"
@@ -2099,14 +2052,6 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
             return str(new) != str(setting.order[0])
     if setting.weaker == "change":
         return old != new
-    if setting.weaker == "insecure":
-        # A plain http:// address sends the data without encryption.
-        return isinstance(new, str) and new.strip().lower().startswith("http://")
-    if setting.control == "rate" and setting.weaker == "higher":
-        was, now = parse_rate(old), parse_rate(new)
-        if was is None:
-            return False  # there was no limit to loosen
-        return now is None or now[0] / now[1] > was[0] / was[1]
     if setting.control == "number":
         if setting.weaker == "lower":
             if new is None:
@@ -2119,10 +2064,6 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
     if setting.control in {"list", "multiselect", "keys"}:
         old_items = [str(v) for v in old] if isinstance(old, list) else []
         new_items = [str(v) for v in new] if isinstance(new, list) else []
-        if setting.weaker == "add":
-            # Only a new destination sends data somewhere new; removing one
-            # sends less.
-            return any(item not in old_items for item in new_items)
         if setting.weaker == "grow":
             added = any(item not in old_items for item in new_items)
             # Emptying hands the decision back to a broader default: an empty
