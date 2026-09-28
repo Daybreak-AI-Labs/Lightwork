@@ -10559,6 +10559,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-record-search.css")
 @app.get("/static/lightwork-grc-recovery.js")
 @app.get("/static/lightwork-workspace-recovery.js")
+@app.get("/static/lightwork-recovery-copilot.js")
+@app.get("/static/lightwork-learning-example.js")
 @app.get("/static/lightwork-webhook-settings.js")
 @app.get("/static/lightwork-workspace-recovery.css")
 @app.get("/static/lightwork-action-center.js")
