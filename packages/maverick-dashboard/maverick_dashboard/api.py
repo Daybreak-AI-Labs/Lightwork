@@ -1361,6 +1361,7 @@ def create_goal(
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
+    director, description = _api_director(payload, title, description)
     # Run AS a specialist pack (JD hires, department deploys): the orchestrator
     # inherits a domain stamped on the goal row, binding that pack's persona,
     # capability envelope and compartment. Validate against the enabled roster
@@ -1377,7 +1378,9 @@ def create_goal(
     # attachments, binding the complete reviewed payload and effective limits.
     # Replays and read reconciliation never dispatch work a second time.
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
-    max_dollars = clamp_task_limit(payload.max_dollars, configured_max_dollars())
+    # A director autonomy level can only lower the cap (None = no own cap).
+    max_dollars = clamp_task_limit(getattr(director, "max_dollars", None),
+                                   clamp_task_limit(payload.max_dollars, configured_max_dollars()))
     max_wall_seconds = clamp_task_limit(payload.max_wall_seconds, configured_max_wall_seconds())
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
     receipt = None
@@ -1410,6 +1413,7 @@ def create_goal(
         goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
         if domain:
             w.set_goal_domain(goal_id, domain)
+    _record_api_director(w, goal_id, director, receipt)
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
@@ -1457,6 +1461,25 @@ def create_goal(
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
     response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
     return _to_goal_out(g)
+
+
+def _api_director(payload: GoalIn, title: str, description: str):
+    """``(director run or None, description to store)`` for a REST start."""
+    if not payload.director_profile:
+        return None, description
+    from maverick_dashboard.app import _director_run
+
+    director = _director_run(payload.director_profile, title, description,
+                             clamp_task_limit(payload.max_dollars, configured_max_dollars()))
+    return director, director.goal_description
+
+
+def _record_api_director(w, goal_id: int, director, receipt: dict | None) -> None:
+    """Record a new goal's director envelope before it is dispatched."""
+    if director is not None and (receipt is None or receipt.get("created")):
+        from maverick.director_mode import record
+
+        record(w, goal_id, director)
 
 
 @router.get("/goal-submissions/receipt")

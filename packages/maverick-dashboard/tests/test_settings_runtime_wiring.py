@@ -516,3 +516,143 @@ def test_tool_server_reads_the_mcp_section(monkeypatch):
         store.shutdown()
     monkeypatch.setenv("MAVERICK_MCP_RATE_LIMIT", "5")
     assert http_transport._rate_limit_per_min() == 5  # the environment still wins
+
+
+# --------------------------------------------------- director runs (dashboard)
+@pytest.fixture
+def start_env(monkeypatch, tmp_path):
+    from maverick import world_model
+    from maverick_dashboard import app as dashboard
+
+    world = world_model.WorldModel(world_model.DEFAULT_DB)
+    monkeypatch.setattr(dashboard, "_world", lambda: world)
+    monkeypatch.setattr("maverick_dashboard.api._world", lambda: world)
+    monkeypatch.setattr(dashboard, "require_provider_or_400", lambda: None)
+    monkeypatch.setattr("maverick_dashboard.api.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(dashboard, "check_goal_rate_limit", lambda request, **_: None)
+    monkeypatch.setattr("maverick.runner.configured_max_dollars", lambda: 10.0)
+    monkeypatch.setattr("maverick_dashboard.api.configured_max_dollars", lambda: 10.0)
+    calls = []
+
+    async def run(goal_id, *args, **kwargs):
+        calls.append((goal_id, args, kwargs))
+
+    monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
+    _set("director.profiles", [{"name": "semi", "consent_mode": "dashboard",
+                                "budget_multiplier": 0.5, "dollars": 3, "tool_calls": 30}])
+    yield world, calls
+    world.close()
+
+
+def test_start_form_offers_the_configured_autonomy_levels(start_env):
+    page = client.get("/chat").text
+    assert 'name="director_profile"' in page
+    assert "Partly on its own: waits on the Approvals page" in page
+
+
+def test_dashboard_start_honours_the_director_profile(start_env):
+    from maverick import director_mode, review_checkpoint
+    from maverick.review_checkpoint import CheckpointPolicy
+    from maverick.safety import consent
+
+    world, calls = start_env
+    r = client.post("/chat/send", data={"title": "Close the books", "description": "Q3 only",
+                                        "director_profile": "semi"}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    goal = world.list_goals()[0]
+    assert goal.description.startswith("Outcome: Close the books") and "Q3 only" in goal.description
+    (goal_id, _args, kwargs), = calls
+    assert goal_id == goal.id and kwargs["max_dollars"] == 5.0  # 0.5 x the 10.0 cap
+    env = director_mode.recorded_envelope(world, goal.id)
+    assert env["consent_mode"] == "dashboard" and env["max_dollars"] == 5.0
+    assert consent._resolve_mode("low") == "auto-approve"  # outside the run: as configured
+    with director_mode.run_scope(env):
+        assert consent._resolve_mode("low") == "dashboard"
+        assert review_checkpoint.policy_from_config() == CheckpointPolicy(dollars=3.0,
+                                                                          tool_calls=30)
+    assert director_mode.spending_cap(env, 8.0) == 5.0
+    assert director_mode.spending_cap(env, 2.0) == 2.0
+
+
+def test_the_runner_applies_the_director_envelope(start_env, monkeypatch):
+    from maverick import runner
+    from maverick.safety import consent
+
+    world, _calls = start_env
+    r = client.post("/chat/send", data={"title": "Close the books", "director_profile": "semi"},
+                    follow_redirects=False)
+    assert r.status_code == 303, r.text
+    goal = world.list_goals()[0]
+    seen = {}
+
+    def fake_run(llm, world_, budget, goal_id, **kwargs):
+        from maverick.review_checkpoint import policy_from_config
+
+        seen.update(max_dollars=budget.max_dollars, consent=consent._resolve_mode("low"),
+                    checkpoint=policy_from_config().dollars)
+
+    monkeypatch.setattr("maverick.orchestrator.run_goal_sync", fake_run)
+    monkeypatch.setattr("maverick.llm.LLM", lambda *a, **k: object())
+    monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_runner_principal_binding", lambda *a: True)
+    runner.run_goal_in_thread(goal.id, max_dollars=9.0)
+    assert seen == {"max_dollars": 5.0, "consent": "dashboard", "checkpoint": 3.0}
+
+
+def test_a_profile_never_loosens_the_installation_consent(start_env, monkeypatch):
+    from maverick import director_mode
+    from maverick.safety import consent
+
+    _set("safety.consent_mode", "ask")
+    with director_mode.run_scope({"profile": "autonomous", "consent_mode": "auto-approve"}):
+        assert consent._resolve_mode("low") == "ask"
+    with consent.task_consent_mode("dashboard"):
+        assert consent._resolve_mode("critical") == "ask"  # "ask" is stricter here
+    with consent.task_consent_mode("auto-deny"):
+        assert consent._resolve_mode("low") == "auto-deny"  # tightening is allowed
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
+    with consent.task_consent_mode("dashboard"):
+        assert consent._resolve_mode("low") == "auto-deny"  # the environment is the ceiling
+    with consent.task_consent_mode("no-such-mode"):
+        assert consent._TASK_MODE.get() == "ask"  # an unknown level asks a person
+
+
+def test_api_start_applies_the_profile_budget_and_refuses_unknown_levels(start_env):
+    from maverick import director_mode
+
+    world, calls = start_env
+    r = client.post("/api/v1/goals", json={"title": "Close the books", "max_dollars": 4.0,
+                                           "director_profile": "semi"})
+    assert r.status_code == 201, r.text
+    goal_id = r.json()["id"]
+    (called_id, args, _kwargs), = calls
+    assert called_id == goal_id and args[0] == 2.0  # 0.5 x the requested 4.0
+    assert director_mode.recorded_envelope(world, goal_id)["profile"] == "semi"
+    r = client.post("/api/v1/goals", json={"title": "x", "director_profile": "reckless"})
+    assert r.status_code == 400 and "autonomy levels" in r.json()["detail"]
+    r = client.post("/chat/send", data={"title": "x", "director_profile": "reckless"},
+                    follow_redirects=False)
+    assert r.status_code == 400
+
+
+# ------------------------------------------------- AI cost collection limits
+def test_cost_collection_limits_reach_the_collector():
+    from maverick.ai_cost_collectors import configured_collector_limits
+    from maverick.config import load_config
+
+    before = configured_collector_limits({})
+    assert (before.page_cap, before.record_cap, before.page_size, before.timeout_seconds) \
+        == (20, 1000, 200, 20.0)
+    r = _save([{"id": "ai_cost_roi.collector_limits.page_cap", "value": 5},
+               {"id": "ai_cost_roi.collector_limits.record_cap", "value": 300},
+               {"id": "ai_cost_roi.collector_limits.page_size", "value": 50},
+               {"id": "ai_cost_roi.collector_limits.timeout_seconds", "value": 10}],
+              confirm=False)
+    assert r.status_code == 200, r.text  # lowering needs no confirmation
+    limits = configured_collector_limits(load_config().get("ai_cost_roi") or {})
+    assert (limits.page_cap, limits.record_cap, limits.page_size, limits.timeout_seconds) \
+        == (5, 300, 50, 10.0)
+    r = _save([{"id": "ai_cost_roi.collector_limits.page_cap", "value": 40}], confirm=False)
+    assert r.status_code == 409  # raising a limit needs a confirmation
+    r = _save([{"id": "ai_cost_roi.collector_limits.page_cap", "value": 51}])
+    assert r.status_code == 400  # beyond what the collector accepts
