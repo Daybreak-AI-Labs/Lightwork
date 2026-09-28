@@ -157,6 +157,14 @@ class VendorOnboardingEvidenceReviewRequired(ValueError):
         self.case_id = case_id
 
 
+
+def _utc_date(seconds: float) -> str:
+    """A readable UTC date and time for people reading the ticket."""
+    import datetime as _dt
+
+    return _dt.datetime.fromtimestamp(float(seconds), _dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def deployment_readiness() -> dict:
     """Read deployment policy without taking a lease or opening any store.
 
@@ -1878,11 +1886,11 @@ class VendorOnboardingService:
             "description": (
                 f"Vendor: {row['vendor_name']}\nRequest: {row['purpose']}\nCase: {case_id}\n"
                 f"Assessment: {row['assessment']['id']} revision {row['assessment']['revision']}\n"
-                f"Assessment digest: {row['assessment']['assessment_sha256']}\n"
+                f"Assessment fingerprint: {row['assessment']['assessment_sha256']}\n"
                 f"Risk: {row['assessment']['result']['risk_rating']}\n"
                 f"Evidence: {len(row['evidence'].get('documents') or [row['evidence']])} document(s), version {row['evidence']['version']}\n"
-                f"Evidence digest: {row['evidence']['content_sha256']}\n"
-                f"Renewal due (Unix seconds): {row['evidence']['fresh_until']}\n"
+                f"Evidence fingerprint: {row['evidence']['content_sha256']}\n"
+                f"Evidence valid until: {_utc_date(row['evidence']['fresh_until'])}\n"
                 f"Human review: {row['review_history'][-1]['rationale']}"
             ),
             "marker": "lightwork-" + op_id.lower(),
@@ -1901,8 +1909,9 @@ class VendorOnboardingService:
             parameter_summary=[
                 f"Project: {payload['project']}",
                 f"Ticket title: {payload['summary']}",
-                f"Idempotency marker: {payload['marker']}",
-                f"Description digest: {digest(payload['description'])}",
+                f"Reference that prevents a duplicate ticket: {payload['marker']}",
+                "Ticket description: the vendor, the request, the approved assessment and "
+                "its risk rating, the evidence and when it expires, and the reviewer's reasons",
             ],
             actor=ctx.actor,
             workspace=ctx.tenant,
