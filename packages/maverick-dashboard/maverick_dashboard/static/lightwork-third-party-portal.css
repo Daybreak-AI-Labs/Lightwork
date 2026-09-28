@@ -142,31 +142,12 @@ h3 {
   font-size: 1.08rem;
 }
 
-.boundary,
 .panel,
 .workspace {
   border: 1px solid var(--line);
   border-radius: 1rem;
   background: var(--panel);
   box-shadow: var(--shadow);
-}
-
-.boundary {
-  border-left: 0.35rem solid var(--warning-line);
-  padding: 1rem 1.25rem;
-  background: var(--warning-bg);
-  color: var(--warning-text);
-  box-shadow: none;
-}
-
-.boundary h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.05rem;
-}
-
-.boundary ul {
-  margin: 0;
-  padding-left: 1.25rem;
 }
 
 .status {
@@ -227,11 +208,25 @@ select {
   color: var(--text);
 }
 
-input[type="checkbox"] {
+input[type="checkbox"],
+input[type="radio"] {
+  flex: none;
   width: 1.25rem;
   min-height: 1.25rem;
   margin: 0.15rem 0 0;
   accent-color: var(--accent);
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+.field-error {
+  margin: 0.4rem 0 0;
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .help,
@@ -271,27 +266,30 @@ input[type="checkbox"] {
   font-weight: 650;
 }
 
-.digest {
+.code {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 0.82rem;
   word-break: break-all;
 }
 
-.limitations {
-  border: 1px solid var(--warning-line);
-  border-radius: 0.7rem;
-  padding: 1rem;
-  background: var(--warning-bg);
-  color: var(--warning-text);
+.technical,
+.safeguards {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
 }
 
-.limitations h3 {
-  margin-bottom: 0.5rem;
+.technical summary,
+.safeguards summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
 }
 
-.limitations ul {
-  margin: 0;
+.safeguards ul {
+  margin: 0.5rem 0 0;
   padding-left: 1.25rem;
+  color: var(--muted);
 }
 
 #response-form > section {
@@ -299,7 +297,7 @@ input[type="checkbox"] {
 }
 
 .question-card,
-.artifact-card {
+.evidence-file {
   margin-top: 1rem;
   border: 1px solid var(--line);
   border-radius: 0.75rem;
@@ -307,10 +305,75 @@ input[type="checkbox"] {
   background: var(--panel-subtle);
 }
 
-.question-card legend,
-.artifact-card legend {
+.question-card legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
   max-width: 100%;
   padding: 0 0.25rem;
+}
+
+.question-text {
+  font-size: 1.05rem;
+}
+
+.required-mark,
+.optional-mark {
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.required-mark {
+  border: 1px solid var(--warning-line);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.optional-mark {
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.clear-answer {
+  margin-top: 0.75rem;
+}
+
+.file-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence-file.checking {
+  opacity: 0.75;
+}
+
+.file-name {
+  margin: 0;
+  font-weight: 750;
+}
+
+.file-facts {
+  margin: 0.1rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.support-list {
+  border: 0;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+.support-list legend {
+  margin-bottom: 0.35rem;
+}
+
+.evidence-file .remove-file {
+  margin-top: 1rem;
 }
 
 .question-meta {
@@ -331,11 +394,6 @@ input[type="checkbox"] {
   font-weight: 750;
 }
 
-.required-chip {
-  border-color: var(--warning-line);
-  color: var(--warning-text);
-}
-
 .choice-list,
 .support-list {
   display: grid;
@@ -350,16 +408,6 @@ input[type="checkbox"] {
   align-items: flex-start;
   gap: 0.55rem;
   font-weight: 500;
-}
-
-.artifact-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.artifact-card .remove-row {
-  margin-top: 1rem;
 }
 
 .attestation {
@@ -418,20 +466,21 @@ input[type="checkbox"] {
     flex-direction: column;
   }
 
-  .artifact-grid {
-    grid-template-columns: 1fr;
-  }
-
   button {
     width: 100%;
   }
 }
 
 @media (forced-colors: active) {
-  .boundary,
-  .limitations,
-  .receipt {
+  .receipt,
+  .question-card,
+  .evidence-file,
+  .required-mark {
     border: 2px solid CanvasText;
+  }
+
+  .field-error {
+    color: CanvasText;
   }
 
   button {
