@@ -152,6 +152,34 @@ def _restore_environ():
             os.environ[key] = value
 
 
+
+@pytest.fixture(autouse=True)
+def _restore_process_logging():
+    """Put process-wide logging back the way the test found it.
+
+    A test that runs a ``maverick`` command in-process (the finance, audit and
+    first-run pages drive the same kernel commands) triggers its once-per-process
+    logging set-up, which replaces the root handlers and level. Left in place it
+    silenced log capture for whichever test the same worker ran next.
+    """
+    import logging
+
+    from maverick import logging_config
+
+    configured = logging_config._configured
+    root = logging.getLogger()
+    level, handlers, filters = root.level, root.handlers[:], root.filters[:]
+    handler_filters = {id(h): h.filters[:] for h in handlers}
+    disabled = logging.root.manager.disable
+    yield
+    logging_config._configured = configured
+    root.setLevel(level)
+    root.handlers[:] = handlers
+    root.filters[:] = filters
+    for handler in handlers:
+        handler.filters[:] = handler_filters[id(handler)]
+    logging.disable(disabled)
+
 @pytest.fixture(autouse=True)
 def _fail_the_test_that_forks_a_module():
     """Fail the test that leaves a package attribute pointing at a module copy.

@@ -4,7 +4,6 @@ Permissions, workspace scoping, recorded-before-acting, confirmation and
 plain wording."""
 from __future__ import annotations
 
-import contextlib
 import html as _html
 import json
 import re
@@ -271,40 +270,8 @@ def _cli_verify(folder, *keys) -> int:
     args = ["audit", "checkpoint", "verify", "--checkpoint-dir", str(folder)]
     for key in keys:
         args += ["--pubkey", key]
-    with _process_logging_kept():
-        return CliRunner().invoke(main, args).exit_code
+    return CliRunner().invoke(main, args).exit_code
 
-
-@contextlib.contextmanager
-def _process_logging_kept():
-    """The command sets up process-wide logging once; put it back so later
-    tests in the same worker still see their log records."""
-    import logging
-
-    from maverick import logging_config
-
-    configured = logging_config._configured
-    root = logging.getLogger()
-    saved = (root.level, root.handlers[:], root.filters[:])
-    handler_filters = {id(h): h.filters[:] for h in root.handlers}
-    loggers = {name: (lg.level, lg.propagate, lg.disabled, lg.handlers[:], lg.filters[:])
-               for name, lg in logging.Logger.manager.loggerDict.items()
-               if isinstance(lg, logging.Logger)}
-    try:
-        yield
-    finally:
-        logging_config._configured = configured
-        root.setLevel(saved[0])
-        root.handlers[:] = saved[1]
-        root.filters[:] = saved[2]
-        for handler in root.handlers:
-            handler.filters[:] = handler_filters.get(id(handler), handler.filters)
-        for name, lg in logging.Logger.manager.loggerDict.items():
-            if isinstance(lg, logging.Logger) and name in loggers:
-                level, propagate, disabled, handlers, filters = loggers[name]
-                lg.setLevel(level)
-                lg.propagate, lg.disabled = propagate, disabled
-                lg.handlers[:], lg.filters[:] = handlers, filters
 
 
 def test_checkpoint_settings_are_for_installation_administrators(client, monkeypatch):
