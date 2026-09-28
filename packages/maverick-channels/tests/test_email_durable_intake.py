@@ -126,3 +126,22 @@ def test_rotating_recovery_window_finds_later_records_and_preserves_failed_curso
         found.update(row["id"] for row in rows)
         journal.finish_recovery_window(checkpoint)
     assert len(found) == 8
+
+
+def test_one_recovery_pass_looks_past_finished_receipts(environment):
+    """Before, a pass inspected only ``limit`` receipts, so on a store full of
+    finished work a stranded message waited hours for its turn."""
+    channel, _ = environment
+    journal = delivery.DeliveryJournal()
+    admitted = []
+    for i in range(40):
+        msg = delivery.IncomingMessage(user_id="alice@example.test", text=str(i), channel="email", message_id=str(i))
+        admitted.append(journal.admit(msg, external_id=str(i), account=channel._account(), route={"subject": "Review"}))
+    waiting = admitted.pop(17)
+    for row in admitted:
+        journal.change(row, execution="completed", delivery="delivered")
+    rows, _ = journal.recovery_window(channel="email", account=channel._account(), limit=2)
+    assert [row["id"] for row in rows] == [waiting["id"]]
+    # The scan still has a hard bound on receipts inspected per pass.
+    rows, _ = journal.recovery_window(channel="email", account=channel._account(), limit=2, scan_limit=2)
+    assert len(rows) <= 2

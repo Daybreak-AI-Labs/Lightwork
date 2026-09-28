@@ -22,6 +22,10 @@ from pathlib import Path
 from .base import IncomingMessage, Reply, as_reply
 
 MAX_RECORDS = 10_000
+# One recovery pass inspects at most this many receipts, for at most this long.
+RECOVERY_SCAN_LIMIT = 1000
+RECOVERY_SCAN_SECONDS = 1.0
+_monotonic = time.monotonic  # bound once: tests replace this module's ``time``
 MAX_TEXT_CHARS = 1_000_000
 MAX_CHUNKS = 512
 MAX_ATTACHMENTS = 10
@@ -155,8 +159,14 @@ class DeliveryJournal:
     def get(self, record_id):
         return self.store.get(record_id)
 
-    def recovery_window(self, *, channel, account, limit=16):
-        """Fair bounded recovery; one window never proves an empty queue."""
+    def recovery_window(self, *, channel, account, limit=16, scan_limit=RECOVERY_SCAN_LIMIT,
+                        scan_seconds=RECOVERY_SCAN_SECONDS):
+        """Fair bounded recovery; one window never proves an empty queue.
+
+        At most ``limit`` rows are returned, but up to ``scan_limit`` receipts
+        (within ``scan_seconds``) are inspected to find them: most receipts
+        are finished, and inspecting only ``limit`` per 30-second pass took
+        hours to come round a full store to a stranded message."""
         from maverick.governed_records import GovernedRecordStore
         from maverick.privacy_ops import RecordConflict
 
@@ -172,12 +182,16 @@ class DeliveryJournal:
             except RecordConflict:
                 cursor = cursors.get(cursor_id)
         rows, next_cursor = [], cursor["cursor"]
-        for position, record_id in self.store.iter_record_ids(start_after=next_cursor, limit=limit):
+        started = _monotonic()
+        for position, record_id in self.store.iter_record_ids(start_after=next_cursor,
+                                                              limit=max(limit, scan_limit)):
             row = self._surface_stale_claim(self.get(record_id))
             next_cursor = position
             if (row and not row.get("restore_hold") and row["channel"] == channel and row["account_sha256"] == _digest(account)
                     and (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
                 rows.append(row)
+            if len(rows) >= limit or _monotonic() - started >= scan_seconds:
+                break
         return rows, (cursors, cursor, next_cursor)
 
     def _surface_stale_claim(self, row):
