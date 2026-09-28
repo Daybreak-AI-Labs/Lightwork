@@ -1,0 +1,32 @@
+{#- Spend page: where spend went, a suggested spending cap and why tasks
+    failed. Filled by lightwork-value-proof.js. -#}
+<div id="vp-spend" class="vp">
+  <div class="section-head"><h2 id="vp-retro-title">Where spend went and what to do</h2></div>
+  <div class="panel">
+    <p id="vp-retro-summary">Loading…</p>
+    <ul id="vp-retro-advice" aria-label="Suggestions"></ul>
+    <table aria-labelledby="vp-retro-title" id="vp-retro-table" hidden>
+      <thead><tr><th scope="col">Costliest tasks</th><th scope="col">Cost</th><th scope="col">Result</th></tr></thead>
+      <tbody id="vp-retro-rows"></tbody>
+    </table>
+  </div>
+
+  <div class="vp-grid">
+    <div class="panel">
+      <h2 id="vp-cap-title">Suggested spending cap per task</h2>
+      <p class="muted">Sized so nine in ten past tasks fit, with room to spare, while a runaway task still stops.</p>
+      <div id="vp-cap" aria-labelledby="vp-cap-title">Loading…</div>
+      <p><a class="btn btn--ghost" href="/spending-limits">Change spending limits</a></p>
+    </div>
+    <div class="panel">
+      <h2 id="vp-fail-title">Why tasks failed</h2>
+      <div id="vp-fail" aria-labelledby="vp-fail-title">Loading…</div>
+    </div>
+  </div>
+  <p id="vp-spend-msg" role="status" aria-live="polite" class="muted"></p>
+</div>
+<style>
+  .vp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: var(--space-3, 1rem); }
+  .vp-bar { display: block; height: .5rem; background: var(--accent, currentColor); border-radius: 999px; min-width: 2px; }
+</style>
+<script src="/static/lightwork-value-proof.js" defer></script>
