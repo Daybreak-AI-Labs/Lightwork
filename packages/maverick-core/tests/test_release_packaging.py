@@ -447,13 +447,9 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
     )
 
     cohort_names = {item["distribution"] for item in packages}
+    # `maverick version` and Settings > Maintenance share this package list.
     version_command = (
-        REPO_ROOT
-        / "packages"
-        / "maverick-core"
-        / "maverick"
-        / "cli"
-        / "__init__.py"
+        REPO_ROOT / "packages" / "maverick-core" / "maverick" / "installation_info.py"
     ).read_text(encoding="utf-8")
     assert all(f'"{name}"' in version_command for name in cohort_names)
     canonical_homepage = f"https://github.com/{cohort['repository']}"

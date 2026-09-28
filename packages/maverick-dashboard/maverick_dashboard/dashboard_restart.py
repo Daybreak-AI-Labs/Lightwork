@@ -61,6 +61,8 @@ def supervision(environ: Mapping[str, str] | None = None,
 
 def register_server(app: Any, server: Any) -> None:
     """Called by the launchers that own the web server object."""
+    if app is None:  # a server built without an app has nothing to restart
+        return
     app.state.dashboard_server = server
 
 
