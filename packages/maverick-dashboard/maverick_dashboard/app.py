@@ -5622,6 +5622,10 @@ def safe_audit_day(day: str | None) -> str | None:
     return None
 
 
+# How many events one date-range view of the activity log reads at most.
+_AUDIT_RANGE_SCAN_LIMIT = 2_000_000
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -5653,39 +5657,59 @@ async def audit_page(request: Request) -> HTMLResponse:
     from maverick.audit.segments import ReadReport
 
     read_report = ReadReport()
-    if since or until:
-        from maverick.audit.export import iter_audit_events
-
-        def _window() -> list[dict]:
-            kept: deque = deque(maxlen=5000)
-            for scanned, e in enumerate(iter_audit_events(since=since, until=until,
-                                                          report=read_report)):
-                if scanned >= 200_000:
-                    break
-                kept.append(e)
-            return list(kept)
-
-        events = await run_in_threadpool(_window)
-    else:
-        events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
-    # Distinct kinds and people in the window (for the filter dropdowns),
-    # computed before filtering so every choice stays selectable.
-    kinds = sorted({str(e.get("kind")) for e in events if e.get("kind")},
-                   key=_audit_plain.kind_label)
-    people = sorted({_audit_plain.event_person(e) for e in events} - {""})
     kind = (request.query_params.get("kind") or "").strip()
     person = (request.query_params.get("person") or "").strip()
     q = (request.query_params.get("q") or "").strip()[:200]
-    if kind:
-        events = [e for e in events if e.get("kind") == kind]
-    if person:
-        events = [e for e in events if _audit_plain.event_person(e) == person]
-    if q:
-        needle = q.lower()
-        events = [e for e in events if needle in json.dumps(e, default=str).lower()
-                  or needle in _audit_plain.kind_label(e.get("kind")).lower()]
+    needle = q.lower()
+
+    def _matches(e: dict) -> bool:
+        if kind and e.get("kind") != kind:
+            return False
+        if person and _audit_plain.event_person(e) != person:
+            return False
+        return not needle or (needle in json.dumps(e, default=str).lower()
+                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+
+    window_note = ""
     if since or until:
-        events = events[-n:]
+        from maverick.audit.export import iter_audit_events
+
+        def _window() -> tuple[list[dict], set[str], set[str], int, bool]:
+            # Filters apply while scanning, and the newest matches are kept,
+            # so a busy range never hides recent events behind old ones.
+            kept: deque = deque(maxlen=n)
+            seen_kinds: set[str] = set()
+            seen_people: set[str] = set()
+            matched = 0
+            for scanned, e in enumerate(iter_audit_events(since=since, until=until,
+                                                          report=read_report)):
+                if scanned >= _AUDIT_RANGE_SCAN_LIMIT:
+                    return list(kept), seen_kinds, seen_people, matched, True
+                if e.get("kind"):
+                    seen_kinds.add(str(e.get("kind")))
+                if len(seen_people) < 1000:
+                    seen_people.add(_audit_plain.event_person(e))
+                if _matches(e):
+                    matched += 1
+                    kept.append(e)
+            return list(kept), seen_kinds, seen_people, matched, False
+
+        events, kind_set, people_set, matched, cut = await run_in_threadpool(_window)
+        if cut:
+            window_note = ("These dates hold more activity than the page can search at once, "
+                           "so later events may be missing. Choose fewer days to see everything.")
+        elif matched > n:
+            window_note = (f"Showing the latest {n} of {matched} matching events. "
+                           "Choose fewer days or add a filter to see earlier ones.")
+    else:
+        events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
+        kind_set = {str(e.get("kind")) for e in events if e.get("kind")}
+        people_set = {_audit_plain.event_person(e) for e in events}
+        events = [e for e in events if _matches(e)]
+    # Distinct kinds and people in the window (for the filter dropdowns),
+    # gathered before filtering so every choice stays selectable.
+    kinds = sorted(kind_set, key=_audit_plain.kind_label)
+    people = sorted(people_set - {""})
     return templates.TemplateResponse(
         request,
         "audit.html",
@@ -5704,6 +5728,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             "can_global_admin": has_global_permission(request, "admin"),
             "audit_signing_enabled": bool(audit_log.signing_enabled),
             "audit_read_report": read_report.as_dict(),
+            "audit_window_note": window_note,
             **_audit_plain.page_helpers(),
         },
     )

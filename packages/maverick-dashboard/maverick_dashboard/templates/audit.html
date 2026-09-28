@@ -36,6 +36,9 @@
     </div>
   {% endcall %}
 
+  {% if audit_window_note %}
+  <p class="muted" role="status">{{ audit_window_note }}</p>
+  {% endif %}
   {% if audit_read_report and audit_read_report.failures %}
   <p role="alert">Some entries could not be read. This view is incomplete. Run “Check the log has not been changed” below before using it as evidence.</p>
   {% endif %}

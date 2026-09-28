@@ -95,6 +95,23 @@ def test_download_without_dates_covers_every_day_and_never_runs_formulas(audit_l
     assert any(cell.startswith("'=1+1") for row in rows for cell in row)
 
 
+def test_a_date_range_finds_recent_matches_behind_many_older_events(audit_log, client, monkeypatch):
+    from maverick_dashboard import app as app_mod
+    older = [{"ts": 1.0 + i, "kind": "tool_call", "payload": {"name": "read_file"}} for i in range(300)]
+    newest = [{"ts": 9e8, "kind": "shield_block", "payload": {"reason": "jailbreak attempt"}}]
+    import maverick.audit.export as export
+    monkeypatch.setattr(export, "iter_audit_events", lambda **kw: iter(older + newest))
+    monkeypatch.setattr(app_mod, "_AUDIT_RANGE_SCAN_LIMIT", 1000)
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    page = client.get("/audit", params={"since": today, "until": today, "q": "jailbreak", "n": 5}).text
+    assert "jailbreak attempt" in page
+    note = client.get("/audit", params={"since": today, "until": today, "n": 5}).text
+    assert "Showing the latest 5 of 301 matching events" in note
+    monkeypatch.setattr(app_mod, "_AUDIT_RANGE_SCAN_LIMIT", 100)
+    cut = client.get("/audit", params={"since": today, "until": today, "n": 5}).text
+    assert "more activity than the page can search at once" in cut
+
+
 def test_protection_actions_need_the_right_role(audit_log, client, monkeypatch):
     _as(monkeypatch, "auditor")
     assert client.post("/api/v1/audit/check", json={}).status_code == 200
