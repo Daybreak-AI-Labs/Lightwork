@@ -1338,6 +1338,10 @@ app.include_router(settings_all_router)
 from .license_ops_api import router as license_ops_router  # noqa: E402
 
 app.include_router(license_ops_router)
+# Finance operations that were terminal-only (the separation-of-duties check).
+from .finance_ops_api import router as finance_ops_router  # noqa: E402
+
+app.include_router(finance_ops_router)
 # Ekko Work Discovery: a human review/control surface only.  Endpoint
 # collectors do not enter through HTTP; they write through the local core
 # daemon's owner/device/tenant-scoped store.
