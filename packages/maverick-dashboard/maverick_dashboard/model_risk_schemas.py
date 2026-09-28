@@ -1093,7 +1093,14 @@ class Article73AuthorityIn(BaseModel):
 
 
 class Article73SubmissionIn(Article73AuthorityIn):
-    submission_reference: str = Field(..., min_length=1, max_length=512)
+    # The authority's filing reference, bounded exactly as the incident
+    # register accepts it (letters and numbers first, no spaces, 128 max).
+    submission_reference: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
+    )
     receipt_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     submitted_at: float | None = Field(None, gt=0)
 
