@@ -341,7 +341,9 @@ RETENTION_CHOICES: tuple[int, ...] = (30, 90, 180, 365, 730, 1095, 2555)
 class RetentionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    audit_days: int | None = Field(default=None, ge=1, le=3650)
+    # The activity record is kept at least a month: a shorter period would let
+    # one save and one apply erase the record of who changed it.
+    audit_days: int | None = Field(default=None, ge=30, le=3650)
     episodes_days: int | None = Field(default=None, ge=1, le=3650)
     events_days: int | None = Field(default=None, ge=1, le=3650)
     messages_days: int | None = Field(default=None, ge=1, le=3650)

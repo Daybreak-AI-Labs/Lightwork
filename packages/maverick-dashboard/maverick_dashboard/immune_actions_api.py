@@ -318,10 +318,12 @@ async def title_check(request: Request, body: DossierIn) -> dict:
 
 @router.post("/immune/title/seal")
 async def title_seal(request: Request, body: DossierIn) -> dict:
-    require_permission(request, "admin")
+    # The deployment's audit key signs this, so it is an installation-wide act.
+    require_global_permission(request, "admin")
     from maverick.immune import title
     try:
-        sealed = await run_in_threadpool(title.seal, body.dossier)
+        sealed = await run_in_threadpool(
+            lambda: title.seal(body.dossier, sealed_by=caller_principal(request) or "local administrator"))
     except (KeyError, TypeError, AttributeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="That file is not a discovery record Lightwork can sign.") from exc
     except Exception as exc:  # noqa: BLE001 -- signing identity unavailable
@@ -340,7 +342,15 @@ async def title_verify(request: Request, body: SealedIn) -> dict:
         ok = bool(key) and title.verify(doc, key)
     except (KeyError, TypeError, AttributeError, ValueError):
         ok = False
-    return {"verified": bool(ok)}
+    if not ok:
+        return {"verified": False}
+    sealed_doc = doc.get("dossier") or {}
+    open_problems = sealed_doc.get("open_problems")
+    return {"verified": True,
+            "sealed_by": str(sealed_doc.get("sealed_by") or ""),
+            # Older seals did not record this; say so rather than claim none.
+            "open_problems": ([_plain_problem(p) for p in open_problems[:200]]
+                              if isinstance(open_problems, list) else None)}
 
 @router.post("/immune/title/research")
 async def title_research(request: Request, body: ResearchIn) -> dict:

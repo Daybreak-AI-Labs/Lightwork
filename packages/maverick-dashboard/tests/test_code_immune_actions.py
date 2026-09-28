@@ -303,6 +303,23 @@ def test_discovery_record_check_and_verify(client):
     assert bad == {"verified": False}
 
 
+
+def test_a_seal_records_who_signed_and_what_was_still_open(client):
+    dossier = {"claims": [], "gates": [], "problem": {"text": "Faster invoices"}}
+    sealed = client.post("/api/v1/immune/title/seal", json={"dossier": dossier})
+    if sealed.status_code == 503:
+        pytest.skip("no audit signing key in this environment")
+    doc = sealed.json()["sealed"]
+    assert doc["dossier"]["sealed_by"]
+    assert "problem statement not signed off by a human" in doc["dossier"]["open_problems"]
+    out = client.post("/api/v1/immune/title/verify", json={"sealed": doc}).json()
+    assert out["verified"] is True and out["sealed_by"] == doc["dossier"]["sealed_by"]
+    assert any("signed off" in p for p in out["open_problems"])
+    # The list of open problems is part of what is signed.
+    doc["dossier"]["open_problems"] = []
+    assert client.post("/api/v1/immune/title/verify", json={"sealed": doc}).json() == {"verified": False}
+
+
 def test_people_list_is_for_administrators_and_the_active_workspace(client, monkeypatch):
     import maverick.paths as paths
     from maverick_dashboard import rbac

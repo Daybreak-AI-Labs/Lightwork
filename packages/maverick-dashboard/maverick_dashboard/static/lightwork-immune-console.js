@@ -356,6 +356,18 @@
     clear(target);
     target.appendChild(el("p", null, out.verified ? "Confirmed: this record was signed by your organisation and has not been changed." :
       "Not confirmed: this record was changed after signing, or was not signed by your organisation."));
+    if (!out.verified) { return; }
+    if (out.sealed_by) { target.appendChild(el("p", null, "Signed by " + String(out.sealed_by).replace(/^user:/, "") + ".")); }
+    if (out.open_problems === null || out.open_problems === undefined) {
+      target.appendChild(el("p", null, "This record was signed before Lightwork noted open problems at signing, so check it again below."));
+    } else if (!out.open_problems.length) {
+      target.appendChild(el("p", null, "Nothing was left open when it was signed."));
+    } else {
+      target.appendChild(el("p", null, "Still open when it was signed:"));
+      var list = el("ul");
+      out.open_problems.forEach(function (p) { list.appendChild(el("li", null, p)); });
+      target.appendChild(list);
+    }
   });
 
   wire("ic-title-research", async function () {

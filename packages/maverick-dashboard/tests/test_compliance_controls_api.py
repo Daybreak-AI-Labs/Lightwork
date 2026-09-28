@@ -187,6 +187,7 @@ def test_a_refused_record_undoes_the_change_and_removes_nothing(monkeypatch):
     monkeypatch.setattr(audit, "audit_event", refuse)
     saved = client.post("/api/v1/compliance/retention", json={"audit_days": 30})
     assert saved.status_code == 503 and "undone" in saved.json()["detail"]
+    assert client.post("/api/v1/compliance/retention", json={"audit_days": 1}).status_code == 422
     from maverick_dashboard import settings_store
     assert (settings_store.load_overlay().get("retention") or {}).get("audit_days") is None
     import maverick.audit.retention as retention

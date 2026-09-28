@@ -153,10 +153,15 @@ def add_research_runs(dossier: dict, runs: list[dict], elements: list[str] = (),
     return out
 
 
-def seal(dossier: dict) -> dict:
-    """Sign the dossier with the deployment's audit identity."""
+def seal(dossier: dict, *, sealed_by: str | None = None) -> dict:
+    """Sign the dossier with the deployment's audit identity.
+
+    The signature says who sealed the record and what :func:`problems` found
+    at that moment, so a seal never vouches for an unchecked record."""
     from ..audit.signing import sign_detached_digest
-    body = {**dossier, "schema": SCHEMA}
+    body = {**dossier, "schema": SCHEMA, "open_problems": problems(dossier)}
+    if sealed_by:
+        body["sealed_by"] = sealed_by
     digest = hashlib.sha256(_ledger.canonical(body)).hexdigest()
     return {"dossier": body, "signature": sign_detached_digest(digest)}
 
