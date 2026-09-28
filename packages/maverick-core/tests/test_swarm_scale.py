@@ -27,7 +27,8 @@ def swarm_cfg(monkeypatch):
 
 
 def test_defaults_keep_historical_behaviour(swarm_cfg):
-    assert config.get_swarm() == {"max_total_spawns": 64, "max_concurrent_model_calls": 0}
+    assert config.get_swarm() == {"max_total_spawns": 64, "max_concurrent_model_calls": 0,
+                                  "finding_post_max_chars": 1500}
     ctx = _ctx()
     assert ctx.max_total_spawns == 64 and ctx.max_concurrent_model_calls == 0
 

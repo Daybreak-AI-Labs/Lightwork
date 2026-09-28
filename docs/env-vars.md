@@ -240,7 +240,7 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR` | `8192` | `max_tokens` headroom floor when Opus 4.7/4.8 auto-injects adaptive thinking for a role with no explicit thinking budget. Thinking bills at the output rate, so this is the worst-case output spend of every non-thinking-role turn on the default model (min 2048). Config `[thinking] budget` sets the orchestrator/revisor base (default 8000). |
 | `MAVERICK_SKILL_RENDER_MAX_CHARS` | `4000` | Per-skill body cap when recalled skills are rendered into a system prompt (`0` disables). |
 | `MAVERICK_SKILL_RENDER_TOTAL_CHARS` | `10000` | Combined budget across rendered skills; the relevance-ranked tail is dropped once spent (`0` disables). |
-| `MAVERICK_FINDING_POST_MAX_CHARS` | `1500` | Excerpt size for a FINAL posted to the blackboard (the full answer still reaches the parent and the run record). |
+| `MAVERICK_FINDING_POST_MAX_CHARS` | `1500` | Excerpt size for a FINAL posted to the blackboard (the full answer still reaches the parent and the run record). Overrides `[swarm] finding_post_max_chars`. |
 | `MAVERICK_BB_RENDER_ENTRY_CHARS` | `800` | Per-entry bound when blackboard activity is rendered into a worker's brief. |
 | `MAVERICK_SWARM_CHILD_RESULT_CHARS` | `4000` | Per-child answer cap in the `spawn_swarm` result returned to the parent. |
 | `MAVERICK_SWARM_RESULTS_TOTAL_CHARS` | `24000` | Total budget for the joined swarm result; trailing children's answers are elided (identity line kept). |

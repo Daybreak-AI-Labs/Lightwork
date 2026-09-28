@@ -726,10 +726,11 @@ instead of tripping its rate limits (the installer asks both):
 [swarm]
 max_total_spawns = 256          # agents one goal may create (default 64)
 max_concurrent_model_calls = 16 # model calls in flight per goal (0 = unbounded, the default)
+finding_post_max_chars = 1500   # how much of a helper's final answer is posted to the shared board (min 200)
 ```
 
-`MAVERICK_MAX_TOTAL_SPAWNS` and `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` override
-these. The per-call fan-out cap and the goal's budget still apply at any size.
+`MAVERICK_MAX_TOTAL_SPAWNS`, `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` and
+`MAVERICK_FINDING_POST_MAX_CHARS` override these. The per-call fan-out cap and the goal's budget still apply at any size.
 
 ## Upload size
 
