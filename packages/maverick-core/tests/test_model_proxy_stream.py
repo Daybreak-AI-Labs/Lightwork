@@ -449,3 +449,25 @@ async def test_a_client_that_half_closes_still_gets_its_response():
         await proxy.aclose()
         await upstream.aclose()
     assert b"200" in response.split(b"\r\n", 1)[0] and b"data: whole" in response
+
+
+@pytest.mark.asyncio
+async def test_idle_unauthenticated_sockets_cannot_lock_out_new_clients():
+    """Before, sockets that never sent headers held every slot for 10 s each;
+    now they hold at most half, and a newcomer displaces the oldest one."""
+    stream = Stream()
+    async with fixture_proxy(stream, max_connections=4, total_seconds=30) as (proxy, calls), \
+            httpx.AsyncClient(trust_env=False) as client:
+        idle = [await asyncio.open_connection("127.0.0.1", proxy.address[1]) for _ in range(6)]
+        await asyncio.sleep(0.1)
+        assert len(proxy._pre_auth) <= 2
+        # The oldest idle sockets were displaced and closed by the proxy.
+        reader, _ = idle[0]
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+        async with client.stream("POST", url(proxy), headers={"Authorization": "Bearer fixture-client"},
+                                 content=b"{}") as response:
+            assert response.status_code == 200
+            await asyncio.wait_for(anext(response.aiter_raw()), 5)
+            assert len(calls) == 1
+        for _, writer in idle:
+            writer.close()

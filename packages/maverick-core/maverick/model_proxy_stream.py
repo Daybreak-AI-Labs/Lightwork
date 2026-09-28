@@ -64,6 +64,13 @@ class ProxyServer:
         self._server: asyncio.Server | None = None
         self._closing = False
         self._close_task: asyncio.Task | None = None
+        # Connections that have not yet sent authenticated headers hold at most
+        # half the slots. When that half is full, a new connection displaces
+        # the OLDEST such socket: a real client sends its headers within
+        # milliseconds, so idle sockets are the ones displaced, and they can
+        # neither crowd out authenticated work nor lock out new clients.
+        self._pre_auth: dict[asyncio.Task, dict] = {}
+        self._pre_auth_cap = max(1, config.max_connections // 2)
 
     async def start(self):
         self._server = await asyncio.start_server(
@@ -86,7 +93,18 @@ class ProxyServer:
             self._rejections.add(rejected)
             rejected.add_done_callback(self._rejections.discard)
             return
-        task = asyncio.create_task(self._serve(reader, writer))
+        if len(self._pre_auth) >= self._pre_auth_cap:
+            oldest = next(iter(self._pre_auth))
+            displaced = self._pre_auth.pop(oldest)
+            displaced["pre_auth"] = False
+            # Close the socket here too: a task cancelled before it first runs
+            # never reaches its own cleanup.
+            displaced["writer"].close()
+            oldest.cancel()
+        state = {"started": False, "pre_auth": True, "writer": writer}
+        task = asyncio.create_task(self._serve(reader, writer, state))
+        state["task"] = task
+        self._pre_auth[task] = state
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -163,7 +181,12 @@ class ProxyServer:
             data = await reader.read(CHUNK_BYTES)
             connection.receive_data(data)
 
-    async def _admit(self, connection, reader, writer):
+    def _authenticated(self, state):
+        if state.get("pre_auth"):
+            state["pre_auth"] = False
+            self._pre_auth.pop(state.get("task"), None)
+
+    async def _admit(self, connection, reader, writer, state=None):
         # An unauthenticated socket holds a slot only until its headers are
         # due: 10 s, not 30, bounds how long idle sockets can crowd out clients.
         request = await asyncio.wait_for(self._event(connection, reader),
@@ -175,6 +198,8 @@ class ProxyServer:
         path = request.target.decode("ascii")
         if not authenticate(self.config, headers):
             raise ProxyHTTPError(401, b"proxy authentication required")
+        if state is not None:
+            self._authenticated(state)
         if not route_allowed(self.config, method, path):
             raise ProxyHTTPError(403, b"model proxy route not allowed")
         # Validate target before admitting any potentially large request body.
@@ -220,7 +245,7 @@ class ProxyServer:
             await writer.drain()
 
     async def _transaction(self, connection, reader, writer, state):
-        admitted = await self._admit(connection, reader, writer)
+        admitted = await self._admit(connection, reader, writer, state)
         relay = asyncio.create_task(self._relay(connection, writer, admitted, state))
         disconnected = asyncio.create_task(reader.read(1))
         try:
@@ -252,9 +277,9 @@ class ProxyServer:
         )
         await writer.drain()
 
-    async def _serve(self, reader, writer):
+    async def _serve(self, reader, writer, state=None):
         connection = h11.Connection(h11.SERVER, max_incomplete_event_size=MAX_HEADER_BYTES)
-        state = {"started": False}
+        state = {"started": False} if state is None else state
         try:
             await asyncio.wait_for(
                 self._transaction(connection, reader, writer, state), self.config.total_seconds,
@@ -279,6 +304,7 @@ class ProxyServer:
             # detectable. Never append a JSON error or fabricate a normal end.
             log.debug("model proxy request ended: %s", type(exc).__name__)
         finally:
+            self._authenticated(state)
             writer.close()
             try:
                 await asyncio.wait_for(writer.wait_closed(), 1.0)
