@@ -1102,6 +1102,11 @@ if _compress_enabled():
     from starlette.middleware.gzip import GZipMiddleware
 
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+# Outermost: refuse an over-size request before any parser (the multipart
+# form parser spools uploads to disk) reads it.
+from .request_size import RequestSizeLimitMiddleware  # noqa: E402
+
+app.add_middleware(RequestSizeLimitMiddleware)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
 )

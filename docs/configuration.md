@@ -723,6 +723,17 @@ max_concurrent_model_calls = 16 # model calls in flight per goal (0 = unbounded,
 `MAVERICK_MAX_TOTAL_SPAWNS` and `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` override
 these. The per-call fan-out cap and the goal's budget still apply at any size.
 
+## Upload size
+
+The dashboard refuses any request larger than 600 MB (above the largest batch
+of task attachments one request may carry) before reading it, with a plain
+"That upload is too large" message:
+
+```toml
+[dashboard]
+max_request_mb = 600   # MAVERICK_DASHBOARD_MAX_REQUEST_MB overrides
+```
+
 ## Spending limits
 
 There is no spending limit by default. An administrator sets limits in the
