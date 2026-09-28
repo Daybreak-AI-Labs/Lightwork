@@ -183,80 +183,147 @@ FEATURE_INFO = {
 
 # The self-learning loop's subsystems -- ONE source of truth shared by the
 # one-click toggle (set_learning writes each (section, config_key) to the
-# overlay, which load_config deep-merges so every subsystem's enabled() sees it)
-# and the /learning status view (which pairs each key with its live enabled()).
+# overlay, which load_config deep-merges so every subsystem's enabled() sees it),
+# each subsystem's own switch (set_learning_subsystem writes one of them; ``env``
+# names the deployment variable that overrides it, ``needs`` a subsystem it only
+# works under) and the /learning status view (which pairs each key with its live
+# enabled()).
 # Keeping both off one list stops the button and the view from drifting when a
 # subsystem is added. Governed learning defaults ON; DGM is intentionally not
 # in this registry and has its own high-risk production control.
 LEARNING_SUBSYSTEMS: list[dict] = [
     {"key": "self_learning", "section": "self_learning", "config_key": "enable",
-     "label": "Governed capability learning",
+     "label": "Learn new skills from work",
+     "description": "Agents notice a skill a task needs and pick up an approved one "
+                    "from the catalog.",
+     "env": "MAVERICK_SELF_LEARNING",
      "how": "[self_learning] enable — or MAVERICK_SELF_LEARNING=0 to opt out"},
     {"key": "distill_local", "section": "self_learning", "config_key": "distill_local",
-     "label": "Local skill distillation",
+     "label": "Turn repeated successes into skills",
+     "description": "Write a reusable skill from work that went well, on this server.",
+     "env": "MAVERICK_DISTILL_LOCAL",
      "how": "[self_learning] distill_local — or MAVERICK_DISTILL_LOCAL=0"},
     {"key": "failure_telemetry", "section": "telemetry", "config_key": "failure_modes",
-     "label": "Local failure-mode telemetry",
+     "label": "Count the kinds of failures",
+     "description": "Keep a count of how tasks fail, so learning can focus on the "
+                    "common problems. Nothing leaves this server.",
+     "env": "MAVERICK_FAILURE_TELEMETRY",
      "how": "[telemetry] failure_modes or MAVERICK_FAILURE_TELEMETRY=0"},
     {"key": "budget_tuning", "section": "budget", "config_key": "self_tuning",
-     "label": "Evidence-based budget tuning",
+     "label": "Suggest task limits from experience",
+     "description": "Learn how much each kind of task really needs and suggest a "
+                    "spending limit for it. A limit you set always wins.",
+     "env": "MAVERICK_BUDGET_SELF_TUNING",
      "how": "[budget] self_tuning or MAVERICK_BUDGET_SELF_TUNING=0"},
     {"key": "consequence", "section": "consequence", "config_key": "enable",
-     "label": "Grounded outcomes (reality feedback)",
+     "label": "Learn from real results",
+     "description": "Learn from what really happened, such as an invoice paid, "
+                    "instead of the answer checker's guess.",
+     "env": "MAVERICK_CONSEQUENCE",
      "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=0"},
     {"key": "reflexion", "section": "reflexion", "config_key": "enable",
-     "label": "Failure memory (learn from mistakes)",
+     "label": "Remember lessons from mistakes",
+     "description": "After a task goes wrong, write down what happened so later "
+                    "tasks avoid it.",
+     "env": "MAVERICK_REFLEXION",
      "how": "[reflexion] enable — or MAVERICK_REFLEXION=0"},
     {"key": "dreaming", "section": "dreaming", "config_key": "enable",
-     "label": "Consolidation (distil skills + insights)",
+     "label": "Learn from recent work on a schedule",
+     "description": "Regularly review finished work to write lessons and turn "
+                    "repeated successes into skills.",
+     "env": "MAVERICK_DREAMING",
      "how": "[dreaming] enable — or MAVERICK_DREAMING=0"},
     {"key": "experience", "section": "experience", "config_key": "enable",
-     "label": "Experience-guided planning",
+     "label": "Plan from past experience",
+     "description": "Use how similar past tasks went to plan and staff a new one.",
+     "env": "MAVERICK_EXPERIENCE_GUIDANCE",
      "how": "[experience] enable — or MAVERICK_EXPERIENCE_GUIDANCE=0"},
     {"key": "skill_synthesis", "section": "skill_synthesis", "config_key": "enable",
-     "label": "Task-specific skill synthesis",
+     "label": "Prepare guidance for each task",
+     "description": "Before a task starts, write short guidance for that task.",
+     "env": "MAVERICK_SKILL_SYNTHESIS",
      "how": "[skill_synthesis] enable — or MAVERICK_SKILL_SYNTHESIS=0"},
     {"key": "self_improvement", "section": "self_improvement", "config_key": "enable",
-     "label": "Governed improvement promotion",
+     "label": "Adopt proven improvements",
+     "description": "Adopt a learned change only after it passes its checks. Several "
+                    "parts below need this on.",
+     "env": "MAVERICK_SELF_IMPROVEMENT",
      "how": "[self_improvement] enable — or MAVERICK_SELF_IMPROVEMENT=0"},
     {"key": "prm_guidance", "section": "self_improvement", "config_key": "prm_guidance",
-     "label": "Process-reward guidance",
+     "label": "Nudge agents that stall",
+     "description": "Prompt an agent to change approach when several steps in a row "
+                    "make no progress.",
+     "env": "MAVERICK_PRM_GUIDANCE",
      "how": "[self_improvement] prm_guidance or MAVERICK_PRM_GUIDANCE=0"},
     {"key": "capture", "section": "self_improvement", "config_key": "capture",
-     "label": "Trajectory capture (fuel for the flywheel)",
+     "label": "Keep an outline of how tasks ran",
+     "description": "Save an outline of each task's steps, with secrets removed, as "
+                    "the material learning works from.",
+     "env": "MAVERICK_TRAJECTORY_CAPTURE",
      "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=0"},
     {"key": "causal_promotion", "section": "self_improvement", "config_key": "causal_promotion",
-     "label": "Causal promotion evidence",
+     "label": "Check an improvement really caused the gain",
+     "description": "Before a learned change is adopted, check that it caused the "
+                    "improvement.",
+     "env": "MAVERICK_CAUSAL_PROMOTION", "needs": "self_improvement",
      "how": "[self_improvement] causal_promotion — or MAVERICK_CAUSAL_PROMOTION=0"},
     {"key": "factory_learning", "section": "self_improvement", "config_key": "factory_learning",
-     "label": "Self-improving agent factory",
+     "label": "Improve how new agents are built",
+     "description": "Learn from the gaps found when new agents are set up, so the "
+                    "next ones start better.",
+     "env": "MAVERICK_FACTORY_LEARNING", "needs": "self_improvement",
      "how": "[self_improvement] factory_learning — or MAVERICK_FACTORY_LEARNING=0"},
     {"key": "evaluator_evolution", "section": "self_improvement", "config_key": "evaluator_evolution",
-     "label": "Evaluator co-evolution",
+     "label": "Replace a drifting answer checker",
+     "description": "When the answer checker drifts, try a better one against fixed, "
+                    "locked examples.",
+     "env": "MAVERICK_EVALUATOR_EVOLUTION", "needs": "self_improvement",
      "how": "[self_improvement] evaluator_evolution — or MAVERICK_EVALUATOR_EVOLUTION=0"},
     {"key": "self_harness", "section": "self_harness", "config_key": "enable",
-     "label": "Risk-limited self-harness",
+     "label": "Improve agent instructions carefully",
+     "description": "Find recurring mistakes and test a fix to agents' instructions on "
+                    "unseen cases before using it.",
+     "env": "MAVERICK_SELF_HARNESS",
      "how": "[self_harness] enable — or MAVERICK_SELF_HARNESS=0"},
     {"key": "data_engine", "section": "data_engine", "config_key": "enable",
      "label": "Improvement flywheel",
+     "description": "Find the failures that cost the most and test a fix in a "
+                    "simulation first.",
+     "env": "MAVERICK_DATA_ENGINE",
      "how": "[data_engine] enable — or MAVERICK_DATA_ENGINE=0"},
     {"key": "operations_scientist", "section": "operations_scientist", "config_key": "enable",
-     "label": "Operations scientist",
+     "label": "Look for better ways of working",
+     "description": "Suggest a better step to replace one that keeps causing harm, "
+                    "tested in a simulation first.",
+     "env": "MAVERICK_OPERATIONS_SCIENTIST",
      "how": "[operations_scientist] enable — or MAVERICK_OPERATIONS_SCIENTIST=0"},
     {"key": "rehearsal", "section": "rehearsal", "config_key": "enable",
-     "label": "Pre-execution rehearsal",
+     "label": "Rehearse risky plans first",
+     "description": "Try a risky plan in a simulation before it runs, and ask a "
+                    "person when the result is uncertain.",
+     "env": "MAVERICK_REHEARSAL",
      "how": "[rehearsal] enable — or MAVERICK_REHEARSAL=0"},
     {"key": "credit", "section": "credit", "config_key": "enable",
-     "label": "Counterfactual agent credit",
+     "label": "Score each agent's part in team work",
+     "description": "Work out how much each agent in a team helped, to learn which "
+                    "agents to use.",
+     "env": "MAVERICK_CREDIT",
      "how": "[credit] enable — or MAVERICK_CREDIT=0"},
     {"key": "reasoning_reward", "section": "reasoning_reward", "config_key": "enable",
-     "label": "Structured reasoning rewards",
+     "label": "Detailed answer scoring",
+     "description": "Score final answers on several points, with a safety veto.",
+     "env": "MAVERICK_REASONING_REWARD",
      "how": "[reasoning_reward] enable or MAVERICK_REASONING_REWARD=0"},
     {"key": "reward_audit", "section": "reasoning_reward", "config_key": "audit_rewards",
-     "label": "Tamper-evident reward audit",
+     "label": "Record answer scores in the activity log",
+     "description": "Sign each detailed score into the tamper-evident activity log.",
+     "env": "MAVERICK_REASONING_REWARD_AUDIT",
      "how": "[reasoning_reward] audit_rewards or MAVERICK_REASONING_REWARD_AUDIT=0"},
     {"key": "jit_rl", "section": "jit_rl", "config_key": "enable",
-     "label": "JitRL test-time adaptation",
+     "label": "Favour answers that worked before",
+     "description": "When agents write several answers, lean toward the kind that "
+                    "checked out well before.",
+     "env": "MAVERICK_JIT_RL",
      "how": "[jit_rl] enable or MAVERICK_JIT_RL=0"},
 ]
 LEARNING_TOGGLES = [(s["section"], s["config_key"]) for s in LEARNING_SUBSYSTEMS]
@@ -1659,6 +1726,51 @@ def set_learning(enabled: bool, *, actor: str = "local") -> None:
         reset_config_cache()
 
 
+def set_learning_subsystem(key: str, enabled: bool, *, actor: str = "local") -> None:
+    """Turn ONE learning subsystem of ``LEARNING_SUBSYSTEMS`` on or off.
+
+    The Learning page's per-system switch. ``set_learning`` still writes every
+    subsystem at once, so the master switch can always turn everything off
+    again. Raises ``KeyError`` for an unknown subsystem. The deployment
+    variable named by ``env`` still overrides the value written here."""
+    spec = next((s for s in LEARNING_SUBSYSTEMS if s["key"] == key), None)
+    if spec is None:
+        raise KeyError(key)
+    with _locked():
+        before = _load_overlay_for_update()
+        data = json.loads(json.dumps(before))
+        section = data.setdefault(spec["section"], {})
+        if not isinstance(section, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        if spec["section"] == "self_harness" and not config.load_global_config().get(
+                "self_harness"):
+            # The first key in an empty [self_harness] table would switch the
+            # kernel to its historical, weaker defaults: keep the careful
+            # profile the pristine default already gives (as set_learning does).
+            section.setdefault("risk_limited", True)
+            section.setdefault("auto_run", True)
+        section[spec["config_key"]] = bool(enabled)
+        from maverick.audit import EventKind, audit_event
+        from maverick.config import reset_config_cache
+
+        # Record the authorization before publishing the control bit.
+        audited = audit_event(
+            EventKind.LEARNING_CONTROL_CHANGED,
+            _global=True,
+            control=key,
+            enabled=bool(enabled),
+            actor=actor,
+            acknowledged=False,
+            phase="authorized",
+        )
+        if not audited:
+            raise RuntimeError("learning control audit could not be persisted")
+        _write(data)
+        reset_config_cache()
+
+
 def set_dgm(
     enabled: bool,
     *,
@@ -1667,8 +1779,9 @@ def set_dgm(
 ) -> dict:
     """Set only the canonical, default-off DGM request bit.
 
-    Editable surfaces, challenge tests, evaluator policy and adoption authority
-    are deliberately not dashboard-editable. The production runner rechecks all
+    The editable surface and challenge tests are separate All settings rows
+    (global admin, confirmed before they widen); evaluator policy and adoption
+    authority are not dashboard-editable. The production runner rechecks all
     of them and never adopts code.
     """
     with _locked():
@@ -2032,6 +2145,7 @@ __all__ = [
     "research_execution_state", "set_research_execution",
     "security_suite_revision",
     "set_dgm", "set_ekko", "set_security_suite",
-    "set_toggle", "set_toggles", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
+    "set_toggle", "set_toggles", "set_learning", "set_learning_subsystem",
+    "set_flow_autonomy", "state", "set_channel", "clear_channel",
     "channels_state",
 ]

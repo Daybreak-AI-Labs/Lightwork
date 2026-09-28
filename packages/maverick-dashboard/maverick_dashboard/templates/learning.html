@@ -128,19 +128,75 @@
       <p class="lrn__enable-note" id="lrn-switches-msg" role="status" aria-live="polite" style="margin-top: var(--space-2);"></p>
 
       <details style="margin-top: var(--space-4);">
-      <summary id="lrn-detail-h">Show every part of the learning loop</summary>
-      <p class="lrn__section-sub">The “Turn core learning on/off” button above switches these parts together.</p>
-      <ul class="lrn__comp" aria-labelledby="lrn-detail-h">
+      <summary id="lrn-detail-h">Turn each part of learning on or off</summary>
+      <p class="lrn__section-sub">Each part has its own switch. The “Turn core learning on/off” button above
+        still switches every part together. More detailed learning settings are in
+        <a href="/settings/all">All settings</a> under Memory &amp; learning.</p>
+      <ul class="lrn__comp" aria-labelledby="lrn-detail-h" id="lrn-parts">
         {% for c in snap.components %}
         <li class="lrn__row" data-on="{{ 'true' if c.on else 'false' }}">
-          <span class="badge {{ 'active' if c.on else '' }}">{{ 'On' if c.on else 'Off' }}</span>
+          <span class="badge {{ 'active' if c.on else '' }}">{{ 'On' if c.on else ('Waiting' if c.waiting_on else 'Off') }}</span>
           <div class="lrn__row-main">
-            <div class="lrn__row-label">{{ c.label }}</div>
+            <div class="lrn__row-label" id="lrn-part-{{ c.key }}">{{ c.label }}</div>
+            {% if c.description %}<div class="lrn__row-desc">{{ c.description }}</div>{% endif %}
+            {% if c.waiting_on %}<div class="lrn__row-members">Waits until “{{ c.waiting_on }}” is on.</div>{% endif %}
+            {% if c.managed %}<div class="lrn__row-members">Set by your server's deployment settings, so it can't be changed here.</div>{% endif %}
+            <div class="lrn__row-err" role="status"></div>
           </div>
+          {% if learning_can_manage and not c.managed %}
+          <button type="button" class="btn lrn-part-btn" data-part="{{ c.key }}"
+                  data-label="{{ c.label }}" data-wanted="{{ 'true' if c.wanted else 'false' }}"
+                  aria-pressed="{{ 'true' if c.wanted else 'false' }}"
+                  aria-describedby="lrn-part-{{ c.key }}">{{ 'Turn off' if c.wanted else 'Turn on' }}</button>
+          {% else %}
+          <button type="button" class="btn" disabled aria-disabled="true"
+                  aria-describedby="lrn-part-{{ c.key }}">Read only</button>
+          {% endif %}
         </li>
         {% endfor %}
       </ul>
       </details>
+      <script>
+      (function () {
+        var list = document.getElementById('lrn-parts');
+        if (!list) return;
+        list.addEventListener('click', async function (ev) {
+          var btn = ev.target.closest('.lrn-part-btn');
+          if (!btn || btn.dataset.inFlight === 'true') return;
+          btn.dataset.inFlight = 'true';
+          var next = btn.getAttribute('data-wanted') !== 'true';
+          var label = btn.getAttribute('data-label');
+          var err = btn.parentNode.querySelector('.lrn__row-err');
+          var impact = next
+            ? 'It starts again for the whole installation.'
+            : 'It pauses for the whole installation. Nothing it has already learned is deleted.';
+          if (!(await mvConfirm((next ? 'Turn on “' : 'Turn off “') + label + '”? ' + impact,
+                                { okText: next ? 'Turn on' : 'Turn off' }))) {
+            delete btn.dataset.inFlight; return;
+          }
+          btn.disabled = true; btn.setAttribute('aria-busy', 'true'); err.textContent = '';
+          try {
+            var r = await fetch('/api/v1/learning', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled: next, subsystem: btn.getAttribute('data-part') }),
+            });
+            if (!r.ok) {
+              var b = await r.json().catch(function () { return {}; });
+              err.textContent = r.status === 403
+                ? 'Only an administrator can change this. Ask your administrator.'
+                : ((r.status === 409 && window.mvPlainDetail(b.detail))
+                   || window.mvErrorText(r, 'change “' + label + '”'));
+              delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
+              return;
+            }
+            location.reload();
+          } catch (e) {
+            err.textContent = 'Could not reach the server — check your connection and try again.';
+            delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
+          }
+        });
+      })();
+      </script>
       <p class="lrn__enable-note">Once outcome tracking is on, every human sign-off on a deliverable
         automatically becomes feedback your workforce learns from — see
         <a href="/workforce">Workforce</a> for what your teams have delivered, and
@@ -550,7 +606,8 @@
         </span>
       </p>
       {% if snap.dgm.blockers %}
-      <p class="muted" style="font-size: var(--text-sm); margin-top:0;">{{ snap.dgm.blockers | length }} setting{{ '' if snap.dgm.blockers | length == 1 else 's' }} outside this page must be changed first. Ask your IT administrator.</p>
+      <p class="muted" style="font-size: var(--text-sm); margin-top:0;">{{ snap.dgm.blockers | length }} setting{{ '' if snap.dgm.blockers | length == 1 else 's' }} outside this page must be changed first. The files and tests it may use are in
+        <a href="/settings/all">All settings</a> under Memory &amp; learning, Research experiments; ask your IT administrator about the rest.</p>
       {% endif %}
       <button type="button" class="btn" id="lrn-dgm"
               data-on="{{ 'true' if snap.dgm.requested else 'false' }}"
