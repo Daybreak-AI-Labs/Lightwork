@@ -219,11 +219,10 @@ SIGN_IN_FIRST = (
 
 def sign_in_configured() -> bool:
     """Whether the dashboard has a sign-in mechanism (token, OIDC, SSO...)."""
-    import os
-
     from . import auth
+    from ._shared import dashboard_token
 
-    return bool(os.environ.get("MAVERICK_DASHBOARD_TOKEN")) or not auth.auth_genuinely_off()
+    return bool(dashboard_token()) or not auth.auth_genuinely_off()
 
 
 def _status_by_control() -> dict[str, str]:

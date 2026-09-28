@@ -701,6 +701,22 @@
       input = document.createElement('input');
       input.type = 'checkbox';
       input.checked = value === true;
+    } else if (kind === 'color') {
+      // A colour picker; an optional colour can be left out with its switch.
+      input = document.createElement('input');
+      input.type = 'color';
+      input.value = typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase()
+        : (typeof value === 'string' && /^#[0-9a-fA-F]{3}$/.test(value)
+          ? '#' + value.slice(1).split('').map(function (c) { return c + c; }).join('').toLowerCase()
+          : '#888888');
+      if (!column.required) {
+        var use = document.createElement('input');
+        use.type = 'checkbox';
+        use.checked = typeof value === 'string' && value !== '';
+        use.setAttribute('data-cell-use', '');
+        use.setAttribute('aria-label', 'Use ' + column.label.toLowerCase() + ' ' + where);
+        td.appendChild(use);
+      }
     } else if (kind === 'secret') {
       // A saved password is never sent to the page: leave empty to keep it.
       input = document.createElement('input');
@@ -728,7 +744,7 @@
     var tr = document.createElement('tr');
     tr.setAttribute('data-grid-row', '');
     var where;
-    if (state.kind === 'grid') {
+    if (state.kind === 'grid' || state.kind === 'named') {
       tr.dataset.name = entry.name;
       where = 'for ' + (entry.label || entry.name);
       var name = document.createElement('td');
@@ -779,13 +795,17 @@
     var input = td.querySelector('[data-cell-input]');
     if (!input) return null;
     if (column.kind === 'switch') return input.checked;
+    if (column.kind === 'color') {
+      var use = td.querySelector('[data-cell-use]');
+      return use && !use.checked ? '' : input.value;
+    }
     if (column.kind === 'number') return input.value.trim() === '' ? null : Number(input.value);
     return input.value;
   }
   function readGrid(row) {
     var state = gridState(row);
     return gridRows(row).map(function (tr) {
-      var out = state.kind === 'grid' ? {name: tr.dataset.name} : {};
+      var out = state.kind === 'grid' || state.kind === 'named' ? {name: tr.dataset.name} : {};
       state.columns.forEach(function (column) {
         out[column.key] = readCell(tr.querySelector('[data-cell="' + column.key + '"]'), column);
       });
@@ -795,7 +815,15 @@
   function addFromGridForm(row) {
     var state = gridState(row);
     var tr;
-    if (state.kind === 'grid') {
+    if (state.kind === 'named') {
+      var box = row.querySelector('[data-grid-newname]');
+      var typed = box ? box.value.trim() : '';
+      if (!typed) { say(row, 'Type a name first.'); if (box) box.focus(); return; }
+      var used = gridRows(row).some(function (r) { return r.dataset.name === typed; });
+      if (used) { say(row, 'That name is already in the list. Change it there.'); return; }
+      tr = addGridRow(row, {name: typed, label: typed, cells: {}});
+      box.value = '';
+    } else if (state.kind === 'grid') {
       var pick = row.querySelector('[data-grid-newkey]');
       var chosen = pick && pick.value;
       if (!chosen) { say(row, 'Choose one from the list first.'); return; }

@@ -18,13 +18,12 @@ refused until its check passes, and confirmed before anyone is signed out.
 Not given a row (see the report in the change that added this module):
 ``[client] id`` (it also chooses where the encryption key lives, so changing it
 here would leave every sealed setting and record unreadable),
-``[dashboard] token`` (the break-glass access token; a browser cannot
-present it and the server needs it before it listens beyond this computer),
-``[approval_delegation]`` (a legacy table only checked for presence),
-``[deployment] type`` (the installer's own record), ``[governance] profile``
-(a label; the level's protections are separate rows), ``[dashboard] themes``
-(colour themes need a colour editor) and the unified-custody security
-monitoring address (it needs a workspace placeholder the page cannot build).
+``[approval_delegation]`` (a legacy name: the delegation rules it stands for
+are ``[approval] delegation``, which has its own row), the ``[deployment]``
+GPU counts of a training job file (no product path starts such a run yet),
+``[governance] profile`` (applying a level means writing the settings the
+installer derives from it) and the unified-custody security monitoring
+address (it needs a workspace placeholder the page cannot build).
 """
 from __future__ import annotations
 
@@ -47,6 +46,7 @@ _HOST_PORT = r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]{2,45}\](:[0-9]
 _SIEM = r"(https?|tcp|udp)://[^\s\"'<>]{1,300}"
 _REDIS = r"(rediss?|unix)://\S{1,500}"
 _PAGE = r"/[A-Za-z0-9/_.-]{0,200}"
+_ORIGIN = r"[a-z0-9][a-z0-9._-]{0,63}"
 _ALGORITHMS = (("RS256", "RS256 (RSA)"), ("RS384", "RS384 (RSA)"), ("RS512", "RS512 (RSA)"),
                ("ES256", "ES256 (elliptic curve)"), ("ES384", "ES384 (elliptic curve)"),
                ("ES512", "ES512 (elliptic curve)"), ("PS256", "PS256 (RSA-PSS)"),
@@ -232,6 +232,16 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_DASHBOARD_ADMINS",), weaker="grow",
           warning="More people will be able to change every setting.",
           aliases="admins administrators owners"),
+        S("dashboard", "token", "Server access token",
+          "A long password that programs, and other computers, use to reach Lightwork. "
+          "Browsers can't send it, so set up a sign-in method first if people use Lightwork "
+          "in a browser. To reach Lightwork from other computers, restart it after setting "
+          "this. Use at least 32 characters. It is stored sealed and never shown again.",
+          "secret", grp, "", "maverick_dashboard._shared", subgroup=access, pattern=_SECRET32,
+          max_length=512, env=("MAVERICK_DASHBOARD_TOKEN",), weaker="change",
+          warning="Programs using the old token will be refused, and anyone holding the new "
+                  "one can do everything an administrator can.",
+          aliases="bearer token api access remote"),
         S("dashboard", "default_role", "Role for people without one",
           "The role anyone who signs in gets until they are given a role of their own.",
           "select", grp, "operator", "maverick_dashboard.rbac", subgroup=access,
@@ -965,6 +975,14 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_FEDERATION_ENABLED",), weaker=True,
           warning="Linked Lightwork servers will be able to send this server work.",
           aliases="federation peers"),
+        S("federation", "origin", "This server's name for chat messages",
+          "The name this server signs chat messages and marketplace listings with, as the "
+          "other linked servers know it.",
+          "text", grp, "local", "maverick.federation_envelope", subgroup=fed, pattern=_ORIGIN,
+          max_length=64, weaker="change",
+          warning="Linked servers that know this server by its old name will refuse its "
+                  "messages.",
+          aliases="origin"),
         S("federation", "node", "This server's name",
           "The name linked servers know this server by.",
           "text", grp, "maverick", "maverick.federation", subgroup=fed, pattern=_NAME,
@@ -1046,6 +1064,15 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           maximum=86400, integer=True, unit="seconds", restart=True,
           env=("MAVERICK_LICENSE_REFRESH_INTERVAL",)),
         # ----------------------------------------------- enterprise boundary
+        S("profile", "name", "Deployment profile",
+          "Enterprise turns on the stricter enterprise protections whenever the Enterprise "
+          "protections switch is not set on its own.",
+          "select", grp, "standard", "maverick.profile", subgroup=ent,
+          choices=(("enterprise", "Enterprise"), ("standard", "Standard")),
+          env=("MAVERICK_PROFILE",), weaker=True, order=("enterprise", "standard"),
+          warning="The stricter enterprise protections will stop applying unless they are "
+                  "switched on by themselves.",
+          aliases="profile enterprise standard"),
         S("enterprise", "require", "Refuse to start unless protected",
           "Stop Lightwork from starting unless every regulated-deployment protection holds.",
           "toggle", grp, False, "maverick.deployment", subgroup=ent, restart=True,
@@ -1066,6 +1093,13 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           item_label="Service", item_hint="my-internal-model", item_error="a service name",
           weaker="grow", warning="More AI services will be allowed to receive your data.",
           aliases="local providers"),
+        S("deployment", "type", "How Lightwork was installed",
+          "Recorded by the installer. It offers this as the first choice when it runs again.",
+          "select", grp, "", "maverick.config", subgroup=ent,
+          choices=(("", "Not recorded"), ("desktop", "On this computer"),
+                   ("docker", "In a Docker container"), ("vps", "On a server you own"),
+                   ("phone", "Phone companion")),
+          aliases="deployment type installer"),
         S("deployment", "allow_multiple_control_planes", "Allow several main servers",
           "Let more than one server act as the main server at the same time. Only for special "
           "setups: two main servers can overwrite each other's work.",
@@ -1119,13 +1153,54 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
                    max_length=64, item_error="a server name"),
                  C("target", "Address and port", "text", required=True, pattern=_HOST_PORT,
                    max_length=260, item_error="a server name and port"),
-                 C("token", "Shared password", "secret", pattern=_SECRET32, max_length=512,
-                   item_error="at least 32 characters with no spaces")),
+                 C("token", "Shared password", "secret", required=True, pattern=_SECRET32,
+                   max_length=512, item_error="at least 32 characters with no spaces")),
         item_label="Linked server", add_label="Add a linked server",
         empty_text="No servers are linked yet.", weaker="grow",
         warning="Another server will be able to send this server work, or a linked server's "
                 "details change.",
         aliases="federation peers"))
+    origin = C("origin", "Server name", "text", required=True, unique=True, pattern=_ORIGIN,
+               max_length=64, item_error="a lowercase server name")
+    pubkey = C("pubkey", "Signing key", "text", required=True, pattern=r"[0-9A-Fa-f]{64}",
+               max_length=64, item_error="a 64-character signing key")
+    rows.append(S(
+        "federation", "channel_peers", "Servers that may pass on chat messages",
+        "Linked servers whose chat messages this server accepts: each one's name, the key its "
+        "messages are signed with, and the password used to hide people's chat names. "
+        "Passwords are stored sealed and never shown again; leave one empty to keep it.",
+        "rules", "Server & deployment", [], "maverick.federation_envelope",
+        subgroup="Linked Lightwork servers",
+        columns=(origin, pubkey,
+                 C("secret", "Shared password", "secret", required=True, pattern=_SECRET32,
+                   max_length=512, item_error="at least 32 characters with no spaces")),
+        item_label="Server", add_label="Add a server", empty_text="No servers yet.",
+        weaker="grow", warning="Another server will be able to pass on chat messages.",
+        aliases="channel federation peers"))
+    rows.append(S(
+        "federation", "marketplace_peers", "Servers that may share marketplace listings",
+        "Linked servers whose marketplace listings this server accepts: each one's name and "
+        "the key its listings are signed with.",
+        "rules", "Server & deployment", [], "maverick.federation_envelope",
+        subgroup="Linked Lightwork servers", columns=(origin, pubkey),
+        item_label="Server", add_label="Add a server", empty_text="No servers yet.",
+        weaker="grow", warning="Another server will be able to share listings with this one.",
+        aliases="marketplace federation peers"))
+    colour = [C(key, label, "color", required=key in {"bg", "panel", "text", "accent"})
+              for key, label in (("bg", "Page background"), ("panel", "Panels"),
+                                 ("text", "Text"), ("accent", "Highlights"),
+                                 ("border", "Borders"), ("muted", "Quiet text"),
+                                 ("warn", "Warnings"), ("danger", "Errors"))]
+    rows.append(S(
+        "dashboard", "themes", "Your own colour themes",
+        "Extra colour themes people can pick in Settings, and that can be chosen above as the "
+        "theme for everyone. The first four colours are needed; the others are optional.",
+        "table", "People & access", {}, "maverick_dashboard.themes", subgroup="Dashboard access",
+        row_kind="named", columns=tuple(colour), pattern=r"[a-z][a-z0-9_-]{0,31}",
+        item_error="lowercase letters, numbers and dashes, starting with a letter",
+        fixed_keys=("dark", "light", "solarized", "hicontrast"),
+        row_label="Theme name", item_label="Theme", add_label="Add a theme",
+        empty_text="No colour themes of your own yet.", aliases="themes colours branding"))
     rows.append(S(
         "local_first", "models", "Local model for each kind of work",
         "When local models are preferred, use these for the kinds of work listed.",

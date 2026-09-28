@@ -314,7 +314,9 @@ def _dashboard_token_authenticated(request) -> bool:
     """Whether this request carries the configured static dashboard bearer."""
     import hmac
 
-    expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    from ._shared import dashboard_token
+
+    expected = dashboard_token()
     if not expected:
         return False
     authorization = request.headers.get("authorization", "")
@@ -332,7 +334,9 @@ def auth_genuinely_off() -> bool:
     unauthenticated local deployment. Any unreadable auth configuration denies
     that legacy exception.
     """
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN") or _dashboard_require_auth_enabled():
+    from ._shared import dashboard_token
+
+    if dashboard_token() or _dashboard_require_auth_enabled():
         return False
     return not non_static_auth_configured()
 
@@ -1023,7 +1027,6 @@ def websocket_authorized(
     loopback-only, and available solely in genuine local auth-off mode.
     """
     import hmac as _hmac
-    import os as _os
 
     if principal is not None:
         via = str((principal.claims or {}).get("via") or "")
@@ -1033,7 +1036,9 @@ def websocket_authorized(
         return _websocket_same_origin(websocket) if via in {
             "session", "invite", "proxy",
         } else True
-    expected = _os.environ.get("MAVERICK_DASHBOARD_TOKEN")
+    from ._shared import dashboard_token
+
+    expected = dashboard_token()
     if expected:
         auth = websocket.headers.get("authorization", "")
         supplied = auth[7:] if auth.startswith("Bearer ") else ""

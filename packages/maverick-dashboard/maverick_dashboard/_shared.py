@@ -40,6 +40,24 @@ def dashboard_setting(env: str, key: str, default: object) -> object:
     return default if value is None else value
 
 
+def dashboard_token() -> str:
+    """The server's access token: ``MAVERICK_DASHBOARD_TOKEN``, else the sealed
+    ``[dashboard] token`` a global administrator set on Settings > All
+    settings (installation-wide config only: a workspace's own settings can
+    never supply it). Empty when neither is set."""
+    env = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    if env:
+        return env
+    try:
+        from maverick.config import load_global_config
+
+        table = (load_global_config() or {}).get("dashboard") or {}
+    except Exception:  # unreadable settings: no configured token (auth fails closed)
+        return ""
+    value = table.get("token") if isinstance(table, dict) else None
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _max_sse_streams() -> int:
     try:
         return max(1, int(dashboard_setting("MAVERICK_DASHBOARD_MAX_SSE", "max_sse", 64)))

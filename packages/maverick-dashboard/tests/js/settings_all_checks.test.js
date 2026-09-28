@@ -162,3 +162,51 @@ test("a row's saved password is never shown, and an empty box keeps it",async()=
     assert.deepEqual(calls[0].changes[0].value,[{name:"west-1",target:"west2.example.com:50052",token:""}]);
   }finally{dom.window.close();}
 });
+
+// ---- named rows with colour pickers (your own colour themes) ---------------
+const THEMES={kind:"named",row_label:"Theme name",item_label:"Theme",
+  columns:[
+    {key:"bg",label:"Page background",kind:"color",required:true,choices:[]},
+    {key:"warn",label:"Warnings",kind:"color",required:false,choices:[]}],
+  rows:[{name:"midnight",label:"midnight",cells:{bg:"#101020",warn:null}}]};
+const THEME_HTML=`<!doctype html><main>
+<div role="status" id="settings-all-status" hidden></div>
+<input id="settings-all-search"><select id="settings-all-group"><option value="">All</option></select>
+<input type="checkbox" id="settings-all-changed"><p id="settings-all-filter-status"></p>
+<div id="settings-all-groups"><section class="settings-all-group" data-group="people"><h2>People</h2>
+ <div class="settings-all-row" data-setting-id="dashboard.themes" data-control="table" data-source="here" data-search="themes">
+  <strong data-value-text>1 theme</strong><span data-source-text>Set here</span>
+  <div data-grid data-grid-state='${attr(THEMES)}'><table><tbody data-grid-body></tbody></table>
+  <p data-grid-empty>No colour themes of your own yet.</p>
+  <input type="text" data-grid-newname><button data-grid-add>Add a theme</button></div>
+  <button data-save>Save</button><button data-reset>Reset to default</button><p data-row-status></p></div>
+</section></div><p id="settings-all-empty" hidden></p></main>`;
+
+test("themes: rows are named by the person and colours come from colour pickers",async()=>{
+  const dom=new JSDOM(THEME_HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
+  const w=dom.window,d=w.document,calls=[];
+  w.mvConfirm=async()=>true;w.mvErrorText=(f,a)=>"Could not "+a+".";w.mvToast=()=>{};
+  w.fetch=async(url,init={})=>{calls.push(JSON.parse(init.body));return reply(200,{changed:["dashboard.themes"],groups:[]});};
+  w.eval(read("static/lightwork-settings-all.js"));
+  await flush();
+  try{
+    const r=d.querySelector('[data-setting-id="dashboard.themes"]');
+    const first=r.querySelector("[data-grid-row]");
+    assert.equal(first.querySelector("[data-row-label]").textContent,"midnight");
+    assert.equal(first.querySelector('[data-cell="bg"] [data-cell-input]').type,"color");
+    assert.equal(first.querySelector('[data-cell="bg"] [data-cell-use]'),null);
+    assert.equal(first.querySelector('[data-cell="warn"] [data-cell-use]').checked,false);
+    r.querySelector("[data-grid-add]").click();await flush();
+    assert.match(r.querySelector("[data-row-status]").textContent,/Type a name first/);
+    r.querySelector("[data-grid-newname]").value="sunrise";
+    r.querySelector("[data-grid-add]").click();await flush();
+    const added=r.querySelectorAll("[data-grid-row]")[1];
+    assert.equal(added.dataset.name,"sunrise");
+    added.querySelector('[data-cell="bg"] [data-cell-input]').value="#ffeedd";
+    added.querySelector('[data-cell="warn"] [data-cell-use]').checked=true;
+    added.querySelector('[data-cell="warn"] [data-cell-input]').value="#aa0000";
+    r.querySelector("[data-save]").click();await flush();
+    assert.deepEqual(calls[0].changes[0].value,[
+      {name:"midnight",bg:"#101020",warn:""},{name:"sunrise",bg:"#ffeedd",warn:"#aa0000"}]);
+  }finally{dom.window.close();}
+});

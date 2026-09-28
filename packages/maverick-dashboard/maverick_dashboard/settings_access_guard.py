@@ -31,9 +31,9 @@ from typing import Any
 
 SIGN_IN_PREFIXES = ("auth.",)
 SIGN_IN_IDS = frozenset({
-    "dashboard.invites", "dashboard.require_auth", "dashboard.admins",
+    "dashboard.token", "dashboard.invites", "dashboard.require_auth", "dashboard.admins",
     "dashboard.default_role", "dashboard.session_secret", "dashboard.group_roles",
-    "client.enforce", "enterprise.mode",
+    "client.enforce", "enterprise.mode", "profile.name",
 })
 KEY_PREFIXES = ("kms.",)
 _TRUE = {"1", "true", "yes", "on"}
@@ -115,7 +115,8 @@ def _secret(env: str, table: dict, key: str) -> str:
 class Access:
     """Every way into the dashboard, as one configuration would allow it."""
 
-    token_env: bool
+    token_env: bool  # the server's access token (environment or these settings)
+    token_value: str
     oidc: bool
     oidc_login: bool
     oidc_secret: str
@@ -185,6 +186,14 @@ def _admins(cfg: dict) -> frozenset[str]:
         if isinstance(raw, (list, tuple)) else frozenset()
 
 
+def _token(cfg: dict) -> str:
+    env = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    if env:
+        return env
+    value = _table(cfg, "dashboard").get("token")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _client_enforced(cfg: dict) -> bool:
     flag = _env_flag("MAVERICK_CLIENT_ENFORCE")
     if flag is not None:
@@ -217,7 +226,7 @@ def access_for(cfg: dict) -> Access:
         raw = dashboard.get("require_auth", False)
         require = raw if isinstance(raw, bool) else True
     return Access(
-        token_env=bool(os.environ.get("MAVERICK_DASHBOARD_TOKEN")),
+        token_env=bool(_token(cfg)), token_value=_token(cfg),
         oidc=oidc["enabled"], oidc_login=oidc["login"], oidc_secret=oidc["secret"],
         oidc_issuer=oidc["issuer"], saml_policy=saml_policy, saml_login=saml_login,
         proxy=proxy_flag if proxy_flag is not None else proxy_table.get("enabled") is True,
@@ -272,7 +281,16 @@ def _proxy_trusts(table: dict, host: str) -> bool:
 
 def _route_survives(route: str, request, before: Access, after: Access) -> bool:
     if route == "token":
-        return True
+        # The environment's token can't be changed here; a token set on this
+        # page keeps working only if it is still the one the caller sent.
+        if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+            return True
+        import hmac
+
+        authorization = request.headers.get("authorization", "") if request else ""
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        return bool(supplied and after.token_value) and hmac.compare_digest(
+            supplied.encode(), after.token_value.encode())
     if route == "local":
         return after.anonymous_ok
     if route == "proxy":
@@ -364,7 +382,11 @@ def _unproven_message(route: str, after: Access, failure: str) -> str:
     if failure:
         return (f"{failure} Until your company sign-in passes this check, this change would "
                 "lock you out, so nothing was changed.")
-    if route not in {"local", "token"}:
+    if route == "token":
+        return ("This change would stop the access token you are using from working, and you "
+                "would have no other working way back in. Set up and test a sign-in method "
+                "first.")
+    if route != "local":
         return ("This change would sign you out, and you would have no working way back in. "
                 "Set up and test another sign-in method first, or make this change on the "
                 "computer Lightwork runs on.")
@@ -426,8 +448,9 @@ def review_sign_in(request, changes: list[dict], layers: dict[str, Any], writes:
         confirms.append({
             "id": touched[0].id, "label": "Your access", "kind": "access",
             "warning": ("Signing in with the owner account's email and passphrase is paused "
-                        "while company sign-in details are saved. Stay signed in until company "
-                        "sign-in works, or remove these details to use the passphrase again."),
+                        "while company sign-in details or a server access token are saved. Stay "
+                        "signed in until the new way in works, or remove them to use the "
+                        "passphrase again."),
         })
     if principal and route != "token" and not _stays_admin(principal, after):
         raise Refused("This would remove your own administrator access. Ask another "
@@ -437,7 +460,7 @@ def review_sign_in(request, changes: list[dict], layers: dict[str, Any], writes:
 
 def _owner_sign_in_open(cfg: dict) -> bool:
     """The owner's passphrase sign-in is allowed by this configuration."""
-    return not (cfg.get("auth") or cfg.get("proxy_auth"))
+    return not (cfg.get("auth") or cfg.get("proxy_auth") or _token(cfg))
 
 
 def _is_owner(principal: str | None) -> bool:

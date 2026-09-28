@@ -554,7 +554,8 @@ def _grid_state(setting: catalog.Setting, value: object) -> dict[str, Any]:
                             if lazy else ""),
         })
     return {
-        "kind": "rules" if setting.control == "rules" else "grid",
+        "kind": "rules" if setting.control == "rules" else (
+            "named" if setting.row_kind == "named" else "grid"),
         "columns": columns,
         "key_choices": [{"value": v, "label": label} for v, label in setting.choices],
         "row_label": setting.row_label,
@@ -819,11 +820,11 @@ def _keep_row_secrets(setting: catalog.Setting, old: object, new: object) -> obj
                 continue
             previous = saved.get(row.get(unique)) if unique else None
             kept = previous.get(key) if isinstance(previous, dict) else None
-            if not kept:
-                label = next(c.label for c in setting.columns if c.key == key)
-                raise _Refused(400, f"{setting.label}: enter the {label.lower()} for each new "
-                                    f"{setting.item_label.lower()}.")
-            row[key] = kept
+            column = next(c for c in setting.columns if c.key == key)
+            if not kept and column.required:
+                raise _Refused(400, f"{setting.label}: enter the {column.label.lower()} for "
+                                    f"each new {setting.item_label.lower()}.")
+            row[key] = kept or ""
         out.append(row)
     return out
 

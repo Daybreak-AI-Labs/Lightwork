@@ -90,9 +90,12 @@ def _policy(*, bootstrap=False):
     if not isinstance(dashboard, dict):
         raise HTTPException(503, "Authentication policy is unavailable.")
     # Partial enterprise identity configuration also denies local enrollment.
+    from ._shared import dashboard_token
+
     if (cfg.get("auth") or cfg.get("proxy_auth")
             or any(os.environ.get(name) for name in (
                 "MAVERICK_DASHBOARD_TOKEN", "LIGHTWORK_DASHBOARD_TOKEN"))
+            or dashboard_token()
             or auth.oidc_enabled() or auth.proxy_auth_enabled()
             or auth._saml_policy_configured()):
         raise HTTPException(409, "This installation uses managed sign-in. Use its configured sign-in method.")

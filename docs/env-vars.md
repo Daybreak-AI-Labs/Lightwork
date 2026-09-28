@@ -395,3 +395,43 @@ system-specific shapes (e.g. `SERVICENOW_INSTANCE_URL`, `SNOWFLAKE_ACCOUNT`,
 | --- | --- | --- |
 | `MAVERICK_DURABLE` | config `[durable] enabled` (off) | Enable durable execution (checkpoint/resume). |
 | `MAVERICK_WORLD_SYNCHRONOUS` | config `[world_model] synchronous` (NORMAL) | World-DB PRAGMA synchronous level. `FULL`/`EXTRA` make every commit durable on OS crash/power loss (no acked-row loss) at a write-latency cost — for deployments treating the world DB as the billed Operating Record. |
+
+## Also settable in the dashboard
+
+These switches used to exist only as environment variables. Each now also has
+a config key that a global administrator can set on **Settings > All
+settings** (secrets are stored sealed and never shown again). The environment
+variable still wins; with neither set, behaviour is unchanged.
+
+| Env var | Config key |
+| --- | --- |
+| `MAVERICK_DASHBOARD_TOKEN` | `[dashboard] token` |
+| `MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN` | `[dashboard] max_goals_per_min` |
+| `MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN` | `[dashboard] max_goals_global_per_min` |
+| `MAVERICK_DASHBOARD_MAX_SSE` | `[dashboard] max_sse` |
+| `MAVERICK_SHUTDOWN_TIMEOUT` / `MAVERICK_DRAIN_TIMEOUT` | `[dashboard] shutdown_timeout_seconds` |
+| `MAVERICK_SCIM_TOKEN` | `[dashboard] scim_token` |
+| `MAVERICK_A2A_TOKEN` | `[a2a] token` |
+| `MAVERICK_A2A_ALLOW_UNAUTHENTICATED` | `[a2a] allow_unauthenticated` |
+| `MAVERICK_A2A_ALLOWED_ORIGINS` | `[a2a] allowed_origins` |
+| `MAVERICK_A2A_BASE_URL` | `[a2a] base_url` |
+| `MAVERICK_A2A_MAX_DOLLARS` / `_MAX_WALL_SECONDS` / `_MAX_DEPTH` | `[a2a] max_dollars` / `max_wall_seconds` / `max_depth` |
+| `MAVERICK_A2A_MAX_CONCURRENCY` / `MAVERICK_A2A_MAX_TASKS` | `[a2a] max_concurrency` / `max_tasks` |
+| `MAVERICK_PG_CONNECT_TIMEOUT_SECONDS` | `[world_model] connect_timeout_seconds` |
+| `MAVERICK_PG_IO_TIMEOUT_SECONDS` | `[world_model] io_timeout_seconds` |
+| `MAVERICK_PG_STATEMENT_TIMEOUT_MS` | `[world_model] statement_timeout_ms` |
+| `MAVERICK_PG_IDLE_TX_TIMEOUT_MS` | `[world_model] idle_tx_timeout_ms` |
+| `MAVERICK_ORPHAN_RECLAIM_SECONDS` | `[world_model] orphan_reclaim_seconds` |
+| `MAVERICK_PG_DSN` | `[world_model] dsn` (now also read by the Postgres record store itself) |
+| `MAVERICK_QUEUE_GOAL_ACQUIRE_TIMEOUT` | `[queue] goal_acquire_timeout_seconds` |
+| `MAVERICK_GRPC_BEARER_TOKEN` | `[grpc] token` |
+| `MAVERICK_GRPC_RATE_LIMIT` | `[grpc] rate_limit` |
+| `MAVERICK_FEDERATION_RATE_LIMIT` | `[federation] rate_limit` |
+| `MAVERICK_SIEM_TOKEN` | `[audit] siem_token` |
+| `MAVERICK_SIEM_ALLOW_INSECURE` | `[audit] siem_allow_insecure` |
+
+`MAVERICK_SETTINGS_PATH_ROOTS` (deployment only) replaces the list of places a
+server location chosen on that page may point into (locations separated by the
+system path separator). By default: Lightwork's own folders, the folder of its
+config file, the home folder of the account it runs as, and on Linux and macOS
+`/etc`, `/run/secrets`, `/var/lib`, `/srv` and `/opt`.

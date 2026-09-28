@@ -26,6 +26,8 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 CHECK = API + "/test"
 ROWS = [catalog.BY_ID[s.id] for s in access.entries(catalog.S, catalog.C, catalog.Column)]
+# The server access token has its own test: these tests sign in with it.
+EDITABLE = [s for s in ROWS if s.id != "dashboard.token"]
 _KEY = "11" * 32
 _TOKEN = "server-access-token-for-tests-only-000000"  # pragma: allowlist secret
 _SECRET = "correct-horse-battery-staple-long-enough-0001"  # pragma: allowlist secret
@@ -132,6 +134,7 @@ _TEXT = {
     "license.api_url": "https://license.example.com/v1/license",
     "external_agents.approval_webhook": "https://hooks.example.com/approvals",
     "a2a.base_url": "https://agents.example.com",
+    "federation.origin": "east-1",
 }
 _LIST = {
     "auth.proxy.trusted_proxies": ["10.0.0.5", "10.1.0.0/16"],
@@ -147,6 +150,7 @@ _SECRETS = {
     "queue.redis_dsn": "rediss://:pw@queue.example.com:6380/0",  # pragma: allowlist secret
     "world_model.dsn": "postgres://lw:pw@db.example.com:5432/lightwork",  # pragma: allowlist secret
 }
+_THEME = {"bg": "#101020", "panel": "#181830", "text": "#e0e0f0", "accent": "#7aa2f7"}
 _NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200}
 # Rows whose kernel reader refuses them alone: saved together with these.
 _WITH = {
@@ -189,6 +193,12 @@ def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
         return [{"name": "acme", "allow": ["api.example.com"], "deny": ["*.bad.example"]}]
     if setting.id == "federation.peers":
         return [{"name": "west-1", "target": "west.example.com:50052", "token": _SECRET}]
+    if setting.id == "federation.channel_peers":
+        return [{"origin": "west-1", "pubkey": "ab" * 32, "secret": _SECRET}]
+    if setting.id == "federation.marketplace_peers":
+        return [{"origin": "west-1", "pubkey": "ab" * 32}]
+    if setting.id == "dashboard.themes":
+        return [dict(_THEME, name="midnight")]
     columns = setting.columns
     first = next(v for v in [c for c, _ in page._resolved(setting).columns[0].choices] if v)
     return [{"name": choices[0], columns[0].key: first}]
@@ -199,11 +209,13 @@ def _expected(setting, value):
         return value
     if setting.control == "number" and setting.scale != 1.0:
         return int(value * setting.scale)
+    if setting.id == "dashboard.themes":
+        return {"midnight": {k: v for k, v in _THEME.items()}}
     if setting.control == "table" and setting.id == "tenancy.egress":
         return {"acme": {"allow": ["api.example.com"], "deny": ["*.bad.example"]}}
     if setting.control == "table":
         return {value[0]["name"]: value[0][setting.columns[0].key]}
-    if setting.id == "federation.peers":
+    if setting.id in {"federation.peers", "federation.channel_peers"}:
         return value  # the kernel reads the passwords unsealed
     return value
 
@@ -220,7 +232,7 @@ def workspaces(monkeypatch):
 
 
 # ------------------------------------------------------------ round trip
-@pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
+@pytest.mark.parametrize("setting", EDITABLE, ids=lambda s: s.id)
 def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeypatch, as_token,
                                                       workspaces, audit_rows):
     monkeypatch.setattr(guard, "_prerequisites", lambda changed, values: None)
@@ -270,7 +282,7 @@ def _invalid(setting, tmp_path):  # noqa: C901 - one branch per control
     return [{"name": "no-such-row"}]
 
 
-@pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
+@pytest.mark.parametrize("setting", EDITABLE, ids=lambda s: s.id)
 def test_every_access_row_refuses_invalid_values(setting, tmp_path, as_token, workspaces,
                                                  audit_rows):
     r = _save([{"id": setting.id, "value": _invalid(setting, tmp_path)}], confirm=True)
@@ -533,6 +545,9 @@ def test_turning_on_invitations_or_the_proxy_from_an_unsigned_session_is_refused
 def test_enterprise_protections_from_an_unsigned_session_are_refused(audit_rows):
     r = _save([{"id": "enterprise.mode", "value": True}], confirm=True)
     assert r.status_code == 409 and r.json()["lockout"] is True
+    r = _save([{"id": "profile.name", "value": "enterprise"}], confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert "profile" not in _loaded()
     assert "enterprise" not in _loaded()
 
 
@@ -840,3 +855,94 @@ def test_linked_server_passwords_are_sealed_kept_and_never_shown(as_token, audit
     r = _save([{"id": "federation.peers", "value": [moved, dict(fresh, token="short")]}],
               confirm=True)
     assert r.status_code == 400
+
+
+def test_the_server_access_token_can_be_set_here_and_is_checked(monkeypatch, audit_rows):
+    from maverick import config
+    from maverick_dashboard import _shared, settings_store
+
+    # Nobody can sign in yet: setting a token would lock this browser out.
+    r = _save([{"id": "dashboard.token", "value": _TOKEN}], confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert _shared.dashboard_token() == ""
+    # Set by a deployment tool (as a break-glass holder would), it works.
+    settings_store.set_catalog_values({("dashboard", "token"): _TOKEN})
+    raw = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert _TOKEN not in raw
+    assert _shared.dashboard_token() == _TOKEN
+    assert client.get(API).status_code == 401
+    bearer = {"Authorization": "Bearer " + _TOKEN}
+    assert client.get(API, headers=bearer).status_code == 200
+    assert _row_with(bearer, "dashboard.token")["is_set"] is True
+    # Removing it with only the token to get back in would lock you out.
+    r = client.post(API, json={"changes": [{"id": "dashboard.token", "reset": True}],
+                               "confirm": True}, headers=bearer)
+    assert r.status_code == 409 and "no other working way back in" in r.json()["message"]
+    r = client.post(API, json={"changes": [{"id": "dashboard.token", "value": "short"}],
+                               "confirm": True}, headers=bearer)
+    assert r.status_code == 400 and r.json()["message"].startswith("Server access token")
+    # The environment still wins.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "other-token-from-the-environment-0000")
+    assert _shared.dashboard_token() == "other-token-from-the-environment-0000"
+    assert client.get(API, headers=bearer).status_code == 401
+
+
+def _row_with(headers, setting_id):
+    for group in client.get(API, headers=headers).json()["groups"]:
+        for row in group["settings"]:
+            if row["id"] == setting_id:
+                return row
+    raise AssertionError(setting_id)
+
+
+def test_linked_server_names_keys_and_install_record_reach_their_readers(as_token,
+                                                                          audit_rows):
+    from maverick import config, federation_envelope
+
+    peer = {"origin": "west-1", "pubkey": "AB" * 32, "secret": _SECRET}
+    r = _save([{"id": "federation.origin", "value": "east-1"},
+               {"id": "federation.channel_peers", "value": [peer]},
+               {"id": "federation.marketplace_peers",
+                "value": [{"origin": "west-1", "pubkey": "cd" * 32}]},
+               {"id": "deployment.type", "value": "vps"}], confirm=True)
+    assert r.status_code == 200, r.text
+    assert federation_envelope.local_origin() == "east-1"
+    channel = federation_envelope.peer_allowlist("channel_peers")
+    assert channel["west-1"]["secret"] == _SECRET and channel["west-1"]["pubkey"] == "ab" * 32
+    assert federation_envelope.peer_allowlist("marketplace_peers")["west-1"]["pubkey"] == "cd" * 32
+    assert federation_envelope.peer_allowlist("somewhere_else") == {}
+    assert config.get_deployment()["type"] == "vps"
+    from maverick import profile
+
+    assert _save([{"id": "profile.name", "value": "enterprise"}]).status_code == 200
+    assert profile.active_profile() == "enterprise"
+    assert _SECRET not in config.dashboard_overrides_path().read_text(encoding="utf-8")
+
+
+def test_the_oversight_report_sees_delegation_rules_set_on_the_page():
+    from maverick import ai_act_package, config
+
+    assert ai_act_package._oversight()["approval_delegation_configured"] is False
+    config.config_path().parent.mkdir(parents=True, exist_ok=True)
+    config.config_path().write_text(
+        '[approval]\ndelegation = [{ delegate_to = "user:ada", tool_glob = "*" }]\n',
+        encoding="utf-8")
+    config.reset_config_cache()
+    assert ai_act_package._oversight()["approval_delegation_configured"] is True
+
+
+def test_colour_themes_are_made_on_the_page_and_offered_to_everyone(as_token, audit_rows):
+    from maverick_dashboard import themes
+
+    theme = dict(_THEME, name="midnight", warn="#FFAA00", danger="")
+    r = _save([{"id": "dashboard.themes", "value": [theme]}], confirm=True)
+    assert r.status_code == 200, r.text
+    assert themes.custom_themes() == {"midnight": dict(_THEME, warn="#ffaa00")}
+    assert "body.theme-midnight" in themes.theme_css(themes.custom_themes())
+    assert "midnight" in [c["value"] for c in _row("dashboard.theme")["choices"]]
+    assert _save([{"id": "dashboard.theme", "value": "midnight"}]).status_code == 200
+    for bad in (dict(theme, name="dark"), dict(theme, name="Bad Name"),
+                dict(theme, bg="red"), {k: v for k, v in theme.items() if k != "text"}):
+        r = _save([{"id": "dashboard.themes", "value": [bad]}], confirm=True)
+        assert r.status_code == 400, bad
+        assert r.json()["message"].startswith("Your own colour themes")

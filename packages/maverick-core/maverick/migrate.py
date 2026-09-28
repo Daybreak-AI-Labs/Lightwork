@@ -61,6 +61,9 @@ KNOWN_SECTIONS = frozenset({
     "paper_review",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
+    # [profile] name: the deployment profile (standard / enterprise), read by
+    # profile.py and enterprise.py.
+    "profile",
     "privacy_automation", "privacy_ops", "provider_failover", "providers", "queue", "quotas",
     "spending_limits",
     "rate_limits", "reflexion",

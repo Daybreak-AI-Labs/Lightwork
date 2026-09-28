@@ -27,7 +27,7 @@ Deliberately NOT in the catalog:
   behind the lock-out guard in ``settings_access_guard``: a change that would
   lock the person saving (or saved records) out is refused until its check
   passes. Still deployment-only by design: ``[client] id`` (it also places the
-  encryption key), the server's access token, ``[providers] per_tenant_keys``,
+  encryption key), ``[providers] per_tenant_keys``,
   the sandbox ``workdir``, the Stripe and Pushover credentials (read only from
   the server's environment), ``[deployment] type`` (installer provenance), and
   the settings that name an environment variable (``*_token_env``,
@@ -115,7 +115,8 @@ CONTROLS = frozenset({
 PATH_KINDS = frozenset({"file", "folder"})
 
 COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words", "text",
-                          "secret"})
+                          "secret", "color"})
+_COLOR = r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})"
 
 
 @dataclass(frozen=True)
@@ -125,9 +126,12 @@ class Column:
     ``select`` is a short fixed list, ``pick`` one choice from a long list the
     page can search, ``picks`` several such choices in order, ``number`` a
     bounded number, ``switch`` on or off, ``words`` short references
-    separated by commas, ``text`` one short value, and ``secret`` a password
+    separated by commas, ``text`` one short value, ``secret`` a password
     for the row: sealed when saved, never shown again, and kept as it is when
-    left empty (``rules`` rows are matched by their ``unique`` column).
+    left empty (``rules`` rows are matched by their ``unique`` column), and
+    ``color`` a colour chosen with a colour picker (optional ones may be left
+    out). A ``table`` with row kind ``named`` has rows the person names
+    (``pattern`` checks the name; ``fixed_keys`` are names it may not use).
     """
 
     key: str
@@ -2521,6 +2525,14 @@ def _coerce_table(setting: Setting, value: object) -> dict:  # noqa: C901 - one 
             if name not in allowed:
                 raise SettingError(f"{label}: choose each {setting.item_label.lower()} from the list.")
             out[name] = _grid_spec(setting, row)
+        elif setting.row_kind == "named":
+            if setting.pattern and not re.fullmatch(setting.pattern, name):
+                raise SettingError(f"{label}: each name must be {setting.item_error}.")
+            if name in setting.fixed_keys:
+                raise SettingError(f"{label}: “{name}” is already taken. Choose another name.")
+            spec = _grid_spec(setting, row)
+            # An optional column left empty is left out, never stored empty.
+            out[name] = {k: v for k, v in spec.items() if v not in ("", None)}
         elif setting.row_kind == "risk":
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name) or "__" in name:
                 raise SettingError(
@@ -2584,6 +2596,13 @@ def _coerce_cell(setting: Setting, column: Column, value: object) -> object:  # 
                 raise SettingError(f"{where}: enter a whole number.")
             return int(value)
         return float(value)
+    if kind == "color":
+        text = "" if value is None else value
+        if not isinstance(text, str) or (text and not re.fullmatch(_COLOR, text.strip())):
+            raise SettingError(f"{where}: choose a colour.")
+        if column.required and not text.strip():
+            raise SettingError(f"{where}: choose a colour for each row.")
+        return text.strip().lower()
     if kind in {"text", "secret"}:
         if value is None:
             value = ""
@@ -2836,6 +2855,8 @@ def _table_loosens(setting: Setting, old: object, new: object) -> bool:
     after = new if isinstance(new, dict) else {}
     if setting.row_kind == "grid":
         return _grid_loosens(setting, before, after)
+    if setting.row_kind == "named":
+        return False if setting.weaker is None else before != after
     if setting.row_kind == "rate":
         for name, spec in before.items():
             if name not in after:
@@ -2928,7 +2949,7 @@ def display_value(setting: Setting, value: object) -> str:
     if setting.control == "keys" and isinstance(value, list):
         return f"{len(value)} trusted key" + ("" if len(value) == 1 else "s")
     if setting.control == "table" and isinstance(value, dict):
-        if setting.row_kind == "grid":
+        if setting.row_kind in {"grid", "named"}:
             return _count(len(value), setting.item_label.lower()) if value else "None"
         noun = "limit" if setting.row_kind == "rate" else "tool"
         return f"{len(value)} {noun}" + ("" if len(value) == 1 else "s") if value else "None"
@@ -2963,8 +2984,8 @@ def _assert_consistent() -> None:
         if s.warning:
             assert s.weaker is not None, s.id
         if s.control == "table":
-            assert s.row_kind in {"rate", "risk", "grid"}, s.id
-        if s.row_kind == "grid" or s.control == "rules":
+            assert s.row_kind in {"rate", "risk", "grid", "named"}, s.id
+        if s.row_kind in {"grid", "named"} or s.control == "rules":
             assert s.columns and all(c.kind in COLUMN_KINDS for c in s.columns), s.id
             assert not s.scalar or len(s.columns) == 1, s.id
             for c in s.columns:

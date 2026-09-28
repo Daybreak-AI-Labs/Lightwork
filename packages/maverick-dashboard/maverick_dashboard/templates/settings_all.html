@@ -41,9 +41,8 @@
     <summary>What can't be changed here</summary>
     <p class="muted">
       A setting marked &ldquo;Set by your server's deployment settings&rdquo; is fixed by whoever
-      runs your server, so it can only be changed there. So are the server's own access token,
-      the main encryption key, and the folder Lightwork keeps its files in: they protect or start
-      Lightwork itself.
+      runs your server, so it can only be changed there. So are the main encryption key and the
+      folder Lightwork keeps its files in: they protect or start Lightwork itself.
     </p>
     <p class="muted">
       Sign-in, administrator and key settings are checked before they are saved. A change that
@@ -199,7 +198,7 @@
               </details>
             </div>
           {% elif s.grid %}
-            {% set grid_rows = s.grid.kind == 'grid' %}
+            {% set grid_rows = s.grid.kind in ['grid', 'named'] %}
             <div class="settings-all-grid" data-grid data-grid-state='{{ s.grid | tojson }}'>
               <table class="settings-all-rows" aria-labelledby="{{ cid }}-label">
                 <thead><tr>
@@ -210,9 +209,15 @@
                 <tbody data-grid-body></tbody>
               </table>
               <p class="muted" data-grid-empty>{{ s.empty_text }}</p>
-              {% if s.grid.key_choices or not grid_rows %}
+              {% if s.grid.key_choices or not grid_rows or s.grid.kind == 'named' %}
               <div class="settings-all-table-add">
-                {% if grid_rows %}
+                {% if s.grid.kind == 'named' %}
+                <label class="settings-all-field" for="{{ cid }}">New {{ s.grid.row_label | lower }}
+                  <input class="input" type="text" id="{{ cid }}" data-grid-newname maxlength="64"
+                         autocomplete="off" aria-describedby="{{ cid }}-help">
+                </label>
+                <button class="btn btn--ghost" type="button" data-grid-add>{{ s.add_label }}</button>
+                {% elif grid_rows %}
                 <label class="settings-all-field" for="{{ cid }}">{{ s.grid.row_label }}
                   <select class="select" id="{{ cid }}" data-grid-newkey aria-describedby="{{ cid }}-help">
                     <option value="">Choose one</option>
