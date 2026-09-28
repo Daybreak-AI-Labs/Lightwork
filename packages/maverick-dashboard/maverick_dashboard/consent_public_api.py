@@ -1814,15 +1814,21 @@ class PublicConsentRateLimiter:
         *,
         requests_per_minute: int = 120,
         clock: Callable[[], float] = time.monotonic,
+        limit_source: Callable[[], int | None] | None = None,
     ) -> None:
         if not 1 <= requests_per_minute <= 100_000:
             raise ValueError("requests_per_minute is invalid")
         self.requests_per_minute = requests_per_minute
+        # The installation's limit when one is set, read on every request.
+        self._limit_source = limit_source
         self._clock = clock
         self._buckets: dict[tuple[str, str], deque[float]] = {}
         self._lock = threading.Lock()
 
     def __call__(self, credential_sha256: str, action: str) -> None:
+        limit = self.requests_per_minute
+        if self._limit_source is not None:
+            limit = self._limit_source() or limit
         now = self._clock()
         key = (credential_sha256, action)
         with self._lock:
@@ -1837,7 +1843,7 @@ class PublicConsentRateLimiter:
             values = self._buckets.setdefault(key, deque())
             while values and now - values[0] >= _RATE_WINDOW_SECONDS:
                 values.popleft()
-            if len(values) >= self.requests_per_minute:
+            if len(values) >= limit:
                 raise PublicConsentRateLimitExceeded("rate limit reached")
             values.append(now)
 
@@ -2014,7 +2020,7 @@ def default_public_consent_dependencies() -> PublicConsentDependencies:
             tenant=None,
         )
     )
-    limiter = PublicConsentRateLimiter()
+    limiter = PublicConsentRateLimiter(limit_source=configured_requests_per_minute)
     return PublicConsentDependencies(
         credential_store=registry,
         publishing_store_for=lambda tenant: ConsentPublishingStore(
@@ -2236,12 +2242,13 @@ async def _cache_limited_body(request: Request) -> None:
             raise HTTPException(status_code=400, detail="invalid Content-Length") from None
         if declared < 0:
             raise HTTPException(status_code=400, detail="invalid Content-Length")
-        if declared > _MAX_REQUEST_BYTES:
-            raise HTTPException(status_code=413, detail="request body too large")
+    limit = _request_byte_limit()
+    if declared_value and declared > limit:
+        raise HTTPException(status_code=413, detail="request body too large")
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > _MAX_REQUEST_BYTES:
+        if len(body) > limit:
             raise HTTPException(status_code=413, detail="request body too large")
     request._body = bytes(body)  # noqa: SLF001 - bounded cache for Pydantic parsing
 
@@ -2310,9 +2317,77 @@ def _set_private_response_headers(
             response.headers["Vary"] = "Origin"
 
 
+def _public_api_settings() -> Mapping[str, Any]:
+    """``[consent_preferences.public_api]`` (Settings > All settings), or {}."""
+    try:
+        from maverick.config import load_config
+
+        consent = (load_config() or {}).get("consent_preferences")
+    except Exception:  # an unreadable config keeps the built-in limits
+        return {}
+    section = consent.get("public_api") if isinstance(consent, Mapping) else None
+    return section if isinstance(section, Mapping) else {}
+
+
+def _configured_int(section: Mapping[str, Any], key: str, lower: int, upper: int,
+                    default: int) -> int:
+    value = section.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+        return default
+    return value
+
+
+def configured_request_byte_limit() -> int | None:
+    """The installation's largest public request body, or None when unset."""
+    value = _public_api_settings().get("max_request_bytes")
+    if isinstance(value, bool) or not isinstance(value, int) or not 1_024 <= value <= 1_048_576:
+        return None
+    return value
+
+
+def _request_byte_limit() -> int:
+    """Largest public request body: the installation's, else 64 KiB."""
+    return configured_request_byte_limit() or _MAX_REQUEST_BYTES
+
+
+def _response_byte_limit() -> int:
+    """Largest public response: the installation's, else 256 KiB."""
+    return _configured_int(_public_api_settings(), "max_response_bytes", 1_024, 4_194_304,
+                           _MAX_RESPONSE_BYTES)
+
+
+def configured_requests_per_minute() -> int | None:
+    """Requests per minute for each public client, or None for the built-in 120."""
+    value = _public_api_settings().get("requests_per_minute")
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10_000:
+        return None
+    return value
+
+
+def _sdk_cache_control() -> str:
+    """How long the consent script may be cached (``[consent_preferences.edge_cache]``).
+
+    Only the static consent script is ever cached: configuration, preference
+    and personal answers stay ``no-store``. Without the edge cache on, the
+    historical five-minute browser cache applies.
+    """
+    try:
+        from maverick.config import load_config
+
+        consent = (load_config() or {}).get("consent_preferences")
+    except Exception:
+        consent = None
+    section = consent.get("edge_cache") if isinstance(consent, Mapping) else None
+    if not isinstance(section, Mapping) or section.get("enable") is not True:
+        return "public, max-age=300"
+    max_age = _configured_int(section, "max_age_seconds", 0, 86_400, 300)
+    stale = _configured_int(section, "stale_if_error_seconds", 0, 604_800, 0)
+    return f"public, max-age={max_age}" + (f", stale-if-error={stale}" if stale else "")
+
+
 def _bounded_response(payload: Mapping[str, Any]) -> dict[str, Any]:
     try:
-        _canonical(payload, maximum=_MAX_RESPONSE_BYTES)
+        _canonical(payload, maximum=_response_byte_limit())
     except PublicConsentValidationError as exc:
         raise HTTPException(
             status_code=503,
@@ -2497,7 +2572,7 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             path,
             media_type="text/javascript; charset=utf-8",
             headers={
-                "Cache-Control": "public, max-age=300",
+                "Cache-Control": _sdk_cache_control(),
                 "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
             },

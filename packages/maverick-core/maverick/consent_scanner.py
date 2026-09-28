@@ -240,6 +240,59 @@ class ScanLimits:
         )
 
 
+_LIMIT_BOUNDS = {
+    "max_pages": (1, 10_000),
+    "max_depth": (0, 20),
+    "page_timeout_seconds": (1, 300),
+    "max_network_events": (1, 100_000),
+}
+
+
+def scan_limit_settings(config: Mapping[str, Any] | None = None) -> dict[str, int]:
+    """The installation's scan limits from ``[consent_preferences.scanner]``.
+
+    Each of ``max_pages``, ``max_depth``, ``page_timeout_seconds`` and
+    ``max_network_events`` is both the default for a new scan and a cap no
+    scan may exceed. ``interval_seconds`` is the shortest time between
+    scheduled scans (and the default for a schedule that names none). Only
+    keys that are set are returned; unset keeps each scan's own value.
+    """
+    if config is None:
+        from .config import load_config
+
+        config = load_config() or {}
+    consent = config.get("consent_preferences") if isinstance(config, Mapping) else None
+    section = consent.get("scanner") if isinstance(consent, Mapping) else None
+    section = section if isinstance(section, Mapping) else {}
+    bounds = {**_LIMIT_BOUNDS, "interval_seconds": (300, 2_592_000)}
+    selected: dict[str, int] = {}
+    for key, (lower, upper) in bounds.items():
+        if key in section:
+            try:
+                selected[key] = _positive_int(section[key], f"scanner {key}", lower, upper)
+            except ConsentScannerValidationError as exc:
+                raise ConsentScannerConfigError(str(exc)) from exc
+    return selected
+
+
+def default_scan_limits(settings: Mapping[str, int] | None = None) -> ScanLimits:
+    """Scan limits for a scan that names none: the installation's, else built-in."""
+    chosen = scan_limit_settings() if settings is None else settings
+    return ScanLimits(**{k: v for k, v in chosen.items() if k in _LIMIT_BOUNDS})
+
+
+def capped_scan_limits(
+    limits: ScanLimits, settings: Mapping[str, int] | None = None
+) -> ScanLimits:
+    """``limits`` lowered to the installation's caps (never raised)."""
+    chosen = scan_limit_settings() if settings is None else settings
+    values = asdict(limits.validated())
+    for key in _LIMIT_BOUNDS:
+        if key in chosen:
+            values[key] = min(values[key], chosen[key])
+    return ScanLimits(**values)
+
+
 @dataclass(frozen=True)
 class NetworkMetadata:
     url: str
@@ -1017,7 +1070,7 @@ class ConsentScanner:
         if not 1 <= len(start_urls) <= _MAX_START_URLS:
             raise ConsentScannerValidationError("start_urls count is invalid")
         seeds = tuple(_navigation_url(value, origins) for value in start_urls)
-        scan_limits = (limits or ScanLimits()).validated()
+        scan_limits = capped_scan_limits(limits or default_scan_limits())
         if auth_secret_ref is not None:
             _ref(auth_secret_ref, "auth_secret_ref")
             if authenticated_scan_consent is not True:
@@ -1152,6 +1205,9 @@ __all__ = [
     "SCAN_REPORT_SCHEMA",
     "ScanFinding",
     "ScanLimits",
+    "capped_scan_limits",
+    "default_scan_limits",
+    "scan_limit_settings",
     "ScanReport",
     "enabled",
     "require_enabled",

@@ -231,6 +231,52 @@ def _digest(value: object, label: str) -> str:
     return value
 
 
+_LIMIT_BOUNDS = {
+    "max_assets": (1, 1_000_000),
+    "max_fields": (1, 10_000_000),
+    "max_lineage_edges": (1, 20_000_000),
+    "max_context_age_seconds": (60, 31_536_000),
+}
+_CAPPED_RECORDS = {"asset": "max_assets", "field": "max_fields", "lineage": "max_lineage_edges"}
+
+
+def data_use_limits(config: Mapping[str, Any] | None = None) -> dict[str, int]:
+    """``[data_use_governance.limits]`` values that are set.
+
+    ``max_assets``, ``max_fields`` and ``max_lineage_edges`` cap how many of
+    each a workspace may register; ``max_context_age_seconds`` is the oldest a
+    decision context may be (it is stale after that even if declared fresher).
+    Unset keeps the historical behaviour: no workspace caps, and contexts stay
+    fresh until the time their source declared.
+    """
+    if config is None:
+        from .config import load_config
+
+        config = load_config() or {}
+    root = config.get("data_use_governance") if isinstance(config, Mapping) else None
+    section = root.get("limits") if isinstance(root, Mapping) else None
+    section = section if isinstance(section, Mapping) else {}
+    selected: dict[str, int] = {}
+    for key, (lower, upper) in _LIMIT_BOUNDS.items():
+        if key not in section:
+            continue
+        value = section[key]
+        if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+            raise DataUseValidationError(
+                f"data-use limit {key} must be between {lower} and {upper}"
+            )
+        selected[key] = value
+    return selected
+
+
+def context_expires_at(context: Mapping[str, Any], max_age: int | None) -> float:
+    """When a context stops counting: its declared end or its age limit."""
+    fresh_until = float(context["fresh_until"])
+    if max_age is None:
+        return fresh_until
+    return min(fresh_until, float(context["observed_at"]) + max_age)
+
+
 def _timestamp(value: object, label: str) -> float:
     if (
         isinstance(value, bool)
@@ -757,6 +803,18 @@ class DataUseGovernanceStore:
         material = dict(body)
         if material.get("tenant_id") != tenant or material.get("record_id") != record_id:
             raise DataUseValidationError("record body identity does not match")
+        limit_key = _CAPPED_RECORDS.get(record_type)
+        cap = data_use_limits().get(limit_key) if limit_key else None
+        if cap is not None:
+            (count,) = conn.execute(
+                "SELECT COUNT(*) FROM data_use_records WHERE tenant_id = ? AND record_type = ?",
+                (tenant, record_type),
+            ).fetchone()
+            if count >= cap:
+                raise DataUseValidationError(
+                    f"this workspace already has the most {record_type} records "
+                    "this installation allows"
+                )
         revision = 1
         digest = _sha256(
             _record_material(tenant, record_type, record_id, revision, material, now, now)
@@ -1195,6 +1253,11 @@ class DataUseGovernanceStore:
                 raise DataUseValidationError("observed_at cannot be in the future")
             if fresh <= now:
                 raise DataUseStaleAuthority("context authority is already stale")
+            max_age = data_use_limits().get("max_context_age_seconds")
+            if max_age is not None and fresh - observed > max_age:
+                raise DataUseValidationError(
+                    "context freshness is longer than this installation allows"
+                )
             self._get_on(conn, tenant, "asset", asset)
             semantic = {
                 "schema": CONTEXT_SCHEMA,
@@ -2170,6 +2233,7 @@ class DataUseGovernanceStore:
         contexts: list[dict[str, Any]] = []
         missing: list[str] = []
         stale: list[str] = []
+        max_age = data_use_limits().get("max_context_age_seconds")
         for kind in CONTEXT_KINDS:
             record_id = self._context_record_id(asset_id, kind)
             context = self._get_on(conn, tenant, "context", record_id, required=False)
@@ -2177,7 +2241,7 @@ class DataUseGovernanceStore:
                 missing.append(kind)
             else:
                 contexts.append(context)
-                if float(context["fresh_until"]) <= now:
+                if context_expires_at(context, max_age) <= now:
                     stale.append(kind)
         reasons: list[str] = []
         if missing:
@@ -2457,8 +2521,9 @@ class DataUseGovernanceStore:
                 now=now,
             )
             complete_contexts = len(authority["contexts"]) == len(CONTEXT_KINDS)
+            max_age = data_use_limits().get("max_context_age_seconds")
             expires_at = (
-                min(float(item["fresh_until"]) for item in authority["contexts"])
+                min(context_expires_at(item, max_age) for item in authority["contexts"])
                 if complete_contexts
                 else now
             )

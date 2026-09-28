@@ -533,3 +533,42 @@ def test_freshness_expiry_rejects_previously_valid_compilation(
     expired = DataUsePolicyCompiler(store, clock=clock)
     with pytest.raises(DataUseCompilationStale):
         expired.compile(TENANT, str(decision["decision_id"]))
+
+
+def _compiler_settings(monkeypatch: pytest.MonkeyPatch, **values: int) -> None:
+    from maverick import config
+
+    monkeypatch.setattr(
+        config, "load_config", lambda *a, **k: {"data_use_governance": {"compiler": values}}
+    )
+
+
+def test_installation_caps_compiled_operations(
+    authority: tuple[DataUseGovernanceStore, Clock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _clock = authority
+    decision, compiler = _compiled_decision(store)
+    _compiler_settings(monkeypatch, max_operations=1)
+    with pytest.raises(DataUseCompilationValidationError, match="more operations"):
+        compiler.compile(TENANT, str(decision["decision_id"]))
+    _compiler_settings(monkeypatch, max_operations=10)
+    assert compiler.compile(TENANT, str(decision["decision_id"]))
+
+
+def test_installation_row_filter_bound_can_only_lower_the_built_in_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick.data_use_policy_compiler import compiler_limits
+
+    ast = {"op": "and", "args": [
+        {"op": "eq", "field": "region", "value": "US"},
+        {"op": "eq", "field": "region", "value": "CA"},
+    ]}
+    assert normalize_row_filter_ast(ast, {"region": "string"})
+    _compiler_settings(monkeypatch, max_row_filter_nodes=2)
+    with pytest.raises(DataUseUnsafeFilter):
+        normalize_row_filter_ast(ast, {"region": "string"})
+    _compiler_settings(monkeypatch, max_row_filter_nodes=257)
+    with pytest.raises(DataUseCompilationValidationError):
+        compiler_limits()

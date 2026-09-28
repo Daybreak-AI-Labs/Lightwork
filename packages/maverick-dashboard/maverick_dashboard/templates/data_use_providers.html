@@ -293,10 +293,31 @@
         ? "Apply the decision for “" + CW.human(row.decision.request_id) + "” to " + tableName(row.binding) + " in " + service + " now? Access settings in your database change straight away."
         : "Undo on " + tableName(row.binding) + " in " + service + "? The table is set to blocked for this decision. Earlier settings made outside Lightwork are not restored.";
       if (!(await CW.confirm(message, operation === "apply" ? "Apply now" : "Undo and block"))) return;
+      // With four-eyes on, the first try asks a second person on the Approvals
+      // page; the next try sends that approval with the same reference.
+      var key = [row.binding.provider_id, row.binding.binding_id, row.decision.decision_id, row.decision.decision_sha256, operation].join("|");
+      var pending = pendingApproval(key);
+      var payload = {expected_decision_sha256: row.decision.decision_sha256, idempotency_key: pending ? pending.reference : CW.reference()};
+      if (pending) payload.approval_id = pending.approval_id;
       try {
-        await call("/providers/" + row.binding.provider_id + "/bindings/" + encodeURIComponent(row.binding.binding_id) + "/decisions/" + encodeURIComponent(row.decision.decision_id) + "/" + operation, {method: "POST", json: {expected_decision_sha256: row.decision.decision_sha256, idempotency_key: CW.reference()}});
+        var result = await call("/providers/" + row.binding.provider_id + "/bindings/" + encodeURIComponent(row.binding.binding_id) + "/decisions/" + encodeURIComponent(row.decision.decision_id) + "/" + operation, {method: "POST", json: payload});
+        if (result && result.approval_id && (result.state === "approval_required" || result.state === "approval_pending")) {
+          rememberApproval(key, {approval_id: result.approval_id, reference: payload.idempotency_key});
+          say("A second person must approve this on the Approvals page. When they have, choose " + (operation === "apply" ? "Apply" : "Undo") + " again.");
+          return;
+        }
+        rememberApproval(key, null);
         say(operation === "apply" ? "Applied in " + service + "." : "Undone. The table is blocked for this decision.");
-      } catch (error) { fail(error, operation === "apply" ? "apply the decision" : "undo the decision"); }
+      } catch (error) {
+        if (pending && (error.status === 403 || error.status === 404 || error.status === 409)) rememberApproval(key, null);
+        fail(error, operation === "apply" ? "apply the decision" : "undo the decision");
+      }
+    }
+    var APPROVALS_KEY = "lightwork-data-use-second-approvals";
+    function approvals() { try { return JSON.parse(window.localStorage.getItem(APPROVALS_KEY) || "{}") || {}; } catch (_error) { return {}; } }
+    function pendingApproval(key) { var item = approvals()[key]; return item && item.approval_id && item.reference ? item : null; }
+    function rememberApproval(key, value) {
+      try { var all = approvals(); if (value) all[key] = value; else delete all[key]; window.localStorage.setItem(APPROVALS_KEY, JSON.stringify(all)); } catch (_error) { /* per-browser convenience only */ }
     }
     $("dup-refresh").addEventListener("click", load);
     load();

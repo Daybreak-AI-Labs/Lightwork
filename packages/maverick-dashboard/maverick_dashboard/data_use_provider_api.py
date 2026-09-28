@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi import Path as ApiPath
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -60,6 +61,102 @@ class RevokeBindingIn(_StrictModel):
 class ApplyDecisionIn(_StrictModel):
     expected_decision_sha256: str = Field(..., pattern=_DIGEST)
     idempotency_key: str = Field(..., pattern=_IDEMPOTENCY)
+    # With [data_use_governance.enforcement] require_four_eyes, the approval a
+    # second person granted for this exact change on the Approvals page.
+    approval_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
+
+
+_FOUR_EYES_PROVENANCE = "data_use.provider_write.four_eyes.v1"
+
+
+def _four_eyes_required(config: Mapping[str, Any]) -> bool:
+    root = config.get("data_use_governance") if isinstance(config, Mapping) else None
+    enforcement = root.get("enforcement") if isinstance(root, Mapping) else None
+    return isinstance(enforcement, Mapping) and enforcement.get("require_four_eyes") is True
+
+
+def _four_eyes_request(**values: str) -> dict[str, Any]:
+    return {"target": {k: values[k] for k in ("provider_id", "binding_id", "decision_id")},
+            "parameters": {k: values[k] for k in ("operation", "expected_decision_sha256",
+                                                  "idempotency_sha256")}}
+
+
+def _four_eyes_gate(request: Request, body: ApplyDecisionIn, **values: str) -> dict | None:
+    """Require a second, different person's approval for this exact write.
+
+    Returns ``None`` when an approval from someone other than the requester
+    covers exactly this operation; otherwise queues one on the Approvals page
+    (or reports its state) and returns the response to send instead.
+    """
+    from maverick.approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+        digest,
+        encode_operation_approval_detail,
+        require_current_approval_card,
+    )
+
+    from . import auth
+    from ._shared import _world
+
+    requester = auth.caller_principal(request)
+    wanted = _four_eyes_request(**values)
+    action = f"data_use.provider_{values['operation']}"
+    if body.approval_id is None:
+        if not requester:
+            raise HTTPException(
+                status_code=403,
+                detail="A second person must approve this change, so people must sign in "
+                       "to Lightwork first.",
+            )
+        detail = encode_operation_approval_detail(
+            action=action,
+            summary=f"{values['operation'].capitalize()} a data rule in "
+                    f"{values['provider_id'].capitalize()}",
+            target_label=f"{values['provider_id'].capitalize()} connection "
+                         f"{values['binding_id']}"[:500],
+            target=wanted["target"],
+            parameters=wanted["parameters"],
+            parameter_summary=[f"Decision {values['decision_id']}"],
+            actor=requester,
+            role="data_use_admin",
+            known_effects=["Changes access controls in the connected data platform."],
+            unresolved_assumptions=["The platform is checked again when the change runs."],
+            before="The data platform keeps its current access controls.",
+            after="The approved change may be sent to the data platform once.",
+            irreversible=False,
+            ttl_seconds=24 * 3600,
+        )
+        approval_id = int(_world().create_approval(
+            action, risk="high", scope=values["binding_id"], detail=detail,
+            provenance=_FOUR_EYES_PROVENANCE, requested_by=requester,
+        ))
+        return {"state": "approval_required", "approval_id": approval_id,
+                "message": "A second person must approve this change on the Approvals page."}
+    row = _world().get_approval(int(body.approval_id))
+    if row is None or row.action != action or row.provenance != _FOUR_EYES_PROVENANCE:
+        raise HTTPException(status_code=404, detail="That approval does not exist.")
+    if row.status == "pending":
+        return {"state": "approval_pending", "approval_id": row.id,
+                "message": "The change is still waiting for a second person to approve it."}
+    if row.status != "approved":
+        raise HTTPException(status_code=403, detail="The second person did not approve this change.")
+    try:
+        card = decode_approval_detail(row.detail)
+        if (
+            card is None
+            or card["target"]["sha256"] != digest(wanted["target"])
+            or card["parameters"]["sha256"] != digest(wanted["parameters"])
+        ):
+            raise ApprovalCardError("approval covers a different change")
+        require_current_approval_card(card)
+    except (ApprovalCardError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=409, detail="That approval does not cover this exact "
+                            "change or has expired; ask for a new one.") from exc
+    if not row.requested_by or not row.decided_by or row.decided_by == row.requested_by:
+        raise HTTPException(status_code=403, detail="The approval must come from a different "
+                            "person than the one who asked for the change.")
+    return None
 
 
 def _tenant_id() -> str:
@@ -559,17 +656,26 @@ async def _execute_decision(
         binding_id=binding_id,
         store=store,
     )
-    control_ir = await _compile(
-        decision_id,
-        body.expected_decision_sha256,
-        native_adapter=adapter,
-    )
     idempotency_sha256 = _operation_sha256(
         operation=operation,
         tenant_id=tenant,
         provider_id=provider_id,
         binding_id=binding_id,
         idempotency_key=body.idempotency_key,
+    )
+    if _four_eyes_required(config):
+        waiting = await run_in_threadpool(
+            _four_eyes_gate, request, body, provider_id=provider_id, binding_id=binding_id,
+            decision_id=decision_id, operation=operation,
+            expected_decision_sha256=body.expected_decision_sha256,
+            idempotency_sha256=idempotency_sha256,
+        )
+        if waiting is not None:
+            return JSONResponse(waiting, status_code=202)
+    control_ir = await _compile(
+        decision_id,
+        body.expected_decision_sha256,
+        native_adapter=adapter,
     )
     audit_authority_id: str | None = None
     if audit_composition is not None:

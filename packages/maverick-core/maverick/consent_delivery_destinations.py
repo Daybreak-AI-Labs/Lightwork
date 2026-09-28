@@ -524,6 +524,16 @@ def build_consent_destination_registry(
         provider not in STOCK_DESTINATION_PROVIDERS for provider in providers
     ):
         raise ConsentDestinationConfigError("enabled destination providers are invalid")
+    if not enabled:
+        # Off is a clean off: services still listed (for example by the
+        # installer) are kept but not bound, so nothing is sent and the
+        # registry reports disabled rather than a configuration error.
+        return ConsentDestinationRegistry(
+            tenant,
+            enabled=False,
+            timeout_seconds=section.get("timeout_seconds", 10.0),
+            max_response_bytes=section.get("max_response_bytes", 64 * 1024),
+        )
     bindings: list[ConsentDestinationBinding] = []
     for provider in providers:
         raw = section.get(provider)

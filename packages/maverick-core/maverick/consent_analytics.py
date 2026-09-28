@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import time
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -77,6 +78,43 @@ def enabled() -> bool:
         return False
     analytics = consent.get("analytics")
     return isinstance(analytics, Mapping) and analytics.get("enable") is True
+
+
+_DEFAULT_COHORT = 10
+_MIN_COHORT = 2
+
+
+def analytics_limits(config: Mapping[str, Any] | None = None) -> tuple[int, int, int | None]:
+    """``(default cohort, smallest cohort, look-back days)`` for this installation.
+
+    ``[consent_preferences.analytics] min_cohort_size`` is both the default and
+    the floor: a request may ask for a larger cohort, never a smaller one.
+    Unset keeps the historical default of 10 with requests allowed down to 2.
+    ``retention_days`` limits how far back a snapshot may read receipts; unset
+    means no look-back limit (the historical behaviour).
+    """
+    if config is None:
+        from .config import load_config
+
+        config = load_config() or {}
+    consent = config.get("consent_preferences") if isinstance(config, Mapping) else None
+    section = consent.get("analytics") if isinstance(consent, Mapping) else None
+    section = section if isinstance(section, Mapping) else {}
+    default, floor = _DEFAULT_COHORT, _MIN_COHORT
+    if "min_cohort_size" in section:
+        try:
+            floor = default = _integer(
+                section["min_cohort_size"], "analytics min_cohort_size", 2, 100_000
+            )
+        except ConsentAnalyticsValidationError as exc:
+            raise ConsentAnalyticsConfigError(str(exc)) from exc
+    lookback = None
+    if "retention_days" in section:
+        try:
+            lookback = _integer(section["retention_days"], "analytics retention_days", 1, 3_650)
+        except ConsentAnalyticsValidationError as exc:
+            raise ConsentAnalyticsConfigError(str(exc)) from exc
+    return default, floor, lookback
 
 
 def require_enabled() -> None:
@@ -248,7 +286,7 @@ class ConsentAnalytics:
         end_at: float,
         dimensions: Sequence[str],
         *,
-        min_cohort_size: int = 10,
+        min_cohort_size: int | None = None,
         max_receipts: int = 10_000,
         max_rows: int = 1_000,
     ) -> AnalyticsSnapshot:
@@ -259,7 +297,24 @@ class ConsentAnalytics:
         if end <= start:
             raise ConsentAnalyticsValidationError("end_at must be later than start_at")
         selected = _dimensions(dimensions)
-        cohort = _integer(min_cohort_size, "min_cohort_size", 2, 100_000)
+        default_cohort, smallest_cohort, lookback_days = analytics_limits()
+        requested = (
+            default_cohort
+            if min_cohort_size is None
+            else _integer(min_cohort_size, "min_cohort_size", 2, 100_000)
+        )
+        # The installation's smallest cohort is a privacy floor: a request can
+        # only suppress more, never less.
+        cohort = max(requested, smallest_cohort)
+        window_limited = False
+        if lookback_days is not None:
+            earliest = time.time() - lookback_days * 86_400
+            if start < earliest:
+                start, window_limited = earliest, True
+            if end <= start:
+                raise ConsentAnalyticsValidationError(
+                    "the requested period is older than the analytics look-back limit"
+                )
         receipt_limit = _integer(max_receipts, "max_receipts", 1, _MAX_RECEIPTS)
         row_limit = _integer(max_rows, "max_rows", 1, _MAX_ROWS)
 
@@ -328,6 +383,8 @@ class ConsentAnalytics:
             "small cohorts are suppressed by unique profile count",
             "location and privacy signals are asserted collection context, not verified facts",
         ]
+        if window_limited:
+            limitations.append("start moved to the installation's analytics look-back limit")
         if source_truncated:
             limitations.append("source receipt limit reached; aggregates are partial")
         if row_truncated:
@@ -380,6 +437,7 @@ __all__ = [
     "ConsentAnalyticsError",
     "ConsentAnalyticsUnavailable",
     "ConsentAnalyticsValidationError",
+    "analytics_limits",
     "enabled",
     "require_enabled",
 ]

@@ -1373,6 +1373,9 @@ from .admin_pages import router as admin_pages_router  # noqa: E402
 
 app.include_router(admin_pages_router)
 # Settings > All settings (/settings/all + its catalog save/reset API).
+from .privacy_notice_publication_targets_api import (  # noqa: E402
+    router as privacy_notice_targets_router,
+)
 from .settings_all_page import router as settings_all_router  # noqa: E402
 
 app.include_router(settings_all_router)
@@ -1384,6 +1387,7 @@ app.include_router(license_ops_router)
 from .finance_ops_api import router as finance_ops_router  # noqa: E402
 
 app.include_router(finance_ops_router)
+app.include_router(privacy_notice_targets_router)
 # Ekko Work Discovery: a human review/control surface only.  Endpoint
 # collectors do not enter through HTTP; they write through the local core
 # daemon's owner/device/tenant-scoped store.
@@ -1693,7 +1697,11 @@ async def bound_public_governance_body(request: Request, call_next):
         maximum = _MAX_NATIVE_CONSENT_BODY_BYTES
         detail = "native consent request body too large"
     elif path.startswith("/api/v1/public/consent/"):
-        maximum = _MAX_PUBLIC_CONSENT_BODY_BYTES
+        # The installation's public request cap (Settings > All settings),
+        # else 64 KiB; the router applies the same cap again.
+        from .consent_public_api import configured_request_byte_limit
+
+        maximum = configured_request_byte_limit() or _MAX_PUBLIC_CONSENT_BODY_BYTES
         detail = "public consent request body too large"
     elif path.startswith("/api/v1/external/third-party-collaboration/"):
         if request.method == "POST" and path.endswith("/evidence"):
