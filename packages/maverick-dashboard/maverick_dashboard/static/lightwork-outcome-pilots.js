@@ -215,7 +215,7 @@
   $('op-review-load').addEventListener('click', () => {
     if (busy || lostAuthority) return;
     const identifier = $('op-review-reference').value.trim();
-    if (!/^OPL-[A-Za-z0-9_-]+$/.test(identifier)) { status.textContent = 'Enter the pilot reference shared by its owner.'; return; }
+    if (!/^OPL-[A-Za-z0-9_-]+$/.test(identifier)) { status.textContent = 'Choose a pilot to review.'; return; }
     mutation(async () => {
       const packet = await request('/independent-review/' + encodeURIComponent(identifier));
       const host = $('op-independent-report'); host.replaceChildren();
@@ -236,6 +236,46 @@
       form.addEventListener('input', () => { delete form.dataset.operation; }); host.append(form);
     });
   });
+  // Reviewers choose from the protected pilots waiting in this workspace
+  // instead of typing a reference the owner shared.
+  let reviewQueueLoaded = false, reviewQueueLoading = false;
+  async function loadReviewQueue() {
+    const picker = $('op-review-reference'), note = $('op-review-note');
+    if (!picker || reviewQueueLoaded || reviewQueueLoading || lostAuthority) return;
+    reviewQueueLoading = true;
+    note.textContent = 'Loading pilots waiting for review…';
+    try {
+      // Read directly: a person who is not an administrator is simply told
+      // who can review, without resetting the rest of the page.
+      let r;
+      try {
+        r = await fetch('/api/v1/outcome-pilots/independent-review', {cache:'no-store',
+          headers: {'X-Lightwork-Pilot-Context':context}});
+      } catch (_) { throw new Error('Lightwork is not responding. Check your connection and try again.'); }
+      if (r.status === 401 || r.status === 403) throw new Error('Only an administrator who did not create a pilot can review it. Sign in with that account to see pilots waiting for review.');
+      if (!r.ok) throw new Error(typeof window.mvErrorText === 'function' ? window.mvErrorText(r, 'load pilots waiting for review') : 'Pilots waiting for review could not be loaded. Try again.');
+      let data;
+      try { data = await r.json(); } catch (_) { throw new Error('Pilots waiting for review could not be loaded. Try again.'); }
+      if (!data || data.context !== context) throw new Error('The account or workspace changed. Reload this page.');
+      const items = Array.isArray(data.items) ? data.items.filter(item => item && /^OPL-[A-Za-z0-9_-]+$/.test(String(item.id || ''))) : [];
+      picker.replaceChildren(new Option(items.length ? 'Choose a pilot' : 'No pilots are waiting for review', ''));
+      const decisions = {accepted_local_scope: 'accepted', needs_more_evidence: 'more evidence requested'};
+      items.forEach(item => {
+        const when = Number.isFinite(item.frozen_at) ? new Date(item.frozen_at * 1000).toLocaleDateString() : '';
+        const done = item.decision ? ' · already reviewed (' + (decisions[item.decision] || 'reviewed') + ')' : '';
+        picker.append(new Option(String(item.title || 'Untitled pilot') + (when ? ' · planned ' + when : '') + done, item.id));
+      });
+      note.textContent = items.length ? '' : 'No protected pilots from other people are waiting in this workspace.';
+      reviewQueueLoaded = true;
+    } catch (error) {
+      picker.replaceChildren(new Option('Pilots could not be loaded', ''));
+      note.textContent = error.message || 'Only an administrator who did not create a pilot can review it.';
+    } finally {
+      reviewQueueLoading = false;
+    }
+  }
+  const reviewPanel = $('op-review-panel');
+  if (reviewPanel) reviewPanel.addEventListener('toggle', () => { if (reviewPanel.open) loadReviewQueue(); });
   $('op-add-case').addEventListener('click', addCase);
   if (loadMore) loadMore.addEventListener('click', async () => {
     if (busy || lostAuthority || !pilotCursor) return;

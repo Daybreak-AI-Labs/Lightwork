@@ -406,6 +406,12 @@
   function path(actionName) { if (!get("snapshot").value) throw new Error("Choose a snapshot first."); return "snapshots/" + encodeURIComponent(get("snapshot").value) + "/" + actionName; }
   function count(value) { return Number.isSafeInteger(value) && value >= 0; }
   function digest(value) { return typeof value === "string" && /^[a-f0-9]{64}$/i.test(value); }
+  function fileSize(bytes) {
+    if (bytes < 1024) return bytes + (bytes === 1 ? " byte" : " bytes");
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+  }
   function fileMetadata(value) { return value && typeof value === "object" && digest(value.sha256) && count(value.size); }
   function comparisonIdentity(row) {
     return JSON.stringify([row.report_id, row.target, row.snapshot.id, row.snapshot.sha256, row.snapshot.application_version,
@@ -444,14 +450,17 @@
       name.textContent = item.path;
       description.textContent = ({ added: "Added since the snapshot", changed: "Changed since the snapshot", deleted: "Removed since the snapshot" })[item.change]
         + (item.protected ? " · Protected: administrator reconciliation is required." : " · File difference; business impact has not been verified.");
+      var sizes = document.createElement("p");
+      sizes.textContent = "Size in the snapshot: " + (item.snapshot ? fileSize(item.snapshot.size) : "not present")
+        + " · Size now: " + (item.current ? fileSize(item.current.size) : "not present") + ".";
       var details = document.createElement("details"), summary = document.createElement("summary");
-      summary.textContent = "File verification details"; details.append(summary);
+      summary.textContent = "Technical details"; details.append(summary);
       ["snapshot", "current"].forEach(function (side) {
         var text = document.createElement("p"), file = item[side];
         text.textContent = (side === "snapshot" ? "Snapshot" : "Current at comparison") + ": " + (file ? file.size + " bytes · fingerprint " + file.sha256 : "Not present");
         details.append(text);
       });
-      li.append(name, description, details); get("comparison-items").append(li);
+      li.append(name, description, sizes, details); get("comparison-items").append(li);
     });
     get("comparison-identity").textContent = "Snapshot application: " + row.snapshot.application_version + " · Compatibility: " + row.snapshot.compatibility
       + ". Compared using Lightwork " + row.application_version + ". Snapshot archive fingerprint: " + row.snapshot.sha256
@@ -582,7 +591,7 @@
     list("custody-checks", row.checks.map(function (item) { return (formats[item.format] || item.format) + ": " + item.detected + " detected; " + item.verified + " verified; " + item.failed + " failed; " + item.unsupported + " unsupported."; }));
     var totals = row.checks.reduce(function (sum, item) { sum.verified += item.verified; sum.failed += item.failed; sum.unsupported += item.unsupported; return sum; }, { verified: 0, failed: 0, unsupported: 0 });
     get("custody-totals").textContent = totals.verified + " recognized encrypted records verified; " + totals.failed + " failed; " + totals.unsupported + " unsupported. " + row.unexamined_files + " files were not examined. Review the limits below even when no failures were found.";
-    get("custody-coverage").textContent = row.files_scanned + " files and " + row.sqlite_columns_scanned + " SQLite columns scanned; " + row.unexamined_files + " files not examined. Coverage is limited to the recognized formats reported above.";
+    get("custody-coverage").textContent = row.files_scanned + " files and " + row.sqlite_columns_scanned + " database columns scanned; " + row.unexamined_files + " files not examined. Coverage is limited to the recognized formats reported above.";
     list("custody-limits", row.limits);
     get("custody-identity").textContent = "Snapshot: " + row.snapshot + ". Archive fingerprint: " + row.archive_sha256 + ". Uploaded key file fingerprint: " + row.custody_sha256 + ". Report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
     get("custody-report").hidden = false;

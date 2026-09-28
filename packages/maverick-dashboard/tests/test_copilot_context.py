@@ -18,7 +18,7 @@ CANONICAL_CONTEXTS = {
     "/consent/experiments": "Consent Experiments",
     "/consent/delivery": "Consent Delivery",
     "/consent/public-clients": "Public Consent Clients",
-    "/consent/native": "Native Consent SDK",
+    "/consent/native": "Consent in Your Apps",
     "/consent/profile-data": "Consent Profile Data",
     "/consent/custom-indexes": "Custom Consent Indexes",
     "/consent/bulk-jobs": "Consent Bulk Jobs",

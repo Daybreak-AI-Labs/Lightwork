@@ -254,9 +254,9 @@
     var parts = String(definition || "").split(":");
     if (parts.length !== 2 || !PROJECTION_LABEL[parts[0]] || !ID.test(parts[1])) { throw problem("Choose what to send."); }
     var target = String(values.target_id || "").trim();
-    if (!ID.test(target)) { throw problem("Enter the destination name exactly as it was set up (letters, numbers, dots or dashes)."); }
+    if (!ID.test(target)) { throw problem("Choose a destination from the list."); }
     var revision = Number(values.target_revision);
-    if (!Number.isSafeInteger(revision) || revision < 1) { throw problem("Enter the destination version as a whole number."); }
+    if (!Number.isSafeInteger(revision) || revision < 1) { throw problem("Choose a destination from the list. The details entered by hand are incomplete."); }
     var payload = {
       studio_id: liveRow.studio_id,
       projection_kind: parts[0],
@@ -522,6 +522,72 @@
     } catch (error) {
       listStatus.textContent = plainError(error, "load your blueprints");
     }
+    await loadSources();
+  }
+
+  // ---------- collectors and destinations to choose from ----------
+  var sources = { collectors: [], destinations: [], listed: false, loaded: false };
+  async function loadSources() {
+    try {
+      var payload = await request("/sources");
+      sources = {
+        collectors: Array.isArray(payload.collectors) ? payload.collectors.filter(function (item) {
+          return item && ID.test(String(item.collector_id || "")) && Number.isSafeInteger(item.collector_version) &&
+            item.collector_version > 0 && FINGERPRINT.test(String(item.collector_integrity_sha256 || ""));
+        }) : [],
+        destinations: Array.isArray(payload.destinations) ? payload.destinations.filter(function (item) {
+          return item && PROJECTION_LABEL[item.target_kind] && ID.test(String(item.target_id || "")) &&
+            Number.isSafeInteger(item.target_revision) && item.target_revision > 0;
+        }) : [],
+        listed: payload.destinations_listed === true,
+        loaded: true
+      };
+    } catch (error) {
+      sources = { collectors: [], destinations: [], listed: false, loaded: false };
+    }
+    fillCollectorChoices();
+    fillTargetChoices();
+  }
+  function fillCollectorChoices() {
+    var select = $("grcs-collector-choice");
+    var note = $("grcs-collector-note");
+    fillSelect(select, sources.collectors.map(function (item, index) {
+      return { value: String(index), label: human(item.collector_id) + " (version " + item.collector_version + ")" };
+    }), sources.collectors.length ? "Choose a collector" : "No collectors linked yet");
+    note.textContent = sources.collectors.length ? "" : (sources.loaded
+      ? "No collectors are linked in this workspace yet. Ask your administrator which collector to use, then enter it under Technical details."
+      : "The list of collectors could not be loaded. Refresh the page to try again.");
+    useCollector();
+  }
+  function useCollector() {
+    var item = sources.collectors[Number($("grcs-collector-choice").value)];
+    if ($("grcs-collector-choice").value === "" || !item) { return; }
+    $("grcs-collector-id").value = item.collector_id;
+    $("grcs-collector-version").value = String(item.collector_version);
+    $("grcs-collector-digest").value = item.collector_integrity_sha256;
+  }
+  function fillTargetChoices() {
+    var select = $("grcs-projection-target");
+    var note = $("grcs-projection-target-note");
+    var kind = String($("grcs-projection-definition").value || "").split(":")[0];
+    var matching = [];
+    sources.destinations.forEach(function (item, index) {
+      if (!kind || item.target_kind === kind) {
+        matching.push({ value: String(index), label: (item.label || human(item.target_id)) + " (version " + item.target_revision + ")" });
+      }
+    });
+    fillSelect(select, matching, matching.length ? "Choose a destination" : "No destinations to choose from");
+    note.textContent = matching.length ? "" : (sources.listed
+      ? "No connected destination accepts this kind of item yet."
+      : "Your installation does not list its destinations here. Ask your administrator for the destination, then enter it under Technical details.");
+    useTarget();
+  }
+  function useTarget() {
+    var form = $("grcs-projection-form");
+    var item = sources.destinations[Number($("grcs-projection-target").value)];
+    if ($("grcs-projection-target").value === "" || !item) { return; }
+    form.elements.target_id.value = item.target_id;
+    form.elements.target_revision.value = String(item.target_revision);
   }
 
   function fillStudioFilter() {
@@ -996,11 +1062,11 @@
     var object = needObject("grcs-binding-object");
     var bindingId = slug($("grcs-binding-name").value, "the evidence link");
     var collector = String($("grcs-collector-id").value || "").trim();
-    if (!ID.test(collector)) { throw problem("Enter the collector name exactly as it appears on its setup page."); }
+    if (!ID.test(collector)) { throw problem("Choose a collector from the list."); }
     var version = Number($("grcs-collector-version").value);
-    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Enter the collector version as a whole number."); }
+    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Choose a collector from the list, or enter its version as a whole number under Technical details."); }
     var fingerprint = String($("grcs-collector-digest").value || "").trim().toLowerCase();
-    if (!FINGERPRINT.test(fingerprint)) { throw problem("Copy the collector fingerprint (64 letters and numbers) from its setup page."); }
+    if (!FINGERPRINT.test(fingerprint)) { throw problem("Choose a collector from the list. The details entered by hand are incomplete."); }
     var target = needField(object, "grcs-mapping-target", "the field to fill");
     var path = String($("grcs-source-path").value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
     if (!path.length || path.length > 16 || path.some(function (item) { return !ID.test(item); })) {
@@ -1213,7 +1279,10 @@
       composerState = emptyComposerState(); renderComposer(); report("Cleared.");
     });
   });
-  $("grcs-projection-studio").addEventListener("change", fillDefinitions);
+  $("grcs-projection-studio").addEventListener("change", function () { fillDefinitions(); fillTargetChoices(); });
+  $("grcs-projection-definition").addEventListener("change", fillTargetChoices);
+  $("grcs-projection-target").addEventListener("change", useTarget);
+  $("grcs-collector-choice").addEventListener("change", useCollector);
   $("grcs-projection-form").addEventListener("submit", projection);
   $("grcs-import").addEventListener("click", function () { $("grcs-import-file").click(); });
   $("grcs-import-file").addEventListener("change", importCopy);

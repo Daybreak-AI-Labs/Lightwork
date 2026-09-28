@@ -84,7 +84,7 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
     visibility = next(item for item in ui_visibility.PAGES if item["path"] == page.PAGE_PATH)
     assert visibility == {
         "path": "/consent/native",
-        "label": "Native Consent SDK",
+        "label": "Consent in Your Apps",
         "group": "Consent",
         "icon": "key",
         "floor": "view",
@@ -92,6 +92,6 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
         "in_nav": True,
     }
     context = copilot_context.context_for_page(page.PAGE_PATH)
-    assert context.title == "Native Consent SDK"
+    assert context.title == "Consent in Your Apps"
     assert any("no permissive fallback" in item for item in context.boundaries)
     assert any("live-device" in item for item in context.boundaries)

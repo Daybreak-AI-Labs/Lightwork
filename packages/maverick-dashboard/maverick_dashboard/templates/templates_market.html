@@ -29,18 +29,19 @@
     <div class="card-grid" id="tplm-grid">
       {% for e in entries %}
         {% set label = e.name | humanize %}
-        <div class="card" data-template-name="{{ e.name }}" data-tplm-text="{{ (label ~ ' ' ~ e.title) | lower }}">
+        <div class="card" data-template-name="{{ e.name }}" data-tplm-text="{{ (label ~ ' ' ~ (e.title | fill_placeholders)) | lower }}">
           <div class="tplm__head">
             <strong class="tplm__name">{{ label }}</strong>
             <span class="muted tplm__stars" title="Your team's rating">{{ 'Not rated yet' if not e.stars else e.rating_bar }}</span>
           </div>
-          <p class="tplm__title">{{ e.title | replace('{{', '') | replace('}}', '') }}</p>
+          <p class="tplm__title">{{ e.title | fill_placeholders }}</p>
           {% if e.params %}
           <p class="muted tplm__params">You'll be asked for: {% for p in e.params %}{{ p | humanize | lower }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
           {% endif %}
           {% if e.body %}
-          <details class="tplm__preview"><summary>Preview the instructions</summary>
-            <p class="muted">{{ e.body | replace('{{', '') | replace('}}', '') }}</p>
+          <details class="tplm__preview"><summary>Technical details</summary>
+            <p class="muted">The exact instructions the agent receives. Words in brackets are filled in from your answers.</p>
+            <p class="muted">{{ e.body | fill_placeholders }}</p>
           </details>
           {% endif %}
           <div class="tplm__actions">

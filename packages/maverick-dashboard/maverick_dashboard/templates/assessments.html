@@ -104,11 +104,21 @@
     <div>
       <div class="as-card" style="margin-bottom: var(--space-4);">
         <div class="as-card__title">Assess a subject</div>
+        {% if agents|length > 12 %}
+        <label class="as-field">
+          <span>Find an agent</span>
+          <input class="input" type="search" id="as-agent-filter" autocomplete="off"
+                 placeholder="Type part of a name or department" aria-describedby="as-agent-filter-count">
+          <span class="muted" id="as-agent-filter-count" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
+        </label>
+        {% endif %}
         <label class="as-field">
           <span>Agent</span>
           <select id="as-agent" aria-label="Agent to assess">
             <option value="">{{ 'Choose an agent…' if agents else 'No agents yet' }}</option>
-            {% for a in agents %}<option value="{{ a.name }}">{{ a.name }}</option>{% endfor %}
+            {% for group in agents|groupby('group') %}<optgroup label="{{ group.grouper }}">
+              {% for a in group.list %}<option value="{{ a.name }}">{{ a.label }}</option>{% endfor %}
+            </optgroup>{% endfor %}
           </select>
         </label>
         {% if flows %}
@@ -135,6 +145,41 @@
   </div>
 
 <script>
+(function () {
+  'use strict';
+  // Narrow the long agent list as the person types: matches the readable
+  // name or the department. Options stay in the select, only hidden.
+  var filter = document.getElementById('as-agent-filter');
+  var picker = document.getElementById('as-agent');
+  var count = document.getElementById('as-agent-filter-count');
+  if (!filter || !picker) return;
+  var timer = null;
+  function apply() {
+    var words = filter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = 0;
+    Array.prototype.forEach.call(picker.querySelectorAll('optgroup'), function (group) {
+      var groupName = (group.label || '').toLowerCase();
+      var any = false;
+      Array.prototype.forEach.call(group.querySelectorAll('option'), function (option) {
+        var text = (option.textContent + ' ' + groupName).toLowerCase();
+        var match = words.every(function (w) { return text.indexOf(w) !== -1; });
+        option.hidden = !match;
+        option.disabled = !match;
+        if (match) { any = true; shown += 1; }
+      });
+      group.hidden = !any;
+    });
+    var selected = picker.options[picker.selectedIndex];
+    if (selected && selected.disabled) picker.value = '';
+    count.textContent = words.length
+      ? (shown ? shown + (shown === 1 ? ' agent matches.' : ' agents match.') : 'No agents match. Try other words.')
+      : '';
+  }
+  filter.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(apply, 120);
+  });
+})();
 (function () {
   'use strict';
   var LENS_LABEL = { privacy: 'Privacy', security: 'Security', ai_risk: 'AI risk' };

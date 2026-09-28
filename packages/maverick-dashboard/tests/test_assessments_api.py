@@ -182,7 +182,12 @@ def test_page_uses_selectors_and_plain_language(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     body = _client().get("/assessments").text
     main = body.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
-    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL))
+    # Agent job titles ("Sequencing & Cadence Specialist") are business words;
+    # the agent list is checked separately for readable, grouped names.
+    agents = main.split('<select id="as-agent"', 1)[1].split("</select>", 1)[0]
+    assert "<optgroup label=" in agents
+    assert all("_" not in label for label in re.findall(r'<option value="[^"]+">([^<]+)</option>', agents))
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main.replace(agents, ""), flags=re.DOTALL))
     assert re.search(r"\b(JSON|lens|cadence|HTTP \d{3})\b", text, re.IGNORECASE) is None
     assert '<select id="as-agent"' in body and "<datalist" not in body
     assert "format=json" not in body and "Download spreadsheet" in text

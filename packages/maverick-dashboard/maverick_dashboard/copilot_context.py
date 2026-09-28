@@ -542,7 +542,7 @@ _CONTEXTS = tuple(
         ),
         CopilotPageContext(
             path="/consent/native",
-            title="Native Consent SDK",
+            title="Consent in Your Apps",
             summary=(
                 "Operate application and device authority for the attested mobile and "
                 "OTT/CTV consent runtime and its offline-verifiable receipt keys."

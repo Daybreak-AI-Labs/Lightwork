@@ -517,7 +517,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/native",
-        "label": "Native Consent SDK",
+        "label": "Consent in Your Apps",
         "group": "Consent",
         "icon": "key",
         "floor": "view",

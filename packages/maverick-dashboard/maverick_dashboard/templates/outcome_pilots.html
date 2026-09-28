@@ -197,9 +197,11 @@
       <button type="submit" class="btn primary">Save and freeze plan</button>
     </form>
   </details>
-  <details class="panel"><summary>Independently review a pilot’s local learning policy</summary>
-    <p>A different named global administrator can review the frozen plan, exclusion receipts and prior-exposure statement. The decision covers the stated local scope; it does not certify model-provider training or prior exposure.</p>
-    <label for="op-review-reference">Pilot reference shared by its owner</label><input class="input" id="op-review-reference" maxlength="64" pattern="OPL-[A-Za-z0-9_\-]+">
+  <details class="panel" id="op-review-panel"><summary>Independently review a pilot’s local learning policy</summary>
+    <p>An administrator who did not create the pilot checks that its test plan was fixed in advance and that its test tasks were kept out of automatic learning. The decision covers this installation only. It does not certify how the AI provider trains its models.</p>
+    <label for="op-review-reference">Pilot to review</label>
+    <select class="select" id="op-review-reference" aria-describedby="op-review-note"><option value="">Open this section to load pilots…</option></select>
+    <p class="muted" id="op-review-note" role="status"></p>
     <button type="button" class="btn" id="op-review-load">Open review evidence</button>
     <div id="op-independent-report"></div>
   </details>

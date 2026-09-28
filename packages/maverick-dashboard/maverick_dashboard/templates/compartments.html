@@ -56,12 +56,12 @@
       </tr></thead>
       <tbody>
       {% for d in domains %}
-        {% set label = d.name | humanize %}
+        {% set label = d | pack_label %}
         <tr>
           <td>
             <strong>{{ label }}</strong>
-            {% if d.persona %}
-              <div class="muted cmp-wide" title="{{ d.persona }}">{{ d.persona[:140] }}{% if d.persona|length > 140 %}…{% endif %}</div>
+            {% if d.description %}
+              <div class="muted cmp-wide">{{ d.description }}</div>
             {% endif %}
             {% if d.output.deliverable %}
               <div class="muted cmp-wide">
@@ -71,6 +71,7 @@
                 {%- if d.output.gate %} · needs {{ d.output.gate | humanize }} sign-off{% endif -%}
               </div>
             {% endif %}
+            {% if d.persona %}<details class="muted cmp-wide"><summary>Technical details</summary><p>Instructions the agent follows:</p><p>{{ d.persona }}</p></details>{% endif %}
           </td>
           <td><span class="badge">{{ d.compartment | humanize }}</span></td>
           <td class="muted">{{ 'Built-in' if d.authoring == 'manual' else 'Created in Agent Factory' }}</td>

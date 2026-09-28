@@ -32,17 +32,34 @@
       .forEach(control => { control.disabled = value; });
   }
 
-  async function api(path, method = 'GET', body) {
-    const response = await fetch(BASE + path, {
-      method,
-      cache: 'no-store',
-      headers: body ? {'Accept':'application/json', 'Content-Type':'application/json'} : {'Accept':'application/json'},
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    let value = {};
-    try { value = await response.json(); } catch (_) { value = {}; }
-    if (!response.ok) throw new Error(value.detail || 'Candidate promotion is unavailable.');
-    return value;
+  async function api(path, method = 'GET', body, action = 'load candidate promotions') {
+    let response;
+    try {
+      response = await fetch(BASE + path, {
+        method,
+        cache: 'no-store',
+        headers: body ? {'Accept':'application/json', 'Content-Type':'application/json'} : {'Accept':'application/json'},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (_) {
+      throw new Error('Lightwork is not responding. Check your connection and try again.');
+    }
+    // Plain sentences only: never the server's own error text.
+    if (!response.ok) {
+      throw new Error(typeof window.mvErrorText === 'function'
+        ? window.mvErrorText(response, action)
+        : 'Could not ' + action + '. Please try again.');
+    }
+    try { return await response.json(); } catch (_) {
+      throw new Error('The candidate list could not be read. Refresh and try again.');
+    }
+  }
+
+  // The shared in-page dialog; the browser's own box only when it is missing.
+  function confirmAction(prompt, okText) {
+    return typeof window.mvConfirm === 'function'
+      ? window.mvConfirm(prompt, {okText})
+      : Promise.resolve(window.confirm(prompt));
   }
 
   function shortDigest(value) {
@@ -66,7 +83,8 @@
   }
 
   async function transition(candidate, action, prompt, extra = {}) {
-    if (busy || !window.confirm(prompt)) return;
+    if (busy || !(await confirmAction(prompt, 'Continue'))) return;
+    if (busy) return;
     setBusy(true);
     try {
       await api('/' + encodeURIComponent(candidate.candidate_id) + '/' + action, 'POST', {
@@ -74,7 +92,7 @@
         confirm: true,
         expected_revision: candidate.revision,
         ...extra,
-      });
+      }, 'update this candidate');
       message('Candidate ' + candidate.candidate_id + ' is now updated.');
       await refresh();
     } catch (error) {
@@ -218,7 +236,7 @@
         !Array.isArray(value.completed_runs) || !Array.isArray(value.target_presets) ||
         typeof value.available !== 'boolean' || typeof value.can_manage !== 'boolean' ||
         typeof value.can_propose !== 'boolean') {
-      throw new Error('Candidate promotion response was malformed.');
+      throw new Error('The candidate list could not be read. Refresh and try again.');
     }
     if (typeof value.context === 'string') context = value.context;
     list.replaceChildren();
@@ -276,7 +294,8 @@
   if (proposalForm) proposalForm.addEventListener('submit', async event => {
     event.preventDefault();
     if (busy || !proposalForm.reportValidity()) return;
-    if (!window.confirm('Create a review request from this completed run and reviewed target preset? This does not stage or activate anything.')) return;
+    if (!(await confirmAction('Create a review request from this completed run and reviewed target preset? This does not stage or activate anything.', 'Create request'))) return;
+    if (busy) return;
     setBusy(true);
     try {
       const value = await api('', 'POST', {
@@ -285,7 +304,7 @@
         candidate_id: field(proposalForm, 'candidate_id'),
         run_id: field(proposalForm, 'run_id'),
         target_preset: field(proposalForm, 'target_preset'),
-      });
+      }, 'create the review request');
       message(
         value.state === 'not_advancing'
           ? 'Candidate ' + value.candidate_id + ' was retained as a non-advancing study result.'

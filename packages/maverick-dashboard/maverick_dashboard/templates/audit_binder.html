@@ -171,7 +171,7 @@
   </div>
 
   <details class="panel">
-    <summary>Verification details (for auditors)</summary>
+    <summary>Technical details for auditors</summary>
     <p>Signed: {{ sig_words.get(b.artifact.signature_state) or (b.artifact.signature_state | humanize) }}.
       Key held separately from this server: {{ 'Yes, confirmed' if b.artifact.independent_key_custody_verified else 'Not confirmed' }}.</p>
     <p class="bnd-mono">Evidence file name: {{ b.artifact.binder_id }}</p>

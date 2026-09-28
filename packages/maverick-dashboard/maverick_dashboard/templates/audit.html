@@ -199,8 +199,8 @@
           headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
         var j = await r.json().catch(function () { return {}; });
         if (!r.ok) {
-          show([([403, 409, 422, 502, 503].indexOf(r.status) >= 0 && typeof j.detail === 'string' && j.detail.length < 300)
-            ? j.detail : window.mvErrorText(r, action)]);
+          show([([403, 409, 422, 502, 503].indexOf(r.status) >= 0 && window.mvPlainDetail(j.detail))
+            || window.mvErrorText(r, action)]);
           return null;
         }
         return j;

@@ -535,8 +535,14 @@
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Lightwork didn't answer. Reload the request and try again.");
     if (!response.ok) {
       const detail = data.detail;
-      const error = new Error(typeof detail === "string" ? detail :
-        typeof detail?.message === "string" ? detail.message : "That didn't work. Check the fields, reload the request and try again.");
+      // Only a message already written as a plain sentence reaches the
+      // person; anything else becomes the shared plain wording.
+      const raw = typeof detail === "string" ? detail : typeof detail?.message === "string" ? detail.message : "";
+      const plain = typeof window.mvPlainDetail === "function" ? window.mvPlainDetail(raw)
+        : (/^[A-Z][^{}<>=_[\]\\/`|]*[.!?]$/.test(raw.trim()) && raw.length <= 300 ? raw.trim() : "");
+      const error = new Error(plain || (typeof window.mvErrorText === "function"
+        ? window.mvErrorText(response, "finish that")
+        : "That didn't work. Check the fields, reload the request and try again."));
       if (detail && typeof detail === "object" && typeof detail.code === "string") error.code = detail.code;
       if (detail && typeof detail === "object" && typeof detail.next_action === "string" &&
           detail.next_action.length > 0 && detail.next_action.trim() === detail.next_action &&
@@ -825,7 +831,7 @@
       const guidance = error.code === "evidence_reevaluation_required"
         ? `${current.operation?.state === "verified" ? "The verified ticket remains recorded. " : "The stale prepared action was invalidated. "}Review the named evidence status and start a reevaluation request; the prior review cannot be reused.`
         : "Review it before submitting again.";
-      const readable = new Error(`${error.message} Someone else updated this request, so the latest version (${stageName(current.stage).toLowerCase()}) is now open. ${guidance}`);
+      const readable = new Error(`Someone else updated this request, so the latest version (${stageName(current.stage).toLowerCase()}) is now open. ${guidance}`);
       readable.code = error.code; readable.current = error.current;
       throw readable;
     }
@@ -1051,7 +1057,7 @@
   click("export-download", async () => {
     const reviewed = exportReview;
     if (!reviewed || !byId("export-confirm").checked)
-      throw new Error("Preview the export and confirm its manifest before downloading.");
+      throw new Error("Preview the export and confirm the list of files before downloading.");
     if (selected?.id !== reviewed.caseId || selected?.revision !== reviewed.revision)
       throw new Error("The request changed. Preview the evidence export again.");
     try {

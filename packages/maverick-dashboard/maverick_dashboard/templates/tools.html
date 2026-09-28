@@ -60,7 +60,8 @@
         {% for t in tools %}
           <tr class="tool-row">
             <td>{{ t.name | humanize }}</td>
-            <td class="muted tl-desc">{{ t.description or 'No description given.' }}</td>
+            <td class="tl-desc">{{ t.summary }}
+              {% if t.description %}<details class="muted tl-tech-row"><summary>Technical details</summary><p class="tl-tech">{{ t.description }}</p></details>{% endif %}</td>
           </tr>
         {% endfor %}
         </tbody>

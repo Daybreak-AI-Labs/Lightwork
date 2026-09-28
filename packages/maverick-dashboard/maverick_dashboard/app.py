@@ -2259,7 +2259,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             ),
             401: (
                 "Sign in required",
-                "Your session or access token is missing or no longer valid. Sign in again, then retry.",
+                "Your sign-in has expired. Sign in again.",
             ),
             403: (
                 "Permission required",
@@ -2286,6 +2286,25 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         )
         if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
             message = "That date isn’t valid. Pick a day from the calendar, then try again."
+        gate = ""
+        if status == 403 and isinstance(exc.detail, str):
+            # Feature switches and named sign-in gates raise 403 with these
+            # fixed server phrases; show the real reason instead of the
+            # generic role message. The check itself is unchanged.
+            if "disabled in Settings" in exc.detail:
+                gate = "off"
+                title = "This page is turned off"
+                message = (
+                    "This feature is turned off for your workspace, or its settings "
+                    "could not be read. An administrator can turn it on in Settings."
+                )
+            elif exc.detail.startswith("Sign in with a named account"):
+                gate = "sign_in"
+                title = "Sign in with your own account"
+                message = (
+                    "This page works only when you sign in with your own account "
+                    "and choose a workspace. Sign in, then choose a workspace."
+                )
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -2294,6 +2313,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "title": title,
                 "message": message,
                 "path": request.url.path,
+                "gate": gate,
             },
             status_code=status,
             headers=exc.headers,
@@ -6017,6 +6037,7 @@ async def compartments_page(
             if not folded
             or folded in d.name.casefold()
             or folded in (getattr(d, "persona", "") or "").casefold()
+            or folded in (getattr(d, "description", "") or "").casefold()
             or folded in (getattr(d, "compartment", "") or "").casefold()
         ]
         page_count = max(1, (len(filtered) + per_page - 1) // per_page)
@@ -6110,6 +6131,23 @@ def assessments_page(request: Request) -> HTMLResponse:
             [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()],
             suite_of=lambda a: a.get("suite"),
         )
+        # People pick from readable names grouped by department; the pack
+        # name stays the option value the API receives.
+        from maverick.departments import department_title
+        from maverick.domain import available_domains
+
+        from .plain_labels import pack_display_name
+
+        profiles = available_domains()
+        for a in agents:
+            prof = profiles.get(a["name"])
+            a["label"] = pack_display_name(
+                a["name"],
+                getattr(prof, "persona", ""),
+                getattr(prof, "description", ""),
+            )
+            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents"
+        agents.sort(key=lambda a: (a["group"].casefold(), a["label"].casefold(), a["name"]))
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     try:
@@ -6978,11 +7016,17 @@ def tools_page(
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
 
+        from .tool_summary import plain_tool_summary
+
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
         catalog = [
-            {"name": t.name, "description": (t.description or "")[:240]}
+            {
+                "name": t.name,
+                "description": (t.description or "")[:240],
+                "summary": plain_tool_summary(t.name, t.description),
+            }
             for t in sorted(reg.all(), key=lambda x: x.name)
         ]
         folded = query.casefold()
@@ -6992,6 +7036,7 @@ def tools_page(
             if not folded
             or folded in tool["name"].casefold()
             or folded in tool["description"].casefold()
+            or folded in tool["summary"].casefold()
         ]
         page_count = max(1, (len(filtered) + per_page - 1) // per_page)
         if page > page_count:
