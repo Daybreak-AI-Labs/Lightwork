@@ -17,8 +17,7 @@ Deliberately NOT in the catalog:
 * Developer / operations plumbing with no business meaning: ``[grpc]``,
   ``[grpc_dispatch]``, ``[lsp]``, ``[langchain]``, ``[tui]``, ``[perf]``,
   ``[benchmark]``, ``[logging]``, ``[observability]``, ``[queue]``,
-  ``[coding]``, ``[model_proxy]``, ``[obsidian]``, ``[github]``,
-  ``[calendar]``, ``[embedded]``, ``[ebpf_monitor]``, ``[local_runtime]``
+  ``[coding]``, ``[model_proxy]``, ``[embedded]``, ``[ebpf_monitor]``, ``[local_runtime]``
   (serving engines), ``[emergent_protocol]``/``[emergent_codec]`` (research
   telemetry), ``[self_modify]``/``[adapter_rung]`` (research-only code and
   weights rungs with their own high-risk page).
@@ -26,15 +25,20 @@ Deliberately NOT in the catalog:
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
   ``[federation]``, ``[license]``, ``[providers] per_tenant_keys``, the sandbox
-  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the Stripe and
-  Pushover credentials (read only from the server's environment),
+  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the Stripe,
+  GitHub app, GitLab and Pushover credentials (read only from the server's
+  environment),
   ``[deployment]`` (installer provenance), and every setting that names a
   server file path or an environment variable (``signal_cli_path``,
-  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
+  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``,
+  the voice program ``whisper_cpp_bin``). The Obsidian notes folder is the
+  exception: a folder agents read and write, checked to be a folder path.
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, the per-task spending cap, capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
-  connections, the learning switches, research execution, savings
+  connections (the account-connection and desktop-return switches are on
+  the Connections page, vendor onboarding's connections and owner on its
+  setup page), the learning switches, research execution, savings
   assumptions, workspace selection, the security suite's on/off switches.
 * Structured policies that need their module's own page to author safely:
   consent and privacy workbench options, identity-connector scheduling,
@@ -628,7 +632,8 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Spending & limits", False, "maverick.billing_stripe", env=("MAVERICK_STRIPE_ENABLE",)),
     S("billing.stripe", "bill_metered_usage", "Charge for model usage",
       "Also charge customers for their model usage, not only the platform fee.",
-      "toggle", "Spending & limits", False, "maverick.config"),
+      "toggle", "Spending & limits", False, "maverick.billing_stripe",
+      env=("MAVERICK_STRIPE_BILL_METERED",)),
     S("billing.stripe", "currency", "Billing currency",
       "The three-letter currency code for charges, for example usd or eur.",
       "text", "Spending & limits", "usd", "maverick.config", max_length=3,
@@ -718,7 +723,8 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Privacy", True, "maverick.attachments", env=("MAVERICK_ATTACH_EXTRACT",)),
     S("voice", "auto_fetch_model", "Download the offline speech model",
       "Download a verified speech-to-text model so voice input works without an outside service.",
-      "toggle", "Privacy", False, "maverick.voice_models", restart=True),
+      "toggle", "Privacy", False, "maverick.voice_models", restart=True,
+      env=("MAVERICK_VOICE_AUTO_FETCH",)),
     S("compliance", "disclosure_text", "AI disclosure message",
       "The sentence shown to people to tell them they are dealing with an AI system.",
       "text", "Privacy", "", "maverick.compliance", max_length=1000, env=("MAVERICK_AI_DISCLOSURE",),
@@ -800,7 +806,7 @@ SETTINGS: tuple[Setting, ...] = (
     S("notifications", "batch_window_seconds", "Group routine alerts",
       "Collect routine alerts and send them together this often. Urgent alerts are always sent at once. Zero sends each alert straight away.",
       "number", "Integrations", 0, "maverick.notification_batcher", minimum=0, maximum=86400,
-      integer=True, unit="seconds"),
+      integer=True, unit="seconds", env=("MAVERICK_NOTIFY_BATCH_WINDOW",)),
     S("webhooks", "outbound", "Send task events to these addresses",
       "Web addresses that receive a signed message when tasks start and finish.",
       "list", "Integrations", [], "maverick.webhooks", max_items=10, pattern=_HTTPS,
