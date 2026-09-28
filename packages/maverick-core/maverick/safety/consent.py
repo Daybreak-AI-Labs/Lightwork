@@ -39,6 +39,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
@@ -190,7 +191,57 @@ def _configured_mode() -> str:
     return mode if mode in _CONSENT_MODES else "ask"
 
 
+# Consent modes from the strictest to the loosest. "ask" outranks "dashboard":
+# outside a terminal (every server-run task) it refuses, while "dashboard" can
+# still be approved on the Approvals page.
+_STRICTNESS = ("auto-deny", "ask", "dashboard", "auto-approve")
+
+# A per-task consent mode (director mode's autonomy level for one task). It is
+# only ever applied when it is at least as strict as the installation's mode.
+_TASK_MODE: ContextVar[str | None] = ContextVar("maverick_task_consent_mode", default=None)
+
+
+def _strictness(mode: str) -> int:
+    """Position in :data:`_STRICTNESS`; a mode this module does not know ranks
+    strictest (-1), so nothing can be chosen over it."""
+    try:
+        return _STRICTNESS.index(mode)
+    except ValueError:
+        return -1
+
+
+@contextmanager
+def task_consent_mode(mode: str | None) -> Iterator[None]:
+    """Run the enclosed task under ``mode`` where that tightens consent.
+
+    The installation's mode (``MAVERICK_CONSENT_MODE``, ``[safety]
+    consent_mode``, enterprise and secure-by-default rules) stays the ceiling:
+    a task may ask for a stricter mode, never a looser one. A mode this module
+    does not know is treated as "ask". ``None`` or ``""`` leaves consent as it
+    is. Bound through a ContextVar, so concurrent tasks never see each other's
+    mode.
+    """
+    value = str(mode or "").strip().lower() or None
+    if value is not None and value not in _CONSENT_MODES:
+        value = "ask"
+    token = _TASK_MODE.set(value)
+    try:
+        yield
+    finally:
+        _TASK_MODE.reset(token)
+
+
 def _resolve_mode(risk: str | None = None) -> str:
+    """The consent mode for an action: the installation's, or the task's own
+    when that is stricter (see :func:`task_consent_mode`)."""
+    installation = _installation_mode(risk)
+    task = _TASK_MODE.get()
+    if task and _strictness(task) < _strictness(installation):
+        return task
+    return installation
+
+
+def _installation_mode(risk: str | None = None) -> str:
     # Explicit operator setting always wins (any risk level).
     env = os.environ.get("MAVERICK_CONSENT_MODE")
     if env:

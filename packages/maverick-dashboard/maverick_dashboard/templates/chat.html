@@ -87,6 +87,17 @@
       aria-label="Extra details for the agent (optional)"
       placeholder="Context, constraints, links, or acceptance criteria."
     >{{ prefill_description or '' }}</textarea>
+    {% if director_profiles %}
+    <label class="composer__director" for="director-profile">How much it may do on its own
+      <select id="director-profile" name="director_profile" class="select" aria-describedby="director-profile-help">
+        <option value="">As usual (your settings decide)</option>
+        {% for p in director_profiles %}
+        <option value="{{ p.value }}">{{ p.label }}: {{ p.summary }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <span id="director-profile-help" class="muted">Director mode plans first and checks in with you as the level says. It never goes above your spending limit or your approval rules.</span>
+    {% endif %}
   </details>
   <input type="file" name="files" id="attach-input" multiple aria-label="Attach files to this task" tabindex="-1"
          style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />

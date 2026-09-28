@@ -402,6 +402,13 @@ def run_goal_in_thread(
             # A rejected caller has no authority to change the goal. In
             # particular, it must not interrupt another principal's live run.
             return "blocked"
+        # Director mode (a dashboard start with an autonomy level): its
+        # recorded spending cap can only lower this run's, and its consent
+        # mode and review checkpoints (applied around the run below) can only
+        # tighten the installation's.
+        from .director_mode import recorded_envelope, run_scope, spending_cap
+        director = recorded_envelope(world, goal_id)
+        max_dollars = spending_cap(director, max_dollars)
         # Precedence: explicit caller arg > [budget] config > the
         # background runner's conservative defaults (tighter than the
         # interactive Budget defaults on purpose).
@@ -423,13 +430,14 @@ def run_goal_in_thread(
         from .trace_pin import pin_trace
         pin_trace(world, goal_id)
         try:
-            run_goal_sync(
-                llm, world, budget,
-                goal_id, sandbox=sandbox, max_depth=max_depth,
-                conversation_id=conversation_id, channel=channel,
-                user_id=user_id, capability=capability,
-                allowed_suites=allowed_suites, resume=True,
-            )
+            with run_scope(director):
+                run_goal_sync(
+                    llm, world, budget,
+                    goal_id, sandbox=sandbox, max_depth=max_depth,
+                    conversation_id=conversation_id, channel=channel,
+                    user_id=user_id, capability=capability,
+                    allowed_suites=allowed_suites, resume=True,
+                )
         except Exception:
             # If the swarm raises an unexpected exception (anything not
             # caught by run_goal itself), the goal row is still 'active'.

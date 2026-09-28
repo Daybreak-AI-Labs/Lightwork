@@ -20,7 +20,9 @@ Off by default — a run with no checkpoint config behaves exactly as today.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -36,7 +38,49 @@ class CheckpointPolicy:
         return bool(self.dollars or self.tool_calls or self.wall_seconds)
 
 
+# A per-task checkpoint policy (director mode's review intervals for one task),
+# merged so it can only make reviews come sooner, never later.
+_TASK_POLICY: ContextVar[CheckpointPolicy | None] = ContextVar(
+    "maverick_task_checkpoint_policy", default=None)
+
+
+@contextmanager
+def task_checkpoint_policy(policy: CheckpointPolicy | None) -> Iterator[None]:
+    """Review the enclosed task at least as often as ``policy`` asks.
+
+    Each interval is the smaller of the installation's and the task's; an
+    interval the installation leaves unset takes the task's. Bound through a
+    ContextVar, so concurrent tasks never see each other's policy.
+    """
+    token = _TASK_POLICY.set(policy)
+    try:
+        yield
+    finally:
+        _TASK_POLICY.reset(token)
+
+
+def _sooner(configured: float | None, task: float | None) -> float | None:
+    if not task or task <= 0:
+        return configured
+    return min(configured, task) if configured else task
+
+
 def policy_from_config() -> CheckpointPolicy:
+    """The installation's policy, tightened by the task's (see
+    :func:`task_checkpoint_policy`)."""
+    base = _installation_policy()
+    task = _TASK_POLICY.get()
+    if task is None:
+        return base
+    calls = _sooner(base.tool_calls, task.tool_calls)
+    return CheckpointPolicy(
+        dollars=_sooner(base.dollars, task.dollars),
+        tool_calls=int(calls) if calls else None,
+        wall_seconds=_sooner(base.wall_seconds, task.wall_seconds),
+    )
+
+
+def _installation_policy() -> CheckpointPolicy:
     """Build the policy from ``[safety] review_checkpoint`` (empty = inactive)."""
     import os
 

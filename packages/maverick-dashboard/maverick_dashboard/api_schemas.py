@@ -169,6 +169,9 @@ class GoalIn(BaseModel):
     # Run the goal AS a specialist pack: the orchestrator inherits a domain
     # stamped on the goal row (persona + capability envelope + compartment).
     domain: str | None = Field(None, max_length=120)
+    # Director mode: an autonomy level from [director] profiles. It can only
+    # tighten consent and review checkpoints and lower the spending cap.
+    director_profile: str | None = Field(None, max_length=40)
 
 
 class GoalOut(BaseModel):

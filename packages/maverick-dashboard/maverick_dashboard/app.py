@@ -8683,8 +8683,19 @@ def chat_page(request: Request) -> HTMLResponse:
             "prefill_description": prefill_description,
             "submission_key": secrets.token_urlsafe(24),
             "model_route_ready": selected_model_routes_ready(),
+            "director_profiles": _director_choices(),
         },
     )
+
+
+def _director_choices() -> list[dict]:
+    """The start form's autonomy levels, from ``[director] profiles``."""
+    try:
+        from maverick.director_mode import profile_choices
+
+        return profile_choices()
+    except Exception:  # pragma: no cover -- the start form never fails on this
+        return []
 
 
 # ---- Chat threads -----------------------------------------------------------
@@ -8750,7 +8761,33 @@ def _thread_turns(w, goal) -> list:
     ]
 
 
-def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conversation_id: int | None, receipt: dict) -> None:
+def _director_run(profile: str, title: str, description: str, base_max_dollars: float | None = None):
+    """Director mode for a dashboard start: ``None`` for an ordinary task.
+
+    The autonomy level's spending share is applied to the configured cap and
+    clamped to it; its consent mode and review checkpoints can only tighten
+    the installation's when the run applies them (``maverick.runner``).
+    """
+    name = (profile or "").strip()
+    if not name:
+        return None
+    from maverick.director_mode import UnknownProfileError, direct
+    from maverick.runner import clamp_task_limit, configured_max_dollars
+
+    base = base_max_dollars if base_max_dollars is not None else configured_max_dollars()
+    try:
+        run = direct(title, profile=name, base_max_dollars=base)
+    except (UnknownProfileError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Choose one of the listed autonomy levels.") from exc
+    import dataclasses
+
+    framed = run.goal_description + (f"\n\n{description}" if description.strip() else "")
+    return dataclasses.replace(run, goal_title=title, goal_description=framed,
+                               max_dollars=clamp_task_limit(run.max_dollars, configured_max_dollars()))
+
+
+def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conversation_id: int | None,
+                   receipt: dict, max_dollars: float | None = None) -> None:
     """Hand a goal to the shared runner (same concurrency cap, budget defaults
     and error handling as the REST API and MCP server)."""
     from maverick.runner import run_goal_in_background_async
@@ -8758,6 +8795,8 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     from .attachment_submission import dispatch
 
     kwargs: dict = {"allowed_suites": caller_suites(request)}
+    if max_dollars is not None:
+        kwargs["max_dollars"] = max_dollars
     if conversation_id is not None:
         kwargs["conversation_id"] = conversation_id
     user_id = execution_user_id_from_request(request)
@@ -8795,6 +8834,7 @@ async def chat_send(
     description: str = Form(""),
     files: list[UploadFile] = File(default=[]),
     submission_key: str = Form(""),
+    director_profile: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
@@ -8817,17 +8857,32 @@ async def chat_send(
     # back to the title when empty (prior behavior was description == title).
     # Preserve the full reviewed brief, including meaningful whitespace.
     description = description if description.strip() else title
+    chat_text = _turn_text(title, description)
+    # Director mode: the chosen autonomy level frames the task plan-first and
+    # sets its consent, review checkpoints and spending share (never above the
+    # configured cap, never looser than the installation's consent mode).
+    director = _director_run(director_profile, title, description)
+    if director is not None:
+        description = director.goal_description
+        if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
+            raise HTTPException(status_code=422, detail=(
+                "Shorten the details a little: director mode adds a short plan-first note."))
     w = _world()
     owner = caller_principal(request) or ""
     from .attachment_submission import submit
 
     receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
                            owner=owner, title=title, description=description,
-                           chat_text=_turn_text(title, description))
+                           chat_text=chat_text)
     goal_id = receipt["goal_id"]
+    if director is not None and receipt.get("created"):
+        from maverick.director_mode import record
+
+        await run_in_threadpool(record, w, goal_id, director)
     # The first message opens a chat thread: this goal is its root.
     conversation_id = _submission_conversation(w, receipt)
-    _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id, receipt=receipt)
+    _dispatch_goal(request, bg, goal_id, conversation_id=conversation_id, receipt=receipt,
+                   max_dollars=director.max_dollars if director is not None else None)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
 
