@@ -156,6 +156,58 @@ def test_erase_reports_a_refused_erasure_record_as_uncertified(monkeypatch):
     assert client.get("/api/v1/compliance/people").json()["people"] == []
 
 
+def _capture_audit(monkeypatch):
+    import maverick.audit as audit
+
+    rows = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **kw: rows.append((str(kind), kw)) or True)
+    return rows
+
+
+def test_protection_and_retention_changes_are_recorded_with_who_made_them(monkeypatch):
+    rows = _capture_audit(monkeypatch)
+    assert client.post("/api/v1/compliance/switches/anonymous_logs").status_code == 200
+    assert client.post("/api/v1/compliance/retention", json={"audit_days": 30}).status_code == 200
+    import maverick.audit.retention as retention
+    monkeypatch.setattr(retention, "enforce", lambda: {"deleted_events": 0})
+    assert client.post("/api/v1/compliance/retention/apply").json()["applied"] is True
+    changed = [(kw["section"], kw["key"], kw["old"], kw["new"]) for kind, kw in rows
+               if kw.get("source") == "compliance" and "section" in kw]
+    assert changed == [("privacy", "anonymous", None, True), ("retention", "audit_days", None, 30)]
+    assert [kw["actor"] for _, kw in rows]  # every row names who did it
+    assert any(kind == "retention_applied" for kind, _ in rows)
+
+
+def test_a_refused_record_undoes_the_change_and_removes_nothing(monkeypatch):
+    import maverick.audit as audit
+
+    def refuse(*args, **kwargs):
+        raise audit.AuditRefused("strict audit refused")
+
+    monkeypatch.setattr(audit, "audit_event", refuse)
+    saved = client.post("/api/v1/compliance/retention", json={"audit_days": 30})
+    assert saved.status_code == 503 and "undone" in saved.json()["detail"]
+    from maverick_dashboard import settings_store
+    assert (settings_store.load_overlay().get("retention") or {}).get("audit_days") is None
+    import maverick.audit.retention as retention
+    ran = []
+    monkeypatch.setattr(retention, "enforce", lambda: ran.append(1) or {})
+    assert client.post("/api/v1/compliance/retention/apply").status_code == 503
+    assert ran == []
+    _seed_person()
+    exported = client.post("/api/v1/compliance/people/export", json={"channel": "slack", "user": "U123"})
+    assert exported.status_code == 503
+
+
+def test_a_person_data_download_is_recorded_without_the_person(monkeypatch):
+    _seed_person()
+    rows = _capture_audit(monkeypatch)
+    assert client.post("/api/v1/compliance/people/export",
+                       json={"channel": "slack", "user": "U123"}).status_code == 200
+    assert [kind for kind, _ in rows] == ["person_data_exported"]
+    assert "U123" not in repr(rows)
+
+
 def test_ai_act_self_check_and_control_finder_are_plain():
     act = client.get("/api/v1/compliance/ai-act").json()
     assert act["banned_uses"] and act["high_risk_uses"]

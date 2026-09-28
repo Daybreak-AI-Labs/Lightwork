@@ -241,6 +241,63 @@ _SWITCH_CONTROLS = {
 }
 
 
+def _audit_value(value: object) -> object:
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    return "set"  # text (the disclosure wording) is recorded as changed, not copied
+
+
+async def _save_recorded(request: Request, updates: dict[tuple[str, str], object]) -> None:
+    """Save compliance settings and record who changed what.
+
+    If the activity record refuses the change, the previous values are put
+    back so nothing changes without a record of it."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    from . import settings_store
+    from .auth import caller_principal
+
+    def previous_values() -> dict[tuple[str, str], object]:
+        overlay = settings_store.load_overlay()
+        out: dict[tuple[str, str], object] = {}
+        for section, key in updates:
+            table = overlay.get(section)
+            out[(section, key)] = (table.get(key, settings_store.REMOVE)
+                                   if isinstance(table, dict) else settings_store.REMOVE)
+        return out
+
+    try:
+        previous = await run_in_threadpool(previous_values)
+        await run_in_threadpool(settings_store.set_compliance_settings, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="That setting could not be saved.") from exc
+    except settings_store.SecuritySuiteConfigUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Settings could not be read.") from exc
+    actor = caller_principal(request) or "local administrator"
+
+    def record() -> None:
+        for (section, key), value in updates.items():
+            old = previous[(section, key)]
+            audit_event(EventKind.SETTING_CHANGED, agent="dashboard", _global=True, actor=actor,
+                        section=section, key=key,
+                        old=None if old is settings_store.REMOVE else _audit_value(old),
+                        new=_audit_value(value), source="compliance")
+
+    try:
+        await run_in_threadpool(record)
+    except AuditRefused as exc:
+        try:
+            await run_in_threadpool(settings_store.set_catalog_values, previous)
+        except Exception as rollback_exc:
+            raise HTTPException(
+                status_code=500,
+                detail="The change could not be recorded and could not be undone.",
+            ) from rollback_exc
+        raise HTTPException(
+            status_code=503, detail="The change could not be recorded, so it was undone."
+        ) from exc
+
+
 @router.post("/switches/{key}")
 async def turn_on_protection(request: Request, key: str) -> dict:
     """Switch one protection on (deployment-wide, global admin only)."""
@@ -249,15 +306,7 @@ async def turn_on_protection(request: Request, key: str) -> dict:
         raise HTTPException(status_code=404, detail="That protection is not available here.")
     if key in _NEEDS_SIGN_IN and not sign_in_configured():
         raise HTTPException(status_code=409, detail=SIGN_IN_FIRST)
-    from . import settings_store
-
-    updates = _settings_for(key)
-    try:
-        await run_in_threadpool(settings_store.set_compliance_settings, updates)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="That setting could not be saved.") from exc
-    except settings_store.SecuritySuiteConfigUnavailable as exc:
-        raise HTTPException(status_code=503, detail="Settings could not be read.") from exc
+    await _save_recorded(request, _settings_for(key))
     try:
         now_on = (await run_in_threadpool(_status_by_control)).get(_SWITCH_CONTROLS[key]) == "active"
     except Exception:  # pragma: no cover - the save itself succeeded
@@ -333,14 +382,7 @@ async def save_retention(request: Request, body: RetentionIn) -> dict:
     }
     if not updates:
         raise HTTPException(status_code=422, detail="Choose at least one period.")
-    from . import settings_store
-
-    try:
-        await run_in_threadpool(settings_store.set_compliance_settings, updates)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="That setting could not be saved.") from exc
-    except settings_store.SecuritySuiteConfigUnavailable as exc:
-        raise HTTPException(status_code=503, detail="Settings could not be read.") from exc
+    await _save_recorded(request, updates)
     return {"saved": True, "message": "Retention periods saved."}
 
 
@@ -380,8 +422,21 @@ def _summarize_retention(report: dict) -> dict:
 async def apply_retention(request: Request) -> dict:
     """Run the retention rules now (every workspace; global admin)."""
     require_global_permission(request, "admin")
+    from maverick.audit import AuditRefused, audit_event
     from maverick.audit.retention import enforce
 
+    from .auth import caller_principal
+
+    # Recorded before anything is removed: a refused record removes nothing.
+    try:
+        await run_in_threadpool(
+            lambda: audit_event("retention_applied", agent="dashboard", _global=True,
+                                actor=caller_principal(request) or "local administrator",
+                                source="compliance"))
+    except AuditRefused as exc:
+        raise HTTPException(
+            status_code=503, detail="This could not be recorded, so nothing was removed."
+        ) from exc
     try:
         report = await run_in_threadpool(enforce)
     except Exception as exc:
@@ -466,8 +521,21 @@ async def export_person(request: Request, person: PersonIn) -> Response:
     """Download everything held about one person (right of access)."""
     require_permission(request, "admin")
     channel, user = _validated(person)
+    from maverick.audit import AuditRefused, audit_event
     from maverick.dsar import export_subject_data
 
+    from .auth import caller_principal
+
+    # Who downloaded a person's data, and when; never whose data it was.
+    try:
+        await run_in_threadpool(
+            lambda: audit_event("person_data_exported", agent="dashboard",
+                                actor=caller_principal(request) or "local administrator",
+                                channel=channel, source="dashboard"))
+    except AuditRefused as exc:
+        raise HTTPException(
+            status_code=503, detail="This download could not be recorded, so it was not created."
+        ) from exc
     world = _world_for_request()
     try:
         bundle = await run_in_threadpool(
