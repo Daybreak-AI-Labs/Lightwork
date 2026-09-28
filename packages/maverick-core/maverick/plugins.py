@@ -315,6 +315,9 @@ def _requested_permissions(manifest) -> list[str]:
         requested.append("subprocess")
     if perms.sensitive_envs:
         requested.append("sensitive_envs")
+    # RFC ``requires`` entries with no permission of their own must be
+    # granted by exactly their name (``[plugins] grant``).
+    requested.extend(str(r) for r in getattr(perms, "requires", ()) or ())
     return requested
 
 

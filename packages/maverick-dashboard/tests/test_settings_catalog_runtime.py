@@ -105,6 +105,11 @@ _WORDS = {
     "observability.otel_endpoint": "https://otel.example.com/v1/traces",
     "shield.update_url": "https://rules.example.com/shield.json",
     "shield.update_pubkey": "cd" * 32,
+    "memory.weaviate_grpc_host": "grpc.example.com",
+    "models.embed": "BAAI/bge-base-en-v1.5",
+    "models.clap": "laion/larger_clap_general",
+    "model_proxy.upstream": "https://api.anthropic.com",
+    "model_proxy.listen": "127.0.0.1:9876",
 }
 _LISTS = {
     "models.catalog": ["vllm:my-model"],
@@ -116,7 +121,11 @@ _LISTS = {
     "attachments.extra_mime_prefixes": ["application/vnd.visio"],
     "containment.deny_tools": ["github_issues"],
     "search.ladder": ["anthropic:claude-opus-4-8:0.3"],
+    "mcp.allowed_origins": ["https://gateway.example.com"],
+    "mcp.elicit_allowed_hosts": ["accounts.google.com"],
 }
+# Rows whose only other value is refused on purpose (with a plain reason).
+_REFUSED = {"ekko.provider_egress"}
 
 
 def _sample(setting) -> tuple[object, object]:  # noqa: C901 - one branch per control
@@ -164,11 +173,23 @@ def _sample(setting) -> tuple[object, object]:  # noqa: C901 - one branch per co
                 [{"phrases": ["launch codes", "secret plan"], "severity": "critical"}])
     if setting.control == "rate":
         return {"count": 5, "seconds": 60}, "5/60"
+    if sid == "tui.keys":
+        return [{"name": "quit", "key": "x"}], {"quit": "x"}
+    if sid == "director.profiles":
+        return ([{"name": "supervised", "consent_mode": "dashboard", "budget_multiplier": 0.5,
+                  "dollars": 5, "tool_calls": 50}],
+                {"supervised": {"consent_mode": "dashboard", "budget_multiplier": 0.5,
+                                "dollars": 5.0, "tool_calls": 50}})
+    if sid == "env_hunt.enrichment_sources":
+        return [{"name": "intel_feed", "enable": True}], {"intel_feed": {"enable": True}}
     if setting.control == "path":
-        import os
         from pathlib import Path
 
-        found = Path(os.environ["HOME"]) / (sid.replace(".", "-") + ".json")
+        if setting.path_kind == "folder":
+            folder = Path.home() / "places" / sid.replace(".", "-")
+            folder.mkdir(parents=True, exist_ok=True)
+            return str(folder), str(folder)
+        found = Path.home() / (sid.replace(".", "-") + ".json")
         found.write_text("{}", encoding="utf-8")
         return str(found), str(found)
     raise AssertionError(f"no sample for {sid}")
@@ -192,7 +213,7 @@ def _bad(setting) -> object:
     if control == "multiselect":
         return ["nope"]
     if control == "table":
-        return [{"name": "no-such-choice"}]
+        return [{"name": "Not A Name!"}] if setting.row_kind == "named" else [{"name": "no-such-choice"}]
     if control == "rules":
         return [{"phrases": "", "severity": "high"}]
     if control == "rate":
@@ -217,7 +238,7 @@ def test_every_runtime_row_is_in_the_catalog():
 
 # Saving a quorum turns on approvals for safety settings, the quorum itself
 # included, so its reset is held for approval: tested on its own below.
-_GENERIC = [s for s in ROWS if s.id != "safety.quorum_required"]
+_GENERIC = [s for s in ROWS if s.id != "safety.quorum_required" and s.id not in _REFUSED]
 
 
 @pytest.mark.parametrize("setting", _GENERIC, ids=lambda s: s.id)

@@ -16,14 +16,21 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from .._envparse import env_float, env_int
+from .._envparse import env_float
 from . import Tool
 
 if TYPE_CHECKING:
     from ..agent import Agent
 
 
-MAX_SWARM_FANOUT = env_int("MAVERICK_MAX_SWARM_FANOUT", 8)
+def _max_fanout_setting() -> int:
+    """``[swarm] max_fanout`` read at startup (env ``MAVERICK_MAX_SWARM_FANOUT`` wins)."""
+    from ..env_setting import env_or_config_int
+
+    return env_or_config_int("MAVERICK_MAX_SWARM_FANOUT", "swarm", "max_fanout", 8)
+
+
+MAX_SWARM_FANOUT = _max_fanout_setting()
 
 # #611: budget reserved for the top-level goal's synthesis/write step. Once
 # cumulative spend crosses (1 - this) of the cap, spawn_swarm refuses new

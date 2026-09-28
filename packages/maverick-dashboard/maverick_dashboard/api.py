@@ -7557,10 +7557,10 @@ def _require_skill_install_opt_in() -> None:
         raise HTTPException(
             status_code=403,
             detail=(
-                "Installing skills from the dashboard is disabled on this "
-                "server — an administrator can opt in (set "
-                "MAVERICK_ALLOW_SKILL_INSTALL=1, or run "
-                "`maverick skill install` on the host)."
+                "Installing skills from the dashboard is turned off. A global "
+                "administrator can turn on “Install skills from a typed web "
+                "address” in Settings > All settings (or set "
+                "MAVERICK_ALLOW_SKILL_INSTALL=1 on the server)."
             ),
         )
 
