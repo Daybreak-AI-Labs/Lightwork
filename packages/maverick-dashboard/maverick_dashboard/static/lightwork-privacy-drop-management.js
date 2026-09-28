@@ -107,6 +107,7 @@
   var statusEl = byId("drop-status");
   var state = { requests: [], brokers: [], waiting: [], keys: [], dependencies: {} };
   var outcomeRow = null;
+  var settled = null;
 
   var TYPE = { DataDeletion: "Delete their data", OptOut: "Stop selling or sharing" };
   var LANGUAGE = { en: "English", es: "Spanish", zh: "Chinese", vi: "Vietnamese", tl: "Tagalog", ko: "Korean" };
@@ -162,6 +163,7 @@
     var el = byId("drop-readiness");
     try {
       var st = await request("/status");
+      settled = st;
       if (st.ready === true) {
         el.textContent = "Ready: California DROP requests are set up for this workspace.";
       } else if (st.enabled !== true) {
@@ -179,6 +181,27 @@
     } catch (failure) {
       el.textContent = R.errorText(failure, "check whether DROP requests are set up");
     }
+    return settled;
+  }
+
+  // Replace every list's "Loading…" placeholder with a plain sentence, so a
+  // turned-off or unreachable feature never looks like it is still loading.
+  function showNothing(text) {
+    ["drop-requests", "drop-waiting", "drop-brokers"].forEach(function (id) {
+      var box = byId(id);
+      if (!box) return;
+      var note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = text;
+      box.replaceChildren(note);
+    });
+    var broker = byId("drop-import-broker");
+    if (broker) {
+      var option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No data brokers available";
+      broker.replaceChildren(option);
+    }
   }
 
   // ---- loading -------------------------------------------------------------------
@@ -192,6 +215,7 @@
       render();
     } catch (failure) {
       fail(failure, "load the DROP requests");
+      showNothing("Nothing to show right now. Reload the page to try again.");
     }
   }
 
@@ -559,6 +583,13 @@
     } catch (failure) { fail(failure, "send the key change for approval"); }
   });
 
-  refreshStatus();
-  load();
+  // Only ask for the lists when the feature is on: a turned-off feature has no
+  // requests, and asking would only fail. If the check itself fails, try anyway.
+  refreshStatus().then(function (st) {
+    if (st && st.enabled === false) {
+      showNothing("Nothing to show: California DROP requests are turned off.");
+      return;
+    }
+    return load();
+  });
 })();

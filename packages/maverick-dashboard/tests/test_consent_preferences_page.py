@@ -56,6 +56,12 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
     assert 'data-module-gate="consent_preferences.analytics"' in page
     assert "[consent_preferences.analytics] enable = true" not in page
     assert "Small groups are hidden" in page
+    # The optional consent register is off by default: the page shows its
+    # turned-off card and does not ask for records it cannot have.
+    assert 'data-registry-enabled="false"' in page
+    assert 'data-module-gate="consent_registry"' in page
+    assert "Consent register is turned off." in page
+    assert "[consent_registry]" not in page
     assert "/identity-links/integrity?limit=500" in page
     assert "Links change only when the person verifies themselves" in page
     assert 'value="web_tracker"' in page

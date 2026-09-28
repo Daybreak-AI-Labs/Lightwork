@@ -223,7 +223,7 @@ def test_drop_client_has_bounded_transport_and_safe_rendering() -> None:
         'cache: "no-store"',
         "Number.isSafeInteger",
         "encodeURIComponent(dropId)",
-        "refreshStatus();",
+        "refreshStatus().then(",
         "/authority/overview",
         "R.fingerprint",
         "R.confirm",

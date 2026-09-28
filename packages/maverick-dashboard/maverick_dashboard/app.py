@@ -3824,7 +3824,7 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
 async def consent_preferences_page(request: Request) -> HTMLResponse:
     """Consumer consent operations, separate from agent-action approvals."""
     require_permission(request, "operate")
-    from maverick import consent_analytics, consent_preferences
+    from maverick import consent_analytics, consent_preferences, consent_registry
 
     return templates.TemplateResponse(
         request,
@@ -3832,6 +3832,7 @@ async def consent_preferences_page(request: Request) -> HTMLResponse:
         {
             "consent_preferences_enabled": consent_preferences.enabled(),
             "consent_analytics_enabled": consent_analytics.enabled(),
+            "consent_registry_enabled": consent_registry.enabled(),
             "consent_can_admin": has_global_permission(request, "admin"),
         },
     )
