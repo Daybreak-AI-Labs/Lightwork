@@ -81,11 +81,11 @@ SAMPLES: dict[str, object] = {
     f"{_DEST}.snowflake.warehouse": "LIGHTWORK_WH",
     f"{_DEST}.snowflake.role": "LIGHTWORK_CONSENT_WRITER",
     "consent_preferences.native_sdk.receipt_key_id": "native-consent-receipt",
-    "consent_preferences.native_sdk.receipt_key_secret_ref": "ACME_NATIVE_CONSENT_KEY",
-    "consent_preferences.profile_data.custom_index.key_secret_ref": "ACME_CONSENT_INDEX_KEY",
+    "consent_preferences.native_sdk.receipt_key_secret_ref": "ACME_NATIVE_CONSENT_KEY",  # pragma: allowlist secret
+    "consent_preferences.profile_data.custom_index.key_secret_ref": "ACME_CONSENT_INDEX_KEY",  # pragma: allowlist secret
     "consent_preferences.trust_center.branding.key_ref": "vault:brand-asset-key",
     "consent_registry.subject_salt": "a-private-salt-value-0001",  # pragma: allowlist secret
-    "consent_registry.webhook_secret_env": "ACME_CONSENT_WEBHOOK_SECRET",
+    "consent_registry.webhook_secret_env": "ACME_CONSENT_WEBHOOK_SECRET",  # pragma: allowlist secret
     "data_use_governance.snowflake.origin": "https://acme.snowflakecomputing.com",
     "data_use_governance.snowflake.credential_secret_ref": "$ACME_DATA_USE_TOKEN",
     "data_use_governance.databricks.origin": "https://acme.cloud.databricks.com",
@@ -331,7 +331,7 @@ def test_loosening_needs_confirmation(setting, audit_rows):
     "https://localhost",
     "https://metadata.google.internal",
     "https://printer.local",
-    "https://user:pass@login.example.com",
+    "https://user:pass@login.example.com",  # pragma: allowlist secret
     "https://login.example.com/keys?token=1",
 ])
 def test_sign_in_key_address_must_be_a_public_secure_origin(address, audit_rows):
@@ -451,14 +451,14 @@ def test_native_app_settings_reach_the_native_runtime(audit_rows):
     _modules_on("consent_preferences", "consent_preferences.publishing",
                 "consent_preferences.public_api", "consent_preferences.native_sdk")
     r = _save({"consent_preferences.native_sdk.receipt_key_id": "native-receipt",
-               "consent_preferences.native_sdk.receipt_key_secret_ref": "ACME_CONSENT_KEY",
+               "consent_preferences.native_sdk.receipt_key_secret_ref": "ACME_CONSENT_KEY",  # pragma: allowlist secret
                "consent_preferences.native_sdk.max_devices": 50,
                "consent_preferences.native_sdk.require_profile_linking": True,
                "consent_preferences.standards.tcf": True}, confirm=True)
     assert r.status_code == 200, r.text
     settings = native_consent_settings(_loaded())
     assert settings.max_devices == 50 and settings.require_profile_linking is True
-    assert settings.receipt_key_secret_ref == "ACME_CONSENT_KEY"
+    assert settings.receipt_key_secret_ref == "ACME_CONSENT_KEY"  # pragma: allowlist secret
     assert settings.standards_wire_required is True
 
 
@@ -521,12 +521,12 @@ def test_consent_register_reads_the_saved_values(audit_rows):
     _modules_on("consent_registry")
     r = _save({"consent_registry.subject_salt": "a-private-salt-value-0001",
                "consent_registry.webhook_enable": True,
-               "consent_registry.webhook_secret_env": "ACME_CONSENT_WEBHOOK_SECRET"},
+               "consent_registry.webhook_secret_env": "ACME_CONSENT_WEBHOOK_SECRET"},  # pragma: allowlist secret
               confirm=True)
     assert r.status_code == 200, r.text
     settings = get_consent_registry_config()
     assert settings["subject_salt"] == "a-private-salt-value-0001"  # pragma: allowlist secret
-    assert settings["webhook_secret_env"] == "ACME_CONSENT_WEBHOOK_SECRET"
+    assert settings["webhook_secret_env"] == "ACME_CONSENT_WEBHOOK_SECRET"  # pragma: allowlist secret
     assert webhook_enabled() is True
 
 
@@ -560,7 +560,7 @@ def test_data_use_settings_reach_the_provider_runtime(audit_rows):
     limits = provider_limits(loaded, "snowflake")
     assert limits.timeout_seconds == 20 and limits.max_attempts == 2
     metadata = credential_metadata(loaded, "snowflake")
-    assert metadata.secret_name == "ACME_DATA_USE_TOKEN" and metadata.key_revision == 4
+    assert metadata.secret_name == "ACME_DATA_USE_TOKEN" and metadata.key_revision == 4  # pragma: allowlist secret
     assert operation_settings(loaded).audit_window_seconds == 4 * 3600
     native = _native_limits(loaded)
     assert native.max_pages_per_read == 7
