@@ -10464,7 +10464,6 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-outcome-pilot-costs.js")
 @app.get("/static/lightwork-project-reviews.js")
 @app.get("/static/lightwork-workspace-members.js")
-@app.get("/static/lightwork-consent-picker.js")
 @app.get("/static/lightwork-consent-workbench.js")
 @app.get("/static/lightwork-consent-workbench.css")
 @app.get("/static/lightwork-consent-publishing.js")
@@ -10588,17 +10587,6 @@ async def consent_publish_settings_client() -> FileResponse:
     return FileResponse(
         _STATIC_DIR / "lightwork-consent-publish-settings.js",
         media_type="application/javascript; charset=utf-8",
-        headers={"Cache-Control": "public, max-age=300"},
-    )
-
-
-@app.get("/static/lightwork-consent-global-opt-out.css")
-async def consent_global_opt_out_styles() -> FileResponse:
-    """Liquid-glass styles for the governed Global Opt-Out workbench."""
-
-    return FileResponse(
-        _STATIC_DIR / "lightwork-consent-global-opt-out.css",
-        media_type="text/css; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )
 
