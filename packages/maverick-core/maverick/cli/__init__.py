@@ -3740,21 +3740,17 @@ def diag_ratelimits(as_json: bool) -> None:
 @click.argument("goal_id", type=int)
 def diag_health(goal_id: int) -> None:
     """Compute a 0-100 health score for a finished goal from its episode."""
-    from ..health_score import compute_health, render
+    from ..health_score import goal_health, render
     from ..world_model import close_world_if_owned, open_world
     w = open_world()
     try:
-        g = w.get_goal(goal_id)
-        eps = w.list_episodes(goal_id=goal_id, limit=50) if g is not None else []
+        found = goal_health(w, goal_id)
     finally:
         close_world_if_owned(w)
-    if g is None:
+    if found is None:
         click.echo(f"ERROR: no such goal {goal_id}", err=True)
         sys.exit(2)
-    in_tok = sum(getattr(e, "input_tokens", 0) for e in eps)
-    out_tok = sum(getattr(e, "output_tokens", 0) for e in eps)
-    success = g.status == "done"
-    h = compute_health(success=success, in_tok=in_tok, out_tok=out_tok)
+    g, h = found
     click.echo(f"goal #{goal_id} ({g.status}):")
     click.echo(render(h))
 
@@ -5185,16 +5181,13 @@ def skills_stats() -> None:
     if not items:
         click.echo("no skills yet.")
         return
-    for s in items:
-        st = skill_stats.get(s.name)
-        if st is None or st.uses == 0:
-            click.echo(f"  {s.name}: no usage recorded")
+    for row in skill_stats.usage_rows([s.name for s in items]):
+        if not row["uses"]:
+            click.echo(f"  {row['name']}: no usage recorded")
             continue
-        decided = st.wins + st.losses
-        wr = (st.wins / decided) if decided else 0.0
         click.echo(
-            f"  {s.name}: uses={st.uses} wins={st.wins} losses={st.losses} "
-            f"win_rate={wr:.0%} weight={skill_stats.decay_weight(s.name):.2f}"
+            f"  {row['name']}: uses={row['uses']} wins={row['wins']} losses={row['losses']} "
+            f"win_rate={row['win_rate']:.0%} weight={row['weight']:.2f}"
         )
 
 

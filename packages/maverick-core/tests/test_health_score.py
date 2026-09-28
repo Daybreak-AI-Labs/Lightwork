@@ -46,3 +46,25 @@ def test_score_never_negative():
                        out_tok=0, expected_tokens=10)
     assert h.score == 0
     assert render(h) == "Run health: 0/100 (F)"
+
+
+def test_diag_health_cli_reads_the_shared_kernel_score(tmp_path, monkeypatch):
+    """``maverick diag health`` and the task page read one kernel function."""
+    from click.testing import CliRunner
+    from maverick import world_model
+    from maverick.cli import main
+    from maverick.health_score import goal_health
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    world = world_model.open_world()
+    gid = world.create_goal("report", "")
+    ep = world.start_episode(gid)
+    world.end_episode(ep, "done", "success", input_tokens=10, output_tokens=5)
+    world.set_goal_status(gid, "done")
+    _goal, health = goal_health(world, gid)
+    world_model.close_world_if_owned(world)
+    result = CliRunner().invoke(main, ["diag", "health", str(gid)])
+    assert result.exit_code == 0, result.output
+    assert result.output == f"goal #{gid} (done):\n{render(health)}\n"
+    missing = CliRunner().invoke(main, ["diag", "health", "999999"])
+    assert missing.exit_code == 2 and "no such goal 999999" in missing.output

@@ -417,6 +417,16 @@ def read_trace(path: str | Path, *, allow_legacy: bool = False) -> list[dict]:
     return list(_scan_trace(p, allow_legacy=allow_legacy).events)
 
 
+def goal_trace_path(goal_id: int) -> Path | None:
+    """Where a run of ``goal_id`` records its trace --
+    ``$MAVERICK_TRACE_DIR/goal-<id>.jsonl`` -- or ``None`` when tracing is off.
+    The one naming rule the orchestrator writes by and readers find it by."""
+    base = os.environ.get("MAVERICK_TRACE_DIR")
+    if not base:
+        return None
+    return Path(base) / f"goal-{int(goal_id)}.jsonl"
+
+
 def replay(path: str | Path, handlers: dict[str, Callable[[dict], Any]]) -> int:
     """Verify and dispatch committed events in their recorded sequence."""
     events = read_trace(path)
@@ -431,6 +441,7 @@ def replay(path: str | Path, handlers: dict[str, Callable[[dict], Any]]) -> int:
 
 __all__ = [
     "TraceWriter",
+    "goal_trace_path",
     "read_trace",
     "replay",
     "TraceError",

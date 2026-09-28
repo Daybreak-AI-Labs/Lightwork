@@ -318,6 +318,28 @@ class RestDialect:
     def is_money(self, field_name: str) -> bool:
         return str(field_name).strip().lower() in self.money_fields
 
+    #: How a record address is spelled: ``{object}`` and an optional
+    #: ``/{record}`` suffix. Empty = this dialect cannot build one.
+    path_template: str = ""
+
+    def path_for(self, record_type: str, record_id: str = "") -> str:
+        """The address of one record (or, with no ``record_id``, the collection
+        a create goes into), built from a record type and id a person picked,
+        so nobody has to spell another vendor's URL grammar. Raises
+        ``ValueError`` when this dialect cannot build addresses or a value
+        does not fit its grammar -- the result always matches
+        :meth:`target`/:meth:`collection`."""
+        kind = str(record_type or "").strip()
+        rid = str(record_id or "").strip()
+        if not self.path_template:
+            raise ValueError(f"{self.name} records cannot be addressed by type and id")
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,80}", kind):
+            raise ValueError("record type must be letters, digits or underscores")
+        if rid and (self.id_re is None or not self.id_re.match(rid)):
+            raise ValueError(f"not a valid {self.name} record id")
+        path = self.path_template.format(object=kind)
+        return f"{path}/{rid}" if rid else path
+
 
 class SalesforceDialect(RestDialect):
     """Salesforce REST: ``/services/data/vNN.N/sobjects/<Object>/<Id>``.
@@ -335,6 +357,7 @@ class SalesforceDialect(RestDialect):
     """
 
     name = "salesforce"
+    path_template = "/services/data/v60.0/sobjects/{object}"
     record_re = re.compile(
         r"\A/services/data/v\d+\.\d+/sobjects/([A-Za-z0-9_]+)"
         r"/([A-Za-z0-9]{15,18})/?\Z")
@@ -381,6 +404,7 @@ class ServiceNowDialect(RestDialect):
     """
 
     name = "servicenow"
+    path_template = "/api/now/table/{object}"
     record_re = re.compile(
         r"\A/api/now/(?:v\d+/)?table/([A-Za-z0-9_]+)/([0-9a-fA-F]{32})/?\Z")
     collection_re = re.compile(

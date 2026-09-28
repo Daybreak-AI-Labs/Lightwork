@@ -72,9 +72,23 @@ def compute_health(
     return Health(score=score, grade=_grade(score), factors=factors)
 
 
+def goal_health(world, goal_id: int):
+    """``(goal, Health)`` for a goal from its recorded runs, or ``None`` when
+    the goal does not exist. A goal that finished (``done``) scores as a
+    success; tokens come from its most recent 50 runs. Shared by
+    ``maverick diag health`` and the task page."""
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        return None
+    eps = world.list_episodes(goal_id=goal_id, limit=50)
+    in_tok = sum(getattr(e, "input_tokens", 0) for e in eps)
+    out_tok = sum(getattr(e, "output_tokens", 0) for e in eps)
+    return goal, compute_health(success=goal.status == "done", in_tok=in_tok, out_tok=out_tok)
+
+
 def render(h: Health) -> str:
     """One-line CLI summary."""
     return f"Run health: {h.score}/100 ({h.grade})"
 
 
-__all__ = ["Health", "compute_health", "render"]
+__all__ = ["Health", "compute_health", "goal_health", "render"]

@@ -225,6 +225,35 @@ def verify_lock(path: Path | None = None) -> dict:
             "drifted": drifted, "unpinned": unpinned, "missing": missing}
 
 
+def lock_report(path: Path | None = None) -> dict:
+    """Per-distribution reading of :func:`verify_lock`, for a person to scan.
+
+    ``{locked, ok, rows: [{name, pinned, installed, state}]}`` with ``state``
+    one of ``match`` (pinned and installed at the pinned version),
+    ``drifted`` (installed at another version), ``missing`` (pinned, not
+    installed) or ``unpinned`` (installed, not in the lock). The same set
+    comparison ``verify_lock`` makes, kept row by row so the matching
+    plugins are listed too, not only the problems. No lockfile: every
+    installed distribution is ``unpinned`` and ``locked`` is False."""
+    pins = read_lock(path)
+    installed = _active_plugin_dists()
+    known = dict(pins or {})
+    rows: list[dict] = []
+    for name in sorted(set(known) | set(installed)):
+        pinned, have = known.get(name), installed.get(name)
+        if pinned is None:
+            state = "unpinned"
+        elif have is None:
+            state = "missing"
+        elif have != pinned:
+            state = "drifted"
+        else:
+            state = "match"
+        rows.append({"name": name, "pinned": pinned, "installed": have, "state": state})
+    ok = pins is None or all(r["state"] == "match" for r in rows)
+    return {"locked": pins is not None, "ok": ok, "rows": rows}
+
+
 def dist_allowed_by_lock(dist_name: str | None) -> bool:
     """Per-dist gate used by plugin discovery.
 
@@ -285,4 +314,4 @@ def reset_warned() -> None:
 
 
 __all__ = ["lock_path", "lock_policy", "write_lock", "read_lock", "read_hashes",
-           "verify_lock", "dist_allowed_by_lock", "reset_warned"]
+           "verify_lock", "lock_report", "dist_allowed_by_lock", "reset_warned"]
