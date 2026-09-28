@@ -363,12 +363,17 @@ def run(setting, value: object, values: Mapping[str, object]) -> Outcome:
         from . import settings_paths
 
         try:
-            settings_paths.check(str(value or ""), kind=setting.path_kind,
-                                 writable=setting.path_writable, private=setting.path_private)
+            stored = settings_paths.check(str(value or ""), kind=setting.path_kind,
+                                          writable=setting.path_writable,
+                                          private=setting.path_private,
+                                          new_ok=setting.path_new, scope=setting.path_scope)
         except settings_paths.PathRefused as exc:
             text = str(exc)
             return Outcome(False, text[:1].upper() + text[1:])
-        return Outcome(True, settings_paths.describe_ok(setting.path_kind))
+        from pathlib import Path
+
+        later = setting.path_new and not Path(stored).exists()
+        return Outcome(True, settings_paths.describe_ok(setting.path_kind, created_later=later))
     tester = TESTERS.get(setting.test)
     if tester is None:
         return Outcome(False, "This setting has nothing to test.")

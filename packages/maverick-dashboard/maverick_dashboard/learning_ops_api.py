@@ -44,22 +44,56 @@ _TEXT = 300
 _JOB_ID = re.compile(r"[0-9a-f]{16}\Z")
 _PROPOSAL_ID = re.compile(r"[0-9a-f]{16}\Z")
 _HALTED = "Learning is stopped for this installation right now, so nothing was changed."
-_MODIFY_BLOCKERS = {
-    "self_improvement_disabled": "Turn on “Adopt proven improvements” in Learning systems first.",
-    "editable_surface_missing": "Choose which parts of Lightwork it may practise on. This is under "
-                                "Memory & learning, Research experiments in All settings.",
-    "challenge_corpus_missing": "Add at least two practice tests it must pass. This is under "
-                                "Memory & learning, Research experiments in All settings.",
-    "attested_evaluator_missing": "It needs a separate, trusted practice area to test changes in. "
-                                  "Ask whoever installed Lightwork to set one up.",
-    "learning_halt_active": "Learning is stopped for this installation right now.",
-}
+_DGM_SECTION = "Experimental: let Lightwork try improving its own code"
+
+
+# ---- where a person turns something on or chooses a location ----------------
+# Built from the pages' own registries, so a message always names the exact
+# place (group, part and label) the person will find.
+
+def setting_place(setting_id: str) -> str:
+    """``All settings, <group>, <part>, “<label>”`` for one All settings row."""
+    from . import settings_catalog as catalog
+    s = catalog.BY_ID[setting_id]
+    parts = ["All settings", s.group] + ([s.subgroup] if s.subgroup else []) + [f"“{s.label}”"]
+    return ", ".join(parts)
+
+
+def switch_place(section: str) -> str:
+    """A system switch in the Learning page's “Learning systems” list."""
+    from .api import _FEATURE_SWITCHES
+    return f"“{_FEATURE_SWITCHES[section][0]}” under Learning systems on the Learning page"
+
+
+def part_place(key: str) -> str:
+    """One part's switch under “Turn each part of learning on or off”."""
+    from .settings_store import LEARNING_SUBSYSTEMS
+    label = next(s["label"] for s in LEARNING_SUBSYSTEMS if s["key"] == key)
+    return f"“{label}” under “Turn each part of learning on or off” on the Learning page"
+
+
+def _modify_blocker(code: object) -> str:
+    if code == "self_improvement_disabled":
+        return f"Turn on {part_place('self_improvement')} first."
+    if code == "editable_surface_missing":
+        return f"Choose which files it may practise on in {setting_place('self_modify.editable_paths')}."
+    if code == "challenge_corpus_missing":
+        return f"Add at least two tests in {setting_place('self_modify.eval_tests')}."
+    if code == "attested_evaluator_missing":
+        return ("It needs a separate, trusted practice area to test changes in. "
+                "Ask whoever installed Lightwork to set one up.")
+    if code == "learning_halt_active":
+        return "Learning is stopped for this installation right now."
+    return "A setting outside this page needs attention. Ask whoever installed Lightwork."
+
+
 _MODIFY_REFUSALS = (
     ("explicit tenant", "This runs for the whole installation, so it cannot start inside one workspace. "
                         "Switch to the whole installation and try again."),
-    ("disabled", "Turn this experiment on first."),
+    ("disabled", f"Turn on the experiment under “{_DGM_SECTION}” on the Learning page first."),
     ("halt", _HALTED),
-    ("eval_tests", "Add at least two practice tests it must pass before it can run."),
+    ("eval_tests", "Add at least two tests it must pass, in All settings, Memory & learning, "
+                   "Research experiments, “Tests each code experiment must pass”."),
     ("objective", "Describe what it should try to improve."),
     ("budget", "The spending limit for this experiment is used up or not set."),
     ("sandbox", "It needs a separate, trusted practice area to test changes in."),
@@ -272,6 +306,9 @@ def _plan() -> dict:
         "checker": checker,
         "models": [{"value": m, "label": model_label(m)} for m in _fleet()],
         "hold_out": {"set_up": bool(ledger), "exists": bool(ledger) and Path(ledger).exists()},
+        "places": {"test_cases": setting_place("self_harness.eval_corpus"),
+                   "hold_out": setting_place("self_harness.holdout_ledger"),
+                   "self_coaching": switch_place("self_harness")},
     }
 
 
@@ -317,7 +354,7 @@ async def transfer(request: Request, body: TransferIn) -> dict:
     from maverick import self_harness
     from maverick import self_improvement_runner as runner
     if not self_harness.enabled():
-        raise HTTPException(status_code=409, detail="Turn on self-coaching on the Learning page first.")
+        raise HTTPException(status_code=409, detail=f"Turn on {switch_place('self_harness')} first.")
     if not self_harness.settings().get("eval_corpus"):
         raise HTTPException(status_code=409, detail=(
             "Trying lessons on other models needs test cases. Set them up first."))
@@ -346,7 +383,8 @@ def _corpus_path() -> str:
     cpath = self_harness.settings().get("eval_corpus")
     if not cpath:
         raise HTTPException(status_code=409, detail=(
-            "Test cases are not set up yet. Choose where to keep them under Memory & learning in All settings."))
+            "Test cases are not set up yet. Choose where to keep them in "
+            f"{setting_place('self_harness.eval_corpus')}."))
     return str(cpath)
 
 
@@ -436,7 +474,7 @@ async def set_up_hold_out(request: Request, body: ConfirmIn) -> dict:
     target = str(get_self_harness().get("holdout_ledger") or "").strip()
     if not target:
         raise HTTPException(status_code=409, detail=(
-            "Choose where to keep the hold-out record first, under Memory & learning in All settings."))
+            f"Choose where to keep the hold-out record first, in {setting_place('self_harness.holdout_ledger')}."))
     if Path(target).exists():
         raise HTTPException(status_code=409, detail="The hold-out record is already set up. It is never replaced.")
     await run_in_threadpool(lambda: _record(request, "self_harness_holdout_provision"))
@@ -486,7 +524,7 @@ async def turn_flywheel(request: Request) -> dict:
     require_global_permission(request, "admin")
     from maverick import data_engine
     if not data_engine.enabled():
-        raise HTTPException(status_code=409, detail="Turn on “Improvement flywheel” in Learning systems first.")
+        raise HTTPException(status_code=409, detail=f"Turn on {part_place('data_engine')} first.")
     _halt_preflight("flywheel")
     await run_in_threadpool(lambda: _record(request, "flywheel_turn"))
 
@@ -509,7 +547,7 @@ def _factory_on() -> None:
     from maverick import factory_learning
     if not factory_learning.enabled():
         raise HTTPException(status_code=409, detail=(
-            "Turn on “Improve how new agents are built” in Learning systems first."))
+            f"Turn on {part_place('factory_learning')} first."))
 
 
 @router.get("/factory/preview")
@@ -575,9 +613,7 @@ def _modify_status() -> dict:
         limit = None
     return {"state": status["state"], "requested": bool(status["requested"]),
             "running_allowed": bool(status["effective"]),
-            "blockers": [_MODIFY_BLOCKERS.get(b.get("code"), "A setting outside this page needs "
-                                              "attention. Ask whoever installed Lightwork.")
-                         for b in status["blockers"]][:10],
+            "blockers": [_modify_blocker(b.get("code")) for b in status["blockers"]][:10],
             "level": str(getattr(tier, "name", "") or "").replace("_", " "),
             "areas": len(surface.editable_globs),
             "results": len(archive.candidates),

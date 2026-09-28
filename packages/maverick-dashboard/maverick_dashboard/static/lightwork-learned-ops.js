@@ -19,11 +19,18 @@
     models.forEach(function (m) { var o = el('option', m.label); o.value = m.value; select.appendChild(o); });
   }
 
+  function settingsLink() {
+    var a = el('a', 'Open All settings', 'btn btn--ghost');
+    a.href = '/settings/all';
+    return a;
+  }
+
   function holdout(plan) {
     var box = $('lpo-holdout');
     box.textContent = '';
     if (!plan.hold_out.set_up) {
-      box.appendChild(el('p', 'Choose where to keep it first, under Memory & learning in All settings.', 'muted'));
+      box.appendChild(el('p', 'Choose where to keep it first, in ' + plan.places.hold_out + '.', 'muted'));
+      box.appendChild(settingsLink());
       return;
     }
     if (plan.hold_out.exists) {
@@ -52,8 +59,8 @@
 
   function loadPlan() {
     J.request(API + '/plan').then(function (d) {
-      var parts = [d.enabled ? 'Self-coaching is on.' : 'Self-coaching is off. Some tools below need it on.'];
-      parts.push(d.test_cases_set_up ? '' : 'Test cases are not set up yet; choose where to keep them under Memory & learning in All settings.');
+      var parts = [d.enabled ? 'Self-coaching is on.' : 'Self-coaching is off. Some tools below need it on: turn on ' + d.places.self_coaching + '.'];
+      parts.push(d.test_cases_set_up ? '' : 'Test cases are not set up yet; choose where to keep them in ' + d.places.test_cases + '.');
       parts.push(d.spending_limit != null ? 'Testing can spend up to ' + J.money(d.spending_limit) + ' per run.' : '');
       say('lpo-plan', parts.filter(Boolean).join(' '));
       addOptions($('lpo-clash-model'), d.models);

@@ -108,10 +108,11 @@
       var state = data.enabled
         ? (data.require_approval ? 'Suggestions are on. Each change needs an approval before it can be applied.'
           : 'Suggestions are on. Changes can be applied without a separate approval.')
-        : 'Suggestions are turned off, so no new changes can be suggested. Changes already in use stay in use and can still be undone.';
+        : 'Suggestions are turned off, so no new changes can be suggested. Changes already in use stay in use and can still be undone.' +
+          (data.switch_place ? ' To turn them on, go to ' + data.switch_place + '.' : '');
       say('llp-ref-state', state);
       if (!data.enabled) {
-        var on = el('a', 'Turn on suggestions in All settings', 'btn btn--ghost');
+        var on = el('a', 'Open All settings', 'btn btn--ghost');
         on.href = '/settings/all';
         $('llp-ref-state').appendChild(document.createTextNode(' '));
         $('llp-ref-state').appendChild(on);
@@ -331,7 +332,8 @@
       var data = await get('/preview?min_support=' + encodeURIComponent(support) +
         (model() ? '&model_id=' + encodeURIComponent(model()) : ''));
       if (!data.enabled) {
-        box.appendChild(el('p', 'Self-coaching is off, so there is nothing to preview. Turn it on on the Learning page.', 'muted'));
+        box.appendChild(el('p', 'Self-coaching is off, so there is nothing to preview.' +
+          (data.switch_place ? ' Turn on ' + data.switch_place + '.' : ''), 'muted'));
       } else if (!data.weaknesses.length) {
         box.appendChild(el('p', 'No repeated mistakes found in the last ' + plural(data.scanned, 'failure', 'failures') +
           ' (' + data.eligible + ' could be used for this model). Nothing would change.', 'muted'));
@@ -381,7 +383,8 @@
       plural(r.adopted, 'new lesson', 'new lessons') + ' adopted, ' + plural(r.retired, 'old lesson', 'old lessons') + ' retired.';
     div.appendChild(el('p', head));
     if (r.paused_for_calibration) div.appendChild(el('p', 'New lessons are paused until the quality checker is reliable again.', 'muted'));
-    else if (r.promotion_gate_off) div.appendChild(el('p', 'Nothing new can be adopted until self-improvement is turned on on the Learning page.', 'muted'));
+    else if (r.promotion_gate_off) div.appendChild(el('p', 'Nothing new can be adopted until you turn on ' +
+      (r.gate_place || 'adopting proven improvements on the Learning page') + '.', 'muted'));
     if (r.new_lessons.length) {
       var ul = el('ul');
       r.new_lessons.forEach(function (ln) { ul.appendChild(el('li', ln)); });

@@ -28,8 +28,6 @@ SAMPLE: dict[str, object] = {
     "self_improvement.prm_endpoint": "https://score.example.com/v1",
     "self_improvement.prm_api_key": "prm-key-do-not-show-123",  # pragma: allowlist secret
     "self_improvement.prm_path": "/srv/lightwork/prm",
-    "self_harness.eval_corpus": "/srv/lightwork/corpus.json",
-    "self_harness.holdout_ledger": "/srv/lightwork/ledger",
     "self_harness.holdout_container_image": "sha256:" + "a" * 64,
     "self_improvement.approver_keys_dir": "/srv/lightwork/approvers",
     "flows.action_evidence_issuer": "lightwork.prod",
@@ -124,8 +122,19 @@ def _shown(setting, stored):
     return round(stored / setting.scale, 6) if isinstance(stored, (int, float)) else stored
 
 
+def _data_file(name: str) -> str:
+    """A file Lightwork will create, inside its data folder (the folder exists)."""
+    from maverick.paths import maverick_home
+
+    folder = maverick_home() / "learning"
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return str(folder / name)
+
+
 def _valid(setting):
     """A valid value, different from the default, in the page's own units."""
+    if setting.control == "path":
+        return _data_file(setting.key + ".json")
     if setting.id in SAMPLE:
         return SAMPLE[setting.id]
     if setting.control == "toggle":

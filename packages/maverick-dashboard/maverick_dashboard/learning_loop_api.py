@@ -104,7 +104,7 @@ def _refine_problem(exc: Exception) -> HTTPException:
     """A kernel refusal as one plain sentence (never the kernel's wording)."""
     text = str(exc).lower()
     rules = (
-        ("is off", "Suggested instruction changes are turned off. Turn them on in All settings first."),
+        ("is off", f"Suggested instruction changes are turned off. Turn on {_refine_switch_place()} first."),
         ("injection screen", "Part of this text reads like an instruction to ignore Lightwork's rules, "
                              "so it was refused. Reword it and try again."),
         ("queue is full", "Too many suggestions are waiting for a decision. Decide some of them first."),
@@ -173,6 +173,11 @@ def _proposal_view(row: dict) -> dict:
     }
 
 
+def _refine_switch_place() -> str:
+    from .learning_ops_api import setting_place
+    return setting_place("harness_refine.enable")
+
+
 def _refinements_snapshot() -> dict:
     from maverick import harness_refine
     cfg = harness_refine._settings()
@@ -181,6 +186,7 @@ def _refinements_snapshot() -> dict:
     return {
         "enabled": bool(cfg.get("enable")),
         "require_approval": bool(cfg.get("require_approval", True)),
+        "switch_place": _refine_switch_place(),
         "proposals": [_proposal_view(p) for p in proposals[:_MAX_ROWS]],
         "proposals_truncated": len(proposals) > _MAX_ROWS,
         "in_force": [
@@ -358,7 +364,9 @@ async def learning_log(request: Request, limit: int = Query(default=30, ge=1, le
 def _preview(model_id: str | None, min_support: int) -> dict:
     from maverick import reflexion, self_harness
     if not self_harness.enabled():
-        return {"enabled": False, "weaknesses": [], "scanned": 0, "eligible": 0}
+        from .learning_ops_api import switch_place
+        return {"enabled": False, "weaknesses": [], "scanned": 0, "eligible": 0,
+                "switch_place": switch_place("self_harness")}
     if not model_id:
         from maverick.llm import model_for_role
         model_id = model_for_role("orchestrator")
@@ -419,6 +427,11 @@ async def holdout(request: Request) -> dict:
 
 # ---- changes that spend evaluation budget ----------------------------------
 
+def _gate_place() -> str:
+    from .learning_ops_api import part_place
+    return part_place("self_improvement")
+
+
 def _report_view(report: Any, retired: int) -> dict:
     return {"model": str(getattr(report, "model_id", "") or ""),
             "patterns_found": int(report.mined), "ideas_tried": int(report.proposed),
@@ -426,6 +439,7 @@ def _report_view(report: Any, retired: int) -> dict:
             "retired": int(retired or 0),
             "paused_for_calibration": bool(report.frozen),
             "promotion_gate_off": not bool(report.gate_enabled),
+            "gate_place": _gate_place() if not report.gate_enabled else "",
             "new_lessons": [_clip(ln) for ln in list(report.applied_lines)[:20]],
             "back_on_trial": [_clip(ln) for ln in list(getattr(report, "relapsed", []) or [])[:20]]}
 
@@ -452,8 +466,9 @@ async def run_now(request: Request, body: RunIn) -> dict:
 
     from .learning_ops_api import start_job
     if not self_harness.enabled():
+        from .learning_ops_api import switch_place
         raise HTTPException(status_code=409, detail=(
-            "Self-coaching is off. Turn it on on the Learning page first."))
+            f"Self-coaching is off. Turn on {switch_place('self_harness')} first."))
     evaluation_system = _instructions(body.instructions)
     chosen = None
     if body.scope == "chosen":

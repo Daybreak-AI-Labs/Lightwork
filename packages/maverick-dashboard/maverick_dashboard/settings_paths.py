@@ -11,6 +11,11 @@ file, the home folder of the account it runs as, and the server's usual
 places for settings, certificates and mounted secrets. A deployment can
 replace that list with ``MAVERICK_SETTINGS_PATH_ROOTS`` (locations separated
 by the system path separator); the page itself can never widen it.
+
+A setting may narrow the places further: ``scope="data"`` accepts only
+Lightwork's data folder (its home), unless the deployment's own list above
+allows more. A file Lightwork creates itself (``new_ok``) may not exist yet:
+then its folder must exist and Lightwork must be able to save into it.
 """
 from __future__ import annotations
 
@@ -26,10 +31,14 @@ class PathRefused(ValueError):
     """A location the page explains in one plain sentence."""
 
 
-def allowed_roots() -> list[Path]:
+def allowed_roots(scope: str = "") -> list[Path]:
     """The places a setting may point into (resolved, so links can't escape)."""
     raw = os.environ.get(ROOTS_ENV, "").strip()
-    if raw:
+    if scope == "data" and not raw:
+        from maverick.paths import maverick_home
+
+        items = [str(maverick_home())]
+    elif raw:
         items = [part for part in raw.split(os.pathsep) if part.strip()]
     else:
         from maverick import config
@@ -57,7 +66,28 @@ def _inside(path: Path, roots: list[Path]) -> bool:
     return any(path == root or root in path.parents for root in roots)
 
 
-def check(value: str, *, kind: str, writable: bool = False, private: bool = False) -> str:
+def _outside_message(scope: str) -> str:
+    if scope == "data":
+        from maverick.paths import maverick_home
+
+        return (f"Lightwork keeps this inside its own data folder, {maverick_home()}. "
+                "Choose a location there.")
+    return ("Lightwork only uses locations inside its own folders and the server's usual "
+            "places for settings, certificates and secrets.")
+
+
+def _check_new_file(real: Path, normalized: Path) -> str:
+    """A file Lightwork will create: its folder must exist and take new files."""
+    folder = real.parent
+    if not folder.is_dir():
+        raise PathRefused("the folder for that file was not found on the server.")
+    if not os.access(folder, os.R_OK | os.W_OK | os.X_OK):
+        raise PathRefused("Lightwork isn't allowed to save files in that folder.")
+    return str(normalized)
+
+
+def check(value: str, *, kind: str, writable: bool = False, private: bool = False,
+          new_ok: bool = False, scope: str = "") -> str:
     """Validate one location; return it as it will be stored.
 
     Raises :class:`PathRefused` with a sentence a person can act on.
@@ -73,15 +103,14 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
         real = entered.resolve()
     except (OSError, RuntimeError) as exc:
         raise PathRefused("that location could not be checked on the server.") from exc
-    roots = allowed_roots()
+    roots = allowed_roots(scope)
     if not (_inside(normalized, roots) and _inside(real, roots)):
-        raise PathRefused(
-            "Lightwork only uses locations inside its own folders and the server's usual "
-            "places for settings, certificates and secrets."
-        )
+        raise PathRefused(_outside_message(scope))
     try:
         info = real.stat()
     except FileNotFoundError as exc:
+        if new_ok and kind == "file":
+            return _check_new_file(real, normalized)
         raise PathRefused("nothing was found at that location on the server.") from exc
     except OSError as exc:
         raise PathRefused("Lightwork isn't allowed to look at that location.") from exc
@@ -99,6 +128,8 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
             raise PathRefused("that location is not an ordinary file.")
         if not os.access(real, os.R_OK):
             raise PathRefused("Lightwork isn't allowed to read that file.")
+        if writable and not os.access(real, os.W_OK):
+            raise PathRefused("Lightwork isn't allowed to save changes to that file.")
         if private and os.name != "nt" and info.st_mode & stat.S_IROTH:
             raise PathRefused(
                 "anyone on the server can read that key file. Limit who can read it, "
@@ -107,10 +138,12 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
     return str(normalized)
 
 
-def describe_ok(kind: str) -> str:
+def describe_ok(kind: str, *, created_later: bool = False) -> str:
     """The sentence a successful check shows."""
     if kind == "folder":
         return "Found. Lightwork can use this folder."
+    if created_later:
+        return "The folder was found. Lightwork will create this file there when it first needs it."
     return "Found. Lightwork can read this file."
 
 

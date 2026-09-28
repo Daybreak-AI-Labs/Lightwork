@@ -215,8 +215,8 @@ async def add_outside_agent(request: Request, body: AgentIn) -> dict:
     require_permission(request, "admin")
     from maverick import fleet_memory
     if not fleet_memory.enabled():
-        raise HTTPException(status_code=409, detail=(
-            "Turn on shared memory for outside agents first, under Memory & learning in All settings."))
+        from .learning_ops_api import switch_place
+        raise HTTPException(status_code=409, detail=f"Turn on {switch_place('fleet_memory')} first.")
     await run_in_threadpool(lambda: _audit(request, "fleet_memory_register", vendor=body.vendor,
                                            outside_agent=body.name))
     ok = await run_in_threadpool(lambda: fleet_memory.register_agent(

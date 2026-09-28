@@ -291,7 +291,7 @@ def test_transfer_needs_the_switch_and_test_cases(client, monkeypatch, tmp_path,
     from maverick import self_improvement_runner as runner
     _configure("[self_harness]\nenable = false")
     r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
-    assert r.status_code == 409 and "Turn on self-coaching" in r.json()["detail"]
+    assert r.status_code == 409 and "Turn on “Self-harness” under Learning systems" in r.json()["detail"]
     _harness(monkeypatch, tmp_path, corpus=False)
     r = client.post(f"{LO}/self-harness/transfer", json={"source": "claude-x"})
     assert r.status_code == 409 and "test cases" in r.json()["detail"]
@@ -430,7 +430,9 @@ def test_self_modify_run_uses_the_kernel_budget_and_shows_its_refusal(client, mo
         "objective": "  make   summaries faster  ", "cycles": 2, "confirm": True}))
     assert seen["cycles"] == 2 and seen["objective"] == "make summaries faster"
     assert seen["budget"] is not None
-    assert done["result"]["ran"] is False and done["result"]["problem"] == "Turn this experiment on first."
+    assert done["result"]["ran"] is False and done["result"]["problem"] == (
+        "Turn on the experiment under “Experimental: let Lightwork try improving its own code” "
+        "on the Learning page first.")
     assert [r["action"] for r in audit_rows] == ["self_modify_run"]
 
 
@@ -594,3 +596,105 @@ def test_page_scripts_are_served_and_use_the_shared_confirm(client):
         assert r.status_code == 200 and "javascript" in r.headers["content-type"], name
         assert "window.confirm(" not in r.text and "alert(" not in r.text
         assert "String(err" not in r.text and "'HTTP '" not in r.text
+
+
+# ---- every "go here" in a message is a real place, and saving there works ---------
+
+def _save_setting(client, changes):
+    return client.post("/api/v1/settings/catalog", json={"changes": changes, "confirm": True})
+
+
+def _data_file(name: str) -> str:
+    from maverick.paths import maverick_home
+    folder = maverick_home() / "learning"
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return str(folder / name)
+
+
+def test_every_destination_named_in_a_message_exists(client):
+    import html
+
+    from maverick_dashboard import learning_ops_api as ops
+    from maverick_dashboard import settings_catalog as catalog
+    page = html.unescape(client.get("/settings/all").text)
+    for setting_id in ("self_harness.eval_corpus", "self_harness.holdout_ledger", "harness_refine.enable",
+                       "self_modify.editable_paths", "self_modify.eval_tests"):
+        s = catalog.BY_ID[setting_id]
+        place = ops.setting_place(setting_id)
+        assert place.startswith("All settings, " + s.group) and f"“{s.label}”" in place
+        assert s.label in page and s.group in page and (not s.subgroup or s.subgroup in page), setting_id
+    switches = {sw["label"] for sw in client.get("/api/v1/features/switches").json()["switches"]}
+    for section in ("self_harness", "fleet_memory"):
+        label = ops.switch_place(section).split("”")[0].lstrip("“")
+        assert label in switches, section
+    learning = html.unescape(client.get("/learning").text)
+    assert "Turn each part of learning on or off" in learning and "Learning systems" in learning
+    for key in ("self_improvement", "data_engine", "factory_learning"):
+        label = ops.part_place(key).split("”")[0].lstrip("“")
+        assert label in learning, key
+    assert ops._DGM_SECTION in open(Path(__file__).parents[1] / "maverick_dashboard/templates/learning.html").read()
+
+
+def test_test_case_location_is_checked_on_the_server_and_then_used(client):
+    from maverick.paths import maverick_home
+    plan = client.get(f"{LO}/self-harness/plan").json()
+    assert plan["test_cases_set_up"] is False and "“Test cases for improvements”" in plan["places"]["test_cases"]
+    outside = _save_setting(client, [{"id": "self_harness.eval_corpus", "value": "/etc/test-cases.json"}])
+    assert outside.status_code == 400 and "data folder" in outside.json()["message"]
+    no_folder = _save_setting(client, [{"id": "self_harness.eval_corpus",
+                                        "value": str(maverick_home() / "missing" / "c.json")}])
+    assert no_folder.status_code == 400 and "folder for that file was not found" in no_folder.json()["message"]
+    target = _data_file("test-cases.json")
+    check = client.post("/api/v1/settings/catalog/test", json={"id": "self_harness.eval_corpus", "value": target})
+    assert check.json() == {"ok": True, "message": (
+        "The folder was found. Lightwork will create this file there when it first needs it.")}
+    assert _save_setting(client, [{"id": "self_harness.eval_corpus", "value": target}]).status_code == 200
+    assert client.get(f"{LO}/self-harness/plan").json()["test_cases_set_up"] is True
+    upload = json.dumps({"claude-x": [{"goal": "new", "expected": "y"}]}).encode()
+    assert client.post(f"{LO}/self-harness/test-cases/import?confirm=true", content=upload).json()["cases"] == 1
+    assert json.loads(Path(target).read_text())["claude-x"][0]["goal"] == "new"
+
+
+def test_hold_out_location_saved_in_all_settings_is_where_the_record_is_set_up(client):
+    refused = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
+    assert "“Record of unseen-case checks”" in refused.json()["detail"]
+    target = _data_file("hold-out.db")
+    assert _save_setting(client, [{"id": "self_harness.holdout_ledger", "value": target}]).status_code == 200
+    made = client.post(f"{LO}/self-harness/hold-out/set-up", json={"confirm": True})
+    assert made.status_code == 200 and Path(target).is_file()
+    again = _save_setting(client, [{"id": "self_harness.holdout_ledger", "value": target}])
+    assert again.status_code == 200  # an existing record is a valid location too
+    verified = client.get("/api/v1/learning-loop/holdout").json()
+    assert verified["configured"] is True and verified["verified"] is True
+
+
+def test_self_modify_files_and_tests_saved_in_all_settings_clear_its_blockers(client):
+    from maverick import config, self_modify
+    from maverick import self_modify_runner as runner
+    before = client.get(f"{LO}/self-modify").json()["blockers"]
+    assert any("All settings, Memory & learning, Research experiments, “Files code experiments may change”"
+               in b for b in before), before
+    assert any("“Tests each code experiment must pass”" in b for b in before), before
+    tests = ["tests/test_a.py::test_one", "tests/test_b.py::test_two"]
+    r = _save_setting(client, [{"id": "self_modify.editable_paths", "value": ["packages/example/*.py"]},
+                               {"id": "self_modify.eval_tests", "value": tests}])
+    assert r.status_code == 200, r.text
+    config.reset_config_cache()
+    assert runner._self_modify_config()["eval_tests"] == tests
+    assert self_modify.default_surface().editable_globs == ("packages/example/*.py",)
+    codes = {b["code"] for b in self_modify.production_status()["blockers"]}
+    assert "editable_surface_missing" not in codes and "challenge_corpus_missing" not in codes
+    after = client.get(f"{LO}/self-modify").json()["blockers"]
+    assert not any("Files code experiments" in b or "Tests each code experiment" in b for b in after)
+
+
+def test_fleet_memory_is_switched_on_where_the_message_says(client):
+    from maverick_dashboard.learning_ops_api import switch_place
+    body = {"vendor": "custom", "name": "billing-bot"}
+    off = client.post("/api/v1/workforce-ops/outside-agents", json=body)
+    assert off.status_code == 409
+    assert off.json()["detail"] == f"Turn on {switch_place('fleet_memory')} first."
+    assert "“Fleet memory” under Learning systems on the Learning page" in off.json()["detail"]
+    on = client.post("/api/v1/features/switches", json={"section": "fleet_memory", "enabled": True})
+    assert on.status_code == 200, on.text
+    assert client.post("/api/v1/workforce-ops/outside-agents", json=body).json()["added"] is True
