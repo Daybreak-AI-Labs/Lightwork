@@ -143,12 +143,28 @@ def create_shoring_router() -> APIRouter:
         from .auth import require_global_permission
 
         require_global_permission(request, "admin")
+        from maverick.audit import AuditRefused
+
+        from .settings_audit import record_setting_change
+
+        was_on = bool(shoring.enabled())
         await run_in_threadpool(settings_store.set_section_enable, "shoring", True)
         config.reset_config_cache()
         if not shoring.enabled():
             raise HTTPException(
                 status_code=409,
                 detail="This setting is controlled by your installation and cannot be changed here.")
+        if not was_on:
+            try:
+                await run_in_threadpool(lambda: record_setting_change(
+                    request, section="shoring", key="enable", old=False, new=True))
+            except AuditRefused as exc:
+                # No change without a record of it: turn it back off.
+                await run_in_threadpool(settings_store.set_section_enable, "shoring", False)
+                config.reset_config_cache()
+                raise HTTPException(
+                    status_code=503,
+                    detail="The change could not be recorded, so it was undone.") from exc
         return {"enabled": True}
 
     @router.delete("/function/{key}")

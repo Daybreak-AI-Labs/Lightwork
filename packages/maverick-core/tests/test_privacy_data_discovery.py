@@ -870,3 +870,38 @@ def test_scan_limits_validate_closed_bounds() -> None:
         replace(discovery.ScanLimits(), max_seconds=float("nan")).validated()
     with pytest.raises(discovery.PrivacyDataDiscoveryValidationError):
         replace(discovery.ScanLimits(), max_findings=100_001).validated()
+
+
+def test_approval_queue_keeps_older_waiting_reviews_past_the_list_cap(store, monkeypatch) -> None:
+    """The status filter runs before the newest-N cap, so a review still
+    waiting for approval never drops out behind newer decided ones."""
+    enroll(store)
+    report = enqueue_and_run(
+        store,
+        Rows([
+            discovery.StructuredRecord(f"row-{n}", {f"email_{n}": f"p{n}@example.com"})
+            for n in range(4)
+        ]),
+    )
+    findings = store.list_findings("tenant-a", report_id=report.report_id)
+    assert len(findings) >= 3
+
+    def propose(finding, key):
+        return store.propose_review(
+            "tenant-a", finding.finding_id, decision="confirmed",
+            effective_category=finding.category, evidence_sha256=finding.evidence_sha256,
+            freshness_seconds=600, expected_finding_revision=1,
+            prepared_by="reviewer-a", idempotency_key=key)
+
+    waiting = propose(findings[0], "waiting")
+    for n, finding in enumerate(findings[1:3], start=1):
+        proposal = propose(finding, f"decided-{n}")
+        store.approve_review(
+            "tenant-a", proposal.review_id, approved_by="reviewer-b",
+            expected_version=proposal.version,
+            expected_integrity_sha256=proposal.integrity_sha256,
+            idempotency_key=f"approve-{n}")
+    monkeypatch.setattr(discovery, "_MAX_LIST", 2)
+    queue = store.list_all_reviews("tenant-a", status="pending", limit=2)
+    assert [r.review_id for r in queue] == [waiting.review_id]
+    assert len(store.list_all_reviews("tenant-a", limit=2)) == 2

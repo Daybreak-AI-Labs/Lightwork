@@ -209,7 +209,7 @@
       var r = await fetch('/api/v1/run-tree/' + encodeURIComponent(task.value) + '/rewind', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to_step: Number(ck.value), as_copy: copy }) });
-      if (r.status === 409) { msg.textContent = 'That didn’t work. If the task is still running, stop it first, then try again.'; return; }
+      if (r.status === 409) { msg.textContent = 'That didn’t work. If the task is running or waiting to run, stop it first, then try again.'; return; }
       if (!r.ok) throw r;
       var j = await r.json();
       msg.textContent = 'Done. The task waits at step ' + j.to_step + '. ';

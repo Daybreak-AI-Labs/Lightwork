@@ -87,3 +87,25 @@ def test_add_button_is_disabled_without_the_install_opt_in(monkeypatch):
     assert "Weekly report" in html and "Checked author" in html
     assert re.search(r'aria-label="Add Weekly report"\s+disabled', html)
     assert "switched off on this server" in html
+
+
+def test_catalog_changes_are_recorded_with_who_made_them(monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import EventKind
+
+    rows: list[dict] = []
+    monkeypatch.setattr(audit, "audit_event",
+                        lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
+    c = _client()
+    r = c.post("/store/catalogs",
+               data={"action": "add", "url": "https://skills.example.com/c?token=abc"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    (row,) = rows
+    assert row["kind"] == EventKind.SETTING_CHANGED
+    assert (row["section"], row["key"]) == ("catalogs", "indexes")
+    assert row["actor"]
+    assert "https://skills.example.com/c" in row["new"]
+    # A token inside an address is never written to the record.
+    assert "token=abc" not in repr(row)
+    assert row["old"] == ["built-in catalog"]

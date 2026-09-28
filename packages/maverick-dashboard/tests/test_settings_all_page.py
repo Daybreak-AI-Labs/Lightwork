@@ -8,6 +8,8 @@ unless the request confirms it.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
@@ -113,7 +115,9 @@ def test_save_and_reset_round_trip_through_load_config(audit_rows):
         {"id": "sandbox.timeout", "value": 120},
         {"id": "memory_guard.min_recall_trust", "value": "2"},
     ]
-    r = _save(changes)
+    # Adding an address that receives task events is confirmed.
+    assert _save(changes).status_code == 409
+    r = _save(changes, confirm=True)
     assert r.status_code == 200, r.text
     cfg = _loaded()
     assert cfg["ifc"]["mode"] == "block"
@@ -130,7 +134,7 @@ def test_save_and_reset_round_trip_through_load_config(audit_rows):
     assert config.get_memory_guard()["min_recall_trust"] == 2
 
     resets = [{"id": c["id"], "reset": True} for c in changes]
-    # Going back to the default loosens two of these, so it is confirmed too.
+    # Going back to the default loosens some of these, so it is confirmed too.
     assert _save(resets).status_code == 409
     r = _save(resets, confirm=True)
     assert r.status_code == 200, r.text
@@ -159,7 +163,8 @@ def test_existing_overlay_settings_survive_a_catalog_save(audit_rows):
     settings_store.set_sandbox_backend("docker")
     settings_store.set_toggle("features", "skills", False)
     assert _save([{"id": "sandbox.timeout", "value": 90},
-                  {"id": "webhooks.outbound", "value": ["https://a.example/b"]}]).status_code == 200
+                  {"id": "webhooks.outbound", "value": ["https://a.example/b"]}],
+                 confirm=True).status_code == 200
     cfg = _loaded()
     assert cfg["sandbox"] == {"backend": "docker", "timeout": 90}
     assert cfg["features"]["skills"] is False
@@ -304,3 +309,77 @@ def test_refused_audit_undoes_the_change(monkeypatch):
     r = _save([{"id": "ifc.mode", "value": "block"}])
     assert r.status_code == 503
     assert "ifc" not in _loaded()
+
+
+# ------------------------------------------------- settings file integrity
+@pytest.mark.parametrize("bad", ["\ud800", "name\x7fhere", "name\x00here", "line\nbreak"])
+def test_values_that_would_break_the_settings_file_are_refused(audit_rows, bad):
+    from maverick_dashboard import settings_store
+
+    assert _save([{"id": "sandbox.timeout", "value": 30}]).status_code == 200
+    # Sent as escaped JSON, the way any script can send it.
+    body = json.dumps({"changes": [{"id": "persona.name", "value": bad}]})
+    r = client.post(API, content=body, headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+    message = r.json()["message"]
+    assert message.startswith("Name") or ":" in message
+    assert "surrogate" not in message.lower() and "toml" not in message.lower()
+    # The overlay still reads, so every other dashboard setting still applies.
+    assert settings_store.load_overlay()["sandbox"]["timeout"] == 30
+    assert "persona" not in settings_store.load_overlay()
+    assert _save([{"id": "sandbox.timeout", "value": 31}]).status_code == 200
+
+
+def test_list_entries_that_would_break_the_settings_file_are_refused(audit_rows):
+    import dataclasses
+
+    from maverick_dashboard import settings_catalog as catalog
+
+    listed = next(s for s in catalog.SETTINGS if s.control == "list")
+    free_text = dataclasses.replace(listed, pattern="")
+    assert catalog.coerce(free_text, ["ok"]) == ["ok"]
+    for bad in ("bad\ud800", "bad\x7f", "bad\x1b"):
+        with pytest.raises(catalog.SettingError) as exc:
+            catalog.coerce(free_text, ["ok", bad])
+        assert str(exc.value).startswith(listed.label)
+
+
+# ------------------------------------------- loosening spend, rate, egress
+@pytest.mark.parametrize("change,setup", [
+    ({"id": "quotas.enforce", "value": False}, {"id": "quotas.enforce", "value": True}),
+    ({"id": "rate_limits.shell", "reset": True},
+     {"id": "rate_limits.shell", "value": {"count": 5, "seconds": 60}}),
+    ({"id": "rate_limits.shell", "value": {"count": 500, "seconds": 60}},
+     {"id": "rate_limits.shell", "value": {"count": 5, "seconds": 60}}),
+    ({"id": "budget.max_tool_calls", "value": None},
+     {"id": "budget.max_tool_calls", "value": 50}),
+    ({"id": "webhooks.outbound", "value": ["https://collector.example.net/x"]}, None),
+    ({"id": "knowledge.url", "value": "http://10.0.0.5:6333"}, None),
+])
+def test_loosening_spending_rate_and_outbound_controls_needs_confirmation(
+    audit_rows, change, setup,
+):
+    if setup is not None:
+        assert _save([setup]).status_code == 200
+    r = _save([change])
+    assert r.status_code == 409, r.text
+    assert r.json()["confirm"][0]["id"] == change["id"]
+    assert r.json()["confirm"][0]["warning"]
+    r = _save([change], confirm=True)
+    assert r.status_code == 200, r.text
+    assert audit_rows[-1]["confirmed"] is True
+
+
+def test_tightening_spending_rate_and_outbound_controls_needs_no_confirmation(audit_rows):
+    assert _save([{"id": "quotas.enforce", "value": True}]).status_code == 200
+    assert _save([{"id": "rate_limits.shell",
+                   "value": {"count": 5, "seconds": 60}}]).status_code == 200
+    assert _save([{"id": "rate_limits.shell",
+                   "value": {"count": 2, "seconds": 60}}]).status_code == 200
+    assert _save([{"id": "budget.max_tool_calls", "value": 50}]).status_code == 200
+    assert _save([{"id": "budget.max_tool_calls", "value": 20}]).status_code == 200
+    assert _save([{"id": "knowledge.url", "value": "https://qdrant.example.net"}]).status_code == 200
+    assert _save([{"id": "webhooks.outbound", "value": ["https://a.example.net/x"]}],
+                 confirm=True).status_code == 200
+    # Removing an address only sends less, so it needs no confirmation.
+    assert _save([{"id": "webhooks.outbound", "value": []}]).status_code == 200

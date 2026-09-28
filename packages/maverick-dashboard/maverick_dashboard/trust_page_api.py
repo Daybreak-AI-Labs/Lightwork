@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -31,6 +32,9 @@ _EDITABLE = ("pubkey", "direction", "allow_tools", "deny_tools", "max_risk",
 class EnforcementIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enforced: bool
+    # Turning blocking off lowers a protection: like Settings > All settings,
+    # the server refuses it unless the request says the person confirmed.
+    confirm: bool = False
 
 
 class CheckIn(BaseModel):
@@ -85,26 +89,42 @@ async def public_key(request: Request) -> dict:
     return {"key": key}
 
 
-@router.post("/enforcement")
-async def set_enforcement(request: Request, body: EnforcementIn) -> dict:
-    require_global_permission(request, "admin")
+def _enforced_now() -> bool | None:
     from maverick import agent_trust, config
 
+    config.reset_config_cache()
+    try:
+        return agent_trust.agent_trust_enforced()
+    except agent_trust.AgentTrustError:
+        return None
+
+
+@router.post("/enforcement")
+async def set_enforcement(request: Request, body: EnforcementIn):
+    require_global_permission(request, "admin")
+    from maverick.audit import AuditRefused
+
+    from . import settings_catalog as catalog
     from . import settings_store
+    from .settings_audit import record_setting_change
+
+    setting = catalog.BY_ID["agent_trust.enforce"]
+    before = await run_in_threadpool(_enforced_now)
+    if not body.enforced and before is not False and not body.confirm:
+        return JSONResponse(
+            {"detail": "confirmation required",
+             "confirm": [{"id": setting.id, "label": setting.label, "warning": setting.warning}]},
+            status_code=409, headers={"Cache-Control": "no-store"})
 
     def write() -> bool:
         settings_store.set_agent_trust_enforce(body.enforced)
-        config.reset_config_cache()
-        try:
-            effective = agent_trust.agent_trust_enforced()
-        except agent_trust.AgentTrustError:
-            effective = None
+        effective = _enforced_now()
         if effective is not body.enforced:
             # Something with higher precedence pins it: leave the saved value
             # matching what is really in force.
             if effective is not None:
                 settings_store.set_agent_trust_enforce(effective)
-                config.reset_config_cache()
+                _enforced_now()
             return False
         return True
 
@@ -112,6 +132,21 @@ async def set_enforcement(request: Request, body: EnforcementIn) -> dict:
         raise HTTPException(
             status_code=409,
             detail="Your installation controls this setting, so it cannot be changed here.")
+    if before is not body.enforced:
+        try:
+            await run_in_threadpool(
+                lambda: record_setting_change(
+                    request, section="agent_trust", key="enforce", old=before,
+                    new=body.enforced,
+                    confirmed=body.confirm and catalog.weakens(setting, before, body.enforced)))
+        except AuditRefused as exc:
+            # No change without a record of it: put the previous value back.
+            if before is not None:
+                await run_in_threadpool(settings_store.set_agent_trust_enforce, before)
+                await run_in_threadpool(_enforced_now)
+            raise HTTPException(
+                status_code=503,
+                detail="The change could not be recorded, so it was undone.") from exc
     return {"enforced": body.enforced}
 
 

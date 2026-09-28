@@ -53,8 +53,35 @@ async def store_catalogs(request: Request) -> RedirectResponse:
         if action == "add":
             return RedirectResponse("/store?saved=bad-address", status_code=303)
         raise HTTPException(400, "That catalog list can't be saved.") from exc
+    from maverick.audit import AuditRefused
     from maverick.config import reset_config_cache
 
+    from .settings_audit import record_setting_change
+
     reset_config_cache()
+    try:
+        await run_in_threadpool(lambda: record_setting_change(
+            request, section="catalogs", key="indexes",
+            old=_for_record([] if is_default else urls), new=_for_record(new)))
+    except AuditRefused as exc:
+        # No change without a record of it: put the previous list back.
+        await run_in_threadpool(settings_store.set_catalog_indexes, [] if is_default else urls)
+        reset_config_cache()
+        raise HTTPException(503, "The change could not be recorded, so it was undone.") from exc
     return RedirectResponse(f"/store?saved={action}", status_code=303)
+
+
+def _for_record(urls: list[str]) -> list[str]:
+    """Catalog addresses for the activity record, without any query text
+    (which can carry an access token)."""
+    from urllib.parse import urlsplit
+
+    if not urls:
+        return ["built-in catalog"]
+    shown = []
+    for url in urls:
+        parts = urlsplit(url)
+        shown.append(f"{parts.scheme}://{parts.hostname or ''}"
+                     f"{':' + str(parts.port) if parts.port else ''}{parts.path}")
+    return shown
 

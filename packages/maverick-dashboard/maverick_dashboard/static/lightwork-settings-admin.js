@@ -230,6 +230,10 @@
             'Encrypt records', function (res) { return res.protected + ' record' + (res.protected === 1 ? '' : 's') + ' encrypted.'; });
         });
         actions.appendChild(protect);
+      } else if (data.older_note) {
+        // Records kept in a shared database cannot be checked from here:
+        // say so instead of claiming they are encrypted.
+        box.appendChild(el('p', 'muted', data.older_note));
       } else if (data.older_unprotected === 0) {
         box.appendChild(el('p', 'muted', 'All older records are encrypted.'));
       }
