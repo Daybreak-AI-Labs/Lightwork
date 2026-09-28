@@ -293,18 +293,12 @@ def _owner_can_return(request, principal: str | None, after_cfg: dict, after: Ac
     """The person is this computer's owner and can sign in again with the
     owner passphrase after the save (owner sign-in works only on this
     computer, with invitations on and no other sign-in set up)."""
-    from . import local_owner
-
     if not principal or not _is_this_computer(request) or after.token_env:
         return False
-    if after_cfg.get("auth") or after_cfg.get("proxy_auth") or not after.invites \
+    if not _owner_sign_in_open(after_cfg) or not after.invites \
             or after.oidc or after.proxy or after.saml_policy:
         return False
-    try:
-        row = local_owner._read()
-    except Exception:
-        return False
-    return bool(row) and principal == "user:" + str(row.get("email") or "")
+    return _is_owner(principal)
 
 
 def _is_admin_role(role: str | None) -> bool:
@@ -414,8 +408,8 @@ def review_sign_in(request, changes: list[dict], layers: dict[str, Any], writes:
                if c["setting"].id in SIGN_IN_IDS or c["setting"].id.startswith(SIGN_IN_PREFIXES)]
     if not touched:
         return []
-    after_cfg = merged_config(layers, writes)
-    before, after = access_for(merged_config(layers)), access_for(after_cfg)
+    before_cfg, after_cfg = merged_config(layers), merged_config(layers, writes)
+    before, after = access_for(before_cfg), access_for(after_cfg)
     if after.require_auth and not after.any_method:
         raise Refused("With sign-in required, Lightwork would refuse to start, because no way "
                       "to sign in is set up. Set up a sign-in method first.")
@@ -425,10 +419,37 @@ def review_sign_in(request, changes: list[dict], layers: dict[str, Any], writes:
         warning = _way_back(request, route, principal, after_cfg, after, prospective)
         confirms.append({"id": touched[0].id, "label": "Your access", "kind": "access",
                          "warning": warning})
+    elif route == "invite" and _is_owner(principal) and _owner_sign_in_open(before_cfg) \
+            and not _owner_sign_in_open(after_cfg):
+        # Still signed in, but the owner's passphrase sign-in pauses while any
+        # company sign-in details are saved: say so before it matters.
+        confirms.append({
+            "id": touched[0].id, "label": "Your access", "kind": "access",
+            "warning": ("Signing in with the owner account's email and passphrase is paused "
+                        "while company sign-in details are saved. Stay signed in until company "
+                        "sign-in works, or remove these details to use the passphrase again."),
+        })
     if principal and route != "token" and not _stays_admin(principal, after):
         raise Refused("This would remove your own administrator access. Ask another "
                       "administrator to make this change.")
     return confirms
+
+
+def _owner_sign_in_open(cfg: dict) -> bool:
+    """The owner's passphrase sign-in is allowed by this configuration."""
+    return not (cfg.get("auth") or cfg.get("proxy_auth"))
+
+
+def _is_owner(principal: str | None) -> bool:
+    from . import local_owner
+
+    if not principal:
+        return False
+    try:
+        row = local_owner._read()
+    except Exception:
+        return False
+    return bool(row) and principal == "user:" + str(row.get("email") or "")
 
 
 def _is_this_computer(request) -> bool:

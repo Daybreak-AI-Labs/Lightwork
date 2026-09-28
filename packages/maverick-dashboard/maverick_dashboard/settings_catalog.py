@@ -114,7 +114,8 @@ CONTROLS = frozenset({
 # ``path`` rows name a file or folder on the server; ``path_kind`` says which.
 PATH_KINDS = frozenset({"file", "folder"})
 
-COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words"})
+COLUMN_KINDS = frozenset({"select", "pick", "picks", "number", "switch", "words", "text",
+                          "secret"})
 
 
 @dataclass(frozen=True)
@@ -123,8 +124,10 @@ class Column:
 
     ``select`` is a short fixed list, ``pick`` one choice from a long list the
     page can search, ``picks`` several such choices in order, ``number`` a
-    bounded number, ``switch`` on or off, and ``words`` short references
-    separated by commas.
+    bounded number, ``switch`` on or off, ``words`` short references
+    separated by commas, ``text`` one short value, and ``secret`` a password
+    for the row: sealed when saved, never shown again, and kept as it is when
+    left empty (``rules`` rows are matched by their ``unique`` column).
     """
 
     key: str
@@ -2581,6 +2584,19 @@ def _coerce_cell(setting: Setting, column: Column, value: object) -> object:  # 
                 raise SettingError(f"{where}: enter a whole number.")
             return int(value)
         return float(value)
+    if kind in {"text", "secret"}:
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            raise SettingError(f"{where}: enter text.")
+        text = value.strip()
+        if len(text) > column.max_length:
+            raise SettingError(f"{where}: use at most {column.max_length} characters.")
+        if text and column.pattern and not re.fullmatch(column.pattern, text):
+            raise SettingError(f"{where}: each entry must be {column.item_error}.")
+        if kind == "text" and column.required and not text:
+            raise SettingError(f"{where}: fill this in for each row.")
+        return text  # an empty secret keeps the row's saved one (settings_all_page)
     if kind == "words":
         if value is None:
             value = ""

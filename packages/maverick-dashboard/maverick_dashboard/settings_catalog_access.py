@@ -23,8 +23,7 @@ present it and the server needs it before it listens beyond this computer),
 ``[approval_delegation]`` (a legacy table only checked for presence),
 ``[deployment] type`` (the installer's own record), ``[governance] profile``
 (a label; the level's protections are separate rows), ``[dashboard] themes``
-(colour themes need a colour editor), ``[federation] peers`` (each entry
-holds its own password inside a list) and the unified-custody security
+(colour themes need a colour editor) and the unified-custody security
 monitoring address (it needs a workspace placeholder the page cannot build).
 """
 from __future__ import annotations
@@ -378,7 +377,8 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
                   "will stop working.",
           aliases="share links secret"),
         S("role_assignments", "default", "Agent permissions for everyone else",
-          "The permission set every person and agent without one of their own works under.",
+          "The permission set every person and agent without one of their own works under. "
+          "Reset to default to use none.",
           "select", grp, "", "maverick.capability", subgroup="Sharing",
           choices_from="capability_roles", weaker="change",
           warning="Everyone without their own permission set will work under this one.",
@@ -1108,6 +1108,24 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
                 C("deny", "Blocked", "words", pattern=_HOST, max_length=253,
                   item_error="a service name"),
             ))
+    rows.append(S(
+        "federation", "peers", "Linked servers",
+        "The other Lightwork servers this one is linked with: each one's name, its address "
+        "and port, and the password the two servers share. Passwords are stored sealed and "
+        "never shown again; leave one empty to keep it.",
+        "rules", "Server & deployment", [], "maverick.federation",
+        subgroup="Linked Lightwork servers", restart=True,
+        columns=(C("name", "Server name", "text", required=True, unique=True, pattern=_NAME,
+                   max_length=64, item_error="a server name"),
+                 C("target", "Address and port", "text", required=True, pattern=_HOST_PORT,
+                   max_length=260, item_error="a server name and port"),
+                 C("token", "Shared password", "secret", pattern=_SECRET32, max_length=512,
+                   item_error="at least 32 characters with no spaces")),
+        item_label="Linked server", add_label="Add a linked server",
+        empty_text="No servers are linked yet.", weaker="grow",
+        warning="Another server will be able to send this server work, or a linked server's "
+                "details change.",
+        aliases="federation peers"))
     rows.append(S(
         "local_first", "models", "Local model for each kind of work",
         "When local models are preferred, use these for the kinds of work listed.",

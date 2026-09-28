@@ -187,6 +187,8 @@ def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
         return [v for v in choices if v not in (setting.default or [])][:1]
     if setting.id == "tenancy.egress":
         return [{"name": "acme", "allow": ["api.example.com"], "deny": ["*.bad.example"]}]
+    if setting.id == "federation.peers":
+        return [{"name": "west-1", "target": "west.example.com:50052", "token": _SECRET}]
     columns = setting.columns
     first = next(v for v in [c for c, _ in page._resolved(setting).columns[0].choices] if v)
     return [{"name": choices[0], columns[0].key: first}]
@@ -201,6 +203,8 @@ def _expected(setting, value):
         return {"acme": {"allow": ["api.example.com"], "deny": ["*.bad.example"]}}
     if setting.control == "table":
         return {value[0]["name"]: value[0][setting.columns[0].key]}
+    if setting.id == "federation.peers":
+        return value  # the kernel reads the passwords unsealed
     return value
 
 
@@ -212,7 +216,7 @@ def _lookup(tree, setting):
 def workspaces(monkeypatch):
     monkeypatch.setitem(page._ACCESS_SOURCES, "workspaces", lambda: [("acme", "Acme")])
     monkeypatch.setitem(page._ACCESS_SOURCES, "capability_roles",
-                        lambda: [("", "None"), ("analyst", "Analyst")])
+                        lambda: [("analyst", "Analyst")])
 
 
 # ------------------------------------------------------------ round trip
@@ -261,6 +265,8 @@ def _invalid(setting, tmp_path):  # noqa: C901 - one branch per control
         return ["not a key"]
     if control == "path":
         return str(tmp_path / "missing" / "nothing-here")
+    if control == "rules":
+        return [{"name": "bad name!", "target": "x"}]
     return [{"name": "no-such-row"}]
 
 
@@ -577,6 +583,21 @@ def test_turning_off_the_way_you_signed_in_is_refused(audit_rows):
     assert _loaded()["dashboard"]["invites"] is True
 
 
+def test_the_owner_is_told_before_company_sign_in_details_pause_the_passphrase(monkeypatch,
+                                                                              audit_rows):
+    _base_config('[dashboard]\ninvites = true\nadmins = ["user:ada@example.com"]\n')
+    monkeypatch.setattr(guard, "_is_owner", lambda principal: principal == "user:ada@example.com")
+    ada = _invite_client("ada@example.com")
+    change = [{"id": "auth.oidc.client_id", "value": "lightwork"}]
+    r = _save(change, http=ada)
+    assert r.status_code == 409
+    [item] = [i for i in r.json()["confirm"] if i.get("kind") == "access"]
+    assert "passphrase is paused" in item["warning"]
+    assert _save(change, confirm=True, http=ada).status_code == 200
+    assert _save([{"id": "auth.oidc.redirect_uri", "value": _TEXT["auth.oidc.redirect_uri"]}],
+                 http=ada).status_code == 200  # already paused: nothing new to say
+
+
 def _request(host="10.0.0.5", headers=None):
     return SimpleNamespace(client=SimpleNamespace(host=host), headers=headers or {},
                            state=SimpleNamespace(principal=None))
@@ -781,3 +802,41 @@ def test_switches_that_lived_only_in_the_environment_now_have_settings(monkeypat
     assert forwarder._insecure_siem_allowed() is False
     assert grpc_server._resolve_bearer_token() == "from-the-environment"
     assert _row("dashboard.max_goals_per_min")["locked"] is True
+
+
+def test_the_default_permission_set_is_never_stored_empty(workspaces, audit_rows):
+    r = _save([{"id": "role_assignments.default", "value": ""}], confirm=True)
+    assert r.status_code == 400
+    assert _save([{"id": "role_assignments.default", "value": "analyst"}],
+                 confirm=True).status_code == 200
+    assert _save([{"id": "role_assignments.default", "reset": True}],
+                 confirm=True).status_code == 200
+    assert "role_assignments" not in _loaded()
+
+
+def test_linked_server_passwords_are_sealed_kept_and_never_shown(as_token, audit_rows):
+    from maverick import config, federation
+
+    peer = {"name": "west-1", "target": "west.example.com:50052", "token": _SECRET}
+    r = _save([{"id": "federation.peers", "value": [peer]}], confirm=True)
+    assert r.status_code == 200, r.text
+    raw = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert _SECRET not in raw and "MVKAR1:" in raw
+    assert [(p.name, p.target, p.token) for p in federation.load_peers()] == [
+        ("west-1", "west.example.com:50052", _SECRET)]
+    row = _row("federation.peers")
+    assert row["grid"]["rows"][0]["cells"]["token"] == {"is_set": True}
+    assert _SECRET not in client.get(API).text and _SECRET not in repr(audit_rows)
+    assert audit_rows[-1]["new"] == [{"name": "west-1", "target": "west.example.com:50052",
+                                      "token": "set"}]
+    # Leaving the password empty keeps it; a new server must have one.
+    moved = {"name": "west-1", "target": "west2.example.com:50052", "token": ""}
+    assert _save([{"id": "federation.peers", "value": [moved]}], confirm=True).status_code == 200
+    assert federation.load_peers()[0].token == _SECRET
+    assert federation.load_peers()[0].target == "west2.example.com:50052"
+    fresh = {"name": "east-2", "target": "east.example.com:50052", "token": ""}
+    r = _save([{"id": "federation.peers", "value": [moved, fresh]}], confirm=True)
+    assert r.status_code == 400 and "shared password for each new linked server" in r.json()["message"]
+    r = _save([{"id": "federation.peers", "value": [moved, dict(fresh, token="short")]}],
+              confirm=True)
+    assert r.status_code == 400

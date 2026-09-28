@@ -357,8 +357,9 @@ def _capability_role_choices() -> list[tuple[str, str]]:
         roles = sorted(configured_roles())
     except Exception:  # an unreadable roles table offers no roles
         roles = []
-    return [("", "None: no default permission set"),
-            *((role, identity_format.humanize(role)) for role in roles)]
+    # No empty choice: an empty default permission set would make every
+    # permission lookup fail. Reset removes the setting instead.
+    return [(role, identity_format.humanize(role)) for role in roles]
 
 
 def _workspace_choices() -> list[tuple[str, str]]:
@@ -578,6 +579,9 @@ def _grid_rows(setting: catalog.Setting, value: object) -> list[dict[str, Any]]:
                 cell = spec
             else:
                 cell = spec.get(column.key) if isinstance(spec, dict) else None
+            if column.kind == "secret":
+                cells[column.key] = {"is_set": bool(cell)}  # never the password
+                continue
             if cell is None:
                 cell = [] if column.kind == "picks" else column.default
             if column.kind == "picks":
@@ -645,7 +649,7 @@ def catalog_state() -> dict[str, Any]:
     layers = _sources()
     groups = []
     for name in catalog.GROUPS:
-        rows = [_row(s, layers) for s in catalog.SETTINGS if s.group == name]
+        rows = [_row(s, layers) for s in _in_page_order(name)]
         subgroups = list(dict.fromkeys(r["subgroup"] for r in rows if r["subgroup"]))
         for r in rows:
             r["subgroup_slug"] = _slug(name + " " + r["subgroup"]) if r["subgroup"] else ""
@@ -657,6 +661,19 @@ def catalog_state() -> dict[str, Any]:
             "subgroups": [{"name": sub, "slug": _slug(name + " " + sub)} for sub in subgroups],
         })
     return {"groups": groups}
+
+
+def _in_page_order(group: str) -> list[catalog.Setting]:
+    """A group's settings with each part (subgroup) kept together.
+
+    Rows come from several group modules, so one part's rows can be split by
+    another module's; the page shows rows without a part first, then each part
+    in the order it first appears, never one heading twice."""
+    settings = [s for s in catalog.SETTINGS if s.group == group]
+    first: dict[str, int] = {}
+    for setting in settings:
+        first.setdefault(setting.subgroup, len(first))
+    return sorted(settings, key=lambda s: (s.subgroup != "", first[s.subgroup]))
 
 
 def _slug(name: str) -> str:
@@ -774,7 +791,52 @@ def _audit_value(setting: catalog.Setting, value: object) -> object:
         return "set" if value else "not set"
     if setting.control == "keys" and isinstance(value, list):
         return [catalog.key_fingerprint(k) for k in value]
+    secret = _secret_columns(setting)
+    if secret and isinstance(value, list):
+        return [{k: ("set" if v else "not set") if k in secret else v for k, v in row.items()}
+                if isinstance(row, dict) else row for row in value]
     return value
+
+
+def _secret_columns(setting: catalog.Setting) -> list[str]:
+    return [c.key for c in setting.columns if c.kind == "secret"]
+
+
+def _keep_row_secrets(setting: catalog.Setting, old: object, new: object) -> object:
+    """A password left empty in a row keeps that row's saved password (rows
+    are matched by their unique column); a new row must have one."""
+    keys = _secret_columns(setting)
+    if not keys or not isinstance(new, list):
+        return new
+    unique = next((c.key for c in setting.columns if c.unique), None)
+    saved = {row.get(unique): row for row in (old if isinstance(old, list) else [])
+             if isinstance(row, dict) and unique}
+    out = []
+    for row in new:
+        row = dict(row)
+        for key in keys:
+            if row.get(key):
+                continue
+            previous = saved.get(row.get(unique)) if unique else None
+            kept = previous.get(key) if isinstance(previous, dict) else None
+            if not kept:
+                label = next(c.label for c in setting.columns if c.key == key)
+                raise _Refused(400, f"{setting.label}: enter the {label.lower()} for each new "
+                                    f"{setting.item_label.lower()}.")
+            row[key] = kept
+        out.append(row)
+    return out
+
+
+def _sealed_rows(setting: catalog.Setting, rows: object) -> object:
+    """Rows as they are written: every password sealed with the deployment key."""
+    keys = _secret_columns(setting)
+    if not keys or not isinstance(rows, list):
+        return rows
+    from . import settings_store
+
+    return [{k: settings_store._seal_global_secret(v) if k in keys and v else v
+             for k, v in row.items()} for row in rows]
 
 
 def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # noqa: C901
@@ -833,12 +895,13 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 new = catalog.coerce(_resolved(setting, old), item.value)
             except catalog.SettingError as exc:
                 raise _Refused(400, str(exc)) from exc
+            new = _keep_row_secrets(setting, old, new)
             if new is None:
                 base_present, base_value = catalog.lookup(layers["base"], setting.path)
                 writes[setting.path] = None
                 new = base_value if base_present else _default_of(setting)
             else:
-                writes[setting.path] = new
+                writes[setting.path] = _sealed_rows(setting, new)
         unchanged = old == new and (not item.reset or state["source"] != "here")
         if unchanged and (item.reset or not setting.secret):
             writes.pop(setting.path, None)

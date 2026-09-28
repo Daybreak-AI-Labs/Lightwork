@@ -701,6 +701,15 @@
       input = document.createElement('input');
       input.type = 'checkbox';
       input.checked = value === true;
+    } else if (kind === 'secret') {
+      // A saved password is never sent to the page: leave empty to keep it.
+      input = document.createElement('input');
+      input.className = 'input';
+      input.type = 'password';
+      input.autocomplete = 'new-password';
+      input.maxLength = Number(column.max_length || 512);
+      input.placeholder = value && value.is_set ? 'Saved. Leave empty to keep it' : 'Not set';
+      input.value = '';
     } else {
       input = document.createElement('input');
       input.className = 'input';

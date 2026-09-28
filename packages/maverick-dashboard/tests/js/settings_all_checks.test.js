@@ -123,3 +123,42 @@ test("a refused lock-out shows the server's explanation",async()=>{
     assert.equal(r.querySelector("[data-row-status]").textContent,message);
   }finally{ui.dom.window.close();}
 });
+
+// ---- rules with a password per row (linked servers) ------------------------
+const attr=value=>JSON.stringify(value).replace(/'/g,"\\u0027");
+const PEERS={kind:"rules",item_label:"Linked server",
+  columns:[
+    {key:"name",label:"Server name",kind:"text",required:true,max_length:64,choices:[]},
+    {key:"target",label:"Address and port",kind:"text",required:true,max_length:260,choices:[]},
+    {key:"token",label:"Shared password",kind:"secret",max_length:512,choices:[]}],
+  rows:[{cells:{name:"west-1",target:"west.example.com:50052",token:{is_set:true}}}]};
+const PEER_HTML=`<!doctype html><main>
+<div role="status" id="settings-all-status" hidden></div>
+<input id="settings-all-search"><select id="settings-all-group"><option value="">All</option></select>
+<input type="checkbox" id="settings-all-changed"><p id="settings-all-filter-status"></p>
+<div id="settings-all-groups"><section class="settings-all-group" data-group="server"><h2>Server</h2>
+ <div class="settings-all-row" data-setting-id="federation.peers" data-control="rules" data-source="here" data-search="linked servers">
+  <strong data-value-text>1 linked server</strong><span data-source-text>Set here</span>
+  <div data-grid data-grid-state='${attr(PEERS)}'><table><tbody data-grid-body></tbody></table>
+  <p data-grid-empty>No servers are linked yet.</p><button data-grid-add>Add a linked server</button></div>
+  <button data-save>Save</button><button data-reset>Reset to default</button><p data-row-status></p></div>
+</section></div><p id="settings-all-empty" hidden></p></main>`;
+
+test("a row's saved password is never shown, and an empty box keeps it",async()=>{
+  const dom=new JSDOM(PEER_HTML,{url:"https://lightwork.test/settings/all",runScripts:"outside-only"});
+  const w=dom.window,d=w.document,calls=[];
+  w.mvConfirm=async()=>true;w.mvErrorText=(f,a)=>"Could not "+a+".";w.mvToast=()=>{};
+  w.fetch=async(url,init={})=>{calls.push(JSON.parse(init.body));return reply(200,{changed:["federation.peers"],groups:[]});};
+  w.eval(read("static/lightwork-settings-all.js"));
+  await flush();
+  try{
+    const secret=d.querySelector('[data-cell="token"] [data-cell-input]');
+    assert.equal(secret.type,"password");
+    assert.equal(secret.value,"");
+    assert.match(secret.placeholder,/Leave empty to keep it/);
+    assert.ok(secret.getAttribute("aria-label"));
+    d.querySelector('[data-cell="target"] [data-cell-input]').value="west2.example.com:50052";
+    d.querySelector("[data-save]").click();await flush();
+    assert.deepEqual(calls[0].changes[0].value,[{name:"west-1",target:"west2.example.com:50052",token:""}]);
+  }finally{dom.window.close();}
+});
