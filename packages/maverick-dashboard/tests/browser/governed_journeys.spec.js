@@ -115,7 +115,8 @@ test('a failed recovery save retries the exact operation and survives a page rel
   };
   await page.route('**/api/v1/drafts/*',interrupted);
   await page.locator('#wf-brief').fill('Recover my incomplete workflow after a failed connection');
-  await expect(recovery).toContainText('Synthetic connection interruption');
+  // The person sees a plain sentence, never the server's raw error text.
+  await expect(recovery).toContainText('Could not save the recovery copy');await expect(recovery).not.toContainText('Synthetic connection interruption');
   await expect(page.locator('#wf-brief')).toHaveValue('Recover my incomplete workflow after a failed connection');
   await recovery.getByRole('button',{name:'Retry recovery'}).click();
   await expect(recovery).toContainText('Recovery copy saved');expect(attempts).toHaveLength(2);expect(attempts[1]).toEqual(attempts[0]);
@@ -239,7 +240,7 @@ test('separately retained keys rehearse recognized encrypted records in a fresh 
   const signed=page.waitForEvent('download');await page.locator('#wrec-custody-report-download').click();
   const saved=JSON.parse(require('node:fs').readFileSync(await (await signed).path(),'utf8'));
   expect(saved.report_id).toBe(report.report_id);expect(saved.authentication).toBeTruthy();expect(saved.custody_sha256).toBe(report.custody_sha256);
-  await page.getByText('Format counts and verification details',{exact:true}).click();
+  await page.locator('details:has(#wrec-custody-checks) > summary').click();await expect(page.locator('details:has(#wrec-custody-checks) > summary')).toHaveText('Technical details');
   const width=await page.locator('#wrec-custody-report').evaluate(el=>({client:el.clientWidth,scroll:el.scrollWidth}));expect(width.scroll).toBeLessThanOrEqual(width.client+1);
   await page.locator('#wrec-custody-status').scrollIntoViewIfNeeded();await info.attach('retained-key-rehearsal-320',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
   await page.setViewportSize({width:1280,height:1200});await page.locator('#wrec-custody-status').scrollIntoViewIfNeeded();
