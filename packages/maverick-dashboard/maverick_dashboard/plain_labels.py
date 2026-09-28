@@ -294,3 +294,58 @@ def register(env) -> None:
     env.filters.setdefault("agent_role_help", agent_role_help)
     env.filters.setdefault("effort_label", lambda v: EFFORT_LABELS.get(str(v or ""), str(v or "").capitalize()))
     env.filters.setdefault("filesize", size)
+    env.filters.setdefault("fill_placeholders", fill_placeholders)
+    env.filters.setdefault("pack_label", lambda d: pack_display_name(
+        getattr(d, "name", ""), getattr(d, "persona", ""), getattr(d, "description", "")))
+
+
+_PERSONA_TITLE = re.compile(
+    r"^You are (?:the |an |a )?(?P<title>.+?)"
+    r"(?=\s+for\s+(?:this|the|your|a|an)\b|\s+--|\s+—|:|,|\.|\s*\(|\s+(?:at|on|who|inside|within|in)\s)",
+    re.DOTALL,
+)
+
+
+def _title_case(text: str) -> str:
+    """Capitalise lowercase words; keep acronyms and brand casing as written."""
+    small = {"and", "or", "of", "the", "for", "to", "in", "on", "a", "an", "&"}
+    words = text.split()
+    out = []
+    for index, word in enumerate(words):
+        if word.islower() and (index == 0 or word not in small):
+            word = word[:1].upper() + word[1:]
+        out.append(word)
+    return " ".join(out)
+
+
+def pack_display_name(name: object, persona: object = "", description: object = "") -> str:
+    """Readable name for a specialist pack.
+
+    ``aero_airworthiness`` -> ``Airworthiness Specialist``, read from the
+    pack's own "You are the ... specialist" introduction when it has one,
+    else its one-line description, else the humanized pack name.
+    """
+    match = _PERSONA_TITLE.match(str(persona or "").strip())
+    if match:
+        title = re.sub(r"\s+", " ", match.group("title")).strip(" -—")
+        if 2 <= len(title) <= 60 and "_" not in title:
+            return _title_case(title)
+    summary = re.sub(r"\s+", " ", str(description or "")).strip().rstrip(".")
+    if summary and len(summary) <= 60 and "_" not in summary:
+        return _title_case(summary)
+    return _title_case(str(name or "").replace("_", " ").replace("-", " ").strip()) or "Agent"
+
+
+_PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z0-9_\-]+)\s*\}\}")
+
+
+def fill_placeholders(text: object) -> str:
+    """Show template blanks as readable markers.
+
+    ``Compare {{option_a}} vs {{option_b}}`` -> ``Compare [Option A] vs [Option B]``.
+    """
+    def label(match: re.Match) -> str:
+        words = re.split(r"[_\-]+", match.group(1))
+        return "[" + " ".join(w[:1].upper() + w[1:] for w in words if w) + "]"
+
+    return _PLACEHOLDER.sub(label, str(text or ""))

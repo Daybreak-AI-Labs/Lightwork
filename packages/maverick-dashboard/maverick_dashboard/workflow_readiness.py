@@ -36,7 +36,7 @@ CATALOG = (
     {"name": "Workflow pilot measurement", "stage": "preview", "feature": "outcome_measurement", "href": "/outcome-pilots", "permission": "operate",
      "scope": "Plan a trial, record how long work took before and after, the corrections needed and the cost, and see which results were accepted.",
      "limit": "This page does not check your AI provider's bill. Compare against real work you measured before the trial."},
-    {"name": "Runtime accounting receipts", "stage": "bounded", "feature": None, "href": "/billing", "permission": "view",
+    {"name": "Usage and cost receipts", "stage": "bounded", "feature": None, "href": "/billing", "permission": "view",
      "scope": "Lightwork keeps its own record of what each task used and what it cost, including tasks that were retried.",
      "limit": "This is not your AI provider's bill. Some older usage recorded before a crash may be missing, so compare with your provider's statement."},
     {"name": "Windows customer application", "stage": "release_candidate", "feature": None, "href": None, "permission": "view",

@@ -105,6 +105,6 @@ def test_binder_reads_plainly(audit_log, client, monkeypatch, tmp_path):
     text = visible_text(page)
     assert developer_terms(page) == []
     for label in ("Last 90 days", "Download evidence file (for auditors)", "Records of processing",
-                  "Separation-of-duties conflicts", "Verification details (for auditors)"):
+                  "Separation-of-duties conflicts", "Technical details for auditors"):
         assert label in page, label
     assert "[privacy_ops]" not in text and "SHA-256" not in text and "onclick" not in page
