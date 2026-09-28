@@ -224,6 +224,25 @@ def test_run_now_passes_trial_retire_and_the_deployed_instructions(client, monke
     assert fleet_calls[0]["canary"] is None and fleet_calls[0]["retire"] is True
 
 
+def test_run_for_the_chosen_model_and_preview_threshold(client, monkeypatch):
+    from maverick import self_harness
+    from maverick import self_improvement_runner as runner
+    store = os.path.join(os.environ["HOME"], "addenda.json")
+    from pathlib import Path
+    monkeypatch.setattr(self_harness, "_store_path", lambda: Path(store))
+    self_harness._write_addenda({"claude-x": "Operating guidance learned for this model:\n- cite"}, Path(store))
+    monkeypatch.setattr(self_harness, "enabled", lambda: True)
+    seen: list[dict] = []
+    monkeypatch.setattr(runner, "run_self_harness_cycle",
+                        lambda **kw: seen.append(kw) or (self_harness.SelfHarnessReport(model_id="claude-x"), 0))
+    assert client.post(API + "/run", json={"scope": "chosen"}).status_code == 422
+    assert client.post(API + "/run", json={"scope": "chosen", "model_id": "made-up"}).status_code == 422
+    _finished(client, client.post(API + "/run", json={"scope": "chosen", "model_id": "claude-x"}))
+    assert seen[-1]["model_id"] == "claude-x"
+    assert client.get(API + "/preview", params={"min_support": 5}).status_code == 200
+    assert client.get(API + "/preview", params={"min_support": 4}).status_code == 422
+
+
 def test_test_case_check_runs_in_the_background_and_removal_needs_confirmation(client, monkeypatch, tmp_path):
     from maverick import self_harness_eval as ev
     from maverick import self_improvement_runner as runner

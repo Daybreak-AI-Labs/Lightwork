@@ -118,3 +118,32 @@ test("checking a record file reports in plain words", async (t) => {
   assert.equal(sent.url, "/api/v1/value-proof/record-verify");
   assert.match(ui.doc.getElementById("vp-check-result").textContent, /intact and was signed by this Lightwork installation/);
 });
+
+test("a learning statement from another installation is checked with its key file", async (t) => {
+  const html = PROOF.replace('<button type="submit">', '<input id="vp-check-key" type="file"><button type="submit">');
+  const ui = await fixture(html, { over: { "/memory-verify": { intact: true, from_this_installation: false, claims: [] } } });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("vp-check-kind").value = "memory";
+  const doc = new ui.window.File(['{"kind":"x"}'], "statement.json", { type: "application/json" });
+  const key = new ui.window.File(["pubkey: " + "ab".repeat(32)], "key.txt", { type: "text/plain" });  // pragma: allowlist secret
+  Object.defineProperty(ui.doc.getElementById("vp-check-file"), "files", { value: [doc] });
+  Object.defineProperty(ui.doc.getElementById("vp-check-key"), "files", { value: [key] });
+  ui.doc.getElementById("vp-check").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
+  await ui.settle();
+  const sent = ui.calls.find((c) => c.method === "POST");
+  assert.equal(sent.url, "/api/v1/value-proof/memory-verify");
+  assert.match(sent.body.publisher_key, /^pubkey: (ab){32}$/);
+  assert.match(ui.doc.getElementById("vp-check-result").textContent, /signed by the installation whose key you gave/);
+});
+
+test("spend tuning selectors reload the suggestion with the chosen options", async (t) => {
+  const html = SPEND.replace('<div id="vp-cap">', '<select id="vp-cap-fit"><option value="90">9</option><option value="95">19</option></select>' +
+    '<select id="vp-cap-min"><option value="5">5</option></select><div id="vp-cap">');
+  const ui = await fixture(html);
+  t.after(() => ui.window.close());
+  const fit = ui.doc.getElementById("vp-cap-fit");
+  fit.value = "95";
+  fit.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  assert.ok(ui.calls.some((c) => c.url === "/api/v1/value-proof/budget-tune?percentile=95&min_samples=5"));
+});

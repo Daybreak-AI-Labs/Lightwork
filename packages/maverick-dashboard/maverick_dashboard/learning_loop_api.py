@@ -59,7 +59,9 @@ class ProposeIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    scope: Literal["main", "all"] = "main"
+    # ``chosen`` runs for the model picked on the page (``--model``).
+    scope: Literal["main", "all", "chosen"] = "main"
+    model_id: str | None = Field(default=None, max_length=200)
     # Stage new lessons on trial (``--canary``) and retire stale ones
     # (``--retire``); ``instructions`` is the deployed system-prompt snapshot
     # careful (risk-limited) testing compares against (``--system-prompt-file``).
@@ -375,8 +377,10 @@ def _preview(model_id: str | None, min_support: int) -> dict:
 
 @router.get("/preview")
 async def preview(request: Request, model_id: str | None = Query(default=None, max_length=200),
-                  min_support: Literal[2, 3, 5] = 3) -> dict:
+                  min_support: int = 3) -> dict:
     require_permission(request, "audit")
+    if min_support not in (2, 3, 5):
+        raise HTTPException(status_code=422, detail="Choose from the list.")
     model = await run_in_threadpool(_model_choice, model_id)
     try:
         return await run_in_threadpool(_preview, model, min_support)
@@ -451,13 +455,18 @@ async def run_now(request: Request, body: RunIn) -> dict:
         raise HTTPException(status_code=409, detail=(
             "Self-coaching is off. Turn it on on the Learning page first."))
     evaluation_system = _instructions(body.instructions)
+    chosen = None
+    if body.scope == "chosen":
+        chosen = await run_in_threadpool(_model_choice, body.model_id)
+        if not chosen:
+            raise HTTPException(status_code=422, detail="Choose a model from the list.")
     try:
         check_learning_halt("self-harness", "dashboard-start")
     except Halted as exc:
         raise HTTPException(status_code=409, detail=_HALTED) from exc
     stage = True if body.trial else None
-    _audit(request, "self_harness_run", scope=body.scope, trial=body.trial, retire=body.retire,
-           with_instructions=evaluation_system is not None)
+    _audit(request, "self_harness_run", scope=body.scope, model=chosen or "", trial=body.trial,
+           retire=body.retire, with_instructions=evaluation_system is not None)
 
     def _run(job) -> dict:
         check_learning_halt("self-harness", "dashboard-start")
@@ -466,8 +475,9 @@ async def run_now(request: Request, body: RunIn) -> dict:
                 retire=body.retire, canary=stage, evaluation_system=evaluation_system,
                 should_stop=lambda: job.cancelled)
             return {"reports": [_report_view(rep, ret) for _m, (rep, ret) in sorted(results.items())][:20]}
+        pin = {"model_id": chosen} if chosen else {}
         report, retired = runner.run_self_harness_cycle(
-            retire=body.retire, canary=stage, evaluation_system=evaluation_system)
+            retire=body.retire, canary=stage, evaluation_system=evaluation_system, **pin)
         return {"reports": [_report_view(report, retired)]}
     return start_job(request, "self_harness_run", "Learning pass", _run, cancellable=body.scope == "all")
 

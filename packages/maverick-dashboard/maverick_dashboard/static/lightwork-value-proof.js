@@ -82,7 +82,8 @@
 
   // ---- Spend page -------------------------------------------------------
   function loadRetro() {
-    return get('/cost-retro').then(function (d) {
+    var top = $('vp-retro-top');
+    return get('/cost-retro' + (top ? '?top=' + encodeURIComponent(top.value) : '')).then(function (d) {
       if (!d.tasks) {
         say('vp-retro-summary', 'No task costs recorded yet. This fills in as tasks finish.');
         return;
@@ -114,14 +115,17 @@
     });
   }
   function loadCap() {
-    return get('/budget-tune').then(function (d) {
+    var fit = $('vp-cap-fit'), min = $('vp-cap-min');
+    return get('/budget-tune' + (fit && min ? '?percentile=' + encodeURIComponent(fit.value) +
+      '&min_samples=' + encodeURIComponent(min.value) : '')).then(function (d) {
+      var share = { 75: 'three in four', 90: 'nine in ten', 95: '19 in 20' }[d.percentile || 90];
       if (!d.suggestions.length) {
         fill('vp-cap', el('p', 'Not enough finished tasks with costs yet. A suggestion appears after ' +
           d.minimum_tasks + ' tasks.', 'muted'));
         return;
       }
       fill('vp-cap', table(['For', 'Suggested cap', 'Based on'], d.suggestions.map(function (s) {
-        return [s.for, money(s.cap), plural(s.tasks, 'task', 'tasks') + ' (nine in ten cost up to ' + money(s.typical_high) + ')'];
+        return [s.for, money(s.cap), plural(s.tasks, 'task', 'tasks') + ' (' + share + ' cost up to ' + money(s.typical_high) + ')'];
       })));
     }).catch(failed('vp-cap', 'load the suggested cap'));
   }
@@ -146,7 +150,8 @@
   var access = { admin: false, audit: false };
   function pct(n) { var v = Number(n) || 0; return (v > 0 ? '+' : '') + Math.round(v) + '%'; }
   function loadCompounding() {
-    return get('/compounding').then(function (d) {
+    var win = $('vp-window');
+    return get('/compounding' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.task_types.length) {
         fill('vp-comp', el('p', 'Not enough repeated tasks yet. This appears once the same kind of task has run several times.', 'muted'));
         return;
@@ -158,7 +163,8 @@
     }).catch(failed('vp-comp', 'load the results'));
   }
   function loadDepartments() {
-    return get('/departments').then(function (d) {
+    var win = $('vp-window');
+    return get('/departments' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.departments.length) {
         fill('vp-dept', el('p', 'No department has enough runs yet to show a trend.', 'muted'));
         return;
@@ -297,7 +303,14 @@
       box.textContent = 'Checking…';
       try {
         var text = await file.text();
-        var out = await post(kind === 'memory' ? '/memory-verify' : '/record-verify', { document: text });
+        var body = { document: text };
+        var keyInput = $('vp-check-key');
+        var keyFile = kind === 'memory' && keyInput && keyInput.files && keyInput.files[0];
+        if (keyFile) {
+          if (keyFile.size > 2000) { box.textContent = 'That key file is too large. Ask the other installation for its key file.'; return; }
+          body.publisher_key = await keyFile.text();
+        }
+        var out = await post(kind === 'memory' ? '/memory-verify' : '/record-verify', body);
         box.textContent = '';
         if (kind === 'record') {
           box.appendChild(el('p', !out.intact
@@ -307,8 +320,12 @@
               : 'This record is intact, but it was signed by a different Lightwork installation.')));
         } else {
           box.appendChild(el('p', out.intact
-            ? 'This learning statement is intact and was signed by this Lightwork installation.'
-            : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere.'));
+            ? (out.from_this_installation === false
+              ? 'This learning statement is intact and was signed by the installation whose key you gave.'
+              : 'This learning statement is intact and was signed by this Lightwork installation.')
+            : (keyFile
+              ? 'This learning statement could not be confirmed with that key. It may have been changed or signed by someone else.'
+              : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere.')));
           if (out.claims.length) {
             var ul = el('ul');
             out.claims.forEach(function (c) { ul.appendChild(el('li', c.claim + ': ' + c.result)); });
@@ -321,7 +338,11 @@
     });
   }
 
-  if (spend) { loadRetro(); loadCap(); loadFailures(); }
+  if (spend) {
+    loadRetro(); loadCap(); loadFailures();
+    ['vp-retro-top'].forEach(function (id) { var n = $(id); if (n) n.addEventListener('change', loadRetro); });
+    ['vp-cap-fit', 'vp-cap-min'].forEach(function (id) { var n = $(id); if (n) n.addEventListener('change', loadCap); });
+  }
   if (proof) {
     get('/access').catch(function () { return access; }).then(function (a) {
       access = a || access;
@@ -329,6 +350,8 @@
       loadEarned();
     });
     loadCompounding(); loadDepartments(); loadFleet(); loadRecord();
+    var win = $('vp-window');
+    if (win) win.addEventListener('change', function () { loadCompounding(); loadDepartments(); });
     var rec = $('vp-rec-download'); if (rec) download(rec, 'download the record');
     var mem = $('vp-mem-download'); if (mem) download(mem, 'download the learning statement');
   }

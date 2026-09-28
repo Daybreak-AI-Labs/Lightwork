@@ -327,7 +327,9 @@
     box.textContent = '';
     previewBtn.disabled = true;
     try {
-      var data = await get('/preview' + (model() ? '?model_id=' + encodeURIComponent(model()) : ''));
+      var support = $('llp-support') ? $('llp-support').value : '3';
+      var data = await get('/preview?min_support=' + encodeURIComponent(support) +
+        (model() ? '&model_id=' + encodeURIComponent(model()) : ''));
       if (!data.enabled) {
         box.appendChild(el('p', 'Self-coaching is off, so there is nothing to preview. Turn it on on the Learning page.', 'muted'));
       } else if (!data.weaknesses.length) {
@@ -415,11 +417,14 @@
       if (file.size > 1024 * 1024) { say('llp-run-status', 'That instructions file is larger than 1 MB.'); return null; }
       text = await J.readText(file);
     }
-    if (!(await window.mvConfirm('Run a learning pass now for ' + (scope === 'all' ? 'every model in use' : 'the main assistant model') +
+    if (scope === 'chosen' && !model()) { say('llp-run-status', 'Choose a model first.'); return null; }
+    var who = scope === 'all' ? 'every model in use' : (scope === 'chosen' ? 'the model chosen above' : 'the main assistant model');
+    if (!(await window.mvConfirm('Run a learning pass now for ' + who +
       '? It looks for repeated mistakes, tests possible lessons within the evaluation spending limit' +
       ($('llp-retire').checked ? ', and retires old ones.' : '.'), { okText: 'Run now' }))) return null;
-    return { url: API + '/run', init: { method: 'POST', json: { scope: scope, trial: $('llp-trial').checked,
-      retire: $('llp-retire').checked, instructions: text } } };
+    var body = { scope: scope, trial: $('llp-trial').checked, retire: $('llp-retire').checked, instructions: text };
+    if (scope === 'chosen') body.model_id = model();
+    return { url: API + '/run', init: { method: 'POST', json: body } };
   }, runUi('run the learning pass', function (d) {
     return d.reports.map(reportBlock);
   }, function () { modelChanged(); loadLog(); }));

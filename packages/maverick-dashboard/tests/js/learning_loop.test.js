@@ -20,9 +20,9 @@ ${admin ? `<details id="llp-propose-box"><form id="llp-propose">
 <p id="llp-ref-msg"></p>
 <select id="llp-model"></select>
 <table><tbody id="llp-eff-rows"></tbody></table><ul id="llp-conf"></ul>
-<button id="llp-preview-btn">Show</button><div id="llp-preview"></div>
+<select id="llp-support"><option value="3">3</option><option value="5">5</option></select><button id="llp-preview-btn">Show</button><div id="llp-preview"></div>
 <ol id="llp-log"></ol><button id="llp-holdout-btn">Check</button><div id="llp-holdout"></div>
-${admin ? `<select id="llp-scope"><option value="main">Main</option><option value="all">All</option></select>
+${admin ? `<select id="llp-scope"><option value="main">Main</option><option value="all">All</option><option value="chosen">Chosen</option></select>
 <input type="checkbox" id="llp-trial"><input type="checkbox" id="llp-retire" checked>
 <input type="file" id="llp-instructions"><input type="checkbox" id="llp-quality-remove">
 <button id="llp-run">Run</button><button id="llp-quality-btn">Quality</button>
@@ -222,4 +222,18 @@ test("removing weak test cases asks first and sends the confirmation", async (t)
   const sent = ui.calls.find((c) => c.method === "POST");
   assert.deepEqual(sent.body, { model_id: "claude-x", remove_weak: true, confirm: true });
   assert.match(ui.doc.getElementById("llp-run-result").textContent, /Removed 1 test case/);
+});
+
+test("a pass for the chosen model sends that model; the preview sends the threshold", async (t) => {
+  const ui = await fixture();
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("llp-support").value = "5";
+  ui.doc.getElementById("llp-preview-btn").click();
+  ui.doc.getElementById("llp-scope").value = "chosen";
+  ui.doc.getElementById("llp-run").click();
+  await ui.settle();
+  assert.ok(ui.calls.some((c) => c.url === "/api/v1/learning-loop/preview?min_support=5&model_id=claude-x"));
+  const run = ui.calls.find((c) => c.method === "POST");
+  assert.deepEqual(run.body, { scope: "chosen", trial: false, retire: true, instructions: null, model_id: "claude-x" });
+  assert.match(ui.calls.find((c) => c.confirm).confirm, /the model chosen above/);
 });
