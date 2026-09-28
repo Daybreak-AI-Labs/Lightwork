@@ -13,6 +13,11 @@ Pure and deterministic — signals in, a :class:`RouteDecision` out — so it is
 unit-tested with no I/O. **Opt-in and fail-open**: with no table configured the
 decision is a ``passthrough`` (reply on the channel the message arrived on), so
 wiring this in never changes behaviour until an operator writes rules.
+
+The channel server calls :func:`specialist_for` for every inbound chat message:
+a matching rule whose destination is a ``specialist`` (an enabled department
+pack) makes that specialist handle the message's task. The rules are written
+with the guided editor on Settings > All settings > Chat channels.
 """
 from __future__ import annotations
 
@@ -73,7 +78,8 @@ class MessageSignals:
 
 @dataclass(frozen=True)
 class RouteRule:
-    """One row of the routing table: conditions + the channel to route to."""
+    """One row of the routing table: conditions + where to route it (a reply
+    ``channel`` and/or the ``specialist`` pack that should handle it)."""
 
     channel: str
     min_length: int | None = None
@@ -84,6 +90,7 @@ class RouteRule:
     attachments: tuple[str, ...] = ()
     label: str = ""
     name: str = ""                     # human label for explain()
+    specialist: str = ""               # department pack that handles the task
 
     def reasons(self, sig: MessageSignals) -> list[str] | None:
         """Return the satisfied-condition strings if this rule matches ``sig``,
@@ -132,6 +139,7 @@ class RouteDecision:
     rule: str            # the winning rule's name, or "passthrough"
     reasons: list[str] = field(default_factory=list)
     passthrough: bool = False
+    specialist: str = ""
 
 
 def _norm_list(v) -> tuple[str, ...]:
@@ -155,15 +163,20 @@ def parse_rules(raw: list[dict]) -> list[RouteRule]:
         if not isinstance(r, dict):
             continue
         channel = str(r.get("channel") or "").strip()
-        if not channel:
+        specialist = str(r.get("specialist") or "").strip()
+        if not channel and not specialist:
             continue
 
         def _int(key, *, r=r):
             v = r.get(key)
+            if isinstance(v, bool):
+                return None
             try:
-                return int(v) if v is not None else None
+                number = int(v) if v is not None else None
             except (TypeError, ValueError):
                 return None
+            # The guided editor writes 0 for "no limit".
+            return number if number is None or number > 0 else None
 
         urg = str(r.get("urgency") or "").strip().lower()
         if urg and urg not in _URGENCY_ORDER:
@@ -178,6 +191,7 @@ def parse_rules(raw: list[dict]) -> list[RouteRule]:
             attachments=_norm_list(r.get("attachments")),
             label=str(r.get("label") or "").strip().lower(),
             name=str(r.get("name") or f"rule[{i}]"),
+            specialist=specialist,
         ))
     return out
 
@@ -222,7 +236,8 @@ def route(
     for rule in rules:
         why = rule.reasons(sig)
         if why is not None:
-            return RouteDecision(channel=rule.channel, rule=rule.name, reasons=why)
+            return RouteDecision(channel=rule.channel or inbound_channel or "passthrough",
+                                 rule=rule.name, reasons=why, specialist=rule.specialist)
     return RouteDecision(
         channel=inbound_channel or "passthrough",
         rule="passthrough",
@@ -248,6 +263,51 @@ def explain(
             f"urgency={sig.effective_urgency()}, length={sig.length}")
 
 
+_KINDS = (("image/", "image"), ("audio/", "audio"), ("video/", "video"),
+          ("application/pdf", "pdf"), ("text/", "text"))
+
+
+def signals_for_message(msg) -> MessageSignals:
+    """What the rules can see about an inbound chat message: its text and
+    the kinds of files it carries (picture, sound, video, PDF, text, file)."""
+    kinds = []
+    for item in getattr(msg, "attachments", None) or []:
+        mime = str((item or {}).get("mime") or "").lower() if isinstance(item, dict) else ""
+        kind = next((name for prefix, name in _KINDS if mime.startswith(prefix)), "file")
+        if kind not in kinds:
+            kinds.append(kind)
+    return MessageSignals(text=str(getattr(msg, "text", "") or ""), attachments=tuple(kinds))
+
+
+def specialist_for(msg, *, rules: list[RouteRule] | None = None) -> str:
+    """The specialist pack the first matching rule sends ``msg`` to, or "".
+
+    "" (the general assistant, exactly as with no rules) when nothing is
+    configured, nothing matches, or the chosen specialist is not an enabled
+    pack any more. Never raises: routing must not block intake."""
+    import logging
+
+    try:
+        rules = [r for r in (load_rules() if rules is None else rules) if r.specialist]
+        if not rules:
+            return ""
+        decision = route(signals_for_message(msg), rules=rules,
+                         inbound_channel=str(getattr(msg, "channel", "") or ""))
+        if decision.passthrough or not decision.specialist:
+            return ""
+        from .domain import enabled_domains
+        if decision.specialist not in enabled_domains():
+            logging.getLogger(__name__).warning(
+                "routing rule %s names specialist %r, which is not enabled; "
+                "using the general assistant", decision.rule, decision.specialist)
+            return ""
+        return decision.specialist
+    except Exception:  # noqa: BLE001 -- intake continues unrouted
+        logging.getLogger(__name__).warning("channel routing failed; message not routed",
+                                            exc_info=True)
+        return ""
+
+
 __all__ = [
     "MessageSignals",
     "RouteRule",
@@ -256,4 +316,6 @@ __all__ = [
     "load_rules",
     "route",
     "explain",
+    "signals_for_message",
+    "specialist_for",
 ]

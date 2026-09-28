@@ -1228,12 +1228,14 @@ from .vendor_onboarding_page import create_vendor_onboarding_page_router  # noqa
 
 attach_vendor_onboarding_composition(app)
 app.include_router(vendor_onboarding_router, prefix="/api/v1")
+from .portal_routing_key_api import router as portal_routing_key_router  # noqa: E402
 from .task_changes_api import router as task_changes_router  # noqa: E402
 from .task_file_recovery_api import router as task_file_recovery_router  # noqa: E402
 from .vendor_setup_api import router as vendor_setup_router  # noqa: E402
 from .viewpoints_api import router as viewpoints_router  # noqa: E402
 
 app.include_router(vendor_setup_router)
+app.include_router(portal_routing_key_router)
 app.include_router(task_file_recovery_router)
 app.include_router(task_changes_router)
 app.include_router(viewpoints_router)
@@ -7868,8 +7870,9 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
     def _display_channels(channels: dict) -> dict:
         out: dict = {}
         for name, cfg in (channels or {}).items():
-            if not isinstance(cfg, dict):
-                out[name] = {"enabled": bool(cfg)}
+            # [channels] rich_render and the [channels.routing] rules apply
+            # to every chat app; they are not channels of their own.
+            if not isinstance(cfg, dict) or name == "routing":
                 continue
             safe_cfg: dict = {}
             for key, value in cfg.items():
@@ -10562,6 +10565,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-setup.js")
 @app.get("/static/lightwork-voice-setup.js")
 @app.get("/static/lightwork-vendor-setup.js")
+@app.get("/static/lightwork-portal-routing-key.js")
 @app.get("/static/lightwork-task-file-recovery.js")
 @app.get("/static/lightwork-connection-setup.js")
 @app.get("/static/lightwork-native-account-return.js")

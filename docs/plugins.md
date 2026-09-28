@@ -58,14 +58,22 @@ through `Shield.scan_tool_call` just like a built-in.
 
 ```toml
 [project.entry-points."maverick.channels"]
-mattermost = "mattermost_channel:MattermostChannel"
+pager = "pager_channel:PagerChannel"
 ```
 
 ```python
 from maverick_channels import Channel
 
-class MattermostChannel(Channel):
-    name = "mattermost"
+class PagerChannel(Channel):
+    name = "pager"
+
+    @classmethod
+    def from_config(cls, handler, config):
+        # config is the [channels.pager] table without "enabled".
+        channel = cls(handler)
+        channel.url = config["url"]
+        return channel
+
     async def start(self): ...
     async def send(self, user_id, text): ...
     async def stop(self): ...
@@ -74,15 +82,20 @@ class MattermostChannel(Channel):
 Enable it in `~/.maverick/config.toml`:
 
 ```toml
-[channels.mattermost]
+[channels.pager]
 enabled = true
-url     = "https://chat.example.com"
+url     = "https://pager.example.com"
 ```
 
-(Plugin channels are not yet auto-wired into `maverick serve` — they are
-discoverable via `maverick.plugins.discover_channels()`. Roadmap: a
-channel plugin can register its own `_wire` callback so config-driven
-startup works without core changes.)
+`maverick serve` starts every enabled `[channels.<name>]` table whose name is
+an installed channel plugin, exactly like a built-in channel: messages go
+through the same handler (safety checks, workspace policy, AI disclosure,
+task intake), and the server starts, sends through and stops the channel.
+A plugin that defines `from_config(handler, config)` builds itself from its
+table; otherwise it is constructed with the handler alone and receives the
+table as `self.config`. A plugin that is missing or fails to load is skipped
+with a warning and the other channels still start. Built-in channel names
+(Mattermost is built in) always use the built-in adapter.
 
 ## Skill plugin example
 

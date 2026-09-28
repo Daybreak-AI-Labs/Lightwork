@@ -198,6 +198,8 @@ CHANNEL_FIELDS = {
     ("email", "smtp_user"): ("Outgoing mail username", "Usually the full email address.", False),
     ("email", "smtp_password"): ("Outgoing mail password", "Often the same app password as incoming mail.", False),
     ("email", "smtp_port"): ("Outgoing mail port", "Usually 465. Some providers, such as Outlook, use 587.", True),
+    ("mattermost", "url"): ("Server address", "The web address people use to open Mattermost, such as https://chat.example.com.", False),
+    ("mattermost", "bot_token"): ("Bot access token", "From Mattermost's System Console, under Integrations > Bot Accounts, after you create a bot.", False),
 }
 
 CHANNEL_HELP_LINKS = {
@@ -206,6 +208,7 @@ CHANNEL_HELP_LINKS = {
     "slack": "https://api.slack.com/apps",
     "whatsapp_cloud": "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
     "sms": "https://console.twilio.com",
+    "mattermost": "https://developers.mattermost.com/integrate/reference/bot-accounts/",
 }
 
 

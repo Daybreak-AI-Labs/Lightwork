@@ -271,7 +271,7 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
     if source == "chat_channels":
         return [(name, catalog.CHANNEL_ALLOWLISTS.get(name, (identity_format.humanize(name),))[0])
                 for name, table in sorted(_merged_table("channels").items())
-                if isinstance(table, dict)]
+                if isinstance(table, dict) and name != "routing"]
     if source == "providers":
         from maverick import config
 
@@ -320,6 +320,10 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
             groups = {}
         names = sorted({str(g.get("displayName") or "").strip() for g in groups.values()} - {""})
         return [(name, name) for name in names]
+    if source == "specialists":
+        from .settings_catalog_integrations import specialist_choices
+
+        return specialist_choices()
     if source in {"voice_programs", "voice_model_files"}:
         from .settings_catalog_integrations import voice_choices
 

@@ -6,7 +6,7 @@ column types (a plain import would be circular).
 
 Covers the tools agents use to reach email, calendars, an ERP system, GitHub
 and Obsidian; issue-tracker and webhook delivery settings and their sealed
-secrets; the sealed Stripe and Microsoft 365 keys; alert batching and
+secrets; the sealed Stripe, Pushover and Microsoft 365 keys; alert batching and
 operational alerts; tax-figure updates; billing plans, Stripe prices and
 refunds; vendor-onboarding read retries; and voice input. Every row names the
 kernel module that reads it, and each environment variable in ``env`` still
@@ -87,6 +87,29 @@ def voice_choices(source: str) -> list[tuple[str, str]]:
     return [("", "Follow the speech model setting above (default)"),
             *((p.name, by_file.get(p.name, "Added by hand: " + p.name))
               for p in voice_models.approved_model_files())]
+
+
+def specialist_choices() -> list[tuple[str, str]]:
+    """The enabled specialist packs a routing rule can send messages to,
+    named by department and job (the kernel re-checks the pack at intake)."""
+    from maverick.departments import department_title
+    from maverick.domain import SUITE_PREFIXES, enabled_domains, suite_for
+
+    from .identity_format import humanize
+
+    out = []
+    for name in sorted(enabled_domains()):
+        suite = suite_for(name)
+        prefix = max((p for p in SUITE_PREFIXES if name.startswith(p)), key=len, default="")
+        job = humanize(name[len(prefix):] or name)
+        out.append((name, f"{department_title(suite)}: {job}" if suite else job))
+    return sorted(out, key=lambda choice: choice[1].lower())
+
+
+_ROUTE_URGENCY = (("", "Any"), ("normal", "Normal or more urgent"), ("high", "High or critical"),
+                  ("critical", "Critical only"))
+_ROUTE_FILES = (("image", "Picture"), ("audio", "Sound recording"), ("video", "Video"),
+                ("pdf", "PDF"), ("text", "Text file"), ("file", "Other file"))
 
 
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
@@ -317,6 +340,18 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "without waiting for the time above.",
           "number", "Integrations", 10, "maverick.notification_batcher", minimum=1,
           maximum=1000, integer=True, unit="alerts", env=("MAVERICK_NOTIFY_BATCH_MAX",)),
+        S("notifications", "user_key", "Pushover user key",
+          "Your Pushover user or group key, the 30 letters and numbers shown on your "
+          "Pushover dashboard. It is stored sealed and never shown again. A key set on the "
+          "server is used instead.",
+          "secret", "Integrations", "", "maverick.notifications", pattern=r"[A-Za-z0-9]{30}",
+          max_length=30, env=("PUSHOVER_USER_KEY",), aliases="pushover phone alerts"),
+        S("notifications", "app_token", "Pushover app token",
+          "The token of the Pushover app Lightwork sends alerts through, 30 letters and "
+          "numbers. It is stored sealed and never shown again. A token set on the server is "
+          "used instead.",
+          "secret", "Integrations", "", "maverick.notifications", pattern=r"[A-Za-z0-9]{30}",
+          max_length=30, env=("PUSHOVER_APP_TOKEN",), aliases="pushover phone alerts"),
         S("alerts", "enabled", "Alert me about problems with Lightwork itself",
           "Send an urgent alert with the service chosen above when, for example, the "
           "emergency stop trips, a spending limit runs out or the activity record breaks.",
@@ -380,6 +415,27 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           aliases="tax signed updates public key publisher"),
 
         # --------------------------------------------------------- chat apps
+        S("channels.routing", "rules", "Send chat messages to a specialist",
+          "Rules are checked in order for every message that arrives through a chat app; "
+          "the first one that matches decides which specialist handles it. Messages that "
+          "match no rule go to the general assistant, as they do with no rules at all.",
+          "rules", "Chat channels", [], "maverick.channel_autorouting",
+          subgroup="Message routing",
+          columns=(
+              C("any_keyword", "Contains any of these words", "words", max_items=20,
+                max_length=60, pattern=r"[^,<>{}\"\n\r]{1,60}",
+                item_error="a word or short phrase"),
+              C("urgency", "How urgent it sounds", "select", choices=_ROUTE_URGENCY, default=""),
+              C("attachments", "Has a file of this kind", "picks", choices=_ROUTE_FILES),
+              C("min_length", "At least this many characters (0 means any)", "number",
+                minimum=0, maximum=100000, integer=True, default=0, unit="characters"),
+              C("specialist", "Send to", "pick", choices_from="specialists", required=True),
+          ),
+          item_label="Rule", add_label="Add a rule",
+          empty_text="Every chat message goes to the general assistant.", weaker="change",
+          warning="Matching chat messages will be handled by the chosen specialist, with that "
+                  "specialist's tools and permissions.",
+          aliases="routing rules specialist department triage"),
         S("channels", "rich_render", "Show formulas and diagrams as a page",
           "When a reply contains formulas or diagrams, also send a page that shows them "
           "properly. The page is saved on this server.",
