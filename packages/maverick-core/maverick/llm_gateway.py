@@ -62,6 +62,29 @@ _ANTHROPIC_VERSION_RE = re.compile(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}\Z")
 TEAM_BUDGET_SCHEMA = "lightwork.llm-gateway-team-budget.v1"
 
 
+# Credentials the dashboard may store sealed in the settings overlay.
+_SECRET_KEYS = ("gateway_token", "upstream_token", "anthropic_upstream_token")
+
+
+def _token(env_name: str, config_key: str) -> str:
+    """A gateway credential: its environment variable, else the sealed setting.
+
+    Read on demand and never copied into the settings dict, so status views
+    that show the gateway configuration can never carry a credential.
+    """
+    value = os.environ.get(env_name, "")
+    if value:
+        return value
+    try:
+        from .config import load_global_config
+
+        section = (load_global_config() or {}).get("llm_gateway") or {}
+    except Exception:
+        return ""
+    stored = section.get(config_key) if isinstance(section, dict) else None
+    return stored.strip() if isinstance(stored, str) else ""
+
+
 class LLMGatewayError(RuntimeError):
     """Base failure for the governed LLM gateway."""
 
@@ -97,12 +120,18 @@ def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config bo
         "team_budgets",
         "budget_window_seconds",
         "default_max_output_tokens",
+        # Sealed dashboard secrets; the environment variables named by the
+        # *_token_env keys still win (see _token).
+        *_SECRET_KEYS,
     }
     unknown = set(section) - known
     if unknown:
         raise LLMGatewayConfigError(
             f"unknown llm_gateway keys: {', '.join(sorted(unknown))}"
         )
+    for key in _SECRET_KEYS:
+        if key in section and not isinstance(section[key], str):
+            raise LLMGatewayConfigError(f"llm_gateway.{key} must be text")
     flag = section.get("enable", False)
     if not isinstance(flag, bool):
         raise LLMGatewayConfigError("llm_gateway.enable must be a boolean")
@@ -308,7 +337,10 @@ def _team_for_token(caller_token: str, settings: Mapping[str, Any]) -> str | Non
     )
     matched: list[str] = []
     for team, env_name in candidates:
-        expected = os.environ.get(env_name, "")
+        expected = (
+            _token(env_name, "gateway_token") if team == "default"
+            else os.environ.get(env_name, "")
+        )
         if expected and hmac_mod.compare_digest(token, expected):
             matched.append(team)
     # A malformed deployment environment with duplicate secret VALUES should
@@ -1149,14 +1181,14 @@ def _provider_upstream(
             raise LLMGatewayConfigError(
                 "Anthropic compatibility requires llm_gateway.anthropic_upstream_url"
             )
-        token = os.environ.get(str(settings["anthropic_upstream_token_env"]), "")
+        token = _token(str(settings["anthropic_upstream_token_env"]), "anthropic_upstream_token")
         if not token:
             raise LLMGatewayError("The gateway's Anthropic upstream credential is not configured.")
         return f"{base}/v1/messages", {
             "x-api-key": token,
             "anthropic-version": str(settings["anthropic_version"]),
         }
-    token = os.environ.get(str(settings["upstream_token_env"]), "")
+    token = _token(str(settings["upstream_token_env"]), "upstream_token")
     if not token:
         raise LLMGatewayError("The gateway's upstream credential is not configured.")
     return f"{settings['upstream_url']}/v1/chat/completions", {

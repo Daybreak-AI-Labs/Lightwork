@@ -1478,6 +1478,8 @@ def base_registry(
         channel=channel,
         user_id=user_id,
     )
+    if not _skip_tool_acl:
+        _apply_containment(reg)
     _apply_deferred_loading(reg)
 
     # Route every compatible external connector write through the durable,
@@ -1570,6 +1572,17 @@ def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | No
     except Exception as e:  # pragma: no cover
         import logging as _logging
         _logging.getLogger(__name__).warning("tool_acl: %s", e)
+
+
+def _apply_containment(reg: ToolRegistry) -> None:
+    """Containment mode: union the exfil tools into the ACL (existing denials
+    are kept). An enabled profile that cannot be applied stops registry
+    construction rather than running uncontained."""
+    from ..containment import active_profile, apply
+
+    profile = active_profile()
+    if profile is not None:
+        apply(profile, registry=reg, sandbox_env={})
 
 
 def _apply_tool_acl_unless_skipped(

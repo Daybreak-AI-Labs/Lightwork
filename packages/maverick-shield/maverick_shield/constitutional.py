@@ -27,18 +27,28 @@ class ConstitutionalRule:
     severity: str
 
 
+def _phrases_pattern(phrases: object) -> str:
+    """A pattern matching any of ``phrases`` literally (the dashboard's form)."""
+    if not isinstance(phrases, (list, tuple)):
+        return ""
+    words = [str(p).strip() for p in phrases if isinstance(p, str) and str(p).strip()]
+    return "|".join(re.escape(w) for w in words)
+
+
 def parse_rules(raw: list[dict]) -> list[ConstitutionalRule]:
     """Build rules from ``[{name, pattern, severity?}, ...]``.
 
-    ``severity`` defaults to ``high`` and must be a known level; a rule with a
-    bad/empty regex or an unknown severity is skipped (never raises).
+    A rule may give ``phrases`` (a list of words or phrases matched literally,
+    as the dashboard writes them) instead of a ``pattern``. ``severity``
+    defaults to ``high`` and must be a known level; a rule with a bad/empty
+    regex or an unknown severity is skipped (never raises).
     """
     out: list[ConstitutionalRule] = []
     for r in raw or []:
         if not isinstance(r, dict):
             _log.warning("constitutional: skipping non-dict policy rule: %r", r)
             continue
-        pattern = str(r.get("pattern") or "").strip()
+        pattern = str(r.get("pattern") or "").strip() or _phrases_pattern(r.get("phrases"))
         if not pattern:
             _log.warning(
                 "constitutional: skipping rule %r with empty pattern",
@@ -60,7 +70,10 @@ def parse_rules(raw: list[dict]) -> list[ConstitutionalRule]:
                 r.get("name"), pattern, e,
             )
             continue
-        name = str(r.get("name") or pattern[:24]).strip() or "constitutional_rule"
+        fallback = ", ".join(
+            str(w).strip() for w in (r.get("phrases") or []) if isinstance(w, str)
+        )[:48] if not r.get("pattern") and isinstance(r.get("phrases"), (list, tuple)) else ""
+        name = str(r.get("name") or fallback or pattern[:24]).strip() or "constitutional_rule"
         out.append(ConstitutionalRule(name=name, pattern=compiled, severity=severity))
     return out
 

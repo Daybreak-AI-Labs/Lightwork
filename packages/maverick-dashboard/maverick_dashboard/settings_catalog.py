@@ -15,22 +15,23 @@ page (dashboard overlay) > the installer's config.toml > the built-in default.
 Deliberately NOT in the catalog:
 
 * Developer / operations plumbing with no business meaning: ``[grpc]``,
-  ``[grpc_dispatch]``, ``[lsp]``, ``[langchain]``, ``[tui]``, ``[perf]``,
-  ``[benchmark]``, ``[logging]``, ``[observability]``, ``[queue]``,
-  ``[coding]``, ``[model_proxy]``, ``[obsidian]``, ``[github]``,
-  ``[calendar]``, ``[embedded]``, ``[ebpf_monitor]``, ``[local_runtime]``
+  ``[grpc_dispatch]``, ``[langchain]``, ``[queue]``, ``[coding]``,
+  ``[obsidian]``, ``[github]``, ``[calendar]``, ``[local_runtime]``
   (serving engines), ``[emergent_protocol]``/``[emergent_codec]`` (research
   telemetry), ``[self_modify]``/``[adapter_rung]`` (research-only code and
-  weights rungs with their own high-risk page).
+  weights rungs with their own high-risk page). Programs the product never
+  starts itself (``python -m`` helpers) have nothing to change here:
+  ``[perf]`` profiling, ``[ebpf_monitor]``, ``[model_proxy]`` (its key is
+  kept out of the product's settings on purpose) and ``[tui] keys``.
 * Deployment-only by design (sign-in, isolation and key custody must not be
   changeable from inside the app they protect): ``[auth]`` (single sign-on),
   ``[tenancy]``, ``[client]``, ``[world_model] rls``, ``[kms]``,
-  ``[federation]``, ``[license]``, ``[providers] per_tenant_keys``, the sandbox
-  ``workdir``, ``[audit.worm]`` / ``[audit.unified]`` custody, the Stripe and
-  Pushover credentials (read only from the server's environment),
-  ``[deployment]`` (installer provenance), and every setting that names a
-  server file path or an environment variable (``signal_cli_path``,
-  ``[screening] sdn_path``, ``*_token_env``, ``[knowledge] path``/``dsn``).
+  ``[federation]``, ``[license]``, ``[audit.worm]`` / ``[audit.unified]``
+  custody, the Stripe and Pushover credentials (read only from the server's
+  environment), ``[deployment]`` (installer provenance), and every setting
+  that names a server program or an environment variable
+  (``signal_cli_path``, ``*_token_env``; the AI gateway's credentials
+  themselves can be set, sealed, in the runtime rows).
 * Settings that already have a dedicated control elsewhere: provider keys,
   models, the per-task spending cap, capabilities, features, the six chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
@@ -52,8 +53,11 @@ incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
 out, so the page never offers a control that changes nothing: ``[safety]``
-goal-risk floor and quorum keys and ``[containment]`` (their library modules
-are not called by any run path yet).
+quorum keys, ``cascade`` and ``shield_rate_limit``,
+``[shield] probe_model`` and update addresses, ``[models] cascade``,
+``[routing] bandit``, ``[energy]``, ``[voice]`` only-mode and voice unlock
+(their modules are not called by any run path yet; see
+``settings_catalog_runtime``).
 """
 from __future__ import annotations
 

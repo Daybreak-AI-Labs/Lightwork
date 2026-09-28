@@ -889,7 +889,9 @@ def azure_provider_configuration_missing(
     else:
         authentication = bool(key) ^ bool(ad_token)
 
-    deployment = present(os.environ.get("AZURE_OPENAI_DEPLOYMENT"))
+    deployment = present(os.environ.get("AZURE_OPENAI_DEPLOYMENT")) or present(
+        table.get("deployment")
+    )
     return tuple(
         item
         for item, configured in (
@@ -979,6 +981,9 @@ def get_capabilities() -> dict:
         # Programmatic tool calling: a sandboxed Python script that orchestrates
         # declared tool calls (also enableable via MAVERICK_CODE_EXEC).
         "code_exec": bool(cfg.get("code_exec", False)),
+        # Deferred connector loading (default on); agent.py reads it from this
+        # dict, so without it here the documented knob could never turn it off.
+        "deferred_tools": _strict_config_bool(cfg, "deferred_tools", True, invalid=True),
     }
 
 

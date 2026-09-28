@@ -1408,7 +1408,12 @@ def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
     borderline-but-valid request into a false refusal (the estimate is a
     cheap chars/token heuristic); operators opt into hard-refuse explicitly.
     """
-    mode = os.environ.get("MAVERICK_PREFLIGHT", "warn").strip().lower()
+    from .env_setting import env_or_config
+
+    # ``[context] preflight`` is the same choice made in the dashboard; the
+    # environment variable still wins.
+    mode = (env_or_config("MAVERICK_PREFLIGHT", "context", "preflight", "warn")
+            or "warn").strip().lower()
     if mode not in ("warn", "strict"):
         return  # 'off' / unrecognized -> skip
     try:
@@ -1730,6 +1735,14 @@ class LLM:
             }
             if auth_mode is not None:
                 azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
+            # [providers.azure] deployment / api_version fill what the
+            # environment leaves empty (an exported variable still wins).
+            for env_name, field in (("AZURE_OPENAI_DEPLOYMENT", "deployment"),
+                                    ("AZURE_OPENAI_API_VERSION", "api_version")):
+                value = pcfg.get(field)
+                if not azure_environment[env_name].strip() and isinstance(value, str) \
+                        and value.strip():
+                    azure_environment[env_name] = value.strip()
             common_environment.update(azure_environment)
         elif provider == "bedrock":
             # The native client derives its endpoint from the region and picks
@@ -1744,6 +1757,13 @@ class LLM:
             raw_endpoint = pcfg.get("endpoint")
             if isinstance(raw_endpoint, str) and raw_endpoint.strip():
                 bedrock_environment["BEDROCK_ENDPOINT"] = raw_endpoint.strip().lower()
+            # [providers.bedrock] region applies only when neither AWS region
+            # variable is exported.
+            raw_region = pcfg.get("region")
+            if (isinstance(raw_region, str) and raw_region.strip()
+                    and not bedrock_environment["AWS_REGION"].strip()
+                    and not bedrock_environment["AWS_DEFAULT_REGION"].strip()):
+                bedrock_environment["AWS_REGION"] = raw_region.strip()
             common_environment.update(bedrock_environment)
         elif provider == "codex_cli":
             from .providers.codex_cli_provider import _ENV_ALLOWLIST

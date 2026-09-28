@@ -16,8 +16,10 @@ _HEADERS = _COMMON | {"default_headers"}
 CAPABILITIES = MappingProxyType({
     "anthropic": ProviderCapabilities(_HEADERS),
     "openai": ProviderCapabilities(_HEADERS),
-    "azure": ProviderCapabilities(_HEADERS | {"auth_mode"}),
-    "bedrock": ProviderCapabilities(_HEADERS | {"auth_mode", "endpoint"}),
+    # deployment / api_version / region: set on the dashboard; the provider's
+    # own environment variables still win (see LLM._provider_client_config).
+    "azure": ProviderCapabilities(_HEADERS | {"auth_mode", "deployment", "api_version"}),
+    "bedrock": ProviderCapabilities(_HEADERS | {"auth_mode", "endpoint", "region"}),
     **{name: ProviderCapabilities(_COMMON) for name in (
         "moonshot", "xai", "gemini", "deepseek", "openrouter", "ollama",
         "tgi", "vllm", "openai_compatible",
@@ -67,7 +69,8 @@ def validate_fields(provider: str, values) -> None:
                 f"providers.{provider}.{field} is unsupported by this adapter; "
                 "remove the setting or select an adapter that supports it"
             )
-        if name in {"api_key", "base_url", "auth_mode", "endpoint"} and value is not None and not isinstance(value, str):
+        if name in {"api_key", "base_url", "auth_mode", "endpoint", "deployment", "api_version", "region"} \
+                and value is not None and not isinstance(value, str):
             raise ValueError(f"providers.{provider}.{name} must be a string")
 
 

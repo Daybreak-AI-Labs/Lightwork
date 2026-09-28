@@ -173,11 +173,34 @@ class ConsentLedgerError(RuntimeError):
     """The standing-consent authority could not be verified safely."""
 
 
+_CONSENT_MODES = frozenset({"auto-approve", "auto-deny", "ask", "dashboard"})
+
+
+def _configured_mode() -> str:
+    """``[safety] consent_mode`` from config, ``""`` when unset or unreadable."""
+    try:
+        from ..config import load_config
+
+        raw = ((load_config() or {}).get("safety") or {}).get("consent_mode")
+    except Exception:
+        return ""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return ""
+    mode = str(raw).strip().lower()
+    return mode if mode in _CONSENT_MODES else "ask"
+
+
 def _resolve_mode(risk: str | None = None) -> str:
     # Explicit operator setting always wins (any risk level).
     env = os.environ.get("MAVERICK_CONSENT_MODE")
     if env:
         return env.strip().lower()
+    # The same choice made in the dashboard (``[safety] consent_mode``); the
+    # environment variable above still wins. A value this module does not know
+    # fails closed to asking a person.
+    configured = _configured_mode()
+    if configured:
+        return configured
     # Enterprise mode flips the default to 'ask' so destructive actions are gated
     # (and denied in non-interactive contexts) when handling sensitive data.
     try:

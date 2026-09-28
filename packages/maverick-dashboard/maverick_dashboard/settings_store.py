@@ -461,24 +461,50 @@ def _dump_selector_sections(lines: list[str], data: dict) -> None:
 
 def _dump_plugins(lines: list[str], plugins: dict) -> None:
     """Emit [plugins] -- the dashboard-install allowlist + opt-in switch
-    (set_installable_plugins / set_plugin_install_allowed) and the permission
-    grants the All settings page writes (grant / enforce_permissions)."""
-    if not plugins:
+    (set_installable_plugins / set_plugin_install_allowed) and every plugin
+    setting the All settings page writes (permission grants, signing,
+    isolation, version lock, usage counts). An emptied install allowlist is
+    dropped, as before; every other key is written as stored."""
+    keys = [
+        k for k in sorted(plugins or {})
+        if plugins[k] is not None and plugins[k] != ""
+        and not (k == "installable" and not plugins[k])
+    ]
+    if not keys:
         return
     lines.append("[plugins]")
-    if "allow_install" in plugins:
-        lines.append(
-            f"allow_install = {'true' if plugins['allow_install'] else 'false'}"
-        )
-    if plugins.get("installable"):
-        lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
-    if isinstance(plugins.get("grant"), list):
-        lines.append(f"grant = {_toml_value(list(plugins['grant']))}")
-    if isinstance(plugins.get("enforce_permissions"), bool):
-        lines.append(
-            f"enforce_permissions = {'true' if plugins['enforce_permissions'] else 'false'}"
-        )
+    for k in keys:
+        lines.append(f"{_toml_key(k)} = {_toml_value(plugins[k])}")
     lines.append("")
+
+
+# Provider fields the dashboard writes: keys and addresses on the Settings
+# page, and sign-in mode, Bedrock endpoint/region and Azure deployment/version
+# on the All settings page.
+_PROVIDER_FIELDS = ("api_key", "base_url", "auth_mode", "endpoint", "region",
+                    "deployment", "api_version")
+
+
+def _dump_providers(lines: list[str], providers: dict) -> None:
+    """Emit [providers] switches (per_tenant_keys) and each provider's table."""
+    switches = {k: v for k, v in providers.items()
+                if not isinstance(v, dict) and v is not None and v != ""}
+    if switches:
+        lines.append("[providers]")
+        for k in sorted(switches):
+            lines.append(f"{_toml_key(k)} = {_toml_value(switches[k])}")
+        lines.append("")
+    for name in sorted(k for k, v in providers.items() if isinstance(v, dict)):
+        pcfg = providers[name]
+        fields = [(f, pcfg.get(f)) for f in _PROVIDER_FIELDS if pcfg.get(f)]
+        if not fields:
+            continue
+        lines.append(f"[providers.{name}]")
+        for field, val in fields:
+            if field == "api_key":
+                val = _seal_global_secret(val)
+            lines.append(f"{field} = {_toml_str(val)}")
+        lines.append("")
 
 
 def _dump(data: dict) -> str:
@@ -530,18 +556,7 @@ def _dump(data: dict) -> str:
         if whk.get("secret"):
             lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
         lines.append("")
-    for name in sorted(data.get("providers") or {}):
-        pcfg = data["providers"][name] or {}
-        # auth_mode: how Bedrock signs in, chosen on the All settings page.
-        fields = [(f, pcfg.get(f)) for f in ("api_key", "base_url", "auth_mode") if pcfg.get(f)]
-        if not fields:
-            continue
-        lines.append(f"[providers.{name}]")
-        for field, val in fields:
-            if field == "api_key":
-                val = _seal_global_secret(val)
-            lines.append(f"{field} = {_toml_str(val)}")
-        lines.append("")
+    _dump_providers(lines, data.get("providers") or {})
     for name in sorted(data.get("channels") or {}):
         ccfg = data["channels"][name] or {}
         if not ccfg:
