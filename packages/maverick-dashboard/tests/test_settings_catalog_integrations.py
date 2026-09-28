@@ -67,6 +67,7 @@ VALUES: dict[str, tuple[object, object]] = {
     "erp.token": ("sample-erp-token", "sample-erp-token"),  # pragma: allowlist secret
     "erp.system": ("NetSuite", "NetSuite"),
     "github.token": ("sample-github-token", "sample-github-token"),  # pragma: allowlist secret
+    "github.share_token": ("sample-gist-key", "sample-gist-key"),  # pragma: allowlist secret
     "github.trigger_labels": (["automate", "fix-me"], ["automate", "fix-me"]),
     "webhooks.linear_bot_id": ("bot@example.com", "bot@example.com"),
     "webhooks.jira_bot_id": ("5b10ac8d82e05b22cc7d4ef5", "5b10ac8d82e05b22cc7d4ef5"),
@@ -130,6 +131,7 @@ INVALID: dict[str, object] = {
     "erp.token": "",
     "erp.system": "{bad}",
     "github.token": "",
+    "github.share_token": "",
     "github.trigger_labels": ["two words"],
     "webhooks.linear_bot_id": "has space",
     "webhooks.jira_bot_id": "a\nb",
@@ -341,7 +343,7 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
 
     secrets = {row.id: VALUES[row.id][0] for row in ROWS if row.secret}
     assert set(secrets) == {"email.app_password", "calendar.password", "erp.token",
-                            "github.token", "billing.stripe.secret_key",
+                            "github.token", "github.share_token", "billing.stripe.secret_key",
                             "billing.stripe.webhook_secret", "github.app_webhook_secret",
                             "webhooks.gitlab_token", "data_map.graph_token",
                             "notifications.user_key", "notifications.app_token"}
@@ -543,6 +545,36 @@ def test_saved_stripe_keys_are_used_when_the_server_has_none(monkeypatch, audit_
     assert _STRIPE_KEY not in repr(status.to_dict())
     monkeypatch.setenv("MAVERICK_STRIPE_SECRET_KEY", "sk_test_fromtheserver")  # pragma: allowlist secret
     assert billing_stripe._secret_key() == "sk_test_fromtheserver"  # pragma: allowlist secret
+
+
+def test_saved_gist_key_shares_task_histories_and_the_environment_wins(monkeypatch, audit_rows):
+    from maverick import run_share
+
+    sent = []
+
+    class Reply:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"html_url": "https://gist.github.com/example/1"}
+
+    def post(url, *, json, headers, timeout):
+        sent.append(headers["Authorization"])
+        return Reply()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", post)
+    monkeypatch.setattr(run_share, "build_gist_payload", lambda goal_id: {"files": {}})
+    with pytest.raises(RuntimeError):
+        run_share.share_run(1)
+    _set("github.share_token", VALUES["github.share_token"][0])
+    assert run_share.share_run(1) == "https://gist.github.com/example/1"
+    assert sent == ["Bearer " + VALUES["github.share_token"][0]]
+    monkeypatch.setenv("GITHUB_TOKEN", "server-gist-key")  # pragma: allowlist secret
+    run_share.share_run(1)
+    assert sent[-1] == "Bearer server-gist-key"
 
 
 def test_saved_github_app_secret_verifies_github_messages(monkeypatch, audit_rows):

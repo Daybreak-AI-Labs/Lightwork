@@ -299,6 +299,72 @@ def test_business_setup_drafts_then_saves_only_after_confirmation(env, monkeypat
     assert again.status_code == 404, "a draft is approved at most once"
 
 
+def _tool_gap_plan(env, monkeypatch):
+    import maverick.provision as provision
+
+    # Tool building is part of the governed self-learning loop; turn it on here.
+    env.cfg.write_text(env.cfg.read_text() + "\n[self_learning]\nenable = true\ncreate_tools = true\n")
+    config.reset_config_cache()
+
+    plan = provision.ProvisioningPlan(profile_name="acme_books", gaps=[provision.CapabilityGap(
+        kind="tool", need="invoice_lookup", resolution="generate_tool")])
+    monkeypatch.setattr(provision, "analyze_profile", lambda profile, **_: plan)
+
+
+def _approve_with_tools(env):
+    base = "/api/v1/agents/business-setup"
+    job = env.client.post(base + "/draft", json={"name": "Acme Books", "use_ai": False},
+                          headers=_as("boss")).json()["job"]
+    assert _wait(env.client, f"{base}/{job}?step=draft", headers=_as("boss"))["result"]["ran"] is True
+    started = env.client.post(f"{base}/{job}/approve", data={"confirm": "true"}, headers=_as("boss"))
+    assert started.status_code == 202, started.text
+    return _wait(env.client, f"{base}/{started.json()['job']}?step=approve", headers=_as("boss"))["result"]
+
+
+def test_business_setup_builds_tools_on_the_writer_model_under_a_budget(env, monkeypatch):
+    import maverick.llm as llm
+
+    _tool_gap_plan(env, monkeypatch)
+    calls, roles = [], []
+
+    class ToolLLM:
+        def __init__(self, model=None):
+            self.model = model
+
+        def complete(self, *, system, messages, budget=None, **_):
+            assert budget is not None, "tool generation always runs under a budget"
+            budget.check()
+            budget.record_tokens(300, 200)
+            calls.append(budget)
+            return SimpleNamespace(text="not a usable tool module")
+
+    monkeypatch.setattr(llm, "LLM", ToolLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: roles.append(role) or "anthropic:configured")
+    saved = _approve_with_tools(env)
+    assert saved["saved"] is True
+    assert "writer" in roles and len(calls) == 1 and calls[0].dollars > 0
+    assert calls[0].max_dollars <= 1.0
+    assert [r["phase"] for r in env.audit if r["kind"] == "business_agent_tools"] == ["start", "end"]
+
+
+def test_business_setup_adds_no_tools_when_the_budget_is_refused(env, monkeypatch):
+    import maverick.llm as llm
+    from maverick_dashboard import viewpoints_api
+
+    _tool_gap_plan(env, monkeypatch)
+    made = []
+    monkeypatch.setattr(llm, "LLM", lambda model=None: made.append(model))
+
+    def refuse(principal, max_dollars=1.0):
+        raise viewpoints_api._Refused("Your spending limit for today has been reached.")
+
+    monkeypatch.setattr(viewpoints_api, "_admit", refuse)
+    saved = _approve_with_tools(env)
+    assert saved["saved"] is True and made == []
+    assert "spending limits" in saved["message"] and "spending limit for today" in saved["message"]
+    assert not [r for r in env.audit if r["kind"] == "business_agent_tools"]
+
+
 def test_business_setup_bounds_documents(env):
     base = "/api/v1/agents/business-setup"
     job = env.client.post(base + "/draft", json={"name": "Acme", "use_ai": False}, headers=_as("boss")).json()["job"]
@@ -435,7 +501,7 @@ def test_pages_offer_the_new_controls_in_plain_words(template, needles):
     for needle in needles:
         assert needle in text
     for added in re.findall(r'<(?:section|details|div)[^>]*id="(?:task-journal|goal-export|auto-new-sched|tplm-library|'
-                            r'biz-setup|ekko-recording|planning-steps)".*?</(?:section|details)>', text, re.S):
+                            r'biz-setup|ekko-recording|planning-steps)".*?</(?:section|details)>', text, re.DOTALL):
         visible = re.sub(r"<[^>]+>|\{\{.*?\}\}|\{%.*?%\}", " ", added)
         assert not BANNED.search(visible), BANNED.search(visible)
 

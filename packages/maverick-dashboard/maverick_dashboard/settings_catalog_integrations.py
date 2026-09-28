@@ -273,6 +273,14 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "public projects can be read. It is stored sealed and never shown again.",
           "secret", "Integrations", "", "maverick.tools.github_search", subgroup="GitHub",
           max_length=500, env=("GITHUB_TOKEN", "GH_TOKEN")),
+        # Sharing a task's history as a private gist (task history page).
+        S("github", "share_token", "GitHub key for sharing task histories",
+          "A GitHub access key allowed to create gists. It is used when someone shares a "
+          "task's history as a private gist from its history page. It is stored sealed and "
+          "never shown again. A key set on the server is used instead.",
+          "secret", "Integrations", "", "maverick.run_share", subgroup="GitHub",
+          max_length=500, env=("GITHUB_TOKEN", "GH_TOKEN"),
+          aliases="github gist share task history key token"),
         S("github", "app_webhook_secret", "GitHub app message secret",
           "The webhook secret of the Lightwork GitHub app. Messages from GitHub are refused "
           "unless they are signed with it. It is stored sealed and never shown again. A "

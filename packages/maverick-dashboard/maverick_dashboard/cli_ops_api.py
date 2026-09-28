@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 
 from .business_agent_ops_api import router as _business_agent_router
 from .ekko_ops_api import router as _ekko_router
+from .flow_capture_ops_api import router as _flow_capture_router
 from .flow_teach_ops_api import router as _flow_teach_router
 from .goal_export_ops_api import router as _goal_export_router
 from .plan_reflect_ops_api import router as _plan_reflect_router
@@ -25,7 +26,8 @@ from .template_ops_api import router as _template_router
 
 router = APIRouter()
 for _child in (_journal_router, _goal_export_router, _schedule_router, _template_router,
-               _business_agent_router, _ekko_router, _flow_teach_router, _plan_reflect_router):
+               _business_agent_router, _ekko_router, _flow_teach_router, _plan_reflect_router,
+               _flow_capture_router):
     router.include_router(_child)
 
 _STATIC = Path(__file__).parent / "static"
@@ -38,6 +40,7 @@ ASSETS = (
     "lightwork-ekko-recording.js",
     "lightwork-flow-teach.js",
     "lightwork-planning-steps.js",
+    "lightwork-learning-capture.js",
 )
 
 

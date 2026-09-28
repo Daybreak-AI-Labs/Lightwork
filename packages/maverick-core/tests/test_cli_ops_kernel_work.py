@@ -122,3 +122,31 @@ def test_apply_approved_plan_records_learning_signals(monkeypatch):
     monkeypatch.setattr(factory_learning, "record_provisioning", lambda profile, plan, res: seen.append(res))
     assert provision.apply_approved_plan("profile", "plan") is result
     assert seen == [True, result]
+
+
+def test_capture_description_is_closed_bounded_and_admitted():
+    from maverick.flow.action_episode_review import _matches, _schema
+    from maverick.flow.capture_schema import describe
+
+    value = {"name": "ACME", "count": 3, "rate": 1.5, "ok": True, "tags": ["a", "b"], "nested": {"id": None}}
+    schema = describe(value)
+    _schema(schema)  # the capture service's own closed language
+    _matches(value, schema)
+    assert schema["properties"]["tags"]["minItems"] == schema["properties"]["tags"]["maxItems"] == 2
+    with pytest.raises(ValueError):
+        describe({"x": object()})
+
+
+def test_budgeted_model_checks_and_passes_the_budget():
+    from maverick.budget import Budget, BudgetExceeded
+    from maverick.provision import BudgetedLLM
+
+    seen = []
+    inner = SimpleNamespace(complete=lambda **kw: seen.append(kw["budget"]) or "ok")
+    budget = Budget(max_dollars=1.0)
+    assert BudgetedLLM(inner, budget).complete(system="s", messages=[]) == "ok" and seen == [budget]
+    spent = Budget(max_dollars=0.01)
+    spent.dollars = 1.0
+    with pytest.raises(BudgetExceeded):
+        BudgetedLLM(inner, spent).complete(system="s", messages=[])
+    assert len(seen) == 1, "no model call once the budget is spent"
