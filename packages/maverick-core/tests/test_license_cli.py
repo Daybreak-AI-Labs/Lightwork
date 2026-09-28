@@ -131,3 +131,22 @@ def test_show_exits_nonzero_when_untrusted(monkeypatch, tmp_path):
     # No trust anchor configured, and an explicit bogus pubkey -> not licensed.
     res = _run("show", "--file", str(out), "--pubkey", "bb" * 32)
     assert res.exit_code == 1, res.output
+
+
+def test_issue_notes_an_untrusted_signing_key_and_writes_via_the_shared_installer(monkeypatch, tmp_path):
+    # The dashboard's License page installs through the same kernel writer
+    # (entitlements.install_license) and shows the same trust warning.
+    priv, pub = _keypair()
+    monkeypatch.setenv("MAVERICK_LICENSE_PRIVATE_KEY", priv)
+    res = _run("issue", "--customer", "acme")
+    assert res.exit_code == 0, res.output
+    from maverick.entitlements import _default_license_path, license_text
+    path = _default_license_path()
+    assert f"wrote signed license -> {path}" in res.output
+    doc = json.loads(path.read_text("utf-8"))
+    assert path.read_text("utf-8") == license_text(doc)
+    assert "not in the deployment trust anchor" in res.output
+    monkeypatch.setenv("MAVERICK_LICENSE_PUBKEYS", pub.upper())
+    res = _run("issue", "--customer", "acme", "--out", str(tmp_path / "trusted.json"))
+    assert res.exit_code == 0, res.output
+    assert "trust anchor" not in res.output

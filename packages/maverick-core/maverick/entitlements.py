@@ -625,6 +625,35 @@ def publisher_private_key() -> str | None:
     return key.strip() if key and key.strip() else None
 
 
+def public_key_for(private_key_hex: str) -> str:
+    """The public key hex (a signed license's ``key_id``) of a publisher private
+    key. Raises ``ValueError`` on a key that is not Ed25519 hex."""
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    priv = ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key_hex))
+    return priv.public_key().public_bytes_raw().hex()
+
+
+def key_trusted(key_id: str, trusted_pubkeys: list[str] | None = None) -> bool:
+    """Whether the signing key ``key_id`` is in the deployment trust anchor. A
+    license signed by any other key grants nothing beyond the base tier."""
+    return str(key_id or "").lower() in _trusted_pubkeys(trusted_pubkeys)
+
+
+def license_text(doc: dict) -> str:
+    """The on-disk text of a signed license document."""
+    return json.dumps(doc, indent=2) + "\n"
+
+
+def install_license(doc: dict, path: str | Path | None = None) -> Path:
+    """Write a signed license where the deployment reads it (the default
+    license path unless ``path`` is given) and return that path. Callers
+    verify the document first; this only writes it."""
+    target = Path(path).expanduser() if path else _default_license_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(license_text(doc), encoding="utf-8")
+    return target
+
+
 # ---- CLI: python -m maverick.entitlements {keygen,issue,verify,show} -------
 # Self-contained so it needs no wiring into the main cli.py. `keygen`/`issue`
 # are Daybreak-side (keep the private key secret); `verify`/`show` run on a

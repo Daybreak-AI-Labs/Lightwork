@@ -12,7 +12,8 @@ union over its packs' ``allow_tools``. A compartment that holds an *incompatible
 pair (e.g. ``stage_payment_batch`` = record **and** ``release_payment`` = custody)
 is a conflict. Record + reconcile in one compartment is allowed (the same closer
 records and reconciles); custody and authorize are incompatible with everything.
-Pure and dependency-free.
+The linter is pure and dependency-free; :func:`lint_finance_roster` loads the
+installed finance packs for it (``maverick finance lint-sod`` and the dashboard).
 """
 from __future__ import annotations
 
@@ -134,6 +135,17 @@ def lint_roster(profiles) -> list[SoDConflict]:
     return conflicts
 
 
+def lint_finance_roster() -> tuple[dict, list[SoDConflict]]:
+    """Lint every installed finance pack as one roster: the built-in packs plus
+    the active workspace's own (a workspace pack replaces a built-in one of the
+    same name). Returns ``(packs, conflicts)``."""
+    from ..domain import builtin_dir, load_domains, user_dir
+    packs = {n: p for n, p in {**load_domains(builtin_dir()),
+                               **load_domains(user_dir())}.items()
+             if n.startswith("finance_")}
+    return packs, lint_roster(packs)
+
+
 def assert_no_conflicts(profiles) -> None:
     """Raise ``SoDViolation`` if the roster has any SoD conflict (CI gate)."""
     conflicts = lint_roster(profiles)
@@ -149,5 +161,5 @@ class SoDViolation(Exception):
 
 __all__ = [
     "classify_duty", "SoDConflict", "SoDViolation",
-    "lint_compartment", "lint_roster", "assert_no_conflicts",
+    "lint_compartment", "lint_roster", "lint_finance_roster", "assert_no_conflicts",
 ]
