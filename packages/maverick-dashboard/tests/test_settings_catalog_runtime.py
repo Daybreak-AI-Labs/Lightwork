@@ -103,6 +103,11 @@ _WORDS = {
     "memory.qdrant_url": "https://qdrant.example.com",
     "memory.weaviate_url": "https://weaviate.example.com",
     "observability.otel_endpoint": "https://otel.example.com/v1/traces",
+    "memory.weaviate_grpc_host": "grpc.example.com",
+    "models.embed": "BAAI/bge-base-en-v1.5",
+    "models.clap": "laion/larger_clap_general",
+    "model_proxy.upstream": "https://api.anthropic.com",
+    "model_proxy.listen": "127.0.0.1:9876",
 }
 _LISTS = {
     "models.catalog": ["vllm:my-model"],
@@ -114,7 +119,11 @@ _LISTS = {
     "attachments.extra_mime_prefixes": ["application/vnd.visio"],
     "containment.deny_tools": ["github_issues"],
     "search.ladder": ["anthropic:claude-opus-4-8:0.3"],
+    "mcp.allowed_origins": ["https://gateway.example.com"],
+    "mcp.elicit_allowed_hosts": ["accounts.google.com"],
 }
+# Rows whose only other value is refused on purpose (with a plain reason).
+_REFUSED = {"ekko.provider_egress"}
 
 
 def _sample(setting) -> tuple[object, object]:  # noqa: C901 - one branch per control
@@ -160,6 +169,21 @@ def _sample(setting) -> tuple[object, object]:  # noqa: C901 - one branch per co
     if sid == "safety.constitution":
         return ([{"phrases": "launch codes, secret plan", "severity": "critical"}],
                 [{"phrases": ["launch codes", "secret plan"], "severity": "critical"}])
+    if sid == "tui.keys":
+        return [{"name": "quit", "key": "x"}], {"quit": "x"}
+    if sid == "director.profiles":
+        return ([{"name": "supervised", "consent_mode": "dashboard", "budget_multiplier": 0.5,
+                  "dollars": 5, "tool_calls": 50}],
+                {"supervised": {"consent_mode": "dashboard", "budget_multiplier": 0.5,
+                                "dollars": 5.0, "tool_calls": 50}})
+    if sid == "env_hunt.enrichment_sources":
+        return [{"name": "intel_feed", "enable": True}], {"intel_feed": {"enable": True}}
+    if setting.control == "path":
+        from pathlib import Path
+
+        folder = Path.home() / "places" / sid.replace(".", "-")
+        folder.mkdir(parents=True, exist_ok=True)
+        return str(folder), str(folder)
     raise AssertionError(f"no sample for {sid}")
 
 
@@ -181,9 +205,11 @@ def _bad(setting) -> object:
     if control == "multiselect":
         return ["nope"]
     if control == "table":
-        return [{"name": "no-such-choice"}]
+        return [{"name": "Not A Name!"}] if setting.row_kind == "named" else [{"name": "no-such-choice"}]
     if control == "rules":
         return [{"phrases": "", "severity": "high"}]
+    if control == "path":
+        return "relative/folder"
     raise AssertionError(setting.id)
 
 
@@ -200,7 +226,8 @@ def test_every_runtime_row_is_in_the_catalog():
     assert all(s.group in catalog.GROUPS for s in ROWS)
 
 
-@pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
+@pytest.mark.parametrize("setting", [s for s in ROWS if s.id not in _REFUSED],
+                         ids=lambda s: s.id)
 def test_row_saves_reads_back_and_resets(setting, audit_rows):
     sent, stored = _sample(setting)
     r = _save([{"id": setting.id, "value": sent}])
@@ -239,7 +266,7 @@ def test_row_refuses_wrong_values(setting, audit_rows):
     assert not present
 
 
-_LOOSENING = [s for s in ROWS if s.warning]
+_LOOSENING = [s for s in ROWS if s.warning and s.id not in _REFUSED]
 
 
 @pytest.mark.parametrize("setting", _LOOSENING, ids=lambda s: s.id)
