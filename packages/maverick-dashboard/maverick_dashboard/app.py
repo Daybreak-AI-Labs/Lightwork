@@ -760,6 +760,12 @@ async def _lifespan(app: FastAPI):
             await run_in_threadpool(start_identity_governance_scheduler)
         except Exception:  # pragma: no cover - never block startup
             log.exception("identity-governance scheduler not started")
+        try:
+            from maverick_dashboard.data_use_scheduler import start_data_use_scheduler
+
+            await run_in_threadpool(start_data_use_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("data-use checks not started")
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
         # Connected-entitlement auto-refresh: a deployment with [license] api_url
@@ -1388,6 +1394,10 @@ from .finance_ops_api import router as finance_ops_router  # noqa: E402
 
 app.include_router(finance_ops_router)
 app.include_router(privacy_notice_targets_router)
+# Settings > Maintenance: copying consent records into the shared consent database.
+from .consent_storage_api import router as consent_storage_router  # noqa: E402
+
+app.include_router(consent_storage_router)
 # Ekko Work Discovery: a human review/control surface only.  Endpoint
 # collectors do not enter through HTTP; they write through the local core
 # daemon's owner/device/tenant-scoped store.

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import consent_storage
 from .paths import canonical_tenant_id
 
 ANALYTICS_SCHEMA = "lightwork.consent-analytics.v1"
@@ -232,6 +233,17 @@ class ConsentAnalytics:
         self.path = Path(consent_database)
 
     def _connect(self) -> sqlite3.Connection:
+        if consent_storage.shared():
+            if not consent_storage.store_exists(self.path):
+                raise ConsentAnalyticsUnavailable("consent receipt authority is unavailable")
+            try:
+                conn = consent_storage.connect(self.path, timeout=5, read_only=True)
+            except (consent_storage.ConsentStorageError, sqlite3.Error) as exc:
+                raise ConsentAnalyticsUnavailable(
+                    "consent receipt authority is unavailable"
+                ) from exc
+            conn.row_factory = sqlite3.Row
+            return conn
         if not self.path.is_file():
             raise ConsentAnalyticsUnavailable("consent receipt authority is unavailable")
         try:

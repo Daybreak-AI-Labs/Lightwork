@@ -144,6 +144,8 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- rows only
         *_other_rows(S),
         *_consent_limit_rows(S),
         *_data_use_limit_rows(S),
+        *_consent_storage_rows(S),
+        *_data_use_check_rows(S),
     )
 
 
@@ -1009,6 +1011,7 @@ def cross_checks(effective: dict, by_id: dict, error: type) -> None:
     _check_rights(effective, by_id, error)
     _check_ordered(effective, by_id, error)
     _check_profiles(effective, by_id, error)
+    _check_storage(effective, by_id, error)
 
 
 def _label(by_id: dict, setting_id: str) -> str:
@@ -1340,3 +1343,90 @@ def _data_use_limit_rows(S) -> tuple:
           "maverick_dashboard.data_use_provider_runtime", subgroup=enforcement, minimum=0.25,
           maximum=60, step=0.05, unit="seconds"),
     )
+
+
+def _consent_storage_rows(S) -> tuple:
+    store = _sub("Consent preferences", "where records are kept")
+    reader = "maverick.consent_storage"
+    return (
+        S(f"{_CP}.storage", "backend", "Where consent records are kept",
+          "Consent choices, receipts and the other consent records live in files on this "
+          "server, or in a shared PostgreSQL database that several servers can use. Switching "
+          "doesn't move records already kept: after Lightwork restarts, copy them in Settings, "
+          "Maintenance.", "select", _P, "sqlite", reader, subgroup=store,
+          choices=(("sqlite", "In files on this server"),
+                   ("postgres", "In a shared PostgreSQL database")),
+          restart=True, env=("MAVERICK_CONSENT_STORAGE_BACKEND",), weaker="change",
+          warning="Consent records kept in the other place won't be shown until they are "
+                  "copied in Settings, Maintenance.",
+          aliases="consent database postgres storage backend"),
+        S(f"{_CP}.storage", "dsn", "Shared consent database connection",
+          "How to reach the PostgreSQL database for consent records, including its password "
+          "if it needs one. It is stored sealed and never shown again. A connection set on "
+          "the server is used instead.", "secret", _P, "", reader, subgroup=store,
+          max_length=4000, pattern=r"postgres(?:ql)?://\S+|\w+=\S+(?:\s+\w+=\S+)*",
+          restart=True, test="server", env=("MAVERICK_CONSENT_PG_DSN",),
+          weaker="change",
+          warning="Consent records will be read from a different database, and records in "
+                  "the old one won't be shown.",
+          aliases="consent dsn connection string postgres"),
+        S(f"{_CP}.storage", "dsn_secret_ref", "Server setting holding the connection",
+          "The name of the server setting that holds the consent database connection; the "
+          "name must include the word CONSENT. When that setting is present on the server it "
+          "is used instead of the connection saved here. Leave empty to use Lightwork's "
+          "standard name. It is stored sealed and never shown again.", "secret", _P, "",
+          reader, subgroup=store, pattern=r"\$?" + _env_name("CONSENT", 63), max_length=65,
+          restart=True, weaker="change",
+          warning="Lightwork will look for the consent database connection somewhere else.",
+          aliases="consent dsn environment variable secret reference"),
+    )
+
+
+def _check_storage(effective, by_id, error) -> None:
+    """The shared consent database needs a connection and its driver."""
+    import os
+
+    from maverick import consent_storage
+
+    backend = f"{_CP}.storage.backend"
+    if os.environ.get(consent_storage.BACKEND_ENV, "").strip():
+        return  # chosen on the server, which wins over this page
+    if effective.get(backend) != "postgres":
+        return
+    ref = str(effective.get(f"{_CP}.storage.dsn_secret_ref") or "").strip().lstrip("$")
+    name = ref or consent_storage.DEFAULT_DSN_ENV
+    if not os.environ.get(name, "").strip() and not effective.get(f"{_CP}.storage.dsn"):
+        raise error(f"{_label(by_id, backend)}: fill in "
+                    f"“{_label(by_id, f'{_CP}.storage.dsn')}” first.")
+    if not consent_storage.driver_available():
+        raise error(f"{_label(by_id, backend)}: the database driver isn't installed with this "
+                    "copy of Lightwork.")
+
+
+def _data_use_check_rows(S) -> tuple:
+    checks = _sub("Data use governance", "background checks")
+    reader = "maverick.data_use_checks"
+    return (
+        S(f"{_DU}.scheduler", "enable", "Run data-use checks in the background",
+          "On a schedule, re-check every workspace with data use governance on: that the "
+          "record of changes is intact, which allowing decisions no longer match current "
+          "facts, and which policy exceptions have ended. Nothing is changed and nothing is "
+          "sent to a data platform. Takes effect after a restart.", "toggle", _P, False,
+          reader, subgroup=checks, restart=True, weaker=False,
+          warning="Data use problems will only be found when someone checks by hand.",
+          aliases="data use scheduler background checks"),
+        S(f"{_DU}.scheduler", "poll_seconds", "How often the checks run",
+          "Time between two runs of the background checks.", "number", _P, 3600, reader,
+          subgroup=checks, minimum=5, maximum=3600, integer=True, unit="seconds",
+          weaker="higher", warning="Problems will be found later."),
+        S(f"{_DU}.scheduler", "lease_seconds", "Longest one server holds a run",
+          "When several servers share this installation, one runs the checks at a time. If "
+          "it stops before finishing, another takes over after this long.", "number", _P,
+          900, reader, subgroup=checks, minimum=30, maximum=86400, integer=True,
+          unit="seconds"),
+        S(f"{_DU}.scheduler", "history_limit", "Past check results kept",
+          "How many past runs of the background checks are kept to look back on.", "number",
+          _P, 50, reader, subgroup=checks, minimum=1, maximum=1000, integer=True,
+          unit="runs", weaker="lower", warning="Fewer past check results will be kept."),
+    )
+

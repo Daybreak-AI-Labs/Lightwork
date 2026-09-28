@@ -211,3 +211,22 @@ def test_snowflake_native_audit_emits_latency_watermark_and_safe_window(monkeypa
     parsed = tomllib.loads("\n".join(wizard._cfg_assessments(selected)))
     assert parsed["data_use_governance"]["provider_audit"] == audit_config
     assert lint_config(parsed) == []
+
+
+def test_pick_assessments_can_turn_on_background_data_use_checks(monkeypatch):
+    def confirm(prompt, *, default=False, **_kwargs):
+        if prompt.startswith(("Enable the Data Use Governance", "Run the data-use checks")):
+            return True
+        if prompt.startswith("Enable consumer Consent & Preferences"):
+            return False
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: "")
+    selected = wizard.pick_assessments()
+    assert selected["data_use_governance"]["scheduler"] == {
+        "enable": True, "poll_seconds": 3_600, "lease_seconds": 900, "history_limit": 50}
+    rendered = "\n".join(wizard._cfg_assessments(selected))
+    parsed = tomllib.loads(rendered)
+    assert parsed["data_use_governance"]["scheduler"]["enable"] is True
+    assert not [f for f in lint_config(parsed) if "data_use_governance" in str(f)]

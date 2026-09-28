@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from maverick import consent_storage
 from maverick.consent_native_sdk import (
     NativeApplicationAuthority,
     NativeConsentCapacityError,
@@ -319,16 +320,19 @@ class NativeApplicationDirectory:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")
@@ -1523,9 +1527,7 @@ def _resolve_admin_client(
     if not isinstance(path, Path):
         raise NativeConsentCompositionError("public client registry path is unavailable")
     try:
-        ensure_private_file(path, 0o600)
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+        with consent_storage.reading(path) as connection:
             rows = connection.execute(
                 "SELECT credential_sha256 FROM public_consent_clients "
                 "WHERE tenant_id=? AND credential_id=? AND status='active' LIMIT 2",
@@ -1709,9 +1711,7 @@ def _device_authority(
     expected = _integer(expected_revision, "expected_revision", 1, 2**31 - 1)
     path = registry.path
     try:
-        ensure_private_file(path, 0o600)
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+        with consent_storage.reading(path) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM native_consent_devices WHERE device_id=? "
@@ -1789,9 +1789,7 @@ def list_native_devices(
     bound = _integer(limit, "native device list limit", 1, _MAX_LISTED_DEVICES)
     path = registry.path
     try:
-        ensure_private_file(path, 0o600)
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+        with consent_storage.reading(path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT device_id,platform,sdk_version,revision,status,created_at,"

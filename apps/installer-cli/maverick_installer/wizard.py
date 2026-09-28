@@ -2367,6 +2367,15 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         "live device, service, customer-estate, and legal acceptance remain separate.",
         default=False,
     )
+    if consent_product is not None and _q_confirm(
+        "Keep consent records in a shared PostgreSQL database instead of files on "
+        "this server? The connection is read from MAVERICK_CONSENT_PG_DSN on the server.",
+        default=False,
+    ):
+        consent_product["storage"] = {
+            "backend": "postgres",
+            "dsn_secret_ref": "$MAVERICK_CONSENT_PG_DSN",
+        }
     if consent_global_opt_out and consent_product is not None:
         consent_product["global_opt_out"] = {
             "enable": True,
@@ -2485,6 +2494,11 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     data_use_governance = _q_confirm(
         "Enable the Data Use Governance authority and policy compiler? "
         "Provider writes remain disabled until a native provider is enrolled.",
+        default=False,
+    )
+    data_use_checks = data_use_governance and _q_confirm(
+        "Run the data-use checks in the background (the change record, decisions that "
+        "no longer match current facts, ended exceptions)? Nothing is changed or sent.",
         default=False,
     )
     data_use_native: dict[str, Any] | None = None
@@ -2708,6 +2722,13 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "enable": True,
             "compiler": {"enable": True},
         }
+        if data_use_checks:
+            data_use_product["scheduler"] = {
+                "enable": True,
+                "poll_seconds": 3_600,
+                "lease_seconds": 900,
+                "history_limit": 50,
+            }
         if data_use_native is not None:
             data_use_product["enforcement"] = {
                 "enable": True,

@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from . import consent_storage
 from .file_lock import (
     cross_process_lock,
     ensure_private_directory,
@@ -555,24 +556,27 @@ class ConsentPublishingStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(
-                    self.path,
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                    0o600,
-                )
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(
-            str(self.path),
-            isolation_level=None,
-            timeout=10.0,
-        )
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(
+                        self.path,
+                        os.O_CREAT | os.O_EXCL | os.O_RDWR,
+                        0o600,
+                    )
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(
+                str(self.path),
+                isolation_level=None,
+                timeout=10.0,
+            )
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")

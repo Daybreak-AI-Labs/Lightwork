@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -542,7 +543,10 @@ class ConsentProfileDataStore:
         return _id(actor, "authenticated principal")
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30.0)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -623,7 +627,8 @@ class ConsentProfileDataStore:
                 raise ConsentProfileDataIntegrityError(
                     "consent profile-data database schema is unsupported"
                 )
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     @staticmethod
     def _begin(connection: sqlite3.Connection) -> None:

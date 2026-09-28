@@ -37,6 +37,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Protocol
 
+from . import consent_storage
 from .consent_delivery import (
     DELIVERY_PATH,
     ConsentDeliveryRevoked,
@@ -999,7 +1000,10 @@ class ConsentDestinationOperationStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -1044,7 +1048,8 @@ class ConsentDestinationOperationStore:
                     "ALTER TABLE consent_destination_operations "
                     "ADD COLUMN provider_record_ref TEXT"
                 )
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     def _now(self) -> float:
         try:
