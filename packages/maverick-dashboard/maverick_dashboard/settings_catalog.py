@@ -68,18 +68,12 @@ an AI service, a department) with the ``columns`` described by
 incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
-<<<<<<< HEAD
-out, so the page never offers a control that changes nothing: ``[energy]``
-(see ``settings_catalog_runtime``). Voice unlock is offered, but its switch is
-refused until the voice-unlock add-on and a speaker model are present.
-=======
-out, so the page never offers a control that changes nothing: ``[voice]
-biometric_unlock`` (voice unlock needs a speaker-recognition model this
-product does not ship; see ``settings_catalog_runtime``). ``[energy]``,
+out, so the page never offers a control that changes nothing. ``[energy]``,
 ``[memory] learning_cache``, ``[tools] speculative``, ``[director] profiles``,
 ``[logging] crash_only_fsync`` and ``[tui] keys`` are used by the running
-product and are in ``settings_catalog_runtime``.
->>>>>>> pr2519-fixes
+product and are in ``settings_catalog_runtime``. Voice unlock is offered, but
+its switch is refused until the voice-unlock add-on and a speaker model are
+present.
 """
 from __future__ import annotations
 

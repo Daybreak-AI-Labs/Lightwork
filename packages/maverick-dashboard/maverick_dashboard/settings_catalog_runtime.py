@@ -36,7 +36,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column kept for the share
             + _wired(S, C) + _background(S) + _startup_limits(S) + _tool_server(S))
 
 
-def cross_checks(effective: dict, by_id: dict, error: type) -> None:  # noqa: ARG001
+def cross_checks(effective: dict, by_id: dict, error: type) -> None:
     """Refuse values the kernel would reject or cannot honour yet."""
     if effective.get("ekko.provider_egress") is True:
         raise error("Send Ekko's findings to an AI service: this can't be turned on yet. Ekko "
@@ -48,6 +48,20 @@ def cross_checks(effective: dict, by_id: dict, error: type) -> None:  # noqa: AR
 
         if keymap.validate({**keymap.DEFAULTS, **{k: str(v).lower() for k, v in keys.items()}}):
             raise error("Keys in the terminal view: two actions can't share one key.")
+    _voice_unlock_check(effective, by_id, error)
+
+
+def _voice_unlock_check(effective: dict, by_id: dict, error: type) -> None:
+    """Voice unlock can't be turned on until it can actually check voices."""
+    if effective.get("voice.biometric_unlock") is not True:
+        return
+    from maverick import voice_unlock
+
+    if voice_unlock.enabled():
+        return  # already on: other saves are not held up by it
+    reason = voice_unlock.readiness(str(effective.get("voice.speaker_model_path") or ""))
+    if reason:
+        raise error(f"{by_id['voice.biometric_unlock'].label}: {reason}")
 
 
 def _models(S, C) -> tuple:
@@ -1238,19 +1252,6 @@ def _switches(S) -> tuple:
     )
 
 
-<<<<<<< HEAD
-def cross_checks(effective: dict, by_id: dict, error: type) -> None:
-    """Voice unlock can't be turned on until it can actually check voices."""
-    if effective.get("voice.biometric_unlock") is not True:
-        return
-    from maverick import voice_unlock
-
-    if voice_unlock.enabled():
-        return  # already on: other saves are not held up by it
-    reason = voice_unlock.readiness(str(effective.get("voice.speaker_model_path") or ""))
-    if reason:
-        raise error(f"{by_id['voice.biometric_unlock'].label}: {reason}")
-=======
 _KEY = r"[!-~]|[Ff]([1-9]|1[0-2])|up|down|left|right|tab|enter|esc"
 _MODEL_NAME = r"([A-Za-z0-9][A-Za-z0-9_.-]{0,95}/)?[A-Za-z0-9][A-Za-z0-9_.-]{0,95}"
 _ORIGIN = r"https?://[A-Za-z0-9.\[\]:-]{1,253}(:[0-9]{1,5})?"
@@ -1707,4 +1708,3 @@ def _tool_server(S) -> tuple:
           "maverick_mcp.settings", minimum=1, maximum=64, integer=True, unit="tasks",
           restart=True, env=("MAVERICK_MCP_TASK_WORKERS",), **common),
     )
->>>>>>> pr2519-fixes
