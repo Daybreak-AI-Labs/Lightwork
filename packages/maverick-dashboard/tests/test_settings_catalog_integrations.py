@@ -654,3 +654,33 @@ def test_saved_pushover_keys_send_alerts_and_the_environment_wins(monkeypatch, a
     monkeypatch.setenv("PUSHOVER_USER_KEY", "server-user-key")
     assert notifications._send_pushover("Title", "Body", "high") is True
     assert sent[-1]["user"] == "server-user-key" and sent[-1]["token"] == _PUSHOVER_APP
+
+
+# ------------------------------------------------------- Mattermost channel
+def test_mattermost_is_set_up_on_the_channels_page_with_a_sealed_token(monkeypatch, audit_rows):
+    from maverick import config
+
+    token = "sample-mattermost-bot-token"  # pragma: allowlist secret
+    page = client.get("/channels")
+    assert page.status_code == 200 and "Mattermost" in page.text
+    refused = client.post("/channels/save", follow_redirects=False, data={
+        "channel": "mattermost", "enabled": "on", "url": "http://chat.example.com",
+        "bot_token": token})
+    assert refused.status_code == 400
+    saved = client.post("/channels/save", follow_redirects=False, data={
+        "channel": "mattermost", "enabled": "on", "url": "https://chat.example.com/",
+        "bot_token": token})
+    assert saved.status_code == 303
+    stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert token not in stored and "MVKAR1:" in stored
+    table = _loaded()["channels"]["mattermost"]
+    assert table == {"enabled": True, "url": "https://chat.example.com", "bot_token": token}
+    assert token not in client.get("/channels").text
+    _set("channels.mattermost.allowed_user_ids", ["alice"])
+    assert _loaded()["channels"]["mattermost"]["allowed_user_ids"] == ["alice"]
+    monkeypatch.setenv("MATTERMOST_BOT_TOKEN", "server-token")
+    from maverick_dashboard import settings_store
+
+    (row,) = [c for c in settings_store.channels_state() if c["name"] == "mattermost"]
+    token_field = next(f for f in row["fields"] if f["key"] == "bot_token")
+    assert token_field["hint"] == "on the server" and token_field["value"] == ""

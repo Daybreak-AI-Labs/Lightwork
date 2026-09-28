@@ -33,7 +33,7 @@ Deliberately NOT in the catalog:
   the voice program and model file, picked by name from the checked lists
   of Lightwork's own programs and speech model folders.
 * Settings that already have a dedicated control elsewhere: provider keys,
-  models, the per-task spending cap, capabilities, features, the six chat
+  models, the per-task spending cap, capabilities, features, the chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections (the account-connection and desktop-return switches are on
   the Connections page, vendor onboarding's connections and owner on its
@@ -945,6 +945,8 @@ CHANNEL_ALLOWLISTS: dict[str, tuple[str, bool, str, str, str, str, str]] = {
             r"[^\s,]{1,64}", "a signed-in IRC account name"),
     "voice": ("Phone calls", False, "allowed_callers", "Number", "+14155551234",
               _PHONE, "a phone number starting with + and the country code"),
+    "mattermost": ("Mattermost", True, "allowed_user_ids", "Person", "alice",
+                   r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "a Mattermost username or user id"),
 }
 
 
@@ -1125,6 +1127,11 @@ _CHANNEL_FIELDS: tuple[Setting, ...] = (
       "The port on this server that receives call events.", "number", "Chat channels", 8770,
       "maverick.server", subgroup="Phone calls", restart=True, minimum=1024, maximum=65535,
       integer=True, unit="port"),
+    # Mattermost (on the Channels page; how often to check is not)
+    S("channels.mattermost", "poll_interval", "Check Mattermost every",
+      "How often Lightwork looks for new Mattermost messages.", "number", "Chat channels", 10,
+      "maverick.server", subgroup="Mattermost", restart=True, minimum=2, maximum=3600,
+      integer=True, unit="seconds"),
     # Email (on the Channels page; how often to check is not)
     S("channels.email", "poll_interval", "Check email every",
       "How often Lightwork looks for new email.", "number", "Chat channels", 30,

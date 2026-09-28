@@ -300,6 +300,11 @@ CHANNELS: list[dict] = [
         {"key": "smtp_password", "label": "SMTP password", "secret": True},
         {"key": "smtp_port", "label": "SMTP port", "secret": False, "type": "int"},
     ]},
+    {"name": "mattermost", "label": "Mattermost", "fields": [
+        {"key": "url", "label": "Server address", "secret": False, "type": "url"},
+        {"key": "bot_token", "label": "Bot access token", "secret": True,
+         "env": "MATTERMOST_BOT_TOKEN"},
+    ]},
 ]
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
 
@@ -1931,9 +1936,26 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
                     ccfg[key] = int(val)
                 except (TypeError, ValueError) as exc:
                     raise ValueError(f"{field['label']} must be a number") from exc
+            elif field.get("type") == "url":
+                ccfg[key] = _channel_server_address(field["label"], val)
             else:
                 ccfg[key] = str(val)
         _write(data)
+
+
+def _channel_server_address(label: str, value: object) -> str:
+    """A chat server's web address: https, or plain http only on this computer
+    (the channel's access token is sent to it with every request)."""
+    from urllib.parse import urlsplit
+
+    text = str(value).strip().rstrip("/")
+    parts = urlsplit(text)
+    local = parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}
+    if (len(text) > 300 or not parts.netloc or parts.query or parts.fragment or parts.username
+            or parts.password or not (parts.scheme == "https" or local)
+            or any(ch.isspace() for ch in text)):
+        raise ValueError(f"{label} must be a secure web address starting with https://")
+    return text
 
 
 def clear_channel(name: str) -> None:
@@ -2027,12 +2049,15 @@ def channels_state() -> list[dict]:
             raw_v = raw.get(f["key"])
             v = ov_v if ov_v not in (None, "") else raw_v
             configured = v not in (None, "")
+            # A value set on the server (environment) wins over this page.
+            from_server = bool(f.get("env") and os.environ.get(f["env"], "").strip())
             fields.append({
                 "key": f["key"], "label": f["label"],
                 "secret": bool(f.get("secret")), "type": f.get("type", "text"),
                 "value": "" if f.get("secret") else (str(v) if configured else ""),
-                "hint": _mask(v) if (configured and f.get("secret")) else "",
-                "configured": configured,
+                "hint": ("on the server" if from_server else
+                         _mask(v) if (configured and f.get("secret")) else ""),
+                "configured": configured or from_server,
             })
         out.append({
             "name": name, "label": spec["label"],

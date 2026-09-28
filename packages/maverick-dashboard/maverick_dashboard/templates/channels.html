@@ -13,6 +13,9 @@
         {% elif f.type == 'int' %}
         <input class="input" type="number" name="{{ f.key }}" value="{{ f.value }}" min="1" max="65535"
                aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
+        {% elif f.type == 'url' %}
+        <input class="input" type="url" name="{{ f.key }}" value="{{ f.value }}" placeholder="https://"
+               aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
         {% else %}
         <input class="input" type="text" name="{{ f.key }}" value="{{ f.value }}"
                aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />

@@ -750,6 +750,19 @@ def _wire_voice(server, cfg):
     ))
 
 
+def _wire_mattermost(server, cfg):
+    from maverick_channels.mattermost import MattermostChannel
+    allowed_user_ids = cfg.get("allowed_user_ids")
+    server.add_channel(MattermostChannel(
+        handler=server._handle_message,
+        url=cfg.get("url") or "",
+        # The environment wins over the token saved on the Channels page.
+        bot_token=os.environ.get("MATTERMOST_BOT_TOKEN") or cfg.get("bot_token"),
+        allowed_user_ids={str(v) for v in allowed_user_ids} if allowed_user_ids is not None else None,
+        poll_interval=cfg.get("poll_interval", 10),
+    ))
+
+
 _WIRES = {
     "telegram": _wire_telegram,
     "discord":  _wire_discord,
@@ -767,7 +780,62 @@ _WIRES = {
     "imessage": _wire_imessage,
     "voice":    _wire_voice,
     "irc":      _wire_irc,
+    "mattermost": _wire_mattermost,
 }
+
+# Tables under [channels] that configure every channel rather than naming one.
+_SHARED_CHANNEL_TABLES = frozenset({"routing"})
+
+
+def _build_plugin_channel(cls, name: str, handler, options: dict):
+    """Instantiate one plugin channel class for ``[channels.<name>]``.
+
+    A plugin may provide ``from_config(handler, options)``; otherwise it is
+    constructed with the handler alone and receives its table as ``config``.
+    """
+    factory = getattr(cls, "from_config", None)
+    if callable(factory):
+        channel = factory(handler, dict(options))
+    else:
+        channel = cls(handler)
+        channel.config = dict(options)
+    for method in ("start", "send", "stop"):
+        if not callable(getattr(channel, method, None)):
+            raise TypeError(f"plugin channel has no {method}()")
+    if not getattr(channel, "name", None):
+        channel.name = name
+    return channel
+
+
+def _wire_plugin_channels(server, channels_cfg: dict) -> None:
+    """Start enabled ``[channels.<name>]`` tables that name an installed
+    channel plugin (``maverick.channels`` entry point), exactly like the
+    built-in channels: same handler (Shield, workspace policy, disclosure,
+    intake), same start/stop lifecycle. A plugin that cannot be found or
+    fails to load is skipped with a warning; the other channels still run."""
+    wanted = {name: table for name, table in channels_cfg.items()
+              if isinstance(table, dict) and table.get("enabled") is True
+              and name not in _WIRES and name not in _SHARED_CHANNEL_TABLES}
+    if not wanted:
+        return
+    try:
+        from .plugins import discover_channels
+        found = dict(discover_channels())
+    except Exception as e:
+        log.warning("channel plugins could not be discovered (%s); not starting %s",
+                    e, ", ".join(sorted(wanted)))
+        return
+    for name, table in sorted(wanted.items()):
+        cls = found.get(name)
+        if cls is None:
+            log.warning("channel %s is turned on but no installed channel plugin provides it", name)
+            continue
+        options = {k: v for k, v in table.items() if k != "enabled"}
+        try:
+            server.add_channel(_build_plugin_channel(cls, name, server._handle_message, options))
+            log.info("enabled plugin channel %s", name)
+        except Exception as e:
+            log.warning("plugin channel %s failed to load; continuing without it: %s", name, e)
 
 
 def _advise_channel_tenancy(server) -> None:
@@ -849,7 +917,7 @@ def build_from_config() -> Server:
         channels_cfg = cfg.get("channels", {})
         for name, wire in _WIRES.items():
             ch_cfg = channels_cfg.get(name, {})
-            if not ch_cfg.get("enabled"):
+            if not isinstance(ch_cfg, dict) or not ch_cfg.get("enabled"):
                 continue
             try:
                 wire(server, ch_cfg)
@@ -858,6 +926,7 @@ def build_from_config() -> Server:
                 log.error("channel %s enabled but optional deps missing: %s", name, e)
             except Exception as e:
                 log.error("channel %s failed to initialize: %s", name, e)
+        _wire_plugin_channels(server, channels_cfg if isinstance(channels_cfg, dict) else {})
 
         if not server._channels:
             raise RuntimeError(
