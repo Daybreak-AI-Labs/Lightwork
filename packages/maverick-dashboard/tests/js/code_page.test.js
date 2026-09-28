@@ -36,6 +36,7 @@ async function fixture({ confirm = true, reply } = {}) {
   const confirms = [];
   window.mvConfirm = async (message) => { confirms.push(message); return confirm; };
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
+  window.mvPlainDetail = (detail) => (typeof detail === "string" && /^[A-Z][^_]*[.!?]$/.test(detail) ? detail : "");
   window.mvHuman = (v) => String(v).replace(/_/g, " ");
   window.mvWhen = () => "1 Jan";
   window.mvToast = () => {};
@@ -97,6 +98,15 @@ test("a refused merge shows the plain reason from the page's own action", async 
   const merge = [...ui.doc.querySelectorAll("#ic-prop-rows button")].find((b) => b.textContent === "Merge");
   merge.click(); await ui.settle();
   assert.match(ui.doc.getElementById("ic-error").textContent, /waiting for a person to approve/);
+});
+
+test("a refusal with internal wording falls back to a plain sentence", async (t) => {
+  const ui = await fixture({ reply: (url) => url.endsWith("/merge") ? json({ detail: "proposal_state_conflict: expected pending" }, 409) : null });
+  t.after(() => ui.window.close());
+  const merge = [...ui.doc.querySelectorAll("#ic-prop-rows button")].find((b) => b.textContent === "Merge");
+  merge.click(); await ui.settle();
+  assert.match(ui.doc.getElementById("ic-error").textContent, /^Could not /);
+  assert.doesNotMatch(ui.doc.getElementById("ic-error").textContent, /proposal_state_conflict/);
 });
 
 test("review shows tests, files and the changed lines behind a disclosure", async (t) => {

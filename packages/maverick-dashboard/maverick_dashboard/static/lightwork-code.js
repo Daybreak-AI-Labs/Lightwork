@@ -42,9 +42,9 @@
   async function failure(response, action) {
     var body = null;
     try { body = await response.json(); } catch (e) { body = null; }
-    if (body && typeof body.detail === "string" && body.detail.length < 300 &&
-        [409, 422, 502, 503].indexOf(response.status) >= 0) {
-      return body.detail;
+    var plain = body && window.mvPlainDetail && window.mvPlainDetail(body.detail);
+    if (plain && [409, 422, 502, 503].indexOf(response.status) >= 0) {
+      return plain;
     }
     return window.mvErrorText(response, action);
   }

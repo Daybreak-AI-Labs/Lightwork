@@ -163,7 +163,11 @@ function harness(file, functionName, args) {
       querySelectorAll() { return []; },
       createElement() { return element("document:created"); },
     },
-    window: { confirm() { return true; } },
+    window: {
+      confirm() { return true; },
+      // Pages show a server message only when it is already a plain sentence.
+      mvPlainDetail(detail) { return typeof detail === "string" && /^[A-Z][^_{}<>]*[.!?]$/.test(detail) ? detail : ""; },
+    },
     confirm() { return true; },
     mvToast() {},
     // agents.html shares these page helpers from its first script block.

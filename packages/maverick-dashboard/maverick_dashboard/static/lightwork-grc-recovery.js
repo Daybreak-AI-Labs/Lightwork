@@ -50,7 +50,7 @@
   }
   function render(result) {
     comparison.replaceChildren();
-    const title = document.createElement("p"); title.textContent = result.detail; comparison.append(title);
+    const title = document.createElement("p"); title.textContent = (window.mvPlainDetail && window.mvPlainDetail(result.detail)) || "Here is how this record compares with the other system."; comparison.append(title);
     if (result.remote_id) {
       const identity = document.createElement("p"); identity.textContent = `Record in the other system: ${result.remote_id}`; comparison.append(identity);
     }

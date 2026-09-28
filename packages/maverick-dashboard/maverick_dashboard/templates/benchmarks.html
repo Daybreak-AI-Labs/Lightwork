@@ -132,8 +132,8 @@
       });
       if (!r.ok) {
         var body = await r.json().catch(function () { return {}; });
-        msg.textContent = (r.status === 422 && typeof body.detail === 'string')
-          ? body.detail : window.mvErrorText(r, 'add this score');
+        msg.textContent = (r.status === 422 && window.mvPlainDetail(body.detail))
+          || window.mvErrorText(r, 'add this score');
         btn.disabled = false; btn.removeAttribute('aria-busy');
         return;
       }

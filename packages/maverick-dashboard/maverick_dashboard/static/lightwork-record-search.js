@@ -1,6 +1,8 @@
 /* Current, authority-scoped metadata results for the existing keyboard finder. */
 (function (global) {
   "use strict";
+  function errText(failure,action){return global.mvErrorText?global.mvErrorText(failure,action):'Could not '+action+'. Please try again.';}
+  function plainError(text){var error=new Error(text);error.plain=true;return error;}
   function init() {
     var doc=global.document, meta=doc.querySelector('meta[name="lightwork-search-context"]');
     var dialog=doc.getElementById('navfinder-dialog'), kind=doc.getElementById('navfinder-kind');
@@ -27,16 +29,16 @@
       more.disabled=true; status.textContent='Searching accessible records…';
       try{
         var response=await global.fetch('/api/v1/records/search',{method:'POST',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json','X-Lightwork-Search-Context':context},body:JSON.stringify({query:query,kind:selectedKind,offset:offset,limit:20,snapshot:append?snapshot:''})});
+        if(!response.ok){if(current!==generation)return;throw plainError(errText(response,'search records'));}
         var value=await response.json();
         if(current!==generation)return;
-        if(!response.ok)throw new Error(typeof value.detail==='string'?value.detail:'Record search failed. Try again.');
-        if(value.context!==context)throw new Error('The account or workspace changed. Reload before searching records.');
-        if(!Array.isArray(value.items)||!value.items.every(validRow)||!Array.isArray(value.coverage)||!Number.isSafeInteger(value.total)||typeof value.snapshot!=='string'||!(/^[a-f0-9]{64}$/).test(value.snapshot)||!(value.next_offset===null||Number.isSafeInteger(value.next_offset)&&value.next_offset>offset))throw new Error('Search results could not be verified. Try again.');
+        if(value.context!==context)throw plainError('The account or workspace changed. Reload before searching records.');
+        if(!Array.isArray(value.items)||!value.items.every(validRow)||!Array.isArray(value.coverage)||!Number.isSafeInteger(value.total)||typeof value.snapshot!=='string'||!(/^[a-f0-9]{64}$/).test(value.snapshot)||!(value.next_offset===null||Number.isSafeInteger(value.next_offset)&&value.next_offset>offset))throw plainError('Search results could not be verified. Try again.');
         rows=append?rows.concat(value.items):value.items;next=value.next_offset;snapshot=value.snapshot;activeQuery=query;activeKind=selectedKind;
         finder.setRecords(rows);more.hidden=next===null;
         status.textContent=rows.length+' of '+value.total+' matching records in the searched sources. '+(value.complete?'All selected sources are current.':'Some sources are partial or unavailable. Check Search coverage.');
-        coverage.replaceChildren();value.coverage.forEach(function(source){var li=doc.createElement('li');li.textContent=String(source.source)+': '+String(source.state)+(Number.isSafeInteger(source.indexed)?' ('+source.indexed+' accessible records indexed)':'');coverage.appendChild(li);});
-      }catch(error){if(current===generation){rows=[];next=null;snapshot='';more.hidden=true;finder.setRecords([]);status.textContent=error.message||'Record search failed. Try again.';}}
+        coverage.replaceChildren();value.coverage.forEach(function(source){var li=doc.createElement('li');var human=global.mvHuman||String;li.textContent=human(source.source)+': '+human(source.state).toLowerCase()+(Number.isSafeInteger(source.indexed)?' ('+source.indexed+' accessible records indexed)':'');coverage.appendChild(li);});
+      }catch(error){if(current===generation){rows=[];next=null;snapshot='';more.hidden=true;finder.setRecords([]);status.textContent=error&&error.plain?error.message:errText(error,'search records');}}
       finally{if(current===generation)more.disabled=false;}
     }
     dialog.addEventListener('lightwork:finder-query',function(event){clear();if(event.detail.reason==='closed')return;status.textContent='Type a name or reference to search records.';timer=setTimeout(function(){search(false);},300);});

@@ -328,8 +328,8 @@
           body: body ? JSON.stringify(body) : undefined });
         var j = await r.json().catch(function () { return {}; });
         if (!r.ok) {
-          var text = ([404, 409, 422, 503].indexOf(r.status) >= 0 && typeof j.detail === 'string' && j.detail.length < 300)
-            ? j.detail : window.mvErrorText(r, action);
+          var text = ([404, 409, 422, 503].indexOf(r.status) >= 0 && window.mvPlainDetail(j.detail))
+            || window.mvErrorText(r, action);
           if (target) show(target, [text]); else window.mvToast(text, { error: true });
           return null;
         }

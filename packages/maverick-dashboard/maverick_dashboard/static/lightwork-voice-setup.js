@@ -7,6 +7,7 @@
   var locked = false, writing = false, reading = false, generation = 0, timer = null, readController = null;
   var activeStates = ['checking', 'downloading', 'cancelling'];
   function active() { return state && state.job && activeStates.includes(state.job.state); }
+  function plainError(message) { var error = new Error(message); error.plain = true; return error; }
   function text(name, value) { el(name).textContent = value; }
   function stopTimer() { window.clearTimeout(timer); timer = null; }
   function controls() {
@@ -60,9 +61,9 @@
       clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
       throw new Error('Setup changed');
     }
-    var data; try { data = await response.json(); } catch (_error) { throw new Error('Voice setup returned an unreadable response.'); }
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail.slice(0, 2000) : 'Voice setup could not confirm this request.');
-    if (!valid(data)) throw new Error('Voice setup information could not be verified.');
+    var data; try { data = await response.json(); } catch (_error) { throw plainError('Voice setup returned an unreadable response.'); }
+    if (!response.ok) throw plainError(window.mvErrorText ? window.mvErrorText(response, 'confirm this voice setup request') : 'Voice setup could not confirm this request.');
+    if (!valid(data)) throw plainError('Voice setup information could not be verified.');
     if (context && context !== data.context) {
       clearPrivate('The account, workspace or voice configuration changed. Please reload this page before continuing.');
       throw new Error('Context changed');
@@ -104,7 +105,7 @@
     if (locked || reading || writing) return;
     reading = true; var expected = generation, controller = new AbortController(); readController = controller; controls();
     try { var data = await request('', null, controller.signal); if (!locked && expected === generation) render(data); }
-    catch (error) { if (!locked && expected === generation) problem(error.message || 'Voice setup status is unavailable.'); }
+    catch (error) { if (!locked && expected === generation) problem(error && error.plain ? error.message : 'Voice setup status is unavailable. Lightwork may not be responding.'); }
     finally { if (readController === controller) { readController = null; reading = false; } controls(); }
   }
   async function mutate(path, body) {
@@ -113,7 +114,7 @@
     if (readController) { readController.abort(); readController = null; reading = false; }
     el('confirm').checked = false; controls();
     try { var data = await request(path, body); if (!locked) render(data); }
-    catch (error) { if (!locked) problem(error.message || 'Voice setup could not confirm the action.'); }
+    catch (error) { if (!locked) problem(error && error.plain ? error.message : 'Voice setup could not confirm the action. Lightwork may not be responding.'); }
     finally { writing = false; controls(); }
   }
   el('confirm').addEventListener('change', controls);
