@@ -23,6 +23,31 @@ def test_network_on_a_graph_file(tmp_path):
     assert rows[0]["kind"] == "exfiltration"
 
 
+def test_network_what_if_output_matches_the_deployment_dials_and_leaves_them_alone(monkeypatch):
+    """``--levels/--grounding`` print exactly what the roster shows when the
+    deployment itself is set that way, and write nothing to the environment."""
+    import os
+
+    from maverick import domain
+    from maverick.immune import network as n
+    aero = {k: v for k, v in domain.available_domains().items() if k.startswith("aero_")}
+    monkeypatch.setattr(domain, "available_domains", lambda: aero)
+    monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
+    monkeypatch.delenv("MAVERICK_WORKFORCE_DATA_GROUNDING", raising=False)
+    what_if_text = _run("network", "--levels", "--no-grounding", "--swarm").output
+    what_if_json = _run("network", "--levels", "--no-grounding", "--swarm", "--json").output
+    assert "MAVERICK_WORKFORCE_LEVELS" not in os.environ
+    assert "MAVERICK_WORKFORCE_DATA_GROUNDING" not in os.environ
+    # The same roster read with the deployment's own dials set that way.
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", "0")
+    assert _run("network", "--swarm").output == what_if_text
+    assert _run("network", "--swarm", "--json").output == what_if_json
+    assert json.loads(what_if_json) == json.loads(json.dumps(
+        [f.__dict__ for f in n.findings(n.roster_graph(swarm=True))], default=list))
+    assert "agents," in what_if_text and "findings" in what_if_text
+
+
 def test_title_check_seal_verify_roundtrip(tmp_path):
     d = {"problem": {"statement": "x", "signed_off_by": "h"}, "inputs": [], "priority": [],
          "gates": [{"id": "g", "human": "h", "decision": "framed", "elements": ["e"], "at": 1}],

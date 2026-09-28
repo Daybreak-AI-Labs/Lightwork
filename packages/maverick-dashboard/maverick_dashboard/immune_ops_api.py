@@ -7,14 +7,11 @@
   whoever reviews it can be measured fairly.
 * ``POST /api/v1/immune/network/check`` -- find chains of assistants where
   private data could reach the outside (``maverick immune network``), for
-  the installed assistants with or without shared team messaging, or for a
-  set of assistants described in a file (``audit``, like the page).
-
-What the terminal command can also do -- re-check the installed assistants
-under different autonomy or data-grounding settings -- is not offered here:
-the kernel applies those settings to the whole running program for the
-duration of the check, which would change how real assistants behave while
-it runs.
+  the installed assistants with or without shared team messaging and, as a
+  what-if, with autonomy levels or data connectors switched on or off
+  (``--levels`` / ``--grounding``), or for a set of assistants described in a
+  file (``audit``, like the page). The what-if settings are handed to the
+  check itself; nothing the running assistants read is changed.
 """
 from __future__ import annotations
 
@@ -48,6 +45,10 @@ class WrittenCanaryIn(BaseModel):
 class NetworkIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     shared_messaging: bool = False
+    #: What if autonomy levels / data connectors were on (True) or off
+    #: (False)? None keeps this installation's current setting.
+    levels: bool | None = None
+    grounding: bool | None = None
     #: A file describing assistants and how data flows between them.
     graph: str | None = Field(default=None, max_length=_MAX_GRAPH_BYTES)
 
@@ -122,7 +123,8 @@ def _graph_from_file(text: str):
 def _network(body: NetworkIn) -> dict[str, Any]:
     from maverick.immune import network as n
 
-    graph = _graph_from_file(body.graph) if body.graph else n.roster_graph(swarm=body.shared_messaging)
+    graph = (_graph_from_file(body.graph) if body.graph else
+             n.roster_graph(swarm=body.shared_messaging, levels=body.levels, grounding=body.grounding))
     found = n.findings(graph)
     kinds = Counter(f.kind for f in found)
     chains = [{

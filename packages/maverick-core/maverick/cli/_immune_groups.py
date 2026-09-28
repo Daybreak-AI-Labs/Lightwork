@@ -50,8 +50,7 @@ def network_cmd(graph_file, levels, grounding, swarm, as_json, limit) -> None:
     if graph_file:
         g = n.load_graph(_load(graph_file))
     else:
-        with n.settings(levels=levels, grounding=grounding):
-            g = n.roster_graph(swarm=swarm)
+        g = n.roster_graph(swarm=swarm, levels=levels, grounding=grounding)
     found = n.findings(g)
     if as_json:
         _emit([f.__dict__ for f in found])

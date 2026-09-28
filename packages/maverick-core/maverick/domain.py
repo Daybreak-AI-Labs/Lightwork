@@ -537,15 +537,20 @@ def enabled_domains(cfg: dict | None = None) -> dict[str, DomainProfile]:
 _GOVERNED_ACTION_BUNDLE = frozenset({"email", "notify", "calendar"})
 
 
-def data_grounding_enabled() -> bool:
+def data_grounding_enabled(override: bool | None = None) -> bool:
     """Whether packs are granted their suite's primary-source data connectors.
 
     ON by default (these are GET-only, LOW-risk public/government data readers,
     deferred so they cost no context until ``find_tools`` surfaces them, and
     inert without their env key). ``MAVERICK_WORKFORCE_DATA_GROUNDING`` overrides
-    the ``[workforce] data_grounding`` config either way. Never raises."""
+    the ``[workforce] data_grounding`` config either way. ``override`` (a what-if
+    analysis) takes the environment override's place for this one call, with
+    the same fail-closed rules, and changes nothing global. Never raises."""
     import os
-    env = os.environ.get("MAVERICK_WORKFORCE_DATA_GROUNDING", "").strip().lower()
+    if override is None:
+        env = os.environ.get("MAVERICK_WORKFORCE_DATA_GROUNDING", "").strip().lower()
+    else:
+        env = "1" if override else "0"
     if env in {"0", "false", "no", "off"}:
         return False
     try:
@@ -566,7 +571,8 @@ def data_grounding_enabled() -> bool:
         return False
 
 
-def domain_capability(profile: DomainProfile, parent_cap, principal: str):
+def domain_capability(profile: DomainProfile, parent_cap, principal: str, *,
+                      levels: bool | None = None, grounding: bool | None = None):
     """The Capability a domain agent runs under.
 
     With a parent grant present, attenuate it by the profile's scopes (never
@@ -578,13 +584,17 @@ def domain_capability(profile: DomainProfile, parent_cap, principal: str):
     levels``), a non-empty allowlist is expanded with the governed action bundle
     so the hire can execute its job's output -- gated by its autonomy rung. Off
     by default (kernel rule 1): no grant, the pack stays exactly read-only.
+
+    ``levels`` / ``grounding`` override those two dials for this one call (an
+    analysis of "what if levels were on"); ``None`` reads the deployment's
+    setting. Nothing global changes either way.
     """
     allow = set(profile.allow_tools)
     max_risk = profile.max_risk
     if allow:  # only a real allowlist is expanded (empty == inherit, untouched)
         try:
             from .agent_autonomy import levels_enabled
-            if levels_enabled():
+            if levels_enabled() if levels is None else levels_enabled(levels):
                 # The governed action bundle is high-risk, so packs with a
                 # low/medium ceiling need a high runtime ceiling for those
                 # actions to pass through to the autonomy gate. Keep that lift
@@ -608,7 +618,8 @@ def domain_capability(profile: DomainProfile, parent_cap, principal: str):
         # widened -- a host-restricted pack stays restricted (the connector
         # returns a graceful egress error) until an operator opts the host in.
         try:
-            if data_grounding_enabled():
+            if (data_grounding_enabled() if grounding is None
+                    else data_grounding_enabled(grounding)):
                 from .tools.enterprise_connectors import data_connectors_for_suite
                 allow = allow | set(data_connectors_for_suite(suite_for(profile.name)))
         except Exception:  # pragma: no cover -- never block capability build

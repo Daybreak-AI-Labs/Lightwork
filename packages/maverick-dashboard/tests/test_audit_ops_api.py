@@ -5,6 +5,7 @@ plain wording."""
 from __future__ import annotations
 
 import html as _html
+import json
 import re
 
 import pytest
@@ -127,7 +128,8 @@ def test_publish_is_recorded_first_then_listed_and_verified_with_a_kept_receipt(
     assert kept["sequence"] == 1 and len(kept["fingerprint"]) == 64
 
     checked = client.post(f"{BASE}/verify", json={"receipt": receipt.text}).json()
-    assert checked == {"intact": True, "none_yet": False, "pinned": True, "problems": [], "technical": []}
+    assert checked == {"intact": True, "none_yet": False, "pinned": True, "keys_pinned": False,
+                       "problems": [], "technical": []}
     # Publishing the same unchanged day again adds nothing.
     assert client.post(f"{BASE}/publish", json={"day": DAY}).json()["sequence"] == 1
 
@@ -246,3 +248,147 @@ def test_changes_from_another_site_are_refused(client):
                            json={"channel": "slack", "user": "U1", "confirm": True,
                                  "confirm_name": "U1"}).status_code == 403
     assert client.get(BASE).json()["total"] == 0
+
+
+# ---- where checkpoints live and which keys may sign them -----------------------
+
+SETTINGS = f"{BASE}/settings"
+
+
+def _other_key() -> str:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    public = Ed25519PrivateKey.generate().public_key()
+    return public.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
+
+
+def _cli_verify(folder, *keys) -> int:
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    args = ["audit", "checkpoint", "verify", "--checkpoint-dir", str(folder)]
+    for key in keys:
+        args += ["--pubkey", key]
+    return CliRunner().invoke(main, args).exit_code
+
+
+def test_checkpoint_settings_are_for_installation_administrators(client, monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import rbac
+
+    _as(monkeypatch, "auditor", "user:aud")
+    assert client.get(SETTINGS).status_code == 200
+    assert client.post(f"{SETTINGS}/folder", json={"folder": "", "confirm": True}).status_code == 403
+    assert client.post(f"{SETTINGS}/keys", json={"own_key": True}).status_code == 403
+    _as(monkeypatch, "viewer", "user:alice")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    token = set_tenant("acme")
+    try:  # a workspace administrator cannot change an installation-wide setting
+        assert client.post(f"{SETTINGS}/folder/check", json={"folder": "/tmp"}).status_code == 403
+        assert client.post(f"{SETTINGS}/keys/remove", json={"fingerprint": "AAAA", "confirm": True}).status_code == 403
+        assert client.get(SETTINGS).status_code == 403
+    finally:
+        reset_tenant(token)
+    assert TestClient(client.app).post(f"{SETTINGS}/folder", json={"folder": ""}).status_code == 403
+
+
+def test_a_chosen_folder_is_checked_on_the_server_and_confirmed(client, monkeypatch, tmp_path):
+    allowed = tmp_path / "allowed"
+    (allowed / "worm").mkdir(parents=True)
+    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", f"{allowed}:{tmp_path / 'mh'}")
+    _write_day()
+    check = client.post(f"{SETTINGS}/folder/check", json={"folder": str(allowed / "worm")})
+    assert check.status_code == 200 and check.json()["ok"] is True
+    outside = client.post(f"{SETTINGS}/folder/check", json={"folder": str(tmp_path)})
+    assert outside.status_code == 422 and "only uses locations" in outside.json()["detail"]
+    assert client.post(f"{SETTINGS}/folder/check", json={"folder": "worm"}).status_code == 422
+    assert client.post(f"{SETTINGS}/folder/check", json={"folder": str(allowed / "missing")}).status_code == 422
+    home = client.post(f"{SETTINGS}/folder/check", json={"folder": str(tmp_path / "mh")})
+    assert home.status_code == 422 and "outside Lightwork" in home.json()["detail"]
+    assert client.post(f"{SETTINGS}/folder/check", json={"folder": "x" * 2000}).status_code == 422
+
+    seen = _recorded(monkeypatch)
+    unconfirmed = client.post(f"{SETTINGS}/folder", json={"folder": str(allowed / "worm")})
+    assert unconfirmed.status_code == 409 and client.get(SETTINGS).json()["default_folder"] is True
+    saved = client.post(f"{SETTINGS}/folder", json={"folder": str(allowed / "worm"), "confirm": True})
+    assert saved.status_code == 200 and saved.json()["saved"] is True
+    row = [r for r in seen if r.get("action") == "audit_checkpoint_folder"][0]
+    assert row["folder"] == str(allowed / "worm") and row["previous"] == "default"
+
+    assert client.post(f"{BASE}/publish", json={"day": DAY}).status_code == 200
+    assert (allowed / "worm" / "audit-checkpoint-00000000000000000001.ndjson").exists()
+    assert client.get(BASE).json()["total"] == 1
+    assert client.post(f"{BASE}/verify", json={}).json()["intact"] is True
+    # The same folder, checked from the terminal, agrees.
+    assert _cli_verify(allowed / "worm") == 0
+    # Back to the default: its own (empty) history.
+    assert client.post(f"{SETTINGS}/folder", json={"folder": "", "confirm": True}).status_code == 200
+    assert client.get(BASE).json()["total"] == 0
+
+
+def test_pinned_keys_are_used_like_the_terminal_options(client, monkeypatch):
+    _write_day()
+    assert client.post(f"{BASE}/publish", json={"day": DAY}).status_code == 200
+    seen = _recorded(monkeypatch)
+    own = client.post(f"{SETTINGS}/keys", json={"own_key": True})   # the first pin narrows: no confirmation
+    assert own.status_code == 200 and own.json()["saved"] is True
+    view = client.get(SETTINGS).json()
+    assert view["own_key_pinned"] is True and view["keys"][0]["own"] is True
+    fingerprint = view["keys"][0]["fingerprint"]
+    assert re.fullmatch(r"[0-9A-F]{4}( [0-9A-F]{4}){3}", fingerprint)
+    assert client.post(f"{BASE}/verify", json={}).json()["keys_pinned"] is True
+    assert client.post(f"{BASE}/publish", json={"day": DAY}).status_code == 200
+
+    other = _other_key()
+    widen = client.post(f"{SETTINGS}/keys", json={"key": other})
+    assert widen.status_code == 409 and "Nothing was changed" in widen.json()["detail"]
+    assert client.post(f"{SETTINGS}/keys", json={"key": "not a key"}).status_code == 422
+    assert client.post(f"{SETTINGS}/keys", json={"key": other, "confirm": True}).status_code == 200
+    rows = [r for r in seen if str(r.get("action", "")).startswith("audit_checkpoint_key")]
+    assert len(rows) == 2 and all(set(r) >= {"fingerprint"} for r in rows)
+    assert "BEGIN PUBLIC KEY" not in json.dumps(seen, default=str)
+
+    # Only the other key pinned: this installation's checkpoints are no longer
+    # trusted, exactly as with the terminal's --pubkey.
+    assert client.post(f"{SETTINGS}/keys/remove", json={"fingerprint": fingerprint}).status_code == 200
+    checked = client.post(f"{BASE}/verify", json={}).json()
+    assert checked["intact"] is False and checked["problems"]
+    from maverick_dashboard import audit_checkpoint_settings as store
+    from maverick_dashboard import audit_ops_api
+    assert _cli_verify(audit_ops_api._checkpoint_dir(), *store.load()["keys"]) != 0
+    refused = client.post(f"{BASE}/publish", json={"day": DAY})
+    assert refused.status_code == 409 and "Pin its key below" in refused.json()["detail"]
+
+    last = client.get(SETTINGS).json()["keys"][0]["fingerprint"]
+    loosen = client.post(f"{SETTINGS}/keys/remove", json={"fingerprint": last})
+    assert loosen.status_code == 409
+    assert client.post(f"{SETTINGS}/keys/remove", json={"fingerprint": last, "confirm": True}).status_code == 200
+    assert client.post(f"{BASE}/verify", json={}).json()["intact"] is True
+    assert client.post(f"{SETTINGS}/keys/remove", json={"fingerprint": last, "confirm": True}).status_code == 404
+
+
+def test_damaged_settings_fail_closed(client, tmp_path):
+    _write_day()
+    (tmp_path / "mh" / "audit-checkpoint-settings.json").write_text("{not json", encoding="utf-8")
+    assert client.get(SETTINGS).status_code == 503
+    assert client.post(f"{BASE}/publish", json={"day": DAY}).status_code == 503
+    assert client.post(f"{BASE}/verify", json={}).status_code == 503
+
+
+def test_audit_page_shows_the_settings_to_installation_administrators_only(client, monkeypatch):
+    page = client.get("/audit").text
+    for control in ("ops-ckpt-folder", "ops-ckpt-folder-check", "ops-ckpt-folder-save", "ops-ckpt-key-file",
+                    "ops-ckpt-key-paste", "ops-ckpt-key-own"):
+        assert f'id="{control}"' in page
+    assert not BANNED.search(_visible(page, "ops-ckpt"))
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import rbac
+    _as(monkeypatch, "viewer", "user:alice")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    token = set_tenant("acme")
+    try:
+        page = client.get("/audit").text
+    finally:
+        reset_tenant(token)
+    assert 'id="ops-ckpt-publish"' in page and 'id="ops-ckpt-folder"' not in page

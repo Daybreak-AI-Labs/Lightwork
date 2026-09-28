@@ -266,3 +266,74 @@ test('a written reviewer test is placed only after confirming', async (t) => {
   assert.deepEqual(posts(ui, '/canaries/written')[0].body, {action: 'Pay invoice', detail: 'Pay Acme',
     decision_class: 'payments', flaw: 'Changed account', risk: 'medium', requested_by: 'user:bo'});
 });
+
+// ---- checkpoint folder and pinned keys (installation administrators) -----------
+
+function checkpointRoute(settings, saved) {
+  return (url, options) => {
+    if (url.endsWith('/checkpoints/settings')) return response(settings);
+    if (url.includes('/checkpoints/settings/')) { saved.push({url, body: JSON.parse(options.body)}); return response({saved: true, message: 'Saved.'}); }
+    return response(CHECKPOINTS);
+  };
+}
+const ONE_KEY = {folder: '/srv/worm', default_folder: false, signing_on: true, own_key_pinned: true, max_keys: 20,
+  keys: [{fingerprint: 'AAAA BBBB CCCC DDDD', own: true}]};
+
+test('keys are shown by fingerprint, and unpinning the last one asks first', async (t) => {
+  const saved = [];
+  const ui = await fixture(partial('_ops_audit_checkpoints.html'), checkpointRoute(ONE_KEY, saved), {confirm: false});
+  t.after(() => ui.window.close());
+  assert.match(ui.document.getElementById('ops-ckpt-where').textContent, /kept in \/srv\/worm.*1 pinned key/);
+  assert.equal(ui.document.getElementById('ops-ckpt-folder').value, '/srv/worm');
+  assert.match(ui.document.getElementById('ops-ckpt-keys').textContent, /This installation's key, fingerprint AAAA BBBB CCCC DDDD/);
+  [...ui.document.querySelectorAll('#ops-ckpt-keys button')].find((b) => b.textContent === 'Unpin').click();
+  await ui.settle();
+  assert.match(ui.confirms[0], /Unpin the last key/);
+  assert.equal(saved.length, 0);
+});
+
+test('pinning a second key and moving the folder are confirmed and say so to the server', async (t) => {
+  const saved = [];
+  const ui = await fixture(partial('_ops_audit_checkpoints.html'), checkpointRoute(ONE_KEY, saved));
+  t.after(() => ui.window.close());
+  ui.document.getElementById('ops-ckpt-key-paste').value = 'ssh-ed25519 AAAA';
+  ui.document.getElementById('ops-ckpt-key-add').click();
+  await ui.settle();
+  assert.match(ui.confirms[0], /Also accept checkpoints signed with this key/);
+  assert.deepEqual(saved[0].body, {key: 'ssh-ed25519 AAAA', confirm: true});
+  ui.document.getElementById('ops-ckpt-folder').value = '/srv/other';
+  ui.document.getElementById('ops-ckpt-folder-save').click();
+  await ui.settle();
+  assert.match(ui.confirms[1], /Keep checkpoints in \/srv\/other/);
+  assert.deepEqual(saved[1].body, {folder: '/srv/other', confirm: true});
+  assert.match(ui.document.getElementById('ops-ckpt-settings-msg').textContent, /Saved/);
+});
+
+test('the first pinned key needs no extra confirmation', async (t) => {
+  const saved = [];
+  const none = {...ONE_KEY, folder: '', default_folder: true, keys: [], own_key_pinned: false};
+  const ui = await fixture(partial('_ops_audit_checkpoints.html'), checkpointRoute(none, saved));
+  t.after(() => ui.window.close());
+  assert.match(ui.document.getElementById('ops-ckpt-where').textContent, /beside each workspace's activity log.*any key/);
+  ui.document.getElementById('ops-ckpt-key-own').click();
+  await ui.settle();
+  assert.equal(ui.confirms.length, 0);
+  assert.deepEqual(saved[0].body, {own_key: true, confirm: false});
+});
+
+test('the data path check sends the what-if settings chosen', async (t) => {
+  const ui = await fixture(partial('_ops_immune.html'), (url) => {
+    if (url.endsWith('/choices')) return response({people: [], decision_classes: []});
+    return response({assistants: 3, chains: [], total: 0, shown: 0, summary: 'Checked 3 assistants.'});
+  });
+  t.after(() => ui.window.close());
+  ui.document.getElementById('ops-network-levels').value = 'on';
+  ui.document.getElementById('ops-network-grounding').value = 'off';
+  ui.document.getElementById('ops-network-run').click();
+  await ui.settle();
+  assert.deepEqual(posts(ui, '/network/check')[0].body, {shared_messaging: false, levels: true, grounding: false});
+  ui.document.getElementById('ops-network-levels').value = '';
+  ui.document.getElementById('ops-network-run').click();
+  await ui.settle();
+  assert.equal(posts(ui, '/network/check')[1].body.levels, null);
+});
