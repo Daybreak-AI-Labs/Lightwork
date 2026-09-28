@@ -4,6 +4,10 @@
 
   var MAX_RESPONSE_BYTES = 256 * 1024;
   var MAX_RIGHTS_PACKAGE_BYTES = 16 * 1024 * 1024;
+  var CONFIGURATION_SIGNATURE_SCHEMA = "lightwork.consent-configuration-signature.v1";
+  var UNSIGNED_REFUSAL = "consent configuration is not signed by a trusted key";
+  var SESSION_HEADER = "X-Lightwork-Consent-Session";
+  var SESSION_REFUSALS = ["consent session required", "consent session expired or invalid"];
 
   function requireText(value, label) {
     if (typeof value !== "string" || !value || value.length > 2048) {
@@ -114,6 +118,77 @@
 
   async function canonicalSha256(value) {
     return sha256(canonicalJSON(value));
+  }
+
+  function unhex(value) {
+    var bytes = new Uint8Array(value.length / 2);
+    for (var index = 0; index < bytes.length; index += 1) {
+      bytes[index] = parseInt(value.slice(index * 2, index * 2 + 2), 16);
+    }
+    return bytes;
+  }
+
+  // Keys a site trusts for signed configurations: the files downloaded from
+  // Lightwork ({key_id, public_key}), one or several (during a key change).
+  function trustedPublicationKeys(value) {
+    if (value === undefined || value === null) return null;
+    var list = Array.isArray(value) ? value : [value];
+    var keys = {};
+    list.forEach(function (item) {
+      if (!item || typeof item !== "object" || typeof item.key_id !== "string" ||
+          !/^lwcp-[0-9a-f]{24}$/.test(item.key_id) || typeof item.public_key !== "string" ||
+          !/^[0-9a-f]{64}$/.test(item.public_key)) {
+        throw new Error("publicationKeys must be Lightwork consent signing key files");
+      }
+      keys[item.key_id] = item.public_key;
+    });
+    if (!Object.keys(keys).length) throw new Error("publicationKeys must name at least one key");
+    return keys;
+  }
+
+  // Refuse a configuration unless its Ed25519 signature is from a trusted key
+  // and covers exactly the content, publication and policy about to be used.
+  async function verifySignedConfiguration(value, keys) {
+    var signature = value && value.signature;
+    var statement = signature && signature.statement;
+    var fields = ["algorithm", "configuration_sha256", "key_id", "policy_id", "policy_sha256",
+      "policy_version", "property_id", "publication_key_id", "publication_sha256", "schema"];
+    if (!signature || typeof signature !== "object" ||
+        signature.schema !== CONFIGURATION_SIGNATURE_SCHEMA || signature.algorithm !== "Ed25519" ||
+        typeof signature.signature !== "string" || !/^[0-9a-f]{128}$/.test(signature.signature) ||
+        !hasExactKeys(statement, fields) || statement.schema !== CONFIGURATION_SIGNATURE_SCHEMA ||
+        statement.algorithm !== "Ed25519" || statement.key_id !== signature.key_id ||
+        !Object.prototype.hasOwnProperty.call(keys, statement.key_id) ||
+        !value.property || !value.publication || !value.rule ||
+        statement.property_id !== value.property.property_id ||
+        statement.publication_sha256 !== value.publication.publication_sha256 ||
+        statement.configuration_sha256 !== value.configuration_sha256 ||
+        statement.policy_id !== value.policy_id || statement.policy_version !== value.policy_version ||
+        statement.policy_sha256 !== value.policy_sha256) {
+      throw new Error(UNSIGNED_REFUSAL);
+    }
+    var digest = await canonicalSha256({
+      publication_sha256: value.publication.publication_sha256,
+      property_id: value.property.property_id,
+      property_revision: value.property.revision,
+      consent_group_id: value.property.consent_group_id,
+      rule_id: value.rule.rule_id,
+      rule_sha256: value.rule.rule_sha256,
+      locale: value.rule.locale,
+      configuration: value.configuration
+    });
+    if (digest !== value.configuration_sha256) throw new Error(UNSIGNED_REFUSAL);
+    var verified = false;
+    try {
+      var subtle = global.crypto.subtle;
+      var key = await subtle.importKey("raw", unhex(keys[statement.key_id]), { name: "Ed25519" },
+        false, ["verify"]);
+      verified = await subtle.verify({ name: "Ed25519" }, key, unhex(signature.signature),
+        new TextEncoder().encode(canonicalJSON(statement)));
+    } catch (_error) {
+      verified = false;  // a browser without Ed25519 cannot prove the signature
+    }
+    if (verified !== true) throw new Error(UNSIGNED_REFUSAL);
   }
 
   function withoutKey(value, omitted) {
@@ -438,13 +513,69 @@
     this.profilePrompt = null;
     this.trustCenter = null;
     this.pendingRightsRequests = {};
+    // Set only when the site opts in: then unsigned or badly signed
+    // configurations are refused instead of shown.
+    this.publicationKeys = trustedPublicationKeys(options.publicationKeys);
+    // A short-lived visitor session, used when the consent service asks for one.
+    this.sessionToken = null;
+    this.sessionRenewAt = 0;
+    this._sessionPending = null;
   }
+
+  LightworkConsent.prototype._sessionCall = async function (path, token) {
+    var headers = {
+      "Authorization": "ConsentPublic " + this.clientCredential,
+      "Accept": "application/json"
+    };
+    if (token) headers[SESSION_HEADER] = token;
+    var response = await global.fetch(this.endpoint + path, {
+      method: "POST", headers: headers, mode: "cors", credentials: "omit",
+      cache: "no-store", redirect: "error"
+    });
+    var body = {};
+    try { body = JSON.parse(await response.text() || "{}"); } catch (_error) { body = {}; }
+    if (!response.ok || typeof body.session_token !== "string" ||
+        !Number.isInteger(body.ttl_seconds) || body.ttl_seconds < 1) {
+      var failure = new Error(body.detail || ("consent session failed: " + response.status));
+      failure.status = response.status;
+      throw failure;
+    }
+    this.sessionToken = body.session_token;
+    // Renew at four fifths of the lifetime, measured on this device's clock.
+    this.sessionRenewAt = Date.now() + body.ttl_seconds * 800;
+    return this.sessionToken;
+  };
+
+  LightworkConsent.prototype._session = function (renew) {
+    var self = this;
+    if (!this._sessionPending) {
+      var current = this.sessionToken;
+      this._sessionPending = (async function () {
+        if (renew && current) {
+          try { return await self._sessionCall("/sessions/renew", current); } catch (_error) {
+            self.sessionToken = null;  // ended or refused: start a new one
+          }
+        }
+        return self._sessionCall("/sessions", null);
+      })().finally(function () { self._sessionPending = null; });
+    }
+    return this._sessionPending;
+  };
+
+  LightworkConsent.prototype._withSession = async function (headers) {
+    if (this._sessionPending) {
+      try { await this._sessionPending; } catch (_error) { /* the request itself reports it */ }
+    }
+    if (this.sessionToken && Date.now() >= this.sessionRenewAt) await this._session(true);
+    if (this.sessionToken) headers[SESSION_HEADER] = this.sessionToken;
+    return headers;
+  };
 
   LightworkConsent.prototype._storageKey = async function () {
     return this.storageNamespace + ":" + (await sha256(this.endpoint + "\0" + this.clientCredential)).slice(0, 32);
   };
 
-  LightworkConsent.prototype._request = async function (path, options) {
+  LightworkConsent.prototype._request = async function (path, options, retried) {
     options = options || {};
     var headers = Object.assign({
       "Authorization": "ConsentPublic " + this.clientCredential,
@@ -452,6 +583,7 @@
     }, options.headers || {});
     if (this.profileCredential) headers["X-Lightwork-Profile-Credential"] = this.profileCredential;
     if (options.body) headers["Content-Type"] = "application/json";
+    await this._withSession(headers);
     var response = await global.fetch(this.endpoint + path, {
       method: options.method || "GET",
       headers: headers,
@@ -471,18 +603,23 @@
     if (text) {
       try { body = JSON.parse(text); } catch (_error) { throw new Error("invalid consent response"); }
     }
+    if (response.status === 401 && !retried && SESSION_REFUSALS.indexOf(body.detail) >= 0) {
+      this.sessionToken = null;
+      await this._session(false);
+      return this._request(path, options, true);
+    }
     if (!response.ok) throw new Error(body.detail || ("consent request failed: " + response.status));
     return body;
   };
 
-  LightworkConsent.prototype._download = async function (path, body, reauthenticationReceipt) {
-    var headers = {
+  LightworkConsent.prototype._download = async function (path, body, reauthenticationReceipt, retried) {
+    var headers = await this._withSession({
       "Authorization": "ConsentPublic " + this.clientCredential,
       "Accept": "application/octet-stream",
       "Content-Type": "application/json",
       "X-Lightwork-Profile-Credential": this.profileCredential,
       "X-Lightwork-Reauthentication-Receipt": reauthenticationReceipt
-    };
+    });
     var response = await global.fetch(this.endpoint + path, {
       method: "POST",
       headers: headers,
@@ -501,6 +638,11 @@
       }
       var detail = null;
       try { detail = JSON.parse(errorText).detail; } catch (_error) { detail = null; }
+      if (response.status === 401 && !retried && SESSION_REFUSALS.indexOf(detail) >= 0) {
+        this.sessionToken = null;
+        await this._session(false);
+        return this._download(path, body, reauthenticationReceipt, true);
+      }
       throw new Error(detail || ("rights delivery failed: " + response.status));
     }
     var bytes = await response.arrayBuffer();
@@ -522,7 +664,9 @@
   };
 
   LightworkConsent.prototype.loadConfiguration = async function () {
-    this.configuration = await this._request("/configuration");
+    var configuration = await this._request("/configuration");
+    if (this.publicationKeys) await verifySignedConfiguration(configuration, this.publicationKeys);
+    this.configuration = configuration;
     return this.configuration;
   };
 

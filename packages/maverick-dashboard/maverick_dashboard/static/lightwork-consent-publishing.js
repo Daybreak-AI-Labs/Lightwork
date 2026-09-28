@@ -33,6 +33,56 @@
 
   var CW = window.LightworkConsentWorkbench;
   if (CW && document.getElementById("cpp-root")) start();
+  if (CW && document.getElementById("cpp-signing")) startSigning();
+
+  // ---- Signing key: shown by fingerprint only; the private key never leaves the server.
+  function startSigning() {
+    var $ = function (id) { return document.getElementById(id); };
+    var status = $("cpp-signing-status");
+    var rotate = $("cpp-signing-rotate");
+    var download = $("cpp-signing-download");
+    var canAdmin = $("cpp-signing").dataset.canAdmin === "true";
+    var configured = false;
+
+    function grouped(fingerprint) {
+      return String(fingerprint || "").toUpperCase().match(/.{1,4}/g).join(" ");
+    }
+    function render(state) {
+      configured = !!state.key;
+      var pairs = [
+        ["Signed publishing", state.required ? "On" : "Off (turn it on in All settings)"],
+        ["Key", state.key ? state.key.key_id : "Not created yet"],
+        ["Public key fingerprint", state.key ? grouped(state.key.fingerprint) : ""],
+        ["Earlier keys kept to check older publications", state.retired_keys ? String(state.retired_keys) : ""],
+        ["Last changed", state.rotated_at ? CW.when(state.rotated_at) : ""],
+        ["Kept on the server", state.managed_by_server ? "Yes, set by your server team; it can't be changed here." : ""],
+      ];
+      CW.facts($("cpp-signing-state"), pairs);
+      download.hidden = !state.key;
+      rotate.textContent = state.key ? "Replace signing key" : "Create signing key";
+      rotate.disabled = !canAdmin || !!state.managed_by_server;
+      if (!canAdmin) rotate.title = "Only an administrator can change the signing key.";
+    }
+    async function load() {
+      var state = await call("/signing-key");
+      render(state);
+      return state;
+    }
+    rotate.addEventListener("click", function () {
+      CW.busy(rotate, async function () {
+        var replacing = configured;
+        var question = replacing
+          ? "Replace the signing key? Websites that check signatures stop showing your banner until they are given the new public key. Settings you published keep working."
+          : "Create the signing key? You can then turn on signed publishing and give the public key to your websites.";
+        if (!(await CW.confirm(question, replacing ? "Replace key" : "Create key"))) return;
+        try {
+          render(await call("/signing-key/rotate", { method: "POST", json: { confirm: true } }));
+          CW.say(status, replacing ? "The signing key was replaced. Download the new public key for your websites." : "The signing key was created. Download the public key for your websites.");
+        } catch (error) { CW.fail(status, error, "change the signing key"); }
+      });
+    });
+    load().catch(function (error) { $("cpp-signing-state").replaceChildren(); CW.fail(status, error, "load the signing key"); });
+  }
 
   function start() {
     var $ = function (id) { return document.getElementById(id); };
