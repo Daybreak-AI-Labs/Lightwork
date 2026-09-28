@@ -915,6 +915,55 @@ def sync_finance_alert(alert_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.sync_finance_alert(alert_id, **kwargs)
 
 
+def list_reviewed_alerts(*, status: str = "accepted", limit: int = 100) -> list[Any]:
+    """The finance regulatory-change queue page the bridge reads."""
+    from .finance.regulatory_change import RegulatoryChangeEngine
+    from .paths import data_dir
+
+    engine = RegulatoryChangeEngine(
+        data_dir("finance_operations", "regulatory_change.sqlite3")
+    )
+    return engine.list_alerts(status=status, limit=limit)
+
+
+def sync_reviewed_alerts(
+    *,
+    rules: Sequence[Mapping[str, Any]],
+    actor: str,
+    status: str = "accepted",
+    limit: int = 100,
+    deliver: bool = False,
+) -> dict[str, Any]:
+    """Run each alert in one review-queue state through the bridge.
+
+    Idempotent per alert (the bridge is). Listing failures raise; a failure
+    on one alert is collected and the others still run. Returns the number
+    of alerts read, one row per alert that produced an impact record, the
+    per-alert failures, and whether nothing was queued.
+    """
+    alerts = list_reviewed_alerts(status=status, limit=limit)
+    rows: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for alert in alerts:
+        try:
+            result = sync_alert(alert, rules=rules, actor=actor, deliver=deliver)
+        except (KeyError, ValueError, RuntimeError) as exc:
+            failures.append(f"{getattr(alert, 'alert_id', '?')}: {exc}")
+            continue
+        impact = result.get("impact")
+        if impact is None:
+            continue
+        notice = result.get("notice") or {}
+        rows.append({
+            "alert_id": getattr(alert, "alert_id", "?"),
+            "impact_id": impact.get("id"),
+            "stale_evidence": len(result.get("staleness") or []),
+            "notice_id": notice.get("id"),
+            "notice_status": notice.get("status"),
+        })
+    return {"alerts": len(alerts), "bridged": rows, "failures": failures}
+
+
 def deliver_notice(notice_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.deliver_notice(notice_id, **kwargs)
 
@@ -938,6 +987,8 @@ def resolve_staleness(staleness_id: str, **kwargs: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "list_reviewed_alerts",
+    "sync_reviewed_alerts",
     "AIRegulatoryFeedConfigError",
     "AIRegulatoryFeedError",
     "AIRegulatoryFeedStateError",

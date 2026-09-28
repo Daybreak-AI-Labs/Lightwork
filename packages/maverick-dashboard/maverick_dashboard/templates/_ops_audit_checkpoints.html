@@ -1,0 +1,26 @@
+{#- Activity log: independent checkpoints (maverick audit checkpoint publish /
+    verify / retire). Filled by lightwork-ops-panels.js. -#}
+{% include "_ops_styles.html" %}
+<section class="panel" id="ops-ckpt" aria-labelledby="ops-ckpt-title" data-can-admin="{{ 'true' if can_admin else 'false' }}">
+  <h2 id="ops-ckpt-title">Independent checkpoints</h2>
+  <p class="muted">A checkpoint is a signed note of how long one day of the log was and how it ended, kept in a
+    separate folder. If anyone later changes or removes entries from that day, the check below finds it.</p>
+  {% if can_admin %}
+  <div class="ops-row">
+    <label for="ops-ckpt-day">Day
+      <select id="ops-ckpt-day" class="select"><option value="">Loading days…</option></select></label>
+    <label for="ops-ckpt-erasure" class="ops-actions"><input type="checkbox" id="ops-ckpt-erasure">
+      The log changed after a person&rsquo;s data was erased</label>
+    <button type="button" class="btn btn--primary" id="ops-ckpt-publish">Publish checkpoint</button>
+  </div>
+  {% endif %}
+  <div class="ops-row">
+    <label for="ops-ckpt-receipt">A receipt you kept elsewhere (optional)
+      <input type="file" id="ops-ckpt-receipt" class="input" accept=".json,application/json"></label>
+    <button type="button" class="btn btn--ghost" id="ops-ckpt-verify">Check the checkpoints</button>
+  </div>
+  <div id="ops-ckpt-result" role="status" aria-live="polite"></div>
+  <h3 id="ops-ckpt-list-title">Published checkpoints</h3>
+  <div id="ops-ckpt-rows" aria-labelledby="ops-ckpt-list-title">Loading…</div>
+</section>
+<script src="/static/lightwork-ops-panels.js" defer></script>

@@ -613,20 +613,11 @@ def _default_graph_fetch(url: str, token: str) -> dict[str, Any]:
     return payload
 
 
-def sync_sharepoint_sites(
-    *,
-    actor: str,
-    owner: str,
-    search: str = "",
-    fetcher: Callable[[str], dict[str, Any]] | None = None,
-) -> dict[str, int]:
-    """Enumerate SharePoint sites via Microsoft Graph into site assets.
-
-    Uses ``GET /sites?search={query}`` when a query is given, else
-    ``GET /sites/getAllSites`` (both need the ``Sites.Read.All``
-    application permission). One page, bounded — a census, not a crawler.
-    """
-
+def _sharepoint_site_rows(
+    search: str,
+    fetcher: Callable[[str], dict[str, Any]] | None,
+) -> list[Any]:
+    """One bounded page of the Microsoft Graph site listing (the census)."""
     settings = _require_enabled()
     query = str(search or "").strip()[:256]
     if fetcher is None:
@@ -654,6 +645,46 @@ def sync_sharepoint_sites(
     rows = payload.get("value")
     if not isinstance(rows, list):
         raise DataMapError("Microsoft Graph returned an unexpected shape")
+    return rows
+
+
+def find_sharepoint_site_id(
+    web_url: str,
+    *,
+    search: str = "",
+    fetcher: Callable[[str], dict[str, Any]] | None = None,
+) -> str | None:
+    """The Graph site id of the census site at ``web_url`` (its asset
+    location), from the same bounded listing the census reads; ``None`` when
+    that page does not contain it. Reads only."""
+    wanted = str(web_url or "").strip().rstrip("/").lower()
+    if not wanted:
+        return None
+    for row in _sharepoint_site_rows(search, fetcher)[:_MAX_SITES]:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("webUrl") or "").strip().rstrip("/").lower() != wanted:
+            continue
+        site_id = str(row.get("id") or "").strip()
+        return site_id if _GRAPH_ID_RE.fullmatch(site_id) else None
+    return None
+
+
+def sync_sharepoint_sites(
+    *,
+    actor: str,
+    owner: str,
+    search: str = "",
+    fetcher: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Enumerate SharePoint sites via Microsoft Graph into site assets.
+
+    Uses ``GET /sites?search={query}`` when a query is given, else
+    ``GET /sites/getAllSites`` (both need the ``Sites.Read.All``
+    application permission). One page, bounded — a census, not a crawler.
+    """
+
+    rows = _sharepoint_site_rows(search, fetcher)
     imported = 0
     skipped = 0
     for row in rows[:_MAX_SITES]:
@@ -1004,6 +1035,7 @@ __all__ = [
     "classify_columns",
     "data_map_posture",
     "enabled",
+    "find_sharepoint_site_id",
     "get_data_asset",
     "get_data_map_config",
     "import_information_schema_csv",

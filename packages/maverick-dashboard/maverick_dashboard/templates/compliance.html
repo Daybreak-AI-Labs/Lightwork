@@ -197,6 +197,7 @@
       <button type="button" class="btn btn--danger" id="cmp-erase">Erase their data</button>
     </div>
     <p id="cmp-people-result" class="muted" role="status" aria-live="polite"></p>
+    {% include "_ops_person_documents.html" %}
     {% else %}
     <p class="muted">Only an administrator can export or erase a person&rsquo;s data.</p>
     {% endif %}
