@@ -14,11 +14,25 @@ const answer = {
   turns: [{ side: 'for', text: 'It frees Fridays.' }, { side: 'against', text: '<img src=x onerror=alert(1)> Mondays are packed.' }]
 };
 
+const JOB = 'a'.repeat(32);
+
+// The page starts a background job and polls it; `reply` stands in for the
+// finished job's result (or a failing response for the start request).
 async function fixture(reply) {
   const dom = new JSDOM('<main>' + panel + '</main>', { url: 'https://app.example/chat', runScripts: 'outside-only' });
   const w = dom.window, calls = [];
   w.mvErrorText = (failure, action) => 'Could not ' + action + '. Plain message.';
-  w.fetch = async (url, options) => { calls.push({ url, options }); const out = await reply(url, options); return out instanceof Response ? out : new Response(JSON.stringify(out)); };
+  w.setTimeout = fn => { fn(); return 0; };
+  w.fetch = async (url, options) => {
+    calls.push({ url, options });
+    if (url === '/api/v1/viewpoints/jobs/' + JOB) {
+      const done = await reply(url, options);
+      return new Response(JSON.stringify({ id: JOB, state: 'done', result: done }));
+    }
+    const out = await reply(url, options);
+    if (out instanceof Response) return out;
+    return new Response(JSON.stringify({ job: JOB }), { status: 202 });
+  };
   w.eval(script);
   const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
   const submit = () => w.document.getElementById('vp-form').dispatchEvent(new w.Event('submit', { cancelable: true }));
@@ -45,9 +59,10 @@ test('sends the question and chosen depth, and shows both sides and the verdict 
   ui.el('rounds').value = '3';
   ui.submit();
   await ui.settle();
-  assert.equal(ui.calls[0].url, '/api/v1/viewpoints');
+  assert.equal(ui.calls[0].url, '/api/v1/viewpoints/jobs');
   assert.equal(ui.calls[0].options.method, 'POST');
   assert.deepEqual(JSON.parse(ui.calls[0].options.body), { question: 'Should we move the meeting?', rounds: 3 });
+  assert.equal(ui.calls[1].url, '/api/v1/viewpoints/jobs/' + JOB, 'the page polls the background job');
   const result = ui.el('result');
   assert.equal(result.hidden, false);
   assert.match(result.textContent, /case against stronger/);
@@ -79,4 +94,16 @@ test('a refusal shows its sentence; failures and odd answers stay plain', async 
   odd.submit();
   await odd.settle();
   assert.match(odd.el('status').textContent, /couldn’t be checked/);
+});
+
+test('chosen positions for each side are sent only when filled in', async t => {
+  const ui = await fixture(() => answer);
+  t.after(() => ui.w.close());
+  assert.match(panel, /<label for="vp-for">/);
+  assert.match(panel, /<label for="vp-against">/);
+  ui.el('question').value = 'Should we open on Sundays?';
+  ui.el('for').value = '  Sunday trade is worth it ';
+  ui.submit();
+  await ui.settle();
+  assert.deepEqual(JSON.parse(ui.calls[0].options.body), { question: 'Should we open on Sundays?', rounds: 2, for_side: 'Sunday trade is worth it' });
 });

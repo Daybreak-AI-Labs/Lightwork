@@ -62,7 +62,13 @@
     <ul id="llp-conf" aria-labelledby="llp-conf-title"><li class="muted">Choose a model to check.</li></ul>
 
     <h3>What it would work on next</h3>
-    <p><button type="button" class="btn btn--ghost" id="llp-preview-btn">Show what it would work on next</button></p>
+    <div class="llp-row">
+      <label for="llp-support">Only mistakes seen at least</label>
+      <select id="llp-support" class="select">
+        <option value="2">2 times</option><option value="3" selected>3 times</option><option value="5">5 times</option>
+      </select>
+      <button type="button" class="btn btn--ghost" id="llp-preview-btn">Show what it would work on next</button>
+    </div>
     <div id="llp-preview"></div>
 
     <h3 id="llp-log-title">Recent learning activity</h3>
@@ -80,11 +86,27 @@
       <select id="llp-scope" class="select">
         <option value="main">The main assistant model</option>
         <option value="all">Every model in use</option>
+        <option value="chosen">The model chosen above</option>
       </select>
+    </div>
+    <div class="llp-row">
+      <label><input type="checkbox" id="llp-trial"> Put new lessons on trial first</label>
+      <label><input type="checkbox" id="llp-retire" checked> Also remove lessons not confirmed lately</label>
+    </div>
+    <div class="llp-row">
+      <label for="llp-instructions">Current standing instructions (needed for careful testing)</label>
+      <input type="file" id="llp-instructions" class="input" accept=".txt,.md,text/plain"
+             aria-describedby="llp-instructions-help">
+      <span id="llp-instructions-help" class="muted">A plain text copy of the instructions your agents use today, up to 1 MB.
+        With careful testing on, new lessons are only adopted when this is given.</span>
+    </div>
+    <div class="llp-row">
       <button type="button" class="btn btn--primary" id="llp-run">Run a learning pass now</button>
       <button type="button" class="btn btn--ghost" id="llp-quality-btn">Check the test cases</button>
+      <label><input type="checkbox" id="llp-quality-remove"> Remove test cases that are too easy</label>
     </div>
-    <p class="muted">Both use the evaluation spending limit and stop if learning is paused.</p>
+    <p class="muted" id="llp-cost">Both use the evaluation spending limit and stop if learning is paused.</p>
+    <p class="muted" id="llp-run-status" role="status" aria-live="polite"></p>
     <div id="llp-run-result"></div>
     {% endif %}
     <p id="llp-harness-msg" role="status" aria-live="polite" class="muted"></p>
@@ -95,4 +117,5 @@
   .llp-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .5rem 0 1rem; }
   .llp-log li { margin-bottom: .4rem; }
 </style>
+<script src="/static/lightwork-ops-jobs.js" defer></script>
 <script src="/static/lightwork-learning-loop.js" defer></script>

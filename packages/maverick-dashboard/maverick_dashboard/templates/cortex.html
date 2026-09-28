@@ -225,6 +225,12 @@
           </select>
         </div>
         <div class="ctx-field">
+          <label for="fa-cortex-collection">Keep it with</label>
+          <select class="select" id="fa-cortex-collection" name="collection">
+            {% for c in deposit_collections %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="ctx-field">
           <label for="fa-cortex-domain">Business area</label>
           <select class="select" id="fa-cortex-domain" name="domain">
             <option value="">All areas</option>

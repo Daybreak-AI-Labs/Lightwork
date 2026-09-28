@@ -1076,6 +1076,8 @@
         {{ estate.data_map_posture.assets }} places hold likely personal data,
         {{ estate.data_map_posture.special_category_assets }} of them sensitive (such as health data), and
         {{ estate.data_map_posture.unlinked_flagged_assets }} are not yet linked to a processing record entry.
+        {% if estate.data_map_posture.by_category %}By kind of data:
+        {% for category, count in estate.data_map_posture.by_category.items() %}{{ category | humanize }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}.{% endif %}
         {% endif %}
       </p>
       <div class="pw-form">
@@ -1132,7 +1134,8 @@
             <td>{{ (a.categories | map('replace', '_', ' ') | join(', ')) or '—' }}</td>
             <td>{% if a.special_category %}<span class="badge blocked">Sensitive</span>{% else %}—{% endif %}</td>
             <td>{{ a.links | length }}</td>
-            <td><button class="btn pe-dm-sample" type="button" data-asset="{{ a.id }}" data-revision="{{ a.revision }}" data-name="{{ a.name }}">Check a sample</button></td>
+            <td><button class="btn pe-dm-sample" type="button" data-asset="{{ a.id }}" data-revision="{{ a.revision }}" data-name="{{ a.name }}">Check a sample</button>
+              {% if a.kind in ('site', 'bucket') %}<button class="btn btn--ghost ops-dm-scan" type="button" data-asset="{{ a.id }}" data-revision="{{ a.revision }}" data-name="{{ a.name }}" data-kind="{{ a.kind }}" aria-label="Scan the files in {{ a.name }}">Scan the files</button>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -1149,6 +1152,8 @@
       {% endif %}
     </div>
   </div>
+
+  {% include "_ops_privacy.html" %}
 
   <script>
     (function () {

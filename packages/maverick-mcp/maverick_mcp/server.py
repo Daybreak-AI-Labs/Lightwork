@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from . import __version__ as _PACKAGE_VERSION
+from .settings import mcp_setting
 from .tasks import TaskError
 
 log = logging.getLogger(__name__)
@@ -156,10 +157,10 @@ def _task_budget(args: dict):
 
     configured = resolve_budget_caps()
     overrides = {}
-    for key, env in (("max_dollars", "MAVERICK_MCP_MAX_DOLLARS"),
-                     ("max_wall_seconds", "MAVERICK_MCP_MAX_WALL_SECONDS")):
+    # MAVERICK_MCP_MAX_DOLLARS / MAVERICK_MCP_MAX_WALL_SECONDS, else [mcp].
+    for key in ("max_dollars", "max_wall_seconds"):
         limits = []
-        for raw in (args.get(key), os.environ.get(env), configured.get(key)):
+        for raw in (args.get(key), mcp_setting(key), configured.get(key)):
             if raw is None:
                 limits.append(None)
                 continue
@@ -495,7 +496,7 @@ def _elicit_timeout() -> float:
     """Seconds to wait for an elicitation response before giving up (and
     leaving the question parked for the async maverick_answer flow)."""
     return _bounded_float(
-        os.environ.get("MAVERICK_MCP_ELICITATION_TIMEOUT", 300.0),
+        mcp_setting("elicitation_timeout", "300"),
         default=300.0, ceiling=86400.0,
     )
 
@@ -1581,7 +1582,7 @@ class MCPServer:
         max_depth = _bounded_int(
             args.get("max_depth", 3),
             default=3,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
+            ceiling=mcp_setting("max_depth", "3"),
         )
         with _canonical_world() as world:
             goal_id = world.create_goal(
@@ -1653,7 +1654,7 @@ class MCPServer:
             max_depth = _bounded_int(
                 args.get("max_depth", 3),
                 default=3,
-                ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
+                ceiling=mcp_setting("max_depth", "3"),
             )
             run_kwargs = {"sandbox": build_sandbox(), "max_depth": max_depth}
             if capability is not None:
@@ -1953,7 +1954,7 @@ class MCPServer:
                 except _ProtocolError:
                     return None
             max_rounds = _bounded_int(
-                os.environ.get("MAVERICK_MCP_MAX_ELICIT_ROUNDS", 8),
+                mcp_setting("max_elicit_rounds", "8"),
                 default=8, ceiling=64,
             )
             resume_args = {"goal_id": goal_id}
@@ -2256,7 +2257,7 @@ class MCPServer:
                     enforced=True,
                 )
             else:
-                current_credential = os.environ.get("MAVERICK_MCP_TOKEN", "")
+                current_credential = mcp_setting("token", "") or ""
                 # The legacy shared bearer remains unscoped in local/dev while
                 # Agent Trust is disengaged. If policy became enforced while
                 # queued, the current `mcp` entry becomes mandatory.

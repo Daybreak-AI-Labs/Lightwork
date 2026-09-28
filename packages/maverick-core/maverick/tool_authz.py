@@ -160,6 +160,14 @@ def authorize(
             "Route it through an agent node or an approval step."
         )
 
+    # 3b. Finance separation of duties ([finance.sod] mode). A flow node holds
+    #     no agent grant, so it cannot show the duties are separated, and the
+    #     warn mode's compensating control (a person's approval) cannot run
+    #     unattended: a conflict is refused in both modes.
+    if (refusal := _finance_sod_refusal(tool, origin, goal_id, principal,
+                                        compliance_profiles)) is not None:
+        return refusal
+
     # 4. Record the dispatch on the signed chain. This is what makes the
     #    attestation's policy_envelope claim falsifiable for flow actions.
     from .audit import (
@@ -194,6 +202,36 @@ def authorize(
     return None
 
 
+def _finance_sod_refusal(tool: str, origin: str, goal_id: int | None,
+                         principal: str | None,
+                         compliance_profiles: tuple[str, ...] | None) -> str | None:
+    """Refuse a flow dispatch that completes a finance duty conflict."""
+    try:
+        from .finance import profile as finance_profile
+
+        check = finance_profile.check_action_sod(tool)
+        if check is not None:
+            finance_profile.record_sod_finding(
+                check, agent=f"{origin}:action", goal_id=goal_id,
+                principal=principal, origin=origin, outcome="blocked",
+            )
+    except Exception:
+        log.warning("finance separation-of-duties check unavailable for %r",
+                    tool, exc_info=True)
+        _record_denial(tool, origin, goal_id, "finance_sod:error",
+                       "separation-of-duties check unavailable (failed closed)",
+                       compliance_profiles=compliance_profiles)
+        return ("ERROR: the separation-of-duties check was unavailable; dispatch "
+                "refused under the fail-closed policy")
+    if check is None:
+        return None
+    _record_denial(tool, origin, goal_id, check.rule, check.reason,
+                   compliance_profiles=compliance_profiles)
+    return (f"ERROR: BLOCKED by separation of duties ({check.rule}): "
+            f"{check.reason}. A flow step holds no agent grant; route it "
+            "through an agent whose pack separates the duties.")
+
+
 def _record_denial(tool: str, origin: str, goal_id: int | None,
                    rule: str, reason: str, *,
                    compliance_profiles: object = _PROFILE_KEYS_UNSET) -> None:
@@ -224,6 +262,8 @@ def gate_summary() -> dict[str, list[str]]:
             "shield scan of the tool name and rendered params",
             "org governance policy (deny)",
             "org governance policy (require-human -> refused, not downgraded)",
+            "finance separation of duties ([finance.sod] mode; a flow step "
+            "holds no agent grant, so a duty conflict is refused)",
             "required audit row before every allowed dispatch (signed when "
             "audit signing is enabled or a compliance floor requires it)",
         ],

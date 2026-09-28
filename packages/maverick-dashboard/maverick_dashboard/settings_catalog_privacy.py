@@ -142,6 +142,8 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- rows only
         *_automation_rows(S),
         *_rights_rows(S),
         *_other_rows(S),
+        *_consent_limit_rows(S),
+        *_data_use_limit_rows(S),
     )
 
 
@@ -268,7 +270,8 @@ def _destination_rows(S) -> tuple:
     rows = [
         S(_DEST, "enable", "Send consent changes to outside services",
           "Send each consent change to the services chosen below. Fill in a service's details "
-          "before you choose it. To stop, turn this off and untick every service.", "toggle", _P, False, reader, subgroup=head, weaker=True,
+          "before you choose it. Turning this off stops all sending, even for services "
+          "that stay ticked.", "toggle", _P, False, reader, subgroup=head, weaker=True,
           warning="Consent changes will be sent to the services chosen below."),
         S(_DEST, "enabled_providers", "Services to send to",
           "The outside services that receive consent changes.", "multiselect", _P, [], reader,
@@ -1035,6 +1038,8 @@ def _check_destinations(effective, by_id, error) -> None:
         raise error(f"{_label(by_id, switch)}: choose at least one option in "
                     f"“{_label(by_id, _DEST + '.enabled_providers')}” first.")
     names: set[str] = set()
+    if effective.get(switch) is not True:
+        return  # off: listed services are kept but nothing is bound or sent
     for provider in chosen:
         for key in _DESTINATION_FIELDS.get(str(provider), ()):
             setting_id = f"{_DEST}.{provider}.{key}"
@@ -1061,6 +1066,34 @@ def _check_discovery(effective, by_id, error) -> None:
     notice = f"{_PA}.notice_governance.publication_runtime"
     _require(effective, by_id, error, f"{notice}.scheduler_enable", (f"{notice}.enable",))
     _require(effective, by_id, error, f"{notice}.enable", (f"{notice}.active_tenants",))
+    _check_notice_targets(effective, by_id, error, notice)
+
+
+def _check_notice_targets(effective, by_id, error, notice: str) -> None:
+    """Workspaces that publish and publishing targets must match one to one
+    (targets are set on the Privacy notices page)."""
+    tenants = effective.get(f"{notice}.active_tenants")
+    if not isinstance(tenants, list):
+        return
+    try:
+        from maverick.config import load_config
+
+        node = load_config() or {}
+        for part in notice.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        bindings = node.get("bindings") if isinstance(node, dict) else None
+    except Exception:  # an unreadable config is reported by the module itself
+        return
+    targets = {row.get("tenant_id") for row in (bindings or {}).values() if isinstance(row, dict)}
+    label = _label(by_id, f"{notice}.active_tenants")
+    missing = sorted(t for t in tenants if t not in targets)
+    if missing:
+        raise error(f"{label}: add a publishing target for “{missing[0]}” on the Privacy "
+                    "notices page first.")
+    orphaned = sorted(t for t in targets if isinstance(t, str) and t not in tenants)
+    if orphaned:
+        raise error(f"{label}: “{orphaned[0]}” still has a publishing target; remove it on the "
+                    "Privacy notices page first.")
 
 
 def _check_rights(effective, by_id, error) -> None:
@@ -1098,6 +1131,8 @@ _ORDERED = (
     (f"{_PA}.rights_consumer_intake.max_active_requests_per_subject",
      f"{_PA}.rights_consumer_intake.max_active_requests", False),
     (f"{_SOURCES}.max_response_bytes", f"{_SOURCES}.max_retrieval_bytes", False),
+    (f"{_CP}.delivery.retry_base_seconds", f"{_CP}.delivery.retry_max_seconds", False),
+    (f"{_DU}.enforcement.retry_base_seconds", f"{_DU}.enforcement.retry_max_seconds", False),
 )
 
 
@@ -1139,3 +1174,169 @@ def _check_profiles(effective, by_id, error) -> None:
         raise error(f"{_label(by_id, 'compliance.profiles')}: HIPAA and SOC 2 switch on "
                     "enterprise mode, which needs dashboard sign-in and a client binding set "
                     "up on the server first.")
+
+
+# -------------------------------- installation defaults and caps (wave 2)
+def _consent_limit_rows(S) -> tuple:
+    reports = _sub("Consent preferences", "reports")
+    delivery = _sub("Consent preferences", "delivery tries")
+    scans = _sub("Consent preferences", "website scan limits")
+    public = _sub("Consent preferences", "public consent service")
+    admin = _sub("Consent preferences", "consent records screens")
+    pr = "maverick_dashboard.consent_public_api"
+    return (
+        S(f"{_CP}.analytics", "min_cohort_size", "Smallest group shown in consent reports",
+          "Groups with fewer people than this are hidden from consent reports. A report can "
+          "ask for bigger groups but never smaller ones. When not set, reports hide groups "
+          "under 10 unless they ask for as few as 2.", "number", _P, 2,
+          "maverick.consent_analytics", subgroup=reports, minimum=2, maximum=100000,
+          integer=True, unit="people", weaker="lower",
+          warning="Consent reports will be able to show smaller groups, which makes people "
+                  "easier to single out."),
+        S(f"{_CP}.analytics", "retention_days", "How far back consent reports can look",
+          "Reports only count consent records from this many days back. Leave empty for no "
+          "limit.", "number", _P, None, "maverick.consent_analytics", subgroup=reports,
+          minimum=1, maximum=3650, integer=True, unit="days", weaker="higher",
+          none_text="No limit", warning="Consent reports will be able to include older records."),
+
+        S(f"{_CP}.delivery", "max_attempts", "Tries before a delivery stops",
+          "How many times each consent change is sent to a delivery destination before it "
+          "stops and is flagged. It is also the most a destination may choose, and it applies "
+          "to existing destinations too.", "number", _P, 6, "maverick.consent_delivery",
+          subgroup=delivery, minimum=1, maximum=20, integer=True, unit="tries",
+          weaker="higher", warning="Failed consent changes will be sent more times."),
+        S(f"{_CP}.delivery", "retry_base_seconds", "First wait before trying again",
+          "How long to wait after the first failed delivery. Each later wait doubles, up to "
+          "the longest wait below. Destinations added from now on use it unless they choose "
+          "their own.", "number", _P, 5, "maverick.consent_delivery", subgroup=delivery,
+          minimum=1, maximum=3600, integer=True, unit="seconds"),
+        S(f"{_CP}.delivery", "retry_max_seconds", "Longest wait between tries",
+          "The longest wait between two delivery tries, for destinations added from now on "
+          "that do not choose their own.", "number", _P, 3600, "maverick.consent_delivery",
+          subgroup=delivery, minimum=1, maximum=86400, integer=True, unit="seconds"),
+
+        S(f"{_CP}.scanner", "max_pages", "Most pages in one website scan",
+          "The most pages one scan may open. Scans that ask for more are held to it.",
+          "number", _P, 100, "maverick.consent_scanner", subgroup=scans, minimum=1,
+          maximum=10000, integer=True, unit="pages", weaker="higher",
+          warning="Website scans will be able to open more pages."),
+        S(f"{_CP}.scanner", "max_depth", "Most clicks deep a scan follows",
+          "How many links deep a scan may follow from its start pages.", "number", _P, 4,
+          "maverick.consent_scanner", subgroup=scans, minimum=0, maximum=20, integer=True,
+          unit="clicks", weaker="higher", warning="Website scans will reach deeper pages."),
+        S(f"{_CP}.scanner", "page_timeout_seconds", "Longest wait for one page",
+          "How long a scan waits for one page to load.", "number", _P, 30,
+          "maverick.consent_scanner", subgroup=scans, minimum=1, maximum=300, integer=True,
+          unit="seconds", weaker="higher", warning="Website scans will wait longer on each page."),
+        S(f"{_CP}.scanner", "max_network_events", "Most connections recorded per page",
+          "The most network connections a scan records on one page.", "number", _P, 5000,
+          "maverick.consent_scanner", subgroup=scans, minimum=1, maximum=100000,
+          integer=True, unit="connections", weaker="higher",
+          warning="Website scans will record more connections on each page."),
+        S(f"{_CP}.scanner", "interval_seconds", "Shortest time between scheduled scans",
+          "Scheduled scans of the same site never run more often than this, and schedules "
+          "that name no interval use it.", "number", _P, 300, "maverick.consent_scanner",
+          subgroup=scans, minimum=5, maximum=43200, integer=True, scale=_MINUTE,
+          unit="minutes", weaker="lower",
+          warning="Your websites will be able to be scanned more often."),
+
+        S(f"{_CP}.edge_cache", "enable", "Let networks cache the consent script",
+          "The consent script your websites load can be cached for the time below and served "
+          "from cache if Lightwork cannot be reached. Consent settings and people's choices "
+          "are never cached. When off, browsers keep the script for 5 minutes.", "toggle", _P,
+          False, pr, subgroup=public),
+        S(f"{_CP}.edge_cache", "max_age_seconds", "Keep the consent script for",
+          "How long a cached copy of the consent script is used.", "number", _P, 300, pr,
+          subgroup=public, minimum=0, maximum=1440, integer=True, scale=_MINUTE,
+          unit="minutes"),
+        S(f"{_CP}.edge_cache", "stale_if_error_seconds",
+          "Use an old copy while Lightwork is unreachable for up to",
+          "How long an expired cached copy may still be used when Lightwork cannot be "
+          "reached. Zero never uses an expired copy.", "number", _P, 0, pr, subgroup=public,
+          minimum=0, maximum=168, integer=True, scale=_HOUR, unit="hours"),
+        S(f"{_CP}.public_api", "max_request_bytes", "Largest request from a website or app",
+          "Bigger requests to the public consent service are refused.", "number", _P,
+          64 * _KB, pr, subgroup=public, minimum=1, maximum=1024, integer=True, scale=_KB,
+          unit="KB", weaker="higher",
+          warning="Websites and apps will be able to send bigger requests."),
+        S(f"{_CP}.public_api", "max_response_bytes", "Largest answer to a website or app",
+          "Answers bigger than this are withheld.", "number", _P, 256 * _KB, pr,
+          subgroup=public, minimum=1, maximum=4096, integer=True, scale=_KB, unit="KB",
+          weaker="higher", warning="Bigger answers will be sent to websites and apps."),
+        S(f"{_CP}.public_api", "requests_per_minute", "Requests per minute from each site or app",
+          "Requests beyond this from one website or app in a minute are refused.", "number",
+          _P, 120, pr, subgroup=public, minimum=1, maximum=10000, integer=True,
+          unit="per minute", weaker="higher",
+          warning="Websites and apps will be able to send more requests each minute."),
+
+        S(f"{_CP}.limits", "profile_page_size", "People listed per page",
+          "How many consent profiles one page of the list shows, and the most a request may "
+          "ask for.", "number", _P, 100, "maverick_dashboard.consent_preferences_api",
+          subgroup=admin, minimum=1, maximum=500, integer=True, unit="people"),
+        S(f"{_CP}.limits", "receipt_page_size", "Consent records in one export",
+          "How many consent records one person's export includes, and the most a request may "
+          "ask for.", "number", _P, 500, "maverick_dashboard.consent_preferences_api",
+          subgroup=admin, minimum=1, maximum=500, integer=True, unit="records"),
+        S(f"{_CP}.limits", "request_body_bytes", "Largest change sent to the consent records",
+          "Bigger requests to the consent records screens are refused. Leave empty for no "
+          "extra limit.", "number", _P, None, "maverick_dashboard.consent_preferences_api",
+          subgroup=admin, minimum=1, maximum=1024, integer=True, scale=_KB, unit="KB",
+          weaker="higher", none_text="No extra limit",
+          warning="Bigger requests will be accepted by the consent records screens."),
+    )
+
+
+def _data_use_limit_rows(S) -> tuple:
+    rules = _sub("Data use governance", "rule limits")
+    records = _sub("Data use governance", "catalog limits")
+    enforcement = _sub("Data use governance", "enforcement")
+    return (
+        S(f"{_DU}.compiler", "max_operations", "Most changes one decision may make",
+          "A decision that would change more fields than this is refused. Leave empty for no "
+          "limit.", "number", _P, None, "maverick.data_use_policy_compiler", subgroup=rules,
+          minimum=1, maximum=10000, integer=True, unit="changes", weaker="higher",
+          none_text="No limit", warning="Decisions will be able to change more at once."),
+        S(f"{_DU}.compiler", "max_row_filter_nodes", "Most parts in a row filter",
+          "Row filters with more parts than this are refused. The data platforms accept at "
+          "most 256.", "number", _P, 256, "maverick.data_use_policy_compiler", subgroup=rules,
+          minimum=1, maximum=256, integer=True, unit="parts", weaker="higher",
+          warning="More complex row filters will be accepted."),
+        S(f"{_DU}.limits", "max_assets", "Data sets per workspace",
+          "The most data sets a workspace may register. Leave empty for no limit.", "number",
+          _P, None, "maverick.data_use_governance", subgroup=records, minimum=1,
+          maximum=1000000, integer=True, unit="data sets", weaker="higher",
+          none_text="No limit", warning="Workspaces will be able to register more data sets."),
+        S(f"{_DU}.limits", "max_fields", "Fields per workspace",
+          "The most fields a workspace may register. Leave empty for no limit.", "number", _P,
+          None, "maverick.data_use_governance", subgroup=records, minimum=1,
+          maximum=10000000, integer=True, unit="fields", weaker="higher",
+          none_text="No limit", warning="Workspaces will be able to register more fields."),
+        S(f"{_DU}.limits", "max_lineage_edges", "Data links per workspace",
+          "The most links between fields a workspace may record. Leave empty for no limit.",
+          "number", _P, None, "maverick.data_use_governance", subgroup=records, minimum=1,
+          maximum=20000000, integer=True, unit="links", weaker="higher",
+          none_text="No limit", warning="Workspaces will be able to record more data links."),
+        S(f"{_DU}.limits", "max_context_age_seconds", "Oldest a decision fact may be",
+          "Facts behind a data use decision (purpose, rules, consent, what the data holds) "
+          "stop counting once they are this old, even if their source said they last longer. "
+          "Leave empty to go by each source.", "number", _P, None,
+          "maverick.data_use_governance", subgroup=records, minimum=1, maximum=365,
+          integer=True, scale=_DAY, unit="days", weaker="higher", none_text="No limit",
+          warning="Older facts will still count when data use is decided."),
+        S(f"{_DU}.enforcement", "require_four_eyes", "Second person approves data platform changes",
+          "Each change Lightwork makes in Snowflake or Databricks waits until a second, "
+          "different person approves it on the Approvals page. People must sign in.",
+          "toggle", _P, False, "maverick_dashboard.data_use_provider_api",
+          subgroup=enforcement, weaker=False,
+          warning="Changes in Snowflake and Databricks will run without a second person "
+                  "approving them."),
+        S(f"{_DU}.enforcement", "retry_base_seconds", "First wait before retrying a change",
+          "When a request to the data platform did not go out, Lightwork waits this long "
+          "before the next try, doubling each time.", "number", _P, 0.25,
+          "maverick_dashboard.data_use_provider_runtime", subgroup=enforcement, minimum=0.05,
+          maximum=10, step=0.05, unit="seconds"),
+        S(f"{_DU}.enforcement", "retry_max_seconds", "Longest wait between retries",
+          "The longest wait between two tries of the same change.", "number", _P, 1.0,
+          "maverick_dashboard.data_use_provider_runtime", subgroup=enforcement, minimum=0.25,
+          maximum=60, step=0.05, unit="seconds"),
+    )

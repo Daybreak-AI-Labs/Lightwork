@@ -80,6 +80,7 @@ def _audit_verbs(monkeypatch):
 def test_account_reads_as_plain_language_for_every_role(client, monkeypatch):
     me = client.get("/api/v1/account/me").json()
     assert me["signed_in"] is False and me["can"]["admin"] is True
+    assert me["workspace"] == "The main workspace"
     _as(monkeypatch, "viewer", "user:vic@example.com")
     me = client.get("/api/v1/account/me").json()
     assert me["name"] == "vic@example.com" and me["role"] == "Viewer"

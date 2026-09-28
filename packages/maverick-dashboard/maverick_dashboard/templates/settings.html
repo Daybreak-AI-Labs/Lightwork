@@ -622,7 +622,18 @@
     </form>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="cleanup"></p>
     <div data-maintenance-out="cleanup"></div>
+    <div data-ops-cleanup-all>
+      <h3 id="cleanup-all-title">Every workspace at once</h3>
+      <p class="muted">Tidies up every workspace on this installation with the time periods chosen above, one workspace at a time. For installation administrators.</p>
+      <p class="settings-row-form">
+        <button type="button" class="btn" data-ops-run="cleanup-all">See what would be removed in every workspace</button>
+        <button type="button" class="btn btn--danger" data-ops-run="cleanup-all-go" hidden>Remove from every workspace</button>
+      </p>
+      <p class="muted" role="status" aria-live="polite" data-ops-status="cleanup-all"></p>
+      <div data-ops-out="cleanup-all"></div>
+    </div>
   </div>
+  {% include "_maintenance_ops.html" %}
   </div>
   <style>
     .settings-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }

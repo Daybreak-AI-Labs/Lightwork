@@ -168,6 +168,7 @@ def test_trust_overview_shapes_registry(monkeypatch):
     assert a["max_risk"] == "medium"
     assert "shell" in a["deny_tools"]
     assert a["active"] is True
+    assert a["has_key"] is True
 
 
 def test_trust_overview_lifecycle_failure_is_not_rendered_active(monkeypatch):
@@ -187,6 +188,7 @@ def test_trust_overview_lifecycle_failure_is_not_rendered_active(monkeypatch):
     row = ov["agents"][0]
     assert row["active"] is False
     assert row["status"] == "unknown (lifecycle check failed)"
+    assert row["has_key"] is False  # no pinned key: the page says so
     assert ov["graph"]["nodes"][0]["color"] == "#dc2626"
 
 

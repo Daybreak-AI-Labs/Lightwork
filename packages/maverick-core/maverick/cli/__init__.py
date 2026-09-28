@@ -553,59 +553,30 @@ def _install_config_from_file(src: str) -> None:
     """Headless provisioning: validate SRC and install it as config.toml (0600)."""
     from pathlib import Path as _P
 
-    from ..config import config_path
+    from ..config_install import (
+        ConfigInstallError,
+        config_findings,
+        install_config_bytes,
+        parse_config_bytes,
+    )
     src_path = _P(src).expanduser()
     if not src_path.is_file():
         raise click.ClickException(f"no such config file: {src}")
     try:
-        try:
-            import tomllib
-        except ModuleNotFoundError:  # 3.10
-            import tomli as tomllib  # type: ignore
-        with open(src_path, "rb") as f:
-            cfg = tomllib.load(f)
-    except Exception as e:
+        data = src_path.read_bytes()
+        cfg = parse_config_bytes(data)
+    except (ConfigInstallError, OSError) as e:
         raise click.ClickException(f"invalid TOML in {src}: {e}") from e
     # Surface unknown-section / type problems, but don't block (operators may use
     # newer keys than this build knows).
-    try:
-        from ..config_lint import lint_config
-        for finding in lint_config(cfg):
-            click.echo(click.style(f"  ! {finding.section}: {finding.message}",
-                                   fg="yellow"), err=True)
-    except Exception:
-        pass
-    dst = config_path()
-    from ..file_lock import (
-        atomic_write_bytes,
-        ensure_private_directory,
-        ensure_private_file,
-    )
-
-    # A provisioned config may contain inline provider keys. Tighten the
-    # directory with a protected Windows DACL and publish the bytes from a
-    # create-time protected temp; POSIX mode bits passed to os.open do not
-    # provide the equivalent Windows custody boundary.
-    ensure_private_directory(dst.parent)
-    data = src_path.read_bytes()
-    try:
-        installed = dst.read_bytes() if dst.is_file() else b""
-        unchanged = (
-            dst.is_file()
-            and installed.replace(b"\r\n", b"\n")
-            == data.replace(b"\r\n", b"\n")
-        )
-    except OSError:
-        unchanged = False
-    if unchanged:
-        # A retried deployment should be a true no-op: do not rotate the inode,
-        # mtime, or watcher state when the same logical TOML is installed,
-        # including when a cross-platform checkout changed line endings.
-        # Still repair/verify custody in case an older release left wide perms.
-        ensure_private_file(dst, 0o600)
+    for finding in config_findings(cfg):
+        click.echo(click.style(f"  ! {finding.section}: {finding.message}",
+                               fg="yellow"), err=True)
+    result = install_config_bytes(data)
+    dst = result["path"]
+    if result["unchanged"]:
         click.echo(click.style(f"config unchanged -> {dst} (0600)", fg="green"))
         return
-    atomic_write_bytes(dst, data, mode=0o600)
     click.echo(click.style(f"installed config -> {dst} (0600)", fg="green"))
 
 
@@ -658,20 +629,14 @@ def shared_key_digest() -> None:
     is safe to store in IaC. Reads the key from the process environment exactly
     as crypto_at_rest does; run it wherever MAVERICK_ENCRYPTION_KEY is injected.
     """
-    import hashlib
+    from ..installation_info import KeyDigestError, encryption_key_digest
 
-    from ..crypto_at_rest import _KEY_ENV, _decode_injected_key
-
-    raw = os.environ.get(_KEY_ENV, "")
-    if not raw.strip():
-        click.echo(f"{_KEY_ENV} is not set in this environment", err=True)
-        sys.exit(1)
     try:
-        key = _decode_injected_key(raw)
-    except Exception as exc:  # noqa: BLE001
-        click.echo(f"cannot decode {_KEY_ENV}: {exc}", err=True)
+        digest = encryption_key_digest()
+    except KeyDigestError as exc:
+        click.echo(str(exc), err=True)
         sys.exit(1)
-    click.echo("sha256:" + hashlib.sha256(key).hexdigest())
+    click.echo(digest)
 
 
 @main.command("launch-check")
@@ -826,86 +791,44 @@ def license_keygen() -> None:
 @main.command()
 def version() -> None:
     """Show installed package versions + runtime info."""
-    import importlib.metadata
+    from ..installation_info import package_versions, runtime_facts
 
     click.echo(click.style("Lightwork installed packages", bold=True))
-    # PyPI distribution name for the core is `maverick-agent` (the
-    # `maverick` name was squatted). Fall back to `maverick` if the
-    # squatter ever releases the original name.
-    pkg_names = [
-        ("maverick-agent",     ("maverick-agent", "maverick")),
-        ("maverick-shield",    ("maverick-shield",)),
-        ("maverick-channels",  ("maverick-channels",)),
-        ("maverick-evolve",    ("maverick-evolve",)),
-        ("maverick-dashboard", ("maverick-dashboard",)),
-        ("maverick-mcp-server", ("maverick-mcp-server",)),
-        ("maverick-knowledge", ("maverick-knowledge",)),
-        ("maverick-installer", ("maverick-installer",)),
-    ]
-    for display, candidates in pkg_names:
-        version = None
-        for c in candidates:
-            try:
-                version = importlib.metadata.version(c)
-                break
-            except importlib.metadata.PackageNotFoundError:
-                continue
+    for display, version in package_versions():
         if version:
             click.echo(f"  {display:22s} {version}")
         else:
             click.echo(f"  {display:22s} " + click.style("not installed", fg="yellow"))
     click.echo("")
     click.echo(click.style("Runtime", bold=True))
-    try:
-        from ..world_model import SCHEMA_VERSION
-        click.echo(f"  schema:                v{SCHEMA_VERSION}")
-    except Exception:
-        pass
-    try:
-        from maverick_shield import Shield
-        # warn_if_missing=False: this command prints the backend itself, so the
-        # raw "SDK not installed" log line would just bleed into the table.
-        s = Shield.from_config(warn_if_missing=False)
-        click.echo(f"  shield backend:        {s.backend}")
-    except ImportError:
+    facts = runtime_facts()
+    if facts["schema"] is not None:
+        click.echo(f"  schema:                v{facts['schema']}")
+    if facts["shield_backend"] is not None:
+        click.echo(f"  shield backend:        {facts['shield_backend']}")
+    else:
         click.echo("  shield backend:        (maverick-shield not installed)")
-    try:
-        from ..providers import KNOWN_PROVIDERS
-        click.echo(f"  providers:             {', '.join(KNOWN_PROVIDERS)}")
-    except Exception:
-        pass
-    try:
-        from ..persona import load_persona
-        p = load_persona()
-        if p["name"] or p["style"]:
-            ident = p["name"] or "(unnamed)"
-            style = p["style"] or "(default)"
+    if facts["providers"] is not None:
+        click.echo(f"  providers:             {', '.join(facts['providers'])}")
+    p = facts["persona"]
+    if p is not None:
+        if p.get("name") or p.get("style"):
+            ident = p.get("name") or "(unnamed)"
+            style = p.get("style") or "(default)"
             click.echo(f"  persona:               {ident} ({style})")
         else:
             click.echo("  persona:               (none)")
-    except Exception:
-        pass
-    click.echo(f"  python:                {sys.version.split()[0]}")
-    click.echo(f"  platform:              {sys.platform}")
+    click.echo(f"  python:                {facts['python']}")
+    click.echo(f"  platform:              {facts['platform']}")
 
 
 @main.command("release-runtime-check")
 def release_runtime_check() -> None:
     """Verify packaged providers, parsers, SQL, MathML and metrics offline."""
-    from ..providers import verify_release_runtime
-    from ..release_runtime import (
-        verify_release_database_runtime,
-        verify_release_mathml_runtime,
-        verify_release_metrics_runtime,
-    )
-    from ..tools.document_processing import verify_release_document_runtime
+    from ..release_runtime import libpq_label, verify_full_release_runtime
 
     try:
-        verify_release_runtime()
-        verify_release_document_runtime()
-        libpq_version = verify_release_database_runtime()
-        verify_release_mathml_runtime()
-        verify_release_metrics_runtime()
+        libpq_version = verify_full_release_runtime()
     except Exception as exc:
         raise click.ClickException(
             f"full release runtime is unavailable: {exc}"
@@ -914,7 +837,7 @@ def release_runtime_check() -> None:
         "release runtime ready: Anthropic and OpenAI-compatible provider "
         "SDKs, document parsers and document worker source are available; "
         "offline SQL, bundled PostgreSQL driver "
-        f"(libpq {libpq_version // 10000}.{libpq_version % 10000}), "
+        f"(libpq {libpq_label(libpq_version)}), "
         "MathML and metrics checks passed"
     )
 
@@ -1145,15 +1068,10 @@ def _apply_capability_plan(profile, plan, llm) -> None:
     Records the gaps as factory-learning signals (no-op unless that's on)."""
     if plan is None or plan.is_empty():
         return
-    from ..provision import apply_plan
-    result = apply_plan(plan, approved=True, llm=llm)
+    from ..provision import apply_approved_plan
+    result = apply_approved_plan(profile, plan, llm=llm)
     if result.acquired or result.generated or result.failed:
         click.echo(click.style(f"Provisioning: {result.summary()}", fg="cyan"))
-    try:
-        from .. import factory_learning
-        factory_learning.record_provisioning(profile, plan, result)
-    except Exception:  # pragma: no cover -- learning must never break onboarding
-        pass
 
 
 @main.command()
@@ -1214,34 +1132,10 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
             llm = LLM(model=_cli_model(ctx, "writer"))
         except Exception as e:  # no provider/key -> deterministic generation
             click.echo(f"(LLM unavailable; using deterministic generation: {e})", err=True)
-    kb = None
-    try:
-        from ..config import get_knowledge
-        from ..workspace import Workspace
-        kcfg = get_knowledge()
-        if kcfg.get("enable"):
-            from maverick_knowledge import KnowledgeBase, build_embedder, build_store
-            # Persist uploads to the active tenant's knowledge store (NOT :memory:,
-            # which discards them on exit) so the run-time KB reads the same store.
-            # An explicit [knowledge] path still wins.
-            if not kcfg.get("path"):
-                kcfg = {**kcfg, "path": str(Workspace.current().knowledge_path)}
-            # Shield-scan documents at ingest: a poisoned upload is dropped at the
-            # door, not only at query time (RAG-poisoning defense).
-            shield = None
-            try:
-                from maverick_shield import Shield
-                shield = Shield.from_config(warn_if_missing=False)
-            except Exception:
-                pass
-            kb = KnowledgeBase(store=build_store(kcfg), embedder=build_embedder(kcfg),
-                               shield=shield)
-            try:  # OCR uploaded diagrams/images when the vision extra is installed
-                from maverick_knowledge.image import build_ocr_describer
-                kb.image_describer = build_ocr_describer()
-            except Exception:
-                pass  # no vision extra -> images are skipped, not read as bytes
-        elif doc_paths:
+    from ..intake import onboarding_knowledge_base
+    kb, kb_problem = onboarding_knowledge_base()
+    if kb is None and doc_paths:
+        if kb_problem == "disabled":
             # The client explicitly attached docs AND the generated persona
             # tells the agent to answer from them -- so a quiet "skipping"
             # aside under-sells that the domain agent ends up with NO document
@@ -1255,9 +1149,8 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
                 "~/.maverick/config.toml, then re-run onboard.",
                 err=True,
             )
-    except Exception as e:  # knowledge layer is optional
-        if doc_paths:
-            click.echo(f"(knowledge unavailable; skipping doc ingestion: {e})", err=True)
+        elif kb_problem is not None:
+            click.echo(f"(knowledge unavailable; skipping doc ingestion: {kb_problem})", err=True)
 
     click.echo("Generating a draft domain agent...")
     profile = run_intake(spec, llm=llm, kb=None)
@@ -1941,12 +1834,8 @@ def harness_run(model: str | None, all_models: bool, system_prompt_file: Path | 
     if system_prompt_file is not None:
         try:
             with system_prompt_file.open("rb") as prompt_stream:
-                raw = prompt_stream.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
-                raise ValueError("system prompt exceeds the 1 MiB limit")
-            evaluation_system = raw.decode("utf-8")
-            if not evaluation_system.strip() or "\x00" in evaluation_system:
-                raise ValueError("system prompt must be non-empty UTF-8 text without NULs")
+                raw = prompt_stream.read(runner.EVALUATION_SYSTEM_LIMIT + 1)
+            evaluation_system = runner.read_evaluation_system(raw)
         except (OSError, UnicodeError, ValueError) as exc:
             raise click.ClickException(
                 f"cannot read deployed system prompt: {exc}") from exc
@@ -2029,83 +1918,34 @@ def harness_migrate_store() -> None:
     Verifies the routed store serves every imported key, then renames the
     files to *.migrated backups. Run once per host that learned locally.
     """
-    import json as _json
-
-    from .. import learning_store
-    from .. import self_harness as sh
-    if sh.settings().get("store") != "world":
-        raise click.ClickException(
-            'set [self_harness] store = "world" first -- the migration '
-            "imports into the configured world database.")
-    src = sh._store_path()
-
-    def _raw(p, keep) -> dict:
-        try:
-            data = _json.loads(p.read_text(encoding="utf-8"))
-        except (FileNotFoundError, ValueError, OSError):
-            return {}
-        return {str(k): v for k, v in data.items() if keep(v)} \
-            if isinstance(data, dict) else {}
-
-    addenda = _raw(src, lambda v: isinstance(v, str) and v.strip())
-    meta = _raw(sh._meta_path(src), lambda v: isinstance(v, dict))
-    tried = {k: float(v) for k, v in
-             _raw(sh._transfer_tried_path(src),
-                  lambda v: isinstance(v, (int, float))).items()}
-    migrated_any = bool(addenda or meta or tried)
-    if migrated_any:
-        _migrate_learning_files(sh, learning_store, src, addenda, meta, tried)
+    from ..learning_store_migration import (
+        MigrationRefused,
+        migrate_corpus,
+        migrate_learning_files,
+        require_world_store,
+    )
+    try:
+        require_world_store()
+        learned = migrate_learning_files()
+    except MigrationRefused as exc:
+        raise click.ClickException(str(exc)) from exc
+    migrated_any = learned is not None
+    if learned is not None:
+        merged = learned["merged"]
+        click.echo(f"imported {learned['addenda']} addenda key(s), "
+                   f"{learned['provenance']} provenance "
+                   f"record(s), {learned['tried']} tried pair(s) into the world store"
+                   + (f" ({merged} conflicting key(s) merged)" if merged else "")
+                   + "; file stores renamed to *.migrated.")
     # Phase 2: the corpus family rides the same migration when configured.
-    cpath = sh.settings().get("eval_corpus")
-    if cpath:
-        from .. import self_harness_eval as ev
-        counts = ev.migrate_corpus_files(cpath)
-        if counts and any(counts.values()):
-            migrated_any = True
-            click.echo(f"corpus: merged {counts['live']} live case(s), "
-                       f"{counts['pending']} pending, {counts['rejected']} "
-                       "rejected goal(s) into the world store.")
+    counts = migrate_corpus()
+    if counts and any(counts.values()):
+        migrated_any = True
+        click.echo(f"corpus: merged {counts['live']} live case(s), "
+                   f"{counts['pending']} pending, {counts['rejected']} "
+                   "rejected goal(s) into the world store.")
     if not migrated_any:
         click.echo("nothing to migrate: no file learning stores on this host.")
-
-
-def _migrate_learning_files(sh, learning_store, src, addenda, meta, tried) -> None:
-    merged = 0
-    with learning_store.rmw_lock():
-        db_add = learning_store.load_addenda_db()
-        for k, block in addenda.items():
-            if k not in db_add:
-                db_add[k] = block
-            elif db_add[k] != block:
-                cur = db_add[k]
-                have = {sh._norm_line(x) for x in sh._bullets(cur)}
-                for ln in sh._bullets(block):
-                    if sh._norm_line(ln) not in have:
-                        cur = sh._compose_addendum(k, cur, ln)
-                db_add[k] = cur
-                merged += 1
-        learning_store.write_addenda_db(db_add)
-        db_meta = learning_store.load_line_meta_db()
-        for lid, rec in meta.items():
-            db_meta.setdefault(lid, rec)
-        learning_store.write_line_meta_db(db_meta)
-        db_tried = learning_store.load_transfer_tried_db()
-        for lid, ts in tried.items():
-            db_tried.setdefault(lid, ts)
-        learning_store.write_transfer_tried_db(db_tried)
-    routed = sh.load_addenda()
-    missing = [k for k in addenda if k not in routed]
-    if missing:
-        raise click.ClickException(
-            f"verification failed -- keys missing after import: {missing[:3]}"
-            " (file stores left untouched)")
-    for p in (src, sh._meta_path(src), sh._transfer_tried_path(src)):
-        if p.exists():
-            p.rename(p.with_name(p.name + ".migrated"))
-    click.echo(f"imported {len(addenda)} addenda key(s), {len(meta)} provenance "
-               f"record(s), {len(tried)} tried pair(s) into the world store"
-               + (f" ({merged} conflicting key(s) merged)" if merged else "")
-               + "; file stores renamed to *.migrated.")
 
 
 @harness.group("corpus")
@@ -3074,7 +2914,26 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         proxy_kwargs = uvicorn_launch_kwargs()
     except Exception:  # pragma: no cover - never block startup on a config read
         proxy_kwargs = {}
-    uvicorn.run(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
+    config = uvicorn.Config(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
+    if config.reload or config.workers > 1:
+        # uvicorn.run's own refusal for an app object (one control plane per data root).
+        logging.getLogger("uvicorn.error").warning(
+            "You must pass the application as an import string to enable 'reload' or 'workers'.")
+        sys.exit(3)
+    server = uvicorn.Server(config)
+    from maverick_dashboard.dashboard_restart import RESTART_EXIT_CODE, register_server, requested
+    # Settings > Maintenance can ask a supervised copy (systemd, a container
+    # engine, Kubernetes) to restart: the server stops gracefully and this
+    # command exits with a failure code so the supervisor starts it again.
+    register_server(fastapi_app, server)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
+    if not server.started:
+        sys.exit(3)
+    if requested():
+        sys.exit(RESTART_EXIT_CODE)
 
 
 @main.command()
@@ -3652,22 +3511,19 @@ def billing_stripe_sync(tenant_id: str, since: str | None, until: str | None,
     import json as _json
 
     from ..audit.events import is_valid_day
-    from ..billing import RateCard, generate_invoice
-    from ..billing_stripe import StripeError, bill_metered_usage, sync_tenant
+    from ..billing import RateCard
+    from ..billing_stripe import StripeError, sync_tenant_for_period
     from ..tenant.registry import UnknownTenant
     for _label, _val in (("--since", since), ("--until", until)):
         if _val is not None and not is_valid_day(_val):
             click.echo(f"ERROR: {_label} must be a valid YYYY-MM-DD date (got {_val!r}).",
                        err=True)
             sys.exit(2)
-    invoice = None
-    if bill_metered_usage():
-        invoice = generate_invoice(
+    try:
+        result = sync_tenant_for_period(
             tenant_id, RateCard(markup_pct=markup_pct, minimum_charge=min_charge),
             since=since, until=until,
         )
-    try:
-        result = sync_tenant(tenant_id, invoice=invoice)
     except UnknownTenant:
         click.echo(f"ERROR: no such tenant {tenant_id!r}.", err=True)
         sys.exit(2)
@@ -3755,7 +3611,7 @@ def diag_health(goal_id: int) -> None:
 @click.argument("trace_file", type=click.Path(exists=True))
 @click.option("--kind", default=None, help="Only show events of this kind.")
 def diag_replay(trace_file: str, kind: str | None) -> None:
-    """Read a replayable run trace (written when MAVERICK_TRACE_DIR is set)."""
+    """Read a replayable run trace (written when MAVERICK_TRACE_DIR or [replay] record is set)."""
     from ..replay.trace import read_trace
     events = read_trace(trace_file)
     shown = 0
@@ -3863,6 +3719,33 @@ def mcp_registry_list(ctx) -> None:
             click.echo(f"  {s.name}  (stdio)  {argstr}")
 
 
+def _apply_director(profile: str, outcome: str, description: str,
+                    max_dollars: float | None) -> tuple[str, str, float | None]:
+    """Director mode for this process's one run (:mod:`maverick.director_mode`).
+
+    The profile's consent mode and review checkpoints apply to this process
+    only (it runs this one goal); its budget multiple is applied to the
+    requested or configured cap and then clamped to the configured cap, so a
+    profile can never raise spending past what the deployment allows.
+    """
+    from ..director_mode import UnknownProfileError, direct
+    from ..runner import clamp_task_limit, configured_max_dollars
+
+    try:
+        run = direct(outcome, profile=profile, base_max_dollars=max_dollars)
+    except (UnknownProfileError, ValueError) as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(2)
+    for name, value in run.env_overrides.items():
+        if value:
+            os.environ[name] = value
+    extra = f"\n\n{description}" if description else ""
+    capped = clamp_task_limit(run.max_dollars, configured_max_dollars())
+    click.echo(f"[director {profile}] consent={run.consent_mode} "
+               f"checkpoint={run.checkpoint} max_dollars={capped}")
+    return run.goal_title, run.goal_description + extra, capped
+
+
 def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
     """Export the coding-mode / best-of-N env flags that ``coding_mode.from_env()``
     reads everywhere. ``--best-of-n`` only takes effect under ``--coding-mode``,
@@ -3913,13 +3796,18 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
                    "the preference pairs DPO needs (pair with [telemetry] "
                    "donate_min_entropy = 0 to capture them). Non-clean runs are "
                    "kept, not fatal, in repeat mode.")
+@click.option("--director", "director_profile", default=None,
+              type=click.Choice(["supervised", "semi", "autonomous"]),
+              help="Director mode: TITLE is an outcome, run plan-first under this "
+                   "autonomy profile (consent, review checkpoints and budget from "
+                   "[director.profiles], clamped to the configured spend cap).")
 @click.pass_context
 @_humane_errors
 def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat,
+    repeat, director_profile,
 ) -> None:
     """Start a new goal and run the swarm."""
     # Coding-mode flags propagate via env so coding_mode.from_env()
@@ -3959,6 +3847,9 @@ def start(
     elif not title:
         click.echo("ERROR: pass TITLE or --template <name>", err=True)
         sys.exit(2)
+    if director_profile:
+        title, description, max_dollars = _apply_director(
+            director_profile, title, description, max_dollars)
 
     if dry_cost:
         # Forecast from past priced runs and exit — no goal created, no run.
@@ -4440,22 +4331,13 @@ def schema_plan_cmd() -> None:
     maintenance window is needed. Exits 1 when the migration table fails its
     structural lint.
     """
-    from ..schema_migrations import plan, render, validate
-    from ..world_model import SCHEMA_VERSION, close_world_if_owned, open_world
-    problems = validate()
+    from ..schema_migrations import current_plan, render
+    problems, _current, _target, steps = current_plan()
     if problems:
         for pb in problems:
             click.echo(f"LINT: {pb}", err=True)
         sys.exit(1)
-    try:
-        w = open_world()
-        try:
-            current = w.schema_version
-        finally:
-            close_world_if_owned(w)
-    except Exception:
-        current = SCHEMA_VERSION  # no DB yet -> nothing pending
-    click.echo(render(plan(int(current), SCHEMA_VERSION)))
+    click.echo(render(steps))
 
 
 @main.command("config-lint")
@@ -6313,18 +6195,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
         )
         click.confirm("Proceed?", abort=True)
 
-    def _prune(world) -> tuple[int, int, int]:
-        convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
-        events = world.prune_goal_events(
-            older_than_seconds=events_days * 24 * 3600
-        )
-        # Twilio dedup rows accumulate one-per-webhook forever; reap after
-        # 30 days (the retry window is minutes so this is generous).
-        dedup = world.prune_processed_messages(
-            older_than_seconds=30 * 24 * 3600
-        )
-        return int(convs), int(events), int(dedup)
-
+    from ..records_gc import prune_world, sweep_workspaces
     from ..world_model import close_world_if_owned
     from ..world_model_backends import is_postgres_configured
 
@@ -6332,7 +6203,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
     # implicit delete-all authority. Routine GC fans out through each explicit
     # roster tenant; a true global purge requires a separate purpose-built API.
     if is_postgres_configured():
-        from ..paths import current_tenant_id, tenant_scope
+        from ..paths import current_tenant_id
         if current_tenant_id() is None:
             from ..tenant.registry import list_tenants
             try:
@@ -6346,17 +6217,11 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
                     "refusing unbound Postgres GC: bind a tenant or provision "
                     "the tenant roster; global delete is not implicit"
                 )
-            convs = events = dedup = 0
-            for record in tenants:
-                with tenant_scope(tenant=record.id):
-                    world = open_world()
-                    try:
-                        c, e, d = _prune(world)
-                    finally:
-                        close_world_if_owned(world)
-                convs += c
-                events += e
-                dedup += d
+            rows = sweep_workspaces(tenants, days=days, events_days=events_days,
+                                    open_world=open_world)
+            convs = sum(row["conversations"] for row in rows)
+            events = sum(row["activity"] for row in rows)
+            dedup = sum(row["duplicate_checks"] for row in rows)
             click.echo(
                 f"pruned {convs} conversation(s), {events} goal_event row(s), "
                 f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
@@ -6365,7 +6230,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
 
     world = open_world(ctx.obj["db"])
     try:
-        convs, events, dedup = _prune(world)
+        convs, events, dedup = prune_world(world, days=days, events_days=events_days)
     finally:
         close_world_if_owned(world)
     click.echo(
@@ -7375,21 +7240,14 @@ def export_goal(ctx, goal_id: int, output: str | None) -> None:
     was logged to events.
     """
     import json as _json
+
+    from ..goal_bundle import build_goal_bundle
     world = open_world(ctx.obj["db"])
     try:
-        goal = world.get_goal(goal_id)
-        if goal is None:
+        bundle = build_goal_bundle(world, goal_id)
+        if bundle is None:
             click.echo(f"goal {goal_id} not found", err=True)
             sys.exit(2)
-        events = world.goal_events(goal_id, limit=10_000)
-        episodes = world.list_episodes(limit=200, goal_id=goal_id)
-        from dataclasses import asdict
-        bundle = {
-            "v": 1,
-            "goal": asdict(goal),
-            "events": [asdict(e) for e in events],
-            "episodes": [asdict(e) for e in episodes],
-        }
     finally:
         world.close()
     out_path = Path(output) if output else Path(f"goal-{goal_id}.json")

@@ -28,6 +28,7 @@ ASSETS = (
     "lightwork-value-proof.js",
     "lightwork-assurance-forms.js",
     "lightwork-feature-actions.js",
+    "lightwork-ops-panels.js",
     "lightwork-tax.js",
     "lightwork-task-changes.js",
     "lightwork-viewpoints.js",

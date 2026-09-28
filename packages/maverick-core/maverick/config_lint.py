@@ -83,6 +83,13 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_scan_chars",
         "decode_hidden",
         "supply_chain_pinning",
+        # Second-opinion scan, scan limit per task, and approvals for
+        # protected settings (All settings).
+        "cascade",
+        "shield_rate_limit",
+        "quorum_required",
+        "quorum_protected_keys",
+        "quorum_ttl_days",
     },
     "sandbox": {
         "backend",
@@ -116,6 +123,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # Per-tool address rules (sandbox/network_policy.py) and the cluster
         # settings file (sandbox/__init__.py), both on the All settings page.
         "tool",
+        # The work area's no-network rule (sandbox/network_policy.py).
+        "network_policy",
         "kubeconfig",
         "long_command_timeout",
         "firecracker_strict",
@@ -215,7 +224,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_suites",
         "active_tenant",
     },
-    "analytics": {"mcp_client_language"},
+    "analytics": {"mcp_client_language", "task_questions"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
     # fall back to defaults.
@@ -693,7 +702,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "cross_run_pool",
         "warm",
     },
-    "analytics": {"mcp_client_language"},
+    "analytics": {"mcp_client_language", "task_questions"},
     "self_learning": {
         "preflight",
         "create_tools",
@@ -1778,10 +1787,9 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
         1_048_576,
     ),
     (("data_use_governance", "compiler"), "max_operations"): (1, 10_000),
-    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 1_000),
+    # Native adapters accept row filters of at most 256 parts.
+    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 256),
     (("data_use_governance", "enforcement"), "max_attempts"): (1, 5),
-    (("data_use_governance", "enforcement"), "retry_base_seconds"): (1, 3_600),
-    (("data_use_governance", "enforcement"), "retry_max_seconds"): (1, 86_400),
     (("data_use_governance", "provider_audit"), "audit_window_seconds"): (
         60,
         604_800,
@@ -2053,6 +2061,9 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
 _NESTED_NUMBER_BOUNDS: dict[
     tuple[tuple[str, ...], str], tuple[float, float]
 ] = {
+    # Data-use enforcement retries wait inside one request (seconds, not minutes).
+    (("data_use_governance", "enforcement"), "retry_base_seconds"): (0.05, 10.0),
+    (("data_use_governance", "enforcement"), "retry_max_seconds"): (0.25, 60.0),
     (
         ("privacy_automation", "data_discovery", "adapters"),
         "timeout_seconds",
@@ -2601,14 +2612,8 @@ def _lint_consent_delivery_destinations(cfg: dict) -> list[Finding]:  # noqa: C9
                     "enabled consent destinations require a unique non-empty closed provider list",
                 )
             )
-    elif raw_enabled not in ([], _MISSING):
-        findings.append(
-            _nested_error(
-                section_name,
-                "enabled_providers",
-                "disabled consent destinations cannot select provider adapters",
-            )
-        )
+    # Disabled with services still listed is a clean off: the runtime keeps
+    # the list but binds and sends nothing.
 
     common = {
         "destination_id",

@@ -15,10 +15,13 @@ page (dashboard overlay) > the installer's config.toml > the built-in default.
 Deliberately NOT in the catalog:
 
 * Developer / operations plumbing with no business meaning: ``[langchain]``,
-  ``[coding]``, ``[local_runtime]`` (serving engines). Programs the product
-  never starts itself (``python -m`` helpers) have nothing to change here:
-  ``[perf]`` profiling, ``[ebpf_monitor]``, ``[model_proxy]`` (its key is kept
-  out of the product's settings on purpose) and ``[tui] keys``. The research
+  ``[coding]``, ``[local_runtime]`` (serving engines). Profiling
+  (``[perf.profiling]``), the kernel activity monitor (``[ebpf_monitor]``) and
+  the model proxy (``[model_proxy]``) ARE here (settings_catalog_runtime): the
+  dashboard starts them with itself when they are on
+  (``background_programs``). Only the model proxy's AI service key stays on the
+  server (``MAVERICK_PROXY_KEY``), on purpose: a key kept in the settings would
+  be loaded into the agent process the proxy protects it from. The research
   rungs (``[self_modify]`` files and tests, ``[adapter_rung]``,
   ``[emergent_protocol]``/``[emergent_codec]``) are in
   settings_catalog_learning.py, off by default and confirmed before they widen;
@@ -74,12 +77,12 @@ an AI service, a department) with the ``columns`` described by
 incident report deciders).
 
 Settings a reader keeps but nothing in the running product consults are left
-out, so the page never offers a control that changes nothing: ``[safety]``
-quorum keys, ``cascade`` and ``shield_rate_limit``,
-``[shield] probe_model`` and update addresses, ``[models] cascade``,
-``[routing] bandit``, ``[energy]``, ``[voice]`` only-mode and voice unlock
-(their modules are not called by any run path yet; see
-``settings_catalog_runtime``).
+out, so the page never offers a control that changes nothing: ``[voice]
+biometric_unlock`` (voice unlock needs a speaker-recognition model this
+product does not ship; see ``settings_catalog_runtime``). ``[energy]``,
+``[memory] learning_cache``, ``[tools] speculative``, ``[director] profiles``,
+``[logging] crash_only_fsync`` and ``[tui] keys`` are used by the running
+product and are in ``settings_catalog_runtime``.
 """
 from __future__ import annotations
 
@@ -262,6 +265,11 @@ class Setting:
     path_kind: str = ""
     path_writable: bool = False
     path_private: bool = False
+    # ``path_new``: a file Lightwork creates itself, so it may not exist yet
+    # (its folder must). ``path_scope="data"``: only inside Lightwork's data
+    # folder, unless the deployment's own list of places allows more.
+    path_new: bool = False
+    path_scope: str = ""
     # A "Test connection" button: the name of a check in settings_tests that
     # tries the entered (or saved) value and answers in one plain sentence.
     test: str = ""
@@ -2560,7 +2568,8 @@ def _coerce_path(setting: Setting, value: object) -> str | None:
     try:
         return settings_paths.check(text, kind=setting.path_kind,
                                     writable=setting.path_writable,
-                                    private=setting.path_private)
+                                    private=setting.path_private,
+                                    new_ok=setting.path_new, scope=setting.path_scope)
     except settings_paths.PathRefused as exc:
         raise SettingError(f"{setting.label}: {exc}") from exc
 
@@ -3230,6 +3239,8 @@ def _assert_consistent() -> None:
         assert s.scale > 0, s.id
         assert (s.control == "path") == bool(s.path_kind), s.id
         assert not s.path_kind or s.path_kind in PATH_KINDS, s.id
+        assert not (s.path_new or s.path_scope) or s.control == "path", s.id
+        assert s.path_scope in {"", "data"}, s.id
     for pairs in (_REQUIRES_NONEMPTY, _REQUIRES_VALUE):
         for first, needs in pairs.items():
             first_id = first[0] if isinstance(first, tuple) else first

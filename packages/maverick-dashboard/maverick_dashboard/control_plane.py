@@ -44,6 +44,7 @@ _KIND_LABELS: dict[str, tuple[str, str]] = {
     "shield_block": ("Shield blocked", "block"),
     "capability_denied": ("Capability denied", "block"),
     "governance_denied": ("Governance denied", "block"),
+    "finance_sod_finding": ("Finance duty conflict", "approval"),
     "egress_blocked": ("Egress blocked", "block"),
     "agent_trust_denied": ("Agent-trust denied", "block"),
     "memory_guard": ("Memory guard", "block"),
@@ -419,6 +420,9 @@ def trust_overview() -> dict[str, Any]:
             "status": reason,
             "expires_at": getattr(a, "expires_at", None),
             "revoked": bool(getattr(a, "revoked", False)),
+            # ``maverick trust show``: whether a pinned security key proves
+            # who the agent is, or only its connection secrets do.
+            "has_key": bool(getattr(a, "pubkey", "") or ""),
         })
     return {
         "enforced": bool(enforced),

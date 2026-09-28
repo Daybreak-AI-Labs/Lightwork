@@ -2100,7 +2100,6 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "enable": True,
             "publishing": {
                 "enable": consent_publishing,
-                "require_signed_publications": True,
                 **(
                     {
                         "web_settings": {
@@ -2714,8 +2713,6 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
                 "enable": True,
                 "require_four_eyes": True,
                 "max_attempts": 3,
-                "retry_base_seconds": 30,
-                "retry_max_seconds": 300,
             }
             data_use_product[str(data_use_native["provider"])] = data_use_native["section"]
             provider_audit_config: dict[str, Any] = {
@@ -3916,6 +3913,7 @@ def pick_finance() -> dict[str, Any]:
                 or "Finance Control Owner",
             }
         )
+        operations.update(pick_finance_profile())
     return {
         "enable": True,
         "regimes": regimes,
@@ -3924,6 +3922,58 @@ def pick_finance() -> dict[str, Any]:
         "require_fresh_human_approval": require_fresh,
         "sdn_path": sdn_path,
         **operations,
+    }
+
+
+# The Finance Operating Profile (finance-agent-suite §3.8) -- the same keys
+# and values the dashboard's Settings > All settings > Finance rows write and
+# maverick.finance.profile reads.
+FINANCE_FRAMEWORKS = ("us_gaap", "ifrs")
+FINANCE_AUTOMATION_LEVELS = ("draft", "approve", "auto_threshold", "straight_through")
+FINANCE_SOD_MODES = ("enforce", "warn")
+
+
+def pick_finance_profile() -> dict[str, Any]:
+    """The finance operating profile, asked only with finance operations on.
+
+    Returns ``finance_framework`` / ``finance_materiality`` (0 = not set) /
+    ``finance_automation_default`` / ``finance_sod_mode`` /
+    ``finance_approvals_timeout``. The approval timeout has one value,
+    ``fail_closed``: finance never lets an unanswered approval through.
+    """
+    console.print(
+        "[dim]Finance operating profile: the accounting framework, the "
+        "materiality amount that raises review, how far agents may go on "
+        "finance actions (payments and postings always wait for a person), "
+        "and whether separation-of-duties conflicts block or are recorded.[/dim]"
+    )
+    framework = _q_select(
+        "  Accounting framework:", list(FINANCE_FRAMEWORKS), default="us_gaap",
+    )
+    materiality = max(0.0, _safe_float(
+        _q_text("  Materiality amount (0 = not set)", default="0"), default=0.0,
+    ))
+    automation = _q_select(
+        "  How far agents go on finance actions by default "
+        "(draft = prepare only; approve = act after a person approves; "
+        "auto_threshold = act alone under the approval limit; "
+        "straight_through = act alone):",
+        list(FINANCE_AUTOMATION_LEVELS), default="draft",
+    )
+    sod_mode = _q_select(
+        "  Separation-of-duties conflicts (enforce = block; warn = record and "
+        "ask a person):",
+        list(FINANCE_SOD_MODES), default="enforce",
+    )
+    return {
+        "finance_framework": framework if framework in FINANCE_FRAMEWORKS else "us_gaap",
+        "finance_materiality": materiality,
+        "finance_automation_default": (
+            automation if automation in FINANCE_AUTOMATION_LEVELS else "draft"
+        ),
+        "finance_sod_mode": sod_mode if sod_mode in FINANCE_SOD_MODES else "enforce",
+        # The only value: an unanswered finance approval is refused.
+        "finance_approvals_timeout": "fail_closed",
     }
 
 
@@ -7504,10 +7554,26 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
         lines.append("[governance.deny_above]")
         lines.append(f'"*" = {da}')
     regimes = finance.get("regimes") or []
-    if regimes:
+    framework = finance.get("finance_framework") or ""
+    materiality = finance.get("finance_materiality") or 0
+    if regimes or framework or materiality:
         lines.append("")
         lines.append("[finance]")
-        _emit_kv(lines, "regimes", regimes)
+        if regimes:
+            _emit_kv(lines, "regimes", regimes)
+        if framework:
+            _emit_kv(lines, "framework", framework)
+        if materiality and materiality > 0:
+            _emit_kv(lines, "materiality", materiality)
+    for table, key, value in (
+        ("finance.automation", "default", finance.get("finance_automation_default")),
+        ("finance.sod", "mode", finance.get("finance_sod_mode")),
+        ("finance.approvals", "timeout", finance.get("finance_approvals_timeout")),
+    ):
+        if value:
+            lines.append("")
+            lines.append(f"[{table}]")
+            _emit_kv(lines, key, value)
     sdn = (finance.get("sdn_path") or "").strip()
     if sdn:
         lines.append("")

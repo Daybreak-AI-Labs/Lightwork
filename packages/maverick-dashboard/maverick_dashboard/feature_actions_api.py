@@ -91,6 +91,25 @@ _RISK_LABELS = {"low": "Low-risk actions only", "medium": "Up to medium-risk act
                 "high": "Up to high-risk actions"}
 
 
+def _workspace_name() -> str:
+    """The workspace this page works in, by its display name."""
+    try:
+        from maverick.paths import current_tenant_id
+        tenant = current_tenant_id()
+    except Exception:  # noqa: BLE001 -- the panel still shows everything else
+        return "Unknown"
+    if not tenant:
+        return "The main workspace"
+    try:
+        from maverick.tenant.registry import list_tenants
+        for record in list_tenants():
+            if record.id == tenant:
+                return str(getattr(record, "display_name", "") or record.id)
+    except Exception:  # noqa: BLE001 -- fall back to its short name
+        pass
+    return str(tenant)
+
+
 def _account(request: Request) -> dict[str, Any]:
     from maverick.capability import capability_enforced, capability_from_config
 
@@ -111,6 +130,7 @@ def _account(request: Request) -> dict[str, Any]:
         "name": humanize_principal(principal).name if signed_in else "You (this computer)",
         "role": (role_label(role) or "No role yet") if signed_in else "Full access (sign-in is off)",
         "installation_admin": bool(has_global_permission(request, "admin")),
+        "workspace": _workspace_name(),
         "abilities": abilities,
         "departments": sorted(s.replace("_", " ").capitalize() for s in suites) if suites is not None else [],
         "all_departments": suites is None,

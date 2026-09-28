@@ -49,6 +49,33 @@ _RISK_ALIASES = {
 # without it being read as a typo and clamped.
 _RISK_DISABLE = {"none", "off", "disabled", "never"}
 
+#: The finance automation ladder (finance-agent-suite §3.1), strictest first:
+#: ``draft`` (L1: an agent prepares, a person carries the action out -- the
+#: agent's call is refused), ``approve`` (L2: every call waits for a person),
+#: ``auto_threshold`` (L3: runs on its own only with an amount under the
+#: approval threshold), ``straight_through`` (L4: runs within the rest of the
+#: policy). An unknown level is treated as the strictest.
+AUTOMATION_LEVELS: tuple[str, ...] = (
+    "draft", "approve", "auto_threshold", "straight_through",
+)
+
+
+def automation_rank(level: object) -> int:
+    """Position on the ladder; lower is stricter, unknown ranks strictest."""
+    try:
+        return AUTOMATION_LEVELS.index(str(level))
+    except ValueError:
+        return 0
+
+
+def stricter_level(a: str | None, b: str | None) -> str | None:
+    """The stricter of two automation levels (``None`` == no level)."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if automation_rank(a) <= automation_rank(b) else b
+
 
 class Decision(str, Enum):
     ALLOW = "allow"
@@ -66,8 +93,9 @@ class Verdict:
 
     ``rule`` names the policy clause that fired (``capability`` / ``deny_actions``
     / ``deny_min_risk`` / ``deny_above`` / ``require_human_actions`` /
-    ``require_human_min_risk`` / ``require_human_above`` / ``default``) so an
-    auditor can see *why*, not just *what*.
+    ``require_human_min_risk`` / ``require_human_above`` /
+    ``finance_automation:<level>`` / ``default``) so an auditor can see *why*,
+    not just *what*.
     """
 
     decision: Decision
@@ -252,6 +280,12 @@ class Policy:
       above the threshold it gets the verdict — the finance delegation-of-authority
       tier ("< $5k auto, $5k–50k human, > $50k denied"). Thresholds are in one
       reporting currency; the caller normalises ``amount`` into it.
+    - ``automation``: action (lower-case tool name) -> finance automation level
+      (:data:`AUTOMATION_LEVELS`), compiled from the Finance Operating Profile
+      (:mod:`maverick.finance.profile`). It only ever adds a gate: ``draft``
+      denies the agent's call, ``approve`` requires a human, ``auto_threshold``
+      requires a human unless the call carries an amount within this policy's
+      ``require_human_above`` threshold for the action.
     """
 
     deny_actions: frozenset[str] = frozenset()
@@ -261,6 +295,7 @@ class Policy:
     deny_above: dict[str, float] = field(default_factory=dict)
     require_human_above: dict[str, float] = field(default_factory=dict)
     require_fresh_human_approval: bool = False
+    automation: dict[str, str] = field(default_factory=dict)
     #: Provenance only; deliberately excluded from ``is_empty`` because a
     #: profile may enforce solely through capability attenuation.
     compliance_profiles: tuple[str, ...] = ()
@@ -274,6 +309,7 @@ class Policy:
             or self.deny_above
             or self.require_human_above
             or self.require_fresh_human_approval
+            or self.automation
         )
 
     @classmethod
@@ -322,7 +358,20 @@ class Policy:
             raise GovernancePolicyError(
                 "finance-regime governance policy is unavailable"
             ) from exc
-        if not profiles and not regime_keys:
+        # The Finance Operating Profile ([finance] framework / materiality,
+        # [finance.automation]) compiles to one more strictest-wins overlay.
+        # None while the finance layer is off or no profile key is set; a
+        # present-but-invalid profile (e.g. a hard-floored action lowered
+        # below approve) raises so the chokepoint fails closed.
+        try:
+            from .finance import profile as finance_profile
+
+            finance_policy = finance_profile.configured_policy(snapshot)
+        except Exception as exc:
+            raise GovernancePolicyError(
+                "finance operating profile is unavailable or invalid"
+            ) from exc
+        if not profiles and not regime_keys and finance_policy is None:
             return base
         policies = [base]
         try:
@@ -330,6 +379,8 @@ class Policy:
                 policies.append(compliance_profiles.compile_policy(profiles))
             if regime_keys:
                 policies.append(finance_regimes.compile_policy(regime_keys))
+            if finance_policy is not None:
+                policies.append(finance_policy)
             combined = finance_regimes.union_policies(policies)
             return replace(combined, compliance_profiles=tuple(profiles))
         except Exception as exc:
@@ -367,6 +418,45 @@ def _money(amount: float | None, currency: str) -> str:
     return f"{amount:g}{cur}"
 
 
+def _automation_verdict(
+    policy: Policy, action: str, amount: float | None, *, stage: str,
+) -> Verdict | None:
+    """The finance automation ladder's verdict for ``action``, if it adds one.
+
+    ``stage="deny"`` answers only the ``draft`` level (evaluated with the other
+    hard denies); ``stage="human"`` answers ``approve`` and an
+    ``auto_threshold`` call that cannot be shown to be under its threshold
+    (evaluated with the other human gates, so an amount above the threshold is
+    already caught by ``require_human_above``).
+    """
+    level = policy.automation.get(action.strip().lower()) if policy.automation else None
+    if level is None or level == "straight_through":
+        return None
+    rule = f"finance_automation:{level}"
+    if stage == "deny":
+        if automation_rank(level) == 0:  # draft, or an unknown level
+            return Verdict(
+                Decision.DENY,
+                f"{action!r} is set to the draft automation level: an agent "
+                "prepares it and a person carries it out",
+                rule, policy.compliance_profiles,
+            )
+        return None
+    if level == "approve":
+        return Verdict(Decision.REQUIRE_HUMAN,
+                       f"{action!r} is set to the approve automation level and "
+                       "requires human approval", rule, policy.compliance_profiles)
+    threshold = _threshold_for(policy.require_human_above, action)
+    if amount is None or threshold is None:
+        why = ("carries no amount" if amount is None
+               else "has no approval threshold configured")
+        return Verdict(Decision.REQUIRE_HUMAN,
+                       f"{action!r} runs automatically only under an approval "
+                       f"threshold, and this call {why}; requires human approval",
+                       rule, policy.compliance_profiles)
+    return None
+
+
 def evaluate(
     action: str,
     *,
@@ -380,9 +470,11 @@ def evaluate(
 
     Strictest-wins evaluation order:
       1. capability (least privilege) -- a forbidden action is denied outright;
-      2. org hard-deny (``deny_actions`` / ``deny_min_risk`` / ``deny_above``);
+      2. org hard-deny (``deny_actions`` / ``deny_min_risk`` / ``deny_above``,
+         then a ``draft`` finance automation level);
       3. human-oversight gate (``require_human_actions`` / ``require_human_min_risk``
-         / ``require_human_above``);
+         / ``require_human_above``, then the ``approve`` / ``auto_threshold``
+         finance automation levels);
       4. otherwise allow.
 
     ``risk`` overrides the classifier (``safety.tool_risk``) when given. ``amount``
@@ -414,6 +506,8 @@ def evaluate(
                        f"{action!r} amount {_money(amount, currency)} exceeds the "
                        f"deny ceiling {_money(deny_thresh, currency)}", "deny_above",
                        policy.compliance_profiles)
+    if (drafted := _automation_verdict(policy, action, amount, stage="deny")) is not None:
+        return drafted
 
     # 3. Human-oversight gate (EU AI Act Art 14).
     if action in policy.require_human_actions:
@@ -432,6 +526,8 @@ def evaluate(
                        f"approval threshold {_money(hitl_thresh, currency)}, "
                        "requires human approval", "require_human_above",
                        policy.compliance_profiles)
+    if (gated := _automation_verdict(policy, action, amount, stage="human")) is not None:
+        return gated
 
     # 4. Default-allow.
     return Verdict(
@@ -440,5 +536,6 @@ def evaluate(
 
 
 __all__ = [
-    "Decision", "GovernancePolicyError", "Verdict", "Policy", "evaluate",
+    "AUTOMATION_LEVELS", "Decision", "GovernancePolicyError", "Verdict", "Policy",
+    "automation_rank", "evaluate", "stricter_level",
 ]

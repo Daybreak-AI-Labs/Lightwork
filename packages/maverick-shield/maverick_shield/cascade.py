@@ -8,13 +8,15 @@ unicode anomalies); the expensive pass is an LLM-based judge. Cut
 jailbreak success 86% -> 4.4% with much lower compute than v1.
 
 This module wraps the existing Shield's scan_* methods with that
-cascade. When `MAVERICK_CASCADE_SHIELD=1`, every call goes through
-the cheap probe first; ONLY on probe-flagged texts do we invoke the
-LLM-based deep scan. Default OFF (back-compat).
+cascade. When `MAVERICK_CASCADE_SHIELD=1` or ``[safety] cascade = true``,
+every call goes through the cheap probe first; ONLY on probe-flagged texts
+do we invoke the LLM-based deep scan. Default OFF (back-compat).
 
 The expensive scanner is pluggable: pass a callable returning
 ShieldVerdict at construction. When None, deep-pass falls back to the
-existing builtin/Shield rules.
+existing builtin/Shield rules. The kernel's run path
+(``maverick.orchestrator._build_shield``) passes the model-based judge in
+``maverick.safety.shield_judge``.
 """
 from __future__ import annotations
 
@@ -243,8 +245,12 @@ class CascadedShield:
 
 
 def cascade_enabled() -> bool:
-    if os.environ.get("MAVERICK_CASCADE_SHIELD", "").lower() in ("1", "true", "yes"):
+    """``MAVERICK_CASCADE_SHIELD`` (either way) wins over ``[safety] cascade``."""
+    env = os.environ.get("MAVERICK_CASCADE_SHIELD", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
         return True
+    if env in ("0", "false", "no", "off"):
+        return False
     try:
         from maverick.config import load_config
         return bool(load_config().get("safety", {}).get("cascade", False))

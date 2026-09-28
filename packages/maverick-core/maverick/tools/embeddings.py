@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import threading
 from typing import Any
 
@@ -55,7 +54,11 @@ _model_cache: dict[str, Any] = {}
 
 
 def _default_model() -> str:
-    return os.environ.get("MAVERICK_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+    """``[models] embed`` (env ``MAVERICK_EMBED_MODEL`` wins), else the default."""
+    from ..env_setting import env_or_config
+
+    return (env_or_config("MAVERICK_EMBED_MODEL", "models", "embed") or "").strip() \
+        or "BAAI/bge-small-en-v1.5"
 
 
 def _load_model(name: str):

@@ -580,6 +580,22 @@ def maintain_questionnaire_index(*, limit: int = 100, rebuild: bool = False):
     return _VENDORS.maintain_lookup(limit=limit, rebuild=rebuild)
 
 
+def prepare_questionnaire_index(*, batches: int = 1, rebuild: bool = False):
+    """Advance up to ``batches`` maintenance batches, stopping once ready.
+
+    ``rebuild`` restarts the derived index on the first batch only. Returns
+    the last batch's result (``ready`` and ``scanned`` among its keys).
+    """
+    if isinstance(batches, bool) or not isinstance(batches, int) or not 1 <= batches <= 1000:
+        raise ValueError("batches must be between 1 and 1000")
+    result = None
+    for index in range(batches):
+        result = maintain_questionnaire_index(rebuild=rebuild and index == 0)
+        if result["ready"]:
+            break
+    return result
+
+
 def get_vendor(vendor_id: str) -> dict[str, Any] | None:
     _require_enabled()
     record = _VENDORS.get(_text(vendor_id, "vendor_id", 64))
@@ -730,6 +746,7 @@ __all__ = [
     "import_onetrust_vendors",
     "link_vendor_record",
     "list_vendors",
+    "prepare_questionnaire_index",
     "questionnaire_for_token",
     "questionnaire_responses",
     "record_monitoring_note",

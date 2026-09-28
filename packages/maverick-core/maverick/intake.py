@@ -504,6 +504,42 @@ def attach_docs_to_profile(spec: IntakeSpec, profile: DomainProfile, kb) -> int:
     return total
 
 
+def onboarding_knowledge_base():
+    """The knowledge base approved onboarding documents are loaded into.
+
+    Returns ``(kb, None)``, ``(None, "disabled")`` when ``[knowledge]`` is off
+    (the knowledge package is then never imported), or ``(None, exc)`` when the
+    optional knowledge layer could not be built. Uploads persist to the active
+    workspace's knowledge store (an explicit ``[knowledge] path`` still wins),
+    are Shield-scanned at ingest when Shield is installed, and diagrams/images
+    are read with OCR when the vision extra is installed.
+    """
+    try:
+        from .config import get_knowledge
+        from .workspace import Workspace
+        kcfg = get_knowledge()
+        if not kcfg.get("enable"):
+            return None, "disabled"
+        from maverick_knowledge import KnowledgeBase, build_embedder, build_store
+        if not kcfg.get("path"):
+            kcfg = {**kcfg, "path": str(Workspace.current().knowledge_path)}
+        shield = None
+        try:
+            from maverick_shield import Shield
+            shield = Shield.from_config(warn_if_missing=False)
+        except Exception:
+            pass
+        kb = KnowledgeBase(store=build_store(kcfg), embedder=build_embedder(kcfg), shield=shield)
+        try:  # OCR uploaded diagrams/images when the vision extra is installed
+            from maverick_knowledge.image import build_ocr_describer
+            kb.image_describer = build_ocr_describer()
+        except Exception:
+            pass  # no vision extra -> images are skipped, not read as bytes
+        return kb, None
+    except Exception as e:  # knowledge layer is optional
+        return None, e
+
+
 def run_intake(spec: IntakeSpec, *, llm=None, kb=None,
                model: str | None = None, budget=None) -> DomainProfile:
     """Generate a validated (but UNSAVED) DomainProfile for human approval.

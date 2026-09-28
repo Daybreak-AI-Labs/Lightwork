@@ -301,25 +301,58 @@
     } catch (ignored) { /* not a readable body */ }
     return errorText(failure, action);
   }
+  function waitForExport(job, done) {
+    // The file is prepared in the background; ask for its status until it is
+    // ready, then offer the download link.
+    var tries = 0;
+    async function poll() {
+      tries += 1;
+      try {
+        var state = await call(base + '/client/export/' + encodeURIComponent(job), 'GET');
+        if (state.state === 'ready') { done(null, base + '/client/export/' + encodeURIComponent(job) + '/download'); return; }
+        if (state.state === 'failed') { done(state.message || 'The export could not be prepared.'); return; }
+      } catch (failure) { done(await plainFailure(failure, 'prepare the download')); return; }
+      if (tries > 400) { done('The export is taking too long. Try again later.'); return; }
+      setTimeout(poll, 3000);
+    }
+    setTimeout(poll, 500);
+  }
+  function areaList(preview) {
+    var list = el('ul', 'maintenance-list');
+    preview.areas.forEach(function (area) {
+      var li = el('li');
+      li.appendChild(el('span', 'maintenance-label', area.label));
+      li.appendChild(el('span', null, area.files + ' file' + (area.files === 1 ? '' : 's')));
+      list.appendChild(li);
+    });
+    return list;
+  }
   renderers.client = function (data) {
     var box = out('client'); box.textContent = '';
     technical('client', data.technical);
     var row = el('p', 'settings-row-form');
     var download = el('button', 'btn btn--primary', 'Download all data');
     download.type = 'button';
+    var ready = el('p', 'settings-row-form');
     download.addEventListener('click', async function () {
       var ok = await window.mvConfirm('Download a copy of all of this organisation\'s data? The file holds everything Lightwork keeps, so store it somewhere safe. Encryption keys are not included.', {okText: 'Download'});
       if (!ok) return;
       download.disabled = true;
-      say('client', 'Preparing the download. This can take a few minutes…');
+      ready.textContent = '';
+      say('client', 'Preparing the download. This can take a few minutes; you can keep working.');
       try {
-        var response = await window.fetch(base + '/client/export', {method: 'POST', credentials: 'same-origin'});
-        if (!response.ok) throw response;
-        saveBlob(await response.blob(), 'Lightwork-data-export.tgz');
-        say('client', 'Download ready. It has been added to the activity record.');
+        var started = await call(base + '/client/export', 'POST');
+        waitForExport(started.job, function (problem, href) {
+          download.disabled = false;
+          if (problem) { say('client', problem); return; }
+          var link = el('a', 'btn btn--primary', 'Save the file');
+          link.href = href;
+          link.setAttribute('download', '');
+          ready.appendChild(link);
+          say('client', 'Your download is ready. It has been added to the activity record.');
+        });
       } catch (failure) {
         say('client', await plainFailure(failure, 'download the data'));
-      } finally {
         download.disabled = false;
       }
     });
@@ -332,15 +365,38 @@
       keepLabel.appendChild(keepRow);
       var erase = el('button', 'btn btn--danger', 'Erase all data');
       erase.type = 'button';
+      var previewBox = el('div');
       erase.addEventListener('click', async function () {
-        var ok = await window.mvConfirm('Erase all data for ' + data.organisation + '? Every task, conversation, lesson and saved file for this organisation is deleted for good and cannot be brought back. Download a copy first if you may need it.', {okText: 'Erase everything'});
-        if (!ok) return;
         erase.disabled = true;
+        previewBox.textContent = '';
+        say('client', 'Counting what would be erased…');
+        var preview;
+        try {
+          preview = await call(base + '/client/erase/preview?keep_activity_record=' + (keep.checked ? 'true' : 'false'), 'GET');
+        } catch (failure) {
+          say('client', await plainFailure(failure, 'count what would be erased'));
+          erase.disabled = false;
+          return;
+        }
+        previewBox.appendChild(el('p', null, 'Erasing removes ' + preview.files + ' file' + (preview.files === 1 ? '' : 's') + ':'));
+        previewBox.appendChild(areaList(preview));
+        say('client', preview.keeps_activity_record ? 'The activity record is kept.' : 'The activity record is erased too.');
+        var ok = await window.mvConfirm('Erase all data for ' + data.organisation + '? Every task, conversation, lesson and saved file for this organisation is deleted for good and cannot be brought back. Download a copy first if you may need it.', {okText: 'Erase everything'});
+        if (!ok) { erase.disabled = false; return; }
+        var typed = window.mvForm ? await window.mvForm('Type the organisation name to confirm', [
+          {key: 'organisation', label: 'Organisation name (' + data.organisation + ')', type: 'text', required: true}],
+          {okText: 'Erase everything'}) : {organisation: data.organisation};
+        if (!typed) { erase.disabled = false; return; }
+        if (String(typed.organisation || '').trim() !== data.organisation) {
+          say('client', 'The name you typed does not match ' + data.organisation + '. Nothing was erased.');
+          erase.disabled = false;
+          return;
+        }
         say('client', 'Erasing…');
         try {
           var response = await window.fetch(base + '/client/erase', {
             method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({organisation: data.organisation, keep_activity_record: keep.checked, confirm: true})
+            body: JSON.stringify({organisation: String(typed.organisation).trim(), keep_activity_record: keep.checked, confirm: true})
           });
           if (!response.ok) throw response;
           var result = await response.json();
@@ -353,9 +409,11 @@
       row.appendChild(erase);
       box.appendChild(row);
       box.appendChild(keepLabel);
+      box.appendChild(previewBox);
     } else {
       box.appendChild(row);
     }
+    box.appendChild(ready);
     return data.summary;
   };
   var paths = {readiness: ['/readiness', 'GET'], health: ['/health-check', 'POST'], settings: ['/settings-check', 'GET'],

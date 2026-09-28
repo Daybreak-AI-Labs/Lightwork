@@ -1421,10 +1421,14 @@ def create_goal(
                   "max_depth": max_depth, "channel": "api", "user_id": user_id,
                   "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None}
         if not try_claim_api_dispatch(w, receipt, intent):
-            if replay_resume:
-                g1 = w.get_goal(goal_id)
-                if g1 is not None and g1.status != "draft":
-                    return _to_goal_out(g1)  # a concurrent replay dispatched it
+            # A concurrent same-key request claimed the draft first (a replay
+            # can win the claim before the request that created it): the work
+            # was dispatched exactly once, so this request gets the same goal.
+            g1 = w.get_goal(goal_id)
+            if g1 is not None and g1.status != "draft":
+                response.headers["Location"] = f"/api/v1/goals/{goal_id}"
+                response.headers["Idempotency-Replayed"] = "true" if replay_resume else "false"
+                return _to_goal_out(g1)
             raise HTTPException(status_code=409, detail=(
                 "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
     if user_id:
@@ -7557,10 +7561,10 @@ def _require_skill_install_opt_in() -> None:
         raise HTTPException(
             status_code=403,
             detail=(
-                "Installing skills from the dashboard is disabled on this "
-                "server — an administrator can opt in (set "
-                "MAVERICK_ALLOW_SKILL_INSTALL=1, or run "
-                "`maverick skill install` on the host)."
+                "Installing skills from the dashboard is turned off. A global "
+                "administrator can turn on “Install skills from a typed web "
+                "address” in Settings > All settings (or set "
+                "MAVERICK_ALLOW_SKILL_INSTALL=1 on the server)."
             ),
         )
 
@@ -7853,6 +7857,15 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
         text, _redactions = redact_for_speech(text)
     except Exception:  # pragma: no cover -- redaction is fail-open by design
         pass
+    try:
+        # [voice] only_mode: replies are heard, not read, so code, tables and
+        # links are described instead of spelled out.
+        from maverick.voice_only import shape_for_speech, voice_only_enabled
+
+        if voice_only_enabled():
+            text = shape_for_speech(text) or text
+    except Exception:  # pragma: no cover -- shaping never blocks read-aloud
+        log.warning("voice-only shaping failed; reading the text as written")
 
     import os as _os
     import tempfile as _tempfile
@@ -9802,6 +9815,7 @@ def _schedule_out(job) -> ScheduleOut:
         title=(str(p.get("title") or p.get("text") or ""))[:200],
         next_run=job.run_at,
         schedule_id=str(p.get("schedule_id") or ""),
+        zone=str(p.get("__tz__") or ""),
     )
 
 
@@ -9830,6 +9844,12 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     from maverick.scheduler import CronError, next_run, schedule_cron
 
     cron = (payload.cron or "").strip()
+    tz = (payload.tz or "").strip()
+    if tz:
+        from .schedule_ops_api import valid_zone
+
+        if not valid_zone(tz):
+            raise HTTPException(status_code=400, detail="unknown time zone")
     try:
         next_run(cron)  # validate up front; CronError -> 400
     except CronError as e:
@@ -9864,6 +9884,8 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
 
     schedule_id = uuid4().hex
     job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
+    if tz:
+        job_payload["__tz__"] = tz
     owner = caller_principal(request) or ""
     if owner:
         job_payload["owner"] = owner
@@ -9890,6 +9912,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
         title=title,
         next_run=run_at,
         schedule_id=schedule_id,
+        zone=tz,
     )
 
 

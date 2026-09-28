@@ -8,7 +8,6 @@ at the end of the package __init__, like the other ``_*_groups`` modules.
 from __future__ import annotations
 
 import json as _json
-from dataclasses import asdict
 
 import click
 
@@ -17,25 +16,8 @@ from . import main
 
 def _strict_json_object(raw: str) -> dict:
     """Decode one finite JSON object without silently collapsing duplicate keys."""
-    def reject_constant(token: str) -> object:
-        raise ValueError(f"non-standard JSON constant {token!r}")
-
-    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
-        decoded: dict[str, object] = {}
-        for key, value in pairs:
-            if key in decoded:
-                raise ValueError(f"duplicate JSON field {key!r}")
-            decoded[key] = value
-        return decoded
-
-    value = _json.loads(
-        raw,
-        parse_constant=reject_constant,
-        object_pairs_hook=reject_duplicate_keys,
-    )
-    if not isinstance(value, dict):
-        raise ValueError("outputs must be a CASE_ID-to-output JSON object")
-    return value
+    from ..training.improvement_report import strict_json_object
+    return strict_json_object(raw)
 
 
 @main.group("reward-model")
@@ -108,34 +90,9 @@ def model_improvement_group() -> None:
 @model_improvement_group.command("status")
 def model_improvement_status_cmd() -> None:
     """Show control posture, taskset readiness, and catalog identity."""
-    from ..config import get_model_improvement
-    from ..training.environments import (
-        list_environment_ids,
-        load_environment,
-        promotion_readiness,
-    )
-    from ..training.specialist_models import load_catalog
+    from ..training.improvement_report import status_report
 
-    settings = get_model_improvement()
-    catalog = load_catalog()
-    environments = []
-    for environment_id in list_environment_ids():
-        pack = load_environment(environment_id)
-        environments.append(promotion_readiness(
-            pack,
-            minimum_train_families=settings["minimum_train_families"],
-            minimum_holdout_families=settings["minimum_holdout_families"],
-        ))
-    click.echo(_json.dumps({
-        "config": settings,
-        "catalog": {
-            "as_of": catalog.as_of,
-            "sha256": catalog.digest,
-            "candidates": len(catalog.models),
-            "claim": "planning candidates; no model is production-qualified",
-        },
-        "environments": environments,
-    }, indent=2, sort_keys=True))
+    click.echo(_json.dumps(status_report(), indent=2, sort_keys=True))
 
 
 @model_improvement_group.command("models")
@@ -150,32 +107,12 @@ def model_improvement_models_cmd(
     concurrency,
 ) -> None:
     """List planning candidates for one role and memory envelope."""
-    from ..training.specialist_models import candidate_matrix, load_catalog
+    from ..training.improvement_report import candidates_report
 
-    catalog = load_catalog()
-    rows = []
-    for candidate, estimate in candidate_matrix(
-        role,
-        available_memory_gib=memory_gib,
-        context_tokens=context_tokens,
+    click.echo(_json.dumps(candidates_report(
+        role, memory_gib=memory_gib, context_tokens=context_tokens,
         concurrency=concurrency,
-        catalog=catalog,
-    ):
-        rows.append({
-            "catalog_id": candidate.catalog_id,
-            "model_id": candidate.model_id,
-            "upstream_revision": candidate.upstream_revision,
-            "license": candidate.license,
-            "status": candidate.status,
-            "planning_priority": candidate.planning_priority,
-            "estimate": asdict(estimate),
-        })
-    click.echo(_json.dumps({
-        "catalog_sha256": catalog.digest,
-        "role": role,
-        "planning_only": True,
-        "candidates": rows,
-    }, indent=2, sort_keys=True))
+    ), indent=2, sort_keys=True))
 
 
 @model_improvement_group.command("score")
@@ -201,29 +138,13 @@ def model_improvement_score_cmd(
     """Score a CASE_ID-to-output JSON object without an LLM judge."""
     from pathlib import Path
 
-    from ..training.environments import evaluate_outputs, load_environment
+    from ..training.improvement_report import score_report
 
     try:
         raw = _strict_json_object(Path(outputs).read_text(encoding="utf-8"))
     except (OSError, _json.JSONDecodeError, ValueError) as exc:
         raise click.ClickException(f"cannot read outputs: {exc}") from exc
-    evaluation = evaluate_outputs(
-        load_environment(environment_id),
-        raw,
-        split=split,
-    )
-    payload = {
-        "schema": evaluation.schema,
-        "environment_id": evaluation.environment_id,
-        "environment_digest": evaluation.environment_digest,
-        "split": evaluation.split,
-        "score": evaluation.score,
-        "pass_rate": evaluation.pass_rate,
-        "evaluation_sha256": evaluation.digest,
-        "missing_case_ids": list(evaluation.missing_case_ids),
-        "extra_case_ids": list(evaluation.extra_case_ids),
-        "results": [asdict(result) for result in evaluation.results],
-    }
+    payload = score_report(environment_id, raw, split=split)
     click.echo(_json.dumps(payload, indent=2, sort_keys=True))
-    if require_perfect and evaluation.pass_rate != 1.0:
+    if require_perfect and payload["pass_rate"] != 1.0:
         raise click.ClickException("selected split did not pass perfectly")

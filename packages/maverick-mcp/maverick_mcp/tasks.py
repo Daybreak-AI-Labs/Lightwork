@@ -60,9 +60,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _env_int(name: str, default: int, *, lo: int, hi: int) -> int:
+def _env_int(name: str, default: int, *, lo: int, hi: int, key: str = "") -> int:
+    """``name`` from the environment, else ``[mcp] <key>``, else ``default``;
+    read when the task manager starts."""
+    from .settings import mcp_setting
+
+    raw = mcp_setting(key) if key else os.environ.get(name)
     try:
-        v = int(os.environ.get(name, default))
+        v = int(raw if raw is not None else default)
     except (TypeError, ValueError):
         v = default
     return max(lo, min(hi, v))
@@ -173,7 +178,7 @@ class TaskStore:
         # server can push notifications/tasks/status. Fired outside the lock.
         self._on_status_change = on_status_change
         self._max_tasks = max_tasks if max_tasks is not None else _env_int(
-            "MAVERICK_MCP_MAX_TASKS", 256, lo=1, hi=100_000)
+            "MAVERICK_MCP_MAX_TASKS", 256, lo=1, hi=100_000, key="max_tasks")
         # Per-caller sub-cap (HTTP multi-client mode only). The global cap above
         # is shared, and _make_room only evicts TERMINAL tasks, so without this
         # one principal could fill all 256 slots with active tasks and block
@@ -184,21 +189,21 @@ class TaskStore:
         self._max_tasks_per_owner = (
             max_tasks_per_owner if max_tasks_per_owner is not None else _env_int(
                 "MAVERICK_MCP_MAX_TASKS_PER_OWNER",
-                min(32, self._max_tasks), lo=1, hi=self._max_tasks)
+                min(32, self._max_tasks), lo=1, hi=self._max_tasks, key="max_tasks_per_owner")
         )
         self._default_ttl_ms = default_ttl_ms if default_ttl_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_TTL_MS", 3_600_000, lo=1_000, hi=604_800_000)
+            "MAVERICK_MCP_TASK_TTL_MS", 3_600_000, lo=1_000, hi=604_800_000, key="task_ttl_ms")
         self._max_ttl_ms = max_ttl_ms if max_ttl_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_MAX_TTL_MS", 86_400_000, lo=1_000, hi=604_800_000)
+            "MAVERICK_MCP_TASK_MAX_TTL_MS", 86_400_000, lo=1_000, hi=604_800_000, key="task_max_ttl_ms")
         self._poll_ms = poll_interval_ms if poll_interval_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_POLL_MS", 1_000, lo=50, hi=3_600_000)
+            "MAVERICK_MCP_TASK_POLL_MS", 1_000, lo=50, hi=3_600_000, key="task_poll_ms")
         # Upper bound on how long a single ``tasks/result`` call blocks a worker
         # thread, INDEPENDENT of the task's ttl (see result()). Defaults to 60s.
         self._result_block_ms = result_block_ms if result_block_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_RESULT_BLOCK_MS", 60_000, lo=1_000, hi=600_000)
+            "MAVERICK_MCP_TASK_RESULT_BLOCK_MS", 60_000, lo=1_000, hi=600_000, key="task_result_block_ms")
         self._page_size = max(1, page_size)
         workers = max_workers if max_workers is not None else _env_int(
-            "MAVERICK_MCP_TASK_WORKERS", 4, lo=1, hi=64)
+            "MAVERICK_MCP_TASK_WORKERS", 4, lo=1, hi=64, key="task_workers")
         self._executor = ThreadPoolExecutor(
             max_workers=workers, thread_name_prefix="mcp-task")
         self._tasks: dict[str, McpTask] = {}

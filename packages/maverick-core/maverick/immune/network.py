@@ -11,10 +11,7 @@ proven by the runtime :class:`~maverick.capability.Capability` itself
 """
 from __future__ import annotations
 
-import os
 from collections import deque
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from ..capability import COORDINATION_TOOLS
@@ -187,29 +184,18 @@ def blast_radius(g: Graph) -> dict[str, int]:
     return {n: len(_paths_from(g, n)) - 1 for n in sorted(g.agents)}
 
 
-@contextmanager
-def settings(*, levels: bool | None = None, grounding: bool | None = None) -> Iterator[None]:
-    """Evaluate pack capabilities under explicit autonomy/grounding settings.
-    ``None`` keeps the deployment's current setting for that dial."""
-    keys = {k: v for k, v in {"MAVERICK_WORKFORCE_LEVELS": levels,
-                              "MAVERICK_WORKFORCE_DATA_GROUNDING": grounding}.items()
-            if v is not None}
-    saved = {k: os.environ.get(k) for k in keys}
-    os.environ.update({k: "1" if v else "0" for k, v in keys.items()})
-    try:
-        yield
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+def runtime_tools(profile, *, levels: bool | None = None,
+                  grounding: bool | None = None) -> frozenset[str]:
+    """Tools a pack can actually call: the runtime capability, not the TOML.
 
-
-def runtime_tools(profile) -> frozenset[str]:
-    """Tools a pack can actually call: the runtime capability, not the TOML."""
+    ``levels`` / ``grounding`` evaluate the pack under an explicit autonomy /
+    data-grounding dial; ``None`` keeps the deployment's current setting. The
+    dials are passed to the capability builder, never written to the process
+    environment, so a what-if check cannot change how running agents behave.
+    """
     from ..domain import domain_capability
-    cap = domain_capability(profile, None, f"agent:{profile.name}")
+    cap = domain_capability(profile, None, f"agent:{profile.name}",
+                            levels=levels, grounding=grounding)
     # An empty allowlist means EVERY tool (Capability semantics), not none.
     if cap.allow_tools:
         candidates = cap.allow_tools
@@ -219,13 +205,16 @@ def runtime_tools(profile) -> frozenset[str]:
     return frozenset(t for t in candidates if cap.permits(t))
 
 
-def roster_graph(domains=None, *, swarm: bool = False) -> Graph:
+def roster_graph(domains=None, *, swarm: bool = False, levels: bool | None = None,
+                 grounding: bool | None = None) -> Graph:
     """Graph of every pack. ``swarm=True`` adds the orchestrator hub: peer
     messaging and the shared blackboard are coordination tools no pack
-    allowlist can remove, so every member's data can reach every other."""
+    allowlist can remove, so every member's data can reach every other.
+    ``levels`` / ``grounding`` as in :func:`runtime_tools`."""
     from ..domain import available_domains
     domains = domains if domains is not None else available_domains()
-    agents = {name: runtime_tools(p) for name, p in sorted(domains.items())}
+    agents = {name: runtime_tools(p, levels=levels, grounding=grounding)
+              for name, p in sorted(domains.items())}
     flows: set[tuple[str, str]] = set()
     if swarm:
         agents["orchestrator"] = frozenset()

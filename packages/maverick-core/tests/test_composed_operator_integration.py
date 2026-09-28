@@ -210,6 +210,9 @@ def test_packed_governed_review_exports_only_an_unpublished_refined_draft(tmp_pa
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    # The review export verifies signed audit receipts; pin signing so the test
+    # holds under the suite's ordinary posture as well as the secure one.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     for name in ("MAVERICK_GOVERNED_RECORDS_BACKEND", "MAVERICK_PG_DSN",
                  "MAVERICK_REPLICA_COUNT", "MAVERICK_WORLD_BACKEND"):
         monkeypatch.delenv(name, raising=False)

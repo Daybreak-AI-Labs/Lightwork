@@ -315,12 +315,19 @@ async def tax_tables_roll_back(request: Request) -> dict:
     return {"rolled_back": True}
 
 
+class TaxTablesCheckIn(BaseModel):
+    """Optional one-off update address (the command's ``--url``); https only."""
+    model_config = ConfigDict(extra="forbid")
+    url: str | None = Field(default=None, max_length=500, pattern=r"^https://[^\s]+$")
+
+
 @router.post("/api/v1/tax/tables/check")
-async def tax_tables_check(request: Request) -> dict:
+async def tax_tables_check(request: Request, body: TaxTablesCheckIn | None = None) -> dict:
     _same_origin(request)
     require_global_permission(request, "admin")
     from maverick import tax_constants
-    status, detail = await run_in_threadpool(lambda: tax_constants.check_for_update(force=True))
+    url = body.url if body is not None and body.url else None
+    status, detail = await run_in_threadpool(lambda: tax_constants.check_for_update(url=url, force=True))
     if status == "applied":
         await run_in_threadpool(lambda: _record(request, "tax_tables_apply", installation=True,
                                                 version=tax_constants.active_version()))

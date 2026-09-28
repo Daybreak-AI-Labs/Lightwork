@@ -100,8 +100,11 @@ def _skill_source(raw: str) -> str:
 
 
 def _install_allowed() -> bool:
-    import os
-    return os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() in {"1", "true", "yes"}
+    # The server's MAVERICK_ALLOW_SKILL_INSTALL wins; otherwise the All settings
+    # switch "Install skills from a typed web address" ([skills] allow_url_install).
+    from maverick.skills import url_install_allowed
+
+    return url_install_allowed()
 
 
 class SkillSourceIn(BaseModel):
@@ -151,7 +154,8 @@ async def skill_source_install(body: SkillInstallIn, request: Request) -> dict:
     same_origin(request)
     require_permission(request, "admin")
     if not _install_allowed():
-        raise HTTPException(403, "Adding skills from this page is switched off on this server.")
+        raise HTTPException(403, "Adding skills from a web address is turned off. A global "
+                                 "administrator can turn it on in Settings > All settings.")
     source = _skill_source(body.source)
     if not body.confirm:
         raise HTTPException(422, "Confirm that you want to add this skill.")

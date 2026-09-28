@@ -349,16 +349,18 @@ def _harness(S) -> tuple:
           warning="Improvements will be read from and saved to a different place. What was "
                   "learned in the old place is not moved."),
         S("self_harness", "eval_corpus", "Test cases for improvements",
-          "The file on the server with the test cases improvements are measured against. "
-          "Without it, nightly runs only report what they would change.", "text", group, "",
-          "maverick.config", subgroup=_HARNESS, max_length=400, pattern=_PATH,
-          weaker="change",
+          "The file, inside Lightwork's data folder, with the test cases improvements are "
+          "measured against. Lightwork creates it when it first saves test cases. Without "
+          "it, nightly runs only report what they would change.", "path", group, "",
+          "maverick.config", subgroup=_HARNESS, max_length=400, path_kind="file",
+          path_writable=True, path_new=True, path_scope="data", weaker="change",
           warning="Improvements will be judged against a different set of test cases."),
         S("self_harness", "holdout_ledger", "Record of unseen-case checks",
-          "The file on the server that counts how often the unseen test cases have been "
-          "used. The careful improvement profile needs it before it adopts anything.", "text",
-          group, "", "maverick.config", subgroup=_HARNESS, max_length=400, pattern=_PATH,
-          weaker="change",
+          "The file, inside Lightwork's data folder, that counts how often the unseen test "
+          "cases have been used. Set it up once from the Learned page. The careful "
+          "improvement profile needs it before it adopts anything.", "path",
+          group, "", "maverick.config", subgroup=_HARNESS, max_length=400, path_kind="file",
+          path_writable=True, path_new=True, path_scope="data", weaker="change",
           warning="Checks will be counted in a different record, which could let the unseen "
                   "cases be used more often than allowed."),
         S("self_harness", "holdout_container_image", "Approved checking environment",

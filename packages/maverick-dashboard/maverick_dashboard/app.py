@@ -667,6 +667,11 @@ async def _lifespan(app: FastAPI):
     from maverick.installation_recovery import assert_normal_start_allowed
 
     assert_normal_start_allowed()
+    # Moves an administrator scheduled for "while Lightwork is stopped" run
+    # here, before this process takes ownership of the data folder. Never raises.
+    from .offline_maintenance import run_scheduled as _run_offline_maintenance
+
+    await run_in_threadpool(_run_offline_maintenance)
     from maverick.deployment import require_enterprise_or_die
 
     require_enterprise_or_die()
@@ -734,6 +739,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("red-team schedule dispatcher not started")
         try:
+            from maverick_dashboard.shield_update_scheduler import (
+                start_shield_update_scheduler,
+            )
+
+            await run_in_threadpool(start_shield_update_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("shared threat rules check not started")
+        try:
             from maverick_dashboard.ai_inventory_scheduler import (
                 start_ai_inventory_scheduler,
             )
@@ -755,6 +768,14 @@ async def _lifespan(app: FastAPI):
             await run_in_threadpool(start_identity_governance_scheduler)
         except Exception:  # pragma: no cover - never block startup
             log.exception("identity-governance scheduler not started")
+        try:
+            # Profiling, the kernel activity monitor and the model proxy, each
+            # only when its setting is on (All settings); stopped at shutdown.
+            from maverick_dashboard.background_programs import start_enabled
+
+            await run_in_threadpool(start_enabled)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("background programs not started")
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
         # Connected-entitlement auto-refresh: a deployment with [license] api_url
@@ -1079,6 +1100,23 @@ app.include_router(store_catalogs_router)
 app.include_router(billing_invoice_router)
 app.include_router(voice_setup_router)
 app.include_router(build_tools_ops_router())
+# Installation operations that were terminal-only (Settings > Maintenance,
+# Workspaces, Billing, Help, Savings, Performance and the full setup guide).
+from . import (  # noqa: E402
+    billing_ops_api,
+    insights_ops_api,
+    installation_ops_api,
+    process_ops_api,
+    setup_guide,
+    support_ops_api,
+    tenant_ops_api,
+)
+
+for _ops_module in (billing_ops_api, insights_ops_api, installation_ops_api, support_ops_api, tenant_ops_api):
+    app.include_router(_ops_module.router)
+    app.include_router(_ops_module.asset_router)
+app.include_router(process_ops_api.router)
+app.include_router(setup_guide.router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 
@@ -1219,6 +1257,15 @@ app.include_router(_third_party_page_assets)
 from .trc_setup_api import router as _trc_setup_router  # noqa: E402
 
 app.include_router(_trc_setup_router)
+from .audit_ops_api import router as _audit_ops_router  # noqa: E402
+from .governance_ops_api import router as _governance_ops_router  # noqa: E402
+from .immune_ops_api import router as _immune_ops_router  # noqa: E402
+from .privacy_ops_api import router as _privacy_ops_router  # noqa: E402
+from .security_ops_api import router as _security_ops_router  # noqa: E402
+
+for _ops_router in (_audit_ops_router, _governance_ops_router, _immune_ops_router,
+                    _privacy_ops_router, _security_ops_router):
+    app.include_router(_ops_router)
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -1241,6 +1288,9 @@ app.include_router(portal_routing_key_router)
 app.include_router(task_file_recovery_router)
 app.include_router(task_changes_router)
 app.include_router(viewpoints_router)
+from .cli_ops_api import router as cli_ops_router  # noqa: E402
+
+app.include_router(cli_ops_router)
 from .connection_setup_api import router as connection_setup_router  # noqa: E402
 
 app.include_router(connection_setup_router)
@@ -1339,6 +1389,9 @@ from .admin_pages import router as admin_pages_router  # noqa: E402
 
 app.include_router(admin_pages_router)
 # Settings > All settings (/settings/all + its catalog save/reset API).
+from .privacy_notice_publication_targets_api import (  # noqa: E402
+    router as privacy_notice_targets_router,
+)
 from .settings_all_page import router as settings_all_router  # noqa: E402
 
 app.include_router(settings_all_router)
@@ -1350,6 +1403,7 @@ app.include_router(license_ops_router)
 from .finance_ops_api import router as finance_ops_router  # noqa: E402
 
 app.include_router(finance_ops_router)
+app.include_router(privacy_notice_targets_router)
 # Ekko Work Discovery: a human review/control surface only.  Endpoint
 # collectors do not enter through HTTP; they write through the local core
 # daemon's owner/device/tenant-scoped store.
@@ -1659,7 +1713,11 @@ async def bound_public_governance_body(request: Request, call_next):
         maximum = _MAX_NATIVE_CONSENT_BODY_BYTES
         detail = "native consent request body too large"
     elif path.startswith("/api/v1/public/consent/"):
-        maximum = _MAX_PUBLIC_CONSENT_BODY_BYTES
+        # The installation's public request cap (Settings > All settings),
+        # else 64 KiB; the router applies the same cap again.
+        from .consent_public_api import configured_request_byte_limit
+
+        maximum = configured_request_byte_limit() or _MAX_PUBLIC_CONSENT_BODY_BYTES
         detail = "public consent request body too large"
     elif path.startswith("/api/v1/external/third-party-collaboration/"):
         if request.method == "POST" and path.endswith("/evidence"):
@@ -7345,7 +7403,11 @@ def _permissions_snapshot() -> dict:
         for n, c in (cfg.get("channels") or {}).items()
     ]
     sec = cfg.get("security") or {}
-    snap["network"] = sec.get("network_policy") or "open"
+    # The enforced network posture ([security] network_policy), normalized, so
+    # the page never shows a label the kernel does not apply.
+    from maverick.sandbox.network_policy import network_posture
+
+    snap["network"] = network_posture(cfg)
 
     try:
         from maverick.runtime_overrides import denied_tools as _overlay
@@ -9980,8 +10042,19 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
+            "voice_only": _voice_only_mode(),
         },
     )
+
+
+def _voice_only_mode() -> bool:
+    """``[voice] only_mode``: the finished result is read aloud on arrival."""
+    try:
+        from maverick.voice_only import voice_only_enabled
+
+        return voice_only_enabled()
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return False
 
 
 def _withheld_event_markers() -> list[str]:

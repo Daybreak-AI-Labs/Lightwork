@@ -28,6 +28,7 @@
   <a class="btn btn--ghost" href="/approvals">Approvals</a>
   {% if enabled %}<button class="btn btn--primary" id="hunt-run" type="button">Run a check now</button>{% endif %}
 </div>
+{% include "_ops_security.html" %}
 {% if not enabled %}
 <section class="panel">
   <h2>The Lightwork threat check is off</h2>

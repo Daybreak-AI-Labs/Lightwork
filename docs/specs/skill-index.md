@@ -90,18 +90,23 @@ Each skill entry MUST have:
 
 ## Federation
 
-Users add custom indexes:
+Users add custom indexes. The key is `[catalogs] indexes` (what
+`maverick.catalog` reads, and what the Skill Store's sources control writes);
+each entry is a base URL that serves `<base>/skills/index.json`:
 
 ```toml
-[skills]
+[catalogs]
 indexes = [
-  "https://skills.maverick.dev/index.json",
-  "https://my-internal-index.corp/skills.json",
+  "https://skills.maverick.dev",
+  "https://my-internal-index.corp/catalog",
 ]
+
+[skills]
 require_signed = false
 ```
 
-The first index URL wins on name collision. Skills from internal indexes
+(Earlier drafts of this spec said `[skills] indexes`; nothing ever read that
+key.) The first index URL wins on name collision. Skills from internal indexes
 get a tiny `<index-host>` annotation in CLI output so users can tell
 provenance at a glance.
 

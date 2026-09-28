@@ -35,6 +35,16 @@ Schema (TOML):
     fs_write         = true
     subprocess       = false
     sensitive_envs   = []
+
+The Plugin API v2 RFC's declaration form is honoured too: ``requires`` in
+``[capabilities]`` (or ``[plugin.capabilities]``), e.g. ``requires =
+["net:egress", "fs:write"]``, and ``api = 2`` for ``api_version``. Each
+requirement maps onto the permissions above (``net:egress`` -> network,
+``fs:write`` -> fs_write, ``proc:exec`` -> subprocess, ``env:NAME`` -> a
+sensitive environment variable); any other requirement (``tool:<name>`` and
+anything unknown) stays in ``permissions.requires`` and must be granted by
+exactly that name, so a plugin can never be loaded with a requirement the
+operator did not grant.
 """
 from __future__ import annotations
 
@@ -89,6 +99,44 @@ class PluginPermissions:
     fs_write: bool = False
     subprocess: bool = False
     sensitive_envs: list[str] = field(default_factory=list)
+    # Declared requirements with no permission of their own (``tool:<name>``
+    # or unknown); each must be granted by exactly this name.
+    requires: list[str] = field(default_factory=list)
+
+
+# RFC ``requires`` spellings -> the permission they need.
+_REQUIREMENT_PERMISSIONS = {
+    "net:egress": "network", "net": "network", "network": "network",
+    "fs:write": "fs_write", "fs_write": "fs_write",
+    "proc:exec": "subprocess", "subprocess": "subprocess",
+}
+
+
+def _declared_requirements(data: dict[str, Any], section: dict[str, Any]) -> list[str]:
+    """Every ``requires`` entry, from ``[capabilities]`` and ``[plugin.capabilities]``."""
+    found: list[str] = []
+    for table in (data.get("capabilities"), section.get("capabilities")):
+        raw = table.get("requires") if isinstance(table, dict) else None
+        if isinstance(raw, str):
+            raw = [raw]
+        for item in raw if isinstance(raw, (list, tuple)) else ():
+            text = str(item or "").strip().lower()
+            if text and text not in found:
+                found.append(text)
+    return found
+
+
+def _apply_requirements(perms: PluginPermissions, requirements: list[str]) -> None:
+    for requirement in requirements:
+        permission = _REQUIREMENT_PERMISSIONS.get(requirement)
+        if permission is not None:
+            setattr(perms, permission, True)
+        elif requirement.startswith("env:") and len(requirement) > 4:
+            name = requirement[4:].upper()
+            if name not in perms.sensitive_envs:
+                perms.sensitive_envs.append(name)
+        elif requirement not in perms.requires:
+            perms.requires.append(requirement)
 
 
 @dataclass
@@ -164,6 +212,8 @@ def parse_dict(data: dict[str, Any], *, source: str = "<inline>") -> PluginManif
     name = section.get("name")
     version = section.get("version")
     api_version = section.get("api_version")
+    if api_version is None and section.get("api") is not None:
+        api_version = str(section.get("api"))  # the RFC's spelling
     if not name or not version or not api_version:
         log.warning("plugin_manifest: %s missing required fields", source)
         return None
@@ -190,6 +240,7 @@ def parse_dict(data: dict[str, Any], *, source: str = "<inline>") -> PluginManif
             sensitive_envs=list(perm_d.get("sensitive_envs") or []),
         ),
     )
+    _apply_requirements(manifest.permissions, _declared_requirements(data, section))
     if not manifest.is_compatible():
         manifest.warnings.append(
             f"api_version {manifest.api_version!r} not in supported majors "

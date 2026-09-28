@@ -19,16 +19,16 @@ for false unless noted otherwise.
 | `MAVERICK_CODING_MODE` | unset | When `1`/`true`/`yes`, switches the agent into coding mode (set by `maverick start --coding-mode`); affects prompts, fs/shell tool defaults, and cache TTL. |
 | `MAVERICK_LANGUAGE` | unset | Primary project language hint (e.g. `python`, `go`). Feeds sandbox/toolchain selection and coding mode. |
 | `MAVERICK_MAX_STEPS` | unset | Optional explicit cap on agent loop steps per goal. Ordinary goals have no generated step cap. |
-| `MAVERICK_STEP_BUDGET_WARNING` | `3` | When this many tool-using turns remain before `MAVERICK_MAX_STEPS`, the loop nudges the agent to give its FINAL answer (so a long run isn't cut off mid-work). `0` disables. |
-| `MAVERICK_MAX_SWARM_FANOUT` | `8` | Max child agents a single spawn call may branch into. |
+| `MAVERICK_STEP_BUDGET_WARNING` | `3` | When this many tool-using turns remain before `MAVERICK_MAX_STEPS`, the loop nudges the agent to give its FINAL answer (so a long run isn't cut off mid-work). `0` disables. Also `[agent] step_budget_warning` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_MAX_SWARM_FANOUT` | `8` | Max child agents a single spawn call may branch into. Also `[swarm] max_fanout` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_MAX_TOTAL_SPAWNS` | `64` | Cap on the agents one goal may create (overrides `[swarm] max_total_spawns`). |
 | `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` | `0` (unbounded) | Model calls in flight at once across one goal's swarm (overrides `[swarm] max_concurrent_model_calls`). |
-| `MAVERICK_MAX_CONCURRENT_GOALS` | `16` | Global ceiling on goals running in parallel — a host-overload backstop, sized so normal multi-user load never reaches it. |
-| `MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL` | `3` | Per-user concurrency lane: one principal can run this many goals at once without blocking other users (fair scheduling). |
+| `MAVERICK_MAX_CONCURRENT_GOALS` | `16` | Global ceiling on goals running in parallel — a host-overload backstop, sized so normal multi-user load never reaches it. Also `[agent] max_concurrent_goals` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL` | `3` | Per-user concurrency lane: one principal can run this many goals at once without blocking other users (fair scheduling). Also `[agent] max_concurrent_goals_per_principal` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_GOAL_ACQUIRE_TIMEOUT` | `300` | Seconds to wait for a goal-execution slot (per-user lane, then global) before giving up. |
 | `MAVERICK_PARALLEL_TOOLS` | `1` (on) | Set `0` to run tool calls within a turn serially instead of in parallel. |
-| `MAVERICK_LOOP_GUARD` | `1` (on) | Set `0` to disable the repeated-failure loop guard (nudges the agent when it re-issues the same failing tool call). |
-| `MAVERICK_LOOP_GUARD_THRESHOLD` | `3` | Consecutive identical tool-call failures before the loop guard nudges (min 2). |
+| `MAVERICK_LOOP_GUARD` | `1` (on) | Set `0` to disable the repeated-failure loop guard (nudges the agent when it re-issues the same failing tool call). Also `[agent] loop_guard` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_LOOP_GUARD_THRESHOLD` | `3` | Consecutive identical tool-call failures before the loop guard nudges (min 2). Also `[agent] loop_guard_threshold` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_HALT_FILE` | `~/.maverick/HALT` | Killswitch path; the run aborts if this file exists. |
 | `MAVERICK_NO_CLI` | unset | `1` marks embedded mode: skips third-party plugin auto-discovery and CLI-only paths. |
 | `MAVERICK_NO_PROGRESS` | unset | Set to suppress the live progress display. |
@@ -43,7 +43,7 @@ for false unless noted otherwise.
 | `MAVERICK_BILLING_STRICT` | `true` | Require verified pricing for live accounting. `false` explicitly enables warning-labelled estimate-only accounting for legacy/custom gateways. |
 | `MAVERICK_DEFAULT_MAX_DOLLARS` | unset | Optional deployment task default; Settings and `[budget] max_dollars` take precedence. The task-limits switch can disable these defaults. No dollar limit is generated when omitted. |
 | `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | unset | Optional deployment task wall-clock default, in seconds. No elapsed-time cap is generated when omitted. |
-| `MAVERICK_DEFAULT_MAX_DEPTH` | `3` | Default max recursion depth for spawned sub-goals. |
+| `MAVERICK_DEFAULT_MAX_DEPTH` | `3` | Default max recursion depth for spawned sub-goals. Also `[swarm] default_max_depth` (Settings > All settings; read at startup, this variable wins). |
 
 Task limits and organization allowances are separate. See
 [task limits and spend accounting](task-limits.md) for existing-install migration,
@@ -57,7 +57,7 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_MODEL_OVERRIDE_<ROLE>` | unset | Per-role override, e.g. `MAVERICK_MODEL_OVERRIDE_CODER`. Beats the global override for that role. |
 | `MAVERICK_TEMPERATURE` | provider default | Sampling temperature for LLM calls. |
 | `MAVERICK_VISION_MODEL` | `anthropic:claude-sonnet-4-6` | Model used by the image/video viewing tools (`provider:model-id`). |
-| `MAVERICK_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model id. |
+| `MAVERICK_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model id. Also `[models] embed` (Settings > All settings; this variable wins). |
 | `MAVERICK_COST_ROUTING` | config `[routing] cost_aware` (off) | Enable cost-aware model routing. |
 | `MAVERICK_CASCADE_ROUTING` | config `[models] cascade` (off) | Enable cascaded routing (cheap model first, escalate on need). |
 | `MAVERICK_ESCALATE_BELOW` | `0.6` | Verifier-confidence threshold below which a cascade escalates to a stronger model. |
@@ -65,9 +65,9 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_ANTHROPIC_CACHE_TTL` | `1h` (coding mode: `5m`) | Anthropic prompt-cache TTL; an explicit value always wins. |
 | `MAVERICK_CACHE_MESSAGES` | `1` (on) | Set `0` to disable prompt caching of message history. |
 | `MAVERICK_LLM_CACHE` | unset (off) | Enable the on-disk LLM response cache. |
-| `MAVERICK_LLM_RETRY_ATTEMPTS` | `5` | Max retry attempts for failed LLM calls. |
-| `MAVERICK_LLM_RETRY_BASE_DELAY` | `1.0` | Base backoff delay (seconds) between LLM retries. |
-| `MAVERICK_LLM_RETRY_MAX_DELAY` | `30.0` | Max backoff delay (seconds) between LLM retries. |
+| `MAVERICK_LLM_RETRY_ATTEMPTS` | `3` | Max retry attempts for failed LLM calls. Also `[latency] retry_attempts` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_LLM_RETRY_BASE_DELAY` | `1.0` | Base backoff delay (seconds) between LLM retries. Also `[latency] retry_base_delay` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_LLM_RETRY_MAX_DELAY` | `30.0` | Max backoff delay (seconds) between LLM retries. Also `[latency] retry_max_delay` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_LLM_CONNECT_TIMEOUT` | `15.0` | LLM connect timeout (seconds). |
 | `MAVERICK_LLM_READ_TIMEOUT` | `120.0` | LLM read timeout (seconds). |
 
@@ -103,8 +103,8 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_PRM_ENDPOINT` | unset | Endpoint URL when `MAVERICK_PRM=remote`. |
 | `MAVERICK_PRM_API_KEY` | unset | API key for the remote PRM endpoint. |
 | `MAVERICK_VERIFY_ENSEMBLE` | config `[routing] verify_ensemble` (off) | Run the multi-model verifier panel (stronger, ~Nx cost). |
-| `MAVERICK_VERIFIER_CONFIDENCE` | `0.75` | Confidence threshold at which the verifier accepts a result. |
-| `MAVERICK_DISAGREEMENT_HIGH` | `0.5` | Verifier disagreement level treated as high. |
+| `MAVERICK_VERIFIER_CONFIDENCE` | `0.75` | Confidence threshold at which the verifier accepts a result. Also `[verification] confidence_accept` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_DISAGREEMENT_HIGH` | `0.5` | Verifier disagreement level treated as high. Also `[verification] disagreement_high` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_CROSS_FAMILY_VERIFIER` | config-driven | Force the verifier to use a different model family than the generator. |
 | `MAVERICK_SPECULATIVE_FINALIZE` | `1` (on) | Set `0` to disable speculative finalization in the orchestrator. |
 
@@ -232,10 +232,10 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_COMPACT_TIKTOKEN` | `1` | Use a real local BPE tokenizer (tiktoken) for compaction token counts when installed; `0` forces the `len/4` heuristic. Fails open to the heuristic if tiktoken is absent. |
 | `MAVERICK_HISTORY_WINDOW` | config `[context]` | Max number of recent turns kept verbatim. |
 | `MAVERICK_HISTORY_TOKENS` | config `[context]` | Max history tokens before compaction triggers. |
-| `MAVERICK_COMPACT_KEEP_RECENT` | `4` | Recent turns always kept uncompacted. |
-| `MAVERICK_COMPACT_DIGEST_EVERY` | `10` | Digest older turns every N turns. |
-| `MAVERICK_COMPACT_MAX_TOOL_BYTES` | `2048` | Max bytes of tool output retained before truncation during compaction (applies to results behind the recent window). |
-| `MAVERICK_COMPACT_MAX_TOTAL_BYTES` | `200000` | Ceiling on the whole live message window. When a few results at the per-result cap push the window over it, compaction shrinks into the recent window oldest-first (the brief and the newest message are always spared). `0` disables. |
+| `MAVERICK_COMPACT_KEEP_RECENT` | `4` | Recent turns always kept uncompacted. Also `[compaction] keep_recent` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_COMPACT_DIGEST_EVERY` | `10` | Digest older turns every N turns. Also `[compaction] digest_every` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_COMPACT_MAX_TOOL_BYTES` | `2048` | Max bytes of tool output retained before truncation during compaction (applies to results behind the recent window). Also `[compaction] max_tool_bytes` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_COMPACT_MAX_TOTAL_BYTES` | `200000` | Ceiling on the whole live message window. When a few results at the per-result cap push the window over it, compaction shrinks into the recent window oldest-first (the brief and the newest message are always spared). `0` disables. Also `[compaction] max_total_bytes` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_MAX_TOOL_RESULT_BYTES` | `100000` | Hard cap on a single tool result (head+tail kept) before it enters the context window, so one runaway `shell`/query output can't blow tokens/budget in a turn. |
 | `MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR` | `8192` | `max_tokens` headroom floor when Opus 4.7/4.8 auto-injects adaptive thinking for a role with no explicit thinking budget. Thinking bills at the output rate, so this is the worst-case output spend of every non-thinking-role turn on the default model (min 2048). Config `[thinking] budget` sets the orchestrator/revisor base (default 8000). |
 | `MAVERICK_SKILL_RENDER_MAX_CHARS` | `4000` | Per-skill body cap when recalled skills are rendered into a system prompt (`0` disables). |
@@ -281,8 +281,8 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_FETCH_RESPECT_ROBOTS` | unset | `1` makes the fetch tool honor `robots.txt`. |
 | `MAVERICK_FETCH_NO_SCAN` | unset | `1` skips safety scanning of fetched remote content. |
 | `MAVERICK_NET_HOST_CONCURRENCY` | `4` | Max concurrent network requests per host. |
-| `MAVERICK_ATTACH_MAX_FILE_BYTES` | `26214400` (25 MiB) | Max size of a single attachment file. |
-| `MAVERICK_ATTACH_MAX_GOAL_BYTES` | `104857600` (100 MiB) | Max total attachment bytes per goal. |
+| `MAVERICK_ATTACH_MAX_FILE_BYTES` | `104857600` (100 MiB) | Max size of a single attachment file. Also `[attachments] max_file_bytes` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_ATTACH_MAX_GOAL_BYTES` | `524288000` (500 MiB) | Max total attachment bytes per goal. Also `[attachments] max_goal_bytes` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_ALLOW_RAW_MEDIA_ARGS` | unset | `1` passes raw media tool args verbatim (skips sanitization). |
 | `MAVERICK_ENABLE_CRED_TOOLS` | unset (off) | Enable credential-handling tools. |
 | `MAVERICK_USE_SKILLS` | config `[features] skills` | Override skill injection; `0` disables (e.g. for benchmark runs). |
@@ -294,13 +294,13 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_CONSENT_MODE` | `auto-approve` | Gating for destructive actions: `auto-approve`, `auto-deny`, `ask`, or `dashboard`. |
 | `MAVERICK_CONSENT_DASHBOARD_TIMEOUT` | `300` | Seconds to wait for a dashboard approval before treating as denied. |
 | `MAVERICK_MCP_ELICITATION` | `decline` | How the MCP client answers an external server's `elicitation/create`: `decline` (continue without the value), `cancel` (abort the server's op), or `prompt` (collect typed input from an interactive operator, gated through consent). The prompt is shield-scanned either way. |
-| `MAVERICK_MCP_ELICITATION_TIMEOUT` | `300` | Seconds the MCP *server* waits for an elicitation response from a stdio client before giving up and leaving the question parked for the async `maverick_answer` flow. |
-| `MAVERICK_MCP_MAX_ELICIT_ROUNDS` | `8` | Max elicit→answer→resume rounds the MCP server runs per `maverick_start`/`maverick_resume` call before returning (bounds runaway question loops). |
-| `MAVERICK_MCP_TASK_WORKERS` | `4` | Background worker threads for MCP async tasks (concurrent task-augmented tool calls over stdio). |
-| `MAVERICK_MCP_MAX_TASKS` | `256` | Max MCP tasks retained in the in-memory registry; the oldest are evicted past this cap. |
-| `MAVERICK_MCP_TASK_TTL_MS` | `3600000` | Default task lifetime (ms) when the client doesn't request a `ttl`; the task may be purged after it elapses. |
-| `MAVERICK_MCP_TASK_MAX_TTL_MS` | `86400000` | Ceiling (ms) a client-requested task `ttl` is clamped to. |
-| `MAVERICK_MCP_TASK_POLL_MS` | `1000` | `pollInterval` (ms) the server suggests to clients in task responses. |
+| `MAVERICK_MCP_ELICITATION_TIMEOUT` | `300` | Seconds the MCP *server* waits for an elicitation response from a stdio client before giving up and leaving the question parked for the async `maverick_answer` flow. Also `[mcp] elicitation_timeout` (Settings > All settings; this variable wins). |
+| `MAVERICK_MCP_MAX_ELICIT_ROUNDS` | `8` | Max elicit→answer→resume rounds the MCP server runs per `maverick_start`/`maverick_resume` call before returning (bounds runaway question loops). Also `[mcp] max_elicit_rounds` (Settings > All settings; this variable wins). |
+| `MAVERICK_MCP_TASK_WORKERS` | `4` | Background worker threads for MCP async tasks (concurrent task-augmented tool calls over stdio). Also `[mcp] task_workers` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_MCP_MAX_TASKS` | `256` | Max MCP tasks retained in the in-memory registry; the oldest are evicted past this cap. Also `[mcp] max_tasks` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_MCP_TASK_TTL_MS` | `3600000` | Default task lifetime (ms) when the client doesn't request a `ttl`; the task may be purged after it elapses. Also `[mcp] task_ttl_ms` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_MCP_TASK_MAX_TTL_MS` | `86400000` | Ceiling (ms) a client-requested task `ttl` is clamped to. Also `[mcp] task_max_ttl_ms` (Settings > All settings; read at startup, this variable wins). |
+| `MAVERICK_MCP_TASK_POLL_MS` | `1000` | `pollInterval` (ms) the server suggests to clients in task responses. Also `[mcp] task_poll_ms` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_PREFLIGHT` | `warn` | Request preflight mode: `warn` (log only), `strict` (hard-refuse), or `off`. |
 | `MAVERICK_AUDIT_SIGN` | config `[audit] sign` (off) | Sign audit-log rows. |
 | `MAVERICK_ANON` | config `[privacy] anonymous` (off) | Enable anonymous mode (scrubs home paths and identifying data). |

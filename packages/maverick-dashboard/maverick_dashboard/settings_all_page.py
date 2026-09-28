@@ -1148,6 +1148,18 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
         state = await run_in_threadpool(catalog_state)
         return JSONResponse({"changed": [], "restart": False, **state},
                             headers={"Cache-Control": "no-store"})
+    actor = auth.caller_principal(request) or "local administrator"
+    # [safety] quorum_required: a protected change waits for other
+    # administrators' approval (settings_quorum); unset, this is a no-op.
+    from . import settings_quorum
+
+    hold, approved = await run_in_threadpool(settings_quorum.review, changes, actor,
+                                             _audit_value)
+    if hold is not None:
+        state = await run_in_threadpool(catalog_state)
+        return JSONResponse({"changed": [], "restart": False, "quorum": hold,
+                             "message": hold["message"], **state},
+                            status_code=202, headers={"Cache-Control": "no-store"})
     payload = {path: (settings_store.REMOVE if value is None else value)
                for path, value in writes.items()}
     try:
@@ -1159,7 +1171,6 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
             status_code=503,
             detail="Settings could not be saved right now. Nothing was changed.",
         ) from exc
-    actor = auth.caller_principal(request) or "local administrator"
     try:
         await run_in_threadpool(_record, changes, actor, body.confirm,
                                 frozenset(item["id"] for item in access))
@@ -1177,6 +1188,7 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
             status_code=503,
             detail="The change could not be recorded, so it was undone.",
         ) from exc
+    await run_in_threadpool(settings_quorum.settle, approved)
     if learning:
         try:
             await run_in_threadpool(settings_governance_level.turn_on, learning, actor)

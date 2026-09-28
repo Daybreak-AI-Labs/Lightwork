@@ -263,6 +263,13 @@
         return;
       }
       applyAll(result.data || {});
+      if (result.response.status === 202 && typeof result.data.message === 'string') {
+        // Held for approval by other administrators: nothing was saved yet.
+        busyRows.forEach(function (row) { say(row, result.data.message); });
+        announce(result.data.message);
+        updateFilter();
+        return;
+      }
       var done = (result.data.changed || []).length;
       var text = done ? 'Saved.' : 'Nothing changed.';
       if (result.data.restart) text += ' Some changes take effect after Lightwork restarts.';

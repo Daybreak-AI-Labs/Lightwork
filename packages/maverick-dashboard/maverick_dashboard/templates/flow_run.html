@@ -48,6 +48,7 @@
   <p class="fr__msg" id="fr-meta"></p>
   <p>
     <a class="btn btn--ghost" id="fr-designer-link" href="/flows/designer/{{ flow_id }}">Open the flow</a>
+    <a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a>
     <a class="btn btn--ghost" href="/automations">All automations</a>
   </p>
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
@@ -79,6 +80,41 @@
         <button type="button" class="btn btn--ghost" id="le-cancel">Cancel</button>
       </div>
     </form>
+  </section>
+
+  <section class="panel fr__example" id="lx-card" aria-labelledby="lx-title" data-flow-id="{{ flow_id }}" data-run-id="{{ run_id }}">
+    <h2 id="lx-title">Keep this run as a learning example</h2>
+    <p id="lx-status" role="status" aria-live="polite" tabindex="-1">Checking whether this run can be an example…</p>
+    <div id="lx-enroll" hidden>
+      <p class="fr__msg">Lightwork keeps this run's starting details and what each action sent and got back, so you can review
+        it and let new flows learn from it. Approving each action stays a separate step on this page.</p>
+      <p class="fr__msg">Check what each part holds. Lightwork filled these in from this run and earlier ones; change anything that's
+        wrong. A value that doesn't match stops the example from being kept, but never stops the run.</p>
+      <div id="lx-describe"></div>
+      <div class="mv-form__field"><label for="lx-until">Keep the example until</label>
+        <input class="input" type="date" id="lx-until"></div>
+      <div class="fr__actions"><button type="button" class="btn btn--primary" id="lx-enroll-go">Keep this run as an example</button></div>
+    </div>
+    <div id="lx-review" hidden>
+      <div id="lx-evidence"></div>
+      <div class="mv-form__field"><label for="lx-review-reason">Why this example is or isn't right</label>
+        <textarea class="textarea" id="lx-review-reason" maxlength="2000" rows="2"></textarea></div>
+      <div class="fr__actions">
+        <button type="button" class="btn btn--primary" id="lx-accept">Accept as a learning example</button>
+        <button type="button" class="btn btn--ghost" id="lx-reject">Don't use this example</button>
+      </div>
+    </div>
+    <div id="lx-grant" hidden>
+      <p class="fr__msg">Allow new flows to learn from this accepted example. Copies made while learning are kept until the date
+        you choose; withdrawing the example later stops future use but doesn't erase those copies.</p>
+      <div class="mv-form__field"><label for="lx-grant-until">Allow learning until</label>
+        <input class="input" type="date" id="lx-grant-until"></div>
+      <div class="mv-form__field"><label for="lx-grant-reason">Why it may be used for learning</label>
+        <textarea class="textarea" id="lx-grant-reason" maxlength="2000" rows="2"></textarea></div>
+      <label><input type="checkbox" id="lx-grant-copies"> Keep the copies made while learning until that date</label>
+      <div class="fr__actions"><button type="button" class="btn btn--primary" id="lx-grant-go">Allow learning from this example</button></div>
+    </div>
+    <p id="lx-next" class="fr__msg" hidden><a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a></p>
   </section>
 
   <h2 style="font-size:var(--text-base);">Steps</h2>
@@ -528,4 +564,4 @@
 })();
 </script>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-learning-example.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-learning-example.js" defer></script><script src="/static/lightwork-learning-capture.js" defer></script>{% endblock %}

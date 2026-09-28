@@ -67,16 +67,20 @@ class PropertyIn(_StrictModel):
 
 
 class ScanLimitsIn(_StrictModel):
-    max_pages: int = Field(default=100, ge=1, le=10_000)
-    max_depth: int = Field(default=4, ge=0, le=20)
-    page_timeout_seconds: int = Field(default=30, ge=1, le=300)
-    max_network_events: int = Field(default=5_000, ge=1, le=100_000)
+    # Omitted limits take the installation's scan limits (Settings > All
+    # settings), and every limit is lowered to the installation's cap.
+    max_pages: int | None = Field(default=None, ge=1, le=10_000)
+    max_depth: int | None = Field(default=None, ge=0, le=20)
+    page_timeout_seconds: int | None = Field(default=None, ge=1, le=300)
+    max_network_events: int | None = Field(default=None, ge=1, le=100_000)
     settle_milliseconds: int = Field(default=1_000, ge=0, le=30_000)
 
 
 class ScheduleIn(_StrictModel):
     property_id: OpaqueId
-    interval_seconds: int = Field(ge=300, le=2_592_000)
+    # Required unless the installation sets a scan interval; a shorter one is
+    # raised to the installation's shortest interval.
+    interval_seconds: int | None = Field(default=None, ge=300, le=2_592_000)
     next_due_at: float = Field(gt=0, lt=100_000_000_000.0)
     expected_revision: int = Field(ge=0, le=2**31 - 1)
     idempotency_key: IdempotencyKey
@@ -382,8 +386,15 @@ async def put_schedule(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     ops, tenant, inventory = _authority()
-    from maverick.consent_scanner import ScanLimits
+    from dataclasses import asdict
 
+    from maverick.consent_scanner import ConsentScannerConfigError, ScanLimits, default_scan_limits
+
+    try:
+        defaults = asdict(default_scan_limits())
+    except ConsentScannerConfigError as exc:
+        raise HTTPException(status_code=503, detail="scanner settings are invalid") from exc
+    explicit = {k: v for k, v in body.limits.model_dump().items() if v is not None}
     payload = body.model_dump(exclude={"property_id", "limits"})
     return await _call(
         ops,
@@ -391,7 +402,7 @@ async def put_schedule(
         tenant,
         schedule_id,
         body.property_id,
-        limits=ScanLimits(**body.limits.model_dump()),
+        limits=ScanLimits(**{**defaults, **explicit}),
         **payload,
     )
 

@@ -83,10 +83,12 @@ def _audit_root() -> Path:
 def _checkpoint_dir() -> Path:
     """Where anchoring publishes checkpoints: beside the audit directory, never
     inside it (the checkpoint store refuses a nested or overlapping path so a
-    checkpoint can never be mistaken for, or sealed with, a day-file)."""
-    from maverick.paths import data_dir
+    checkpoint can never be mistaken for, or sealed with, a day-file) -- or
+    the folder an installation administrator chose on the Activity log page,
+    so receipts and the page's checkpoints share one history."""
+    from .audit_checkpoint_settings import checkpoint_dir
 
-    return data_dir("audit-checkpoints")
+    return checkpoint_dir()
 
 
 def _local_keys() -> dict[str, str]:

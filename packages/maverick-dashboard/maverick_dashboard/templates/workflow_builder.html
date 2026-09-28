@@ -939,9 +939,17 @@
       schedBtn.disabled = true;
       schedCronPreview.textContent = 'Scheduling…';
       try {
-        var resp = await fetch('/api/v1/schedules', {
+        // The server builds and checks the timetable in the person's own time zone.
+        var cad = schedCadence.value, zone = 'UTC';
+        try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) { zone = 'UTC'; }
+        var days = Array.prototype.filter.call(document.querySelectorAll('#sched-days-wrap input[type=checkbox]'), function (c) { return c.checked; })
+          .map(function (c) { return Number(c.value); });
+        var timetable = { repeat: cad === 'days' ? 'weekly' : cad, at: /^\d{2}:\d{2}$/.test(schedTime.value) ? schedTime.value : '09:00',
+          days: days, day_of_month: parseInt((document.getElementById('sched-dom') || {}).value, 10) || 1,
+          every_hours: Math.min(12, Math.max(1, parseInt(schedInterval && schedInterval.value, 10) || 1)), zone: zone };
+        var resp = await fetch('/api/v1/schedules/add', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cron: cron, template: lastSavedTemplate.name, params: params }),
+          body: JSON.stringify({ what: 'workflow', template: lastSavedTemplate.name, params: params, timetable: timetable }),
         });
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) { schedCronPreview.textContent = plainErr(resp, 'save the schedule'); mvFail(resp, 'save the schedule'); return; }
@@ -974,7 +982,8 @@
         title.textContent = s.title || 'Untitled task';
         var when = document.createElement('span');
         when.className = 'wf__sched-when';
-        when.textContent = ' · ' + cronWords(s.cron) + (fmtWhen(s.next_run) ? ' · next ' + fmtWhen(s.next_run) : '');
+        when.textContent = ' · ' + (s.zone ? 'Next ' + (fmtWhen(s.next_run) || 'run soon') + ' (' + String(s.zone).replace(/_/g, ' ') + ' time)'
+          : cronWords(s.cron) + (fmtWhen(s.next_run) ? ' · next ' + fmtWhen(s.next_run) : ''));
         span.appendChild(title); span.appendChild(when);
         var rm = document.createElement('button');
         rm.type = 'button';

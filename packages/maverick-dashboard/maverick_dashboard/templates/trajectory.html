@@ -42,6 +42,11 @@
 } %}
 <p class="muted"><a href="/goals">← All tasks</a> · <a href="/goals/{{ goal.id }}/plan">Plan</a> · <a href="/chat/goal/{{ goal.id }}">Open the task</a></p>
 <div class="section-head"><h2>Step-by-step history: {{ goal.title }}</h2></div>
+<div class="panel goal-export" id="goal-export" data-goal="{{ goal.id }}" data-can-share="{{ '1' if can_operate else '0' }}">
+  <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/export.json" download="task-{{ goal.id }}.json">Download full history</a>
+  {% if can_operate %}<button class="btn btn--ghost" type="button" id="goal-gist">Share a private copy on GitHub</button>{% endif %}
+  <p class="muted" id="goal-export-msg" role="status" aria-live="polite">The download holds this task, every recorded step and its work summaries, as one file you can keep or move to another installation.</p>
+</div>
 
 {% if events %}
 <div class="panel">
@@ -111,6 +116,7 @@
 </div>
 {% endif %}
 
+<script src="/static/lightwork-goal-export.js" defer></script>
 <script>
   // Step-by-step replay: hide steps past the slider so a person can walk
   // through the run after the fact.

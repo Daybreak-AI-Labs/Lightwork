@@ -28,13 +28,27 @@ def build_gist_payload(goal_id: int) -> dict:
     }
 
 
+def _saved_token() -> str:
+    """``[github] share_token`` saved (sealed) on the All settings page.
+
+    ``load_config`` opens the sealed value; it is never logged or returned."""
+    try:
+        from .config import load_config
+        github = (load_config() or {}).get("github") or {}
+        value = github.get("share_token") if isinstance(github, dict) else None
+    except Exception:  # pragma: no cover -- config never blocks sharing
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def share_run(goal_id: int, token: str | None = None) -> str:
     """Upload the sanitized run as a private gist; return its URL.
 
-    Token resolution: explicit arg > ``GITHUB_TOKEN`` > ``GH_TOKEN``. Raises
-    if none is set (we never upload anonymously).
+    Token resolution: explicit arg > ``GITHUB_TOKEN`` > ``GH_TOKEN`` > the
+    sealed ``[github] share_token`` saved in settings. Raises if none is set
+    (we never upload anonymously).
     """
-    token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or _saved_token()
     if not token:
         raise RuntimeError(
             "no GitHub token: set GITHUB_TOKEN to share a run as a gist."

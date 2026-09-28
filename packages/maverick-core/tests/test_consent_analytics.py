@@ -348,3 +348,35 @@ def test_missing_authority_and_invalid_queries_fail_closed(tmp_path: Path) -> No
         analytics.snapshot(
             "tenant-a", NOW, NOW + 1, ["action"], min_cohort_size=1
         )
+
+
+def test_installation_cohort_floor_and_look_back_limit(
+    authority: tuple[ConsentPreferenceStore, ConsentAnalytics],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time as time_module
+
+    from maverick.consent_analytics import analytics_limits
+
+    assert analytics_limits() == (10, 2, None)
+    settings = {"enable": True, "min_cohort_size": 25, "retention_days": 30}
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {"consent_preferences": {"enable": True, "analytics": settings}},
+    )
+    assert analytics_limits() == (25, 25, 30)
+    _store, analytics = authority
+    now = time_module.time()
+    snapshot = analytics.snapshot("tenant-a", now - 90 * 86_400, now, ["purpose_id"],
+                                  min_cohort_size=2)
+    # A request can never go below the installation's smallest cohort, and
+    # the period starts no earlier than the look-back limit allows.
+    assert snapshot.min_cohort_size == 25
+    assert snapshot.start_at >= now - 30 * 86_400 - 5
+    assert any("look-back" in item for item in snapshot.limitations)
+    with pytest.raises(ConsentAnalyticsValidationError, match="look-back"):
+        analytics.snapshot("tenant-a", now - 90 * 86_400, now - 60 * 86_400, ["purpose_id"])
+    settings["min_cohort_size"] = 1
+    with pytest.raises(ConsentAnalyticsConfigError):
+        analytics_limits()

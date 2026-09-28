@@ -1416,3 +1416,25 @@ def _router_request(binding: ConsentDestinationBinding):
         timeout_seconds=2,
         max_response_bytes=4096,
     )
+
+
+def test_turning_destinations_off_is_a_clean_off_with_services_still_listed() -> None:
+    """Off with installer-chosen services still listed sends nothing and is not an error."""
+    config = {
+        "consent_preferences": {
+            "delivery": {
+                "destinations": {
+                    "enable": False,
+                    "enabled_providers": ["salesforce", "marketo"],
+                    # An incomplete table for a listed service does not matter while off.
+                    "salesforce": {"destination_id": "sf-main"},
+                }
+            }
+        }
+    }
+    registry = build_consent_destination_registry(config, "tenant-a")
+    status = registry.status()
+    assert status["enabled"] is False and status["configured"] is False
+    assert status["destinations"] == []
+    with pytest.raises(ConsentDestinationConfigError, match="disabled"):
+        registry.binding("sf-main")

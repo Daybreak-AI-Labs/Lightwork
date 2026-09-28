@@ -35,6 +35,10 @@ async function page(options = {}) {
     if (url.includes("/records/field")) return reply(200, { items: [{ asset_id: "customers", field_id: "email" }, { asset_id: "customers", field_id: "country" }] });
     if (url.includes("/records/decision")) return reply(200, { items: [DECISION] });
     if (url.endsWith("/providers/row-filters")) return reply(200, { items: [{ row_filter_sha256: "f".repeat(64), asset_id: "customers", policy_id: "eu-only", row_filter: { op: "eq", field: "country", value: "DE" } }] });
+    if (options.fourEyes && url.endsWith("/apply")) {
+      if (!body.approval_id) return reply(202, { state: "approval_required", approval_id: 41 });
+      return reply(200, { state: "completed" });
+    }
     return reply(200, {});
   };
   w.eval(read("static/lightwork-consent-workbench.js"));
@@ -119,5 +123,23 @@ test("declining a confirmation changes nothing", async () => {
     ui.button("dup-decisions", "Apply in Snowflake").click();
     await flush();
     assert.equal(ui.posts().length, 0);
+  } finally { ui.dom.window.close(); }
+});
+
+test("with a second approver required, the next try carries the approval and the same reference", async () => {
+  const ui = await page({ fourEyes: true });
+  try {
+    ui.w.localStorage.clear();
+    ui.button("dup-decisions", "Apply in Snowflake").click();
+    await flush();
+    assert.match(ui.d.getElementById("dup-status").textContent, /second person must approve this on the Approvals page/);
+    ui.button("dup-decisions", "Apply in Snowflake").click();
+    await flush();
+    const applies = ui.posts().filter((c) => c.url.endsWith("/decisions/DUD-1/apply"));
+    assert.equal(applies.length, 2);
+    assert.equal(applies[0].body.approval_id, undefined);
+    assert.equal(applies[1].body.approval_id, 41);
+    assert.equal(applies[1].body.idempotency_key, applies[0].body.idempotency_key);
+    assert.match(ui.d.getElementById("dup-status").textContent, /Applied in Snowflake/);
   } finally { ui.dom.window.close(); }
 });

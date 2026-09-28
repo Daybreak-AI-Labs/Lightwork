@@ -54,7 +54,10 @@ notice_resource_version = 4
 
 Unknown runtime keys, incomplete binding tables, duplicate tenant/reference
 pairs, bindings outside the active-tenant allowlist, or an active tenant with
-no binding fail closed. The installer can emit one real first binding; add a
+no binding fail closed. A global administrator can also add, change and remove
+bindings on the Privacy notices page ("Where approved notices are published"),
+which checks the whole resulting table with this same parser before saving and
+keeps `active_tenants` in step. The installer can emit one real first binding; add a
 new named binding for each additional exact release target rather than reusing
 an existing consent-publication reference.
 

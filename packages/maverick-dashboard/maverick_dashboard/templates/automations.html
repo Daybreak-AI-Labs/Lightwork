@@ -10,6 +10,12 @@
   .auto .field, .auto input, .auto select, .auto textarea { min-width: 0; max-width: 100%; }
   .auto__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-3); }
   .auto__hint { color: var(--muted); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
+  .auto__new { margin-top: var(--space-4); }
+  .auto__new summary { cursor: pointer; font-weight: var(--font-semibold, 600); }
+  .auto__new form { display: grid; gap: var(--space-3); margin-top: var(--space-3); max-width: 40rem; }
+  .auto__field { display: grid; gap: var(--space-1); }
+  .auto__what, .auto__days { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
+  .auto__what label, .auto__days label { display: inline-flex; gap: var(--space-1); align-items: center; }
   .auto__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .auto__url { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; font-size: var(--text-xs); }
   .auto__runs { color: var(--muted); font-size: var(--text-xs); margin-top: 4px; }
@@ -53,9 +59,86 @@
     <ul class="auto__list" id="auto-sched-list" aria-label="Schedules"></ul>
     <div class="mv-empty" id="auto-sched-empty" hidden>
       <p class="mv-empty__title">No schedules yet</p>
-      <p class="mv-empty__body">Put a saved workflow on a recurring schedule from the builder.</p>
-      <a class="btn btn--primary" href="/workflows">Open Workflows</a>
+      <p class="mv-empty__body">Create one below, or put a saved workflow on a schedule from the builder.</p>
+      <a class="btn btn--primary" href="#auto-new-sched">Create a schedule</a>
     </div>
+    <details id="auto-new-sched" class="auto__new">
+      <summary><span role="heading" aria-level="3">Create a schedule</span></summary>
+      <form id="auto-new-form" novalidate>
+        <fieldset class="auto__what">
+          <legend>What should run?</legend>
+          <label><input type="radio" name="what" value="workflow" checked> A saved workflow</label>
+          <label><input type="radio" name="what" value="task"> A task I describe</label>
+          <label><input type="radio" name="what" value="rerun"> An earlier task, run again</label>
+        </fieldset>
+        <div class="auto__field" id="auto-new-workflow-wrap">
+          <label for="auto-new-workflow">Workflow</label>
+          <select id="auto-new-workflow" class="select"><option value="">Loading…</option></select>
+          <div id="auto-new-params"></div>
+        </div>
+        <div class="auto__field" id="auto-new-text-wrap" hidden>
+          <label for="auto-new-text">Describe the task</label>
+          <textarea id="auto-new-text" class="textarea" rows="3" maxlength="16000"></textarea>
+        </div>
+        <div class="auto__field" id="auto-new-rerun-wrap" hidden>
+          <label for="auto-new-rerun">Task to run again</label>
+          <select id="auto-new-rerun" class="select"><option value="">Loading…</option></select>
+        </div>
+        <div class="auto__field">
+          <label for="auto-new-title">Name for this schedule (optional)</label>
+          <input id="auto-new-title" class="input" type="text" maxlength="200">
+        </div>
+        <div class="auto__field">
+          <label for="auto-new-repeat">How often</label>
+          <select id="auto-new-repeat" class="select">
+            <option value="daily">Every day</option>
+            <option value="weekdays">Every weekday (Monday to Friday)</option>
+            <option value="weekly">Every week, on chosen days</option>
+            <option value="monthly">Every month, on a chosen day</option>
+            <option value="hourly">Every few hours</option>
+          </select>
+        </div>
+        <div class="auto__field" id="auto-new-at-wrap">
+          <label for="auto-new-at">At what time</label>
+          <input id="auto-new-at" class="input" type="time" value="09:00">
+        </div>
+        <fieldset class="auto__days" id="auto-new-days" hidden>
+          <legend>On these days</legend>
+          <label><input type="checkbox" value="1" checked> Monday</label>
+          <label><input type="checkbox" value="2"> Tuesday</label>
+          <label><input type="checkbox" value="3"> Wednesday</label>
+          <label><input type="checkbox" value="4"> Thursday</label>
+          <label><input type="checkbox" value="5"> Friday</label>
+          <label><input type="checkbox" value="6"> Saturday</label>
+          <label><input type="checkbox" value="0"> Sunday</label>
+        </fieldset>
+        <div class="auto__field" id="auto-new-dom-wrap" hidden>
+          <label for="auto-new-dom">Day of the month</label>
+          <select id="auto-new-dom" class="select">
+            {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="auto__field" id="auto-new-every-wrap" hidden>
+          <label for="auto-new-every">Every</label>
+          <select id="auto-new-every" class="select">
+            <option value="1">1 hour</option><option value="2">2 hours</option><option value="3">3 hours</option>
+            <option value="4">4 hours</option><option value="6">6 hours</option><option value="8">8 hours</option>
+            <option value="12">12 hours</option>
+          </select>
+        </div>
+        <div class="auto__field">
+          <label for="auto-new-zone">Time zone</label>
+          <select id="auto-new-zone" class="select"><option value="UTC">UTC</option></select>
+        </div>
+        <details class="auto__advanced">
+          <summary>Technical details</summary>
+          <label for="auto-new-advanced">Custom timetable (five parts: minute, hour, day of month, month, weekday). Leave empty to use the choices above.</label>
+          <input id="auto-new-advanced" class="input" type="text" maxlength="120" autocomplete="off" spellcheck="false">
+        </details>
+        <p class="auto__hint" id="auto-new-preview" role="status" aria-live="polite"></p>
+        <button class="btn btn--primary" type="submit" id="auto-new-save">Create schedule</button>
+      </form>
+    </details>
   </section>
   {% endif %}
 
@@ -303,13 +386,14 @@
       var li = el('li', 'mv-row');
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', s.title || 'Untitled task'));
-      main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
+      main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (s.zone ? ' (' + String(s.zone).replace(/_/g, ' ') + ' time)' : '') + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
       if (s.schedule_id) { var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('schedule', s.schedule_id, runs); }
       li.appendChild(main);
       li.appendChild(delBtn('Delete schedule ' + (s.title || s.id), function () { delSchedule(s.id); }));
       schedList.appendChild(li);
     });
   }
+  document.addEventListener('lightwork:schedules-changed', function () { loadSchedules(); });
   function refocus(id) {   // re-home focus after a row is removed (it held focus)
     var h = document.getElementById(id);
     if (h) h.focus();
@@ -1285,4 +1369,5 @@
   loadTriggers();
 })();
 </script>
+<script src="/static/lightwork-schedule-picker.js" defer></script>
 {% endblock %}
