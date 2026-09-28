@@ -43,6 +43,9 @@ KNOWN_SECTIONS = frozenset({
     # [third_party_portal] routing_keyring: the vendor portal link keyring
     # rotated on the Third-Party Collaboration page (sealed).
     "third_party_portal",
+    # [consent_publication_signing] keyring: the consent publication signing
+    # key made on the Banner and Preference Center page (sealed).
+    "consent_publication_signing",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment",

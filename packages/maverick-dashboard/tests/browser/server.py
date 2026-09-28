@@ -87,6 +87,8 @@ def environment(directory):
         "MAVERICK_PROFILE":"standard", "MAVERICK_ENTERPRISE":"0",
         "MAVERICK_ENCRYPT_AT_REST":"1", "MAVERICK_ENCRYPTION_KEY":secrets.token_hex(32),
         "MAVERICK_DESKTOP_OAUTH_TICKET_KEY":secrets.token_hex(32),
+        # require_signed_publications is on above: publishing needs a signing key.
+        "MAVERICK_CONSENT_PUBLICATION_SIGNING_KEY":"hex:" + secrets.token_hex(32),
         "MAVERICK_CONNECTIONS":"1",
         "MAVERICK_DASHBOARD_ADMINS":"user:browser-reviewer,user:browser-learning-reviewer"})
 

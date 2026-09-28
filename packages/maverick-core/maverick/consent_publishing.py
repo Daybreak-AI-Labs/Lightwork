@@ -17,6 +17,11 @@ The authority has four important properties:
 Translations are plain text.  Templates are closed structured records rather
 than HTML, JavaScript, or CSS.  That keeps executable content outside the
 publishing database and makes every publication digest deterministic.
+
+When ``require_signed_publications`` is on, each publish, restore and
+withdrawal is also signed inside its own transaction with the workspace's
+Ed25519 key (:mod:`maverick.consent_publication_signing`); a publish or
+restore without a usable key is refused, and nothing is signed when it is off.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from . import consent_publication_signing as publication_signing
 from .file_lock import (
     cross_process_lock,
     ensure_private_directory,
@@ -143,6 +149,10 @@ class PublishingIdempotencyConflict(ConsentPublishingError):
 
 class PublishingNotFound(ConsentPublishingError):
     """A tenant-scoped publishing resource does not exist."""
+
+
+class PublishingSigningUnavailable(PublishingConflict):
+    """Signed publishing is required but no signing key is in custody."""
 
 
 def _canonical(value: object, *, maximum: int = _MAX_JSON_BYTES) -> bytes:
@@ -533,10 +543,14 @@ class ConsentPublishingStore:
         *,
         clock: Callable[[], float] = time.time,
         id_factory: Callable[[str], str] | None = None,
+        signing: Callable[[], publication_signing.SigningPolicy] | None = None,
     ) -> None:
         self.path = Path(path).expanduser()
         self._clock = clock
         self._id_factory = id_factory or (lambda prefix: f"{prefix}-{secrets.token_urlsafe(18)}")
+        # ``[consent_preferences.publishing] require_signed_publications`` and
+        # the signing key custody, read on every publish (unset: unsigned).
+        self._signing = signing or publication_signing.configured_policy
         ensure_private_directory(self.path.parent)
         with cross_process_lock(self.path, strict=True):
             self._initialize()
@@ -732,6 +746,30 @@ class ConsentPublishingStore:
                 FOREIGN KEY (tenant, property_id)
                     REFERENCES publishing_properties(tenant, property_id)
             )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS consent_publication_signatures (
+                tenant TEXT NOT NULL,
+                publication_id TEXT NOT NULL,
+                publication_sha256 TEXT NOT NULL,
+                key_id TEXT NOT NULL,
+                public_key TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                signed_at REAL NOT NULL,
+                PRIMARY KEY (tenant, publication_id),
+                FOREIGN KEY (tenant, publication_id)
+                    REFERENCES consent_publications(tenant, publication_id)
+            )
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS consent_publication_signatures_no_update
+            BEFORE UPDATE ON consent_publication_signatures
+            BEGIN SELECT RAISE(ABORT, 'publication signatures are immutable'); END
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS consent_publication_signatures_no_delete
+            BEFORE DELETE ON consent_publication_signatures
+            BEGIN SELECT RAISE(ABORT, 'publication signatures are immutable'); END
             """,
             """
             CREATE TABLE IF NOT EXISTS publishing_idempotency (
@@ -1935,6 +1973,153 @@ class ConsentPublishingStore:
                 raise PublishingConflict("publication head changed concurrently")
         return {**body, "publication_sha256": publication_sha}
 
+    def _signing_policy(self) -> publication_signing.SigningPolicy:
+        try:
+            policy = self._signing()
+        except Exception as exc:  # noqa: BLE001 -- never publish around an unreadable policy
+            raise ConsentPublishingError("publication signing policy is unavailable") from exc
+        if not isinstance(policy, publication_signing.SigningPolicy):
+            raise ConsentPublishingError("publication signing policy is unavailable")
+        return policy
+
+    @staticmethod
+    def _signer(
+        policy: publication_signing.SigningPolicy,
+        tenant: str,
+        *,
+        optional: bool = False,
+    ) -> publication_signing.PublicationSigner | None:
+        """The workspace signer when signing is required; ``optional`` never refuses."""
+        if not policy.required:
+            return None
+        try:
+            return policy.custody.signer_for(tenant)
+        except (publication_signing.PublicationSigningUnavailable, ImportError) as exc:
+            if optional:
+                return None
+            raise PublishingSigningUnavailable(
+                str(exc) if isinstance(exc, publication_signing.PublicationSigningUnavailable)
+                else "publication signing is not available on this installation"
+            ) from exc
+
+    @staticmethod
+    def _sign_publication(
+        connection: sqlite3.Connection,
+        *,
+        tenant: str,
+        result: dict[str, Any],
+        signer: publication_signing.PublicationSigner | None,
+        signed_at: float,
+    ) -> dict[str, Any]:
+        """Sign one new publication inside its own transaction (or leave it unsigned)."""
+        if signer is None:
+            return result
+        statement = publication_signing.publication_statement(signer.key_id, result)
+        signature = signer.sign(publication_signing.canonical(statement))
+        connection.execute(
+            "INSERT INTO consent_publication_signatures(tenant, publication_id, "
+            "publication_sha256, key_id, public_key, signature, signed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                tenant,
+                result["publication_id"],
+                result["publication_sha256"],
+                signer.key_id,
+                signer.public_key_hex,
+                signature,
+                signed_at,
+            ),
+        )
+        return {
+            **result,
+            "signature": {
+                "algorithm": publication_signing.ALGORITHM,
+                "key_id": signer.key_id,
+                "signature": signature,
+            },
+        }
+
+    @staticmethod
+    def _with_stored_signature(
+        connection: sqlite3.Connection,
+        tenant: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """A stored publication as it was returned when made (signature included)."""
+        row = connection.execute(
+            "SELECT key_id, signature FROM consent_publication_signatures "
+            "WHERE tenant = ? AND publication_id = ?",
+            (tenant, result["publication_id"]),
+        ).fetchone()
+        if row is None:
+            return result
+        return {
+            **result,
+            "signature": {
+                "algorithm": publication_signing.ALGORITHM,
+                "key_id": str(row["key_id"]),
+                "signature": str(row["signature"]),
+            },
+        }
+
+    def publication_signature(
+        self,
+        tenant_id: str,
+        publication_id: str,
+        *,
+        trusted_public_keys: frozenset[str],
+    ) -> dict[str, Any] | None:
+        """The publish-time signature of one publication, or None.
+
+        None when the publication was not signed, its record or signature does
+        not verify, or it was signed by a key this installation no longer
+        trusts. Nothing here signs or reveals a private key.
+        """
+
+        tenant = self._tenant(tenant_id)
+        publication_ref = _text(publication_id, "publication_id")
+        with self._snapshot() as connection:
+            publication_row = connection.execute(
+                "SELECT * FROM consent_publications WHERE tenant = ? AND publication_id = ?",
+                (tenant, publication_ref),
+            ).fetchone()
+            signature_row = connection.execute(
+                "SELECT * FROM consent_publication_signatures "
+                "WHERE tenant = ? AND publication_id = ?",
+                (tenant, publication_ref),
+            ).fetchone()
+        if publication_row is None or signature_row is None:
+            return None
+        try:
+            publication = self._publication_result(publication_row, tenant)
+        except ConsentPublishingError:
+            return None
+        public_key = str(signature_row["public_key"])
+        key_id = str(signature_row["key_id"])
+        if (
+            public_key not in trusted_public_keys
+            or key_id != publication_signing.key_id_for(public_key)
+            or not hmac.compare_digest(
+                str(signature_row["publication_sha256"]),
+                publication["publication_sha256"],
+            )
+        ):
+            return None
+        statement = publication_signing.publication_statement(key_id, publication)
+        if not publication_signing.verify(
+            public_key,
+            str(signature_row["signature"]),
+            publication_signing.canonical(statement),
+        ):
+            return None
+        return {
+            "algorithm": publication_signing.ALGORITHM,
+            "key_id": key_id,
+            "public_key": public_key,
+            "signature": str(signature_row["signature"]),
+            "signed_at": float(signature_row["signed_at"]),
+        }
+
     def publish(
         self,
         tenant_id: str,
@@ -1971,6 +2156,7 @@ class ConsentPublishingStore:
         }
         request_sha = _sha256(request)
         now = _timestamp(self._clock(), "clock")
+        policy = self._signing_policy()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -1983,6 +2169,7 @@ class ConsentPublishingStore:
                 if replay is not None:
                     connection.execute("COMMIT")
                     return replay
+                signer = self._signer(policy, tenant)
                 property_result = self._property_result(
                     self._property_row(connection, tenant, property_ref),
                     tenant,
@@ -2014,6 +2201,13 @@ class ConsentPublishingStore:
                     bundle_json=bundle_json,
                     bundle_sha256=str(preview["bundle_sha256"]),
                     created_at=now,
+                )
+                result = self._sign_publication(
+                    connection,
+                    tenant=tenant,
+                    result=result,
+                    signer=signer,
+                    signed_at=now,
                 )
                 self._save_replay(
                     connection,
@@ -2063,6 +2257,7 @@ class ConsentPublishingStore:
         }
         request_sha = _sha256(request)
         now = _timestamp(self._clock(), "clock")
+        policy = self._signing_policy()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2075,6 +2270,7 @@ class ConsentPublishingStore:
                 if replay is not None:
                     connection.execute("COMMIT")
                     return replay
+                signer = self._signer(policy, tenant)
                 property_result = self._property_result(
                     self._property_row(connection, tenant, property_ref),
                     tenant,
@@ -2125,6 +2321,13 @@ class ConsentPublishingStore:
                     ).decode("ascii"),
                     bundle_sha256=actual_bundle_sha,
                     created_at=now,
+                )
+                result = self._sign_publication(
+                    connection,
+                    tenant=tenant,
+                    result=result,
+                    signer=signer,
+                    signed_at=now,
                 )
                 self._save_replay(
                     connection,
@@ -2178,6 +2381,7 @@ class ConsentPublishingStore:
         }
         request_sha = _sha256(request)
         now = _timestamp(self._clock(), "clock")
+        policy = self._signing_policy()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2190,6 +2394,8 @@ class ConsentPublishingStore:
                 if replay is not None:
                     connection.execute("COMMIT")
                     return replay
+                # A withdrawal is signed when it can be, never refused for want of a key.
+                signer = self._signer(policy, tenant, optional=True)
                 property_result = self._property_result(
                     self._property_row(connection, tenant, property_ref),
                     tenant,
@@ -2227,6 +2433,9 @@ class ConsentPublishingStore:
                         "active publication belongs to a different property revision"
                     )
                 if current_result["action"] == "withdraw":
+                    current_result = self._with_stored_signature(
+                        connection, tenant, current_result
+                    )
                     self._save_replay(
                         connection,
                         tenant=tenant,
@@ -2258,6 +2467,13 @@ class ConsentPublishingStore:
                     bundle_json=tombstone_json,
                     bundle_sha256=_sha256(tombstone, maximum=_MAX_BUNDLE_BYTES),
                     created_at=now,
+                )
+                result = self._sign_publication(
+                    connection,
+                    tenant=tenant,
+                    result=result,
+                    signer=signer,
+                    signed_at=now,
                 )
                 self._save_replay(
                     connection,

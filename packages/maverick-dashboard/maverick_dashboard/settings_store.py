@@ -634,6 +634,9 @@ def _dump(data: dict) -> str:
                     "security_suite_control", "oauth", "workspace",
                     # Portal link keyring (portal_routing_key_api); sealed values.
                     "third_party_portal",
+                    # Consent publication signing keyring
+                    # (consent_publication_signing_api); sealed values.
+                    "consent_publication_signing",
                     "research_execution", "models", "catalogs", "agent_trust", "immune",
                     *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,

@@ -15316,6 +15316,9 @@ from .consent_global_opt_out_api import (  # noqa: E402
 from .consent_preferences_api import router as consent_preferences_router  # noqa: E402
 from .consent_profile_data_api import router as consent_profile_data_router  # noqa: E402
 from .consent_public_admin_api import router as consent_public_admin_router  # noqa: E402
+from .consent_publication_signing_api import (  # noqa: E402
+    router as consent_publication_signing_router,
+)
 from .consent_publishing_api import router as consent_publishing_router  # noqa: E402
 from .consent_scan_inventory_api import router as consent_scan_inventory_router  # noqa: E402
 from .consent_scan_notice_proposals_api import (  # noqa: E402
@@ -15433,6 +15436,7 @@ router.include_router(consent_public_admin_router)
 router.include_router(consent_delivery_router)
 router.include_router(consent_delivery_destinations_router)
 router.include_router(consent_experiments_router)
+router.include_router(consent_publication_signing_router)
 router.include_router(consent_publishing_router)
 router.include_router(consent_scan_inventory_router)
 router.include_router(consent_scan_notice_proposals_router)

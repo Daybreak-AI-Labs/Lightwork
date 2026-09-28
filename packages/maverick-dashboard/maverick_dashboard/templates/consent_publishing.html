@@ -140,6 +140,17 @@
       </form>
     </section>
   </fieldset>
+
+  <section class="panel" id="cpp-signing" aria-labelledby="cpp-signing-heading" data-can-admin="{{ 'true' if pub_admin else 'false' }}">
+    <h2 id="cpp-signing-heading">Signing key</h2>
+    <p class="muted">Websites can check that the consent settings they receive came from Lightwork unchanged. Turn on “Sign published consent settings” in <a href="/settings/all">All settings</a> under Privacy, create the key here and give the public key to your websites. The private key stays sealed on the server and is never shown.</p>
+    <p id="cpp-signing-status" class="muted" role="status" aria-live="polite"></p>
+    <div id="cpp-signing-state"><p class="muted">Loading the signing key…</p></div>
+    <div class="cw-actions">
+      <button class="btn btn--primary" type="button" id="cpp-signing-rotate" disabled>Create signing key</button>
+      <a class="btn" id="cpp-signing-download" href="/api/v1/consent/publishing/signing-key/public-key" download hidden>Download the public key</a>
+    </div>
+  </section>
 </div>
 <script src="/static/lightwork-consent-workbench.js"></script>
 <script src="/static/lightwork-consent-publishing.js"></script>

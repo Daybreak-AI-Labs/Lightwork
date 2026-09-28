@@ -31,6 +31,8 @@ def isolated_publishing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
     monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    # require_signed_publications is on: every publish here is signed.
+    monkeypatch.setenv("MAVERICK_CONSENT_PUBLICATION_SIGNING_KEY", "hex:" + "5a" * 32)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     for name in (
         "MAVERICK_DASHBOARD_ADMINS",
