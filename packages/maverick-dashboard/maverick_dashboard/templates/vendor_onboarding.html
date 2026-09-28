@@ -33,7 +33,7 @@
   #vo-upload-review pre {max-height:24rem;min-width:0}
   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
   .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
-  .vo-card #vo-cancellation-confirm,.vo-card #vo-export-confirm,.vo-card #vs-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
+  .vo-card #vo-cancellation-confirm,.vo-card #vo-export-confirm,.vo-card #vs-confirm,.vo-card #vs-off-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
   #vo-cancellation-status {white-space:pre-line;overflow-wrap:anywhere}
   #vo-export-status,#vo-acceptance-evidence-check {white-space:pre-line;overflow-wrap:anywhere}
   #vo-export-manifest li {overflow-wrap:anywhere}
@@ -67,6 +67,12 @@
       <div class="vo-actions"><button id="vs-save" class="btn btn--primary" type="submit" disabled>Save workspace setup</button><button id="vs-enable" class="btn" type="button" disabled>Turn on vendor onboarding</button><button id="vs-refresh" class="btn btn--ghost" type="button">Refresh setup</button></div>
     </form>
     <p class="muted">Turning on vendor onboarding also turns on the vendor, risk and evidence features it uses. It doesn't give anyone new access.</p>
+    <details id="vs-off" hidden>
+      <summary>Turn off vendor onboarding</summary>
+      <p>Vendor onboarding stops for every workspace: nobody can start or continue a vendor request until it is turned back on. Saved requests, this workspace setup and your connections are kept, so turning it back on carries on where you left off. The vendor, risk and evidence features it turned on stay on; each can be turned off in <a href="/settings/all">All settings</a>.</p>
+      <label class="vo-upload-confirm-label"><input type="checkbox" id="vs-off-confirm"> <span>I understand that vendor requests stop until this is turned back on.</span></label>
+      <div class="vo-actions"><button id="vs-disable" class="btn btn--danger" type="button" disabled>Turn off vendor onboarding</button></div>
+    </details>
   </details>
   {% endif %}
   <div class="vo-layout">

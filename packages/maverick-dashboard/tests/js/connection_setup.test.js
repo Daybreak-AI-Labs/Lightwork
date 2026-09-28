@@ -143,3 +143,24 @@ test('thirty-two verified native denials retire every consent and remain retryab
   for(let index=0;index<32;index++){h.check('authorize-confirm');await h.submit('authorize');h.el('provider-link').click();await until(h,()=>!h.el('retry').hidden);assert.equal(h.el('retry').hidden,false);assert.equal(h.el('departure').hidden,true);if(index<31)h.el('retry').click();}
   assert.equal(h.calls.filter(call=>call.url.endsWith('/authorize')).length,32);assert.equal(h.calls.filter(call=>call.url.endsWith('/cancel')).length,32);assert.equal(h.el('name').value,'native-drive');assert.equal(h.el('task-return').hidden,false);assert.match(h.el('status').textContent,/retry now|denied/i);
 });
+
+test('turning account connections off needs its own consent, a confirmation and a reload, and sends the chosen scope',async t=>{
+  const off=call=>call.url.endsWith('/disable')?new Response(JSON.stringify({enabled:false,connections_enabled:call.body.scope!=='all',reload_required:true})):undefined;
+  const h=await fixture(t,{intercept:off});
+  assert.equal(h.el('disable').hidden,false);assert.equal(h.el('disable-button').disabled,true);
+  h.el('disable-button').click();await h.settle();assert.equal(h.calls.length,1);
+  h.check('disable-confirm');let asked='';h.w.mvConfirm=async message=>{asked=message;return false;};
+  h.el('disable-button').click();await h.settle();assert.match(asked,/Nothing is deleted/);assert.equal(h.calls.some(call=>call.url.endsWith('/disable')),false);
+  h.w.mvConfirm=async()=>true;h.check('disable-confirm');h.check('disable-scope-all');
+  h.el('disable-button').click();await h.settle();
+  const call=h.calls.find(call=>call.url.endsWith('/disable'));assert.equal(call.body.scope,'all');assert.equal(call.body.confirm,true);assert.equal(call.body.context,context);
+  assert.match(h.el('status').textContent,/Nothing was deleted/);assert.match(h.el('refresh').textContent,/Reload/);assert.equal(h.el('disable-button').disabled,true);
+});
+test('only installation administrators see the turn-off controls, and desktop returns turn off separately',async t=>{
+  const customer=await fixture(t,{data:overview({can_manage_applications:false})});assert.equal(customer.el('disable').hidden,true);assert.equal(customer.el('native-disable').hidden,true);
+  const off=await fixture(t,{data:overview({enabled:false})});assert.equal(off.el('disable').hidden,true);
+  const h=await fixture(t,{data:overview({desktop_return_enabled:true,desktop_return_available:true}),intercept:call=>call.url.endsWith('/desktop-return/disable')?new Response(JSON.stringify({enabled:false,reload_required:true})):undefined});
+  assert.equal(h.el('native-disable').hidden,false);h.check('native-disable-confirm');h.el('native-disable-button').click();await h.settle();
+  const call=h.calls.find(call=>call.url.endsWith('/desktop-return/disable'));assert.equal(call.body.confirm,true);assert.equal(h.calls.some(call=>call.url.endsWith('/connection-setup/disable')),false);
+  assert.match(h.el('status').textContent,/Accounts already connected keep working/);
+});

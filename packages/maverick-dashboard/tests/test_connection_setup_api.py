@@ -113,3 +113,76 @@ def test_enable_respects_current_deployment_denial(client, monkeypatch, name):
     response = client.post("/api/v1/connection-setup/enable", json={"confirm": True, "context": current["context"]})
     assert response.status_code == 409
     assert not config.dashboard_overrides_path().exists()
+
+
+@pytest.fixture
+def audit_rows(monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
+    return rows
+
+
+def test_turning_account_sign_in_off_keeps_saved_connections_and_is_audited(client, audit_rows):
+    current = enable(client)
+    with tenant_scope(tenant="tenant-a"):
+        connections.set_connection("team-jira", connector="jira", base_url="https://example.atlassian.net",
+                                   token="synthetic-private-token", owner="user:owner")
+    denied = client.post("/api/v1/connection-setup/disable", json={"confirm": True, "context": current["context"], "scope": "all"}, headers={"X-Test-User": "other"})
+    assert denied.status_code == 403
+    assert client.post("/api/v1/connection-setup/disable", json={"confirm": False, "context": current["context"]}).status_code == 422
+    response = client.post("/api/v1/connection-setup/disable", json={"confirm": True, "context": current["context"]})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"enabled": False, "connections_enabled": True, "reload_required": True}
+    after = state(client)
+    assert after["enabled"] is False and after["connections_enabled"] is True
+    assert [row["name"] for row in after["connections"]] == ["team-jira"]
+    assert [(row["section"], row["key"], row["old"], row["new"]) for row in audit_rows] == [("oauth", "vault", True, False)]
+    assert audit_rows[0]["_global"] is True and audit_rows[0]["actor"] == "user:owner"
+    everything = client.post("/api/v1/connection-setup/disable", json={"confirm": True, "context": after["context"], "scope": "all"})
+    assert everything.status_code == 200, everything.text
+    assert everything.json()["connections_enabled"] is False
+    assert audit_rows[-1]["section"] == "connections" and len(audit_rows) == 2
+    with tenant_scope(tenant="tenant-a"):
+        assert connections.get_connection("team-jira")["token"] == "synthetic-private-token"
+    enable(client)
+    assert [row["name"] for row in state(client)["connections"]] == ["team-jira"]
+
+
+def test_desktop_return_turns_off_on_its_own(client, audit_rows):
+    current = enable(client)
+    turned_on = client.post("/api/v1/connection-setup/desktop-return/enable", json={"confirm": True, "context": current["context"]})
+    assert turned_on.status_code == 200, turned_on.text
+    current = state(client)
+    assert current["desktop_return_enabled"] is True
+    response = client.post("/api/v1/connection-setup/desktop-return/disable", json={"confirm": True, "context": current["context"]})
+    assert response.status_code == 200, response.text
+    after = state(client)
+    assert after["desktop_return_enabled"] is False and after["enabled"] is True
+    assert [(row["section"], row["key"]) for row in audit_rows] == [("oauth", "desktop_return")]
+
+
+@pytest.mark.parametrize("name", ["MAVERICK_OAUTH_VAULT", "LIGHTWORK_OAUTH_VAULT"])
+def test_turning_off_respects_a_deployment_that_keeps_it_on(client, monkeypatch, audit_rows, name):
+    current = enable(client)
+    monkeypatch.setenv(name, "1")
+    current = state(client)
+    response = client.post("/api/v1/connection-setup/disable", json={"confirm": True, "context": current["context"]})
+    assert response.status_code == 409
+    assert "Deployment settings" in response.json()["detail"]
+    assert state(client)["enabled"] is True and audit_rows == []
+
+
+def test_a_refused_audit_record_undoes_turning_off(client, monkeypatch):
+    import maverick.audit as audit
+
+    current = enable(client)
+
+    def refuse(kind, **payload):
+        raise audit.AuditRefused("audit sink unavailable")
+
+    monkeypatch.setattr(audit, "audit_event", refuse)
+    response = client.post("/api/v1/connection-setup/disable", json={"confirm": True, "context": current["context"]})
+    assert response.status_code == 503
+    assert state(client)["enabled"] is True

@@ -17,6 +17,13 @@
     <label><input id="tf-enable-confirm" type="checkbox">Turn on file protection for future tasks, and block file changes that can't be protected.</label>
     <button id="tf-enable" class="btn btn--primary" type="button" disabled>Turn on file protection</button>
   </div>
+  <details id="tf-disable-panel" class="panel" hidden>
+    <summary>Turn off file protection</summary>
+    <p>Future tasks will change files without keeping a copy first, so their changes can't be put back from this page.
+      Copies already kept for earlier tasks stay, and can still be restored here.</p>
+    <label><input id="tf-disable-confirm" type="checkbox">I understand future task changes can't be undone here.</label>
+    <button id="tf-disable" class="btn btn--danger" type="button" disabled>Turn off file protection</button>
+  </details>
   <button id="tf-preview" class="btn btn--primary" type="button" disabled>Review changes to restore</button>
   <div id="tf-files"></div>
   <div id="tf-review" class="panel" hidden>

@@ -322,3 +322,28 @@ def test_historical_cases_keep_their_owner_when_configuration_is_missing(client)
     saved = bind(client, record, owner="user:other")
     assert saved.status_code == 200 and saved.json()["binding"]["resource_owner"] == "user:other"
     assert client.get("/api/v1/vendor-onboarding/cases").json()["cases"][0]["id"] == created.json()["id"]
+
+
+def test_vendor_onboarding_turns_off_keeps_setup_and_is_audited(client, monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
+    activate(client)
+    record = credential()
+    assert bind(client, record).status_code == 200
+    state = client.get("/api/v1/vendor-setup").json()
+    assert state["modules_enabled"] is True
+    assert client.post("/api/v1/vendor-setup/disable", json={**reviewed(state), "confirm": False}).status_code == 422
+    assert client.post("/api/v1/vendor-setup/disable", json=reviewed(state), headers={"Origin": "https://attacker.example"}).status_code == 403
+    response = client.post("/api/v1/vendor-setup/disable", json=reviewed(state))
+    assert response.status_code == 200, response.text
+    after = response.json()
+    assert after["modules_enabled"] is False and after["connections_enabled"] is True
+    assert after["binding"]["ticket_connection"] == record["name"] and after["revision"] == state["revision"]
+    assert (config.load_config().get("vendor_management") or {}).get("enable") is True
+    assert [(row["section"], row["key"], row["old"], row["new"]) for row in rows] == [("vendor_onboarding", "enable", True, False)]
+    with tenant_scope(tenant="tenant-a"):
+        assert setup.current()["binding"]["ticket_connection"] == record["name"]
+    again = client.post("/api/v1/vendor-setup/enable", json=reviewed(after))
+    assert again.status_code == 200 and again.json()["binding"]["ticket_connection"] == record["name"]
