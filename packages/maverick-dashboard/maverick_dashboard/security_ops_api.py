@@ -60,7 +60,7 @@ SIGNAL_LABELS = {
     "capability_denied": "Assistant tried to go beyond its limits",
     "governance_denied": "Action stopped by a company rule",
     "halt": "All work was stopped",
-    "secret_redacted": "Secret caught before it was saved",
+    "secret_redacted": "Secret caught before it was saved",  # pragma: allowlist secret
     "consent_result": "Risky action refused or not approved in time",
 }
 
