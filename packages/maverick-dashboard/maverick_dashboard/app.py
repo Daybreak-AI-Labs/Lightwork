@@ -1056,6 +1056,7 @@ from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
 from .store_catalogs import router as store_catalogs_router  # noqa: E402
 from .support_api import router as support_router  # noqa: E402
 from .system_checks_api import router as system_checks_router  # noqa: E402
+from .tax_actions_api import router as tax_actions_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
 
@@ -1065,6 +1066,7 @@ app.include_router(support_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
+app.include_router(tax_actions_router)
 app.include_router(channel_check_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)

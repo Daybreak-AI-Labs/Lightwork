@@ -27,6 +27,7 @@ ASSETS = (
     "lightwork-learning-loop.js",
     "lightwork-value-proof.js",
     "lightwork-feature-actions.js",
+    "lightwork-tax.js",
 )
 STYLES: tuple[str, ...] = ()  # stylesheets served by their own page routers
 
