@@ -485,12 +485,11 @@ _LOCAL_KEY_WARNED = False
 
 
 def require_offhost_signing() -> bool:
-    """Whether the audit signing key MUST live off-host (KMS / injected), so the
-    on-disk generated-and-left key is refused.
+    """Whether signing requires an externally supplied key instead of a disk key.
 
-    On by default under enterprise mode -- the audit chain is the tamper-evidence
-    a regulator relies on, and a same-host on-disk private key lets a local root
-    rewrite history and re-sign it. Also flips on via ``[audit]
+    On by default under enterprise mode to avoid leaving a generated private
+    key on local disk. Injected and KMS-unwrapped keys still sign locally; this
+    policy does not establish isolated key custody. Also flips on via ``[audit]
     require_offhost_key`` / ``MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY``. Off by default
     otherwise (the local-key happy path is unchanged)."""
     env = os.environ.get("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "").strip().lower()
@@ -520,8 +519,9 @@ def _kms_wrapped_keypair() -> tuple[bytes, bytes, str] | None:
 
     ``MAVERICK_AUDIT_SIGNING_KEY_WRAPPED`` (hex/base64 of a KMS-wrapped 32-byte
     Ed25519 private key) + a configured cloud KMS (``[encryption.kms]`` AWS / GCP
-    / Vault) lets the audit signer's private key live in KMS custody and be
-    unwrapped only into process memory at startup -- never written to local disk.
+    / Vault) keeps the stored private key wrapped and unwraps it into process
+    memory at startup -- never written to local disk. This is local signing,
+    not an isolated KMS signing operation; the process receives the private key.
     Returns ``(priv, pub, key_id)`` or ``None`` (no config / crypto absent / any
     error -> fall through to the next key source)."""
     raw = os.environ.get(_KMS_WRAPPED_KEY_ENV)
@@ -565,17 +565,16 @@ def _kms_wrapped_keypair() -> tuple[bytes, bytes, str] | None:
 
 
 def active_key_is_offhost() -> bool:
-    """Whether the ACTIVE audit signing key is held off-host (KMS / injected).
+    """Whether the active key is externally supplied rather than stored on disk.
 
     True when the signer's private key comes from an env-injected key
     (:func:`_injected_keypair`, sourced from a KMS / secrets manager) or a
     KMS-wrapped key (:func:`_kms_wrapped_keypair`) -- it never lives
-    generated-and-left on local disk. False for the default co-located on-disk
-    key: that key still lets :func:`verify_chain` detect accidental /
-    non-privileged edits (integrity), but an actor running as the maverick uid
-    can read it and cleanly re-sign the whole chain, so it is NOT tamper-evidence
-    against a same-uid actor. Any *tamper-evidence* claim must be gated on this
-    returning True.
+    generated-and-left on local disk. The historical function name describes
+    key sourcing, not the location of signing: both sources expose private key
+    bytes to this process. True does not establish a non-exportable signer or
+    protection from an actor able to use the process's key. Independently
+    retained checkpoints provide a separate history commitment.
     """
     if _injected_keypair() is not None:
         return True
@@ -625,8 +624,9 @@ def _load_or_create_keypair_unlocked() -> tuple[bytes, bytes, str]:
     two keep the private key off local disk (only the public half is persisted,
     for verification) so the audit chain's trust anchor can live in a KMS / HSM /
     secrets manager. When :func:`require_offhost_signing` is on (enterprise mode)
-    and neither off-host source is available, this RAISES rather than generate a
-    same-host on-disk key a local root could use to rewrite + re-sign history.
+    and neither external source is available, this RAISES rather than generate a
+    local private-key file. In every current path the signer receives private
+    key bytes, so this is not an isolated signing-service boundary.
     """
     injected = _injected_keypair()
     if injected is not None:
@@ -682,9 +682,10 @@ def _load_or_create_keypair_unlocked() -> tuple[bytes, bytes, str]:
             "A same-uid on-disk key gives integrity against accidental / "
             "non-privileged edits only -- it is NOT tamper-evidence against an "
             "actor running as the maverick uid, who can read the key and cleanly "
-            "re-sign the chain. For tamper-evidence, custody the key off-host: set "
+            "re-sign the chain. To avoid a private key on local disk, set "
             "%s (a KMS / secrets-manager-sourced Ed25519 key) or %s (a KMS-wrapped "
-            "key).",
+            "key). Both still expose the private key to the signing process; "
+            "use independently retained checkpoints to detect later history changes.",
             key_dir, _SIGNING_KEY_ENV, _KMS_WRAPPED_KEY_ENV,
         )
     priv, pub, key_id = _generate_keypair()

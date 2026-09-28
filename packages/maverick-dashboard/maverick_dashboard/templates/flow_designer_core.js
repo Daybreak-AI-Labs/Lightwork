@@ -9,7 +9,8 @@ var FDCore = (function () {
     choices: [], assignee: '', expires_after: 0, on_expire: null, form: [],
     seconds: 0, flow_ref: '',
     retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
-    assignments: {}, subflow_inputs: {}, body: null, branches: [], next: null
+    assignments: {}, subflow_inputs: {}, body: null, branches: [], next: null,
+    learned_operator: null, recipe_step: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
     'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label',
@@ -40,6 +41,11 @@ var FDCore = (function () {
       if (n[k] !== '' && n[k] != null) o[k] = n[k];
     });
     if (n.params && Object.keys(n.params).length) o.params = n.params;
+    // Preserve the complete evidence-bound attachment across canvas edits.
+    // The server validates it and its binding; silently dropping it here would
+    // replace learned execution with model work on an unrelated layout save.
+    if (n.learned_operator != null) o.learned_operator = n.learned_operator;
+    if (n.recipe_step != null) o.recipe_step = n.recipe_step;
     if (n.seconds) o.seconds = n.seconds;
     if (n.retries) o.retries = n.retries;
     if (n.retry_backoff) o.retry_backoff = n.retry_backoff;
@@ -62,10 +68,14 @@ var FDCore = (function () {
   }
 
   function serializeFlow(f) {
-    return {
+    var out = {
       id: f.id || '', name: f.name || '', start: f.start || '',
       nodes: (f.nodes || []).map(serializeNode)
     };
+    if (f.learned_recipe != null) out.learned_recipe = f.learned_recipe;
+    if (f.recipe_lineage != null) out.recipe_lineage = f.recipe_lineage;
+    if (f.recipe_teaching != null) out.recipe_teaching = f.recipe_teaching;
+    return out;
   }
 
   // Commit raw Params JSON without destroying an invalid draft. The visual

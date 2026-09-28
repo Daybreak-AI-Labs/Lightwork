@@ -3142,7 +3142,7 @@ def resume_bootstrap_restore(*, isolated: bool, actor: str) -> dict:
 
 
 def reconciliation_status(*, actor: str) -> dict:
-    """Return bounded, content-free bootstrap work for the in-app recovery UI."""
+    """Return bounded bootstrap work and source-review forms for administrators."""
     with _locked():
         marker = _read_bootstrap(actor=actor)
         if marker is None:
@@ -3159,10 +3159,26 @@ def reconciliation_status(*, actor: str) -> dict:
         items, reconciliation = _classified_bootstrap_reconciliation(marker)
         public = []
         for item in items:
-            public.append({
+            row = {
                 key: value for key, value in item.items()
                 if key not in {"actor_sha256", "evidence_sha256"}
-            })
+            }
+            if item.get("category") == "channel_authority":
+                from . import channel_recovery_controls
+
+                try:
+                    relative = backup._safe_relative_path(item["source"], label="channel recovery source")
+                    decryptor = (_bootstrap_record_decryptor(marker) if marker.get("retained_keys") is not None else None)
+                    row["channel_review"] = channel_recovery_controls.descriptor(
+                        marker, item, _root().joinpath(*relative.parts), decryptor=decryptor,
+                        tenant=current_tenant_id_strict(), workspace=_root())
+                except (OSError, ValueError, TypeError, KeyError, OverflowError):
+                    row["channel_review"] = {
+                        "schema": 1, "status": "unavailable", "title": "Review a connected service",
+                        "source_label": "Connected service",
+                        "reason": "This restored item could not be checked. Keep recovery open, refresh, or create a support report.",
+                    }
+            public.append(row)
         return {
             "state": "reconciliation_required",
             "items": public,
@@ -3256,6 +3272,8 @@ def resolve_reconciliation(
     isolated: bool,
     actor: str,
     channel_readback: dict | None = None,
+    channel_answers: dict | None = None,
+    expected_review_token: str | None = None,
 ) -> dict:
     """Record one signed, explicit no-replay disposition from recovery mode."""
     if not isolated:
@@ -3284,6 +3302,19 @@ def resolve_reconciliation(
                 "Choose a disposition that matches the required external readback."
             )
         reference = str(evidence_reference or "").strip()
+        if channel_answers is not None or expected_review_token is not None:
+            if not is_channel or channel_readback is not None or reference:
+                raise RecoveryError("This review does not belong to the selected restored item.")
+            from . import channel_recovery_controls
+
+            relative = backup._safe_relative_path(item["source"], label="channel recovery source")
+            decryptor = (_bootstrap_record_decryptor(marker) if marker.get("retained_keys") is not None else None)
+            try:
+                channel_readback = channel_recovery_controls.readback(
+                    marker, item, channel_answers, expected_review_token, _root().joinpath(*relative.parts),
+                    decryptor=decryptor, tenant=current_tenant_id_strict(), workspace=_root())
+            except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                raise RecoveryError("This connected-service review is incomplete or changed. Refresh and review its details.") from exc
         if is_channel:
             if channel_readback is None or reference:
                 raise RecoveryError("Import the exact channel readback; a generic reference cannot release channel authority.")
@@ -3330,6 +3361,8 @@ def resolve_reconciliation(
             "item_id": item_id,
             "disposition": disposition,
             "unresolved": remaining,
+            "automatic_replay_blocked": True,
+            "normal_start_blocked": True,
         }
 
 

@@ -329,7 +329,11 @@ def derive_claim(row: dict, execution_pair: object = None) -> dict:
         decision = "attempted"
     elif kind == "tool_result":
         paired = _execution_pair_fields_match(row, execution_pair)
-        if row.get("status") == "ok" and paired:
+        # Lost responses and interrupted result collection leave the effect
+        # unresolved even when dispatch is paired or transport status is known.
+        if row.get("disposition") == "execution_unknown":
+            decision = "execution_unknown"
+        elif row.get("status") == "ok" and paired:
             decision = "executed"
         elif row.get("status") == "error" and paired:
             decision = "failed"
@@ -1168,6 +1172,11 @@ def verify(receipt: dict, *, trusted_keys, historical_keys=None,
         findings.append("the issuer's signing key is kept on the same host as the "
                         "log: this is integrity against accidental edits, not "
                         "tamper-evidence against an actor who can read that key")
+    elif custody == "offhost":
+        findings.append("the issuer reports an externally supplied signing key; "
+                        "the historical offhost label does not establish isolated "
+                        "signing: injected or KMS-unwrapped private keys remain "
+                        "available to the local signing process")
     if any(
         policy.not_before is not None
         or policy.not_after is not None

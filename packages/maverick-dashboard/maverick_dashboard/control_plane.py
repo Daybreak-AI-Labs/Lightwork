@@ -2,25 +2,28 @@
 
 Two read-only surfaces over primitives that already exist in the kernel:
 
-* :func:`build_replay` -- reconstructs a run's action timeline from the signed
-  audit log (:func:`maverick.audit.iter_events`), classifies each event, and
-  reports whether the tamper-evident hash chain and cross-file tip ledger
-  covering the run verify (:func:`maverick.audit.verify_chain`,
-  :func:`maverick.audit.verify_anchors`). This is the "flight recorder" view, and
+* :func:`build_replay` -- reconstructs a run's action timeline and verifies each
+  selected segment from the same captured lines. The cross-file tip ledger is
+  checked separately against current files; the days and ledger are not one
+  atomic snapshot. This is the "flight recorder" view, and
   :func:`evidence_packet` wraps it into a one-click, exportable evidence bundle.
 * :func:`trust_overview` -- enumerates the configured external agents from the
   Agent Trust Plane (:func:`maverick.agent_trust.load_trust_state`) with their
   tool/risk/budget ceilings and lifecycle status: the cross-agent permission
   graph.
 
-Both are pure reads; neither mutates state. Everything degrades fail-soft -- a
-missing audit dir, an unreadable day-file, or an absent trust registry yields an
-empty/neutral view rather than an error, so the pages never 500 on a fresh box.
+Both are read-only views. A missing audit directory or absent trust registry
+has an empty state; an unreadable or changing selected segment is disclosed as
+incomplete, never silently treated as an intact empty log. Segment verification
+does not establish complete instrumentation, checkpoint custody, or one global
+point-in-time snapshot.
 """
 from __future__ import annotations
 
 import datetime
+import json
 import math
+from pathlib import Path
 from typing import Any
 
 # ---- replay / flight recorder ----------------------------------------------
@@ -56,15 +59,12 @@ _BLOCK_KINDS = frozenset({
     "shield_block", "capability_denied", "governance_denied", "egress_blocked",
     "agent_trust_denied", "memory_guard", "halt",
 })
-_MAX_WINDOW_DAYS = 32
-
-
 def _utc(ts: float | None) -> datetime.datetime | None:
     if ts is None:
         return None
     try:
         return datetime.datetime.fromtimestamp(float(ts), tz=datetime.timezone.utc)
-    except (TypeError, ValueError, OSError):
+    except (TypeError, ValueError, OSError, OverflowError):
         return None
 
 
@@ -73,28 +73,21 @@ def _fmt_time(ts: float | None) -> str:
     return d.strftime("%Y-%m-%d %H:%M:%S") if d else ""
 
 
-def _day_of(ts: float | None) -> str | None:
-    d = _utc(ts)
-    return d.date().isoformat() if d else None
-
-
 def _window_days(window: tuple[float, float] | None) -> list[str]:
-    """Distinct UTC day strings spanned by ``(start_ts, end_ts)`` (capped)."""
+    """All available audit day files in the task lifetime, without a silent cap."""
+    from maverick.audit.reader import event_paths
+
     if not window:
         return []
     start = _utc(window[0])
     end = _utc(window[1] or window[0])
-    if start is None:
-        return []
-    if end is None or end < start:
-        end = start
-    days: list[str] = []
-    d = start.date()
-    last = end.date()
-    while d <= last and len(days) < _MAX_WINDOW_DAYS:
-        days.append(d.isoformat())
-        d += datetime.timedelta(days=1)
-    return days
+    if start is None or end is None or end < start:
+        raise ValueError("task audit window has invalid timestamps")
+    # Enumerate files, not every date in a potentially long-lived task. This
+    # bounds traversal by the stored evidence without dropping later activity.
+    return [path.stem for path in event_paths(
+        since=start.date().isoformat(), until=end.date().isoformat(),
+    )]
 
 
 def _summarize(ev: dict[str, Any]) -> str:
@@ -144,13 +137,17 @@ def _entry(ev: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _verify_days(days: list[str]) -> dict[str, Any]:
+def _verify_days(
+    days: list[str], *, captured: dict[str, list[Any]] | None = None,
+) -> dict[str, Any]:
     """Verify the signed hash chain for each day-file the run touched.
 
     Mirrors ``maverick audit verify``: a clean signed chain and tip ledger is
     ``verified``; any structural/signature/anchor break is ``broken``; a chain
     that was simply never signed (every row flagged ``unsigned``) reports
-    ``unsigned`` (not tamper); no day-file present is ``no_log``.
+    ``unsigned`` (not tamper); no day-file present is ``no_log``. Replay passes
+    verdicts over its captured lines, so this function must not reopen those
+    segments. Anchor verification remains a separate check of current files.
     """
     from maverick.audit import verify_anchors, verify_chain
     from maverick.paths import data_dir
@@ -160,29 +157,51 @@ def _verify_days(days: list[str]) -> dict[str, Any]:
     unsigned = 0
     present: list[str] = []
     for d in days:
-        path = audit_dir / f"{d}.ndjson"
-        if not path.exists():
-            continue
-        present.append(d)
-        try:
-            breaks = verify_chain(path)
-        except Exception:  # unreadable/locked -- treat as a break, never crash
-            real_breaks.append(type("B", (), {"line_no": 0, "reason": "unreadable", "detail": d})())
-            continue
+        if captured is not None:
+            if d not in captured:
+                continue  # failed capture is disclosed in the replay read report
+            breaks = captured[d]
+            present.append(d)
+        else:
+            path = audit_dir / f"{d}.ndjson"
+            if not path.exists():
+                continue
+            present.append(d)
+            try:
+                breaks = verify_chain(path)
+            except Exception:  # unreadable/locked -- treat as a break, never crash
+                real_breaks.append(type("B", (), {"line_no": 0, "reason": "unreadable", "detail": d})())
+                continue
         for b in breaks:
             if getattr(b, "reason", "") == "unsigned":
                 unsigned += 1
             else:
                 real_breaks.append(b)
 
+    segment_status = "broken" if real_breaks else (
+        "unsigned" if unsigned else ("verified" if present else "no_log")
+    )
     try:
         anchor_breaks = verify_anchors(audit_dir)
     except Exception:  # unreadable/locked anchor ledger -- treat as a break
         anchor_breaks = [type("B", (), {"line_no": 0, "reason": "anchors_unreadable", "detail": str(audit_dir)})()]
     real_breaks.extend(anchor_breaks)
 
+    scope = {} if captured is None else {
+        "scope": "selected_segment_snapshots",
+        "segment_status": segment_status,
+        "atomic_across_days": False,
+        "anchors": {
+            "scope": "current_files_separate_read",
+            "bound_to_timeline": False,
+            "status": "broken" if anchor_breaks else "no_breaks_found",
+            "break_count": len(anchor_breaks),
+        },
+        "checkpoints": "not_verified",
+    }
+
     if not present and not real_breaks:
-        return {"status": "no_log", "break_count": 0, "days": [], "signed": False, "breaks": []}
+        return {"status": "no_log", "break_count": 0, "days": [], "signed": False, "breaks": [], **scope}
     if real_breaks:
         return {
             "status": "broken",
@@ -194,30 +213,80 @@ def _verify_days(days: list[str]) -> dict[str, Any]:
                  "detail": getattr(b, "detail", "")}
                 for b in real_breaks[:50]
             ],
+            **scope,
         }
     if unsigned:
-        return {"status": "unsigned", "break_count": 0, "days": present, "signed": False, "breaks": []}
-    return {"status": "verified", "break_count": 0, "days": present, "signed": True, "breaks": []}
+        return {"status": "unsigned", "break_count": 0, "days": present, "signed": False, "breaks": [], **scope}
+    return {"status": "verified", "break_count": 0, "days": present, "signed": True, "breaks": [], **scope}
+
+
+def _read_replay_day(path: Path, report: Any, raw: list[dict[str, Any]], goal_id: int) -> list[Any]:
+    """Extract and verify each line once, from the same sealing-aware snapshot."""
+    from maverick.audit import verify_chain
+    from maverick.audit.segments import SegmentSnapshot
+    from maverick.file_lock import cross_process_lock
+    from maverick.paths import tenant_scope
+
+    with cross_process_lock(path, strict=True), SegmentSnapshot(path, report) as snapshot:
+        def captured_lines():
+            for line_number, line in enumerate(snapshot.lines(), start=1):
+                if line.strip():
+                    try:
+                        event = json.loads(line)
+                        if not isinstance(event, dict):
+                            raise ValueError("non-object audit row")
+                    except (ValueError, RecursionError):
+                        report.problem(path, "invalid_json_object", line_number)
+                    else:
+                        report.events += 1
+                        # A signed JSON object can still have damaged metadata.
+                        # Reject fields needed by sorting/rendering, but feed
+                        # the unchanged line to signature verification below.
+                        kind, stamp = event.get("kind"), event.get("ts")
+                        if (not isinstance(kind, str) or not kind.strip()
+                                or type(stamp) not in (int, float) or _utc(stamp) is None):
+                            report.problem(path, "invalid_event_metadata", line_number)
+                        elif event.get("goal_id") == goal_id:
+                            raw.append(event)
+                yield line
+
+        lines = captured_lines()
+        with tenant_scope(tenant=snapshot.tenant):
+            breaks = verify_chain(path, lines=lines)
+        # Some verification preconditions (e.g. crypto unavailable) return
+        # before consuming input. Still expose readable records, under the
+        # failing verdict, and complete the snapshot's change detection.
+        for _line in lines:
+            pass
+        return breaks
 
 
 def build_replay(goal_id: int, *, window: tuple[float, float] | None = None) -> dict[str, Any]:
     """Reconstruct a run's signed-audit timeline + chain-verification status."""
-    from maverick.audit import iter_events
+    from maverick.audit.reader import event_paths
+    from maverick.audit.segments import ReadReport
+    from maverick.paths import data_dir
 
-    days = _window_days(window)
+    report = ReadReport()
+    audit_dir = data_dir("audit")
+    try:
+        days = _window_days(window) if window else [path.stem for path in event_paths(all_days=True)]
+    except (OSError, ValueError, OverflowError) as exc:
+        days = []
+        report.problem(Path("audit"), type(exc).__name__)
     raw: list[dict[str, Any]] = []
-    if days:
-        for d in days:
-            try:
-                raw.extend(e for e in iter_events(day=d) if e.get("goal_id") == goal_id)
-            except Exception:
-                continue
-    else:
+    captured: dict[str, list[Any]] = {}
+    for day in days:
+        before_failures = report.failures
+        report.segments += 1
         try:
-            raw.extend(e for e in iter_events(all_days=True) if e.get("goal_id") == goal_id)
-        except Exception:
-            raw = []
-        days = sorted({d for e in raw if (d := _day_of(e.get("ts")))})
+            captured[day] = _read_replay_day(audit_dir / f"{day}.ndjson", report, raw, goal_id)
+            if report.failures == before_failures:
+                report.completed_segments += 1
+        except Exception as exc:
+            if report.failures == before_failures:
+                report.problem(Path(f"{day}.ndjson"), type(exc).__name__)
+    report.finished = True
 
     raw.sort(key=lambda e: e.get("ts") or 0.0)
     entries = [_entry(e) for e in raw if e.get("kind") not in _SKIP_KINDS]
@@ -232,7 +301,17 @@ def build_replay(goal_id: int, *, window: tuple[float, float] | None = None) -> 
                       and e.get("decision") == "deny"),
         "blocks": sum(1 for e in raw if e.get("kind") in _BLOCK_KINDS),
     }
-    return {"entries": entries, "chain": _verify_days(days), "summary": summary}
+    chain = _verify_days(days, captured=captured)
+    if report.failures:
+        if chain["status"] != "broken":
+            chain["status"] = "incomplete"
+        if chain["segment_status"] != "broken":
+            chain["segment_status"] = "incomplete"
+    report.verification = {
+        "verified": "segment_chains_verified", "unsigned": "unsigned",
+        "no_log": "not_requested",
+    }.get(chain["segment_status"], "failed")
+    return {"entries": entries, "chain": chain, "summary": summary, "read_report": report.as_dict()}
 
 
 def _version() -> str:
@@ -265,6 +344,7 @@ def evidence_packet(goal: Any, replay: dict[str, Any]) -> dict[str, Any]:
         "chain": replay["chain"],
         "summary": replay["summary"],
         "timeline": replay["entries"],
+        "read_report": replay["read_report"],
     }
 
 

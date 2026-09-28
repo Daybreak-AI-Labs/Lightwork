@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..approval_cards import ApprovalCardError
+from ..audit.errors import AuditRefused
 from ..budget import BudgetExceeded
 from ..killswitch import Halted
 from .ir import (
@@ -45,7 +46,9 @@ from .ir import (
     NODE_WHILE,
     Flow,
     FlowNode,
+    learned_operator_work_digest,
     max_node_retries,
+    validate_learned_operator,
 )
 
 # Run statuses ----------------------------------------------------------------
@@ -582,6 +585,16 @@ class _Ctx:
     parallel_slots: Any = None                     # shared worker budget for fan-out
     frame: dict = field(default_factory=dict)
     control_stop: list = field(default_factory=list)
+    run_id: str = ""                # supplied by durable execution; empty for library calls
+    recipe: dict | None = None      # comes only from the current validated flow
+    recipe_lineage: dict | None = None
+    recipe_owner: str = ""
+    recipe_lineage_check: dict | None = None
+    recipe_choice_check: dict | None = None
+    recipe_teaching: dict | None = None
+    recipe_teaching_check: dict | None = None
+    recipe_workflow_check: dict | None = None
+    execution_owner: str | None = None  # inherited from the root, never an inline graph
 
     def nested(self, slot: str = "body") -> _Ctx:
         # A copy that cannot pause (foreach body / subflow run straight). Shares
@@ -592,7 +605,8 @@ class _Ctx:
                     flow_stack=self.flow_stack, deadline=self.deadline,
                     parallel_slots=self.parallel_slots,
                     frame=self.frame.setdefault("children", {}).setdefault(slot, {}),
-                    control_stop=self.control_stop)
+                    control_stop=self.control_stop, run_id=self.run_id,
+                    execution_owner=self.execution_owner)
 
     def branched(self, slot: str = "body") -> _Ctx:
         # For a CONCURRENT parallel branch: its own flow_stack copy (independent
@@ -603,7 +617,8 @@ class _Ctx:
                     flow_stack=set(self.flow_stack), deadline=self.deadline,
                     parallel_slots=self.parallel_slots,
                     frame=self.frame.setdefault("children", {}).setdefault(slot, {}),
-                    control_stop=self.control_stop)
+                    control_stop=self.control_stop, run_id=self.run_id,
+                    execution_owner=self.execution_owner)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -611,10 +626,86 @@ def _render_params(node: FlowNode, data: dict) -> dict:
             for k, v in (node.params or {}).items()}
 
 
+def _learned_agent_result(node: FlowNode, data: dict, *, flow_id: str, run_id: str) -> tuple[bool, Any]:
+    """Select pure learned computation or the original agent, before any effect.
+
+    The receipt reports selection, never independently established correctness.
+    No example, input, output, or original brief is copied into that receipt.
+    """
+    from .. import audit
+    from ..config import get_flows
+    from ..learning_guard import check_learning_halt
+    from . import enabled as flows_enabled
+    from .operator_artifacts import COMPOSED_SCHEMA, evaluate
+
+    check_learning_halt("flow_learned_operator", "select")
+    reason, applied, value, candidate_count = "invalid_artifact", False, None, 0
+    artifact_digest, work_digest = "", ""
+    envelope = node.learned_operator
+    if isinstance(envelope, dict):
+        artifact = envelope.get("artifact")
+        if isinstance(artifact, dict):
+            claimed = artifact.get("artifact_sha256")
+            if (isinstance(claimed, str) and len(claimed) == 64
+                    and all(c in "0123456789abcdef" for c in claimed)):
+                artifact_digest = claimed
+        try:
+            work_digest = learned_operator_work_digest(node)
+        except (TypeError, ValueError):
+            pass
+        settings = get_flows()
+        composed = isinstance(artifact, dict) and artifact.get("schema") == COMPOSED_SCHEMA
+        if (not flows_enabled() or settings.get("learned_operators") is not True
+                or (composed and settings.get("composed_operators") is not True)):
+            reason = "feature_disabled"
+        elif envelope.get("work_sha256") != work_digest:
+            reason = "work_changed"
+        else:
+            try:
+                validate_learned_operator(node)
+                decision = evaluate(envelope["artifact"], data)
+            except (TypeError, ValueError):
+                reason = "invalid_artifact"
+            else:
+                reason = decision.reason
+                if reason not in {"agreement", "outside_domain", "ambiguity", "invalid_artifact",
+                                  "evaluation_limit"}:
+                    reason = "invalid_artifact"
+                applied = decision.applied is True and reason == "agreement"
+                value = decision.value if applied else None
+                candidate_count = decision.candidate_count
+    check_learning_halt("flow_learned_operator", "receipt")
+    try:
+        written = audit.record(
+            audit.EventKind.FLOW_LEARNED_OPERATOR_DECISION,
+            agent="flow:learned_operator", flow_id=flow_id, flow_run_id=run_id, node_id=node.id,
+            status="applied" if applied else "fallback", reason=reason,
+            artifact_sha256=artifact_digest, work_sha256=work_digest,
+            candidate_count=candidate_count,
+        )
+    except (AuditRefused, BudgetExceeded, Halted, FlowApprovalStale):
+        raise
+    except Exception as exc:
+        raise AuditRefused("learned operator decision audit failed") from exc
+    if written is not True:
+        raise AuditRefused("learned operator decision requires a durable audit receipt")
+    check_learning_halt("flow_learned_operator", "dispatch")
+    return applied, value
+
+
 def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
     def _call():
         if node.kind == NODE_AGENT:
+            if node.learned_operator is not None:
+                applied, value = _learned_agent_result(
+                    node, data, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+                )
+                if applied:
+                    # Execution agreement is not an independent correctness label.
+                    return value, None
             return ctx.agent_fn(node, render(node.brief, data), data)
+        if node.recipe_step is not None:
+            return _invoke_recipe_action(node, data, ctx)
         return ctx.action_fn(node, _render_params(node, data), data)
     if not (node.timeout and node.timeout > 0):
         return _call()
@@ -631,6 +722,197 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
             return fut.result(timeout=node.timeout)
         except _cf.TimeoutError:
             return fut.result()
+
+
+def _recipe_features_enabled(artifact, *, teaching=False):
+    from ..config import get_flows
+    from . import action_recipe
+    from . import enabled as flows_enabled
+
+    settings = get_flows()
+    return (flows_enabled() and settings.get("action_recipes") is True
+            and (artifact.get("schema") not in {action_recipe.TRANSFORM_SCHEMA, action_recipe.CHOICE_SCHEMA,
+                                                *action_recipe.WORKFLOW_SCHEMAS}
+                 or settings.get("action_recipe_transforms") is True)
+            and (artifact.get("schema") not in action_recipe.WORKFLOW_SCHEMAS
+                 or (settings.get("action_workflow_learning") is True
+                     and settings.get("action_recipe_lineage") is True))
+            and (artifact.get("schema") != action_recipe.MEMORY_SCHEMA
+                 or settings.get("action_workflow_memory_learning") is True)
+            and (artifact.get("schema") != action_recipe.CHOICE_SCHEMA
+                 or settings.get("action_recipe_choices") is True)
+            and (not teaching or (settings.get("action_recipe_teaching") is True
+                                  and settings.get("action_recipe_lineage") is True)))
+
+
+def _recipe_choice_binding(node, data, ctx, index, resolved):
+    from . import action_recipe, recipe_flow
+
+    if ctx.recipe.get("schema") in action_recipe.WORKFLOW_SCHEMAS:
+        from .workflow_recipe_flow import selected_binding
+        if resolved.tool != node.tool:
+            return "workflow_changed", None
+        try:
+            ctx.recipe_workflow_check = selected_binding(ctx.recipe, data, index, node.tool)
+        except (ValueError, TypeError, RecursionError, UnicodeError):
+            return "workflow_changed", None
+        return "agreement", None
+    if ctx.recipe.get("schema") != action_recipe.CHOICE_SCHEMA:
+        return "agreement", None
+    if resolved.tool != node.tool:
+        return "choice_changed", None
+    if index == 0:
+        return "agreement", None
+    # The resolver established argument agreement and either guard agreement
+    # or an exact teaching selection, separately bound to its real observation.
+    binding = recipe_flow.choice_binding(ctx.recipe, data, resolved.tool)
+    if data.get("_recipe_choice") != binding:
+        return "choice_changed", None
+    return "agreement", binding
+
+
+def _recipe_dispatch_eligibility(ctx):
+    """Refresh eligibility after the required selected-receipt I/O boundary.
+
+    This is a final current-state check, not an atomic revocation fence across
+    the external connector. Native tool authority still runs at dispatch.
+    """
+    from ..audit import default_audit_log
+    from . import action_recipe, recipe_flow
+
+    if not _recipe_features_enabled(ctx.recipe, teaching=ctx.recipe_teaching is not None):
+        return "feature_disabled", None
+    try:
+        current = recipe_flow.check_lineage(ctx.recipe, ctx.recipe_lineage, owner=ctx.recipe_owner)
+    except (AuditRefused, BudgetExceeded, Halted, FlowApprovalStale):
+        raise
+    except Exception:
+        return "evidence_ineligible", None
+    if (ctx.recipe.get("schema") in action_recipe.WORKFLOW_SCHEMAS
+            and default_audit_log().signing_enabled is not True):
+        # A successful selected receipt cannot authorize a later unsigned
+        # dispatch if the resolved signing policy changed across that I/O.
+        # The strict completion write still handles failures after the effect.
+        raise AuditRefused("learned workflow requires signed execution receipts")
+    previous = ctx.recipe_lineage_check
+    if current is not None and previous is not None and current.get("trust_sha256") != previous.get("trust_sha256"):
+        return "evidence_changed", None
+    return "agreement", current
+
+
+def _recipe_resolve(node, data, ctx, index):
+    from . import choice_teaching, recipe_flow
+
+    ctx.recipe_teaching_check = None
+    if index != 1 or ctx.recipe_teaching is None or "_recipe_teaching_selection" not in data:
+        return recipe_flow.decision(ctx.recipe, index, data)
+    try:
+        question = recipe_flow.validate_teaching_question(ctx.recipe, data)
+        decision = data.get("_recipe_teaching_decision")
+        if type(decision) is not str or decision not in {"route:0", "route:1"}:
+            raise ValueError("teaching selection changed")
+        route = decision.removeprefix("route:")
+        binding = choice_teaching.selection_binding(ctx.recipe, question, route)
+        if data["_recipe_teaching_selection"] != binding or binding["tool"] != node.tool:
+            raise ValueError("teaching selection changed")
+        resolved = choice_teaching.select(ctx.recipe, question, route, data.get("input"), data.get("_recipe_step_0"))
+        if resolved.applied:
+            ctx.recipe_teaching_check = binding
+        return resolved
+    except (ValueError, TypeError):
+        from .action_recipe import Decision
+        return Decision(False, reason="teaching_changed")
+
+
+def _recipe_arguments(node: FlowNode, data: dict, ctx: _Ctx, index: int, *, record: bool):
+    from ..learning_guard import check_learning_halt
+    from . import recipe_flow
+
+    check_learning_halt("flow_action_recipe", "resolve")
+    if ctx.recipe is None:
+        raise ValueError("learned action is missing its parent recipe")
+    resolved = _recipe_resolve(node, data, ctx, index)
+    reason = resolved.reason
+    if not _recipe_features_enabled(ctx.recipe, teaching=ctx.recipe_teaching is not None):
+        reason = "feature_disabled"
+    ctx.recipe_choice_check = None
+    ctx.recipe_workflow_check = None
+    if resolved.applied is True and reason in {"agreement", "teaching_selection"}:
+        bound_reason, ctx.recipe_choice_check = _recipe_choice_binding(node, data, ctx, index, resolved)
+        if bound_reason != "agreement":
+            reason = bound_reason
+    applied = resolved.applied is True and reason in {"agreement", "teaching_selection"}
+    ctx.recipe_lineage_check = None
+    if applied:
+        try:
+            ctx.recipe_lineage_check = recipe_flow.check_lineage(
+                ctx.recipe, ctx.recipe_lineage, owner=ctx.recipe_owner)
+        except (AuditRefused, BudgetExceeded, Halted, FlowApprovalStale):
+            raise
+        except Exception:
+            reason, applied = "evidence_ineligible", False
+    if record or not applied:
+        recipe_flow.record_decision(
+            ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id, node_id=node.id,
+            index=index, status="selected" if applied else "blocked", reason=reason,
+            arguments=resolved.arguments if applied else None,
+            lineage=ctx.recipe_lineage_check,
+            choice=ctx.recipe_choice_check,
+            teaching=ctx.recipe_teaching_check,
+            workflow=ctx.recipe_workflow_check,
+        )
+    if applied and record:
+        reason, ctx.recipe_lineage_check = _recipe_dispatch_eligibility(ctx)
+        applied = reason == "agreement"
+        if not applied:
+            recipe_flow.record_decision(ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+                node_id=node.id, index=index, status="blocked", reason=reason,
+                choice=ctx.recipe_choice_check, teaching=ctx.recipe_teaching_check,
+                workflow=ctx.recipe_workflow_check)
+    if not applied:
+        # This is a stop, never a fallback to an agent or a replay of the prefix.
+        if index:
+            ctx.on_node(node, STATUS_INDETERMINATE, None)
+            raise _Indeterminate(node.id, f"learned action stopped: {reason}; preserve completed work",
+                                 boundary="learned action sequence")
+        raise ValueError(f"learned action stopped before dispatch: {reason}")
+    check_learning_halt("flow_action_recipe", "dispatch")
+    return resolved.arguments
+
+
+def _invoke_recipe_action(node: FlowNode, data: dict, ctx: _Ctx):
+    from . import action_recipe, recipe_flow
+
+    index = node.recipe_step
+    params = _recipe_arguments(node, data, ctx, index, record=True)
+    result, outcome = ctx.action_fn(copy.deepcopy(node), copy.deepcopy(params), copy.deepcopy(data))
+    if outcome == 0.0:
+        return result, outcome
+    try:
+        parsed = action_recipe.parse_result(result)
+        action_recipe.validate_result(ctx.recipe, index, parsed, tool=node.tool)
+    except (TypeError, ValueError):
+        ctx.on_node(node, STATUS_INDETERMINATE, None)
+        raise _Indeterminate(node.id, "action returned an unsupported result; reconcile before continuing",
+                             boundary="learned action result") from None
+    completed_workflow = ctx.recipe_workflow_check
+    if ctx.recipe.get("schema") == action_recipe.MEMORY_SCHEMA:
+        from .workflow_recipe_flow import completed_memory_binding
+        completed_workflow = completed_memory_binding(ctx.recipe, data, index,
+            tool=node.tool, arguments=params, result=parsed)
+    recipe_flow.record_decision(
+        ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id, node_id=node.id,
+        index=index, status="completed",
+        reason="result_domain_valid" if ctx.recipe.get("schema") in {
+            action_recipe.TRANSFORM_SCHEMA, action_recipe.CHOICE_SCHEMA, *action_recipe.WORKFLOW_SCHEMAS}
+        else "result_shape_valid", arguments=params, lineage=ctx.recipe_lineage_check, choice=ctx.recipe_choice_check,
+        teaching=ctx.recipe_teaching_check,
+        workflow=completed_workflow,
+    )
+    if ctx.recipe.get("schema") in action_recipe.WORKFLOW_SCHEMAS:
+        from .workflow_recipe_flow import retain_result
+        retain_result(ctx.recipe, data, index, tool=node.tool, arguments=params, result=parsed)
+    return parsed, outcome
 
 
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -668,7 +950,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
-        except (BudgetExceeded, Halted, FlowApprovalStale):
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused):
             raise
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
@@ -814,6 +1096,14 @@ def _run_switch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     """n-way route: the value under the ``condition`` data key is compared (as
     text) to each case's ``value``; the first match routes to its ``to``. No
     match falls through to ``next`` (the default arm)."""
+    from .action_recipe import CHOICE_SCHEMA, WORKFLOW_SCHEMAS
+
+    if ctx.recipe is not None and ctx.recipe.get("schema") in WORKFLOW_SCHEMAS:
+        return _run_workflow_decision(node, data, ctx)
+    if ctx.recipe is not None and ctx.recipe.get("schema") == CHOICE_SCHEMA:
+        if ctx.recipe_teaching is not None and node.id == "teaching_choice":
+            return _run_teaching_choice(node, data, ctx)
+        return _run_recipe_choice(node, data, ctx)
     subject = _as_text(_dig(data, node.condition))
     for case in node.cases:
         if _as_text(case.get("value")) == subject:
@@ -822,6 +1112,149 @@ def _run_switch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             return to if to is not None else node.next
     ctx.on_node(node, "default", None)
     return node.next
+
+
+def _run_workflow_decision(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Learned next call or END, bound to the actual completed invocation history."""
+    from ..learning_guard import check_learning_halt
+    from . import recipe_flow, workflow_recipe_flow
+
+    check_learning_halt("flow_action_workflow", "select")
+    index = int(node.id.removeprefix("decision_"))
+    if index == 0:
+        workflow_recipe_flow.clear_initial(data)
+    selected = workflow_recipe_flow.resolve(ctx.recipe, data, index)
+    reason = selected.reason
+    if not _recipe_features_enabled(ctx.recipe):
+        reason = "feature_disabled"
+    applied = selected.applied is True and reason == "agreement"
+    ctx.recipe_lineage_check = None
+    if applied:
+        try:
+            ctx.recipe_lineage_check = recipe_flow.check_lineage(ctx.recipe, ctx.recipe_lineage, owner=ctx.recipe_owner)
+        except (AuditRefused, BudgetExceeded, Halted, FlowApprovalStale):
+            raise
+        except Exception:
+            reason, applied = "evidence_ineligible", False
+    binding = workflow_recipe_flow.binding(ctx.recipe, data, index, selected) if applied else None
+    recipe_flow.record_decision(ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+        node_id=node.id, index=index, status="workflow_selected" if applied else "workflow_blocked",
+        reason=reason, lineage=ctx.recipe_lineage_check, workflow=binding)
+    if applied:
+        reason, ctx.recipe_lineage_check = _recipe_dispatch_eligibility(ctx)
+        applied = reason == "agreement"
+        if not applied:
+            recipe_flow.record_decision(ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+                node_id=node.id, index=index, status="workflow_blocked", reason=reason, workflow=binding)
+    if not applied:
+        if index:
+            ctx.on_node(node, STATUS_INDETERMINATE, None)
+            raise _Indeterminate(node.id, f"learned workflow stopped: {reason}; preserve completed work",
+                                 boundary="learned workflow decision")
+        raise ValueError(f"learned workflow stopped before dispatch: {reason}")
+    check_learning_halt("flow_action_workflow", "route")
+    data[workflow_recipe_flow.SELECTION] = binding
+    if selected.kind == "complete":
+        data.pop("_recipe_next_arguments", None)
+        ctx.on_node(node, "case:complete", None)
+        return None
+    ordinal = ctx.recipe["allowed_tools"].index(selected.tool)
+    ctx.on_node(node, f"case:{ordinal}", None)
+    return f"approval_{index}_{ordinal}"
+
+
+def _run_recipe_choice(node: FlowNode, data: dict, ctx: _Ctx) -> str:
+    """Infer the route from retained observations, never a caller-supplied flag."""
+    from ..learning_guard import check_learning_halt
+    from . import action_choice, choice_teaching, recipe_flow
+
+    check_learning_halt("flow_action_choice", "select")
+    # Original caller data cannot preselect a teaching answer. Every fresh
+    # prefix produces its own question before a separately bound human pause.
+    for key in ("_recipe_teaching_question", "_recipe_teaching_decision", "_recipe_teaching_selection"):
+        data.pop(key, None)
+    selected = action_choice.resolve_choice(ctx.recipe, data.get("input"), [data.get("_recipe_step_0")])
+    reason = selected.reason
+    if not _recipe_features_enabled(ctx.recipe, teaching=ctx.recipe_teaching is not None):
+        reason = "feature_disabled"
+    if reason == "ambiguity" and ctx.recipe_teaching is not None:
+        try:
+            question = choice_teaching.propose(ctx.recipe, data.get("input"), data.get("_recipe_step_0"))
+        except choice_teaching.TeachingUnavailable as exc:
+            reason = exc.reason
+        else:
+            return _request_teaching_review(node, data, ctx, question)
+    applied = selected.applied is True and reason == "agreement"
+    ctx.recipe_lineage_check = None
+    if applied:
+        try:
+            ctx.recipe_lineage_check = recipe_flow.check_lineage(ctx.recipe, ctx.recipe_lineage, owner=ctx.recipe_owner)
+        except (AuditRefused, BudgetExceeded, Halted, FlowApprovalStale):
+            raise
+        except Exception:
+            reason, applied = "evidence_ineligible", False
+    binding = recipe_flow.choice_binding(ctx.recipe, data, selected.tool) if applied else None
+    recipe_flow.record_decision(ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+        node_id=node.id, index=1, status="choice_selected" if applied else "choice_blocked",
+        reason=reason, lineage=ctx.recipe_lineage_check, choice=binding)
+    if not applied:
+        ctx.on_node(node, STATUS_INDETERMINATE, None)
+        raise _Indeterminate(node.id, f"learned choice stopped: {reason}; preserve completed work",
+                             boundary="learned action choice")
+    check_learning_halt("flow_action_choice", "route")
+    data["_recipe_choice"] = binding
+    ctx.on_node(node, f"case:{selected.route}", None)
+    return f"approval_1_{selected.route}"
+
+
+def _teaching_eligibility(ctx):
+    from ..learning_guard import check_learning_halt
+    from . import recipe_flow
+
+    check_learning_halt("flow_action_teaching", "review")
+    if (ctx.recipe_teaching is None or ctx.recipe_lineage is None
+            or not _recipe_features_enabled(ctx.recipe, teaching=True)):
+        raise ValueError("native choice teaching is disabled or lacks signed lineage")
+    return recipe_flow.check_lineage(ctx.recipe, ctx.recipe_lineage, owner=ctx.recipe_owner)
+
+
+def _request_teaching_review(node, data, ctx, question):
+    from . import recipe_flow
+
+    lineage = _teaching_eligibility(ctx)
+    recipe_flow.record_decision(ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+        node_id=node.id, index=1, status="teaching_requested", reason="guard_ambiguity",
+        lineage=lineage, teaching={key: question[key] for key in
+            ("artifact_sha256", "guard_artifact_sha256", "question_sha256", "input_sha256", "prefix_sha256")})
+    _teaching_eligibility(ctx)
+    data["_recipe_teaching_question"] = question
+    data.pop("_recipe_choice", None)
+    ctx.on_node(node, "teaching_requested", None)
+    return "teaching_review"
+
+
+def _run_teaching_choice(node, data, ctx):
+    from . import choice_teaching, recipe_flow
+
+    lineage = _teaching_eligibility(ctx)
+    question = recipe_flow.validate_teaching_question(ctx.recipe, data)
+    decision = data.get("_recipe_teaching_decision")
+    if type(decision) is not str or decision not in {"route:0", "route:1"}:
+        raise ValueError("teaching requires an explicit offered continuation choice")
+    route = decision.removeprefix("route:")
+    selected = choice_teaching.select(ctx.recipe, question, route, data.get("input"), data.get("_recipe_step_0"))
+    if selected.applied is not True:
+        raise ValueError("teaching choice no longer matches the completed observations")
+    binding = choice_teaching.selection_binding(ctx.recipe, question, route)
+    choice = recipe_flow.choice_binding(ctx.recipe, data, selected.tool)
+    recipe_flow.record_decision(ctx.recipe, flow_id=ctx.frame["flow_id"], run_id=ctx.run_id,
+        node_id=node.id, index=1, status="teaching_selected", reason="teaching_selection",
+        arguments=selected.arguments, lineage=lineage, choice=choice, teaching=binding)
+    _teaching_eligibility(ctx)
+    data["_recipe_teaching_selection"] = binding
+    data["_recipe_choice"] = choice
+    ctx.on_node(node, f"case:{route}", None)
+    return f"approval_1_{route}"
 
 
 def _run_while(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -1015,7 +1448,16 @@ def _approval_outcome(decision: str) -> float | None:
 
 
 def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    decision = ctx.approve_fn(node, data) if ctx.approve_fn else "pending"
+    # A policy callback reviews a snapshot. It cannot rewrite a learned action's
+    # already displayed input or node through mutable reference aliases.
+    review_node = copy.deepcopy(node) if ctx.recipe is not None else node
+    review_data = copy.deepcopy(data) if ctx.recipe is not None else data
+    if ctx.recipe_teaching is not None and node.id == "teaching_review":
+        # A generic autoapproval callback cannot supply a training choice.
+        # The native executor must authenticate a separate durable resume.
+        decision = "pending"
+    else:
+        decision = ctx.approve_fn(review_node, review_data) if ctx.approve_fn else "pending"
     # Ground the decided verdict (B7): approved=1.0 / rejected=0.0 / pending=None --
     # the highest-value human signal for the self-rewrite loop.
     ctx.on_node(node, decision, _approval_outcome(decision))
@@ -1074,6 +1516,31 @@ def _run_node(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
 
 
 def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
+    from .action_recipe import WORKFLOW_SCHEMAS
+
+    if ctx.execution_owner is None:
+        ctx.execution_owner = flow.owner
+    ctx.recipe = flow.learned_recipe
+    ctx.recipe_lineage = copy.deepcopy(flow.recipe_lineage)
+    ctx.recipe_owner = ctx.execution_owner
+    ctx.recipe_lineage_check = None
+    ctx.recipe_choice_check = None
+    ctx.recipe_teaching = copy.deepcopy(flow.recipe_teaching)
+    ctx.recipe_teaching_check = None
+    ctx.recipe_workflow_check = None
+    if ctx.recipe is not None and ctx.recipe.get("schema") in WORKFLOW_SCHEMAS:
+        if ctx.recipe_lineage is None or not ctx.allow_pause:
+            raise ValueError("learned workflow requires signed lineage and top-level native approvals")
+    if ctx.recipe_teaching is not None and (ctx.recipe_lineage is None or not ctx.allow_pause):
+        raise ValueError("recipe teaching requires signed lineage and a top-level native pause")
+    if ctx.recipe_lineage is not None and flow.owner and flow.owner != ctx.execution_owner:
+        raise ValueError("learned recipe owner differs from its authoritative execution owner")
+    if ctx.recipe is not None:
+        from .recipe_flow import validate_flow
+        validate_flow(flow)
+    elif (flow.recipe_lineage is not None or flow.recipe_teaching is not None
+          or any(node.recipe_step is not None for node in flow.nodes.values())):
+        raise ValueError("learned action node is missing its parent recipe")
     frame = ctx.frame
     if frame:
         if frame.get("flow_id") != flow.id or not isinstance(frame.get("data"), dict):
@@ -1094,8 +1561,19 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
         if node is None:
             raise ValueError("flow continuation node no longer exists")
         try:
+            if ctx.recipe is not None and node.kind == NODE_APPROVAL:
+                if ctx.recipe_teaching is not None and node.id == "teaching_review":
+                    from .recipe_flow import validate_teaching_question
+                    validate_teaching_question(ctx.recipe, data)
+                    _teaching_eligibility(ctx)
+                    data.pop("_recipe_next_arguments", None)
+                else:
+                    following = flow.node(node.next)
+                    data["_recipe_next_arguments"] = _recipe_arguments(
+                        following, data, ctx, following.recipe_step, record=False,
+                    )
             cursor = _run_node(node, data, ctx)
-        except (BudgetExceeded, Halted, FlowApprovalStale) as exc:
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused) as exc:
             ctx.control_stop.append(exc)
             raise
         except (_Pause, _Reject, _NodeError, _Indeterminate):
@@ -1153,6 +1631,7 @@ def _valid_continuation(resume: dict, continuation: object) -> bool:
 
 def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
              data: dict | None = None,
+             run_id: str = "",
              approve_fn: Callable[[FlowNode, dict], str] | None = None,
              on_node: Callable[[FlowNode, str, float | None], None] | None = None,
              resume: dict | None = None,
@@ -1165,13 +1644,19 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     (``approved`` continues, ``rejected`` ends); a delay resume omits it.
     ``resolve_flow(flow_ref) -> Flow | None`` resolves a ``subflow`` node's target
     (with the caller's cycle/depth guard); ``None`` makes a subflow a no-op error.
+    ``run_id`` attributes decision receipts to the caller's durable execution;
+    direct library calls leave it empty unless their caller supplies an identity.
     """
+    flow = copy.deepcopy(flow)
+    data = copy.deepcopy(data)
+    resume = copy.deepcopy(resume)
     _now = now or time.time
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
                _now, allow_pause=True, resolve_flow=resolve_flow,
                flow_stack={flow.id},   # so the top flow can't recurse into itself
                deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None),
-               parallel_slots=threading.BoundedSemaphore(_PARALLEL_MAX_WORKERS))
+               parallel_slots=threading.BoundedSemaphore(_PARALLEL_MAX_WORKERS),
+               run_id=run_id)
     if resume and resume.get("continuation"):
         continuation = copy.deepcopy(resume["continuation"])
         if not _valid_continuation(resume, continuation):
@@ -1186,7 +1671,7 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         # Ground the HUMAN verdict on resume too (B7) -- the approval node's handler
         # isn't re-run (we resume AFTER it), so without this the decision signal
         # is lost on the resume path exactly as it is captured on the auto path.
-        if node is not None and decision in ("approved", "rejected"):
+        if node is not None and (decision in ("approved", "rejected") or decision in node.choices):
             (on_node or (lambda *_: None))(node, decision, _approval_outcome(decision))
         # The paused/failed node must still exist in this (current) flow version.
         # If an edit or rollback removed or replaced it between pause and resume,
@@ -1266,7 +1751,7 @@ def _execute_chain_result(flow: Flow, data: dict, ctx: _Ctx, start: str | None) 
             error=_safe_error_text(e, limit=2000),
             continuation={"version": 1, "frame": ctx.frame},
         )
-    except (BudgetExceeded, Halted, FlowApprovalStale):
+    except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused):
         raise
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller
         return FlowRunResult(

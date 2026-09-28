@@ -355,26 +355,27 @@
     {% endfor %}
   </div>
 
-  <div class="section-head" data-settings-group="integrations"><h2>Automation webhooks</h2></div>
-  <div class="panel" data-settings-group="integrations">
-    <p class="muted" style="margin-top: 0;">
-      The signing secret that lets other systems securely start your workflows
-      (used by webhook triggers on the <a href="/automations">Automations</a>
-      page). Status:
-      {% if webhook_configured %}<span class="badge active">configured</span>
-      {% else %}<span class="badge blocked">not set — webhook triggers won't fire</span>{% endif %}
-    </p>
-    <form method="post" action="/settings/webhooks" style="display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap;">
-      <label style="flex: 1 1 18rem;">New signing secret <span class="muted">(leave blank and save to clear)</span>
-        <input class="input" type="password" name="secret" autocomplete="new-password" placeholder="paste a long random value">
-      </label>
-      <button type="submit" class="btn btn--primary">Save secret</button>
+  <div class="section-head" data-settings-group="integrations"><h2>Secure connected automations</h2></div>
+  <section class="panel" data-settings-group="integrations" id="webhook-settings" aria-label="Secure connected automations">
+    <p>A signing secret is a shared connection credential that lets other systems securely start your workflows. It can also verify outgoing workflow notifications. Review which secret is active before changing it, and update the connected systems to match.</p>
+    <p id="wh-state" role="status" aria-live="polite" tabindex="-1">Checking the active signing secret…</p>
+    <p id="wh-ownership"></p>
+    <p id="wh-external" hidden>Your installation administrator must arrange any transfer of control from the external secret service or deployment settings. Lightwork cannot make that transfer here. Refresh status after the administrator completes it.</p>
+    <button type="button" class="btn" id="wh-refresh">Refresh status</button>
+    <form id="wh-form" data-settings-local="true" data-draft-recovery="off" autocomplete="off">
+      <label for="wh-action">Change to make</label>
+      <select class="input" id="wh-action" disabled><option value="set">Save a new signing secret</option><option value="remove">Remove the app's saved copy</option></select>
+      <div id="wh-secret-field"><label for="wh-secret">New signing secret</label>
+        <input class="input" id="wh-secret" type="password" autocomplete="new-password" maxlength="4096" disabled aria-describedby="wh-help"></div>
+      <p id="wh-help">Use a long, random value. Lightwork encrypts it and never displays it again.</p>
+      <p id="wh-consequence"></p>
+      <label style="display:flex;gap:var(--space-2);align-items:flex-start"><input type="checkbox" id="wh-confirm" disabled> I reviewed this change and want to apply it to this installation.</label>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)"><button type="submit" class="btn btn--primary" id="wh-save" disabled>Apply change</button><button type="button" class="btn" id="wh-cancel">Cancel</button></div>
     </form>
-    <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">
-      The secret is sealed once saved and never displayed again — rotate it by
-      saving a new value here.
-    </p>
-  </div>
+    <noscript>Enable browser scripting to check the active secret and review a change safely.</noscript>
+  </section>
+  <style>#webhook-settings .input{box-sizing:border-box;width:100%;max-width:100%;min-width:0}#webhook-settings label{margin-block:var(--space-2)}#webhook-settings p,#webhook-settings button{overflow-wrap:anywhere}#webhook-settings form{margin-top:var(--space-3)}</style>
+  <script src="{{ asset('lightwork-webhook-settings.js') }}" defer></script>
 
   <div class="section-head" data-settings-group="controls"><h2>Capabilities</h2></div>
   <div class="panel" data-settings-group="controls">
@@ -581,7 +582,7 @@
     }
     function markDirty(event) { dirty.add(event.currentTarget); }
 
-    forms.forEach(function (form) {
+    forms.filter(function (form) { return form.dataset.settingsLocal !== 'true'; }).forEach(function (form) {
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
       form.addEventListener('submit', function (event) {

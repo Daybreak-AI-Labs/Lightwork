@@ -1,0 +1,124 @@
+# Post-install operation coverage
+
+Source review: September 28, 2026. This is a working gap register against the
+[customer experience contract](./customer-experience-contract.md), not a claim
+that the entire platform has been inventoried or accepted. A working backend,
+command or settings file does not complete a customer operation.
+
+## Delivery boundary
+
+An operation needs an ordinary in-product path, current effective settings,
+appropriate permissions, useful failure/recovery states, and equivalent
+authorized Copilot operation. A raw-data editor does not satisfy the ordinary
+path. Configuration saved to a file is not an effective change when a higher
+priority source still controls it. Keep backend checks shared across interfaces.
+
+Local service tests and synthetic browser fixtures provide distinct evidence;
+neither alone is an authenticated installed-application acceptance test. Track
+those gaps explicitly instead of calling a screen complete because it renders.
+
+## Learning operations
+
+The current review groups seven learning families into 36 operations covering
+readiness, configuration, source selection, retention, review, permission for
+training use, learning, admission, drafting, execution, refinement and recovery.
+These are grouped jobs, not a route count or completion percentage. Richer
+inference families add separate data-range and decision controls.
+
+| Customer job | Current boundary | Required follow-through |
+| --- | --- | --- |
+| Run a saved learned workflow | Designer has ordinary typed input forms and checks the published version before execution. Unsupported forms refuse rather than silently converting data. | Full installed-app journey and authorized Copilot execution. |
+| Edit a workflow with Copilot | Designer proposals protect newer edits, and Undo/Redo include settings. | Global operation coverage is separate from graph suggestions. |
+| Stop future use of an accepted example | Run page and global Copilot now host the same reason/confirmation form. Copilot's closed catalog reads current selection and authority, prepares a sealed short-lived review, then calls the native withdrawal service only after human confirmation. It reports confirmed, pending and changed states separately. Native page maintenance remains available when Copilot actions, workflows or learning are stopped. | Authenticated installed-app browser acceptance, effective-source transfer for the optional setting, and the rest of the example lifecycle. No claim of erasing copies or undoing completed work. |
+| Configure learning after installation | Configuration and installer controls exist. | Effective-source administration, dependencies, readiness and ordinary forms inside the platform. |
+| Collect a suitable demonstration | Native enrollment and bounded retention contracts exist. | Find eligible owned runs and define retained fields without writing schemas or JSON. |
+| Review examples and permit training use | Authenticated review, separate bounded training grants and signed export services exist. | Owned inbox, readable evidence, separate consent forms, status, expiry and recovery. |
+| Learn, admit, draft and refine a procedure | Bounded learners, lineage checks and draft services exist; HTTP coverage varies by family. | Source selection by retained examples, missing service adapters, ordinary controls, comparison and designer handoff. |
+| Explain why automated work can proceed | Native authority, lineage and signed receipts exist. | A joined, readable explanation of the evidence, approval, action and result; uncertainty must remain visible. |
+
+Implementation references:
+[run page](../packages/maverick-dashboard/maverick_dashboard/templates/flow_run.html),
+[ordinary inputs](../packages/maverick-dashboard/maverick_dashboard/templates/flow_designer_inputs.js),
+[example API](../packages/maverick-dashboard/maverick_dashboard/api_flow_action_episodes.py),
+[review service](../packages/maverick-core/maverick/flow/action_episode_review.py),
+[lineage service](../packages/maverick-core/maverick/flow/recipe_lineage.py).
+The [learning journey contract](./learned-capabilities-product-contract.md)
+defines the wider acceptance requirements.
+
+## Other platform operations
+
+This bounded review does not classify providers, connections, access management,
+backups or updates as wholly absent. Existing controls need qualification and
+specific gaps closed.
+
+| Area | Observed gap | Required next result |
+| --- | --- | --- |
+| Restored connected-channel work | Recovery now uses outcome choices, local date controls and evidence fields. A local Recovery Copilot hosts the same form and operation. Interrupted recording can be finished using the exact retained review. | Qualify the authenticated installed-app journey. Replace manual position numbers with in-product source lookup/selection, particularly for iMessage. Complete the other recovery operations in Copilot and the remaining technical wording on the wider page. |
+| Settings controlled by deployment | Some settings correctly refuse local writes when an environment or deployment source controls them. Refusal alone leaves no post-install migration journey. | Explain the current owner and provide an authorized in-product transfer or administrator path with effective-value readback. |
+| Connected-automation signing secret | The former false-success path was reproduced with environment and mounted-file secrets. The settings service now checks effective ownership, binds the change to the current administrator and setting, and verifies both incoming and outgoing signing results. The guided form clears another account's draft and distinguishes uncertain results. | Qualify installed-app use and shared Copilot operation. Deployment-source transfer, outbound-only rotation when a separate incoming secret is controlled elsewhere, and durable audit history remain separate gaps. |
+| Settings change history | The existing webhook-secret setter has no authoritative durable audit-event boundary. An effective-value response or actor-bound review token is not a customer audit record. | Join reviewed intent, authority, exact local setting change and confirmed/uncertain outcome in a durable audit history with interrupted-recording recovery. Do not include secret values or guessable secret fingerprints. |
+| Retention and encryption maintenance | Encryption-key backup already has an in-product download and confirmation. Retention enforcement and encryption migration, rotation and strict-mode changes still have operator commands for which this review did not find equivalent dashboard callers. | Permissioned preview, execution, verified outcome and recovery for the remaining commands. Do not add blind command execution behind a button. |
+| Advanced sandbox and single sign-on policy | Advanced sandbox guidance and identity configuration still include file/environment setup. | Dedicated administration with current-source ownership and safe validation; never weaken isolation or authentication to bypass missing UI. |
+| Workspace lifecycle | Creation, selection, budget, feature and membership controls exist. Suspend/resume, plan change and deletion have native API handlers, but no matching dashboard template/static callers were found. | Complete administrator review and execution from the workspace roster, with consequences, current authority, resulting status and recovery. |
+| Database tenancy and key maintenance | Tenant RLS preflight/backfill and local tenant key rotation are operator commands; this review found no dashboard service callers. | Supported maintenance planning, protected key custody, readiness checks, execution and verified return to service. A roster or credential form is not this journey. |
+| Local AI runtime | Provider connection testing exists. The separate native local-runtime planning operation has no dashboard caller found. | Present supported local-runtime preparation and health inside the product; configuring a URL alone does not prepare the service behind it. |
+| Complete workspace retirement | Domain-specific privacy controls exist; the complete-client erase operation has no dashboard caller found. | Preview all affected owned data, distinguish local and external scope, obtain the required authority and confirmation, and verify the result. |
+| Backup and installation boundaries | Local backup/recovery and packaged Windows update/repair/rollback have substantial product controls. Shared/remote storage recovery and other deployment types have explicit blockers or separate procedures. | Provide the remaining coordinated administration paths; do not claim all deployment types are qualified from Windows/local acceptance. |
+| Diagnostic parity | Cache controls, readiness and support-report preparation exist. Selected circuit/rate-limit/health/trace CLI diagnostics have no equivalent dashboard callers found. | Give customers readable health, affected work and actual repair actions. Support export alone does not replace operational diagnostics. |
+| Global Copilot | The shared page guide still has a zero tool-call budget. A separate default-off, closed operation catalog covers current learning-example status and reviewed withdrawal on a flow run. A proposal opens the real form; it never supplies consent. Connected-service recovery has a separate restricted local form. These bounded operations do not constitute whole-platform coverage. | Extend the typed catalog and current state across every supported job, including work in another panel or background job. Preserve each native service's authority, result and recovery contract. |
+
+Implementation references:
+[recovery controls](../packages/maverick-dashboard/maverick_dashboard/static/lightwork-workspace-recovery.js),
+[recovery page](../packages/maverick-dashboard/maverick_dashboard/templates/workspace_recovery.html),
+[settings authority](../packages/maverick-dashboard/maverick_dashboard/settings_store.py),
+[dashboard API and Copilot](../packages/maverick-dashboard/maverick_dashboard/api.py).
+
+The administration review traced selected commands in `cli/__init__.py`,
+`cli/_ops_groups.py`, `cli/_trust_groups.py` and `cli/_connector_groups.py` to
+their native services and searched the dashboard for those callers. It did not
+complete parity review for signing/WORM/SIEM administration, licensing/billing,
+plugins/MCP/skills, channels, worker topology, schema migrations, knowledge
+maintenance, every business module or every operating system. Those remain
+unreviewed work; they are not implicitly covered by the rows above.
+
+## Technical work still exposed by existing screens
+
+The September 27 review also scanned all 165 dashboard HTML templates for
+labelled serialized-data, record-version, verification-material and machine-time
+inputs. It found 295 candidate controls across 52 templates. These are inspection
+leads, not 295 confirmed defects: optional import editors, hidden controls and
+schema-driven replacements are included. JavaScript-generated controls are not
+covered by that static count. In particular,
+[`lightwork-guided-actions.js`](../packages/maverick-dashboard/maverick_dashboard/static/lightwork-guided-actions.js)
+already replaces some underlying data editors with guided fields. Each candidate
+must be traced through its actual controller and ordinary alternatives.
+
+The following paths were inspected beyond their labels:
+
+| Customer job | Confirmed current path | Required next result |
+| --- | --- | --- |
+| Create a bulk consent export or change | `consent_bulk_jobs.html` exposes required item-data editors; `lightwork-consent-bulk-jobs.js` parses their contents through `parseItems` and constructs the job. These editors do not have the shared guided-field bindings. | Select eligible records and business choices, preview the affected people and consequences, obtain current versions internally, and show per-item progress and recovery. Preserve separate permissions for each operation. |
+| Prepare an incident report | `_governance_operations.html` loads the report template into a data editor and submits `parseObject(details)` alongside a manually entered version. | Present the actual report fields, select the incident, bind its current version internally, preserve draft/independent approval, and distinguish recording a receipt from external submission. |
+| Rotate a registered device's key | `consent_native_admin.html` and `lightwork-consent-native-admin.js` require public-key hex, encoded attestation material, verification fingerprints and epoch times. | A device enrollment/rotation handoff must obtain genuine signed evidence from the device, show understandable dates and verify the actual resulting access. Merely renaming these fields is insufficient. |
+| Operate generic compliance consoles | The shared guided-action layer can create schema-based fields, but still exposes technical references, unknown-property authoring and some technical-editor fallbacks. | Trace each supported action; supply named record selection and business controls. Preserve exact authority and record binding. A generated form alone is not a complete nontechnical journey. |
+
+These are additional work items, not delivered fixes. None of this static review
+qualifies the whole application, live integrations or full Copilot operation.
+
+## Next complete journeys
+
+1. Finish the guided restored-channel journey with source-position selection,
+   authenticated installed-app acceptance and the remaining recovery operations.
+   Unknown external outcomes stay unresolved. See the
+   [connected-service review boundary](recovery-connected-services.md).
+2. Complete a learning-example lifecycle: readiness, eligible source selection,
+   retention, actual approved execution, review, separate permission for training
+   use, signed evidence and withdrawal.
+3. Extend that journey through learning a repeated procedure, reviewed admission,
+   an unpublished draft, ordinary input execution and refinement from additional
+   examples. Cover direct controls and Copilot against the same service contract.
+
+Each delivered journey needs evidence for cancellation, stale state, repeated
+clicks, permission changes, pending audit recording, interrupted requests and
+recovery, plus keyboard and narrow-screen inspection. Do not retire this register
+on the strength of component test counts alone.

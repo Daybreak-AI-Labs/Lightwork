@@ -1,6 +1,15 @@
 {% extends "recovery_shell.html" if recovery_mode else "base.html" %}
 {% block title %}Workspace recovery · Lightwork{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-workspace-recovery.css">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-workspace-recovery.css">
+<style>
+  .wrec-channel{list-style:none;margin:1rem 0;padding:1rem;border:1px solid var(--border,#46516a);border-radius:12px;background:var(--panel,#202b40)}
+  .wrec-channel h3{margin:.1rem 0;font-size:1.05rem}.wrec-channel form{margin-top:1rem}.wrec-channel fieldset{min-width:0;margin:1rem 0;padding:0;border:0}.wrec-channel legend{font-weight:600;padding:0}
+  .wrec-channel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:0 1rem}.wrec-channel .wrec-field-help{font-size:.9rem;margin:.25rem 0;color:var(--text-muted,#c1cadd)}
+  .wrec-channel .wrec-field-error{color:var(--danger,#ffb4a8);margin:.25rem 0}.wrec-channel [aria-invalid=true]{border-color:var(--danger,#ffb4a8)}
+  .wrec-channel .wrec-channel-result{white-space:pre-line}.wrec-channel .wrec-confirm input{margin-right:.5rem}.wrec-channel .wrec-actions button{white-space:normal}
+  #wrec-reconciliation-items:has(.wrec-channel){padding-left:0}.wrec-channel form[hidden]{display:none}
+  @media(forced-colors:active){.wrec-channel,.wrec-channel [aria-invalid=true]{border-color:CanvasText}.wrec-channel .wrec-field-error{color:CanvasText}}
+</style>{% endblock %}
 {% block content %}
 <div class="wrec" id="workspace-recovery">
   <h1>Workspace recovery</h1>
@@ -86,13 +95,21 @@
     <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox"><span id="wrec-confirm-text">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</span></label><button id="wrec-restore" type="button" disabled>Restore reviewed snapshot</button></div>
   </section>
   <section id="wrec-reconciliation" hidden><h2>Review restored work before returning to normal use</h2>
-    <p id="wrec-reconciliation-status" role="status" aria-live="polite"></p>
+    <p id="wrec-reconciliation-status" role="status" aria-live="polite" tabindex="-1"></p>
     <p>Nothing listed here runs automatically. Pending requests must be retired and recreated under current authority. Work that may have reached an external system requires an authoritative readback reference.</p>
     <ul id="wrec-reconciliation-items"></ul>
-    <p>For channel records, review the exact readback template below against the provider or source system. Enter the observation time as Unix seconds and retain its evidence reference. Readback must be no older than 15 minutes. Confirmed old receipts remain retired from automatic replay. Polling checkpoints must name the current provider watermark, timestamp floor, or iMessage row position; do not reuse an archived continuation. Unknown or unavailable outcomes must remain unresolved.</p>
+    <p>For each connection below, check the original service and record what you found, when you checked it, and a reference to that evidence. Your check must be no older than 15 minutes. Lightwork records your review; it does not contact the service to verify it. If you cannot establish an outcome, leave that item unresolved. Confirming a review never repeats an old action.</p>
     <p id="wrec-reconciliation-blocked" hidden>This build cannot safely classify or rewrite at least one restored authority. Keep recovery mode active and <a href="/help">create a redacted support report in the app</a>.</p>
     <label class="wrec-confirm"><input id="wrec-reconciliation-confirm" type="checkbox">I reviewed every restored item and authorize returning this workspace to normal use after restart.</label>
     <button id="wrec-reconciliation-complete" type="button" disabled>Complete restored-work review</button>
+  </section>
+  <section id="wrec-assistant" hidden aria-labelledby="wrec-assistant-heading">
+    <h2 id="wrec-assistant-heading">Recovery Copilot</h2>
+    <p>Review a restored connection here using the same controls and confirmation as the recovery list. This helper stays on this computer and does not contact an AI provider.</p>
+    <label for="wrec-assistant-item">Connection to review</label><select id="wrec-assistant-item"><option value="">Choose a connection</option></select>
+    <div class="wrec-actions"><button id="wrec-assistant-open" type="button" disabled>Review with Copilot</button><button id="wrec-assistant-close" type="button" disabled>Return review to list</button></div>
+    <p id="wrec-assistant-status" role="status" aria-live="polite"></p>
+    <ul id="wrec-assistant-review" style="padding-left:0"></ul>
   </section>
   <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
     <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>
@@ -120,4 +137,4 @@
   </section>
 </div>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-workspace-recovery.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-workspace-recovery.js" defer></script><script src="/static/lightwork-recovery-copilot.js" defer></script>{% endblock %}

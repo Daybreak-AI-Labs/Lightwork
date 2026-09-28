@@ -845,13 +845,15 @@ class StrictAuditProjectionSink:
         # before issuing the receipt.
         identity = event.get("projection_event_id")
         identity = _digest(identity, "projection_event_id")
+        from .audit.sealing import SegmentReadError, segment_text
         from .audit.signing import verify_chain
 
         matches: list[dict[str, Any]] = []
         for path in sorted(self._audit_log.audit_dir.glob("*.ndjson")):
             try:
-                rows = path.read_text(encoding="utf-8").splitlines()
-            except OSError as exc:
+                segment = segment_text(path, fail_soft=False)
+                rows = segment.splitlines()
+            except (OSError, SegmentReadError) as exc:
                 raise UnifiedAuditIntegrityError(
                     "strict signed audit receipt is unavailable"
                 ) from exc
@@ -867,7 +869,7 @@ class StrictAuditProjectionSink:
                     and row.get("kind") == EventKind.UNIFIED_AUDIT_PROJECTION
                     and row.get("projection_event_id") == identity
                 ):
-                    if verify_chain(path):
+                    if verify_chain(path, segment=segment):
                         raise UnifiedAuditIntegrityError(
                             "strict signed audit receipt chain is invalid"
                         )

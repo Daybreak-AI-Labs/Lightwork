@@ -28,12 +28,9 @@
   @media (max-width: 900px) {
     .fd[data-view="steps"] .fdx-work { grid-template-columns: 1fr; height: auto; }
   }
-  /* Canvas view stacks earlier. Inside the app shell (248px sidebar, 48px main
-     padding) the middle track is narrower than the 320px copilot drawer from
-     ~1200px down, so the drawer overflowed the canvas' start edge and was
-     clipped ("…pilot" header, left-truncated messages). Stacked, the palette
-     wraps into a row and the canvas keeps a real height (a bare auto row
-     collapses the SVG to its 150px default). */
+  /* Stack the canvas workspace before its middle column becomes cramped.
+     The palette wraps into a row; the canvas keeps a real height instead of
+     collapsing to the SVG's 150px default. Copilot is a separate shared drawer. */
   @media (max-width: 1240px) {
     .fd[data-view="canvas"] .fdx-work { grid-template-columns: 1fr; height: auto; }
     .fd[data-view="canvas"] .fd__palette { flex-direction: row; flex-wrap: wrap; }
@@ -70,6 +67,11 @@
   .fd__props .field { margin-bottom: var(--space-3); }
   .fd__props label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
   .fd__props textarea { width: 100%; min-height: 60px; font-family: var(--font-mono, monospace); font-size: 12px; }
+  .fd-recipe-inputs { max-width: 36rem; max-height: 90vh; overflow: hidden; }
+  .fd-recipe-inputs .mv-confirm__body { display: flex; flex-direction: column; max-height: calc(90vh - 2px); box-sizing: border-box; }
+  .fd-recipe-fields { overflow-y: auto; min-height: 0; padding-inline-end: var(--space-2); margin-bottom: var(--space-3); }
+  .fd-recipe-inputs .mv-confirm__row { flex-shrink: 0; flex-wrap: wrap; padding-top: var(--space-2); }
+  .fd-recipe-inputs [aria-invalid="true"] { border-color: var(--danger); }
   .fd__props input, .fd__props select { width: 100%; }
   .fd__empty { color: var(--muted); font-size: var(--text-sm); }
   .fd__msg { font-size: var(--text-sm); color: var(--muted); }
@@ -131,27 +133,33 @@
                  opacity: .92; cursor: pointer; }
   .fd__minimap rect.mini-node { fill: var(--muted); }
   .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-  /* copilot chat drawer (over the canvas' end edge). Width tracks the canvas
-     column: min() keeps the drawer inside its container when the track is
-     narrower than 320px -- absolutely positioned, a fixed width overflowed the
-     clipped start edge instead of shrinking. */
-  .fd__chat { display: none; position: absolute; top: 8px; inset-inline-end: 8px; bottom: 8px;
-              width: min(320px, calc(100% - 16px)); max-width: calc(100% - 16px);
-              z-index: 3; background: var(--surface); border: 1px solid var(--border);
-              border-radius: var(--radius-lg); flex-direction: column; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.12)); }
-  .fd__chat.on { display: flex; }
+  /* Shared, nonmodal Copilot: remains visible in Steps and Canvas, and allows
+     editing alongside a pending reply. Only the conversation scrolls. */
+  .fd__chat { display: none; position: fixed; inset-inline-end: 1rem; bottom: 4.6rem;
+              width: min(25rem, calc(100vw - 2rem)); height: min(38rem, calc(100vh - 8rem));
+              height: min(38rem, calc(100dvh - 8rem)); box-sizing: border-box;
+              z-index: 60; background: var(--glass-sheen, none), color-mix(in srgb, var(--panel) 82%, transparent);
+              border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
+              -webkit-backdrop-filter: blur(24px) saturate(175%); backdrop-filter: blur(24px) saturate(175%);
+              flex-direction: column; box-shadow: var(--shadow-lg), var(--glass-edge); }
+  .fd__chat.on:not([hidden]) { display: flex; }
   .fd__chat-head { display: flex; align-items: center; justify-content: space-between;
+                   flex-shrink: 0;
                    padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
                    font-weight: var(--font-semibold); font-size: var(--text-sm); }
-  .fd__chat-log { flex: 1; overflow-y: auto; padding: var(--space-3); display: flex;
-                  flex-direction: column; gap: var(--space-2); }
+  .fd__chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+                  padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .fd__chat-log > * { flex-shrink: 0; }
   .fd__chat-msg { max-width: 92%; padding: 6px 10px; border-radius: 10px; font-size: var(--text-sm);
                   white-space: pre-wrap; word-break: break-word; }
   .fd__chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
   .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
   .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
-  .fd__chat-form { display: flex; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
-  .fd__chat-form input { flex: 1; }
+  .fd__chat-form { display: flex; flex-shrink: 0; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
+  .fd__chat-form input { flex: 1; min-width: 0; }
+  .fd__chat-msg .btn { max-width: 100%; white-space: normal; margin-top: var(--space-2); }
+  @media (prefers-reduced-transparency: reduce) { .fd__chat { background: var(--panel); backdrop-filter: none; } }
+  body.theme-hicontrast .fd__chat { background: var(--panel); border-color: var(--border); backdrop-filter: none; }
 
   /* ---- Redesign layer: glass surfaces, a hero NL "Draft" band, and a
      friendly Steps view toggled against the Canvas. Additive — the toolbar
@@ -237,7 +245,9 @@
     <button class="btn btn--ghost" type="button" id="fd-run-real" title="Run the published version using connected services">Run published</button>
     <button class="btn btn--ghost" type="button" id="fd-history">⏱ History</button>
     <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
-    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
+    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting" aria-controls="fd-chat" aria-expanded="false">💬 Copilot</button>
+    <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo the last edit (Ctrl+Z)">Undo</button>
+    <button class="btn btn--ghost" type="button" id="fd-redo" title="Restore an undone edit (Ctrl+Shift+Z)">Redo</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
   </div>
 
@@ -251,8 +261,6 @@
   <!-- Canvas-only tools: id, history/zoom, import/export, run signal + legend. -->
   <div class="fdx-canvastools">
     <input class="input" id="fd-id" placeholder="flow-id" aria-label="Flow id" style="width:140px;" />
-    <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo (Ctrl+Z)">↶</button>
-    <button class="btn btn--ghost" type="button" id="fd-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
     <button class="btn btn--ghost" type="button" id="fd-fit" title="Zoom to fit">⛶</button>
     <button class="btn btn--ghost" type="button" id="fd-export" title="Download this flow as JSON">⬇</button>
     <button class="btn btn--ghost" type="button" id="fd-import-json" title="Load a flow from a JSON file">⬆</button>
@@ -284,19 +292,6 @@
 
   <div class="fd__canvas-wrap">
     <div id="fd-crumbs" class="fd__crumbs" aria-label="Flow location"></div>
-    <div id="fd-chat" class="fd__chat" aria-label="Flow copilot">
-      <div class="fd__chat-head">
-        <span>💬 Flow copilot</span>
-        <button class="btn btn--ghost" type="button" id="fd-chat-close" aria-label="Close copilot">✕</button>
-      </div>
-      <div id="fd-chat-log" class="fd__chat-log" aria-live="polite">
-        <div class="fd__chat-msg assistant">Tell me what to build or change — “add an approval before the Slack post”, “why did the last run fail?”, “fix it”.</div>
-      </div>
-      <form id="fd-chat-form" class="fd__chat-form">
-        <input class="input" id="fd-chat-input" placeholder="Ask or instruct…" aria-label="Message the flow copilot" autocomplete="off" />
-        <button class="btn btn--primary" type="submit">Send</button>
-      </form>
-    </div>
     <p class="sr-only" id="fd-canvas-help">Use Tab to reach a flow step, Enter or Space to select it, and the arrow keys to move it. Select the next step in the properties panel to connect steps. When the canvas itself has focus, arrow keys pan and plus or minus zoom.</p>
     <svg id="fd-canvas" role="application" tabindex="0" aria-label="Flow canvas"
          aria-describedby="fd-canvas-help" data-flow-id="{{ flow_id or '' }}">
@@ -389,9 +384,28 @@
   </div>
 </div>
 
+<!-- Outside all view-specific containers: the same conversation is available
+     from the default Steps view and the advanced Canvas. -->
+<aside id="fd-chat" class="fd__chat" aria-labelledby="fd-chat-title" hidden>
+  <div class="fd__chat-head">
+    <span id="fd-chat-title">💬 Workflow Copilot</span>
+    <button class="btn btn--ghost" type="button" id="fd-chat-close" aria-label="Close workflow Copilot">✕</button>
+  </div>
+  <div id="fd-chat-log" class="fd__chat-log" aria-live="polite" aria-relevant="additions text">
+    <div class="fd__chat-msg assistant">Tell me what to build or change — “add an approval before the Slack post”, “why did the last run fail?”, “fix it”. Review any changes before saving.</div>
+  </div>
+  <form id="fd-chat-form" class="fd__chat-form">
+    <input class="input" id="fd-chat-input" placeholder="Ask or instruct…" aria-label="Message the workflow Copilot" autocomplete="off" />
+    <button class="btn btn--primary" type="submit">Send</button>
+  </form>
+</aside>
+
 <script id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
 <script>
 {% include "flow_designer_core.js" %}
+</script>
+<script>
+{% include "flow_designer_inputs.js" %}
 </script>
 <script>
 {% include "flow_designer.js" %}
@@ -423,13 +437,24 @@
       try { return JSON.parse(document.getElementById('fd-seed').textContent || 'null'); }
       catch (e) { return null; }
     }
-    function summarize(n) {
+    function summarize(n, learned) {
+      if (learned) {
+        if (n.kind === 'approval') return n.id === 'teaching_review'
+          ? 'Choose how this case should continue. You will review the action separately.'
+          : 'Review the proposed action before it starts.';
+        if (n.kind === 'switch' || n.kind === 'branch') return 'Choose the next step using the learned rules.';
+        if (n.kind === 'setvar') return 'Prepare the next step.';
+        if (n.kind === 'action') return (n.tool || '').replace(/_/g, ' ');
+        return '';
+      }
       return (n.brief || n.prompt || n.condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
               || (n.params && Object.keys(n.params).length ? 'Input values configured' : '') || '').toString();
     }
     function render() {
       var f = seed();
       var nodes = (f && Array.isArray(f.nodes)) ? f.nodes : [];
+      var learned = !!(f && f.learned_recipe && ['lightwork.action-recipe.v1', 'lightwork.action-recipe.v2',
+        'lightwork.action-choice.v1', 'lightwork.workflow-transducer.v1', 'lightwork.workflow-memory.v1'].indexOf(f.learned_recipe.schema) >= 0);
       body.textContent = '';
       if (!nodes.length) {
         var empty = document.createElement('div');
@@ -451,7 +476,7 @@
         var title = document.createElement('div'); title.className = 'fd-scard__t';
         title.textContent = n.label || n.title || n.name || KLABEL[n.kind] || 'Step';
         var desc = document.createElement('div'); desc.className = 'fd-scard__d';
-        desc.textContent = summarize(n);
+        desc.textContent = summarize(n, learned);
         mid.appendChild(kind); mid.appendChild(title); if (desc.textContent) mid.appendChild(desc);
         card.appendChild(ic); card.appendChild(mid);
         body.appendChild(card);
@@ -487,6 +512,7 @@
     // Re-render the Steps list after a Draft (the seed script node is rewritten
     // server-agnostically by the drafter into the canvas; keep the overview honest
     // by re-reading on focus back to Steps). Default view is Steps.
+    window.addEventListener('lightwork:flow-loaded', render);
     render();
   })();
 </script>

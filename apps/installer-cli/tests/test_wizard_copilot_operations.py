@@ -1,0 +1,53 @@
+"""Bounded Copilot actions require a deliberate strict feature opt-in."""
+from __future__ import annotations
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+import pytest
+from maverick import config
+from maverick_dashboard import settings_store
+from maverick_installer import wizard
+
+
+@pytest.mark.parametrize("value", [None, False, 0, 1, "true", "false", [], {}])
+def test_copilot_actions_require_literal_true(monkeypatch, value):
+    monkeypatch.setattr(config, "load_config", lambda: {"features": {"copilot_operations": value}})
+    monkeypatch.setattr(config, "config_source_errors", lambda **kw: {})
+    assert config.get_features()["copilot_operations"] is False
+
+
+def test_copilot_actions_fail_closed_for_unreadable_configuration(monkeypatch):
+    monkeypatch.setattr(config, "load_config", lambda: {"features": {"copilot_operations": True}})
+    monkeypatch.setattr(config, "config_source_errors", lambda **kw: {"config": "invalid"})
+    assert config.get_features()["copilot_operations"] is False
+
+
+def test_installer_prompt_and_serialization_are_explicit_default_off(monkeypatch):
+    prompts = []
+
+    def confirm(prompt, *, default=False):
+        prompts.append((prompt, default))
+        return "Let Copilot show" in prompt
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_select", lambda *a, default=None, **kw: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *a, default="", **kw: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *a, **kw: [])
+    result = wizard.pick_advanced()
+    assert result["allow_copilot_operations"] is True
+    chosen = [default for prompt, default in prompts if "Let Copilot show" in prompt]
+    assert chosen == [False]
+    document = tomllib.loads("\n".join(wizard._cfg_advanced(result, [])))
+    assert document["features"]["copilot_operations"] is True
+    assert "copilot_operations" not in tomllib.loads("\n".join(wizard._cfg_advanced({}, []))).get("features", {})
+    assert "allow_copilot_operations" not in wizard._EXPRESS_ADVANCED
+
+
+def test_feature_setting_reports_when_higher_priority_source_still_controls_it(monkeypatch):
+    monkeypatch.setattr(config, "get_features", lambda: {"copilot_operations": False})
+    with pytest.raises(settings_store.FeatureSettingNotEffective, match="not active"):
+        settings_store.assert_effective_copilot_operations(True)
+    settings_store.assert_effective_copilot_operations(False)

@@ -15,15 +15,19 @@ empty list unless the flow engine is on and enough signal has accumulated.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 
 from . import node_outcomes
 from .ir import (
+    LEARNED_OPERATOR_SCHEMA,
     NODE_ACTION,
     NODE_AGENT,
     Flow,
     FlowNode,
     ensure_high_risk_approvals,
+    learned_operator_work_digest,
+    validate_learned_operator,
 )
 
 _DEFAULT_MIN_SUPPORT = 10
@@ -150,6 +154,7 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
     new = flow.copy()
     n: FlowNode = new.nodes[node_id]
     n.kind = to_kind
+    n.learned_operator = None
     # A node-kind rewrite never inherits an automatic replay policy from the old
     # implementation. Agent attempts and high-risk actions may already have
     # produced side effects before reporting failure.
@@ -206,6 +211,42 @@ def revert_node(flow: Flow, node_id: str, prior: FlowNode) -> Flow:
     n = new.nodes[node_id]
     n.kind, n.tool, n.params, n.brief = prior.kind, prior.tool, dict(prior.params), prior.brief
     n.retries = int(prior.retries)
+    n.timeout = prior.timeout
+    n.learned_operator = copy.deepcopy(prior.learned_operator)
+    # Output routing remains the current definition's property. Never silently
+    # rebind a restored operator if that contract changed after the prior version.
+    if (n.learned_operator is not None
+            and (not isinstance(n.learned_operator, dict)
+                 or n.learned_operator.get("work_sha256") != learned_operator_work_digest(n))):
+        n.learned_operator = None
+    return new
+
+
+def attach_learned_operator(flow: Flow, node_id: str, artifact: dict) -> Flow:
+    """Return a draft attaching a validated bounded scalar/composed operator.
+
+    This does not save, activate, or claim an improvement. Existing flow review,
+    versioning, publication and rollback remain the authority for deployment.
+    """
+    if node_id not in flow.nodes:
+        raise KeyError(f"no such node {node_id!r}")
+    new = flow.copy()
+    node = new.nodes[node_id]
+    node.learned_operator = {
+        "schema": LEARNED_OPERATOR_SCHEMA,
+        "work_sha256": learned_operator_work_digest(node),
+        "artifact": copy.deepcopy(artifact),
+    }
+    validate_learned_operator(node)
+    return new
+
+
+def remove_learned_operator(flow: Flow, node_id: str) -> Flow:
+    """Return a draft restoring ordinary agent execution, without publishing it."""
+    if node_id not in flow.nodes:
+        raise KeyError(f"no such node {node_id!r}")
+    new = flow.copy()
+    new.nodes[node_id].learned_operator = None
     return new
 
 
@@ -256,6 +297,9 @@ def same_work_definition(left: FlowNode, right: FlowNode) -> bool:
         and dict(left.params) == dict(right.params)
         and left.brief == right.brief
         and int(left.retries) == int(right.retries)
+        and left.timeout == right.timeout
+        and left.output == right.output
+        and left.learned_operator == right.learned_operator
     )
 
 
@@ -311,4 +355,5 @@ def measure(
 
 
 __all__ = ["NodeProposal", "propose", "maybe_propose", "apply_proposal",
-           "measure", "regressed", "revert_node", "same_work_definition"]
+           "measure", "regressed", "revert_node", "same_work_definition",
+           "attach_learned_operator", "remove_learned_operator"]

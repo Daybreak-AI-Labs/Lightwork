@@ -40,6 +40,12 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
     and the tmp-path world-DB fixture.
 12. pytest aborts everything on one collection error; a pyo3 PanicException
     usually hides a missing import on the stderr line above it.
+13. Customer features require an in-product journey after installation, plain
+    language, the shared Liquid Glass design, and authorized Copilot coverage.
+    Follow `docs/customer-experience-contract.md`; API/CLI implementation alone
+    is not customer completion. Report missing UI/Copilot/recovery coverage
+    explicitly, and preserve the same authority and current-state checks across
+    interfaces.
 
 The suite size changes frequently; collect and run it from the reviewed checkout.
 The September 12 baseline collected 29,254 tests. No type checker is configured;

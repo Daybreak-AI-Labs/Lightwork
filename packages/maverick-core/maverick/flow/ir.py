@@ -18,6 +18,9 @@ sub-flows rather than a soup of cross-referencing ids.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -48,6 +51,39 @@ NODE_KINDS = frozenset({
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
 _DEFAULT_MAX_NODE_RETRIES = 5
 _HARD_MAX_NODE_RETRIES = 50
+LEARNED_OPERATOR_SCHEMA = "flow-learned-operator-v1"
+
+
+def learned_operator_work_digest(node: FlowNode) -> str:
+    """Bind a pure specialization to the original agent's work and output contract."""
+    payload = {
+        "kind": node.kind, "brief": node.brief, "output": node.output,
+        "retries": node.retries, "timeout": node.timeout,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def validate_learned_operator(node: FlowNode, *, check_work: bool = True) -> None:
+    """Validate an attached artifact without interpreting arbitrary code or tools."""
+    envelope = node.learned_operator
+    if envelope is None:
+        return
+    if node.kind != NODE_AGENT or not node.brief or not node.output:
+        raise ValueError("learned operator requires an agent brief and output key")
+    if not isinstance(envelope, dict) or set(envelope) != {"schema", "work_sha256", "artifact"}:
+        raise ValueError("invalid learned operator envelope")
+    if envelope["schema"] != LEARNED_OPERATOR_SCHEMA:
+        raise ValueError("unsupported learned operator envelope schema")
+    digest = envelope["work_sha256"]
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)):
+        raise ValueError("invalid learned operator work digest")
+    if check_work and digest != learned_operator_work_digest(node):
+        raise ValueError("learned operator original work definition changed")
+    from .operator_artifacts import validate_artifact
+
+    validate_artifact(envelope["artifact"])
 
 
 def max_node_retries() -> int:
@@ -262,6 +298,9 @@ class FlowNode:
     # designer layout (opaque to execution) -----------------------------------
     x: float = 0.0                   # canvas position for the visual designer
     y: float = 0.0
+    # Optional pure scalar specialization; original agent remains the fallback.
+    learned_operator: dict[str, Any] | None = None
+    recipe_step: int | None = None  # requires the parent flow's complete recipe
 
     def to_dict(self) -> dict:
         d: dict[str, Any] = {"id": self.id, "kind": self.kind}
@@ -273,16 +312,14 @@ class FlowNode:
                 d[key] = v
         if self.params:
             d["params"] = self.params
-        if self.seconds:
-            d["seconds"] = self.seconds
-        if self.retries:
-            d["retries"] = self.retries
-        if self.retry_backoff:
-            d["retry_backoff"] = self.retry_backoff
-        if self.timeout:
-            d["timeout"] = self.timeout
-        if self.limit:
-            d["limit"] = self.limit
+        if self.recipe_step is not None:
+            d["recipe_step"] = self.recipe_step
+        if self.learned_operator is not None:
+            d["learned_operator"] = copy.deepcopy(self.learned_operator)
+        for key in ("seconds", "retries", "retry_backoff", "timeout", "limit"):
+            value = getattr(self, key)
+            if value:
+                d[key] = value
         if self.concurrent:
             d["concurrent"] = True
         if self.cases:
@@ -318,6 +355,8 @@ class FlowNode:
             id=str(d["id"]), kind=str(d["kind"]),
             next=d.get("next"), tool=str(d.get("tool", "")),
             params=dict(d.get("params") or {}), brief=str(d.get("brief", "")),
+            learned_operator=copy.deepcopy(d.get("learned_operator")),
+            recipe_step=d.get("recipe_step"),
             condition=str(d.get("condition", "")),
             if_true=d.get("if_true"), if_false=d.get("if_false"),
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
@@ -370,6 +409,9 @@ class Flow:
     max_concurrent: int = 0          # cap simultaneous in-flight runs of this flow (0 = unlimited)
     inputs: list[dict] = field(default_factory=list)   # declared manual-run inputs:
                                      # [{key, type: text|number|bool|date, label, required, default}]
+    learned_recipe: dict | None = None  # reviewed action dataflow; exact generated graph
+    recipe_lineage: dict | None = None  # admitted signed evidence; never caller run data
+    recipe_teaching: dict | None = None  # explicit native human teaching, not general guard bypass
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -386,6 +428,12 @@ class Flow:
             "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
             "max_concurrent": self.max_concurrent, "inputs": self.inputs,
             "nodes": [n.to_dict() for n in self.nodes.values()],
+            **({"learned_recipe": copy.deepcopy(self.learned_recipe)}
+               if self.learned_recipe is not None else {}),
+            **({"recipe_lineage": copy.deepcopy(self.recipe_lineage)}
+               if self.recipe_lineage is not None else {}),
+            **({"recipe_teaching": copy.deepcopy(self.recipe_teaching)}
+               if self.recipe_teaching is not None else {}),
         }
 
     @staticmethod
@@ -404,11 +452,26 @@ class Flow:
             owner=str(d.get("owner", "")),
             max_concurrent=int(d.get("max_concurrent", 0) or 0),
             inputs=[dict(i) for i in (d.get("inputs") or []) if isinstance(i, dict)],
+            learned_recipe=copy.deepcopy(d.get("learned_recipe")),
+            recipe_lineage=copy.deepcopy(d.get("recipe_lineage")),
+            recipe_teaching=copy.deepcopy(d.get("recipe_teaching")),
         )
 
     def validate(self, *, _inherited_approval: bool = False) -> list[str]:
         """Structural problems (empty list = valid). Not an execution check."""
         errs: list[str] = []
+        if self.recipe_lineage is not None and self.learned_recipe is None:
+            errs.append("recipe lineage requires its complete parent recipe")
+        if self.recipe_teaching is not None and self.learned_recipe is None:
+            errs.append("recipe teaching requires its complete parent recipe")
+        if self.learned_recipe is None and any(n.recipe_step is not None for n in self.nodes.values()):
+            errs.append("learned action node requires its complete parent recipe")
+        if self.learned_recipe is not None:
+            from .recipe_flow import validate_flow
+            try:
+                validate_flow(self)
+            except (ValueError, TypeError):
+                errs.append("invalid or edited learned action recipe graph")
         if not self.nodes:
             errs.append("flow has no nodes")
             return errs
@@ -489,6 +552,11 @@ class Flow:
     def _validate_kind_fields(self, n: FlowNode) -> list[str]:
         """Flat required-field checks per kind (no sub-flow recursion)."""
         errs = []
+        if n.learned_operator is not None:
+            try:
+                validate_learned_operator(n)
+            except (TypeError, ValueError):
+                errs.append(f"node {n.id!r}: invalid or stale learned operator")
         if n.kind == NODE_ACTION:
             if not n.tool:
                 errs.append(f"action node {n.id!r} has no tool")

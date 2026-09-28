@@ -7420,6 +7420,8 @@ from . import (  # noqa: E402,F401
     _ekko_groups,
     _external_agent_groups,
     _finance_groups,
+    _flow_operator_groups,
+    _flow_recipe_groups,
     _governed_execution_groups,
     _import_groups,
     _knowledge_groups,

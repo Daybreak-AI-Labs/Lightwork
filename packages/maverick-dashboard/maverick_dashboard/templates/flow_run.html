@@ -30,6 +30,13 @@
   .fr__data { margin-top: var(--space-4); }
   .fr__data pre { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius);
                   padding: var(--space-3); font-size: 12px; overflow-x: auto; max-height: 320px; }
+  .fr__example { margin: var(--space-4) 0; }
+  .fr__example h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+  .fr__example p { max-width: 65ch; }
+  .fr__example textarea { width: 100%; min-height: 7rem; box-sizing: border-box; resize: vertical; }
+  .fr__example .fr__actions { margin-bottom: 0; }
+  .fr__example .btn { white-space: normal; }
+  @media (max-width: 480px) { .fr__example .fr__actions .btn { width: 100%; } }
 </style>
 
 <div class="fr">
@@ -43,6 +50,33 @@
   <div class="fr__error" id="fr-error" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" aria-live="polite"></span>
+
+  <section class="panel fr__example" id="le-card" aria-labelledby="le-title"
+           data-flow-id="{{ flow_id }}" data-run-id="{{ run_id }}" data-draft-recovery="off">
+    <h2 id="le-title">Learning example</h2>
+    <p id="le-status" role="status" aria-live="polite">Checking this example…</p>
+    <p id="le-description" class="fr__msg"></p>
+    <p id="le-message" role="status" aria-live="polite"></p>
+    <div class="fr__actions">
+      <button type="button" class="btn btn--ghost" id="le-withdraw" hidden>Stop using this example</button>
+      <button type="button" class="btn btn--ghost" id="le-refresh" disabled>Refresh status</button>
+    </div>
+    <form id="le-form" class="mv-form" hidden novalidate aria-labelledby="le-form-title">
+      <h3 id="le-form-title">Stop using this example</h3>
+      <p id="le-consequence">This withdraws approval for future use of this example. It keeps the review and audit history,
+        does not undo completed work, and cannot erase existing downloads or copies.</p>
+      <div class="mv-form__field">
+        <label for="le-reason">Reason for stopping use</label>
+        <textarea class="textarea" id="le-reason" required maxlength="2000"
+                  aria-describedby="le-consequence le-error" autocomplete="off"></textarea>
+        <p id="le-error" class="mv-form__err" role="alert"></p>
+      </div>
+      <div class="fr__actions">
+        <button type="submit" class="btn btn--primary" id="le-confirm">Confirm: stop using this example</button>
+        <button type="button" class="btn btn--ghost" id="le-cancel">Cancel</button>
+      </div>
+    </form>
+  </section>
 
   <h2 style="font-size:var(--text-base);">Steps</h2>
   <ul class="fr__steps" id="fr-steps"></ul>
@@ -185,6 +219,32 @@
       var canDecide = run.approval_card_status === 'current'
         && typeof run.approval_binding_sha256 === 'string'
         && run.approval_binding_sha256.length === 64 && card;
+      var teaching = run.cursor === 'teaching_review'
+        && (run.teaching_review || (Array.isArray(node.choices) && node.choices.length === 2
+          && node.choices.indexOf('route:0') >= 0 && node.choices.indexOf('route:1') >= 0));
+      var teachingDetail = run.teaching_review || {};
+      var teachingOptions = teaching && teachingDetail.status === 'current'
+        && teachingDetail.question && teachingDetail.question.options;
+      if (teaching) {
+        var teachingPanel = document.createElement('section');
+        teachingPanel.className = 'fr__review';
+        teachingPanel.setAttribute('aria-label', 'Choose a continuation');
+        addText(teachingPanel, 'h3', 'Choose how this case should continue');
+        addText(teachingPanel, 'p', 'The learned rules disagree on this completed case. Choosing an action opens a separate approval before it runs.');
+        if (!Array.isArray(teachingOptions) || teachingOptions.length !== 2) {
+          canDecide = false;
+          addText(teachingPanel, 'p', 'Complete, verified options are unavailable or contain protected values. This page cannot submit a teaching decision.');
+        } else {
+          addText(teachingPanel, 'h4', 'Actual observations');
+          addText(teachingPanel, 'pre', JSON.stringify(teachingDetail.question.observation, null, 2));
+          teachingOptions.forEach(function (option) {
+            addText(teachingPanel, 'h4', option.tool);
+            addText(teachingPanel, 'pre', JSON.stringify(option.arguments, null, 2));
+          });
+          addText(teachingPanel, 'p', 'Question commitment: ' + teachingDetail.question.question_sha256);
+        }
+        box.appendChild(teachingPanel);
+      }
       if (card) renderApprovalCard(card);
       if (!canDecide) {
         addText(box, 'p', 'This operation cannot be approved until current, integrity-checked details are available. Reload or request a fresh review.');
@@ -245,12 +305,13 @@
           .catch(function (error) { say(error.message || 'Could not bind these inputs.'); })
           .finally(function () { reviewPending = false; });
       }
-      if (canDecide) btn('Approve exact operation', true, function () {
+      if (canDecide && !teaching) btn('Approve exact operation', true, function () {
         reviewThenResume('approved');
       });
       // any declared choice verdicts become their own buttons (routed by a switch)
       (node.choices || []).forEach(function (ch) {
-        if (canDecide) btn(ch, false, function () {
+        var option = teachingOptions && teachingOptions.find(function (item) { return ch === 'route:' + item.route; });
+        if (canDecide) btn(option ? 'Choose ' + option.tool : ch, false, function () {
           reviewThenResume(ch);
         });
       });
@@ -364,3 +425,4 @@
 })();
 </script>
 {% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-learning-example.js" defer></script>{% endblock %}

@@ -19,6 +19,28 @@ test('normalizeNode fills defaults and an id fallback', () => {
   assert.equal(n.next, null);
 });
 
+test('learned operator survives an unrelated designer edit and explicit removal', () => {
+  const envelope = {schema: 'flow-learned-operator-v1', work_sha256: 'binding',
+    artifact: {examples: [{inputs: {x: 1}, output: 2}], candidates: [['field', 'x']]}};
+  const node = FDCore.normalizeNode({id: 'learned', kind: 'agent', brief: 'Calculate',
+    output: 'value', learned_operator: envelope}, 0);
+  node.label = 'Updated label'; node.x = 200;
+  const saved = FDCore.serializeNode(node);
+  assert.deepEqual(saved.learned_operator, envelope);
+  assert.equal(saved.label, 'Updated label');
+  delete node.learned_operator;
+  assert.ok(!('learned_operator' in FDCore.serializeNode(node)));
+});
+
+test('nested learned operator is preserved without hiding malformed attachments', () => {
+  const raw = {id: 'scope', kind: 'scope', body: {id: 'body', start: 'a', nodes: [
+    {id: 'a', kind: 'agent', brief: 'Compute', learned_operator: []}
+  ]}};
+  // Server validation must see malformed data instead of silently changing it
+  // into a valid, more expensive agent-only workflow.
+  assert.deepEqual(FDCore.serializeNode(raw).body.nodes[0].learned_operator, []);
+});
+
 test('serializeNode omits empty scalars and keeps set ones', () => {
   const o = FDCore.serializeNode(FDCore.normalizeNode({ id: 'a', kind: 'agent', brief: 'do it' }, 0));
   assert.equal(o.id, 'a');
@@ -242,6 +264,23 @@ test('fitView centers and clamps zoom', () => {
   assert.deepEqual(FDCore.fitView([], 800, 600, 176, 64, 40), { x: 40, y: 20, k: 1 });
 });
 
+test('recipe evidence and zero step index survive serialization and independent clone', () => {
+  const source = { id: 'r', name: 'Recipe', start: 'a',
+    learned_recipe: { schema: 'lightwork.action-recipe.v1', episodes: [{ id: 'private-source' }] },
+    recipe_lineage: { id: 'admitted-source', package_sha256: 'reviewed-package' },
+    nodes: [FDCore.normalizeNode({ id: 'a', kind: 'action', tool: 'crm_lookup', recipe_step: 0 }, 0)] };
+  const wire = FDCore.serializeFlow(source);
+  assert.deepEqual(wire.learned_recipe, source.learned_recipe);
+  assert.deepEqual(wire.recipe_lineage, source.recipe_lineage);
+  assert.equal(wire.nodes[0].recipe_step, 0);
+  const clone = FDCore.cloneFlow(source);
+  clone.learned_recipe.episodes[0].id = 'changed';
+  clone.recipe_lineage.id = 'changed';
+  assert.equal(source.recipe_lineage.id, 'admitted-source');
+  assert.equal(source.learned_recipe.episodes[0].id, 'private-source');
+  assert.equal(clone.nodes[0].recipe_step, 0);
+});
+
 test('condition grammar parses simple predicates and rejects composites', () => {
   // one source of truth for the builder UI -- mirrors runner._COND
   const m = FDCore.COND_RE.exec('total >= 100');
@@ -252,4 +291,31 @@ test('condition grammar parses simple predicates and rejects composites', () => 
   // quoted values keep their quotes (raw mode handles stripping)
   const q = FDCore.COND_RE.exec('status == "open item"');
   assert.equal(q[3], '"open item"');
+});
+
+test('binary learned choices retain both routes, guard and signed lineage through cloning', () => {
+  const source = { id: 'c', name: 'Choice', start: 'choice',
+    learned_recipe: { schema: 'lightwork.action-choice.v1',
+      guard: { catalog: [{ name: 'v000', source: 'result', step: 0, path: ['flag'] }],
+        artifact: { artifact_sha256: 'complete-guard', candidate_count: 2 } },
+      branches: [{ route: '0', tool: 'approve', bindings: [{ path: ['case_id'] }] },
+        { route: '1', tool: 'review', bindings: [{ path: ['case_id'] }] }] },
+    recipe_lineage: { id: 'admitted', artifact_sha256: 'choice', package_sha256: 'signed-sources' },
+    nodes: [FDCore.normalizeNode({ id: 'choice', kind: 'switch', condition: '_recipe_choice.route',
+      cases: [{ value: '0', to: 'approve' }, { value: '1', to: 'review' }] }, 0),
+      FDCore.normalizeNode({ id: 'approve', kind: 'action', tool: 'approve', recipe_step: 1 }, 1),
+      FDCore.normalizeNode({ id: 'review', kind: 'action', tool: 'review', recipe_step: 1 }, 2)] };
+  const wire = FDCore.serializeFlow(source);
+  assert.deepEqual(wire.learned_recipe, source.learned_recipe);
+  assert.deepEqual(wire.recipe_lineage, source.recipe_lineage);
+  assert.deepEqual(wire.nodes[0].cases, source.nodes[0].cases);
+  assert.equal(wire.nodes[0].condition, '_recipe_choice.route');
+  assert.deepEqual(wire.nodes.slice(1).map(n => [n.tool, n.recipe_step]), [['approve', 1], ['review', 1]]);
+  const clone = FDCore.cloneFlow(source);
+  clone.learned_recipe.guard.artifact.candidate_count = 1;
+  clone.learned_recipe.branches[0].tool = 'changed';
+  clone.nodes[0].cases[0].to = 'changed';
+  assert.equal(source.learned_recipe.guard.artifact.candidate_count, 2);
+  assert.equal(source.learned_recipe.branches[0].tool, 'approve');
+  assert.equal(source.nodes[0].cases[0].to, 'approve');
 });

@@ -6347,6 +6347,28 @@ def _run_out(run) -> dict:
             else:
                 d["approval_card_status"] = "current"
         d["human"] = human
+        if run.cursor == "teaching_review":
+            # The ordinary payload preview may truncate nested options. Expose
+            # an exact, validated teaching question only on owned run detail,
+            # after approval integrity checks; never bypass secret redaction.
+            from maverick.flow import recipe_flow, store
+
+            if d.get("approval_card_status") == "current":
+                try:
+                    pinned = store.load_flow_snapshot(run.definition_digest)
+                    if pinned.recipe_teaching is None:
+                        raise ValueError("not a teaching flow")
+                    d["teaching_review"] = {"status": "unavailable"}
+                    recipe_flow.validate_flow(pinned)
+                    question = recipe_flow.validate_teaching_question(pinned.learned_recipe, run.data)
+                    safe_question = redact(question)
+                    if safe_question != question:
+                        d["teaching_review"] = {"status": "redacted"}
+                    else:
+                        d["teaching_review"] = {"status": "current", "question": safe_question}
+                except Exception:
+                    # Do not surface raw observations or unverified options.
+                    pass
     return d
 
 
@@ -7044,6 +7066,41 @@ def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     return {**f.to_dict(), **_flow_publication_fields(flow_id)}
 
 
+@router.get("/flows/{flow_id}/published")
+def get_published_flow_endpoint(request: Request, flow_id: str) -> dict:
+    """Review the exact published inputs and capture its publication epoch."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    draft = store.load_flow(flow_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, draft)
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release failed integrity checks",
+        ) from exc
+    if published is None:
+        raise HTTPException(
+            status_code=409,
+            detail="flow is not published; publish the reviewed draft before a live run",
+        )
+    flow, release = published
+    _assert_flow_access(request, flow)
+    return {
+        "flow": flow.to_dict(),
+        "release_id": str(release["release_id"]),
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+        "published_at": release.get("published_at"),
+    }
+
+
 @router.delete("/flows/{flow_id}", status_code=204)
 def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     require_permission(request, "operate")
@@ -7102,6 +7159,12 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
         )
     flow, release = published
     _assert_flow_access(request, flow)
+    expected_release_id = payload.expected_release_id or str(release["release_id"])
+    if expected_release_id != str(release["release_id"]):
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release changed since preview; review it before running",
+        )
     owner = _supervisor(request)
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
     # the flow declares none): reject a missing required input or a bad number/date
@@ -7124,7 +7187,7 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
             channel="api" if execution_user_id_from_request(request) else None,
             user_id=execution_user_id_from_request(request),
             allowed_suites=caller_suites(request),
-            expected_revision=str(release["release_id"]),
+            expected_revision=expected_release_id,
         )
     except store.FlowSnapshotError as exc:
         # Snapshot internals may include object paths/digests. The caller only
@@ -11553,6 +11616,9 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     result = public_context(context_for_page(page), permissions)
     configured = bool(_any_provider_key_set())
     result["model_provider_configured"] = configured
+    from maverick.config import get_features
+
+    result["operations_enabled"] = get_features().get("copilot_operations") is True
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions)
     return result
@@ -12111,6 +12177,7 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     if len(pattern) > 200:
         raise HTTPException(status_code=400, detail="pattern too long")
     from maverick.audit import default_audit_log, iter_events
+    from maverick.audit.segments import ReadReport
 
     from maverick_dashboard.app import safe_audit_day
 
@@ -12125,10 +12192,11 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     audit_dir = default_audit_log().audit_dir
 
     def _scan() -> dict:
+        report = ReadReport()
         matches: list[dict] = []
         scanned = 0
         total_matches = 0
-        for event in iter_events(day=effective_day, audit_dir=audit_dir):
+        for event in iter_events(day=effective_day, audit_dir=audit_dir, report=report):
             scanned += 1
             if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
                 total_matches += 1
@@ -12140,7 +12208,8 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
             "total_matches": total_matches,
             "returned": len(matches),
             "truncated": total_matches > len(matches),
-            "scan_complete": True,
+            "scan_complete": report.finished and report.failures == 0,
+            "read_report": report.as_dict(),
             "scope": {"day": effective_day},
         }
 
@@ -14942,6 +15011,9 @@ from .ai_evidence_analysis_authority_api import (  # noqa: E402
     router as ai_evidence_analysis_authority_router,
 )
 from .ai_governance_loop_api import router as ai_governance_loop_router  # noqa: E402
+from .api_flow_action_episodes import router as flow_action_episodes_router  # noqa: E402
+from .api_flow_operator_review import router as flow_operator_review_router  # noqa: E402
+from .api_flow_recipe_lineage import router as flow_recipe_lineage_router  # noqa: E402
 from .assessment_evidence_autopopulation_api import (  # noqa: E402
     router as assessment_evidence_autopopulation_router,
 )
@@ -14976,6 +15048,7 @@ from .consent_web_publish_settings_api import (  # noqa: E402
 from .consumer_trust_center_authority_api import (  # noqa: E402
     router as consumer_trust_center_authority_router,
 )
+from .copilot_operations import router as copilot_operations_router  # noqa: E402
 from .data_use_governance_api import router as data_use_governance_router  # noqa: E402
 from .data_use_provider_api import router as data_use_provider_router  # noqa: E402
 from .data_use_provider_audit_api import (  # noqa: E402
@@ -15034,6 +15107,10 @@ from .trc_continuous_evidence_api import (  # noqa: E402
 from .trust_center_branding_api import router as trust_center_branding_router  # noqa: E402
 
 router.include_router(ai_governance_loop_router)
+router.include_router(flow_action_episodes_router)
+router.include_router(copilot_operations_router)
+router.include_router(flow_recipe_lineage_router)
+router.include_router(flow_operator_review_router)
 router.include_router(ai_cloud_agent_governance_router)
 router.include_router(ai_evidence_analysis_router)
 router.include_router(ai_evidence_analysis_authority_router)

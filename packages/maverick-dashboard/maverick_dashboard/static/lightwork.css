@@ -1109,6 +1109,17 @@
 .mv-copilot__row .input { flex: 1; min-width: 0; }
 .mv-copilot__note { color: var(--muted); font-size: var(--text-xs);
   margin: .4rem 0 0; min-height: 1em; }
+.mv-copilot__operations { margin: var(--space-3) 0; padding: var(--space-3) 0;
+  border-block: 1px solid var(--border); }
+.mv-copilot__operations > h2 { margin: 0; font-size: var(--text-base); }
+.mv-copilot__operations > p { color: var(--muted); font-size: var(--text-sm); }
+.mv-copilot__operation-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.mv-copilot__operation-buttons .btn { white-space: normal; }
+.mv-copilot__operations .fr__example { margin: var(--space-3) 0 0; padding: var(--space-3); }
+.mv-copilot__operations .fr__example h2 { font-size: var(--text-base); }
+.mv-copilot__operations .fr__example .btn { width: 100%; }
+.mv-copilot__operations .fr__example p { overflow-wrap: anywhere; }
+.mv-copilot__operations .fr__example textarea { min-height: 5rem; }
 /* The Copilot is fixed outside <main>, so it needs its own explicit material
    fallbacks rather than relying on the page-surface selectors above. */
 body.theme-hicontrast .mv-copilot,

@@ -90,7 +90,7 @@
   async function loadStatus() {
     var st = await readJson(await request("/status"));
     document.getElementById("rcp-key-id").textContent = st.key_id || "—";
-    document.getElementById("rcp-custody").textContent = st.key_custody;
+    document.getElementById("rcp-custody").textContent = st.key_custody === "offhost" ? "Externally supplied; signs locally" : st.key_custody;
     document.getElementById("rcp-days").textContent = String(st.days.length);
     document.getElementById("rcp-pubkey").textContent = st.pubkey || "no issuer key available";
     document.getElementById("rcp-verifier-sha").textContent = st.verifier_sha256;
@@ -107,11 +107,11 @@
     } else if (st.key_custody === "colocated") {
       setMark("partial", "Integrity");
       title.textContent = "Receipts sign with a co-located key";
-      detail.textContent = "Verifiers get integrity against accidental or non-privileged edits, not tamper-evidence against the maverick uid. Custody the key off-host for the stronger claim.";
+      detail.textContent = "The signature detects edits by someone without the signing key. A process able to use this key can re-sign history. Independently retain checkpoints to detect changes to committed history.";
     } else {
-      setMark("ready", "Tamper-evident");
-      title.textContent = "Receipts sign with an off-host key";
-      detail.textContent = "A verified receipt is tamper-evidence: nobody on this host could have re-signed the chain.";
+      setMark("partial", "Integrity");
+      title.textContent = "Receipts sign with an externally supplied key";
+      detail.textContent = "The private key is injected or unwrapped into this signing process. This does not prove that a host process cannot re-sign history. Independently retain checkpoints to detect changes to committed history.";
     }
     daySelect.textContent = "";
     if (!st.days.length) {

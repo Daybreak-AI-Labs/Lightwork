@@ -206,8 +206,12 @@
           msg.textContent = total + ' match(es) across ' +
             (scanned === null ? 'the selected audit day' : scanned + ' scanned event(s)') +
             ' for ' + scopeDay + (data.truncated ? '; showing the first ' + events.length : '') + '.';
+          if (data.scan_complete !== true) {
+            msg.style.color = 'var(--danger)';
+            msg.textContent += ' Search incomplete: some audit records could not be read. These counts cover readable records only.';
+          }
           // Chain material (hash/sig/key ids) stays out of the on-screen
-          // dump — the signed chain is verified server-side, not by eye.
+          // dump. Read coverage is separate from signature verification.
           const CHAIN_KEYS = ['hash', 'prev_hash', 'sig', 'key_id'];
           out.textContent = events.map(e => {
             const shown = {};
@@ -297,9 +301,17 @@
       </table>
     {% else %}
       <p class="muted">
+        {% if kind %}
+        No events match the selected kind in the loaded tail. Other events may
+        exist for this day; clear the kind filter or search the day.
+        {% elif audit_read_report and audit_read_report.failures %}
+        No readable events are available in this tail. The audit read is
+        incomplete; this does not establish that no activity was recorded.
+        {% else %}
         No instrumented activity was recorded for this day. An empty view does
         not prove that no action occurred; verify instrumentation coverage and
         custody in the Audit Binder before relying on completeness.
+        {% endif %}
       </p>
     {% endif %}
   </div>

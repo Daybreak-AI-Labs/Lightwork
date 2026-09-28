@@ -614,7 +614,9 @@ def _default_grant_fn(action: str) -> None:
 def _default_revoke_fn(action: str) -> None:
     from .safety.consent import revoke
 
-    revoke(action)
+    # False means an already-absent grant, not an I/O failure, only in strict
+    # mode. A tombstone also preserves an idempotent withdrawal record.
+    revoke(action, strict=True, write_tombstone=True)
 
 
 def _live_risk(action: str) -> str | None:
@@ -689,7 +691,7 @@ class EarnedAutonomyEngine:
         except Exception:  # pragma: no cover -- audit sink must never block
             log.debug("earned-autonomy audit sink failed", exc_info=True)
 
-    def _revoke_grant(self, action: str) -> None:
+    def _revoke_grant(self, action: str) -> bool:
         """Attempt the authority withdrawal; failures are logged, then retried
         by every later miss and the per-reconcile stale-grant sweep."""
         try:
@@ -697,6 +699,8 @@ class EarnedAutonomyEngine:
         except Exception:
             log.warning("earned-autonomy grant revoke failed for %s", action,
                         exc_info=True)
+            return False
+        return True
 
     # -- recording ---------------------------------------------------------
 
@@ -989,16 +993,26 @@ class EarnedAutonomyEngine:
 
     def revoke(self, action: str, *, reason: str = "operator revoke",
                principal: str = "operator") -> bool:
-        """Operator withdrawal of an earned grant. Works even while the
-        feature is disabled -- this is the incident-response path."""
-        self._revoke_grant(action)
+        """Demote an action and withdraw its current-authority standing grant.
+
+        Works even while disabled. The default consent withdrawal is bound to
+        the current tenant, identity and policy, not every identity whose
+        earlier evidence contributed to this action's local trust state.
+
+        True confirms the withdrawal callback and local revocation ledger.
+        The separate central audit remains best-effort. False can represent a
+        partial withdrawal; never restore authority to compensate for it.
+        """
+        revoked = self._revoke_grant(action)
         ok = self.ledger.record_event("revoke", action, principal=principal,
                                       reason=reason, ts=self.now())
         from .audit import EventKind
 
         self._audit(EventKind.AUTONOMY_GRADUATION, decision="revoke",
-                    principal=principal, action=action, reason=_safe_text(reason))
-        return ok
+                    principal=principal, action=action, reason=_safe_text(reason),
+                    withdrawal_confirmed=revoked, local_revocation_recorded=ok,
+                    authority_scope="current_identity_and_policy")
+        return revoked and ok
 
     def status(self) -> list[TrustState]:
         """Every action type's trust state, most-proven first."""

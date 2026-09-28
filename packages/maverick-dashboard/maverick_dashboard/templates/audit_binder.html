@@ -20,11 +20,11 @@
   <p class="page-subtitle">A cryptographically identified evidence snapshot assembled from the records themselves:
     signed-chain verification, approvals with identity and quorum, the assessment
     register with revisions, the privacy registers, and the learning KPIs.
-    Event and decision window: last {{ days }} days · generated {{ b.generated }}.
+    Event and decision window: last {{ days }} days · generated {{ generated }}.
     Privacy and finance sections are explicitly labeled current snapshots.</p>
   <div class="bnd-actions">
     <button class="btn btn--primary" onclick="window.print()" type="button">Print / save as PDF</button>
-    <button class="btn" id="binder-json" type="button">Download signed JSON snapshot</button>
+    <button class="btn" id="binder-json" type="button">Download {{ 'signed ' if b.artifact.signature_state == 'signed' else '' }}JSON snapshot</button>
     <a class="btn" href="/audit/binder?days=30">30d</a>
     <a class="btn" href="/audit/binder?days=90">90d</a>
     <a class="btn" href="/audit/binder?days=365">12m</a>
@@ -109,7 +109,7 @@
       </tbody>
     </table>
     </div>
-    <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The signed JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
+    <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
     {% else %}
     <p class="muted">No approvals in this window.</p>
     {% endif %}
@@ -139,7 +139,7 @@
     </table>
     </div>
     <p class="muted" style="font-size: var(--text-xs); margin-top: var(--space-2);">
-      Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} record(s) in print. The signed JSON download contains all records in this time window, including each reviewed version and its template verification fingerprint.</p>
+      Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} record(s) in print. The JSON download contains these current assessment summaries, including the revision number and template fingerprint.</p>
     {% else %}
     <p class="muted">No assessment records yet.</p>
     {% endif %}
@@ -196,7 +196,9 @@
       if (!button || !source) return;
       button.addEventListener('click', function () {
         const payload = JSON.parse(source.textContent || '{}');
-        const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], {type: 'application/json'});
+        // Preserve the server's signed JSON values: JavaScript reserialization
+        // changes integral floats and integers beyond its exact numeric range.
+        const blob = new Blob([source.textContent + '\n'], {type: 'application/json'});
         const href = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = href;

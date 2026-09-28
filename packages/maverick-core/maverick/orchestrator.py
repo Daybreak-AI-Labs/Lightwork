@@ -2470,6 +2470,11 @@ async def run_goal(
     allowed_suites: frozenset[str] | None = None,
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
+    from .federation_admission import FederationAdmissionRequired, require_execution
+    try:
+        require_execution(world, goal_id, capability=capability, budget=budget, consume=True)
+    except FederationAdmissionRequired as exc:
+        return f"BLOCKED: {exc}"
     # A prepared outcome-pilot task is still a normal goal row and can be
     # reached from the CLI, queue, API, or another internal dispatcher.  Keep
     # the admission check at this common boundary, before sandbox setup,
@@ -2753,6 +2758,11 @@ async def run_goal_best_of_n(
 
     Called from the SWE-bench harness when MAVERICK_BEST_OF_N > 1.
     """
+    from .federation_admission import FederationAdmissionRequired, require_execution
+    try:
+        require_execution(world, goal_id, budget=budget)
+    except FederationAdmissionRequired as exc:
+        return f"BLOCKED: {exc}"
     from .coding_mode import (
         Candidate,
         evaluate_candidate,

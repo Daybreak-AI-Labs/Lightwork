@@ -1,6 +1,4 @@
-"""Webhook signing secret is admin-editable from the Settings page: saved to
-the dashboard overlay, picked up by maverick.webhooks.inbound_secret, never
-echoed back, env var still wins."""
+"""Webhook settings use reviewed effective state; secrets are never echoed."""
 from __future__ import annotations
 
 import pytest
@@ -22,15 +20,16 @@ def _isolated(tmp_path, monkeypatch):
 
 def test_settings_page_shows_webhook_state_without_the_value():
     page = client.get("/settings").text
-    assert "Automation webhooks" in page
+    assert "Secure connected automations" in page
     assert "not set" in page
 
 
 def test_save_secret_roundtrip_and_clear():
+    generation = client.get("/settings/webhooks").json()["expected_generation"]
     r = client.post("/settings/webhooks",
-                    data={"secret": "s3cret-value-123"},  # pragma: allowlist secret
+                    data={"secret": "s3cret-value-123", "expected_generation": generation},  # pragma: allowlist secret
                     follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 200
 
     from maverick.webhooks import inbound_secret
     assert inbound_secret() == "s3cret-value-123"  # pragma: allowlist secret
@@ -41,18 +40,20 @@ def test_save_secret_roundtrip_and_clear():
     assert "MVKAR1:" in persisted
 
     page = client.get("/settings").text
-    assert "configured" in page
+    assert client.get("/settings/webhooks").json()["configured"] is True
     assert "s3cret-value-123" not in page  # pragma: allowlist secret -- never echoed back
 
-    r = client.post("/settings/webhooks", data={"secret": "  "},
+    generation = client.get("/settings/webhooks").json()["expected_generation"]
+    r = client.post("/settings/webhooks", data={"secret": "", "action": "remove", "expected_generation": generation},
                     follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 200
     assert inbound_secret() is None or inbound_secret() == ""
 
 
 def test_env_secret_still_wins(monkeypatch):
+    generation = client.get("/settings/webhooks").json()["expected_generation"]
     client.post("/settings/webhooks",
-                data={"secret": "overlay-secret"},  # pragma: allowlist secret
+                data={"secret": "overlay-secret", "expected_generation": generation},  # pragma: allowlist secret
                 follow_redirects=False)
     monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "env-secret")  # pragma: allowlist secret
     from maverick.webhooks import inbound_secret

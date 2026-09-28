@@ -10,7 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 from maverick import agent_trust
+from maverick import federation_admission as admission
 from maverick.agent_trust import TrustedAgent
+from maverick.grpc_api.service import GoalService
+from maverick.paths import data_dir
+from maverick.world_model import WorldModel
 
 # ---- per-caller A2A token resolution --------------------------------------
 
@@ -177,12 +181,20 @@ def test_external_agent_allowlist_does_not_implicitly_gain_coordination():
 # ---- governance gating on federation delegation ---------------------------
 
 
-class _Goals:
-    def start_goal(self, title, description="", **kw):
-        return 1
+class _Goals(GoalService):
+    def __init__(self):
+        self.path = data_dir().parent / f"test-federation-{uuid.uuid4().hex}" / "world.db"
+        super().__init__(world_factory=lambda: WorldModel(self.path),
+                         dispatch=self._run, spawn=lambda fn: fn())
 
-    def status(self, goal_id):
-        return SimpleNamespace(status="done", result="ok")
+    def _run(self, goal_id, **kw):
+        with WorldModel(self.path) as world:
+            admission.require_execution(
+                world, goal_id, capability=kw["capability"],
+                max_dollars=kw["max_dollars"],
+                max_wall_seconds=kw["max_wall_seconds"], consume=True,
+            )
+            world.set_goal_status(goal_id, "done", result="ok")
 
 
 def _fed(monkeypatch, registry):
@@ -193,7 +205,7 @@ def _fed(monkeypatch, registry):
     monkeypatch.setattr(agent_trust, "load_registry", lambda cfg=None: registry)
     return federation, FederationService(
         node="b", peers=[Peer("a", "a:1", "tok")], local_grant=None,
-        goal_service=_Goals(), record=lambda *a, **k: None,
+        goal_service=_Goals(), record=lambda *a, **k: True,
     )
 
 

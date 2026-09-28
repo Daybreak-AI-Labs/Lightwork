@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 
 from . import killswitch
 from ._envparse import env_float, env_int
+from .audit.errors import AuditRefused
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .llm import model_for_role
 from .run_outcome import GoalCancelled, cancellation_message
@@ -3216,7 +3217,7 @@ class Agent:
         if (d := self._read_only_path_denial(name, args)) is not None:
             return d
         # Operating-Twin pre-execution gates (governed rehearsal defaults on;
-        # both fail open on internal errors):
+        # both fail open on incidental errors, never an audit-policy refusal):
         # rehearsal holds an elevated-risk tool the world-model can't vouch for;
         # a learned guardrail holds an action the data engine has causally shown
         # lowers outcomes (self-correcting -- dropped when the harm is gone).
@@ -3524,7 +3525,8 @@ class Agent:
         """Hold an elevated-risk tool the rehearsal twin can't vouch for.
 
         No-op unless ``[rehearsal]`` is enabled; only ``high``-risk tools are
-        gated; any error fails open (the tool runs). A confident-good rehearsal
+        gated; incidental errors fail open. Audit-policy refusals stop dispatch.
+        A confident-good rehearsal
         proceeds; a confident-poor (BLOCK) or unvouchable (ESCALATE) one returns a
         non-leaky refusal the model can react to.
         """
@@ -3550,6 +3552,8 @@ class Agent:
                         action=name, risk="high",
                         goal_id=int(self.ctx.goal_id or 0),
                         episode_id=int(getattr(self.ctx, "episode_id", 0) or 0))
+                except AuditRefused:
+                    raise
                 except Exception:  # pragma: no cover -- never breaks the loop
                     pass
                 return None
@@ -3561,14 +3565,17 @@ class Agent:
                 f"⚠ Held by pre-execution rehearsal ({v.decision}): {v.reason}. "
                 "The tool was not executed; choose another approach or seek approval."
             )
-        except Exception:  # pragma: no cover -- rehearsal must never break the loop
+        except AuditRefused:
+            raise
+        except Exception:  # pragma: no cover -- incidental rehearsal failure
             return None
 
     def _guardrail_denial(self, name: str) -> str | None:
         """Hold an action a learned guardrail flags as causally harmful.
 
         No-op unless ``[data_engine]`` is enabled (guardrails are its output);
-        consults the registry the flywheel writes; any error fails open. Unlike a
+        consults the registry the flywheel writes; incidental errors fail open,
+        but audit-policy refusals stop dispatch. Unlike a
         hand-written deny-list, the guardrail carries the causal effect that
         justifies it and is auto-dropped when the harm is gone.
         """
@@ -3589,7 +3596,9 @@ class Agent:
                 "choose another approach (this rule was learned from real outcomes and "
                 "is dropped automatically once the harm is gone)."
             )
-        except Exception:  # pragma: no cover -- guardrails must never break the loop
+        except AuditRefused:
+            raise
+        except Exception:  # pragma: no cover -- incidental guardrail failure
             return None
 
     def _capture_trajectory_step(self, step_index, tool_name, tool_succeeded,
@@ -4966,20 +4975,38 @@ class Agent:
                 from . import killswitch as _ks
                 from .budget import BudgetExceeded as _BE
                 _norm: list[str] = []
+                _tool_stop: Exception | None = None
                 for o in outputs:
-                    if isinstance(o, (_BE, _ks.Halted)):
-                        # #612: re-raise as a stop, but first answer every
-                        # tool_use this turn emitted so the history isn't left
-                        # with orphan tool_use blocks for a resume/parent.
-                        _answer_pending_tool_uses(
-                            f"ERROR: tool not executed ({type(o).__name__})"
+                    if isinstance(o, (_BE, _ks.Halted, AuditRefused)):
+                        # Keep budget/halt precedence, but finish normalizing:
+                        # every sibling already ran under gather, and a stop
+                        # may have occurred after its own dispatch began.
+                        if _tool_stop is None or (
+                            isinstance(_tool_stop, AuditRefused)
+                            and not isinstance(o, AuditRefused)
+                        ):
+                            _tool_stop = o
+                        _stop_reason = "audit refused" if isinstance(o, AuditRefused) else type(o).__name__
+                        _norm.append(
+                            f"ERROR: tool interrupted ({_stop_reason}); "
+                            "reconcile state before retrying"
                         )
-                        raise o
+                        continue
                     _norm.append(
                         o if isinstance(o, str)
                         else f"ERROR: tool raised {type(o).__name__}: {o}"
                     )
                 outputs = _norm
+                if _tool_stop is not None:
+                    # Concurrent siblings may already have completed. Preserve
+                    # their actual results, answer every tool_use, and stop
+                    # before another model turn; never label them unexecuted.
+                    tool_results.extend(
+                        self._make_tool_result(tc.id, output)
+                        for tc, output in zip(resp.tool_calls, outputs, strict=False)
+                    )
+                    messages.append({"role": "user", "content": tool_results})
+                    raise _tool_stop
                 # Preserve original call order in the results (matched by
                 # tool_use_id, but ordering keeps traces readable).
                 for tc, output in zip(resp.tool_calls, outputs, strict=False):
@@ -5035,9 +5062,11 @@ class Agent:
                     # so the stop still halts the run cleanly.
                     try:
                         output = await self._run_tool(tc.name, tc.input)
-                    except (BudgetExceeded, killswitch.Halted):
+                    except (AuditRefused, BudgetExceeded, killswitch.Halted) as exc:
+                        _stop_reason = "audit refused" if isinstance(exc, AuditRefused) else type(exc).__name__
                         _answer_pending_tool_uses(
-                            "ERROR: tool not executed (run stopped)"
+                            f"ERROR: tool interrupted ({_stop_reason}); "
+                            "reconcile state before retrying"
                         )
                         raise
                     if tc.name == "ask_user":

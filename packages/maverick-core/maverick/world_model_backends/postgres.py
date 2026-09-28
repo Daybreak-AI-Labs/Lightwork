@@ -701,6 +701,11 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (38, [_ATTACHMENT_SUBMISSION_SCHEMA]),
     (39, LEARNING_TENANT_MIGRATION),
     (40, [_EVENT_ADMISSION_SCHEMA]),
+    (41, [
+        "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS request_digest TEXT",
+        "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS sealed_contract TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_pg_event_admission_goal ON event_goal_admissions(tenant_id,goal_id)",
+    ]),
 ]
 
 # Highest migration version = the reported schema version.
@@ -4636,6 +4641,11 @@ class PostgresWorldModel:
                     edge_sql += " AND " + gfrag
                     edge_params += gfparams
                 cur.execute(edge_sql, tuple(edge_params))
+                cur.execute(
+                    "UPDATE event_goal_admissions SET sealed_contract=NULL, "
+                    "delivery_state='federation_retired' WHERE admission_key LIKE 'federation:%%' "
+                    "AND goal_id = ANY(%s)", (gids,),
+                )
                 cur.execute("DELETE FROM goals WHERE id = ANY(%s)", (gids,))
 
             # Scrub the subject's explicitly user-scoped facts. Facts are global

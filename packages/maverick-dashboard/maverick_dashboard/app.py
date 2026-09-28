@@ -5424,9 +5424,9 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     from .api import _binder_payload
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
-    b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    generated = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
     return templates.TemplateResponse(
-        request, "audit_binder.html", {"b": b, "days": b["window_days"]}
+        request, "audit_binder.html", {"b": b, "days": b["window_days"], "generated": generated}
     )
 
 
@@ -10018,6 +10018,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-record-search.css")
 @app.get("/static/lightwork-grc-recovery.js")
 @app.get("/static/lightwork-workspace-recovery.js")
+@app.get("/static/lightwork-webhook-settings.js")
 @app.get("/static/lightwork-workspace-recovery.css")
 @app.get("/static/lightwork-action-center.js")
 @app.get("/static/lightwork-outcome-accounting.js")

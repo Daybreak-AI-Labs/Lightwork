@@ -8,6 +8,8 @@
   var drillEvidence = null, drillContext = null, drillGeneration = 0;
   var custodyEvidence = null, custodyContext = null, custodyGeneration = 0;
   var reconciliation = null;
+  var channelForms = new Map(), channelDrafts = new Map(), channelMounted = null;
+  var channelCurrent = false;
   var identityTransition = null;
   var accessMessage = "Your recovery access is unavailable. Sign in with an authorized account and reload this page before continuing.";
   function say(text) { get("status").textContent = text; }
@@ -64,6 +66,8 @@
     get("reconciliation-confirm").disabled = !canComplete;
     get("reconciliation-complete").disabled = !canComplete || !get("reconciliation-confirm").checked;
     get("reconciliation").querySelectorAll('input[type="text"], textarea').forEach(function (input) { input.disabled = !ready; });
+    channelForms.forEach(function (form) { form.controls(ready && channelCurrent); });
+    channelEvent("controls");
   }
   function clearReview() { review = null; get("review").hidden = true; get("review-text").textContent = ""; get("confirm").checked = false; }
   function clearConfirmations() {
@@ -90,20 +94,25 @@
   }
   function clearEvidence() { clearComparison(); clearDrillReport(); clearCustodyReport(); clearCustodyUpload(); }
   function clearReconciliation() {
+    unmountChannel(); channelForms.clear(); channelCurrent = false;
     reconciliation = null;
     get("reconciliation").hidden = true;
     get("reconciliation-status").textContent = "";
-    get("reconciliation-items").querySelectorAll('input[type="text"]').forEach(function (input) { input.value = ""; input.disabled = true; });
+    get("reconciliation-items").querySelectorAll('input, select').forEach(function (input) { input.value = ""; input.disabled = true; });
     get("reconciliation-items").replaceChildren();
     get("reconciliation-blocked").hidden = true;
     get("reconciliation-confirm").checked = false;
+    channelEvent("unavailable");
   }
   function clearPrivateState() {
+    channelDrafts.clear();
     accessDenied = true; state = null; installationPoints = []; clearConfirmations(); clearEvidence(); clearReconciliation();
     root.querySelectorAll("input, textarea").forEach(function (input) { if (input.type !== "checkbox") input.value = ""; });
     root.querySelectorAll("select, ul").forEach(function (element) { element.replaceChildren(); });
     ["identity", "last-restore", "key-status", "encryption-status", "result", "bootstrap-status", "installation-result", "installation-retention-status"].forEach(function (id) { get(id).textContent = ""; });
     controls();
+    say(accessMessage); get("status").setAttribute("tabindex", "-1"); get("status").focus();
+    channelEvent("denied");
   }
   async function request(path, body, asFile, fileCurrent, custodySnapshot, keyInstall) {
     if (accessDenied) throw new Error(accessMessage);
@@ -128,7 +137,9 @@
     if (!response.ok) {
       clearConfirmations(); clearEvidence();
       var error = await response.json().catch(function () { return {}; });
-      throw new Error(typeof error.detail === "string" ? error.detail : "Recovery could not complete this step.");
+      var failure = new Error(typeof error.detail === "string" ? error.detail : "Recovery could not complete this step.");
+      failure.status = response.status;
+      throw failure;
     }
     if (asFile) {
       var blob = await response.blob();
@@ -201,42 +212,314 @@
     }); });
     return button;
   }
+  function channelEvent(status, itemId) {
+    window.dispatchEvent(new CustomEvent("lightwork:channel-review", { detail: { status: status, item_id: itemId || null } }));
+  }
+  function unmountChannel() {
+    if (!channelMounted) return;
+    if (channelMounted.placeholder.isConnected) channelMounted.placeholder.replaceWith(channelMounted.entry);
+    else channelMounted.entry.remove();
+    channelMounted = null;
+  }
+  function channelKey(item, descriptor) { return JSON.stringify([state.context, item.id, descriptor.review_token]); }
+  function knownChoices(value) {
+    return Array.isArray(value) && value.length > 0 && value.length <= 2
+      && value.every(function (v, i) { return ["absent", "recorded"].includes(v) && value.indexOf(v) === i; });
+  }
+  function isoTime(value) {
+    return typeof value === "string" && value.length <= 64 && /(?:Z|[+-]\d\d:\d\d)$/.test(value) && Number.isFinite(Date.parse(value));
+  }
+  function validChannel(descriptor) {
+    if (!descriptor || descriptor.schema !== 1 || !/^[a-f0-9]{64}$/.test(descriptor.review_token || "")
+      || !["message", "delivery_restart", "imessage_position", "notification_position", "poll_time"].includes(descriptor.kind)
+      || !["review_required", "recorded", "recording_incomplete", "unavailable"].includes(descriptor.status)
+      || typeof descriptor.title !== "string" || !descriptor.title || descriptor.title.length > 256
+      || typeof descriptor.source_label !== "string" || descriptor.source_label.length > 256 || !isoTime(descriptor.restored_at)) return false;
+    if (descriptor.status === "unavailable" || descriptor.status === "recorded") return true;
+    if (descriptor.kind === "message" && (!knownChoices(descriptor.execution_choices) || !knownChoices(descriptor.delivery_choices)
+      || !Array.isArray(descriptor.chunks) || descriptor.chunks.length > 512
+      || !descriptor.chunks.every(function (part, index, parts) {
+        return part && typeof part.key === "string" && part.key.length > 0 && part.key.length <= 128
+          && parts.findIndex(function (p) { return p.key === part.key; }) === index
+          && typeof part.label === "string" && part.label.length <= 256 && knownChoices(part.choices)
+          && typeof part.receipt_locked === "boolean" && typeof part.receipt === "string" && part.receipt.length <= 512;
+      }))) return false;
+    if (descriptor.minimum_position != null && (typeof descriptor.minimum_position !== "string"
+      || !/^\d{1,4096}$/.test(descriptor.minimum_position))) return false;
+    if (descriptor.status === "recording_incomplete") {
+      var retry = descriptor.retry_answers, recorded = descriptor.recorded_review;
+      if (!retry || Object.keys(retry).length !== 2 || retry.kind !== "finish_recording" || !/^[a-f0-9]{64}$/.test(retry.receipt || "")
+        || !recorded || recorded.kind !== descriptor.kind || !isoTime(recorded.checked_at)
+        || typeof recorded.evidence_reference !== "string" || recorded.evidence_reference.length > 512) return false;
+      if (descriptor.kind === "message" && (!descriptor.execution_choices.includes(recorded.execution)
+        || !descriptor.delivery_choices.includes(recorded.delivery) || !recorded.chunks || typeof recorded.chunks !== "object"
+        || Object.keys(recorded.chunks).length !== descriptor.chunks.length || !descriptor.chunks.every(function (part) {
+          var previous = recorded.chunks[part.key];
+          return previous && part.choices.includes(previous.outcome) && typeof previous.provider_id === "string" && previous.provider_id.length <= 512;
+        }))) return false;
+      if (["imessage_position", "notification_position"].includes(descriptor.kind)
+        && (typeof recorded.position !== "string" || !/^\d{1,4096}$/.test(recorded.position))) return false;
+      if (descriptor.kind === "poll_time" && !isoTime(recorded.resume_time)) return false;
+    }
+    return true;
+  }
+  function localTime(value) {
+    var date = new Date(value), pad = function (n) { return String(n).padStart(2, "0"); };
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + "T"
+      + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds());
+  }
+  function selectedTime(value) {
+    var date = new Date(value);
+    var normalized = localTime(date) + "." + String(date.getMilliseconds()).padStart(3, "0");
+    return /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,3})?)?$/.test(value) && Number.isFinite(date.getTime())
+      && normalized.slice(0, value.length) === value ? date.toISOString() : null;
+  }
+  function decimalAtLeast(value, minimum) {
+    var left = value.replace(/^0+(?=\d)/, ""), right = minimum.replace(/^0+(?=\d)/, "");
+    return left.length > right.length || (left.length === right.length && left >= right);
+  }
+  function renderChannel(item, entry, index) {
+    entry.className = "wrec-channel";
+    var descriptor = item.channel_review, heading = document.createElement("h3"), explanation = document.createElement("p");
+    heading.textContent = "Connection review " + (index + 1); entry.replaceChildren(heading, explanation);
+    if (!validChannel(descriptor)) {
+      explanation.textContent = "This review is unavailable. Refresh recovery details before continuing. This item remains unresolved.";
+      return;
+    }
+    heading.textContent = descriptor.title + " · " + descriptor.source_label + " · " + (index + 1);
+    explanation.textContent = descriptor.source_label + " · Restored " + new Date(descriptor.restored_at).toLocaleString();
+    if (descriptor.status === "recorded" && item.state === "resolved") {
+      var done = document.createElement("p"); done.textContent = "Review recorded. No old action was repeated."; entry.append(done); return;
+    }
+    if (descriptor.status === "unavailable" || descriptor.status === "recorded" || item.state !== "unresolved") {
+      var unavailable = document.createElement("p");
+      unavailable.textContent = "This review cannot be completed here right now. Keep recovery mode open, refresh details, or use Help for support.";
+      entry.append(unavailable); return;
+    }
+    var key = channelKey(item, descriptor), existing = channelDrafts.get(key), changed = false;
+    channelDrafts.forEach(function (draft, oldKey) {
+      if (draft.itemId === item.id && oldKey !== key) { channelDrafts.delete(oldKey); changed = true; }
+    });
+    var draft = existing || { itemId: item.id, values: {}, open: false };
+    channelDrafts.set(key, draft);
+    var finishing = descriptor.status === "recording_incomplete", recorded = finishing ? descriptor.recorded_review : null;
+    var toggle = document.createElement("button"), form = document.createElement("form"), result = document.createElement("p");
+    toggle.type = "button"; toggle.textContent = finishing ? "Review saved findings" : "Review this connection";
+    form.id = "wrec-channel-" + item.id; form.noValidate = true; form.hidden = !draft.open;
+    toggle.setAttribute("aria-controls", form.id); toggle.setAttribute("aria-expanded", String(!form.hidden));
+    result.className = "wrec-channel-result"; result.setAttribute("role", "status"); result.setAttribute("aria-live", "polite");
+    if (changed) result.textContent = "This item changed. Earlier entries were cleared; check the service and review it again.";
+    var intro = document.createElement("p");
+    intro.textContent = finishing ? "These findings were already saved, but recording the review did not finish. Check the saved findings below, then confirm to finish recording them. No action will be repeated."
+      : "Check the original service before answering. Leave any outcome you cannot establish unresolved. No action will be repeated.";
+    form.append(intro);
+    var fields = [], fieldByName = new Map(), sequence = 0, awaitingReadback = false;
+    function field(name, labelText, type, help, options) {
+      var wrap = document.createElement("div"), label = document.createElement("label"), input = document.createElement(options ? "select" : "input");
+      var id = form.id + "-" + (++sequence), error = document.createElement("p");
+      label.htmlFor = id; label.textContent = labelText; input.id = id; input.name = name; input.autocomplete = "off";
+      if (options) {
+        var unknown = document.createElement("option"); unknown.value = ""; unknown.textContent = "Not yet confirmed"; input.append(unknown);
+        options.forEach(function (value) { var choice = document.createElement("option"); choice.value = value; choice.textContent = value === "recorded" ? "Confirmed in the service" : "Confirmed not to have happened"; input.append(choice); });
+      } else input.type = type;
+      if (type === "datetime-local") input.step = "1";
+      if (type === "text") input.maxLength = 512;
+      error.id = id + "-error"; error.className = "wrec-field-error"; error.hidden = true;
+      input.setAttribute("aria-describedby", error.id + (help ? " " + id + "-help" : ""));
+      wrap.append(label, input);
+      if (help) { var note = document.createElement("p"); note.id = id + "-help"; note.className = "wrec-field-help"; note.textContent = help; wrap.append(note); }
+      wrap.append(error); form.append(wrap);
+      if (Object.hasOwn(draft.values, name)) input.value = draft.values[name];
+      var record = { input: input, error: error, fixed: finishing }; fields.push(record); fieldByName.set(name, record);
+      input.addEventListener("input", edited); input.addEventListener("change", edited);
+      return input;
+    }
+    function edited() {
+      confirmation.checked = false;
+      fields.forEach(function (record) { if (!record.fixed) draft.values[record.input.name] = record.input.value; record.error.hidden = true; record.input.removeAttribute("aria-invalid"); });
+      controls();
+    }
+    var zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "your device's time zone";
+    var checked = field("checked_at", "When did you check the service?", "datetime-local", "Your local time (" + zone + "). " + (finishing ? "The original saved observation time is retained." : "Check within the last 15 minutes."));
+    var reference = field("evidence_reference", "Evidence reference", "text", "Use a ticket, receipt, or service record that supports your findings. At least 8 characters.");
+    if (finishing) { checked.value = localTime(recorded.checked_at); reference.value = recorded.evidence_reference; }
+    var execution, delivery, chunkFields = [], position, resume;
+    if (descriptor.kind === "message") {
+      execution = field("execution", "Did the requested action happen?", null, "Use the service's action history, not an assumption based on delivery.", descriptor.execution_choices);
+      delivery = field("delivery", "Was the message delivered?", null, "Check the service's delivery record.", descriptor.delivery_choices);
+      if (finishing) { execution.value = recorded.execution; delivery.value = recorded.delivery; }
+      descriptor.chunks.forEach(function (part, partIndex) {
+        var group = document.createElement("fieldset"), legend = document.createElement("legend");
+        legend.textContent = part.label || "Message part " + (partIndex + 1); group.append(legend);
+        var outcome = field("chunk_" + partIndex, "Delivery of this message part", null, "Confirm every part of the message.", part.choices);
+        var receipt = field("receipt_" + partIndex, "Service receipt for this part", "text", part.receipt_locked ? "This saved receipt must be retained." : "Enter the receipt shown by the service, if available.");
+        group.append(outcome.parentNode, receipt.parentNode); form.append(group);
+        if (part.receipt_locked) { receipt.value = part.receipt; fieldByName.get(receipt.name).fixed = true; }
+        if (finishing) {
+          var previous = recorded.chunks && recorded.chunks[part.key];
+          outcome.value = previous.outcome; receipt.value = previous.provider_id;
+        }
+        chunkFields.push({ key: part.key, outcome: outcome, receipt: receipt });
+      });
+    } else if (descriptor.kind === "imessage_position" || descriptor.kind === "notification_position") {
+      var isMessage = descriptor.kind === "imessage_position";
+      position = field("position", isMessage ? "Current iMessage position" : "Latest Mastodon notification number", "text",
+        "Copy the complete number from the source. " + (descriptor.minimum_position != null ? "It must be at least " + descriptor.minimum_position + "." : "Do not use the older saved position."));
+      position.inputMode = "numeric"; position.maxLength = isMessage ? 4096 : 40;
+      if (finishing) position.value = recorded.position;
+    } else if (descriptor.kind === "poll_time") {
+      resume = field("resume_time", "Start checking for new posts from", "datetime-local", "Your local time (" + zone + "). Choose a time at or after restoration, verified against the service.");
+      if (finishing) resume.value = localTime(recorded.resume_time);
+    } else {
+      var reset = document.createElement("p"); reset.textContent = "This discards the saved continuation and starts a fresh check. It does not resend any old message."; form.append(reset);
+    }
+    var consent = document.createElement("label"), confirmation = document.createElement("input");
+    consent.className = "wrec-confirm"; confirmation.type = "checkbox"; confirmation.name = "confirm";
+    consent.append(confirmation, document.createTextNode(finishing ? "I reviewed these saved findings and want to finish recording this review." : "I checked the service and confirm these findings for this connection."));
+    confirmation.addEventListener("change", controls);
+    var actions = document.createElement("div"), submit = document.createElement("button"), cancel = document.createElement("button"), refresh = document.createElement("button");
+    actions.className = "wrec-actions"; submit.type = "submit"; submit.textContent = finishing ? "Finish recording this review" : "Confirm this review";
+    cancel.type = "button"; cancel.textContent = "Leave unresolved"; refresh.type = "button"; refresh.textContent = "Refresh status";
+    actions.append(submit, cancel, refresh); form.append(consent, actions); entry.append(toggle, form, result);
+    function open() { draft.open = true; form.hidden = false; toggle.setAttribute("aria-expanded", "true"); (finishing ? confirmation : fields[0].input).focus(); }
+    toggle.addEventListener("click", open);
+    cancel.addEventListener("click", function () { draft.open = false; form.hidden = true; confirmation.checked = false; toggle.setAttribute("aria-expanded", "false"); result.textContent = "Left unresolved. Your entries stay on this page while this review remains current."; controls(); toggle.focus(); });
+    function errorAt(name, message) {
+      var record = fieldByName.get(name); record.error.textContent = message; record.error.hidden = false; record.input.setAttribute("aria-invalid", "true");
+    }
+    function answers(showErrors) {
+      if (finishing) return JSON.parse(JSON.stringify(descriptor.retry_answers));
+      var errors = [], observed = selectedTime(checked.value), resultAnswers = { kind: descriptor.kind, checked_at: observed, evidence_reference: reference.value.trim() };
+      function invalid(name, message) { errors.push(name); if (showErrors) errorAt(name, message); }
+      if (!observed) invalid("checked_at", "Choose the date and time when you checked the service.");
+      else if (Date.parse(observed) < Date.parse(descriptor.restored_at) || Date.now() - Date.parse(observed) > 900000 || Date.parse(observed) > Date.now() + 60000) invalid("checked_at", "Check the service again and enter a time after restoration, within the last 15 minutes.");
+      if (resultAnswers.evidence_reference.length < 8 || resultAnswers.evidence_reference.length > 512 || /[\x00-\x1f]/.test(resultAnswers.evidence_reference)) invalid("evidence_reference", "Enter an evidence reference of 8 to 512 characters on one line.");
+      if (execution) {
+        resultAnswers.execution = execution.value; resultAnswers.delivery = delivery.value; resultAnswers.chunks = Object.create(null);
+        if (!descriptor.execution_choices.includes(execution.value)) invalid("execution", "Confirm whether the action happened. If you cannot establish this, leave the review unresolved.");
+        if (!descriptor.delivery_choices.includes(delivery.value)) invalid("delivery", "Confirm the delivery outcome, or leave the review unresolved.");
+        if (delivery.value === "recorded" && execution.value !== "recorded") invalid("execution", "A delivered message also requires confirmation that the action happened.");
+        chunkFields.forEach(function (part, partIndex) {
+          if (!descriptor.chunks[partIndex].choices.includes(part.outcome.value)) invalid(part.outcome.name, "Confirm this part's delivery outcome, or leave the review unresolved.");
+          if (part.outcome.value === "recorded" && delivery.value !== "recorded") invalid("delivery", "A confirmed message part also requires confirmation of message delivery.");
+          if (part.receipt.value.length > 512) invalid(part.receipt.name, "Use a service receipt of at most 512 characters.");
+          resultAnswers.chunks[part.key] = { outcome: part.outcome.value, provider_id: part.receipt.value };
+        });
+      }
+      if (position) {
+        var digits = position.value.trim(), maxDigits = descriptor.kind === "imessage_position" ? 4096 : 40;
+        if (!new RegExp("^[0-9]{1," + maxDigits + "}$").test(digits)) invalid("position", "Enter the complete number using digits only, without spaces or punctuation.");
+        else if (descriptor.minimum_position != null && !decimalAtLeast(digits, descriptor.minimum_position)) invalid("position", "This position is older than the saved record. Check the current position in the source.");
+        resultAnswers.position = digits;
+      }
+      if (resume) {
+        resultAnswers.resume_time = selectedTime(resume.value);
+        if (!resultAnswers.resume_time) invalid("resume_time", "Choose the date and time to start checking for new posts.");
+        else if (Date.parse(resultAnswers.resume_time) < Date.parse(descriptor.restored_at) || (observed && Date.parse(resultAnswers.resume_time) > Date.parse(observed) + 60000)) invalid("resume_time", "Choose a time after restoration and no later than the time you checked the service.");
+      }
+      if (errors.length) { if (showErrors) { form.hidden = false; draft.open = true; fieldByName.get(errors[0]).input.focus(); } return null; }
+      return resultAnswers;
+    }
+    async function refreshStatus() {
+      if (busy || accessDenied) return;
+      await action(async function () {
+        channelCurrent = false; confirmation.checked = false;
+        try {
+          var currentAccount = await request("status");
+          if (!state || currentAccount.context !== state.context) {
+            clearPrivateState(); say("Your workspace or signed-in account changed. Reload recovery before continuing."); return;
+          }
+          renderReconciliation(await request("reconciliation"));
+        }
+        catch (_error) { if (!accessDenied) { result.textContent = "Current status is unavailable. Your entries are kept here. Refresh status before continuing."; channelEvent("unavailable", item.id); } }
+      });
+      var fresh = channelForms.get(item.id);
+      if (fresh) fresh.focusRefresh();
+      else if (!accessDenied) {
+        get("reconciliation-status").focus();
+        var currentItem = channelCurrent && reconciliation && reconciliation.items.find(function (row) { return row.id === item.id; });
+        if (currentItem && currentItem.state === "resolved" && validChannel(currentItem.channel_review)
+          && currentItem.channel_review.status === "recorded" && currentItem.channel_review.review_token === descriptor.review_token) {
+          channelDrafts.delete(key); channelEvent("recorded", item.id);
+        }
+      }
+    }
+    refresh.addEventListener("click", refreshStatus);
+    async function submitReview() {
+      if (busy || accessDenied || !channelCurrent || awaitingReadback || channelForms.get(item.id) !== controller || !confirmation.checked) return { status: "needs_confirmation" };
+      var payloadAnswers = answers(true); if (!payloadAnswers) return { status: "needs_input" };
+      var responseStatus = "unconfirmed";
+      await action(async function () {
+        confirmation.checked = false; awaitingReadback = true;
+        result.textContent = finishing ? "Finishing the saved review…" : "Recording your review…";
+        channelEvent("submitting", item.id);
+        try {
+          var reply = await request("operations/channel-review", { confirm: true, item_id: item.id, expected_review_token: descriptor.review_token, answers: payloadAnswers });
+          if (!reply || reply.state !== "resolved" || reply.item_id !== item.id || reply.disposition !== "channel_readback_confirmed"
+            || !count(reply.unresolved) || reply.automatic_replay_blocked !== true || reply.normal_start_blocked !== true) throw new Error("unconfirmed");
+          var current = await request("reconciliation"); verifyReconciliation(current);
+          var resolved = current.items.find(function (candidate) { return candidate.id === item.id; });
+          if (!resolved || resolved.state !== "resolved" || !validChannel(resolved.channel_review) || resolved.channel_review.status !== "recorded"
+            || resolved.channel_review.review_token !== descriptor.review_token) throw new Error("unconfirmed");
+          channelDrafts.delete(key); renderReconciliation(current); responseStatus = "recorded";
+          say("Your review was recorded. No old action was repeated. Review the remaining items before returning to normal use.");
+        } catch (failure) {
+          if (accessDenied) { responseStatus = "denied"; return; }
+          channelCurrent = false;
+          result.textContent = failure.status === 409 ? "The review could not be confirmed because the saved information may have changed. Your entries are kept here. Refresh status and review the current item before confirming again."
+            : "We could not confirm that this review finished recording. Your entries are kept here. Refresh status before taking another action; do not assume the review was recorded.";
+        }
+      });
+      if (!accessDenied) { var latest = channelForms.get(item.id); if (latest) latest.refresh.focus(); else get("reconciliation-status").focus(); }
+      channelEvent(responseStatus, item.id); return { status: responseStatus };
+    }
+    var controller = { itemId: item.id, title: heading.textContent, entry: entry, descriptor: descriptor, refresh: refresh, open: open, submit: submitReview,
+      focusRefresh: function () { (form.hidden ? toggle : refresh).focus(); },
+      prepare: function () { return { item_id: item.id, status: !channelCurrent || awaitingReadback ? "needs_refresh" : !answers(false) ? "needs_input" : !confirmation.checked ? "needs_confirmation" : "ready" }; },
+      controls: function (ready) {
+        fields.forEach(function (record) { record.input.disabled = !ready || record.fixed || awaitingReadback; });
+        confirmation.disabled = !ready || awaitingReadback; submit.disabled = !ready || awaitingReadback || !confirmation.checked;
+        toggle.disabled = busy || accessDenied; cancel.disabled = busy || accessDenied; refresh.disabled = busy || accessDenied;
+      } };
+    channelForms.set(item.id, controller);
+    form.addEventListener("submit", function (event) { event.preventDefault(); return submitReview(); });
+  }
+  window.LightworkChannelReview = Object.freeze({
+    isBusy: function () { return busy || accessDenied; },
+    list: function () { return Array.from(channelForms.values()).map(function (form) { return { item_id: form.itemId, title: form.title, status: form.descriptor.status }; }); },
+    select: function (id) { var form = channelForms.get(id); if (!form || accessDenied) return false; form.open(); return true; },
+    prepare: function (id) { var form = channelForms.get(id); return form && !accessDenied ? form.prepare() : { status: "unavailable" }; },
+    submit: function (id) { var form = channelForms.get(id); return form && !accessDenied ? form.submit() : Promise.resolve({ status: "unavailable" }); },
+    mount: function (id, host) {
+      var form = channelForms.get(id);
+      if (!form || busy || accessDenied || host !== get("assistant-review")) return false;
+      unmountChannel(); var placeholder = document.createElement("li"); placeholder.textContent = "This review is open in Recovery Copilot.";
+      form.entry.replaceWith(placeholder); host.append(form.entry); channelMounted = { entry: form.entry, placeholder: placeholder };
+      form.open(); return true;
+    },
+    unmount: function () { unmountChannel(); }
+  });
   function renderReconciliation(row) {
     verifyReconciliation(row); reconciliation = row;
+    unmountChannel(); channelForms.clear(); channelCurrent = true;
     get("reconciliation-items").replaceChildren();
     get("reconciliation-confirm").checked = false;
-    if (row.state !== "reconciliation_required") { get("reconciliation").hidden = true; controls(); return; }
+    if (row.state !== "reconciliation_required") { channelDrafts.clear(); get("reconciliation").hidden = true; controls(); channelEvent("refreshed"); return; }
     get("reconciliation").hidden = false;
     var globalBlocked = false;
-    row.items.forEach(function (item) {
+    row.items.forEach(function (item, index) {
       var entry = document.createElement("li"), title = document.createElement("strong"), detail = document.createElement("p");
       title.textContent = item.category.replaceAll("_", " ") + " · " + (item.record_id || "record");
       detail.textContent = "Restored state: " + item.prior_state + ". Safe local state: " + item.safe_state + ". Source: " + item.source + ".";
       entry.append(title, detail);
-      if (item.state === "resolved") {
+      if (item.category === "channel_authority") {
+        if (item.safe_state === "global_start_blocked") { globalBlocked = true; renderChannel(Object.assign({}, item, { channel_review: null }), entry, index); }
+        else renderChannel(item, entry, index);
+      } else if (item.state === "resolved") {
         var resolved = document.createElement("p"); resolved.textContent = "Resolved: " + (item.disposition || "recorded safe disposition") + "."; entry.append(resolved);
       } else if (item.safe_state === "global_start_blocked") {
         globalBlocked = true;
         var blocked = document.createElement("p"); blocked.textContent = "This authority cannot be safely changed by this build. Normal startup remains blocked."; entry.append(blocked);
-      } else if (item.category === "channel_authority") {
-        var instructions = document.createElement("p"), readback = document.createElement("textarea");
-        instructions.textContent = "Administrator attestation from authoritative readback: replace unknown outcomes with absent or recorded, set outcome to confirmed, and supply the observation time and evidence reference. This action never replays the old request.";
-        readback.rows = 14; readback.maxLength = 262144;
-        readback.setAttribute("aria-label", "Exact channel readback for " + item.record_id);
-        readback.value = JSON.stringify(item.readback_template, null, 2);
-        var confirmReadback = document.createElement("button"); confirmReadback.type = "button";
-        confirmReadback.textContent = "Confirm exact channel readback and retire old work";
-        confirmReadback.addEventListener("click", function () { return action(async function () {
-          var value;
-          try { value = JSON.parse(readback.value); }
-          catch (_error) { throw new Error("Enter a valid channel readback JSON object."); }
-          await request("reconciliation/items/" + encodeURIComponent(item.id), {
-            confirm: true, disposition: "channel_readback_confirmed", channel_readback: value,
-          });
-          await load(get("snapshot").value);
-          say("Exact channel readback recorded. Old receipts remain retired from automatic replay.");
-        }); });
-        entry.append(instructions, readback, confirmReadback);
       } else if (item.requires_external_readback) {
         var label = document.createElement("label"), evidence = document.createElement("input");
         evidence.type = "text"; evidence.maxLength = 512; evidence.autocomplete = "off"; evidence.placeholder = "Ticket, receipt, log, or external record reference";
@@ -254,14 +537,16 @@
       ? row.unresolved + " restored item" + (row.unresolved === 1 ? " remains" : "s remain") + " unresolved. Normal startup is blocked."
       : "Every restored item has a recorded disposition. Confirm once to complete recovery and restart normal work.";
     controls();
+    channelEvent("refreshed");
   }
   async function load(selected) {
+    channelCurrent = false;
     clearEvidence();
     installationPoints = [];
     get("installation-retire-confirm").checked = false;
     get("installation-retire-point").replaceChildren();
     var result = await request("status");
-    if (state && result.context !== state.context) { clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; get("installation-code").value = ""; get("installation-confirm").checked = false; }
+    if (state && result.context !== state.context) { channelDrafts.clear(); clearReconciliation(); clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; get("installation-code").value = ""; get("installation-confirm").checked = false; }
     state = result;
     renderBootstrapStatus();
     get("identity").textContent = "Workspace: " + result.tenant + " · Lightwork " + result.application_version;

@@ -22,7 +22,7 @@ from . import main
 @click.option("--all-goals", is_flag=True,
               help="Replay all recent goals, not just failed ones.")
 @click.option("--ledger", is_flag=True,
-              help="Append the result to the signed hindsight ledger.")
+              help="Save an aggregate hindsight summary and audit event.")
 @click.option("--strict", is_flag=True,
               help="Exit non-zero if any coverage regression is found "
                    "(a learning-regression CI gate).")
@@ -60,8 +60,12 @@ def hindsight(ctx, before: str, limit: int, all_goals: bool, ledger: bool,
     )
     click.echo(report.summary())
     if ledger:
-        _h.write_ledger(report, before_label=chosen)
-        click.echo("[recorded to the signed hindsight ledger]")
+        if not _h.write_ledger(report, before_label=chosen):
+            raise click.ClickException(
+                "hindsight recording incomplete; the local summary may already "
+                "be saved. Inspect the ledger and audit log before retrying."
+            )
+        click.echo("[saved to the local hindsight ledger and audit log]")
     if strict and report.regressed:
         raise click.ClickException(
             f"{len(report.regressed)} learning regression(s) detected"
@@ -246,8 +250,9 @@ def workforce_graduation(db_path: str | None) -> None:
               help="Score unscored consequence cards against landed real "
                    "outcomes first (may graduate or demote action types).")
 @click.option("--revoke", "revoke_action", default=None, metavar="ACTION",
-              help="Withdraw an earned grant for ACTION now. Works even while "
-                   "the feature is disabled (incident response).")
+              help="Demote ACTION and withdraw its standing grant for the "
+                   "current identity and policy. Other identities' grants "
+                   "are not withdrawn. Works while the feature is disabled.")
 def earned_autonomy(do_reconcile: bool, revoke_action: str | None) -> None:
     """Which action types have earned policy-auto-approval, and how?
 
@@ -260,8 +265,15 @@ def earned_autonomy(do_reconcile: bool, revoke_action: str | None) -> None:
     engine = shared()
     if revoke_action:
         ok = engine.revoke(revoke_action)
-        click.echo(f"Revoked earned auto-approval for {revoke_action!r}"
-                   + ("" if ok else " (grant withdrawn; ledger write failed)"))
+        if not ok:
+            raise click.ClickException(
+                f"revocation not confirmed for {revoke_action!r}; inspect the "
+                "standing grant and local revocation ledger. A partial "
+                "withdrawal may already have occurred."
+            )
+        click.echo(f"Withdrawal recorded for {revoke_action!r} under the current "
+                   "identity and policy; local earned-autonomy state demoted. "
+                   "Other identities' standing grants are not withdrawn.")
     if do_reconcile:
         from . import _learning_cli_preflight, _run_learning_cli
         _learning_cli_preflight("earned_autonomy")

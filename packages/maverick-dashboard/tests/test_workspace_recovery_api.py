@@ -94,6 +94,46 @@ def context(client):
     return {"X-Lightwork-Recovery-Context": data["context"], "X-Lightwork-Expected-Tenant": data["expected_tenant"]}
 
 
+def test_typed_channel_operation_is_closed_explicit_and_rechecks_admin(monkeypatch):
+    client = api_client()
+    headers = context(client)
+    endpoint = "/api/v1/recovery/operations/channel-review"
+    answers = {"kind": "imessage_position", "position": "9007199254740993",
+               "checked_at": "2026-09-27T12:00:00-04:00", "evidence_reference": "source-review-123"}
+    body = {"confirm": True, "item_id": "a" * 32, "expected_review_token": "b" * 64, "answers": answers}
+    calls = []
+    def resolve(*args, **kwargs):
+        calls.append((args, kwargs))
+        if not kwargs["isolated"]:
+            raise recovery_api.recovery.RecoveryError("Use isolated recovery")
+        return {"state": "resolved", "item_id": args[0], "unresolved": 0,
+                "automatic_replay_blocked": True, "normal_start_blocked": True}
+    monkeypatch.setattr(recovery_api.recovery, "resolve_reconciliation", resolve)
+    assert client.post(endpoint, json=body).status_code == 409
+    assert not calls
+    for invalid in ({**body, "confirm": "true"}, {**body, "command": "anything"},
+                    {**body, "answers": {**answers, "position": 9007199254740993}},
+                    {**body, "answers": {**answers, "kind": "unknown"}},
+                    {**body, "answers": {**answers, "checkpoint": {}}}):
+        assert client.post(endpoint, headers=headers, json=invalid).status_code == 422
+    assert not calls
+    assert client.post(endpoint, headers=headers, json={**body, "confirm": False}).status_code == 400
+    assert not calls
+    assert client.post(endpoint, headers=headers, json=body).status_code == 409
+    monkeypatch.setattr(recovery_api, "isolated", lambda app: True)
+    response = client.post(endpoint, headers=headers, json=body)
+    assert response.status_code == 200 and response.headers["cache-control"] == "private, no-store"
+    assert calls[-1][1]["channel_answers"] == answers
+    assert calls[-1][1]["expected_review_token"] == body["expected_review_token"]
+    assert calls[-1][1]["actor"] == headers["X-Lightwork-Recovery-Context"]
+    before = len(calls)
+    def deny(*args):
+        raise HTTPException(403, "global admin required")
+    monkeypatch.setattr(recovery_api, "require_global_permission", deny)
+    assert client.post(endpoint, headers=headers, json=body).status_code == 403
+    assert len(calls) == before
+
+
 def setup_snapshot(client):
     headers = context(client)
     response = client.post("/api/v1/recovery/key", json={"confirm": True}, headers=headers)
