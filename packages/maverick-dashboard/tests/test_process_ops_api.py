@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 ORIGIN = {"Origin": "http://testserver"}
 BASE = "/api/v1/admin/services"
+_REAL_COMMAND = __import__("maverick_dashboard.service_supervisor", fromlist=["command"]).command  # before any stand-in
 _CHILD = ("import sys, time\n"
           "print('service ready', flush=True)\n"
           "print('token sk-ant-api03-' + 'x' * 40, flush=True)\n"
@@ -77,7 +78,14 @@ def _eventually(check, timeout=10.0):
 
 
 def test_the_real_command_is_a_fixed_argument_list():
+    import os
+
     from maverick_dashboard import service_supervisor
+    assert set(service_supervisor.KINDS) == {"worker", "channels", "tools", "profiling", "ebpf_monitor",
+                                             "model_proxy"}
+    assert service_supervisor.command("ebpf_monitor") == [sys.executable, "-m", "maverick.ebpf_monitor", "run",
+                                                          "--pid", str(os.getpid())]
+    assert service_supervisor.command("model_proxy") == [sys.executable, "-m", "maverick.model_proxy"]
     assert service_supervisor.command("worker")[-1] == "worker"
     assert service_supervisor.command("channels")[-1] == "serve"
     tools = service_supervisor.command("tools")
@@ -282,3 +290,58 @@ def test_launchers_exit_with_the_restart_code_after_a_requested_restart(monkeypa
     finally:
         dashboard_restart._reset_for_tests()
         app.state.dashboard_server = None
+
+
+
+# ---- programs a setting turns on share the same registry ------------------------
+
+def test_setting_driven_programs_follow_their_setting_from_maintenance(client, monkeypatch):
+    for name in ("MAVERICK_PROFILING",):
+        monkeypatch.delenv(name, raising=False)
+    rows = {r["kind"]: r for r in client.get(BASE).json()["services"]}
+    assert rows["profiling"]["setting_driven"] is True and rows["profiling"]["wanted"] is False
+    assert rows["profiling"]["settings_href"].startswith("/settings/all#group-")
+    assert rows["worker"]["setting_driven"] is False and rows["worker"]["wanted"] is None
+    refused = client.post(f"{BASE}/start", json={"service": "profiling"})
+    assert refused.status_code == 409 and "turned off in All settings" in refused.json()["detail"]
+    monkeypatch.setenv("MAVERICK_PROFILING", "1")
+    seen = _audit_verbs(monkeypatch)
+    assert client.post(f"{BASE}/start", json={"service": "profiling"}).json()["service"]["running"] is True
+    assert client.post(f"{BASE}/start", json={"service": "profiling"}).status_code == 409  # one per kind
+    assert client.post(f"{BASE}/stop", json={"service": "profiling"}).status_code == 409  # confirm first
+    monkeypatch.setenv("MAVERICK_PROFILING", "0")
+    assert client.post(f"{BASE}/restart", json={"service": "profiling", "confirm": True}).status_code == 409
+    stopped = client.post(f"{BASE}/stop", json={"service": "profiling", "confirm": True})
+    assert stopped.json()["service"]["running"] is False  # stopping is always allowed
+    assert [p.get("verb") for p in seen if p.get("service") == "profiling"] == [
+        "service_start", "service_start", "service_restart", "service_stop"]
+
+
+def test_settings_start_and_the_dashboard_shutdown_use_the_one_registry(client, monkeypatch):
+    from maverick_dashboard import background_programs, service_supervisor
+    monkeypatch.setenv("MAVERICK_PROFILING", "1")
+    assert background_programs.start_enabled() == ["profiling"]
+    assert background_programs.start("profiling")["running"] is True  # already running: left alone
+    client.post(f"{BASE}/start", json={"service": "worker"})
+    assert service_supervisor.alive(["profiling"]) and service_supervisor.alive(["worker"])
+    service_supervisor.stop_all(timeout=5.0)  # the single shutdown component
+    assert _eventually(lambda: not service_supervisor.alive())
+
+
+def test_frozen_builds_refuse_program_modules_plainly(monkeypatch):
+    from maverick_dashboard import service_supervisor
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    with pytest.raises(service_supervisor.ServiceError, match="no separate Python"):
+        service_supervisor.command("model_proxy")
+    assert service_supervisor.command("worker") == [sys.executable, "worker"]
+
+
+def test_a_frozen_refusal_reaches_the_page_and_the_settings_start(client, monkeypatch):
+    from maverick_dashboard import background_programs, service_supervisor
+    monkeypatch.setattr(service_supervisor, "command", _REAL_COMMAND)  # the fixture's stand-in, undone
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("MAVERICK_PROFILING", "1")
+    refused = client.post(f"{BASE}/start", json={"service": "profiling"})
+    assert refused.status_code == 409 and "no separate Python" in refused.json()["detail"]
+    quiet = background_programs.start("profiling")  # the settings start records it instead
+    assert quiet["running"] is False and "no separate Python" in quiet["last_error"]

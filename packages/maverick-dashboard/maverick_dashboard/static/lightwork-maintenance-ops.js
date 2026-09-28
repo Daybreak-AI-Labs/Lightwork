@@ -89,7 +89,8 @@
   // ---- services ---------------------------------------------------------------
   function serviceRow(svc) {
     var state = svc.running ? 'Running since ' + when(svc.since)
-      : (svc.last_error ? svc.last_error : 'Not running from this app');
+      : (svc.last_error ? svc.last_error
+        : (svc.setting_driven && svc.wanted === false ? 'Turned off in All settings' : 'Not running from this app'));
     var actions = el('span', 'ops-actions');
     function button(label, action, danger) {
       var b = el('button', 'btn' + (danger ? ' btn--danger' : ''), label);
@@ -98,7 +99,19 @@
       b.addEventListener('click', function () { serviceAction(svc, action, b); });
       actions.appendChild(b);
     }
-    if (svc.running) { button('Restart', 'restart'); button('Stop', 'stop', true); } else { button('Start', 'start'); }
+    var off = svc.setting_driven && svc.wanted === false;
+    if (svc.running) {
+      if (!off) button('Restart', 'restart');
+      button('Stop', 'stop', true);
+    } else if (!off) {
+      button('Start', 'start');
+    }
+    if (off) {
+      var link = el('a', 'btn btn--ghost', 'Turn on in All settings');
+      link.href = svc.settings_href || '/settings/all';
+      link.setAttribute('aria-label', 'Turn on ' + svc.label + ' in All settings');
+      actions.appendChild(link);
+    }
     var name = el('div');
     name.appendChild(el('strong', null, svc.label));
     name.appendChild(el('div', 'muted', svc.about));

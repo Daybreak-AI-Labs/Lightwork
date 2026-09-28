@@ -171,3 +171,18 @@ test('every workspace clean-up previews, then confirms and follows the job', asy
   assert.deepEqual(JSON.parse(calls.find((c) => c.options.method === 'POST').options.body), {days: 90, activity_days: 30, confirm: true});
   assert.match(window.document.querySelector('[data-ops-out="cleanup-all"]').textContent, /Removed 3 conversations/);
 });
+
+test('a program its setting has turned off links to the setting instead of starting', async (t) => {
+  const saved = SERVICES.services;
+  SERVICES.services = saved.concat([{kind: 'profiling', label: 'Performance profiling', about: 'Records where this app spends its time.',
+    running: false, since: null, last_error: '', log: [], setting_driven: true, wanted: false,
+    settings_href: '/settings/all#group-server-deployment'}]);
+  t.after(() => { SERVICES.services = saved; });
+  const ui = await fixture(() => response({}));
+  t.after(() => ui.window.close());
+  const box = ui.document.querySelector('[data-ops-out="services"]');
+  assert.match(box.textContent, /Turned off in All settings/);
+  const link = box.querySelector('a[aria-label="Turn on Performance profiling in All settings"]');
+  assert.equal(link.getAttribute('href'), '/settings/all#group-server-deployment');
+  assert.equal([...box.querySelectorAll('button')].some((b) => b.getAttribute('aria-label') === 'Start Performance profiling'), false);
+});
