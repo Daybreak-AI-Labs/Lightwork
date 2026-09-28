@@ -81,9 +81,13 @@ def _run(args: dict[str, Any]) -> str:
             FinanceAnomalyInputLimit,
             finding_to_signal,
             scan_transactions,
+            with_configured_materiality,
         )
 
-        report = scan_transactions(transactions, config=_config(args.get("config")))
+        report = scan_transactions(
+            transactions,
+            config=with_configured_materiality(_config(args.get("config"))),
+        )
         actor = str(current_principal() or "agent:finance_anomaly")
         cases = []
         if args.get("enqueue_findings", True) is True:

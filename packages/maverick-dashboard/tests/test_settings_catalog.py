@@ -51,7 +51,7 @@ def test_every_catalog_key_is_read_by_the_kernel(setting):
         # The rows are the table's own keys: the reader must read the whole table.
         assert _quoted(reader, setting.top), f"{setting.id}: {setting.reader} never reads it"
         for fixed in setting.fixed_keys:
-            assert f"{setting.top}.{fixed}" in catalog.BY_ID, fixed
+            assert f"{setting.section}.{fixed}" in catalog.BY_ID, fixed
     else:
         assert _quoted(reader, setting.key), (
             f"{setting.id}: key {setting.key!r} is not read by {setting.reader}"

@@ -44,6 +44,7 @@ _KIND_LABELS: dict[str, tuple[str, str]] = {
     "shield_block": ("Shield blocked", "block"),
     "capability_denied": ("Capability denied", "block"),
     "governance_denied": ("Governance denied", "block"),
+    "finance_sod_finding": ("Finance duty conflict", "approval"),
     "egress_blocked": ("Egress blocked", "block"),
     "agent_trust_denied": ("Agent-trust denied", "block"),
     "memory_guard": ("Memory guard", "block"),

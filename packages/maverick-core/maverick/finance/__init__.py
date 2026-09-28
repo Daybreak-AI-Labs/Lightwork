@@ -11,6 +11,9 @@ primitives (``governance``, ``capability``, ``audit``, ``assessment``):
     over the domain packs (the cardinal control, §2.1).
   * :mod:`maverick.finance.regimes` — finance compliance-regime packs (SOX, COSO,
     GAAP/IFRS, PCI, GLBA, AML, SEC, IRS) compiling to a governance ``Policy`` (§5).
+  * :mod:`maverick.finance.profile` — the Finance Operating Profile compiler
+    (framework, materiality, automation ladder with hard floors, action-time
+    separation of duties, fail-closed approvals; §3.8).
   * :mod:`maverick.finance.status` — the ``finance status`` posture report (§5).
   * :mod:`maverick.finance.regulatory_change` — cited deterministic feed diffs.
   * :mod:`maverick.finance.licensing` — versioned 50-state source-routing packs.
@@ -26,6 +29,7 @@ __all__ = [
     "control_testing",
     "licensing",
     "operations_health",
+    "profile",
     "regimes",
     "regulatory_change",
     "sod_linter",

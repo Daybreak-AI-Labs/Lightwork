@@ -274,6 +274,31 @@ minimum_holdout_families = 20
 # Regime policies combine strictest-wins. Existing `pci` configurations now
 # identify PCI DSS 4.0.1; the key remains backward compatible.
 regimes = ["sox", "gaap", "dora", "basel_iii", "ifrs_17", "pci"]
+# Finance Operating Profile (docs/FINANCE_OPERATIONS.md). Every key below is
+# read only while [finance_operations] enable = true; unset keeps today's
+# behaviour.
+# framework = "us_gaap"      # us_gaap | ifrs: adds that framework's policy pack
+#                            # (strictest-wins with regimes)
+# materiality = 50000        # anomaly findings totalling this or more need a
+#                            # second reviewer; auto_threshold never acts alone
+#                            # above it
+
+# [finance.automation]
+# Automation level of the finance actions: draft (agent prepares, a person
+# acts; the agent's call is refused) | approve (a person approves each call) |
+# auto_threshold (acts alone only under the approval limit) | straight_through.
+# Payments, postings, payroll, bank-detail/supplier changes, period close,
+# chart of accounts, tax and filings never go below approve.
+# default = "draft"
+# "ap.approve_expense" = "approve"   # one action class (department.action or action)
+
+# [finance.sod]
+# mode = "enforce"   # enforce: block a separation-of-duties conflict when the
+#                    # action runs | warn: record a finding and ask a person
+
+# [finance.approvals]
+# timeout = "fail_closed"   # the only value: an unanswered finance approval
+#                           # is refused and withdrawn, never auto-approved
 
 [finance_operations]
 # Deterministic regulatory, anomaly, AML/KYC/sanctions, and GRC control-testing

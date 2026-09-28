@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from ..governance import Policy
+from ..governance import Policy, stricter_level
 from ..safety.tool_risk import risk_rank
 
 # The money/posting/filing actions a finance maker-checker gate pauses on.
@@ -149,6 +149,45 @@ REGIMES: dict[str, FinanceRegime] = {
 }
 
 
+# Accounting-framework packs, selected by ``[finance] framework`` (the Finance
+# Operating Profile, :mod:`maverick.finance.profile`) and unioned
+# strictest-wins with ``[finance] regimes``. Each gates the actions whose
+# treatment the two frameworks actually differ on: what one framework does not
+# permit is refused, what it permits only with judgement waits for a person.
+_FRAMEWORK_POSTING = ("post_journal_entry", "close_period", "change_accounting_policy")
+
+FRAMEWORKS: dict[str, FinanceRegime] = {
+    "us_gaap": FinanceRegime(
+        "us_gaap", "US GAAP (FASB Accounting Standards Codification)",
+        "Postings, period close and accounting-policy changes stay human. US GAAP "
+        "does not permit reversing a recognised impairment loss on assets held and "
+        "used (ASC 360-10-35-20) or goodwill (ASC 350-20-35), and measures "
+        "property, plant and equipment at historical cost, so an impairment "
+        "reversal or an upward revaluation is refused.",
+        Policy(
+            require_human_actions=frozenset(_FRAMEWORK_POSTING),
+            deny_actions=frozenset({"reverse_impairment_loss", "revalue_fixed_asset"}),
+        ),
+        source_urls=("https://asc.fasb.org/",),
+    ),
+    "ifrs": FinanceRegime(
+        "ifrs", "IFRS Accounting Standards (IASB)",
+        "Postings, period close and accounting-policy changes stay human. IFRS "
+        "permits the revaluation model (IAS 16.31) and reversing an impairment "
+        "loss other than on goodwill (IAS 36.114, IAS 36.124), both judgements, so "
+        "they wait for a person; it does not permit LIFO inventory costing "
+        "(IAS 2.25), so that is refused.",
+        Policy(
+            require_human_actions=frozenset({
+                *_FRAMEWORK_POSTING, "revalue_fixed_asset", "reverse_impairment_loss",
+            }),
+            deny_actions=frozenset({"apply_lifo_inventory"}),
+        ),
+        source_urls=("https://www.ifrs.org/issued-standards/list-of-standards/",),
+    ),
+}
+
+
 def list_regimes() -> list[FinanceRegime]:
     return list(REGIMES.values())
 
@@ -171,7 +210,8 @@ def _min_thresholds(a: dict[str, float], b: dict[str, float]) -> dict[str, float
 
 
 def union_policies(policies) -> Policy:
-    """Strictest-wins union of policies (deny > require-human; lowest floor/threshold)."""
+    """Strictest-wins union of policies (deny > require-human; lowest floor/threshold;
+    the strictest finance automation level per action)."""
     deny_actions: set[str] = set()
     require_human_actions: set[str] = set()
     deny_min_risk: str | None = None
@@ -179,6 +219,7 @@ def union_policies(policies) -> Policy:
     deny_above: dict[str, float] = {}
     require_human_above: dict[str, float] = {}
     require_fresh_human_approval = False
+    automation: dict[str, str] = {}
     for p in policies:
         deny_actions |= set(p.deny_actions)
         require_human_actions |= set(p.require_human_actions)
@@ -189,6 +230,8 @@ def union_policies(policies) -> Policy:
         require_fresh_human_approval = (
             require_fresh_human_approval or p.require_fresh_human_approval
         )
+        for action, level in p.automation.items():
+            automation[action] = stricter_level(automation.get(action), level)
     # An action that is hard-denied need not also be listed as require-human --
     # drop it from both the require-human set AND its per-action threshold, or
     # the compiled policy contradicts itself (a hard-deny plus a require-human
@@ -207,6 +250,7 @@ def union_policies(policies) -> Policy:
         deny_above=deny_above,
         require_human_above=require_human_above,
         require_fresh_human_approval=require_fresh_human_approval,
+        automation=automation,
     )
 
 
@@ -268,6 +312,6 @@ def configured_regimes(config: Mapping | None = None) -> list[str]:
 
 
 __all__ = [
-    "FinanceRegime", "REGIMES", "list_regimes",
+    "FinanceRegime", "FRAMEWORKS", "REGIMES", "list_regimes",
     "union_policies", "compile_policy", "configured_regimes",
 ]

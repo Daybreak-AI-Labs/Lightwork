@@ -183,6 +183,15 @@ def _decimal(value: object, label: str) -> Decimal:
     return result
 
 
+def _materiality_amount(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    amount = _decimal(value, "materiality")
+    if amount <= 0:
+        raise ValueError("materiality must be positive")
+    return amount
+
+
 def _amount_text(value: Decimal) -> str:
     if value == 0:
         return "0"
@@ -384,6 +393,11 @@ class FinanceAnomalyConfig:
     business_start: time = time(8, 0)
     business_end: time = time(18, 0)
     business_days: tuple[int, ...] = (0, 1, 2, 3, 4)
+    #: ``[finance] materiality`` (see :func:`with_configured_materiality`): a
+    #: transaction-level finding whose transactions total at least this amount
+    #: is raised to high severity, so closing it needs a second, independent
+    #: person. ``None`` leaves every rule's severity unchanged.
+    materiality: Decimal | None = None
 
     def __post_init__(self) -> None:
         for name, value, hard_max in (
@@ -463,10 +477,11 @@ class FinanceAnomalyConfig:
         ):
             raise ValueError("business_days must contain unique weekday integers 0 through 6")
         object.__setattr__(self, "business_days", tuple(sorted(days)))
+        object.__setattr__(self, "materiality", _materiality_amount(self.materiality))
 
     def to_dict(self) -> dict[str, Any]:
         """Canonical rule configuration bound into every scan report."""
-        return {
+        value = {
             "max_transactions": self.max_transactions,
             "max_findings": self.max_findings,
             "duplicate_window_hours": self.duplicate_window_hours,
@@ -493,6 +508,32 @@ class FinanceAnomalyConfig:
             "business_end": self.business_end.isoformat(),
             "business_days": list(self.business_days),
         }
+        if self.materiality is not None:
+            # Only when set, so an unset materiality keeps every existing
+            # configuration digest unchanged.
+            value["materiality"] = _amount_text(self.materiality)
+        return value
+
+
+def with_configured_materiality(config: FinanceAnomalyConfig) -> FinanceAnomalyConfig:
+    """Apply ``[finance] materiality`` to a scan configuration.
+
+    The configured amount is the organisation's review threshold; a caller
+    may only tighten it (the lower of the two applies). Unset, or with the
+    finance layer off, the configuration is returned unchanged. The result is
+    bound into the report's configuration digest, so a scan stays
+    reproducible against the threshold it ran under.
+    """
+    from dataclasses import replace
+
+    from .profile import configured_materiality
+
+    configured = configured_materiality()
+    if configured is None:
+        return config
+    if config.materiality is not None and config.materiality <= configured:
+        return config
+    return replace(config, materiality=configured)
 
 
 @dataclass(frozen=True)
@@ -665,8 +706,10 @@ class _FindingAccumulator:
         transactions: tuple[FinanceTransaction, ...],
         *,
         limit: int,
+        materiality: Decimal | None = None,
     ) -> None:
         self._limit = limit
+        self._materiality = materiality
         self._evidence = {
             transaction.transaction_id: transaction.evidence()
             for transaction in transactions
@@ -702,6 +745,10 @@ class _FindingAccumulator:
             raise ValueError("finding severity is invalid")
         if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 100:
             raise ValueError("finding score must be an integer between 0 and 100")
+        transactions = tuple(transactions)
+        severity, metrics, caveats = self._apply_materiality(
+            rule_id, severity, transactions, metrics, caveats,
+        )
         self.candidate_count += 1
         order_prefix = (-_SEVERITY_ORDER[severity], -score, rule_id)
         if (
@@ -744,6 +791,34 @@ class _FindingAccumulator:
             heapq.heappush(self._heap, entry)
         elif seed.order_key < self._heap[0].seed.order_key:
             heapq.heapreplace(self._heap, entry)
+
+    def _apply_materiality(
+        self,
+        rule_id: str,
+        severity: str,
+        transactions: tuple[FinanceTransaction, ...],
+        metrics: Mapping[str, Any],
+        caveats: Iterable[str],
+    ) -> tuple[str, Mapping[str, Any], Iterable[str]]:
+        """Raise a transaction-level finding at or above materiality to high.
+
+        Benford is a population screen with no single exposure, so it is
+        unchanged. Exposure is the total of the finding's transactions in their
+        own currency (populations are expected in the reporting currency).
+        """
+        if self._materiality is None or rule_id == BENFORD_RULE_ID:
+            return severity, metrics, caveats
+        exposure = sum((abs(item.amount) for item in transactions), Decimal(0))
+        if exposure < self._materiality:
+            return severity, metrics, caveats
+        if _SEVERITY_ORDER[severity] < _SEVERITY_ORDER["high"]:
+            severity = "high"
+        return severity, {
+            **metrics,
+            "materiality": _amount_text(self._materiality),
+            "materiality_exposure": _amount_text(exposure),
+        }, (*caveats, "At or above the configured materiality, so closing it needs "
+                      "a second, independent reviewer.")
 
     def findings(self) -> tuple[FinanceAnomalyFinding, ...]:
         return tuple(
@@ -1249,7 +1324,9 @@ def scan_transactions(
             "scan exceeds the deterministic approval-threshold work budget; "
             "batch transactions or reduce approval_thresholds"
         )
-    accumulator = _FindingAccumulator(rows, limit=active.max_findings)
+    accumulator = _FindingAccumulator(
+        rows, limit=active.max_findings, materiality=active.materiality,
+    )
     evaluations_by_rule: dict[str, RuleEvaluation] = {}
     # Higher-potential rules run first so the bounded accumulator can reject
     # unambiguously lower-ranked candidates before building their identities.
@@ -1976,4 +2053,5 @@ __all__ = [
     "enabled",
     "finding_to_signal",
     "scan_transactions",
+    "with_configured_materiality",
 ]
