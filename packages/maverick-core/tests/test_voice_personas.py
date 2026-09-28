@@ -58,3 +58,16 @@ def test_speak_tool_applies_persona(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_next_output_path", lambda sb: tmp_path / "s.mp3")
     voice_mod.speak().fn({"text": "all clear", "persona": "ops"})
     assert spoken["voice"] == "echo"
+
+
+def test_a_voice_picked_with_its_service_sets_both(monkeypatch):
+    _cfg(monkeypatch, {"personas": {"desk": {"voice": "openai:nova"},
+                                    "pinned": {"backend": "elevenlabs",
+                                               "voice": "openai:nova"}},
+                       "languages": {"de": {"voice": "elevenlabs:21m00Tcm4TlvDq8ikWAM"}}})
+    desk = vp.get_persona("desk")
+    assert (desk.backend, desk.voice) == ("openai", "nova")
+    assert vp.get_persona("pinned").backend == "elevenlabs"  # an explicit service wins
+    german = vp.voice_for_language("de-AT")
+    assert (german.backend, german.voice) == ("elevenlabs", "21m00Tcm4TlvDq8ikWAM")
+    assert vp.resolve_speech_args({"persona": "desk"})["backend"] == "openai"

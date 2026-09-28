@@ -37,6 +37,7 @@ async function fixture({ confirm = true, watching = [] } = {}) {
     calls.push({ url, method: options.method || "GET", body: options.body ? JSON.parse(options.body) : undefined });
     if (url.endsWith("/summary")) return json(SUMMARY);
     if (url.endsWith("/code/watch")) return json({ watching });
+    if (url.includes("/notes/")) return json({ started: true, repo: "website", protect: "block" }, 202);
     if (url.endsWith("/start")) { watching = [{ repo: "website", state: "watching", reason: "", notes: [NOTE], last_scan: 1 }]; return json(watching[0], 202); }
     if (url.endsWith("/stop")) { watching = [{ ...watching[0], state: "stopped", reason: "Stopped." }]; return json(watching[0]); }
     if (url.endsWith("/export")) return new Response("zip", { status: 200, headers: { "Content-Type": "application/zip" } });
@@ -70,7 +71,7 @@ test("a cancelled download does nothing", async (t) => {
   assert.equal(ui.calls.filter((c) => c.url.endsWith("/export")).length, 0);
 });
 
-test("watching lists the notes, and a note starts a normal task after confirmation", async (t) => {
+test("watching lists the notes, and a note starts protected work after confirmation", async (t) => {
   const ui = await fixture();
   t.after(() => ui.window.close());
   const list = ui.doc.getElementById("code-watch-list");
@@ -87,9 +88,15 @@ test("watching lists the notes, and a note starts a normal task after confirmati
   button(list, "Start a task from this note").click();
   await ui.settle();
   assert.match(ui.confirms[1], /within your spending limits/);
-  const goal = ui.calls.find((c) => c.url === "/api/v1/goals");
-  assert.deepEqual(goal.body, { title: NOTE.title, description: NOTE.task });
-  assert.match(ui.doc.getElementById("ic-status").textContent, /Started task #41/);
+  // Never an ordinary task: the note runs on a private copy under the
+  // project's own protection, and any change waits for approval.
+  assert.match(ui.confirms[1], /under its protection \(Code never leaves Lightwork\)/);
+  assert.match(ui.confirms[1], /waits for your approval/);
+  assert.equal(ui.calls.filter((c) => c.url === "/api/v1/goals").length, 0);
+  const work = ui.calls.find((c) => c.url.includes("/notes/"));
+  assert.equal(work.url, "/api/v1/code/watch/website/notes/n1/start");
+  assert.deepEqual(work.body, { confirm: true });
+  assert.match(ui.doc.getElementById("ic-status").textContent, /Started work on the note/);
   button(list, "Stop watching").click();
   await ui.settle();
   assert.match(list.textContent, /website · Stopped/);

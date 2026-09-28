@@ -79,10 +79,17 @@ def public_url_for(request) -> str:
     so validating against it 403s every legitimate webhook.
 
     Prefer ``MAVERICK_PUBLIC_BASE_URL`` (e.g. ``https://bot.example.com``) when
-    set; otherwise rebuild from the ``X-Forwarded-Proto``/``X-Forwarded-Host``
+    set, else ``[channels] public_base_url`` (the dashboard's All settings
+    page); otherwise rebuild from the ``X-Forwarded-Proto``/``X-Forwarded-Host``
     headers the proxy adds (Caddy/nginx set both). Falls back to the raw
     request URL when neither is available (direct-bind deploys)."""
-    base = os.environ.get("MAVERICK_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    try:
+        from maverick.env_setting import env_or_config
+
+        base = env_or_config("MAVERICK_PUBLIC_BASE_URL", "channels", "public_base_url", "") or ""
+    except Exception:  # an unreadable setting keeps the proxy-header fallback
+        base = os.environ.get("MAVERICK_PUBLIC_BASE_URL", "")
+    base = base.strip().rstrip("/")
     if base:
         return base + request.url.path
 

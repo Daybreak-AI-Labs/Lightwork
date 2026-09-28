@@ -429,9 +429,12 @@ variable still wins; with neither set, behaviour is unchanged.
 | `MAVERICK_FEDERATION_RATE_LIMIT` | `[federation] rate_limit` |
 | `MAVERICK_SIEM_TOKEN` | `[audit] siem_token` |
 | `MAVERICK_SIEM_ALLOW_INSECURE` | `[audit] siem_allow_insecure` |
+| `MAVERICK_PUBLIC_BASE_URL` | `[channels] public_base_url` |
 
 `MAVERICK_SETTINGS_PATH_ROOTS` (deployment only) replaces the list of places a
 server location chosen on that page may point into (locations separated by the
 system path separator). By default: Lightwork's own folders, the folder of its
 config file, the home folder of the account it runs as, and on Linux and macOS
-`/etc`, `/run/secrets`, `/var/lib`, `/srv` and `/opt`.
+`/etc`, `/run/secrets`, `/var/lib`, `/srv` and `/opt`. A program Lightwork
+runs (a plugin program) may also be in `/usr/bin`, `/usr/local/bin` or `/bin`
+unless this variable is set.

@@ -232,7 +232,7 @@
           tr.appendChild(el("td", null, n.note || "(a note with no text)"));
           tr.appendChild(el("td", null, n.file + ", line " + n.line));
           var td = el("td");
-          td.appendChild(button("Start a task from this note", "btn--primary", function () { startNoteTask(n); }));
+          td.appendChild(button("Start a task from this note", "btn--primary", function () { startNoteTask(w.repo, n); }));
           tr.appendChild(td);
           tb.appendChild(tr);
         });
@@ -264,14 +264,20 @@
     var out = await post("/api/v1/code/watch/" + encodeURIComponent(name) + "/stop", {}, "stop watching");
     if (out) { say("Stopped watching " + name + "."); await loadWatch(); }
   }
-  // A note becomes an ordinary task through the normal task start, with its
-  // permission, spending limits and risk checks.
-  async function startNoteTask(n) {
-    var ok = await window.mvConfirm("Start a task from the note “" + (n.note || n.file) + "”? It runs like any other " +
-      "task, within your spending limits, and uses AI.", { okText: "Start task" });
+  // A note starts work on a private copy of the code, under the project's own
+  // protection (the same path as "Build a change"), never as an ordinary task:
+  // the code can leave Lightwork only as the project allows, and any change
+  // waits for approval.
+  async function startNoteTask(repo, n) {
+    var project = (summary.repos || []).filter(function (r) { return r.name === repo; })[0];
+    var rule = project && PROTECT[project.protect] ? " (" + PROTECT[project.protect] + ")" : "";
+    var ok = await window.mvConfirm("Start work on the note “" + (n.note || n.file) + "”? Lightwork works on a " +
+      "private copy of " + repo + " under its protection" + rule + ", within your spending limits, and uses AI. " +
+      "Any change waits for your approval.", { okText: "Start work" });
     if (!ok) { return; }
-    var out = await post("/api/v1/goals", { title: n.title, description: n.task }, "start the task");
-    if (out && out.id) { say("Started task #" + out.id + ". Open Tasks to follow it."); }
+    var out = await post("/api/v1/code/watch/" + encodeURIComponent(repo) + "/notes/" +
+      encodeURIComponent(n.id) + "/start", { confirm: true }, "start the work");
+    if (out && out.started) { say("Started work on the note. The change appears under Changes when it is ready."); }
   }
 
   function renderPicker() {

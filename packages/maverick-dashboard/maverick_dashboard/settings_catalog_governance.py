@@ -16,14 +16,14 @@ its file kinds, a retry ceiling below its first wait, a lookback longer than a
 collection may cover, the Databricks check without cloud oversight) are
 refused by :func:`cross_checks`, so a saved setup never switches itself off.
 
+Pinned fingerprints are never typed: the page works them out from an
+uploaded file, or from the files installed on this server.
+
 Not here, with the reason:
 
-* ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: each
-  source is a structured enrollment (provider, address, credential name,
-  control bindings and a signed definition fingerprint) that needs the
-  Continuous evidence page's own guided form.
-* ``grc_sync.response_field_params``: free-form names and values sent to the
-  GRC system's programming interface; no control kind holds a named text map.
+* ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: see
+  settings_catalog_structured (``grc_sync.response_field_params`` is there
+  too, as a table of names and values).
 * ``red_team_assurance.commitment_secret_ref`` and the connectors'
   ``credential_secret_ref`` keys name environment variables on the server;
   the sealed key rows below make the key itself adjustable instead.
@@ -178,7 +178,14 @@ def _limit(S, section, key, label, help_text, default, sub, warning=_BIGGER_FILE
 
 
 def _pin(S, section, key, label, help_text, what, sub, pattern=_FINGERPRINT, **extra):
-    """A pinned program location, version or fingerprint: any change is confirmed."""
+    """A pinned program location, version or fingerprint: any change is confirmed.
+
+    A fingerprint is never typed: the page works it out from an uploaded file
+    (or, with ``fingerprint_of``, from the files installed on this server)."""
+    if pattern == _FINGERPRINT:
+        return S(section, key, label, help_text, "fingerprint", _G, "", _EA,
+                 weaker="change", warning=f"A different {what} will be trusted to open "
+                                          "files from outside.", **sub, **extra)
     return S(section, key, label, help_text, "text", _G, "", _EA, pattern=pattern,
              weaker="change", warning=f"A different {what} will be trusted to open files "
                                       "from outside.", **sub, **extra)
@@ -191,8 +198,10 @@ def _file_readers(S) -> tuple:
     sandbox = "ai_evidence_analysis.parser_sandbox"
     ocr = "ai_evidence_analysis.ocr"
     old = "ai_evidence_analysis.legacy_xls"
-    fp_help = ("Copy it exactly as your server team gives it: 64 characters. Files are not "
-               "opened if the file on the server does not match.")
+    fp_help = ("Upload the same file that is on the server and Lightwork works out its "
+               "fingerprint. Files are not opened if the file on the server does not match.")
+    installed = ("Lightwork works it out from the files installed on this server. Files are "
+                 "not opened if those files change later.")
     return (
         S(sandbox, "enable", "Open files in an isolated area",
           "Picture reading and older Excel reading run in a locked-down area on this server "
@@ -244,13 +253,13 @@ def _file_readers(S) -> tuple:
           weaker="change", warning="Different program libraries will be trusted to open "
                                    "files from outside.", **pic),
         _pin(S, ocr, "runtime_libraries_sha256", "Program libraries fingerprint",
-             "The combined fingerprint of the library files above. " + fp_help,
-             "set of program libraries", pic),
+             "The combined fingerprint of the library files above. " + installed,
+             "set of program libraries", pic, fingerprint_of="ocr_libraries"),
         _pin(S, ocr, "pillow_version", "Picture library version",
              "The exact version of the picture library installed with Lightwork, such as "
              "11.0.0.", "picture library", pic, pattern=_VERSION, max_length=64),
-        _pin(S, ocr, "pillow_manifest_sha256", "Picture library fingerprint", fp_help,
-             "picture library", pic),
+        _pin(S, ocr, "pillow_manifest_sha256", "Picture library fingerprint", installed,
+             "picture library", pic, fingerprint_of="pillow"),
         _limit(S, ocr, "timeout_seconds", "Time limit for reading one picture",
                "Reading a picture stops after this long.", 30, pic, minimum=1, maximum=120,
                unit="seconds", warning=_LONGER_RUNS),
@@ -273,13 +282,13 @@ def _file_readers(S) -> tuple:
         _pin(S, old, "xlrd_version", "Spreadsheet reader version",
              "The exact version of the spreadsheet reader installed with Lightwork, such as "
              "2.0.2.", "spreadsheet reader", xls, pattern=_VERSION, max_length=64),
-        _pin(S, old, "xlrd_manifest_sha256", "Spreadsheet reader fingerprint", fp_help,
-             "spreadsheet reader", xls),
+        _pin(S, old, "xlrd_manifest_sha256", "Spreadsheet reader fingerprint", installed,
+             "spreadsheet reader", xls, fingerprint_of="xlrd"),
         _pin(S, old, "olefile_version", "Office file reader version",
              "The exact version of the office file reader installed with Lightwork, such as "
              "0.47.", "office file reader", xls, pattern=_VERSION, max_length=64),
-        _pin(S, old, "olefile_manifest_sha256", "Office file reader fingerprint", fp_help,
-             "office file reader", xls),
+        _pin(S, old, "olefile_manifest_sha256", "Office file reader fingerprint", installed,
+             "office file reader", xls, fingerprint_of="olefile"),
         _limit(S, old, "timeout_seconds", "Time limit for reading one workbook",
                "Reading a workbook stops after this long.", 15, xls, minimum=1, maximum=120,
                unit="seconds", warning=_LONGER_RUNS),
@@ -862,9 +871,9 @@ def _governance_modules(S) -> tuple:
           choices=(("", "Built-in checks only (default)"),
                    ("c2patool", "Also the content credentials tool on this server")), **media),
         S("ai_media_provenance", "c2patool_executable_sha256", "Content credentials tool fingerprint",
-          "Copy it exactly as your server team gives it: 64 characters. The tool is not run "
-          "if the program on the server does not match.", "text", _G, "",
-          "maverick.ai_media_provenance", pattern=_FINGERPRINT, weaker="change",
+          "Upload the same program that is on the server and Lightwork works out its "
+          "fingerprint. The tool is not run if the program on the server does not match.",
+          "fingerprint", _G, "", "maverick.ai_media_provenance", weaker="change",
           warning="A different program will be trusted to check content credentials.",
           **media),
 

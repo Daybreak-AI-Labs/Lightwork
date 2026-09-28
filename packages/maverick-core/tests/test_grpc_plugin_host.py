@@ -400,6 +400,28 @@ def test_load_configured_grpc_plugins(rig, monkeypatch):
     assert {c.target for c in rig.channels} == {"localhost:50061", "localhost:50062"}
 
 
+def test_load_configured_grpc_plugins_reads_the_dashboard_form(monkeypatch):
+    """The dashboard writes a program to start and its words, not a command list."""
+    import maverick.grpc_plugin_host as host
+
+    dialled = []
+    monkeypatch.setattr(host, "load_grpc_plugin",
+                        lambda target, command=None, **_kw: dialled.append((target, command))
+                        or [])
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"plugins": {"grpc": [
+            {"target": "localhost:50061", "program": "/opt/tools/serve",
+             "args": ["--port", "50061"]},
+            {"target": "localhost:50062", "program": "", "args": []},
+            {"target": "localhost:50063", "program": "/opt/x", "args": "not-a-list"},
+        ]}},
+    )
+    assert load_configured_grpc_plugins() == []
+    assert dialled == [("localhost:50061", ["/opt/tools/serve", "--port", "50061"]),
+                       ("localhost:50062", None)]
+
+
 def test_load_configured_grpc_plugins_default_empty(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
     assert load_configured_grpc_plugins() == []

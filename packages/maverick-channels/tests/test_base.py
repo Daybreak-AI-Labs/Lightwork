@@ -67,6 +67,19 @@ def test_public_url_for_prefers_configured_base(monkeypatch):
     assert public_url_for(req) == "https://configured.example.com/webhook/whatsapp"
 
 
+def test_public_url_for_reads_the_dashboard_setting(monkeypatch):
+    from maverick_channels.base import public_url_for
+
+    monkeypatch.delenv("MAVERICK_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setattr("maverick.config.load_config",
+                        lambda *a, **k: {"channels": {"public_base_url": "https://set.example.com/"}})
+    req = _FakeRequest(path="/webhook/sms", full="http://127.0.0.1:8766/webhook/sms",
+                       headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "proxy.example.com"})
+    assert public_url_for(req) == "https://set.example.com/webhook/sms"
+    monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://env.example.com")
+    assert public_url_for(req) == "https://env.example.com/webhook/sms"  # the environment wins
+
+
 def test_public_url_for_falls_back_to_raw_url(monkeypatch):
     from maverick_channels.base import public_url_for
 

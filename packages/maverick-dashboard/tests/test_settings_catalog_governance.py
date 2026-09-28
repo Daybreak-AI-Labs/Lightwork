@@ -128,6 +128,8 @@ def _sample(setting):
         return setting.minimum if setting.minimum != default else setting.maximum
     if control == "text":
         return _TEXT_SAMPLES[setting.pattern]
+    if control == "fingerprint":
+        return "ab" * 32
     if control == "secret":
         return "k" * 40
     if control == "list":
@@ -156,6 +158,8 @@ def _invalid(setting):
         return setting.maximum + (setting.step or 1)
     if control == "text":
         return _BAD_TEXT[setting.pattern]
+    if control == "fingerprint":
+        return "not-a-fingerprint"
     if control == "secret":
         return "short" if setting.pattern else "x" * (setting.max_length + 1)
     if control == "list":

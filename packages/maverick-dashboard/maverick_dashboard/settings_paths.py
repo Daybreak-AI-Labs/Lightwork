@@ -20,17 +20,24 @@ from pathlib import Path
 
 ROOTS_ENV = "MAVERICK_SETTINGS_PATH_ROOTS"
 _POSIX_ROOTS = ("/etc", "/run/secrets", "/var/lib", "/srv", "/opt")
+# Where the server keeps installed programs (a ``program`` location may also
+# be there, unless the deployment set its own list of places).
+_POSIX_PROGRAM_ROOTS = ("/usr/bin", "/usr/local/bin", "/bin")
 
 
 class PathRefused(ValueError):
     """A location the page explains in one plain sentence."""
 
 
-def allowed_roots() -> list[Path]:
+def allowed_roots(*, programs: bool = False) -> list[Path]:
     """The places a setting may point into (resolved, so links can't escape)."""
     raw = os.environ.get(ROOTS_ENV, "").strip()
     if raw:
         items = [part for part in raw.split(os.pathsep) if part.strip()]
+    elif programs and os.name != "nt":
+        return allowed_roots() + [
+            root for root in (Path(p).resolve() for p in _POSIX_PROGRAM_ROOTS)
+            if root not in allowed_roots()]
     else:
         from maverick import config
         from maverick.paths import maverick_home
@@ -57,9 +64,12 @@ def _inside(path: Path, roots: list[Path]) -> bool:
     return any(path == root or root in path.parents for root in roots)
 
 
-def check(value: str, *, kind: str, writable: bool = False, private: bool = False) -> str:
+def check(value: str, *, kind: str, writable: bool = False, private: bool = False,
+          program: bool = False) -> str:
     """Validate one location; return it as it will be stored.
 
+    ``program``: a file Lightwork will run, so it may also be in the server's
+    program folders and must be a program Lightwork may run.
     Raises :class:`PathRefused` with a sentence a person can act on.
     """
     text = str(value or "").strip()
@@ -73,7 +83,7 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
         real = entered.resolve()
     except (OSError, RuntimeError) as exc:
         raise PathRefused("that location could not be checked on the server.") from exc
-    roots = allowed_roots()
+    roots = allowed_roots(programs=program)
     if not (_inside(normalized, roots) and _inside(real, roots)):
         raise PathRefused(
             "Lightwork only uses locations inside its own folders and the server's usual "
@@ -99,6 +109,8 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
             raise PathRefused("that location is not an ordinary file.")
         if not os.access(real, os.R_OK):
             raise PathRefused("Lightwork isn't allowed to read that file.")
+        if program and not os.access(real, os.X_OK):
+            raise PathRefused("that file is not a program Lightwork is allowed to run.")
         if private and os.name != "nt" and info.st_mode & stat.S_IROTH:
             raise PathRefused(
                 "anyone on the server can read that key file. Limit who can read it, "

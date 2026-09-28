@@ -87,7 +87,7 @@
            {% if s.subgroup %}data-subgroup="{{ s.subgroup_slug }}"{% endif %}
            data-search="{{ (s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ g.name ~ ' ' ~ s.subgroup) | lower }}">
         <div class="settings-all-about-row">
-          {% if s.control in ['multiselect', 'toggle', 'rate', 'keys', 'table', 'list', 'rules'] %}
+          {% if s.control in ['multiselect', 'toggle', 'rate', 'keys', 'table', 'list', 'rules', 'picks', 'fingerprint', 'document'] %}
           <span class="settings-all-label" id="{{ cid }}-label">{{ s.label }}</span>
           {% else %}
           <label class="settings-all-label" id="{{ cid }}-label" for="{{ cid }}">{{ s.label }}</label>
@@ -114,12 +114,14 @@
               <span>On</span>
             </label>
           {% elif s.control == 'select' %}
-            <select class="select" id="{{ cid }}" data-input aria-describedby="{{ cid }}-help">
+            <select class="select" id="{{ cid }}" data-input aria-describedby="{{ cid }}-help"
+                    {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% endif %}>
               {% for c in s.choices %}
               <option value="{{ c.value }}" {% if c.value == s.value %}selected{% endif %}>{{ c.label }}</option>
               {% endfor %}
             </select>
             {% if s.empty_hint %}<p class="muted">{{ s.empty_hint }} <a href="/users">Open People</a></p>{% endif %}
+            {% if s.preview_url %}<div class="settings-all-preview" data-preview aria-live="polite"></div>{% endif %}
           {% elif s.control == 'multiselect' %}
             <fieldset class="settings-all-choices" aria-labelledby="{{ cid }}-label" aria-describedby="{{ cid }}-help">
               {% for c in s.choices %}
@@ -160,6 +162,56 @@
           {% elif s.control == 'text' %}
             <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
                    value="{{ s.value or '' }}" aria-describedby="{{ cid }}-help">
+            {% if s.segment_at is defined %}
+            <label class="settings-all-field" for="{{ cid }}-part">Where each workspace's own part goes
+              <select class="select" id="{{ cid }}-part" data-segment-at data-at="{{ s.segment_at }}"></select>
+            </label>
+            {% endif %}
+          {% elif s.control == 'picks' %}
+            <div class="settings-all-picks" data-picks data-label="{{ s.label }}"
+                 data-choices-url="{{ s.choices_url }}" data-choices='{{ s.choices | tojson }}'>
+              <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label" data-pick-list>
+                {% for p in s.picks %}
+                <li data-pick-item data-value="{{ p.value }}"><span>{{ p.label }}</span>
+                  <button class="btn btn--ghost" type="button" data-pick-remove aria-label="Remove {{ p.label }}">Remove</button></li>
+                {% endfor %}
+              </ul>
+              <p class="muted" data-picks-empty {% if s.picks %}hidden{% endif %}>{{ s.empty_text or 'Nothing chosen yet.' }}</p>
+              <label class="settings-all-field" for="{{ cid }}-find">Find
+                <input class="input" type="search" id="{{ cid }}-find" data-pick-search maxlength="80"
+                       placeholder="Search by name" autocomplete="off">
+              </label>
+              <label class="settings-all-field" for="{{ cid }}">Choose one to add
+                <select class="select" id="{{ cid }}" data-pick-select aria-describedby="{{ cid }}-help">
+                  <option value="">Search above, then choose</option>
+                </select>
+              </label>
+              <button class="btn btn--ghost" type="button" data-pick-add>Add</button>
+            </div>
+          {% elif s.control == 'fingerprint' %}
+            <div class="settings-all-fingerprint" data-fingerprint>
+              <input type="hidden" data-input value="{{ s.value or '' }}">
+              <p>Fingerprint: <strong data-fingerprint-shown>{{ s.value_text }}</strong></p>
+              <label class="settings-all-field" for="{{ cid }}">Upload the file to work out its fingerprint
+                <input class="input" type="file" id="{{ cid }}" data-fingerprint-file aria-describedby="{{ cid }}-help">
+              </label>
+              {% if s.fingerprint_from_server %}
+              <button class="btn btn--ghost" type="button" data-fingerprint-server>Work it out from this server</button>
+              {% endif %}
+            </div>
+          {% elif s.control == 'document' %}
+            <div class="settings-all-document" data-document>
+              <p data-document-text>{{ s.document.text if s.document else 'Nothing imported yet.' }}</p>
+              <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label" data-document-items>
+                {% for k in (s.document['items'] if s.document else []) %}
+                <li>{{ k.label }}, fingerprint <strong>{{ k.fingerprint }}</strong></li>
+                {% endfor %}
+              </ul>
+              <label class="settings-all-field" for="{{ cid }}">Import the file you were sent
+                <input class="input" type="file" id="{{ cid }}" data-document-file accept=".json,application/json"
+                       aria-describedby="{{ cid }}-help">
+              </label>
+            </div>
           {% elif s.control == 'path' %}
             <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
                    value="{{ s.value or '' }}" spellcheck="false" autocomplete="off"
@@ -209,8 +261,14 @@
                 <tbody data-grid-body></tbody>
               </table>
               <p class="muted" data-grid-empty>{{ s.empty_text }}</p>
-              {% if s.grid.key_choices or not grid_rows or s.grid.kind == 'named' %}
+              {% if s.grid.key_choices or s.grid.key_choices_url or not grid_rows or s.grid.kind == 'named' %}
               <div class="settings-all-table-add">
+                {% if s.grid.key_choices_url %}
+                <label class="settings-all-field" for="{{ cid }}-find">Find
+                  <input class="input" type="search" id="{{ cid }}-find" data-grid-keysearch maxlength="80"
+                         placeholder="Search by name" autocomplete="off">
+                </label>
+                {% endif %}
                 {% if s.grid.kind == 'named' %}
                 <label class="settings-all-field" for="{{ cid }}">New {{ s.grid.row_label | lower }}
                   <input class="input" type="text" id="{{ cid }}" data-grid-newname maxlength="64"
@@ -231,7 +289,7 @@
                 {% endif %}
               </div>
               {% endif %}
-              {% if s.empty_hint and ((grid_rows and not s.grid.key_choices) or (not grid_rows and s.grid.columns[0].choices | length == 0)) %}
+              {% if s.empty_hint and ((grid_rows and not s.grid.key_choices and not s.grid.key_choices_url) or (not grid_rows and s.grid.columns[0].choices | length == 0)) %}
               <p class="muted" data-grid-hint>{{ s.empty_hint }}</p>
               {% endif %}
             </div>

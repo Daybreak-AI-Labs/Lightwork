@@ -68,6 +68,24 @@ def _preset_sources(section: Mapping[str, Any]) -> list:
     return sources
 
 
+def _field_map_table(value: object) -> object:
+    """``field_map`` as a table. The dashboard writes it as a list of
+    ``"field=path.in.feed"`` entries (leaving the key out when there are
+    none); anything else, an empty list included, is returned unchanged so
+    the checks below refuse it."""
+    if not isinstance(value, list) or not value:
+        return value
+    table: dict[str, str] = {}
+    for item in value:
+        if not isinstance(item, str) or "=" not in item:
+            return value
+        key, _, path = item.partition("=")
+        if key.strip() in table:
+            return value
+        table[key.strip()] = path.strip()
+    return table
+
+
 def configured_sources(section: Mapping[str, Any]):
     """Build bounded explicit sources; malformed state-feed config fails closed."""
     from maverick.finance.regulatory_change import FeedSource
@@ -83,7 +101,7 @@ def configured_sources(section: Mapping[str, Any]):
         domains = raw.get("default_domains", [])
         if not isinstance(regimes, list) or not isinstance(domains, list):
             raise ValueError(f"state_feeds[{index}] scopes must be lists")
-        raw_field_map = raw.get("field_map", {})
+        raw_field_map = _field_map_table(raw.get("field_map", {}))
         if not isinstance(raw_field_map, Mapping):
             raise ValueError(f"state_feeds[{index}].field_map must be an object")
         if len(raw_field_map) > _MAX_FIELD_MAP_ENTRIES:

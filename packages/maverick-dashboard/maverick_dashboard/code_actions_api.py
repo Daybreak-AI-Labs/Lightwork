@@ -206,13 +206,7 @@ async def start_feature(request: Request, body: FeatureIn, bg: BackgroundTasks) 
         await run_in_threadpool(vault.get, body.repo)
     except vault.VaultError as exc:
         raise HTTPException(status_code=404, detail="That code project was not found.") from exc
-    try:
-        from maverick.config import load_config
-        from maverick.operator_preflight import _routed_configuration_missing
-        missing = {p: f for p, f in _routed_configuration_missing(load_config()).items() if f}
-    except Exception:  # noqa: BLE001 -- treat an unreadable route as not ready
-        missing = {"selected": ("configuration",)}
-    if missing:
+    if _provider_missing():
         raise HTTPException(status_code=503, detail=(
             "Set up an AI provider in Settings before asking Lightwork to build a change."))
     _audit(request, "start_feature", repo=body.repo)
@@ -308,6 +302,17 @@ async def merge_all_approved(request: Request) -> dict:
     _audit(request, "merge_approved", merged=len(merged), attempted=len(results))
     return {"merged": len(merged), "not_merged": len(results) - len(merged)}
 
+
+
+def _provider_missing() -> bool:
+    """True when no AI provider is ready for the work a code change needs."""
+    try:
+        from maverick.config import load_config
+        from maverick.operator_preflight import _routed_configuration_missing
+        missing = {p: f for p, f in _routed_configuration_missing(load_config()).items() if f}
+    except Exception:  # noqa: BLE001 -- treat an unreadable route as not ready
+        missing = {"selected": ("configuration",)}
+    return bool(missing)
 
 
 def _run_feature(repo: str, title: str, description: str, max_dollars: float | None) -> None:

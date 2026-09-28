@@ -366,10 +366,28 @@ def load_ts_plugin(
     return tools
 
 
+def _entry_command(entry: object) -> list[str] | None:
+    """One ``[plugins] ts`` entry as an argv list, or None when malformed.
+
+    An entry is an argv list (``["node", "/abs/plugin.js"]``) or the table the
+    dashboard writes: ``{program = "/usr/bin/node", file = "/abs/plugin.js",
+    args = ["--quiet"]}`` (``file`` and ``args`` optional)."""
+    if isinstance(entry, dict):
+        program, file, args = entry.get("program"), entry.get("file", ""), entry.get("args", [])
+        if not (isinstance(program, str) and program.strip() and isinstance(file, str)
+                and isinstance(args, list) and all(isinstance(a, str) for a in args)):
+            return None
+        return [program.strip(), *([file.strip()] if file.strip() else []), *args]
+    if isinstance(entry, list) and entry and all(isinstance(c, str) for c in entry):
+        return list(entry)
+    return None
+
+
 def load_configured_ts_plugins() -> list[Tool]:
     """Tools from ``[plugins] ts = [["node", "/abs/plugin.js"], ...]`` in config.
 
-    Listing a command there is the opt-in. Forgiving like the entry-point
+    Listing a command there is the opt-in (see :func:`_entry_command` for the
+    table form the dashboard writes). Forgiving like the entry-point
     loaders in ``plugins``: a broken entry logs and is skipped. Returns the
     Tools for the integrator to register -- this module never touches the
     registry itself.
@@ -387,11 +405,10 @@ def load_configured_ts_plugins() -> list[Tool]:
         log.warning("[plugins] ts must be a list of argv lists; none loaded")
         return []
     out: list[Tool] = []
-    for cmd in configured:
-        if not (
-            isinstance(cmd, list) and cmd and all(isinstance(c, str) for c in cmd)
-        ):
-            log.warning("[plugins] ts entry %r is not a list of strings; skipping", cmd)
+    for entry in configured:
+        cmd = _entry_command(entry)
+        if cmd is None:
+            log.warning("[plugins] ts entry %r is not a list of strings; skipping", entry)
             continue
         try:
             out.extend(load_ts_plugin(cmd))
