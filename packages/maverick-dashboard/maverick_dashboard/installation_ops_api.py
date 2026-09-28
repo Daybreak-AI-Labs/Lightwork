@@ -392,7 +392,20 @@ _DEDICATED_PAGES = {
     "mcp_servers": ("/mcp", "Tool servers"),
     "value": ("/savings", "Savings"),
     "spending_limits": ("/spending-limits", "Spending limits"),
+    "oauth": ("/connections", "Connections"),
+    "connections": ("/connections", "Connections"),
+    "security_ops": ("/security", "Security"),
+    "research_execution": ("/research", "Research"),
 }
+_SECURITY_SWITCHES = {"threat_hunt", "env_hunt"}
+# Why a key has no control in the app (shown in place of a Change link).
+_DEVELOPER_SECTIONS = frozenset({"langchain", "coding", "model_proxy", "perf", "ebpf_monitor", "benchmark"})
+_INSTALL_ONLY_KEYS = frozenset({"client.id", "deployment.type"})
+_REASON_DEVELOPER = "A developer tool setting. Change it in the installation settings file."
+_REASON_INSTALL = "Fixed when Lightwork is installed."
+_REASON_MODULE = "This module's details are set in the installation settings file; its on/off switch is in All settings."
+_REASON_SERVER = "Names a file, program or variable on the server, so it is set in the installation settings file."
+_REASON_NONE = "Not yet changeable in the app. Change it in the installation settings file."
 
 
 def _catalog_index() -> tuple[dict[str, tuple[str, str]], list[tuple[str, tuple[str, str]]]]:
@@ -407,6 +420,41 @@ def _catalog_index() -> tuple[dict[str, tuple[str, str]], list[tuple[str, tuple[
         else:
             tables.append((".".join(setting.path) + ".", target))
     return exact, tables
+
+
+def _switch_index() -> tuple[frozenset[str], dict[str, tuple[str, str]]]:
+    """Module sections switched in All settings, and on/off keys with their own page."""
+    from . import api, settings_store
+    switched: dict[str, tuple[str, str]] = {}
+    for section, key in settings_store.LEARNING_TOGGLES:
+        switched[f"{section}.{key}"] = ("/learning", "Learning")
+    for section in settings_store.SWITCHABLE_SECTIONS:
+        page = ("/security", "Security") if section in _SECURITY_SWITCHES else ("/learning", "Learning")
+        switched.setdefault(f"{section}.enable", page)
+    return frozenset(api._MODULE_SWITCHES), switched
+
+
+def _target(path: str, top: str, index: tuple) -> tuple[tuple[str, str] | None, str]:
+    """``((href, label) or None, reason)`` for one key."""
+    exact, tables, modules, switched = index
+    target = exact.get(path) or next((t for prefix, t in tables if path.startswith(prefix)), None)
+    target = target or switched.get(path)
+    section = path.rsplit(".", 1)[0]
+    if target is None and path.endswith(".enable") and section in modules:
+        target = ("/settings/all#group-modules", "Modules")
+    if target is None and top in _DEDICATED_PAGES and path not in _INSTALL_ONLY_KEYS:
+        target = _DEDICATED_PAGES[top]
+    if target is not None:
+        return target, ""
+    if path in _INSTALL_ONLY_KEYS:
+        return None, _REASON_INSTALL
+    if top in _DEVELOPER_SECTIONS:
+        return None, _REASON_DEVELOPER
+    if path.endswith(("_env", "_path", "_bin")) or path.endswith("sdn_path"):
+        return None, _REASON_SERVER
+    if top in modules or section in modules:
+        return None, _REASON_MODULE
+    return None, _REASON_NONE
 
 
 def _display(value: Any) -> str:
@@ -426,6 +474,7 @@ def _display(value: Any) -> str:
 def _configuration() -> dict[str, Any]:
     from maverick.config_inventory import describe
     exact, tables = _catalog_index()
+    index = (exact, tables, *_switch_index())
     inventory = describe()
     sections = []
     editable = listed = 0
@@ -433,9 +482,7 @@ def _configuration() -> dict[str, Any]:
         rows = []
         for key in section["keys"]:
             path = key["path"]
-            target = exact.get(path) or next((t for prefix, t in tables if path.startswith(prefix)), None)
-            if target is None and section["name"] in _DEDICATED_PAGES:
-                target = _DEDICATED_PAGES[section["name"]]
+            target, reason = _target(path, section["name"], index)
             listed += 1
             editable += 1 if target else 0
             rows.append({
@@ -447,11 +494,12 @@ def _configuration() -> dict[str, Any]:
                 "href": target[0] if target else "",
                 "link_label": "Change in All settings" if target and target[0].startswith("/settings/all")
                 else (f"Change on {target[1]}" if target else ""),
+                "reason": reason,
             })
         sections.append({"name": _words(section["name"]) or "General", "keys": rows})
     read_only = listed - editable
     summary = (f"{listed} setting{'s are' if listed != 1 else ' is'} in effect beyond the built-in defaults. "
-               + (f"{read_only} can only be changed in the installation settings file."
+               + (f"{read_only} can only be changed in the installation settings file; each says why."
                   if read_only else "Every one of them can be changed in this app."))
     if not listed:
         summary = "Lightwork is using its built-in settings. Nothing has been changed yet."
@@ -779,3 +827,98 @@ async def cancel_task_records(body: ConfirmIn, request: Request) -> dict:
     await run_in_threadpool(offline_maintenance.cancel, "task_records")
     await run_in_threadpool(_record, request, "task_records_move_cancelled")
     return await run_in_threadpool(offline_maintenance.task_records_state)
+
+
+# ---- tidy up old records in every workspace (maverick gc, the roster sweep) ----
+
+_MAX_SWEEP_WORKSPACES = 1000
+
+
+class SweepIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: int
+    activity_days: int
+    confirm: bool = Field(default=False, strict=True)
+
+
+def _sweep_periods(days: int, activity_days: int) -> None:
+    from .system_checks_api import _CLEANUP_CHOICES
+    if days not in _CLEANUP_CHOICES or activity_days not in _CLEANUP_CHOICES:
+        raise HTTPException(422, "Choose one of the listed time periods.")
+
+
+def _roster() -> list[Any]:
+    from maverick.tenant.registry import list_tenants
+    tenants = list_tenants()
+    if len(tenants) > _MAX_SWEEP_WORKSPACES:
+        raise HTTPException(409, f"This installation has more than {_MAX_SWEEP_WORKSPACES} workspaces; tidy them "
+                                 "up one workspace at a time.")
+    return tenants
+
+
+def _sweep_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"workspace": row["name"], "empty": bool(row.get("empty")),
+             "conversations": row.get("conversations"), "activity": row.get("activity"),
+             "duplicate_checks": row.get("duplicate_checks")} for row in rows]
+
+
+def _sweep_preview(days: int, activity_days: int) -> dict[str, Any]:
+    from maverick.records_gc import sweep_workspaces
+    tenants = _roster()
+    if not tenants:
+        return {"workspaces": [], "total_conversations": 0, "total_activity": 0,
+                "summary": "This installation has a single workspace. Use the clean-up above."}
+    rows = _sweep_rows(sweep_workspaces(tenants, days=days, events_days=activity_days, dry_run=True,
+                                        skip_empty=True))
+    known = [r["conversations"] for r in rows if r["conversations"] is not None]
+    conversations = sum(known)
+    activity = sum(int(r["activity"] or 0) for r in rows)
+    unknown = any(r["conversations"] is None and not r["empty"] for r in rows)
+    summary = (f"Across {len(rows)} workspace{'s' if len(rows) != 1 else ''}: {conversations:,} "
+               f"conversation{'s' if conversations != 1 else ''}{' or more' if unknown else ''} and "
+               f"{activity:,} activity entr{'ies' if activity != 1 else 'y'} would be removed.")
+    return {"workspaces": rows, "total_conversations": conversations, "total_activity": activity,
+            "summary": summary}
+
+
+@router.get("/all-workspaces-cleanup")
+async def all_workspaces_cleanup_preview(request: Request, days: int = 90, activity_days: int = 30) -> dict:
+    _admin(request)
+    _sweep_periods(days, activity_days)
+    return await run_in_threadpool(_sweep_preview, days, activity_days)
+
+
+@router.post("/all-workspaces-cleanup")
+async def all_workspaces_cleanup(body: SweepIn, request: Request) -> dict:
+    _mutation(request)
+    _sweep_periods(body.days, body.activity_days)
+    _confirmed(body.confirm, "tidy up every workspace")
+    tenants = await run_in_threadpool(_roster)
+    if not tenants:
+        raise HTTPException(409, "This installation has a single workspace. Use the clean-up above.")
+
+    def work() -> dict[str, Any]:
+        from maverick.records_gc import sweep_workspaces
+        rows = _sweep_rows(sweep_workspaces(tenants, days=body.days, events_days=body.activity_days))
+        totals = {key: sum(int(r[key] or 0) for r in rows)
+                  for key in ("conversations", "activity", "duplicate_checks")}
+        return {"workspaces": rows, **totals,
+                "summary": f"Removed {totals['conversations']:,} conversations and {totals['activity']:,} "
+                           f"activity entries across {len(rows)} workspaces."}
+
+    def failure(exc: BaseException) -> str:
+        return ("The clean-up stopped part way. Workspaces already tidied stay tidied; run it again to "
+                "finish the rest.")
+
+    def finished(job: dict) -> None:
+        result = job.get("result") or {}
+        _record(request, "records_cleanup_all_workspaces", days=body.days, activity_days=body.activity_days,
+                workspaces=len(tenants), succeeded=job["state"] == "done",
+                conversations=int(result.get("conversations") or 0),
+                activity=int(result.get("activity") or 0),
+                duplicate_checks=int(result.get("duplicate_checks") or 0))
+    try:
+        job = ops_jobs.start("cleanup-all", work, failure=failure, on_finish=finished)
+    except ops_jobs.JobBusy as exc:
+        raise HTTPException(409, "Every workspace is already being tidied up. Wait for that to finish.") from exc
+    return {"job": ops_jobs.public(job)}

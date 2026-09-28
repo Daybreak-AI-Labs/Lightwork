@@ -113,9 +113,43 @@
     say('services', 'Checking services…');
     try {
       var data = await call(SERVICES);
-      show('services', [table(['Service', 'Status', 'Actions'], data.services.map(serviceRow))]);
+      var rows = data.services.map(serviceRow);
+      if (data.dashboard) rows.unshift(dashboardRow(data.dashboard));
+      show('services', [table(['Service', 'Status', 'Actions'], rows)]);
       say('services', '');
     } catch (failure) { say('services', await failText(failure, 'check the services')); }
+  }
+  function dashboardRow(app) {
+    var name = el('div');
+    name.appendChild(el('strong', null, app.label));
+    name.appendChild(el('div', 'muted', app.about));
+    var status = el('div');
+    status.appendChild(badge(true, 'Running', 'Stopped'));
+    status.appendChild(el('div', 'muted', 'Running since ' + when(app.since)));
+    var actions = el('span', 'ops-actions');
+    if (app.can_restart) {
+      var b = el('button', 'btn', 'Restart');
+      b.type = 'button';
+      b.setAttribute('aria-label', 'Restart ' + app.label);
+      b.addEventListener('click', function () { restartDashboard(app, b); });
+      actions.appendChild(b);
+      actions.appendChild(el('span', 'muted', app.note));
+    } else {
+      actions.appendChild(el('span', 'muted', app.note));
+    }
+    return [name, status, actions];
+  }
+  async function restartDashboard(app, button) {
+    if (!await confirmed('Restart this app? Everyone using it is disconnected for a moment while it starts again. ' + app.note, 'Restart')) return;
+    button.disabled = true;
+    say('services', 'Restarting this app…');
+    try {
+      var data = await call(SERVICES + '/dashboard/restart', 'POST', {confirm: true});
+      say('services', data.summary);
+    } catch (failure) {
+      button.disabled = false;
+      say('services', await failText(failure, 'restart this app'));
+    }
   }
   async function serviceAction(svc, action, button) {
     var body = {service: svc.kind, confirm: false};
@@ -198,7 +232,7 @@
         details.appendChild(table(['Setting', 'Part', 'Value', 'Comes from', 'Change'], section.keys.map(function (k) {
           var change;
           if (k.href) { change = el('a', 'btn btn--ghost', k.link_label); change.href = k.href; }
-          else { change = el('span', 'muted', 'Only in the installation settings file'); }
+          else { change = el('span', 'muted', k.reason || 'Only in the installation settings file'); }
           return [k.setting, k.where, k.value, k.source, change];
         })));
         nodes.push(details);
@@ -413,6 +447,44 @@
       renderTasks(await call(BASE + '/task-records/cancel', 'POST', {confirm: true}));
       say('task-records', 'The scheduled move was cancelled.');
     } catch (failure) { say('task-records', await failText(failure, 'cancel the move')); }
+  };
+
+  // ---- tidy up old records in every workspace ------------------------------------
+  var cleanupGo = q('[data-ops-run="cleanup-all-go"]');
+  function periods() {
+    var form = q('[data-maintenance-cleanup]');
+    return {days: Number(form ? form.elements.days.value : 90), activity_days: Number(form ? form.elements.activity_days.value : 30)};
+  }
+  function sweepTable(rows) {
+    return table(['Workspace', 'Conversations', 'Task activity'], rows.map(function (r) {
+      if (r.empty) return [r.workspace, 'No records yet', ''];
+      return [r.workspace, r.conversations == null ? 'Counted when it runs' : r.conversations.toLocaleString(),
+        (r.activity || 0).toLocaleString()];
+    }));
+  }
+  runners['cleanup-all'] = async function () {
+    if (cleanupGo) cleanupGo.hidden = true;
+    say('cleanup-all', 'Counting in every workspace…');
+    try {
+      var p = periods();
+      var data = await call(BASE + '/all-workspaces-cleanup?' + new URLSearchParams({days: p.days, activity_days: p.activity_days}).toString());
+      show('cleanup-all', [para(data.summary), data.workspaces.length ? sweepTable(data.workspaces) : null]);
+      if (cleanupGo) cleanupGo.hidden = !(data.total_conversations || data.total_activity || data.workspaces.some(function (r) { return r.conversations == null && !r.empty; }));
+      say('cleanup-all', '');
+    } catch (failure) { say('cleanup-all', await failText(failure, 'count the old records')); }
+  };
+  runners['cleanup-all-go'] = async function () {
+    if (!await confirmed('Remove old conversations and task activity from every workspace? Finished tasks and their results stay. This can\'t be undone.', 'Remove')) return;
+    cleanupGo.hidden = true;
+    say('cleanup-all', 'Tidying up every workspace…');
+    try {
+      var p = periods();
+      var data = await call(BASE + '/all-workspaces-cleanup', 'POST', {days: p.days, activity_days: p.activity_days, confirm: true});
+      await follow(data.job, 'cleanup-all', function (result) {
+        show('cleanup-all', [para(result.summary), sweepTable(result.workspaces || [])]);
+        say('cleanup-all', 'Done.');
+      });
+    } catch (failure) { say('cleanup-all', await failText(failure, 'tidy up every workspace')); }
   };
 
   // ---- release checks ---------------------------------------------------------------

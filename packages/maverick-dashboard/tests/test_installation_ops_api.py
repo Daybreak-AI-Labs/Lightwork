@@ -209,10 +209,100 @@ def test_whole_configuration_shows_sources_links_and_hides_secrets(client, monke
     safety = next(r for k, r in rows.items() if k.endswith("|Safety") and r["value"] == "strict")
     assert safety["href"].startswith("/settings/all#group-") and safety["source"] == "Installation settings file"
     grpc = next(r for r in rows.values() if r["where"] == "Grpc")
-    assert grpc["href"] == "" and grpc["value"] == "50051"
+    assert grpc["value"] == "50051"
     alert = next(r for r in rows.values() if r["where"] == "Notifications")
     assert alert["source"] == "Set on the server"
-    assert response.json()["read_only"] >= 1
+
+
+# Keys that gained rows in All settings (or their own page) when the settings
+# packages merged link there; the rest say why they stay in the settings file.
+_LINKED = {
+    "grpc.max_workers": "/settings/all#group-", "logging.level": "/settings/all#group-",
+    "observability.prometheus_port": "/settings/all#group-", "queue.backend": "/settings/all#group-",
+    "embedded.allow_flash": "/settings/all#group-", "license.enforce": "/settings/all#group-",
+    "world_model.dsn": "/settings/all#group-", "lsp.servers": "/settings/all#group-",
+    "ai_bank_mrm.enable": "/settings/all#group-modules", "rehearsal.enable": "/learning",
+    "threat_hunt.enable": "/security", "oauth.vault": "/connections",
+    "security_ops.enable": "/security", "mcp_servers.x": "/mcp",
+}
+_FILE_ONLY = {
+    "langchain.tracing": "developer tool", "client.id": "Fixed when Lightwork is installed",
+    "ai_bank_mrm.model_tiers": "on/off switch is in All settings", "director.mode": "Not yet changeable",
+    "director.signal_cli_path": "file, program or variable",
+}
+
+
+def test_whole_configuration_links_every_key_that_has_a_row_and_explains_the_rest(client, tmp_path):
+    from maverick_dashboard.installation_ops_api import _catalog_index, _switch_index, _target
+    exact, tables = _catalog_index()
+    index = (exact, tables, *_switch_index())
+    for path, href in _LINKED.items():
+        target, reason = _target(path, path.split(".")[0], index)
+        assert target is not None and target[0].startswith(href), (path, target, reason)
+    for path, words in _FILE_ONLY.items():
+        target, reason = _target(path, path.split(".")[0], index)
+        assert target is None and words in reason, (path, target, reason)
+    from maverick_dashboard import settings_catalog
+    for setting in settings_catalog.SETTINGS:  # every catalog row is reachable from this view
+        if setting.key_kind == "key":
+            path = ".".join(setting.path)
+            assert _target(path, setting.top, index)[0] is not None, path
+    _config(tmp_path, '[grpc]\nmax_workers = 8\n[langchain]\ntracing = true\n')
+    rows = [r for s in client.get(BASE + "/configuration").json()["sections"] for r in s["keys"]]
+    grpc = next(r for r in rows if r["where"] == "Grpc")
+    assert grpc["href"].startswith("/settings/all#group-") and grpc["reason"] == ""
+    lang = next(r for r in rows if r["where"] == "Langchain")
+    assert lang["href"] == "" and "developer tool" in lang["reason"]
+
+
+def test_every_workspace_clean_up_previews_then_runs_as_one_recorded_job(client, monkeypatch):
+    from maverick import records_gc
+    from maverick.tenant.registry import create_tenant
+    from maverick_dashboard import ops_admin_jobs
+    single = client.get(BASE + "/all-workspaces-cleanup").json()
+    assert single["workspaces"] == [] and "single workspace" in single["summary"]
+    assert client.post(BASE + "/all-workspaces-cleanup",
+                       json={"days": 90, "activity_days": 30, "confirm": True}).status_code == 409
+    create_tenant("acme", display_name="Acme")
+    create_tenant("beta", display_name="Beta")
+    import time as _time
+
+    from maverick.paths import tenant_scope
+    from maverick.world_model import close_world_if_owned, open_world
+    with tenant_scope(tenant="acme"):
+        world = open_world()
+        goal = world.create_goal("old work")
+        world.append_event(goal, "planner", "note", "step")
+        with world._writing() as conn:
+            conn.execute("UPDATE goal_events SET ts = ?", (_time.time() - 400 * 86400,))
+        close_world_if_owned(world)
+    assert client.get(BASE + "/all-workspaces-cleanup", params={"days": 5}).status_code == 422
+    preview = client.get(BASE + "/all-workspaces-cleanup", params={"days": 90, "activity_days": 30}).json()
+    rows = {r["workspace"]: r for r in preview["workspaces"]}
+    assert rows["Acme"]["activity"] == 1 and rows["Beta"]["empty"] is True
+    assert "1 activity entry would be removed" in preview["summary"]
+    assert client.post(BASE + "/all-workspaces-cleanup",
+                       json={"days": 90, "activity_days": 30}).status_code == 409
+    calls = []
+    real = records_gc.prune_world
+    monkeypatch.setattr(records_gc, "prune_world",
+                        lambda world, **kw: calls.append(kw) or real(world, **kw))
+    seen = _audit_verbs(monkeypatch)
+    job = client.post(BASE + "/all-workspaces-cleanup",
+                      json={"days": 90, "activity_days": 30, "confirm": True}).json()["job"]
+    done = ops_admin_jobs.wait(job["id"])
+    assert done["state"] == "done" and done["result"]["activity"] == 1
+    assert calls == [{"days": 90, "events_days": 30}] * 2
+    records = [p for p in seen if p.get("verb") == "records_cleanup_all_workspaces"]
+    assert len(records) == 1 and records[0]["workspaces"] == 2 and records[0]["activity"] == 1
+    assert 'data-ops-run="cleanup-all"' in client.get("/settings").text
+
+
+def test_every_workspace_clean_up_is_for_installation_administrators(client, monkeypatch):
+    _workspace_admin(monkeypatch)
+    assert client.get(BASE + "/all-workspaces-cleanup").status_code == 403
+    assert client.post(BASE + "/all-workspaces-cleanup",
+                       json={"days": 90, "activity_days": 30, "confirm": True}).status_code == 403
 
 
 def test_message_receipt_tidy_needs_confirmation_and_is_recorded(client, monkeypatch):

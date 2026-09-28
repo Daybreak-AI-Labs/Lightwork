@@ -38,6 +38,10 @@ class DashboardServer(uvicorn.Server):
         # Consume this child-only launch marker before tools can inherit it.
         self.desktop_control = os.environ.pop("MAVERICK_DESKTOP_CONTROL", "") == "stdin-v1"
         self.control_ready = threading.Event()
+        if not self.desktop_control:
+            # Settings > Maintenance may ask a supervised copy to restart.
+            from .dashboard_restart import register_server
+            register_server(app, self)
 
     async def serve(self, sockets=None):
         if self.desktop_control:
@@ -100,3 +104,7 @@ def run_dashboard_server(app, **kwargs):
         pass
     if not server.started:
         raise SystemExit(3)
+    from .dashboard_restart import RESTART_EXIT_CODE, requested
+    if requested():
+        # A failure code, so the supervisor that runs this copy starts it again.
+        raise SystemExit(RESTART_EXIT_CODE)
