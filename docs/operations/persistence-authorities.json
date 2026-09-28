@@ -180,15 +180,15 @@
     "artifact": 48,
     "a2a": 4,
     "preferences": 3,
-    "learning": 54,
+    "learning": 55,
     "sqlite_domain": 79,
-    "configuration": 57,
-    "read_projection": 16,
+    "configuration": 59,
+    "read_projection": 17,
     "coordinator": 1,
-    "audit": 23,
-    "transient": 19,
+    "audit": 24,
+    "transient": 22,
     "business_records": 13,
-    "execution": 21,
+    "execution": 23,
     "recovery": 9,
     "derived": 14,
     "composition": 55,
@@ -23913,6 +23913,268 @@
           "function": "module",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('flow_recipe_lineage', 'LRA', 'flow_recipe_lineage')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/config_install.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/config_install.py",
+      "purpose": "Installs a prepared installation settings file (maverick init --from-file and Settings > setup guide) after validating it, keeping a dated backup of the previous file.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 83,
+          "function": "install_config_bytes",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(dst, data, mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/audit_checkpoint_settings.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/audit_checkpoint_settings.py",
+      "purpose": "The audit checkpoint folder and pinned trusted keys a global admin chose in the app, kept in a private settings file under Lightwork home.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 32,
+          "function": "_store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 60,
+          "function": "save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps({'folder': folder or None, 'keys': list(keys)}, indent=2), mode=384)"
+        },
+        {
+          "line": 70,
+          "function": "checkpoint_dir",
+          "kind": "data_dir",
+          "expression": "data_dir('audit-checkpoints')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/audit_ops_api.py",
+      "contract": "audit",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/audit_ops_api.py",
+      "purpose": "Dashboard controls for audit checkpoints; resolves the checkpoint folder and delegates publish, verify and retire to maverick.audit.checkpoints.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 108,
+          "function": "_audit_dir",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 436,
+          "function": "_no_overlap",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/business_agent_ops_api.py",
+      "contract": "transient",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/business_agent_ops_api.py",
+      "purpose": "Business specialist setup: uploaded reference documents are written to a private temporary folder for the onboarding run and removed with it.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 143,
+          "function": "_approve",
+          "kind": "write_bytes",
+          "expression": "target.write_bytes(data)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/installation_ops_api.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/installation_ops_api.py",
+      "purpose": "Settings > Maintenance operations; opens the configured shared Postgres only to run the kernel pre-RLS workspace backfill (preview or confirmed run) and readiness checks.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 207,
+          "function": "_database_separation",
+          "kind": "connect",
+          "expression": "pg_rls.connect(dsn, autocommit=True)"
+        },
+        {
+          "line": 676,
+          "function": "_backfill",
+          "kind": "connect",
+          "expression": "pg_rls.connect(dsn, autocommit=False)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_ops_api.py",
+      "contract": "transient",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_ops_api.py",
+      "purpose": "Learning operations; an uploaded factory evidence file is written to a private temporary folder for one review pass and removed with it.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 582,
+          "function": "_do",
+          "kind": "write_bytes",
+          "expression": "path.write_bytes(raw)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/offline_maintenance.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/offline_maintenance.py",
+      "purpose": "Offline maintenance requests scheduled from Settings > Maintenance (run at the next start, before the data-folder lock) and their receipts, as private JSON files.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 37,
+          "function": "_directory",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 53,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_directory() / name, json.dumps(data, sort_keys=True), mode=384)"
+        },
+        {
+          "line": 73,
+          "function": "_source_present",
+          "kind": "data_dir",
+          "expression": "data_dir('a2a', 'tasks.sqlite3', tenant=workspace)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/ops_file_jobs.py",
+      "contract": "transient",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/ops_file_jobs.py",
+      "purpose": "Background export downloads (whole-organisation data, insurance evidence pack): finished files kept briefly for the person who started them, then removed.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 81,
+          "function": "run",
+          "kind": "write_bytes",
+          "expression": "target.write_bytes(result)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/settings_paths.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/settings_paths.py",
+      "purpose": "Checks server locations chosen in All settings against the allowed places; reads Lightwork home to resolve them and writes nothing.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 40,
+          "function": "allowed_roots",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 47,
+          "function": "allowed_roots",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 73,
+          "function": "_outside_message",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/training_ops_api.py",
+      "contract": "learning",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/training_ops_api.py",
+      "purpose": "Reward-model and training operations: trained reward models and their index under the learning store; uploaded trajectories are read from a private temporary folder.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 149,
+          "function": "_store",
+          "kind": "data_dir",
+          "expression": "data_dir('reward-models')"
+        },
+        {
+          "line": 170,
+          "function": "_outbox_rows",
+          "kind": "data_dir",
+          "expression": "data_dir('outbox')"
+        },
+        {
+          "line": 181,
+          "function": "_file_rows",
+          "kind": "write_bytes",
+          "expression": "path.write_bytes(raw)"
+        },
+        {
+          "line": 229,
+          "function": "_run",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store / f'{name}.json', json.dumps(model.to_dict(), indent=2, sort_keys=True))"
+        },
+        {
+          "line": 232,
+          "function": "_run",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store / 'index.json', json.dumps((_index() + [entry])[-200:], indent=2))"
         }
       ]
     }
