@@ -880,7 +880,9 @@ def add_mcp_server(name: str, spec: dict) -> dict:
     subprocess-injection / url guards), stores the normalised dict, and returns
     it. Raises ValueError on a bad name or spec; config.toml is never touched."""
     n = (name or "").strip()
-    if not _VALID_SERVER_NAME.fullmatch(n):
+    if not _VALID_SERVER_NAME.fullmatch(n) or n.endswith("_") or "__" in n:
+        # The kernel refuses such a server's tools (``mcp_<server>__<tool>``
+        # must split one way), so refuse it here instead of saving it silently.
         raise ValueError("invalid MCP server name")
     if not isinstance(spec, dict) or ("command" not in spec and "url" not in spec):
         raise ValueError("MCP server needs a command (stdio) or url (http)")
