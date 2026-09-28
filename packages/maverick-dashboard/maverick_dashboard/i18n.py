@@ -71,6 +71,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "action.search":  {"en": "Search", "fr": "Rechercher", "de": "Suchen", "ja": "検索", "zh": "搜索", "ar": "بحث"},
     "footer.local":   {"en": "self-hosted", "fr": "auto-hébergé", "de": "selbst gehostet", "ja": "セルフホスト", "zh": "自托管"},
     "chrome.skip_to_content": {"en": "Skip to content", "fr": "Aller au contenu", "de": "Zum Inhalt springen", "ja": "コンテンツへスキップ", "zh": "跳到内容", "ar": "تخطي إلى المحتوى"},
+    "chrome.account": {"en": "Your account", "fr": "Votre compte", "de": "Ihr Konto", "ja": "アカウント", "zh": "您的账户", "ar": "حسابك"},
     "chrome.sign_out": {"en": "Sign out", "fr": "Se déconnecter", "de": "Abmelden", "ja": "サインアウト", "zh": "退出登录", "ar": "تسجيل الخروج"},
     "font.default":   {"en": "Default", "fr": "Par défaut", "de": "Standard", "ja": "標準", "zh": "默认"},
     "font.dyslexic":  {"en": "Dyslexia-friendly", "fr": "Adaptée à la dyslexie", "de": "Legasthenie-freundlich", "ja": "ディスレクシア対応", "zh": "阅读障碍友好"},
