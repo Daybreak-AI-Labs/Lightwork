@@ -96,6 +96,7 @@ class WorldAnalytics:
         s = query_sql.lstrip("(").lstrip()
         if not s.lower().startswith(("select", "with")):
             raise ValueError("only SELECT / WITH queries are allowed")
+        self._require_single_select(query_sql)
         expired = threading.Event()
         timer = None
         if timeout is not None:
@@ -120,6 +121,21 @@ class WorldAnalytics:
             if timer is not None:
                 timer.cancel()
         return [dict(zip(cols, row, strict=False)) for row in rows]
+
+    def _require_single_select(self, query_sql: str) -> None:
+        """Refuse text that parses as anything but one SELECT: a ``)`` that
+        closes the wrapper would otherwise smuggle further statements (writes,
+        ``SET``, an unlimited last SELECT) past the prefix check."""
+        import duckdb
+
+        extract = getattr(self._conn, "extract_statements", None)
+        if extract is None:  # older duckdb: no parser access, refuse any separator
+            if ";" in query_sql:
+                raise ValueError("only SELECT / WITH queries are allowed, one at a time")
+            return
+        statements = extract(query_sql)
+        if len(statements) != 1 or statements[0].type != duckdb.StatementType.SELECT:
+            raise ValueError("only SELECT / WITH queries are allowed, one at a time")
 
     def ask(self, metric: str, group: str = "none", *, since: float | None = None,
             until: float | None = None, limit: int = 100,

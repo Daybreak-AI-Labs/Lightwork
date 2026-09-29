@@ -100,8 +100,25 @@ def test_query_applies_row_limit(tmp_path):
 def test_query_rejects_multiple_statements(tmp_path):
     w = _seed(tmp_path / "w.db", [("a", "done", [(1.0, "success", 1.0)])])
     wa = WorldAnalytics(w)
-    with pytest.raises(duckdb.ParserException):
+    with pytest.raises((ValueError, duckdb.ParserException)):
         wa.query("SELECT 1; SELECT * FROM goals")
+    wa.close()
+
+
+def test_query_cannot_break_out_of_the_single_select(tmp_path):
+    # Closing the wrapper's parenthesis smuggles further statements past the
+    # SELECT/WITH prefix check: writes and settings changes, and a last
+    # statement that swallows the row limit's placeholder.
+    w = _seed(tmp_path / "w.db", [("a", "done", [(1.0, "success", 1.0)])])
+    wa = WorldAnalytics(w, query_limit=5)
+    for bad in (
+        "SELECT 1) AS x; DROP TABLE goals; SELECT * FROM (SELECT 1",
+        "SELECT 1) AS x; SET threads = 64; SELECT * FROM (SELECT 1",
+        "SELECT 1) AS x; SELECT ?::INT AS lim, range AS r FROM range(50) --",
+    ):
+        with pytest.raises((ValueError, duckdb.Error)):
+            wa.query(bad)
+    assert wa.query("SELECT count(*) AS n FROM goals") == [{"n": 1}]
     wa.close()
 
 

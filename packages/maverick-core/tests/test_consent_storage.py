@@ -96,12 +96,11 @@ def test_statements_are_translated_to_postgres():
     assert "GREATEST(a, %s)" in t("SELECT max(a, ?) FROM x", (1,)).sql
     assert "max(a)" in t("SELECT max(a) FROM x").sql
     numeric = t("SELECT 1 FROM x WHERE json_extract(p,'$.until')>?", (1.5,)).sql
-    assert "((p)::jsonb #>> '{until}'))::double precision>%s" in numeric
+    assert "((p)::jsonb #> '{until}'))::numeric" in numeric and numeric.endswith(">ROW(0, %s)")
     text = t("SELECT 1 FROM x WHERE json_extract(p,'$.id')=?", ("a",)).sql
-    assert "::double precision" not in text
+    assert "::numeric" not in text and text.endswith("=ROW(1, %s)")
     ordered = t("SELECT a FROM x ORDER BY a, b DESC LIMIT ?", (5,)).sql
     assert "a NULLS FIRST, b DESC NULLS LAST LIMIT %s" in ordered
-    assert t("SELECT '50%' FROM x WHERE a = ?", (1,)).sql == "SELECT '50%' FROM x WHERE a = %s"
     assert "%%" in t("SELECT a % ? FROM x", (2,)).sql
     assert t("UPDATE x SET a=:a WHERE b=:b", {"a": 1, "b": 2}).sql == \
         "UPDATE x SET a=%(a)s WHERE b=%(b)s"
@@ -243,3 +242,84 @@ def test_local_records_are_copied_verified_and_never_doubled(shared, monkeypatch
         connection.close()
     refused = storage.move_local_records()["refused"]
     assert any(workspace in r["workspace"] for r in refused)
+
+
+# ------------------------------------------------- literals and json_extract parity
+def test_percent_signs_are_never_read_as_placeholders_when_values_are_bound():
+    t = storage.translate
+    # psycopg reads every % in the text: one inside a string literal, quoted
+    # name or comment must be doubled, or the statement fails ('50%') or a
+    # value lands inside the literal ('%s').
+    assert t("SELECT '50%' FROM x WHERE a = ?", (1,)).sql == "SELECT '50%%' FROM x WHERE a = %s"
+    assert t("SELECT '%s' FROM x WHERE a = ?", (1,)).sql == "SELECT '%%s' FROM x WHERE a = %s"
+    assert t('SELECT "p%" FROM x /* 5% */ WHERE a = ?', (1,)).sql == \
+        'SELECT "p%%" FROM x /* 5%% */ WHERE a = %s'
+    assert t("SELECT '50%' FROM x").sql == "SELECT '50%' FROM x"  # nothing bound: unchanged
+
+
+def test_json_extract_shapes_without_sqlite_parity_are_refused():
+    for sql, params in (
+        ("SELECT 1 FROM x WHERE ? = json_extract(p,'$.a')", ("a",)),
+        ("SELECT 1 FROM x WHERE json_extract(p,'$.a') = other", ()),
+        ("SELECT 1 FROM x WHERE json_extract(?,'$.a') = ?", ("{}", "a")),
+    ):
+        with pytest.raises(storage._Unsupported):
+            storage.translate(sql, params)
+
+
+_CONTAINERS = ['{"v": {"k": 1}}', '{"v": [1, 2]}']
+_PAYLOADS = ['{"v": 5}', '{"v": 5.5}', '{"v": "5"}', '{"v": "abc"}', '{"v": ""}',
+             '{"v": true}', '{"v": false}', '{"v": null}', '{}', '{"v": 9007199254740993}', '{"v": -1}', '{"v": "B"}',
+             '{"v": "a"}', '{"v": "é"}']
+
+
+@live
+def test_json_extract_comparisons_match_sqlite(shared, tmp_path):
+    path = tmp_path / f"{uuid.uuid4().hex}.sqlite3"
+    shared.append(storage.schema_name(path))
+    pg = storage.connect(path)
+    lite = sqlite3.connect(":memory:")
+    try:
+        for connection in (pg, lite):
+            for table, payloads in (("r", _PAYLOADS), ("c", _PAYLOADS + _CONTAINERS)):
+                connection.execute(
+                    f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, payload_json TEXT NOT NULL)")
+                for i, payload in enumerate(payloads):
+                    connection.execute(f"INSERT INTO {table} (id, payload_json) VALUES (?, ?)",
+                                       (i, payload))
+        values = [5, 5.5, 4, 6, 0, 1, -2, 9007199254740992, float("inf"), "5", "abc", "", "a",
+                  "B", "zzz", True, False, None]
+        mismatches = []
+        for op in ("=", "<>", "!=", "==", ">", ">=", "<", "<="):
+            for value in values:
+                for form in ("json_extract(payload_json,'$.v'){op}?",
+                             "NOT (json_extract(payload_json,'$.v'){op}?)"):
+                    sql = f"SELECT id FROM r WHERE {form.format(op=op)} ORDER BY id"
+                    want = [r[0] for r in lite.execute(sql, (value,))]
+                    got = [r[0] for r in pg.execute(sql, (value,))]
+                    if want != got:
+                        mismatches.append((sql, value, want, got))
+                    if not isinstance(value, str):  # objects/arrays against a number
+                        sql = sql.replace("FROM r", "FROM c")
+                        want = [r[0] for r in lite.execute(sql, (value,))]
+                        got = [r[0] for r in pg.execute(sql, (value,))]
+                        if want != got:
+                            mismatches.append((sql, value, want, got))
+        for sql in ("SELECT id FROM r WHERE json_extract(payload_json,'$.v') IN ('abc','a') ORDER BY id",
+                    "SELECT id FROM r WHERE json_extract(payload_json,'$.v') > 5 ORDER BY id",
+                    "SELECT id FROM r WHERE json_extract(payload_json,'$.v') = 'abc' ORDER BY id",
+                    "SELECT id FROM r WHERE json_extract(payload_json,'$.v') = '5' ORDER BY id"):
+            want = [r[0] for r in lite.execute(sql)]
+            got = [r[0] for r in pg.execute(sql)]
+            if want != got:
+                mismatches.append((sql, None, want, got))
+        assert mismatches == []
+        # SQLite compares an object or array as its compact JSON text, which
+        # Postgres cannot reproduce: that comparison fails instead of differing.
+        with pytest.raises(sqlite3.OperationalError):
+            pg.execute("SELECT id FROM c WHERE json_extract(payload_json,'$.v') = ?", ("x",))
+        # Bound values and literals with % keep their meaning.
+        assert tuple(pg.execute("SELECT '50%', '%s', ?", ("x",)).fetchone()) == ("50%", "%s", "x")
+    finally:
+        pg.close()
+        lite.close()
