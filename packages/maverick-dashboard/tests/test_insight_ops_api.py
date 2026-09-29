@@ -112,6 +112,16 @@ def test_typed_questions_are_for_installation_administrators_and_read_only(clien
     assert client.post("/api/v1/analytics/query", json={"query": "SELECT 1"}).status_code == 403
 
 
+def test_typed_questions_cannot_smuggle_a_second_statement(client):
+    pytest.importorskip("duckdb")
+    _task("user:ada", "Ada's report", 1.0)
+    for bad in ("SELECT 1) AS x; DROP TABLE goals; SELECT * FROM (SELECT 1",
+                "SELECT 1) AS x; SELECT ?::INT AS lim, range AS r FROM range(5000) --"):
+        r = client.post("/api/v1/analytics/query", json={"query": bad})
+        assert r.status_code == 422, (bad, r.json())
+        assert "SELECT" in r.json()["detail"]
+
+
 def test_typed_questions_are_stopped_at_the_time_limit(client, monkeypatch):
     pytest.importorskip("duckdb")
     from maverick_dashboard import insight_ops_api
