@@ -1089,7 +1089,7 @@ def _switches(S) -> tuple:
           subgroup="Computer control", env=("MAVERICK_COMPUTER_OCR",)),
         S("tools", "fetch_allow_private", "Let agents read addresses inside your network",
           "Agents may read web pages at private, local or cloud-internal addresses.",
-          "toggle", "Security", False, "maverick.tools.http_fetch", subgroup="Tool access",
+          "toggle", "Security", False, "maverick.tools._ssrf", subgroup="Tool access",
           env=("MAVERICK_FETCH_ALLOW_PRIVATE",), weaker=True,
           warning="Agents will be able to reach services inside your network, including "
                   "ones that hold credentials."),
