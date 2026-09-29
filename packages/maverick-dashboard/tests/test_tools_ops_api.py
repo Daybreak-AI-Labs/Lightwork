@@ -191,7 +191,7 @@ def test_skill_add_keeps_web_address_passwords_out_of_the_activity_record(client
     the activity record keeps where the skill came from, never that password."""
     monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
     fetched = _serve_skill(monkeypatch)
-    source = ("https://alice:hunter2-secret@raw.example.com/acme/skills/SKILL.md"
+    source = ("https://alice:hunter2-secret@raw.example.com/acme/skills/SKILL.md"  # pragma: allowlist secret
               "?token=GHSAT0AAAAAAsecretvalue#frag")
     fp = client.post("/api/v1/skills/source-preview", json={"source": source}).json()["fingerprint"]
     seen = _audit(monkeypatch)
