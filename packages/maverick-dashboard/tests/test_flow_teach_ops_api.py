@@ -189,3 +189,53 @@ def test_teach_page_renders_with_controls(env, monkeypatch):
     for needle in ("Teach a step from examples", "tr-learn", "Build a flow from reviewed runs", "sg-learn"):
         assert needle in page.text
     assert env.client.get("/flows/billing/teach", headers=_as("other")).status_code == 404
+
+
+def _key_trust(public_hex, issuer="caller-issuer"):
+    import hashlib
+
+    from maverick.flow import action_provenance as provenance
+
+    key_id = hashlib.sha256(bytes.fromhex(public_hex)).hexdigest()[:16]
+    return {"schema": provenance.TRUST_SCHEMA, "issuer": issuer, "tenant": TENANT,
+            "purpose": provenance.PURPOSE, "keys": {key_id: public_hex}, "revoked_keys": []}, key_id
+
+
+def test_a_copy_signed_with_a_key_the_caller_supplies_is_never_genuine(env, monkeypatch):
+    # A caller who signs a forged example with their own key and uploads that
+    # key as the "trust file" must not get it reported genuine, or learned from.
+    import time
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from maverick.audit import signing
+    from maverick.flow import action_provenance as provenance
+
+    def public(private):
+        return private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+
+    attacker = Ed25519PrivateKey.generate()
+    caller_trust, key_id = _key_trust(public(attacker))
+    workspace_trust, _ = _key_trust(public(Ed25519PrivateKey.generate()))
+    monkeypatch.setattr(provenance, "local_trust", lambda tenant: workspace_trust)
+    # The body's own validation is covered by the kernel's tests; this is about whose keys are trusted.
+    monkeypatch.setattr(provenance, "validate_body", lambda body: body)
+    body = {"schema": "forged", "tenant": TENANT, "issuer": "caller-issuer", "purpose": provenance.PURPOSE,
+            "issued_at": time.time() - 10, "grant": {"use_until": time.time() + 3600}}
+    digest = provenance.digest(body)
+    message = signing.DETACHED_DIGEST_MESSAGE_VERSION.encode() + b"\x00" + bytes.fromhex(digest)
+    bundle = {"body": body, "signature": {"algorithm": "Ed25519-SHA256", "digest": digest, "key_id": key_id,
+                                          "message_version": signing.DETACHED_DIGEST_MESSAGE_VERSION,
+                                          "signature": attacker.sign(message).hex()}}
+    provenance.verify_bundle(bundle, trust=caller_trust, expected_tenant=TENANT, now=time.time())  # really signed
+
+    checked = env.client.post("/api/v1/flow-teach/signed-copy/check", json={"bundle": bundle, "trust": caller_trust})
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["genuine"] is False
+    assert "signed by a key you supplied, not one this workspace trusts" in checked.json()["message"]
+    assert env.client.post("/api/v1/flow-teach/signed-copy/check", json={"bundle": bundle}).json()["genuine"] is False
+    for path, payload in (("/api/v1/flow-teach/signed/learn", {"bundles": [bundle, bundle], "tools": TOOLS}),
+                          ("/api/v1/flow-teach/signed/refine", {"package": {}, "bundles": [bundle]}),
+                          ("/api/v1/flow-teach/signed/inspect", {"package": {"artifact": {}}})):
+        refused = env.client.post(path, json={**payload, "trust": caller_trust})
+        assert refused.status_code == 400 and "this workspace trusts" in refused.json()["detail"], path
