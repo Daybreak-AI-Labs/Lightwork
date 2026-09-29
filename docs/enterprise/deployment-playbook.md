@@ -307,7 +307,10 @@ HALT writer does not rotate/compare the generation. The database migration is
 compatible with retained rows, but old/new writer coexistence is not a security
 guarantee. Rollback = stop all writers → restore the snapshot → start the prior
 version; do not run the prior binary against writes made under the newer control
-contract.
+contract. Before rolling back, revoke any pending invitations made by "Set up a
+client in one step" (`maverick tenant onboard`): an older version ignores the
+workspace they are limited to and would grant their role across the whole
+installation.
 
 **Secret / key rotation:** API keys — edit `~/.maverick/.env` and reload (no
 downtime). **Audit signing key:** `maverick audit rotate-key` (additive — old
