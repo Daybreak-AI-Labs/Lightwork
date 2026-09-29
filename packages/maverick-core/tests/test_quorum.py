@@ -279,3 +279,15 @@ def test_bogus_config_falls_back(monkeypatch, tmp_path):
     assert policy.required == 2
     assert policy.ttl_days == 7.0
     assert policy.protected_keys == quorum.DEFAULT_PROTECTED_KEYS
+
+
+def test_ttl_above_the_approval_card_window_is_clamped(monkeypatch, tmp_path, caplog):
+    """Approval cards last at most 7 days, so a longer quorum_ttl_days from a
+    config file is clamped to 7 (with a warning) instead of promising more."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("[safety]\nquorum_required = 2\nquorum_ttl_days = 30\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    with caplog.at_level("WARNING", logger="maverick.quorum"):
+        policy = quorum.policy_from_config()
+    assert policy.ttl_days == quorum.MAX_TTL_DAYS == 7.0
+    assert "quorum_ttl_days" in caplog.text

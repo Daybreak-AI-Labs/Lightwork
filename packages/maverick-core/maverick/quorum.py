@@ -61,6 +61,9 @@ log = logging.getLogger(__name__)
 
 DEFAULT_REQUIRED = 2
 DEFAULT_TTL_DAYS = 7.0
+# A settings approval request (approval card) can be voted on for at most 7
+# days, so a longer approval lifetime would promise what can't be delivered.
+MAX_TTL_DAYS = 7.0
 DEFAULT_PROTECTED_KEYS = frozenset({
     "safety.*",
     "governance.*",
@@ -170,6 +173,10 @@ def policy_from_config() -> QuorumPolicy:
             ttl = DEFAULT_TTL_DAYS
     except (TypeError, ValueError):
         ttl = DEFAULT_TTL_DAYS
+    if ttl > MAX_TTL_DAYS:
+        log.warning("[safety] quorum_ttl_days=%s is above the %s-day approval window; "
+                    "using %s days", ttl, MAX_TTL_DAYS, MAX_TTL_DAYS)
+        ttl = MAX_TTL_DAYS
     return QuorumPolicy(required=required, protected_keys=protected, ttl_days=ttl)
 
 
@@ -415,7 +422,8 @@ def prune(
 
 __all__ = [
     "QuorumPolicy", "Proposal", "ProposalStore", "QuorumError",
-    "DEFAULT_PROTECTED_KEYS", "DEFAULT_REQUIRED", "DEFAULT_TTL_DAYS", "SELF_PROTECTED_KEYS",
+    "DEFAULT_PROTECTED_KEYS", "DEFAULT_REQUIRED", "DEFAULT_TTL_DAYS", "MAX_TTL_DAYS",
+    "SELF_PROTECTED_KEYS",
     "PENDING", "APPROVED", "EXPIRED",
     "propose", "approve", "status", "prune",
     "is_protected", "apply_gate", "policy_from_config", "configured_policy",

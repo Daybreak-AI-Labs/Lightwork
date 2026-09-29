@@ -185,11 +185,19 @@ def test_quorum_settings_stay_protected_whatever_areas_are_chosen(audit_rows):
     assert _save([{"id": "safety.quorum_required", "value": "2"}]).status_code == 200
     for change in ({"id": "safety.quorum_required", "value": ""},
                    {"id": "safety.quorum_protected_keys", "value": ["audit.*"]},
-                   {"id": "safety.quorum_ttl_days", "value": 90}):
+                   {"id": "safety.quorum_ttl_days", "value": 3}):
         r = _save([change], confirm=True)
         assert r.status_code == 202, (change, r.text)
     assert quorum.configured_policy().required == 2
     assert quorum.configured_policy().protected_keys == frozenset({"shield.*"})
+
+
+def test_approvals_cannot_be_kept_longer_than_a_week(audit_rows):
+    """Approval cards last at most 7 days, so a longer window can't be saved."""
+    r = _save([{"id": "safety.quorum_ttl_days", "value": 30}], confirm=True)
+    assert r.status_code == 400, r.text
+    assert "7" in r.json()["message"]
+    assert _save([{"id": "safety.quorum_ttl_days", "value": 7}], confirm=True).status_code == 200
 
 
 def _as(monkeypatch, admins=("user:a", "user:b", "user:c")):

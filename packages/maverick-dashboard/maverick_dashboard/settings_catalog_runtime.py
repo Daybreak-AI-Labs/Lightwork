@@ -562,9 +562,10 @@ def _safety(S, C) -> tuple:
           weaker="shrink", warning="The settings you remove will change without anyone "
                                    "else's approval."),
         S("safety", "quorum_ttl_days", "Approvals stay usable for",
-          "How long an approved change to a protected setting can still be saved.", "number",
+          "How long an approved change to a protected setting can still be saved. At most "
+          "7 days, because a request can only be approved for a week.", "number",
           "Safety", 7, "maverick.quorum", subgroup="Changing protected settings", minimum=1,
-          maximum=90, integer=True, unit="days", weaker="higher",
+          maximum=7, integer=True, unit="days", weaker="higher",
           warning="Approved changes will stay usable for longer after they are approved."),
         S("safety", "require_shield", "Require the safety checks",
           "Refuse outside messages and agent requests when Lightwork's safety checks are not "
