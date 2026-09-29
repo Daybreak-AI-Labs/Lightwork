@@ -84,6 +84,16 @@ def _session_principal(request: Request):
         return None
 
 
+def _bind_role(principal: str, inv) -> None:
+    """Grant the invited role: inside the invite's workspace when it names one
+    (a client's first administrator), otherwise dashboard-wide."""
+    from . import rbac
+    if inv.tenant:
+        rbac.set_tenant_role(inv.tenant, principal, inv.role)
+    else:
+        rbac.set_role(principal, inv.role)
+
+
 @router.get("/auth/invite/{token}")
 async def invite_confirm(request: Request, token: str):
     """Peek-only confirmation page — inert for mail-scanner prefetches."""
@@ -128,13 +138,12 @@ async def invite_accept(request: Request, token: str):
         return _page("Blocked", "<p>Cross-site request blocked — open the "
                                 "invitation link directly and try again.</p>",
                      status=400)
-    from . import rbac
     if invites.local_login_mode():
         inv = invites.consume_invite(token)
         if inv is None:
             return _gone()
         try:
-            rbac.set_role(f"user:{inv.email}", inv.role)
+            _bind_role(f"user:{inv.email}", inv)
         except ValueError:  # pragma: no cover - role validated at mint time
             return _gone()
         log.info("invite accepted (local): %s as %s", inv.email, inv.role)
@@ -153,7 +162,7 @@ async def invite_accept(request: Request, token: str):
     if inv is None:
         return _gone()
     try:
-        rbac.set_role(principal.principal, inv.role)
+        _bind_role(principal.principal, inv)
     except ValueError:  # pragma: no cover - role validated at mint time
         return _gone()
     log.info("invite accepted (sso): %s bound to %s (invite for %s)",

@@ -3095,7 +3095,8 @@ def tenant_onboard(tenant_id: str, admin_email: str, plan: str, display_name: st
         )
         sys.exit(2)
     try:
-        inv, token = invites.create_invite(admin_email, role, created_by="operator")
+        inv, token = invites.create_invite(admin_email, role, created_by="operator",
+                                           tenant=rec.id)
     except ValueError as e:
         click.echo(f"ERROR: tenant created, but the invite was rejected: {e}",
                    err=True)

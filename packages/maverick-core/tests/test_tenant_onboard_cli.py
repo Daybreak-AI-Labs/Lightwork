@@ -45,6 +45,8 @@ def test_onboard_creates_tenant_and_emits_invite(monkeypatch):
     assert len(pending) == 1
     assert pending[0].email == "admin@acme.example"
     assert pending[0].role == "admin"
+    # The role is granted inside the new tenant only, never dashboard-wide.
+    assert pending[0].tenant == "acme"
 
     # The link is printed once, built from the configured public URL.
     assert "https://dash.acme.example/auth/invite/" in res.output

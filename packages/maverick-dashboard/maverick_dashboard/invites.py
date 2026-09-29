@@ -102,6 +102,7 @@ class Invite:
     expires_at: float
     used_at: float | None = None
     used_by: str | None = None
+    tenant: str = ""  # set: the role applies inside this workspace only
 
     @property
     def pending(self) -> bool:
@@ -205,6 +206,9 @@ def _validate_record(invite_id: str, rec: object) -> dict:
         raise InviteStoreError(f"invite store corrupt: invalid created_by for {invite_id!r}")
     if used_by is not None and (not isinstance(used_by, str) or len(used_by) > 512):
         raise InviteStoreError(f"invite store corrupt: invalid used_by for {invite_id!r}")
+    tenant = rec.get("tenant", "")
+    if not isinstance(tenant, str) or len(tenant) > 128 or tenant != tenant.strip():
+        raise InviteStoreError(f"invite store corrupt: invalid workspace for {invite_id!r}")
     clean = dict(rec)
     clean["created_at"] = created
     clean["expires_at"] = expires
@@ -222,13 +226,16 @@ def _to_invite(rec: dict) -> Invite:
                   created_by=rec.get("created_by", ""),
                   created_at=float(rec.get("created_at", 0)),
                   expires_at=float(rec.get("expires_at", 0)),
-                  used_at=rec.get("used_at"), used_by=rec.get("used_by"))
+                  used_at=rec.get("used_at"), used_by=rec.get("used_by"),
+                  tenant=rec.get("tenant", ""))
 
 
 def create_invite(email: str, role: str, *, created_by: str,
-                  ttl_hours: float = INVITE_TTL_HOURS) -> tuple[Invite, str]:
+                  ttl_hours: float = INVITE_TTL_HOURS, tenant: str = "") -> tuple[Invite, str]:
     """Mint an invite; returns ``(invite, token)``. The token is shown ONCE —
-    only its sha256 is stored, so a copied store file yields no working links."""
+    only its sha256 is stored, so a copied store file yields no working links.
+    With ``tenant`` the role is granted inside that workspace only (a
+    workspace membership), never as the dashboard-wide role."""
     from . import rbac
     email = (email or "").strip().lower()
     if not email or "@" not in email or any(c.isspace() for c in email):
@@ -241,12 +248,17 @@ def create_invite(email: str, role: str, *, created_by: str,
         raise ValueError("invite TTL must be a finite number") from exc
     if not math.isfinite(ttl):
         raise ValueError("invite TTL must be a finite number")
+    tenant = (tenant or "").strip()
+    if len(tenant) > 128:
+        raise ValueError("invalid workspace")
     token = "inv_" + secrets.token_urlsafe(32)
     inv_id = "invite_" + secrets.token_hex(8)
     now = time.time()
     rec = {"id": inv_id, "email": email, "role": role, "created_by": created_by,
            "created_at": now, "expires_at": now + ttl * 3600,
            "token_sha256": _hash(token), "used_at": None, "used_by": None}
+    if tenant:
+        rec["tenant"] = tenant
     with _locked(store_path()):
         data = _load()
         pending = sum(1 for r in data.values()

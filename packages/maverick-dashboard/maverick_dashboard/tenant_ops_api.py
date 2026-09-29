@@ -87,7 +87,8 @@ async def onboard(body: OnboardIn, request: Request) -> dict:
         display_name=body.display_name.strip(), plan=body.plan, max_daily_dollars=body.max_daily_dollars))
     invited_by = caller_principal(request) or "local-admin"
     try:
-        invite, token = await run_in_threadpool(invites.create_invite, email, body.role, created_by=invited_by)
+        invite, token = await run_in_threadpool(lambda: invites.create_invite(
+            email, body.role, created_by=invited_by, tenant=created.id))
     except ValueError as exc:
         raise HTTPException(409, f"The workspace {created.display_name or created.id} was created, but the "
                                  "invitation could not be made. Invite the administrator from the People "

@@ -157,3 +157,26 @@ def test_workspaces_page_offers_the_new_controls_in_plain_words(client):
         assert marker in page.text
     assert not _BANNED.search(_visible(page.text))
     assert client.get("/static/lightwork-tenant-ops.js").status_code == 200
+
+
+def test_one_step_setup_invites_a_workspace_administrator_not_an_installation_one(client, monkeypatch):
+    """The client's first administrator administers the new workspace only: the
+    invitation must never grant the installation-wide role (which would let a
+    client's admin run every other client's workspace and this server)."""
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    token = "workspace-ops-test-token"  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", token)
+    client.headers["Authorization"] = f"Bearer {token}"
+    made = client.post(BASE + "/onboard", json=ONBOARD)
+    assert made.status_code == 201, made.text
+    workspace = made.json()["workspace"]["id"]
+    path = "/auth/invite/" + made.json()["invite_link"].rsplit("/auth/invite/", 1)[1]
+    del client.headers["Authorization"]
+    accepted = client.post(path, follow_redirects=False)
+    assert accepted.status_code == 303, accepted.text
+    from maverick_dashboard import auth, rbac
+    who = "user:owner@acme.example"
+    assert client.get("/api/v1/admin/services").status_code == 403
+    assert rbac.get_stored_role(who) is None
+    assert auth.global_role_for_principal(who) != "admin"
+    assert rbac.get_tenant_role(workspace, who) == "admin"
