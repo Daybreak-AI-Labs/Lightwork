@@ -597,7 +597,13 @@ def test_a_governance_level_is_previewed_then_applied_with_its_settings(audit_ro
     assert asked.status_code == 409
     asked_ids = {item["id"] for item in asked.json()["confirm"]}
     assert {"retention.audit_days", "learning.dreaming"} <= asked_ids
-    assert _save(change, confirm=True).status_code == 200
+    saved = _save(change, confirm=True)
+    assert saved.status_code == 200
+    # The reply carries the level and every setting it changed, not every row.
+    shown = {row["id"]: row for group in saved.json()["groups"] for row in group["settings"]}
+    assert {"governance.profile", "actions.enable", "retention.audit_days"} <= set(shown)
+    assert shown["retention.audit_days"]["value"] == 365
+    assert set(saved.json()["changed"]) <= set(shown) and len(shown) < len(catalog.SETTINGS) // 4
     loaded = _loaded()
     assert loaded["governance"]["profile"] == "regulated"
     assert loaded["actions"]["enable"] is True and loaded["retention"]["audit_days"] == 365

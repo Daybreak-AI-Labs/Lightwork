@@ -1260,8 +1260,30 @@ def _guard(request: Request, writes: dict, changes: list[dict],
     return settings_access_guard.review(request, changes, layers, writes, prospective)
 
 
+def _saved_state(before: dict[str, Any] | None, asked: set[str]) -> dict[str, Any]:
+    """The state after a save: only the rows the request named or whose state
+    the save changed (a governance level also sets other settings, a new
+    service adds choices elsewhere); ``before`` None gives every row."""
+    after = catalog_state()
+    if before is None:
+        return after
+    old = {r["id"]: r for g in before["groups"] for r in g["settings"]}
+    groups = []
+    for group in after["groups"]:
+        rows = [r for r in group["settings"] if r["id"] in asked or old.get(r["id"]) != r]
+        if rows:
+            parts = {r["subgroup"] for r in rows}
+            groups.append({**group, "settings": rows,
+                           "subgroups": [s for s in group["subgroups"] if s["name"] in parts]})
+    return {"groups": groups}
+
+
 @router.post(API_PATH)
-async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
+async def catalog_update(
+    request: Request, body: CatalogUpdate, full: bool = False,
+) -> JSONResponse:
+    """Save or reset settings. The reply carries the rows the save touched
+    (``?full=1``: every row, as ``GET`` lists them)."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick.audit import AuditRefused
@@ -1293,11 +1315,13 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
             status_code=409,
             headers={"Cache-Control": "no-store"},
         )
+    asked = {item.id for item in body.changes}
+    before = None if full else await run_in_threadpool(catalog_state)
     if not writes:
         if learning:
             await run_in_threadpool(settings_governance_level.turn_on, learning,
                                     auth.caller_principal(request) or "local administrator")
-        state = await run_in_threadpool(catalog_state)
+        state = await run_in_threadpool(_saved_state, before, asked)
         return JSONResponse({"changed": [], "restart": False, **state},
                             headers={"Cache-Control": "no-store"})
     actor = auth.caller_principal(request) or "local administrator"
@@ -1308,7 +1332,7 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
     hold, approved = await run_in_threadpool(settings_quorum.review, changes, actor,
                                              _audit_value)
     if hold is not None:
-        state = await run_in_threadpool(catalog_state)
+        state = await run_in_threadpool(_saved_state, before, asked)
         return JSONResponse({"changed": [], "restart": False, "quorum": hold,
                              "message": hold["message"], **state},
                             status_code=202, headers={"Cache-Control": "no-store"})
@@ -1350,7 +1374,7 @@ async def catalog_update(request: Request, body: CatalogUpdate) -> JSONResponse:
                 detail="The settings were saved, but the learning systems for this level "
                        "could not be turned on. Turn them on from the Learning page.",
             ) from exc
-    state = await run_in_threadpool(catalog_state)
+    state = await run_in_threadpool(_saved_state, before, asked)
     return JSONResponse(
         {
             "changed": [c["setting"].id for c in changes],

@@ -203,6 +203,42 @@ def test_loading_rows_is_for_administrators_only(monkeypatch):
     assert client.get(API, params={"q": "retention"}).status_code == 403
 
 
+def test_a_save_replies_with_the_rows_it_touched_not_every_row(audit_rows):
+    from maverick_dashboard import settings_catalog as catalog
+
+    r = _save([{"id": "ifc.mode", "value": "block"}])
+    assert r.status_code == 200 and r.json()["changed"] == ["ifc.mode"]
+    rows = [s for g in r.json()["groups"] for s in g["settings"]]
+    assert [s["id"] for s in rows] == ["ifc.mode"]
+    assert rows[0]["source"] == "here" and rows[0]["value"] == "block"
+    assert len(r.content) < 10_000
+    # Nothing changed: the named row still comes back, so the page shows it.
+    again = _save([{"id": "ifc.mode", "value": "block"}])
+    assert again.json()["changed"] == []
+    assert [s["id"] for g in again.json()["groups"] for s in g["settings"]] == ["ifc.mode"]
+    # ?full=1 keeps the whole listing for a caller that wants it.
+    whole = client.post(API + "?full=1", json={"changes": [{"id": "ifc.mode", "reset": True}],
+                                                "confirm": True})
+    assert whole.status_code == 200
+    assert sum(len(g["settings"]) for g in whole.json()["groups"]) == len(catalog.SETTINGS)
+
+
+def test_rows_changed_by_a_save_come_back_even_when_not_named():
+    from maverick_dashboard import settings_all_page
+
+    before = settings_all_page.catalog_state()
+    target = before["groups"][2]["settings"][0]
+    target["value_text"] = "something older"  # as if the save changed this row too
+    state = settings_all_page._saved_state(before, {"ifc.mode"})
+    ids = [s["id"] for g in state["groups"] for s in g["settings"]]
+    assert sorted(ids) == sorted({"ifc.mode", target["id"]})
+    for group in state["groups"]:
+        parts = {s["subgroup"] for s in group["settings"] if s["subgroup"]}
+        assert {p["name"] for p in group["subgroups"]} == parts
+    assert settings_all_page._saved_state(None, set())["groups"] == \
+        settings_all_page.catalog_state()["groups"]
+
+
 def test_one_listing_builds_each_live_list_once(monkeypatch):
     from maverick_dashboard import settings_all_page
 
