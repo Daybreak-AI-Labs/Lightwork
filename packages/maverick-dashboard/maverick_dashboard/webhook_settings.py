@@ -238,6 +238,7 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
         if after["authority"] != before["authority"] or after["value"] != expected or after["outbound"] != expected_outbound:
             raise WebhookSettingsConflict("The change did not become active. The app's previous settings were restored. Refresh status.")
         result = _public(after, principal)
+        _record(principal, action, before, after)
     except Exception:
         try:
             settings_store._restore_provider_overlay(path=path, existed=existed,
@@ -247,3 +248,18 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
         raise
     result["result"] = "active" if action == "set" else "app_copy_removed"
     return result
+
+
+def _record(principal: str, action: str, before: dict, after: dict) -> None:
+    """One activity-record row per change: whether a secret is active before
+    and after, never the secret. A refused row undoes the change."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        audit_event(EventKind.SETTING_CHANGED, agent="dashboard", _global=True, actor=principal,
+                    section="webhooks", key="secret", action=action,
+                    old="set" if before["value"] else "not set",
+                    new="set" if after["value"] else "not set", source="settings")
+    except AuditRefused as exc:
+        raise WebhookSettingsUnavailable(
+            "The change could not be recorded in the activity record, so it was undone.") from exc
