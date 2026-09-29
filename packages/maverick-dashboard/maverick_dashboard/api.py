@@ -12970,6 +12970,16 @@ def _approval_api_row(approval) -> dict:
     }
 
 
+def _require_settings_decider(request: Request, world, approval_id: int, who: str, *,
+                              approving: bool) -> None:
+    """A protected-settings request (settings_quorum) is decided only by a
+    global administrator, and never approved by the person who asked."""
+    from . import settings_quorum
+
+    settings_quorum.require_decider(request, world.get_approval(approval_id), who,
+                                    approving=approving)
+
+
 def _require_current_decision_card(world, approval_id: int, request: Request) -> None:
     """Reject a stale page, expired card, or corrupted structured approval."""
     from maverick.approval_cards import (
@@ -13240,6 +13250,7 @@ def approve_approval(request: Request, approval_id: int) -> Response:
     )
     who = _supervisor(request)
     world = _world()
+    _require_settings_decider(request, world, approval_id, who, approving=True)
     _require_current_decision_card(world, approval_id, request)
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
@@ -13278,6 +13289,7 @@ def deny_approval(request: Request, approval_id: int) -> Response:
     )
     who = _supervisor(request)
     world = _world()
+    _require_settings_decider(request, world, approval_id, who, approving=False)
     event = _record_vote_or_raise(world, approval_id, "denied", who)
     return _approval_decision_response(
         world,
@@ -13325,6 +13337,7 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
     except (ApprovalCardError, KeyError, TypeError, ValueError):
         pass
     who = _supervisor(request)
+    _require_settings_decider(request, world, approval_id, who, approving=False)
     event = _record_vote_or_raise(world, approval_id, "denied", who)
     delivered = _audit_approval_decision(world, event)
     if not delivered:

@@ -61,6 +61,9 @@ _SESSION_REQUIRED_DETAIL = "consent session required"
 _SESSION_INVALID_DETAIL = "consent session expired or invalid"
 _SESSION_REPLACED_GRACE_SECONDS = 30.0
 _MAX_LIVE_SESSIONS = 200_000
+# One site key's share of the live sessions, so a single (public) key cannot
+# use up the installation-wide capacity for every other site.
+_MAX_LIVE_SESSIONS_PER_CLIENT = 50_000
 _MOBILE_PLATFORMS = frozenset({"android", "fireos", "ios", "roku", "tizen", "tvos", "webos"})
 _PUBLIC_EXPERIMENT_LAYOUTS = frozenset({"compact", "inline", "stacked"})
 _PUBLIC_EXPERIMENT_ACTIONS = frozenset({"accept_all", "reject_all", "save_preferences"})
@@ -414,6 +417,10 @@ class PublicConsentCredentialStore:
             """
             CREATE INDEX IF NOT EXISTS public_consent_sessions_expiry
             ON public_consent_sessions(expires_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS public_consent_sessions_client
+            ON public_consent_sessions(credential_sha256)
             """,
             """
             CREATE TABLE IF NOT EXISTS public_consent_clients (
@@ -1709,6 +1716,12 @@ class PublicConsentCredentialStore:
         live = connection.execute("SELECT COUNT(*) FROM public_consent_sessions").fetchone()[0]
         if int(live) >= _MAX_LIVE_SESSIONS:
             raise PublicConsentRateLimitExceeded("session capacity reached")
+        mine = connection.execute(
+            "SELECT COUNT(*) FROM public_consent_sessions WHERE credential_sha256 = ?",
+            (client.credential_sha256,),
+        ).fetchone()[0]
+        if int(mine) >= _MAX_LIVE_SESSIONS_PER_CLIENT:
+            raise PublicConsentRateLimitExceeded("session capacity reached for this site key")
         raw = _SESSION_PREFIX + secrets.token_urlsafe(32)
         expires_at = now + ttl
         connection.execute(

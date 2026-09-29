@@ -85,7 +85,17 @@ async def plan_contents(request: Request, workspace: str = Query(..., min_length
 
 # ---- Stripe billing (maverick billing stripe-status / preview / sync) -----------
 
-def _stripe_status() -> dict[str, Any]:
+def _notice_address(request: Request) -> str:
+    """Where Stripe sends payment notices: this server's address for others
+    (``MAVERICK_PUBLIC_URL`` / ``[dashboard] public_url``), else the address
+    this page was opened at."""
+    from .automation_queue import _public_base_url
+
+    base = _public_base_url() or str(request.base_url)
+    return base.rstrip("/") + "/webhook/stripe"
+
+
+def _stripe_status(address: str) -> dict[str, Any]:
     from maverick.billing_stripe import status
     st = status()
     if st.enabled and st.sdk_available:
@@ -102,6 +112,7 @@ def _stripe_status() -> dict[str, Any]:
             {"label": "Turned on", "value": "Yes" if st.enable_flag else "No"},
             {"label": "Stripe key saved", "value": "Yes" if st.has_secret_key else "No"},
             {"label": "Payment notices from Stripe accepted", "value": "Yes" if st.has_webhook_secret else "No"},
+            {"label": "Address for Stripe payment notices", "value": address},
             {"label": "Stripe connector installed", "value": "Yes" if st.sdk_available else "No"},
             {"label": "AI usage billed", "value": "Yes" if st.bill_metered_usage else "No, plan fee only"},
             {"label": "Plans with a Stripe price", "value": ", ".join(_words(p) for p in st.plans_priced) or "None"},
@@ -113,7 +124,7 @@ def _stripe_status() -> dict[str, Any]:
 @router.get("/stripe")
 async def stripe_status(request: Request) -> dict:
     _admin(request)
-    return await run_in_threadpool(_stripe_status)
+    return await run_in_threadpool(_stripe_status, _notice_address(request))
 
 
 def _card(markup: float, minimum: float):

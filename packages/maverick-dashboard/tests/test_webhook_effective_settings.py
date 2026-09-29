@@ -309,3 +309,33 @@ def test_production_settings_serves_its_actual_script():
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "expected_generation" in response.text
+
+
+def test_set_and_remove_are_recorded_without_the_secret(monkeypatch):
+    import maverick.audit as audit
+
+    rows: list[dict] = []
+    monkeypatch.setattr(audit, "audit_event",
+                        lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
+    http = client()
+    value = "synthetic-recorded-rotation-key"
+    assert save(http, value).status_code == 200
+    assert save(http, "", action="remove").status_code == 200
+    changes = [r for r in rows if r.get("section") == "webhooks" and r.get("key") == "secret"]
+    assert [(r["old"], r["new"]) for r in changes] == [("not set", "set"), ("set", "not set")]
+    assert all(r.get("_global") is True and r.get("actor") for r in changes)
+    assert value not in repr(rows)
+
+
+def test_a_refused_record_undoes_the_change(monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import AuditRefused
+
+    def refuse(kind, **payload):
+        raise AuditRefused("activity record unavailable")
+
+    monkeypatch.setattr(audit, "audit_event", refuse)
+    http = client()
+    response = save(http, "synthetic-unrecorded-key")
+    assert response.status_code == 503
+    assert webhooks.inbound_secret() in (None, "")

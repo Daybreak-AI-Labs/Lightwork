@@ -138,6 +138,26 @@ def test_sessions_use_the_existing_rate_limit(tmp_path):
     assert len({sha for sha, _action in calls}) == 1
 
 
+def test_one_site_key_cannot_fill_every_session(tmp_path, monkeypatch):
+    """Each site key has its own share of live sessions, so one key can't use
+    up the installation's capacity for every other site."""
+    from maverick_dashboard import consent_public_api
+
+    monkeypatch.setattr(consent_public_api, "_MAX_LIVE_SESSIONS", 5)
+    monkeypatch.setattr(consent_public_api, "_MAX_LIVE_SESSIONS_PER_CLIENT", 2)
+    env = seed(tmp_path, session_ttl=lambda: 600)
+    _start(env)
+    _start(env)
+    refused = env.client.post(SESSIONS, headers=browser_headers())
+    assert refused.status_code == 429 and refused.json() == {"detail": "rate limit reached"}
+    # Another website still gets its sessions.
+    other = _start(env, OTHER_CREDENTIAL, OTHER_ORIGIN)["session_token"]
+    assert _read(env, other, OTHER_CREDENTIAL, OTHER_ORIGIN).status_code == 200
+    # Ended sessions free the key's share again.
+    env.clock["now"] = NOW + 601
+    assert _start(env)["session_token"]
+
+
 def test_session_lifetime_bounds(tmp_path, monkeypatch):
     from maverick import config
 

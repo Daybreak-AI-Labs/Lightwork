@@ -6951,6 +6951,14 @@ async def plugins_approvals(
     from maverick_dashboard import settings_store
 
     parsed = [p for value in names for chunk in value.replace(",", "\n").splitlines() for p in chunk.split()]
+    from maverick.plugins import installable_plugins
+
+    wanted = list(dict.fromkeys(parsed))
+    hold, approved = await run_in_threadpool(
+        _plugins_quorum, request, "installable", "Plugins that can be installed",
+        list(installable_plugins()), wanted)
+    if hold is not None:
+        return hold
     try:
         await run_in_threadpool(settings_store.set_installable_plugins, parsed)
     except ValueError as exc:
@@ -6958,6 +6966,7 @@ async def plugins_approvals(
     from maverick.config import reset_config_cache
 
     reset_config_cache()
+    await run_in_threadpool(_settle_plugins_quorum, approved)
     return RedirectResponse("/plugins", status_code=303)
 
 
@@ -6974,11 +6983,45 @@ async def plugins_install_switch(
         raise HTTPException(status_code=400, detail="enabled must be 'on' or 'off'")
     from maverick_dashboard import settings_store
 
+    hold, approved = await run_in_threadpool(
+        _plugins_quorum, request, "allow_install", "Install plugins from this page",
+        _plugin_install_enabled(), enabled == "on")
+    if hold is not None:
+        return hold
     await run_in_threadpool(settings_store.set_plugin_install_allowed, enabled == "on")
     from maverick.config import reset_config_cache
 
     reset_config_cache()
+    await run_in_threadpool(_settle_plugins_quorum, approved)
     return RedirectResponse("/plugins", status_code=303)
+
+
+def _plugins_quorum(request: Request, key: str, label: str, old: object,
+                    new: object) -> tuple[JSONResponse | None, str | None]:
+    """[plugins] is protected by the settings quorum ([safety] quorum_*), so a
+    change here waits for other administrators exactly as on All settings.
+    Returns ``(held response, None)`` or ``(None, approved change id)``."""
+    if old == new:
+        return None, None
+    from types import SimpleNamespace
+
+    from maverick_dashboard import auth as auth_module
+    from maverick_dashboard import settings_quorum
+
+    actor = auth_module.caller_principal(request) or "local administrator"
+    change = [{"setting": SimpleNamespace(id=f"plugins.{key}", label=label),
+               "old": old, "new": new}]
+    hold, approved = settings_quorum.review(change, actor, lambda _s, value: value)
+    if hold is not None:
+        return JSONResponse({"changed": [], "quorum": hold, "message": hold["message"]},
+                            status_code=202, headers={"Cache-Control": "no-store"}), None
+    return None, approved
+
+
+def _settle_plugins_quorum(approved: str | None) -> None:
+    from maverick_dashboard import settings_quorum
+
+    settings_quorum.settle(approved)
 
 
 @app.get("/mcp", response_class=HTMLResponse)
@@ -9871,6 +9914,59 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
 
     bg.add_task(run_goal_in_background_async, goal_id, None)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
+
+
+@app.post("/webhook/stripe")
+async def webhook_stripe(request: Request) -> JSONResponse:
+    """Stripe payment notices (failed or recovered payments, subscription
+    changes) -> the workspace's billing status.
+
+    Authenticated by Stripe's own ``Stripe-Signature`` (HMAC-SHA256 over the
+    signed timestamp and body, compared in constant time, stale timestamps
+    refused) against the Stripe message signing secret
+    (``MAVERICK_STRIPE_WEBHOOK_SECRET`` or the sealed All settings value).
+    Refused while no secret is set; an unsigned or badly signed event is never
+    read. A repeated event id is acknowledged without being applied again, and
+    every accepted event is recorded in the activity record before it is
+    applied (a refused record means Stripe retries later)."""
+    from maverick import billing_stripe
+    from maverick.audit import AuditRefused, audit_event
+
+    secret = await run_in_threadpool(billing_stripe._webhook_secret)
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Stripe payment notices aren't set up yet. An administrator must save "
+                "the Stripe message signing secret in Settings > All settings."
+            ),
+        )
+    body = await _read_limited_webhook_body(request)
+    try:
+        event = billing_stripe.verify_webhook(
+            body, request.headers.get("Stripe-Signature") or "", secret=secret)
+    except billing_stripe.StripeWebhookError as exc:
+        raise HTTPException(status_code=400, detail="bad Stripe signature") from exc
+    event_id = str(event.get("id") or "").strip()[:200]
+    event_type = str(event.get("type") or "")[:200]
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Stripe event has no id")
+    if _issue_webhook_replay_seen(f"stripe:{event_id}",
+                                  billing_stripe._DEFAULT_WEBHOOK_TOLERANCE * 2):
+        return JSONResponse({"received": True, "duplicate": True})
+    try:
+        await run_in_threadpool(
+            lambda: audit_event("control_plane_action", agent="stripe", _global=True,
+                                action="stripe_payment_notice", actor="stripe",
+                                event_id=event_id, event_type=event_type))
+    except AuditRefused as exc:
+        with _issue_webhook_seen_lock:
+            _issue_webhook_seen.pop(f"stripe:{event_id}", None)
+        raise HTTPException(status_code=503, detail=(
+            "This notice could not be added to the activity record. Stripe will send it "
+            "again.")) from exc
+    result = await run_in_threadpool(billing_stripe.handle_event, event)
+    return JSONResponse({"received": True, "handled": bool(result.get("handled"))})
 
 
 # Replay dedup for inbound issue webhooks, keyed on the request's HMAC signature

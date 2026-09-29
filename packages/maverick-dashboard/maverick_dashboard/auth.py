@@ -72,6 +72,7 @@ SELF_AUTH_WEBHOOK_PATHS = frozenset(
         "/webhook/jira",
         "/webhook/github",
         "/webhook/gitlab",
+        "/webhook/stripe",
     }
 )
 
