@@ -481,3 +481,40 @@ def test_workspace_recovery_page_explains_when_it_is_switched_off(client, tmp_pa
     assert "Workspace recovery is turned off." in page.text and 'href="/settings#settings-controls"' in page.text
     _config(tmp_path, "[features]\nworkspace_recovery = true\n")
     assert "Workspace recovery is turned off." not in client.get("/workspace/recovery").text
+
+
+def test_a_failing_change_still_leaves_the_request_in_the_activity_record(client, monkeypatch, tmp_path):
+    """Each change is recorded as requested before it runs, so a change that
+    fails part way still shows who asked for it; the outcome follows."""
+    from maverick import learning_store_migration as lsm
+    from maverick import migrate as migrate_mod
+    from maverick_channels import delivery
+    from maverick_dashboard import installation_ops_api as ops
+    from maverick_dashboard import offline_maintenance
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("side effect failed")
+
+    seen = _audit_verbs(monkeypatch)
+    monkeypatch.setattr(migrate_mod, "migrate", boom)
+    with pytest.raises(RuntimeError):
+        client.post(BASE + "/settings-file/update", json={"confirm": True})
+    monkeypatch.setattr(delivery.DeliveryJournal, "compact_delivered", boom)
+    assert client.post(BASE + "/message-receipts/tidy", json={"confirm": True}).status_code == 409
+
+    def refused():
+        raise lsm.MigrationRefused("verification failed")
+    monkeypatch.setattr(ops, "_learning_move", refused)
+    assert client.post(BASE + "/learning-move", json={"confirm": True}).status_code == 409
+    monkeypatch.setattr(offline_maintenance, "cancel", boom)
+    with pytest.raises(RuntimeError):
+        client.post(BASE + "/task-records/cancel", json={"confirm": True})
+    verbs = [p.get("verb") for p in seen]
+    pairs = {"settings_file_update_requested": "settings_file_update",
+             "message_receipts_tidy_requested": "message_receipts_tidy",
+             "learning_move_requested": "learning_move",
+             "task_records_move_cancel_requested": "task_records_move_cancelled"}
+    failed = [p.get("verb") for p in seen if p.get("succeeded") is False]
+    for requested, outcome in pairs.items():
+        assert requested in verbs, requested
+        assert outcome in failed and verbs.index(requested) < verbs.index(outcome), outcome

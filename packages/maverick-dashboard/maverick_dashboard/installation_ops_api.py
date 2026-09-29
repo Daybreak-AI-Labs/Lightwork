@@ -70,6 +70,15 @@ def _record(request: Request, verb: str, **detail: Any) -> None:
     record(request, verb, **detail)
 
 
+def _failed(request: Request, verb: str) -> None:
+    """The outcome row for a change that did not complete (its request row is
+    already in the activity record, so a refused outcome row is not raised)."""
+    try:
+        _record(request, verb, succeeded=False)
+    except HTTPException:
+        pass
+
+
 def _confirmed(confirm: bool, what: str) -> None:
     if confirm is not True:
         raise HTTPException(409, f"Confirm to {what}. Nothing was changed.")
@@ -366,9 +375,14 @@ async def settings_file_preview(request: Request) -> dict:
 async def settings_file_update(body: ConfirmIn, request: Request) -> dict:
     _mutation(request)
     _confirmed(body.confirm, "update the settings file")
-    result = await run_in_threadpool(_migrate, True)
+    await run_in_threadpool(_record, request, "settings_file_update_requested")
+    try:
+        result = await run_in_threadpool(_migrate, True)
+    except Exception:
+        await run_in_threadpool(_failed, request, "settings_file_update")
+        raise
     await run_in_threadpool(_record, request, "settings_file_update", rewrites=result["rewrites"],
-                            wrote=result["wrote"], backup=result["backup"])
+                            wrote=result["wrote"], backup=result["backup"], succeeded=True)
     return result
 
 
@@ -524,13 +538,16 @@ def _tidy_receipts() -> int:
 async def tidy_message_receipts(body: ConfirmIn, request: Request) -> dict:
     _mutation(request)
     _confirmed(body.confirm, "tidy up message receipts")
+    await run_in_threadpool(_record, request, "message_receipts_tidy_requested")
     try:
         count = await run_in_threadpool(_tidy_receipts)
     except ImportError as exc:
+        await run_in_threadpool(_failed, request, "message_receipts_tidy")
         raise HTTPException(409, "Chat channels aren't installed with this copy of Lightwork.") from exc
     except Exception as exc:  # noqa: BLE001 -- a paused or restoring workspace refuses plainly
+        await run_in_threadpool(_failed, request, "message_receipts_tidy")
         raise HTTPException(409, "Message receipts can't be tidied right now. Try again later.") from exc
-    await run_in_threadpool(_record, request, "message_receipts_tidy", cleared=count)
+    await run_in_threadpool(_record, request, "message_receipts_tidy", cleared=count, succeeded=True)
     return {"cleared": count,
             "summary": (f"Cleared the stored text of {count} delivered message{'s' if count != 1 else ''}. "
                         if count else "Nothing needed clearing in this pass. ")
@@ -783,13 +800,18 @@ async def learning_move(body: ConfirmIn, request: Request) -> dict:
     _mutation(request)
     _confirmed(body.confirm, "move the learned items")
     from maverick.learning_store_migration import MigrationRefused
+    await run_in_threadpool(_record, request, "learning_move_requested")
     try:
         result = await run_in_threadpool(_learning_move)
     except MigrationRefused as exc:
+        await run_in_threadpool(_failed, request, "learning_move")
         raise HTTPException(409, "The learned items could not be moved safely, so the files on this computer "
                                  "were left as they were.") from exc
+    except Exception:
+        await run_in_threadpool(_failed, request, "learning_move")
+        raise
     await run_in_threadpool(_record, request, "learning_move", moved=result["moved"],
-                            test_cases=result["test_cases"])
+                            test_cases=result["test_cases"], succeeded=True)
     return result
 
 
@@ -824,8 +846,13 @@ async def cancel_task_records(body: ConfirmIn, request: Request) -> dict:
     _mutation(request)
     _confirmed(body.confirm, "cancel the scheduled move")
     from . import offline_maintenance
-    await run_in_threadpool(offline_maintenance.cancel, "task_records")
-    await run_in_threadpool(_record, request, "task_records_move_cancelled")
+    await run_in_threadpool(_record, request, "task_records_move_cancel_requested")
+    try:
+        await run_in_threadpool(offline_maintenance.cancel, "task_records")
+    except Exception:
+        await run_in_threadpool(_failed, request, "task_records_move_cancelled")
+        raise
+    await run_in_threadpool(_record, request, "task_records_move_cancelled", succeeded=True)
     return await run_in_threadpool(offline_maintenance.task_records_state)
 
 
