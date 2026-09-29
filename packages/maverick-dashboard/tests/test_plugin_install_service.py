@@ -157,3 +157,22 @@ def test_approvals_and_switch_require_admin(tmp_path, monkeypatch):
                        follow_redirects=False).status_code == 403
     assert client.post("/plugins/install-switch", data={"enabled": "on"},
                        follow_redirects=False).status_code == 403
+
+
+def test_plugin_install_settings_wait_for_approval_under_a_quorum(tmp_path, monkeypatch):
+    """[plugins] is protected by the settings quorum: the Plugins page's
+    switch and allowlist wait for other administrators like All settings."""
+    from maverick import world_model
+
+    config = _isolate_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setenv("MAVERICK_QUORUM_REQUIRED", "2")
+    r = client.post("/plugins/install-switch", data={"enabled": "on"},
+                    follow_redirects=False)
+    assert r.status_code == 202, r.text
+    r = client.post("/plugins/approvals", data={"names": ["acme-tools"]},
+                    follow_redirects=False)
+    assert r.status_code == 202, r.text
+    config.reset_config_cache()
+    plugins = config.load_config().get("plugins") or {}
+    assert "allow_install" not in plugins and "installable" not in plugins

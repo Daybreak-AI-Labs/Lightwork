@@ -6951,6 +6951,14 @@ async def plugins_approvals(
     from maverick_dashboard import settings_store
 
     parsed = [p for value in names for chunk in value.replace(",", "\n").splitlines() for p in chunk.split()]
+    from maverick.plugins import installable_plugins
+
+    wanted = list(dict.fromkeys(parsed))
+    hold, approved = await run_in_threadpool(
+        _plugins_quorum, request, "installable", "Plugins that can be installed",
+        list(installable_plugins()), wanted)
+    if hold is not None:
+        return hold
     try:
         await run_in_threadpool(settings_store.set_installable_plugins, parsed)
     except ValueError as exc:
@@ -6958,6 +6966,7 @@ async def plugins_approvals(
     from maverick.config import reset_config_cache
 
     reset_config_cache()
+    await run_in_threadpool(_settle_plugins_quorum, approved)
     return RedirectResponse("/plugins", status_code=303)
 
 
@@ -6974,11 +6983,45 @@ async def plugins_install_switch(
         raise HTTPException(status_code=400, detail="enabled must be 'on' or 'off'")
     from maverick_dashboard import settings_store
 
+    hold, approved = await run_in_threadpool(
+        _plugins_quorum, request, "allow_install", "Install plugins from this page",
+        _plugin_install_enabled(), enabled == "on")
+    if hold is not None:
+        return hold
     await run_in_threadpool(settings_store.set_plugin_install_allowed, enabled == "on")
     from maverick.config import reset_config_cache
 
     reset_config_cache()
+    await run_in_threadpool(_settle_plugins_quorum, approved)
     return RedirectResponse("/plugins", status_code=303)
+
+
+def _plugins_quorum(request: Request, key: str, label: str, old: object,
+                    new: object) -> tuple[JSONResponse | None, str | None]:
+    """[plugins] is protected by the settings quorum ([safety] quorum_*), so a
+    change here waits for other administrators exactly as on All settings.
+    Returns ``(held response, None)`` or ``(None, approved change id)``."""
+    if old == new:
+        return None, None
+    from types import SimpleNamespace
+
+    from maverick_dashboard import auth as auth_module
+    from maverick_dashboard import settings_quorum
+
+    actor = auth_module.caller_principal(request) or "local administrator"
+    change = [{"setting": SimpleNamespace(id=f"plugins.{key}", label=label),
+               "old": old, "new": new}]
+    hold, approved = settings_quorum.review(change, actor, lambda _s, value: value)
+    if hold is not None:
+        return JSONResponse({"changed": [], "quorum": hold, "message": hold["message"]},
+                            status_code=202, headers={"Cache-Control": "no-store"}), None
+    return None, approved
+
+
+def _settle_plugins_quorum(approved: str | None) -> None:
+    from maverick_dashboard import settings_quorum
+
+    settings_quorum.settle(approved)
 
 
 @app.get("/mcp", response_class=HTMLResponse)
