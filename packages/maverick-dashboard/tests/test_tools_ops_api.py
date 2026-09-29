@@ -174,6 +174,28 @@ def test_skill_that_changed_after_the_check_is_not_added(client, monkeypatch, tm
     assert not (tmp_path / "skills" / "weekly-status.md").exists()
 
 
+def test_skill_add_keeps_web_address_passwords_out_of_the_activity_record(client, monkeypatch, tmp_path):
+    """A private link carries its password (``user:pass@`` or ``?token=``);
+    the activity record keeps where the skill came from, never that password."""
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
+    fetched = _serve_skill(monkeypatch)
+    source = ("https://alice:hunter2-secret@raw.example.com/acme/skills/SKILL.md"
+              "?token=GHSAT0AAAAAAsecretvalue#frag")
+    fp = client.post("/api/v1/skills/source-preview", json={"source": source}).json()["fingerprint"]
+    seen = _audit(monkeypatch)
+    r = client.post("/api/v1/skills/source-install",
+                    json={"source": source, "fingerprint": fp, "confirm": True})
+    assert r.status_code == 201, r.text
+    assert fetched[-1] == source  # the fetch itself still uses the full link
+    row = next(p for p in seen if p.get("verb") == "skill_install")
+    assert row["source"] == "https://raw.example.com/acme/skills/SKILL.md"
+    written = "".join(f.read_text(errors="replace") for f in (tmp_path / "home").rglob("*")
+                      if f.is_file() and "audit" in str(f))
+    assert "skill_install" in written
+    for secret in ("hunter2-secret", "GHSAT0AAAAAAsecretvalue", "alice"):
+        assert secret not in written
+
+
 # ---- skills: track record and tidying up -------------------------------------
 
 def _install_skill(tmp_path, name):

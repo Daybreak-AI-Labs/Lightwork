@@ -23,6 +23,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -99,6 +100,15 @@ def _skill_source(raw: str) -> str:
     raise HTTPException(422, "Enter a web address starting with https://, or choose a GitHub project.")
 
 
+def _recorded_source(source: str) -> str:
+    """The source as the activity record keeps it: a private link's password
+    (``user:pass@``, ``?token=``, ``#...``) is dropped, never recorded."""
+    if not source.startswith("https://"):
+        return source[:200]
+    parts = urlsplit(source)
+    return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))[:200]
+
+
 def _install_allowed() -> bool:
     # The server's MAVERICK_ALLOW_SKILL_INSTALL wins; otherwise the All settings
     # switch "Install skills from a typed web address" ([skills] allow_url_install).
@@ -161,7 +171,7 @@ async def skill_source_install(body: SkillInstallIn, request: Request) -> dict:
         raise HTTPException(422, "Confirm that you want to add this skill.")
     if not _HEX64.fullmatch(body.fingerprint):
         raise HTTPException(422, "Check the skill again before adding it.")
-    record(request, "skill_install", installation=False, source=source[:200])
+    record(request, "skill_install", installation=False, source=_recorded_source(source))
     from maverick.skills import install_skill
     try:
         s = await run_in_threadpool(lambda: install_skill(
