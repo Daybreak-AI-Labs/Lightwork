@@ -347,19 +347,34 @@ def test_a_frozen_refusal_reaches_the_page_and_the_settings_start(client, monkey
     assert quiet["running"] is False and "no separate Python" in quiet["last_error"]
 
 
-@pytest.mark.parametrize("proxy_on", [True, False])
-def test_services_get_the_ai_service_keys_only_while_the_model_proxy_is_off(client, monkeypatch, tmp_path,
-                                                                             proxy_on):
-    """With the model proxy on, only the proxy holds the AI service keys: every
-    other program Lightwork starts goes through it and never sees a key."""
+_PROXY_CONFIGS = {
+    "anthropic": '[model_proxy]\nenable = true\nupstream = "https://api.anthropic.com"\n',
+    "unknown": '[model_proxy]\nenable = true\nupstream = "https://models.internal.example"\n',
+    "unset": "[model_proxy]\nenable = true\n",
+    "off": '[model_proxy]\nenable = false\nupstream = "https://api.anthropic.com"\n',
+}
+_KEYS = {"ANTHROPIC_API_KEY": "sk-ant-test", "OPENAI_API_KEY": "sk-test",  # pragma: allowlist secret
+         "AZURE_OPENAI_AD_TOKEN": "ad-token", "MAVERICK_PROXY_KEY": "proxy-held"}  # pragma: allowlist secret
+_KEPT = {
+    # Only the AI service the proxy forwards to loses its key; others are kept.
+    "anthropic": {"OPENAI_API_KEY", "AZURE_OPENAI_AD_TOKEN"},
+    # An upstream that can't be matched to an AI service: every key is removed.
+    "unknown": set(),
+    "unset": set(),
+    "off": set(_KEYS),
+}
+
+
+@pytest.mark.parametrize("mode", list(_PROXY_CONFIGS))
+def test_services_get_the_ai_service_keys_only_while_the_model_proxy_is_off(client, monkeypatch, tmp_path, mode):
+    """With the model proxy on, only the proxy holds the key of the AI service it
+    forwards to: every other program reaches that service through it."""
     from maverick import config, owned_process
     from maverick_dashboard import service_supervisor
-    (tmp_path / "config.toml").write_text(f"[model_proxy]\nenable = {'true' if proxy_on else 'false'}\n",
-                                          encoding="utf-8")
+    (tmp_path / "config.toml").write_text(_PROXY_CONFIGS[mode], encoding="utf-8")
     config.reset_config_cache()
-    keys = {"ANTHROPIC_API_KEY": "sk-ant-test", "OPENAI_API_KEY": "sk-test",  # pragma: allowlist secret
-            "AZURE_OPENAI_AD_TOKEN": "ad-token", "MAVERICK_PROXY_KEY": "proxy-held"}  # pragma: allowlist secret
-    for name, value in keys.items():
+    monkeypatch.delenv("MAVERICK_PROXY_UPSTREAM", raising=False)
+    for name, value in _KEYS.items():
         monkeypatch.setenv(name, value)
     seen: dict[str, dict] = {}
 
@@ -371,6 +386,5 @@ def test_services_get_the_ai_service_keys_only_while_the_model_proxy_is_off(clie
     for kind in ("worker", "channels", "tools", "profiling", "model_proxy"):
         service_supervisor._spawn(kind)
     for kind in ("worker", "channels", "tools", "profiling"):
-        present = {name for name in keys if name in seen[kind]}
-        assert present == (set() if proxy_on else set(keys)), kind
+        assert {name for name in _KEYS if name in seen[kind]} == _KEPT[mode], kind
     assert seen["model_proxy"]["MAVERICK_PROXY_KEY"] == "proxy-held"

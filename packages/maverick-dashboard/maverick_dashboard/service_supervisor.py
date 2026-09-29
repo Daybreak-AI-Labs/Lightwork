@@ -22,7 +22,8 @@ For all of them:
   process tree; a frozen release build, which has no separate Python to run a
   program module with, refuses those plainly;
 * one instance per kind;
-* while the model proxy is on, only the proxy is given the AI service keys;
+* while the model proxy is on, only the proxy is given the key of the AI
+  service it forwards to;
 * output is drained into a small bounded log (secrets masked) so a stopped
   program can say why;
 * it is stopped politely, then forcibly, on request and when the dashboard
@@ -131,14 +132,38 @@ def _scrub(text: str) -> str:
     return text[:LOG_LINE_CHARS]
 
 
+def _proxied_credentials() -> tuple[str, ...]:
+    """The environment credentials of the AI service the model proxy forwards to.
+
+    The upstream is read exactly as the proxy reads it
+    (:func:`maverick.model_proxy.config_from_env`) and matched to a provider by
+    its public API host. Fail safe: when the upstream is missing, unreadable or
+    not a known provider host (a self-hosted or private endpoint), every
+    provider credential is treated as proxied and removed."""
+    from urllib.parse import urlparse
+
+    from maverick.config import PROVIDER_CREDENTIAL_ENV_MAP, PROVIDER_CREDENTIAL_ENV_VARS
+    try:
+        from maverick.model_discovery import LIST_ENDPOINTS
+        from maverick.model_proxy import config_from_env
+        cfg = config_from_env()
+        host = (urlparse(cfg.upstream).hostname or "").lower() if cfg else ""
+        providers = [name for name, (url, _style) in LIST_ENDPOINTS.items()
+                     if host and urlparse(url).hostname == host]
+    except Exception:  # noqa: BLE001 -- an unreadable upstream removes every key (fail safe)
+        providers = []
+    if not providers:
+        return PROVIDER_CREDENTIAL_ENV_VARS
+    return tuple(name for provider in providers for name in PROVIDER_CREDENTIAL_ENV_MAP.get(provider, ()))
+
+
 def _child_env(kind: str) -> dict[str, str]:
     """This dashboard's environment for ``kind``. While the model proxy is on,
-    only the proxy keeps the AI service keys; every other program reaches the
-    AI service through it and never holds a key."""
+    only the proxy keeps the key of the AI service it forwards to; every other
+    program reaches that service through it. Keys for other AI services stay."""
     env = dict(os.environ)
     if kind != "model_proxy" and wanted("model_proxy"):
-        from maverick.config import PROVIDER_CREDENTIAL_ENV_VARS
-        for name in (*PROVIDER_CREDENTIAL_ENV_VARS, "MAVERICK_PROXY_KEY"):
+        for name in (*_proxied_credentials(), "MAVERICK_PROXY_KEY"):
             env.pop(name, None)
     return env
 
