@@ -9916,6 +9916,59 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 
+@app.post("/webhook/stripe")
+async def webhook_stripe(request: Request) -> JSONResponse:
+    """Stripe payment notices (failed or recovered payments, subscription
+    changes) -> the workspace's billing status.
+
+    Authenticated by Stripe's own ``Stripe-Signature`` (HMAC-SHA256 over the
+    signed timestamp and body, compared in constant time, stale timestamps
+    refused) against the Stripe message signing secret
+    (``MAVERICK_STRIPE_WEBHOOK_SECRET`` or the sealed All settings value).
+    Refused while no secret is set; an unsigned or badly signed event is never
+    read. A repeated event id is acknowledged without being applied again, and
+    every accepted event is recorded in the activity record before it is
+    applied (a refused record means Stripe retries later)."""
+    from maverick import billing_stripe
+    from maverick.audit import AuditRefused, audit_event
+
+    secret = await run_in_threadpool(billing_stripe._webhook_secret)
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Stripe payment notices aren't set up yet. An administrator must save "
+                "the Stripe message signing secret in Settings > All settings."
+            ),
+        )
+    body = await _read_limited_webhook_body(request)
+    try:
+        event = billing_stripe.verify_webhook(
+            body, request.headers.get("Stripe-Signature") or "", secret=secret)
+    except billing_stripe.StripeWebhookError as exc:
+        raise HTTPException(status_code=400, detail="bad Stripe signature") from exc
+    event_id = str(event.get("id") or "").strip()[:200]
+    event_type = str(event.get("type") or "")[:200]
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Stripe event has no id")
+    if _issue_webhook_replay_seen(f"stripe:{event_id}",
+                                  billing_stripe._DEFAULT_WEBHOOK_TOLERANCE * 2):
+        return JSONResponse({"received": True, "duplicate": True})
+    try:
+        await run_in_threadpool(
+            lambda: audit_event("control_plane_action", agent="stripe", _global=True,
+                                action="stripe_payment_notice", actor="stripe",
+                                event_id=event_id, event_type=event_type))
+    except AuditRefused as exc:
+        with _issue_webhook_seen_lock:
+            _issue_webhook_seen.pop(f"stripe:{event_id}", None)
+        raise HTTPException(status_code=503, detail=(
+            "This notice could not be added to the activity record. Stripe will send it "
+            "again.")) from exc
+    result = await run_in_threadpool(billing_stripe.handle_event, event)
+    return JSONResponse({"received": True, "handled": bool(result.get("handled"))})
+
+
 # Replay dedup for inbound issue webhooks, keyed on the request's HMAC signature
 # (unique per signed body), so a captured delivery replayed within the freshness
 # window is rejected. Backed by the SHARED world store when Postgres is

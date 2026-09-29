@@ -732,7 +732,10 @@ def verify_webhook(payload: bytes | str, sig_header: str, *,
             raise StripeWebhookError("webhook timestamp outside tolerance window")
     signed = f"{ts}.".encode() + body
     expected = hmac.new(key.encode("utf-8"), signed, hashlib.sha256).hexdigest()
-    if not any(hmac.compare_digest(expected, s) for s in sigs):
+    # Compare as bytes: the header is sender-controlled and compare_digest
+    # raises TypeError on a str with any non-ASCII character.
+    if not any(hmac.compare_digest(expected.encode("utf-8"), s.encode("utf-8"))
+               for s in sigs):
         raise StripeWebhookError("webhook signature mismatch")
     import json
     try:

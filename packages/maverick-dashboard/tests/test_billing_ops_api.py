@@ -110,3 +110,12 @@ def test_billing_page_shows_the_new_panels_to_administrators(client):
     text = _html.unescape(re.sub(r"<[^>]+>", " ", main))
     assert not _BANNED.search(text)
     assert client.get("/static/lightwork-billing-ops.js").status_code == 200
+
+
+def test_stripe_status_shows_where_stripe_sends_payment_notices(client, monkeypatch):
+    facts = {row["label"]: row["value"] for row in client.get(BASE + "/stripe").json()["facts"]}
+    assert facts["Payment notices from Stripe accepted"] == "No"
+    assert facts["Address for Stripe payment notices"] == "http://testserver/webhook/stripe"
+    monkeypatch.setenv("MAVERICK_STRIPE_WEBHOOK_SECRET", "whsec_synthetic123")  # pragma: allowlist secret
+    facts = {row["label"]: row["value"] for row in client.get(BASE + "/stripe").json()["facts"]}
+    assert facts["Payment notices from Stripe accepted"] == "Yes"
