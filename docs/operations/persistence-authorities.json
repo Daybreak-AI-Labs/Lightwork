@@ -183,18 +183,18 @@
     "learning": 55,
     "sqlite_domain": 79,
     "configuration": 59,
-    "read_projection": 17,
+    "read_projection": 18,
     "coordinator": 1,
     "audit": 24,
     "transient": 22,
     "business_records": 13,
-    "execution": 23,
+    "execution": 24,
     "recovery": 9,
     "derived": 14,
     "composition": 55,
     "external": 18,
     "key_custody": 2,
-    "storage_primitive": 9,
+    "storage_primitive": 10,
     "world": 4,
     "mixed_api": 7,
     "knowledge": 4,
@@ -24194,6 +24194,129 @@
           "function": "crash_log_path",
           "kind": "data_dir",
           "expression": "data_dir('logs')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/consent_storage.py",
+      "contract": "storage_primitive",
+      "owner": "packages/maverick-core/maverick/consent_storage.py",
+      "purpose": "Shared Postgres storage for the consent stores: one schema per store file (named from its path under Lightwork home), reached through the governed-records connection layer; SQLite stays the default.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 177,
+          "function": "logical_name",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 832,
+          "function": "__init__",
+          "kind": "connect",
+          "expression": "PostgresTransactions(dsn).connect()"
+        },
+        {
+          "line": 1105,
+          "function": "reading",
+          "kind": "connect",
+          "expression": "connect(path, timeout=5.0, read_only=True)"
+        },
+        {
+          "line": 1110,
+          "function": "reading",
+          "kind": "connect",
+          "expression": "sqlite3.connect(f'{Path(path).resolve().as_uri()}?mode=ro', uri=True, timeout=5.0)"
+        },
+        {
+          "line": 1121,
+          "function": "read_only_connection",
+          "kind": "connect",
+          "expression": "connect(path, timeout=5.0, read_only=True)"
+        },
+        {
+          "line": 1125,
+          "function": "read_only_connection",
+          "kind": "connect",
+          "expression": "sqlite3.connect(f'{local.resolve().as_uri()}?mode=ro', uri=True, timeout=5.0)"
+        },
+        {
+          "line": 1133,
+          "function": "store_exists",
+          "kind": "connect",
+          "expression": "connect(path, timeout=5.0, read_only=True)"
+        },
+        {
+          "line": 1157,
+          "function": "local_store_files",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 1192,
+          "function": "_open_source",
+          "kind": "connect",
+          "expression": "sqlite3.connect(f'{path.resolve().as_uri()}?mode=ro', uri=True, timeout=30.0)"
+        },
+        {
+          "line": 1246,
+          "function": "_target_state",
+          "kind": "connect",
+          "expression": "connect(path, timeout=10.0, read_only=True)"
+        },
+        {
+          "line": 1321,
+          "function": "move_store",
+          "kind": "connect",
+          "expression": "connect(path, timeout=60.0)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/data_use_checks.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-core/maverick/data_use_checks.py",
+      "purpose": "Scheduled data-use checks: read-only integrity, policy-compile and exception-expiry checks over each workspace data-use store.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 117,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/data_use_scheduler.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/data_use_scheduler.py",
+      "purpose": "Runs the scheduled data-use checks under a leased claim with bounded run history in the background-checks store.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 32,
+          "function": "job_store",
+          "kind": "data_dir",
+          "expression": "data_dir('data_use_governance', 'background-checks.sqlite3', tenant=None)"
+        },
+        {
+          "line": 46,
+          "function": "_workspace_counts",
+          "kind": "data_dir",
+          "expression": "data_dir('data_use_governance', 'data-use-governance.sqlite3', tenant=tenant)"
         }
       ]
     }
