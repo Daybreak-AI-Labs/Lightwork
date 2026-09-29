@@ -330,6 +330,28 @@ def test_typescript_plugins_start_the_program_chosen(audit_rows, monkeypatch, tm
     assert _save([{"id": "plugins.ts", "value": outside}], confirm=True).status_code == 400
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_program_other_accounts_can_replace_is_refused(audit_rows, tmp_path):
+    # Lightwork later runs the chosen program, so any account on the server that
+    # can change the file, or swap it inside its folder, could run code as Lightwork.
+    writable = _program(tmp_path, "shared-node")
+    writable.chmod(0o777)
+    rules = [{"program": str(writable), "file": "", "args": ""}]
+    r = _save([{"id": "plugins.ts", "value": rules}], confirm=True)
+    assert r.status_code == 400 and "change" in r.text
+    open_folder = tmp_path / "open"
+    open_folder.mkdir()
+    open_folder.chmod(0o777)
+    swappable = open_folder / "node"
+    swappable.write_text("#!/bin/sh\n", encoding="utf-8")
+    swappable.chmod(0o755)
+    rules = [{"program": str(swappable), "file": "", "args": ""}]
+    r = _save([{"id": "plugins.ts", "value": rules}], confirm=True)
+    assert r.status_code == 400 and "change" in r.text
+    safe = _program(tmp_path, "node")
+    _saved([{"id": "plugins.ts", "value": [{"program": str(safe), "file": "", "args": ""}]}])
+
+
 def test_network_plugins_connect_only_on_this_server(audit_rows, monkeypatch, tmp_path):
     from maverick import grpc_plugin_host
 
