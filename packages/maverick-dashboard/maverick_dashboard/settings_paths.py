@@ -125,6 +125,11 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
     normalized = Path(os.path.normpath(str(entered)))
     try:
         real = entered.resolve()
+        # "link/.." names one file to the server and another once stored:
+        # store only a location that leads to the file checked below.
+        if normalized.resolve() != real:
+            raise PathRefused("that location goes through a link and then back up with \"..\". "
+                              "Enter the location without \"..\".")
     except (OSError, RuntimeError) as exc:
         raise PathRefused("that location could not be checked on the server.") from exc
     roots = allowed_roots(scope, programs=program)

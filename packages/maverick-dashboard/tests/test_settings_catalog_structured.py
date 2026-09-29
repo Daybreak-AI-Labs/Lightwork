@@ -352,6 +352,31 @@ def test_a_program_other_accounts_can_replace_is_refused(audit_rows, tmp_path):
     _saved([{"id": "plugins.ts", "value": [{"program": str(safe), "file": "", "args": ""}]}])
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX links and permission bits")
+def test_a_location_is_stored_as_the_file_that_was_checked(tmp_path):
+    # "link/.." means a different file to the server (which follows the link)
+    # than to the stored text (which drops "link/.."), so the checks would
+    # pass on one file and Lightwork would later use another.
+    from maverick_dashboard import settings_paths
+
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    checked = tmp_path / "a" / "key.pem"
+    checked.write_text("private", encoding="utf-8")
+    checked.chmod(0o600)
+    stored = tmp_path / "key.pem"
+    stored.write_text("readable by anyone", encoding="utf-8")
+    stored.chmod(0o644)
+    (tmp_path / "lnk").symlink_to(tmp_path / "a" / "b")
+    with pytest.raises(settings_paths.PathRefused):
+        settings_paths.check(str(tmp_path / "lnk" / ".." / "key.pem"), kind="file", private=True)
+    with pytest.raises(settings_paths.PathRefused):
+        settings_paths.check(str(stored), kind="file", private=True)
+    assert settings_paths.check(str(checked), kind="file", private=True) == str(checked)
+    assert settings_paths.check(str(tmp_path / "a" / "b" / ".." / "key.pem"), kind="file",
+                                private=True) == str(checked)
+    assert settings_paths.check(str(tmp_path / "lnk"), kind="folder") == str(tmp_path / "lnk")
+
+
 def test_network_plugins_connect_only_on_this_server(audit_rows, monkeypatch, tmp_path):
     from maverick import grpc_plugin_host
 
