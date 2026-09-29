@@ -109,8 +109,10 @@ def _recorded_source(source: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))[:200]
 
 
+# One plain sentence the page shows as it is (no ">" or other symbols its
+# plain-sentence filter turns into a generic error).
 _INSTALL_OFF = ("Adding skills from a web address is turned off. A global administrator can "
-                "turn it on in Settings > All settings.")
+                "turn it on under All settings on the Settings page.")
 
 
 def _install_allowed() -> bool:

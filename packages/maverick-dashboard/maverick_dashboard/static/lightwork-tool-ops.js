@@ -135,7 +135,6 @@
     technical(card, p.technical);
     out.appendChild(card);
     if (!p.ok) { say(status, 'This skill cannot be added yet: ' + plural(p.problems.length, 'problem') + ' must be fixed first.'); return; }
-    if (!p.adding_allowed) { say(status, 'This skill passes the checks, but adding skills from this page is switched off on this server.'); return; }
     say(status, 'This skill passes the checks. Read what it does, then add it if you trust where it came from.');
     var add = button('Add this skill', 'btn--primary');
     add.addEventListener('click', async function () {

@@ -47,7 +47,7 @@ const button = (root, text) => [...root.querySelectorAll('button')].find((b) => 
 
 const PREVIEW = {name: 'weekly-status', triggers: ['weekly status'], tools: ['http_fetch'], instructions: '# Steps\n1. Summarise.',
   instructions_cut_short: false, signed: false, ok: true, problems: [], suggestions: ['It does not list the tools it uses.'],
-  fingerprint: 'f'.repeat(64), technical: [{text: "no 'tools_needed:' declared"}], can_add: true, adding_allowed: true};
+  fingerprint: 'f'.repeat(64), technical: [{text: "no 'tools_needed:' declared"}], can_add: true};
 
 test('a skill is checked and shown before it can be added, then added after confirmation', async (t) => {
   const markup = slice('skills.html', '<details class="sk-more" id="to-skill-install">', '</details>');
@@ -95,6 +95,25 @@ test('a skill with problems cannot be added and a bad address is caught before a
   await ui.settle();
   assert.match(ui.document.getElementById('skill-install-msg').textContent, /cannot be added yet: 1 problem/);
   assert.equal(button(ui.document.getElementById('to-skill-preview'), 'Add this skill'), undefined);
+});
+
+test('when adding skills from a web address is off, the check says so plainly and shows nothing to add', async (t) => {
+  // The server's own sentence, read from the route, through the page's real plain-sentence filter.
+  const api = fs.readFileSync(path.join(folder, 'tools_ops_api.py'), 'utf8');
+  const off = /_INSTALL_OFF = \(([\s\S]*?)\)\n/.exec(api)[1].match(/"([^"]*)"/g).map((q) => q.slice(1, -1)).join('');
+  const ui = await fixture(slice('skills.html', '<details class="sk-more" id="to-skill-install">', '</details>'),
+    () => response({detail: off}, 403));
+  t.after(() => ui.window.close());
+  const lib = fs.readFileSync(path.join(folder, 'static/lightwork-ui.js'), 'utf8');
+  const filter = /var JARGON = [\s\S]*?window\.mvPlainDetail = function \(detail\) \{[\s\S]*?return text;\n\s*\};/.exec(lib)[0];
+  ui.window.eval(filter);
+  ui.document.getElementById('to-skill-url').value = 'https://example.com/s.md';
+  ui.document.getElementById('to-skill-check').click();
+  await ui.settle();
+  assert.equal(ui.document.getElementById('skill-install-msg').textContent, off);
+  assert.match(off, /turned off/);
+  assert.equal(ui.document.getElementById('to-skill-preview').textContent, '');
+  assert.equal(posts(ui.calls, '/source-install').length, 0);
 });
 
 test('skills that rarely help are listed, then removed only after confirmation', async (t) => {
