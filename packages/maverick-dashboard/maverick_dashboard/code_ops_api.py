@@ -6,7 +6,7 @@
 * Watch a code project for notes to Lightwork (``# AI: ...`` and the other
   markers ``maverick watch`` finds): a supervised background job per
   workspace and project. It re-reads the project only when its latest
-  version changes, keeps at most 200 notes, stops by itself after eight
+  version changes, keeps at most 200 notes (at most three projects per workspace), stops by itself after eight
   hours or three failed reads, and stops when Lightwork shuts down. Starting
   work from a note runs it exactly like "Build a change": on a private copy of
   the code, under the project's own protection (a project set to "code never
@@ -46,6 +46,7 @@ _MAX_EXPORT_BYTES = 500 * 1024 * 1024
 _MAX_EXPORT_FILES = 100_000
 _MAX_NOTES = 200
 _MAX_WATCHERS = 10
+_MAX_WATCHERS_PER_WORKSPACE = 3  # one workspace's share of the installation-wide slots
 _INTERVAL = 60.0
 _MAX_SECONDS = 8 * 3600
 _MAX_FAILURES = 3
@@ -224,6 +225,9 @@ async def watch_start(name: str, body: ConfirmIn, request: Request) -> dict:
         current = _watchers.get(key)
         if current is not None and _live(current):
             return current.view()
+        if sum(1 for (ws, _), w in _watchers.items() if ws == key[0] and _live(w)) >= _MAX_WATCHERS_PER_WORKSPACE:
+            raise HTTPException(409, f"This workspace is already watching {_MAX_WATCHERS_PER_WORKSPACE} code "
+                                     "projects, the most one workspace can. Stop one first.")
         if sum(1 for w in _watchers.values() if _live(w)) >= _MAX_WATCHERS:
             raise HTTPException(409, "Lightwork is already watching as many code projects as it can. "
                                      "Stop one first.")

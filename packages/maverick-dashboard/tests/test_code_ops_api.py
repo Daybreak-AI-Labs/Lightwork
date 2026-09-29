@@ -226,3 +226,35 @@ def test_code_page_offers_download_and_watch(client, project):
     text = visible_text(page)
     assert "Watch for notes to Lightwork" in text and "Start watching" in text
     assert developer_terms(page) == []
+
+
+def test_one_workspace_cannot_take_every_watch_slot(client, monkeypatch, project):
+    """Watching is shared by the whole installation: one workspace gets a fair
+    share of the slots, so it can't leave other workspaces unable to watch."""
+    import types
+
+    from maverick_dashboard import code_ops_api
+    monkeypatch.setattr(code_ops_api, "_INTERVAL", 0.2)
+    real_live = code_ops_api._live
+    monkeypatch.setattr(code_ops_api, "_live",
+                        lambda w: True if isinstance(w, types.SimpleNamespace) else real_live(w))
+    here = code_ops_api._workspace()
+    share = getattr(code_ops_api, "_MAX_WATCHERS_PER_WORKSPACE", 3)
+
+    def fill(workspace: str) -> None:
+        for i in range(share):
+            code_ops_api._watchers[(workspace, f"p{i}")] = types.SimpleNamespace()
+
+    def unfill() -> None:
+        for key in [k for k, w in code_ops_api._watchers.items() if isinstance(w, types.SimpleNamespace)]:
+            del code_ops_api._watchers[key]
+    try:
+        fill(here)
+        r = client.post("/api/v1/code/watch/website/start", json={"confirm": True})
+        assert r.status_code == 409 and "This workspace" in r.json()["detail"]
+        assert "Stop one first" in r.json()["detail"]
+        unfill()
+        fill("other")
+        assert client.post("/api/v1/code/watch/website/start", json={"confirm": True}).status_code == 202
+    finally:
+        unfill()
