@@ -32,7 +32,7 @@ what the rules above allow:
 
 ``[sandbox] network_policy = "deny-all"`` asserts the same no-network rule for
 the work area alone (the Kubernetes backend then verifies its deny-all
-NetworkPolicy before every command).
+NetworkPolicy before every command); a value it does not know does too.
 """
 from __future__ import annotations
 
@@ -91,8 +91,13 @@ def work_area_offline(config: dict | None = None) -> bool:
     if network_posture(cfg) != "open":
         return True
     sandbox = cfg.get("sandbox") or {}
-    value = str((sandbox.get("network_policy") if isinstance(sandbox, dict) else "") or "")
-    return value.strip().lower() in _DENY_ALL
+    raw = str((sandbox.get("network_policy") if isinstance(sandbox, dict) else "?") or "")
+    value = raw.strip().lower()
+    if value in _OPEN:
+        return False
+    if value not in _DENY_ALL:
+        log.warning("unknown [sandbox] network_policy %r; keeping commands offline", raw)
+    return True
 
 
 def load_policy() -> dict:

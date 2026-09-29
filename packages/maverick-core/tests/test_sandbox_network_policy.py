@@ -70,3 +70,17 @@ def test_describe():
     assert "unrestricted" in describe("unknown", _POLICY)
     assert "allow=" in describe("http_fetch", _POLICY)
     assert "deny=" in describe("shell", _POLICY)
+
+
+def test_unknown_work_area_network_policy_keeps_commands_offline():
+    # [sandbox] network_policy only ever narrows: a value this module does not
+    # know (a typo, "true", "offline") must keep the work area offline, like an
+    # unknown [security] network_policy does, never silently leave it open.
+    from maverick.sandbox.network_policy import work_area_offline
+
+    for value in ("deny all", "true", "offline", "none", "allowlist"):
+        assert work_area_offline({"sandbox": {"network_policy": value}}) is True, value
+    assert work_area_offline({"sandbox": {"network_policy": "deny-all"}}) is True
+    assert work_area_offline({"sandbox": {"network_policy": ""}}) is False
+    assert work_area_offline({"sandbox": {}}) is False
+    assert work_area_offline({}) is False
