@@ -26,8 +26,13 @@ test('Help reviews the actual redacted support report before downloading its exa
   expect(JSON.parse(await page.locator('#support-preview').textContent())).toEqual(report.bundle);
   const sizes=await page.locator('#support-center').evaluate(node=>({width:document.documentElement.clientWidth,right:node.getBoundingClientRect().right,scroll:node.scrollWidth,inner:node.clientWidth}));
   expect(sizes.right).toBeLessThanOrEqual(sizes.width+1);expect(sizes.scroll).toBeLessThanOrEqual(sizes.inner+1);
-  const links=await page.locator('.support-followups').boundingBox(),fab=await page.locator('#mv-copilot-fab').boundingBox();
-  expect(links&&fab&&!(links.x+links.width>fab.x&&links.x<fab.x+fab.width&&links.y+links.height>fab.y&&links.y<fab.y+fab.height)).toBeTruthy();
+  // The report's follow-up links and the task bug-report form (added with the
+  // same FAB-clearing layout class) must each stay clear of the Copilot button.
+  const followups=page.locator('.support-followups');await expect(followups).toHaveCount(2);
+  const fab=await page.locator('#mv-copilot-fab').boundingBox();
+  for(const links of [await followups.nth(0).boundingBox(),await followups.nth(1).boundingBox()]){
+    expect(links&&fab&&!(links.x+links.width>fab.x&&links.x<fab.x+fab.width&&links.y+links.height>fab.y&&links.y<fab.y+fab.height)).toBeTruthy();
+  }
   await page.screenshot({path:info.outputPath('help-320.png'),fullPage:true});
   await page.locator('#support-confirm').check();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Download reviewed report',exact:true}).click();

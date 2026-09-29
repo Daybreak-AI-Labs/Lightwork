@@ -122,9 +122,11 @@ test('failed cancellation preserves the reason and stale state requires a refres
   const reason = 'Preserve this decision through an interrupted request';
   await confirm(page, reason);
   let attempts = 0;
+  // Only a server reason already written as a plain sentence reaches the
+  // person (mvPlainDetail), so the synthetic reason ends with a full stop.
   await page.route('**/cases/' + row.id + '/cancel', async route => {
     if (++attempts === 1) return route.fulfill({status: 503, contentType: 'application/json',
-      body: JSON.stringify({detail: {code: 'fixture_unavailable', message: 'Synthetic connection interruption'}})});
+      body: JSON.stringify({detail: {code: 'fixture_unavailable', message: 'Synthetic connection interruption.'}})});
     return route.continue();
   });
   await page.locator('#vo-cancel').click();

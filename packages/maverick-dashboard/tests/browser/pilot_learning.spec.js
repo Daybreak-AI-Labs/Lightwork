@@ -52,7 +52,10 @@ test('protected pilot enforces child exclusion and independently reviews exact l
     expect((await reviewer.request.get('/api/v1/outcome-pilots/'+pilot.id)).status()).toBe(404);
     expect((await request.get(reviewPath,{headers:{'X-Browser-Principal':'browser-colleague'}})).status()).toBe(403);
     await second.getByText('Independently review a pilot’s local learning policy',{exact:true}).click();
-    await second.locator('#op-review-reference').fill(pilot.id);await second.locator('#op-review-load').click();
+    // Reviewers pick the pilot from the protected-pilot review queue that
+    // opening this section loads; they no longer type the reference.
+    await expect(second.locator('#op-review-reference option[value="'+pilot.id+'"]')).toHaveCount(1);
+    await second.locator('#op-review-reference').selectOption(pilot.id);await second.locator('#op-review-load').click();
     await expect(second.locator('#op-independent-report')).toContainText('All evaluation task exclusion receipts match');
     const evidence=await (await reviewer.request.get(reviewPath)).json();
     const body={expected_revision:evidence.revision,evidence_version:evidence.learning_policy.evidence_version,operation_id:'browser-independent-negative-0001',decision:'accepted_local_scope',notes:'Reviewed local policy receipts; prior and provider exposure are unknown.',confirm:true};
