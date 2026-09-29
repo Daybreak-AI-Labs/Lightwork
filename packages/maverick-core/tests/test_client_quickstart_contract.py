@@ -312,7 +312,8 @@ def test_typescript_client_dependency_and_ci_security_gates():
         # fast-uri < 3.1.6 and qs < 6.16.0 carry OSV advisories (four High, two
         # Medium) that failed the audit job on 2026-09-02; both are transitive
         # through the MCP SDK's ajv/express, so the pins live in overrides.
-        "fast-uri": "3.1.6",
+        # fast-uri 3.1.7 fixes GHSA-58mr-gqgx-xq4g and GHSA-qw65-cvwx-89v3.
+        "fast-uri": "3.1.7",
         "qs": "6.16.0",
     }
 
