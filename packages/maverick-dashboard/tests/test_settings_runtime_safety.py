@@ -192,6 +192,79 @@ def test_quorum_settings_stay_protected_whatever_areas_are_chosen(audit_rows):
     assert quorum.configured_policy().protected_keys == frozenset({"shield.*"})
 
 
+def _as(monkeypatch, admins=("user:a", "user:b", "user:c")):
+    """Requests carry ``X-Test-User``; the listed people are global admins,
+    everyone else gets the default (operator) role."""
+    from maverick_dashboard import auth
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", ",".join(admins))
+    monkeypatch.setattr(auth, "caller_principal",
+                        lambda request: request.headers.get("x-test-user") or None)
+
+
+def _vote(approval_id, who, verb="approve"):
+    from maverick.approval_cards import decode_approval_detail
+    from maverick_dashboard._shared import _world
+
+    card = decode_approval_detail(_world().get_approval(approval_id).detail)
+    return client.post(f"/api/v1/approvals/{approval_id}/{verb}", headers={
+        "X-Test-User": who, "X-Lightwork-Approval-Binding": card["binding_sha256"]})
+
+
+def _save_as(who, changes, confirm=False):
+    return client.post(API, json={"changes": changes, "confirm": confirm},
+                       headers={"X-Test-User": who})
+
+
+def test_settings_approval_is_decided_on_the_approvals_page(monkeypatch, audit_rows):
+    """End to end: a protected change waits, the requester and an operator
+    can't approve it, two other administrators can, and it applies once."""
+    from maverick_dashboard._shared import _world
+
+    _as(monkeypatch)
+    assert _save_as("user:a", [{"id": "safety.quorum_required", "value": "2"}]).status_code == 200
+    change = [{"id": "safety.cascade", "value": True}]
+    r = _save_as("user:a", change)
+    assert r.status_code == 202, r.text
+    approval_id = r.json()["quorum"]["approval_id"]
+
+    assert _vote(approval_id, "user:a").status_code == 403       # own request
+    assert _vote(approval_id, "user:m").status_code == 403       # operator only
+    assert _vote(approval_id, "user:m", "deny").status_code == 403
+    assert _world().get_approval(approval_id).status == "pending"
+    assert _vote(approval_id, "user:b").status_code in (202, 204)
+    assert _vote(approval_id, "user:c").status_code in (202, 204)
+    assert _world().get_approval(approval_id).status == "approved"
+
+    r = _save_as("user:a", change)
+    assert r.status_code == 200, r.text
+    assert _loaded()["safety"]["cascade"] is True
+    # Used up: the next protected change is a new request.
+    assert _save_as("user:a", [{"id": "safety.cascade", "value": False}],
+                    confirm=True).status_code == 202
+
+
+def test_approved_secret_change_is_bound_to_its_value(monkeypatch, audit_rows):
+    from maverick_dashboard._shared import _world
+
+    _as(monkeypatch)
+    assert _save_as("user:a", [{"id": "safety.quorum_required", "value": "2"}]).status_code == 200
+    approved = [{"id": "safety.receipt_key", "value": "k" * 40}]
+    r = _save_as("user:a", approved)
+    assert r.status_code == 202, r.text
+    approval_id = r.json()["quorum"]["approval_id"]
+    detail = _world().get_approval(approval_id).detail
+    assert "k" * 40 not in detail
+    for who in ("user:b", "user:c"):
+        assert _vote(approval_id, who).status_code in (202, 204)
+    # A different secret is not covered by that approval.
+    other = _save_as("user:a", [{"id": "safety.receipt_key", "value": "z" * 40}])
+    assert other.status_code == 202
+    assert "receipt_key" not in (_loaded().get("safety") or {})
+    assert _save_as("user:a", approved).status_code == 200
+    assert _loaded()["safety"]["receipt_key"] == "k" * 40
+
+
 # ------------------------------------------------ scan limit per task
 def test_scan_limit_refuses_text_over_the_limit(monkeypatch, audit_rows):
     from maverick.logging_config import reset_goal_context, set_goal_context
