@@ -286,8 +286,10 @@ def _render(tokens: Sequence[_Tok], *, bind: bool) -> str:
             parts.append("%s")
         elif tok.kind == "named":
             parts.append(f"%({tok.text[1:]})s")
-        elif tok.kind == "op" and tok.text == "%" and bind:
-            parts.append("%%")
+        elif bind and "%" in tok.text:
+            # psycopg reads every % in the text, inside literals and comments
+            # too: double it so no value lands in (or breaks) the statement.
+            parts.append(tok.text.replace("%", "%%"))
         elif tok.kind == "op" and tok.text == "==":
             parts.append("=")
         else:
@@ -346,6 +348,90 @@ def _json_path(literal: str) -> str:
     return "'{" + ",".join(keys) + "}'"
 
 
+_COMPARE = {"<", ">", "<=", ">=", "=", "==", "<>", "!="}
+# A JSON value ordered the way SQLite orders what json_extract returns: NULL
+# for JSON null or a missing key, then numbers (true/false are 1/0), then text
+# compared byte by byte. Objects and arrays come back from SQLite as compact
+# JSON text that jsonb cannot reproduce, so comparing one with text fails
+# loudly instead of giving a different answer.
+_CLASS = ("CASE WHEN {v} IS NULL OR jsonb_typeof({v}) = 'null' THEN NULL "
+          "WHEN jsonb_typeof({v}) IN ('number', 'boolean') THEN 0 ELSE 1 END")
+_AS_NUMBER = ("CASE jsonb_typeof({v}) WHEN 'number' THEN ({v})::numeric "
+              "WHEN 'boolean' THEN CASE WHEN ({v})::boolean THEN 1 ELSE 0 END END")
+_AS_TEXT = ("CASE WHEN jsonb_typeof({v}) = 'string' THEN ({v} #>> '{{}}') COLLATE \"C\" "
+            "WHEN jsonb_typeof({v}) IN ('object', 'array') THEN (('json_extract of a JSON '"
+            " || jsonb_typeof({v}) || ' cannot be compared with text')::integer)::text END")
+
+
+def _prev_is_comparison(tokens: Sequence[_Tok], i: int) -> bool:
+    before = _prev_code(tokens, i)
+    return before >= 0 and tokens[before].kind == "op" and tokens[before].text in _COMPARE
+
+
+def _named_operand(tokens: Sequence[_Tok], close: int, params: Mapping) -> object:
+    operand = _next_code(tokens, _next_code(tokens, close))
+    if operand < len(tokens) and tokens[operand].kind == "named":
+        return params.get(tokens[operand].text[1:])
+    return None
+
+
+def _ordered(value_sql: str, numeric: bool) -> _Tok:
+    second = (_AS_NUMBER if numeric else _AS_TEXT).format(v=value_sql)
+    return _Tok("word", f"ROW({_CLASS.format(v=value_sql)}, {second})")
+
+
+def _json_extract(tokens: list[_Tok], open_i: int, value: object) -> tuple[list[_Tok], int, int]:
+    """``json_extract(doc, '$.path')`` compared (``op operand`` or ``IN``)
+    the way SQLite compares it. Returns the tokens, the next index, and how
+    many bound values were used."""
+    close = _match_paren(tokens, open_i)
+    inner = tokens[open_i + 1:close]
+    comma = max((j for j, t in enumerate(inner) if t.kind == "op" and t.text == ","), default=-1)
+    path_tokens = [t for t in inner[comma + 1:] if t.kind not in {"ws", "comment"}]
+    if comma < 0 or len(path_tokens) != 1 or path_tokens[0].kind != "str":
+        raise _Unsupported("json_extract form is not supported")
+    doc_tokens = _functions(list(inner[:comma]), ())
+    if any(t.kind in {"param", "named"} for t in doc_tokens):
+        raise _Unsupported("json_extract of a bound value is not supported")
+    doc = _render(doc_tokens, bind=False).strip()
+    json_value = f"(({doc})::jsonb #> {_json_path(path_tokens[0].text)})"
+    after = _next_code(tokens, close)
+    nxt = tokens[after] if after < len(tokens) else _Tok("ws", "")
+    if nxt.kind == "op" and nxt.text in _COMPARE:
+        operand = _next_code(tokens, after)
+        target = tokens[operand] if operand < len(tokens) else _Tok("ws", "")
+        if target.kind not in {"param", "named", "num", "str"}:
+            raise _Unsupported("json_extract can only be compared with a value")
+        used = int(target.kind in {"param", "named"})
+        if used and value is None:
+            # A NULL value: every comparison is NULL, as in SQLite.
+            return ([_Tok("word", f"({json_value} #>> '{{}}')"), nxt, target], operand + 1, used)
+        numeric = target.kind == "num" or (
+            used == 1 and isinstance(value, (int, float)))  # bool binds as 0/1
+        side = "0" if numeric else "1"
+        return ([_ordered(json_value, numeric), nxt, _Tok("word", f"ROW({side}, "), target,
+                 _Tok("op", ")")], operand + 1, used)
+    words = [nxt.up]
+    j = after
+    if nxt.up == "NOT":
+        j = _next_code(tokens, after)
+        words.append(tokens[j].up if j < len(tokens) else "")
+    if words[-1] == "IN":
+        list_open = _next_code(tokens, j)
+        if list_open >= len(tokens) or tokens[list_open].text != "(":
+            raise _Unsupported("json_extract IN needs a list of text values")
+        list_close = _match_paren(tokens, list_open)
+        items = [t for t in tokens[list_open + 1:list_close] if t.kind not in {"ws", "comment"}]
+        texts = items[0::2]
+        if not texts or any(t.kind != "str" for t in texts) or any(
+                t.text != "," for t in items[1::2]):
+            raise _Unsupported("json_extract IN needs a list of text values")
+        rows = ", ".join(f"ROW(1, {t.text})" for t in texts)
+        return ([_ordered(json_value, False), *tokens[close + 1:list_open],
+                 _Tok("word", f"({rows})")], list_close + 1, 0)
+    raise _Unsupported("json_extract is only supported in a comparison")
+
+
 def _functions(tokens: list[_Tok], params: object) -> list[_Tok]:
     """Rewrite SQLite functions to PostgreSQL ones (in place, returns tokens)."""
     positional = list(params) if isinstance(params, Sequence) and not isinstance(
@@ -381,28 +467,14 @@ def _functions(tokens: list[_Tok], params: object) -> list[_Tok]:
                 i += 1
                 continue
         if is_call and name == "JSON_EXTRACT":
-            close = _match_paren(tokens, nxt)
-            inner = tokens[nxt + 1:close]
-            comma = max((j for j, t in enumerate(inner)
-                         if t.kind == "op" and t.text == ","), default=-1)
-            path_tokens = [t for t in inner[comma + 1:] if t.kind not in {"ws", "comment"}]
-            if comma < 0 or len(path_tokens) != 1 or path_tokens[0].kind != "str":
-                raise _Unsupported("json_extract form is not supported")
-            doc = _render(_functions(list(inner[:comma]), ()), bind=False).strip()
-            expr = f"(({doc})::jsonb #>> {_json_path(path_tokens[0].text)})"
-            # Compared with a number: compare as a number, as SQLite does.
-            after = _next_code(tokens, close)
-            if (after < len(tokens) and tokens[after].kind == "op"
-                    and tokens[after].text in {"<", ">", "<=", ">=", "=", "==", "<>", "!="}):
-                operand = _next_code(tokens, after)
-                if operand < len(tokens) and tokens[operand].kind == "param":
-                    value = positional[param_index] if param_index < len(positional) else None
-                    if isinstance(value, (int, float)) and not isinstance(value, bool):
-                        expr = f"({expr})::double precision"
-                elif operand < len(tokens) and tokens[operand].kind == "num":
-                    expr = f"({expr})::double precision"
-            out.append(_Tok("word", expr))
-            i = close + 1
+            value = positional[param_index] if param_index < len(positional) else None
+            if isinstance(params, Mapping):
+                value = _named_operand(tokens, _match_paren(tokens, nxt), params)
+            if _prev_is_comparison(tokens, i):
+                raise _Unsupported("json_extract must be on the left of a comparison")
+            rewritten, i, used = _json_extract(tokens, nxt, value)
+            out.extend(rewritten)
+            param_index += used
             continue
         out.append(tok)
         i += 1
