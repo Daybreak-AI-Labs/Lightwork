@@ -42,6 +42,14 @@ class BlockedHost(Exception):
     """Raised when a URL's host won't resolve or resolves to a non-public IP."""
 
 
+class BlockedAddress(BlockedHost, ValueError):
+    """A host that resolves to a private/internal address.
+
+    Also a ``ValueError``, so callers of the urllib guard
+    (``http_fetch.guarded_urlopen``) that catch ``ValueError`` keep working,
+    while callers that tell "inside the network" apart catch ``BlockedHost``."""
+
+
 _scoped_private_hosts: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
     "maverick_scoped_private_hosts",
     default=frozenset(),
@@ -84,11 +92,14 @@ def allow_private_hosts(hosts: Iterable[str]) -> Iterator[None]:
         _scoped_private_hosts.reset(token)
 
 
-def _ip_is_blocked(ip_str: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return True  # unparseable address -> refuse
+# Shared address space (RFC 6598, carrier-grade NAT). ``ipaddress`` calls it
+# neither private nor global, yet clouds serve internal endpoints from it --
+# Alibaba Cloud's metadata service is 100.100.100.200.
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def address_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True for any address a guarded fetch must never connect to."""
     return (
         ip.is_private
         or ip.is_loopback
@@ -96,11 +107,34 @@ def _ip_is_blocked(ip_str: str) -> bool:
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
+        or (ip.version == 4 and ip in _SHARED_ADDRESS_SPACE)
     )
 
 
+def _ip_is_blocked(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable address -> refuse
+    return address_is_blocked(ip)
+
+
+def allow_private() -> bool:
+    """``MAVERICK_FETCH_ALLOW_PRIVATE`` when set, else ``[tools]
+    fetch_allow_private`` (Settings > All settings). Off unless exactly "1"."""
+    raw = os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE")
+    if raw is not None and raw.strip():
+        return raw == "1"
+    try:
+        from ..env_setting import env_or_config
+
+        return env_or_config("MAVERICK_FETCH_ALLOW_PRIVATE", "tools", "fetch_allow_private") == "1"
+    except Exception:  # an unreadable configuration never opens the guard
+        return False
+
+
 def _allow_private() -> bool:
-    return os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") == "1"
+    return allow_private()
 
 
 def resolve_pinned_ip(host: str) -> str:
@@ -273,6 +307,24 @@ class _AsyncPinnedTransport:
         await self.aclose()
 
 
+def pinned_async_transport(url: str) -> _AsyncPinnedTransport:
+    """An ``httpx`` async transport pinned to ``url``'s validated public IP.
+
+    For a client that builds its own ``httpx.AsyncClient`` (pass it as
+    ``transport=``): the host is resolved and checked once, here, and every
+    request connects to that IP with ``Host`` and TLS SNI kept as the name.
+    Raises ``BlockedHost`` like :func:`safe_async_client`."""
+    import httpx
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise BlockedHost(f"scheme {parsed.scheme!r} not allowed")
+    host = parsed.hostname or ""
+    ip = resolve_pinned_ip(host)
+    host_header = host if not parsed.port else f"{host}:{parsed.port}"
+    return _AsyncPinnedTransport(host, host_header, ip, httpx.AsyncHTTPTransport())
+
+
 def safe_async_client(url: str, **client_kwargs: Any) -> httpx.AsyncClient:
     """Async counterpart of ``safe_client``: an ``httpx.AsyncClient`` pinned
     to a validated public IP for ``url``.
@@ -283,21 +335,19 @@ def safe_async_client(url: str, **client_kwargs: Any) -> httpx.AsyncClient:
     """
     import httpx
 
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise BlockedHost(f"scheme {parsed.scheme!r} not allowed")
-    host = parsed.hostname or ""
-    ip = resolve_pinned_ip(host)
-    host_header = host if not parsed.port else f"{host}:{parsed.port}"
-    transport = _AsyncPinnedTransport(host, host_header, ip, httpx.AsyncHTTPTransport())
+    transport = pinned_async_transport(url)
     client_kwargs.setdefault("follow_redirects", False)
     client_kwargs["transport"] = transport
     return httpx.AsyncClient(**client_kwargs)
 
 
 __all__ = [
+    "BlockedAddress",
     "BlockedHost",
+    "address_is_blocked",
+    "allow_private",
     "allow_private_hosts",
+    "pinned_async_transport",
     "resolve_pinned_ip",
     "safe_client",
     "safe_async_client",

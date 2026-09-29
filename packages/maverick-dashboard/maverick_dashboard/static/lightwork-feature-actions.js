@@ -557,6 +557,7 @@
         facts.push(['Program checked before it starts', p.program_checked ? 'Yes, against its published fingerprint' : 'No']);
       }
       if (p.settings.length) facts.push(['Settings it is given', p.settings.join(', ')]);
+      if (p.gets_every_server_setting) facts.push(['Also given', 'Every setting of this server, including its passwords and keys']);
       if (p.extra_headers.length) facts.push(['Extra details sent with each request', p.extra_headers.join(', ')]);
       box.appendChild(table(['Detail', 'Value'], facts));
       var tools = el('div');

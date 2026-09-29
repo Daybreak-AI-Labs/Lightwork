@@ -973,9 +973,13 @@ class StreamableHttpMCPClient:
     Exposes the same surface the registry uses (``spec``, ``tools``,
     ``call_tool``, ``stop``) so it's a drop-in alongside the stdio MCPClient."""
 
-    def __init__(self, spec: MCPServerSpec, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, spec: MCPServerSpec, timeout: float = DEFAULT_TIMEOUT, *,
+                 transport: Any = None):
         self.spec = spec
         self.timeout = timeout
+        # An httpx transport to connect through (e.g. an IP-pinned one from
+        # ``tools._ssrf.pinned_async_transport``); None uses httpx's own.
+        self._transport = transport
         self._client: Any = None  # httpx.AsyncClient
         self._session_id: str | None = None
         self._protocol_version = PROTOCOL_VERSION
@@ -1066,7 +1070,8 @@ class StreamableHttpMCPClient:
         bearer = self._bearer()
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
-        self._client = httpx.AsyncClient(timeout=self.timeout, headers=headers)
+        extra = {"transport": self._transport} if self._transport is not None else {}
+        self._client = httpx.AsyncClient(timeout=self.timeout, headers=headers, **extra)
         log.info("MCP HTTP client connecting %r (%s)", self.spec.name, self.spec.url)
         init = await self._request("initialize", {
             "protocolVersion": PROTOCOL_VERSION,

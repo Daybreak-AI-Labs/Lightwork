@@ -109,6 +109,7 @@ def _serve_skill(monkeypatch, text=SKILL):
 
 
 def test_skill_check_shows_what_it_does_without_installing(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
     fetched = _serve_skill(monkeypatch)
     r = client.post("/api/v1/skills/source-preview", json={"source": "gh:acme/skills:weekly/SKILL.md"})
     assert r.status_code == 200, r.text
@@ -116,11 +117,12 @@ def test_skill_check_shows_what_it_does_without_installing(client, monkeypatch, 
     assert fetched == ["https://raw.githubusercontent.com/acme/skills/main/weekly/SKILL.md"]
     assert p["name"] == "weekly-status" and p["triggers"] == ["weekly status"] and p["tools"] == ["http_fetch"]
     assert p["ok"] is True and p["problems"] == [] and len(p["fingerprint"]) == 64
-    assert p["adding_allowed"] is False and p["can_add"] is False
+    assert p["adding_allowed"] is True and p["can_add"] is True
     assert not (tmp_path / "skills").exists() or not list((tmp_path / "skills").glob("*.md"))
 
 
 def test_skill_check_explains_problems_plainly_and_refuses_bad_addresses(client, monkeypatch):
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
     _serve_skill(monkeypatch, "---\nname: Bad Name\n---\nshort\n")
     p = client.post("/api/v1/skills/source-preview", json={"source": "https://example.com/s.md"}).json()
     assert p["ok"] is False
@@ -134,21 +136,31 @@ def test_skill_check_explains_problems_plainly_and_refuses_bad_addresses(client,
     assert client.post("/api/v1/skills/source-preview", json={"source": "x" * 2001}).status_code == 422
 
 
-def test_skill_check_refuses_internal_addresses(client, monkeypatch):
-    import maverick.skills as skills_mod
-    from maverick.tools._ssrf import BlockedHost
+@pytest.mark.parametrize("source", ["https://127.0.0.1/s.md", "https://169.254.169.254/latest/s.md",
+                                    "https://[::1]/s.md", "https://100.100.100.200/s.md"])
+def test_skill_check_refuses_internal_addresses(client, monkeypatch, source):
+    # The real guarded fetch refuses these before connecting; the page says why.
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    r = client.post("/api/v1/skills/source-preview", json={"source": source})
+    assert r.status_code == 422 and "inside its own network" in r.json()["detail"], r.text
 
-    def blocked(url):
-        raise BlockedHost("169.254.169.254")
-    monkeypatch.setattr(skills_mod, "_fetch_url_bytes", blocked)
-    r = client.post("/api/v1/skills/source-preview", json={"source": "https://metadata.internal/s.md"})
-    assert r.status_code == 422 and "inside its own network" in r.json()["detail"]
+
+def test_skill_check_is_refused_without_fetching_when_adding_is_off(client, monkeypatch):
+    fetched = _serve_skill(monkeypatch)
+    r = client.post("/api/v1/skills/source-preview", json={"source": "https://example.com/s.md"})
+    assert r.status_code == 403
+    assert "turned off" in r.json()["detail"]
+    _plain(r.json()["detail"])
+    assert fetched == []  # nothing was read from the network
 
 
 def test_skill_add_needs_admin_the_switch_and_a_confirmation(client, monkeypatch, tmp_path):
     _serve_skill(monkeypatch)
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
     fp = client.post("/api/v1/skills/source-preview", json={"source": "https://example.com/s.md"}).json()["fingerprint"]
     body = {"source": "https://example.com/s.md", "fingerprint": fp, "confirm": True}
+    monkeypatch.delenv("MAVERICK_ALLOW_SKILL_INSTALL")
     assert client.post("/api/v1/skills/source-install", json=body).status_code == 403  # switched off
     monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
     assert client.post("/api/v1/skills/source-install", json={**body, "confirm": False}).status_code == 422
@@ -172,6 +184,28 @@ def test_skill_that_changed_after_the_check_is_not_added(client, monkeypatch, tm
                     json={"source": "https://example.com/s.md", "fingerprint": fp, "confirm": True})
     assert r.status_code == 409 and "changed after you checked" in r.json()["detail"]
     assert not (tmp_path / "skills" / "weekly-status.md").exists()
+
+
+def test_skill_add_keeps_web_address_passwords_out_of_the_activity_record(client, monkeypatch, tmp_path):
+    """A private link carries its password (``user:pass@`` or ``?token=``);
+    the activity record keeps where the skill came from, never that password."""
+    monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
+    fetched = _serve_skill(monkeypatch)
+    source = ("https://alice:hunter2-secret@raw.example.com/acme/skills/SKILL.md"
+              "?token=GHSAT0AAAAAAsecretvalue#frag")
+    fp = client.post("/api/v1/skills/source-preview", json={"source": source}).json()["fingerprint"]
+    seen = _audit(monkeypatch)
+    r = client.post("/api/v1/skills/source-install",
+                    json={"source": source, "fingerprint": fp, "confirm": True})
+    assert r.status_code == 201, r.text
+    assert fetched[-1] == source  # the fetch itself still uses the full link
+    row = next(p for p in seen if p.get("verb") == "skill_install")
+    assert row["source"] == "https://raw.example.com/acme/skills/SKILL.md"
+    written = "".join(f.read_text(errors="replace") for f in (tmp_path / "home").rglob("*")
+                      if f.is_file() and "audit" in str(f))
+    assert "skill_install" in written
+    for secret in ("hunter2-secret", "GHSAT0AAAAAAsecretvalue", "alice"):
+        assert secret not in written
 
 
 # ---- skills: track record and tidying up -------------------------------------
@@ -322,6 +356,11 @@ def test_registry_preview_shows_the_exact_program_and_address(client, monkeypatc
     assert p["online"] is False and p["program"] == "/opt/mcp/weather-server"
     assert p["arguments"] == ["--units", "metric"] and p["settings"] == ["WEATHER_KEY"]
     assert p["program_checked"] is True and len(p["fingerprint"]) == 64
+    assert p["gets_every_server_setting"] is False
+    _registry(monkeypatch, {"command": "/opt/mcp/weather-server", "inherit_env": True,
+                            "pin_sha256": "a" * 64})
+    p = client.post("/api/v1/mcp-registry/preview", json={"name": "weather"}).json()
+    assert p["gets_every_server_setting"] is True  # the person sees it before adding
     _registry(monkeypatch, {"url": "https://mcp.example.com/weather"})
     p = client.post("/api/v1/mcp-registry/preview", json={"name": "weather"}).json()
     assert p["online"] is True and p["address"] == "https://mcp.example.com/weather"
@@ -330,14 +369,21 @@ def test_registry_preview_shows_the_exact_program_and_address(client, monkeypatc
     _plain(r.json()["detail"])
 
 
+def _resolve_to(monkeypatch, ip):
+    import socket
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, *a, **k: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))])
+
+
 def test_registry_tools_are_asked_only_on_confirmation(client, monkeypatch):
+    _resolve_to(monkeypatch, "93.184.216.34")
     _registry(monkeypatch, {"url": "https://mcp.example.com/weather"})
     fp = client.post("/api/v1/mcp-registry/preview", json={"name": "weather"}).json()["fingerprint"]
     import maverick.mcp_client as mcp_client
     started = []
 
     class FakeClient:
-        def __init__(self, spec, timeout):
+        def __init__(self, spec, timeout, **kwargs):
             self.tools = [{"name": "forecast", "description": "Tomorrow's weather"}]
 
         async def start(self):
@@ -358,6 +404,86 @@ def test_registry_tools_are_asked_only_on_confirmation(client, monkeypatch):
     r = client.post("/api/v1/mcp-registry/add", json={"name": "weather", "fingerprint": "c" * 64})
     assert r.status_code == 409
     assert client.post("/api/v1/mcp-registry/add", json={"name": "weather", "fingerprint": fp}).json() == {"added": "weather"}
+
+
+
+@pytest.mark.parametrize("url, ip", [("http://169.254.169.254/latest/meta-data/", "169.254.169.254"),
+                                     ("https://mcp.internal.test/weather", "10.0.0.5"),
+                                     ("https://aliyun.test/", "100.100.100.200"),
+                                     ("http://[::1]:8080/mcp", "::1")])
+def test_registry_tools_refuse_an_online_server_inside_the_network(client, monkeypatch, url, ip):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    _resolve_to(monkeypatch, ip)
+    _registry(monkeypatch, {"url": url})
+    fp = client.post("/api/v1/mcp-registry/preview", json={"name": "weather"}).json()["fingerprint"]
+    import maverick.mcp_client as mcp_client
+    started = []
+
+    class FakeClient:
+        def __init__(self, spec, timeout, **kwargs):
+            self.tools = []
+
+        async def start(self):
+            started.append(True)
+
+        async def stop(self):
+            pass
+    monkeypatch.setattr(mcp_client, "StreamableHttpMCPClient", FakeClient)
+    r = client.post("/api/v1/mcp-registry/tools", json={"name": "weather", "fingerprint": fp, "confirm": True})
+    assert r.status_code == 422 and "inside" in r.json()["detail"], r.text
+    _plain(r.json()["detail"])
+    assert started == []  # never contacted
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # the same escape hatch as every fetch
+    r = client.post("/api/v1/mcp-registry/tools", json={"name": "weather", "fingerprint": fp, "confirm": True})
+    assert r.status_code == 200 and started == [True]
+
+
+
+def test_registry_tools_connect_to_the_address_that_was_checked(client, monkeypatch):
+    """DNS that answers a public address for the check and an internal one
+    afterwards must not move the connection inside the network."""
+    import json as _json
+    import socket
+
+    import httpx
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    answers = iter(["93.184.216.34"])
+
+    def rebinding(host, *a, **k):
+        ip = next(answers, "10.0.0.5")  # first lookup public, every later one internal
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding)
+    connected: list[tuple[str, str, str]] = []
+
+    class Wire(httpx.AsyncBaseTransport):
+        """Stands in for the network: records where each request would go."""
+
+        async def handle_async_request(self, request):
+            host = request.url.host
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:  # a name: the connection layer would look it up again
+                host = socket.getaddrinfo(host, None)[0][4][0]
+            connected.append((host, request.headers.get("host", ""),
+                              str(request.extensions.get("sni_hostname", ""))))
+            body = _json.loads(request.content or b"{}")
+            if "id" not in body:
+                return httpx.Response(202, request=request)
+            result = ({"protocolVersion": "2025-11-25", "capabilities": {}} if body["method"] == "initialize"
+                      else {"tools": [{"name": "forecast", "description": "Tomorrow's weather",
+                                  "inputSchema": {"type": "object"}}]})
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result},
+                                  request=request)
+    import ipaddress
+    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **k: Wire())
+    monkeypatch.setattr(httpx._client, "AsyncHTTPTransport", lambda *a, **k: Wire())
+    _registry(monkeypatch, {"url": "https://mcp.example.com/weather"})
+    fp = client.post("/api/v1/mcp-registry/preview", json={"name": "weather"}).json()["fingerprint"]
+    r = client.post("/api/v1/mcp-registry/tools", json={"name": "weather", "fingerprint": fp, "confirm": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["tools"][0]["name"] == "forecast"
+    assert connected and {c[0] for c in connected} == {"93.184.216.34"}  # never 10.0.0.5
+    assert all(c[1] == "mcp.example.com" and c[2] == "mcp.example.com" for c in connected)
 
 
 # ---- governed connectors: list and preview a change ----------------------------
