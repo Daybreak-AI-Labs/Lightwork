@@ -345,3 +345,32 @@ def test_a_frozen_refusal_reaches_the_page_and_the_settings_start(client, monkey
     assert refused.status_code == 409 and "no separate Python" in refused.json()["detail"]
     quiet = background_programs.start("profiling")  # the settings start records it instead
     assert quiet["running"] is False and "no separate Python" in quiet["last_error"]
+
+
+@pytest.mark.parametrize("proxy_on", [True, False])
+def test_services_get_the_ai_service_keys_only_while_the_model_proxy_is_off(client, monkeypatch, tmp_path,
+                                                                             proxy_on):
+    """With the model proxy on, only the proxy holds the AI service keys: every
+    other program Lightwork starts goes through it and never sees a key."""
+    from maverick import config, owned_process
+    from maverick_dashboard import service_supervisor
+    (tmp_path / "config.toml").write_text(f"[model_proxy]\nenable = {'true' if proxy_on else 'false'}\n",
+                                          encoding="utf-8")
+    config.reset_config_cache()
+    keys = {"ANTHROPIC_API_KEY": "sk-ant-test", "OPENAI_API_KEY": "sk-test",  # pragma: allowlist secret
+            "AZURE_OPENAI_AD_TOKEN": "ad-token", "MAVERICK_PROXY_KEY": "proxy-held"}  # pragma: allowlist secret
+    for name, value in keys.items():
+        monkeypatch.setenv(name, value)
+    seen: dict[str, dict] = {}
+
+    class Recorder:
+        def __init__(self, argv, env=None):
+            seen[argv[-1]] = dict(env or {})
+    monkeypatch.setattr(owned_process, "OwnedProcess", Recorder)
+    monkeypatch.setattr(service_supervisor, "command", lambda kind: ["prog", kind])
+    for kind in ("worker", "channels", "tools", "profiling", "model_proxy"):
+        service_supervisor._spawn(kind)
+    for kind in ("worker", "channels", "tools", "profiling"):
+        present = {name for name in keys if name in seen[kind]}
+        assert present == (set() if proxy_on else set(keys)), kind
+    assert seen["model_proxy"]["MAVERICK_PROXY_KEY"] == "proxy-held"

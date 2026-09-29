@@ -22,6 +22,7 @@ For all of them:
   process tree; a frozen release build, which has no separate Python to run a
   program module with, refuses those plainly;
 * one instance per kind;
+* while the model proxy is on, only the proxy is given the AI service keys;
 * output is drained into a small bounded log (secrets masked) so a stopped
   program can say why;
 * it is stopped politely, then forcibly, on request and when the dashboard
@@ -130,9 +131,21 @@ def _scrub(text: str) -> str:
     return text[:LOG_LINE_CHARS]
 
 
+def _child_env(kind: str) -> dict[str, str]:
+    """This dashboard's environment for ``kind``. While the model proxy is on,
+    only the proxy keeps the AI service keys; every other program reaches the
+    AI service through it and never holds a key."""
+    env = dict(os.environ)
+    if kind != "model_proxy" and wanted("model_proxy"):
+        from maverick.config import PROVIDER_CREDENTIAL_ENV_VARS
+        for name in (*PROVIDER_CREDENTIAL_ENV_VARS, "MAVERICK_PROXY_KEY"):
+            env.pop(name, None)
+    return env
+
+
 def _spawn(kind: str):
     from maverick.owned_process import OwnedProcess
-    return OwnedProcess(command(kind), env=dict(os.environ))
+    return OwnedProcess(command(kind), env=_child_env(kind))
 
 
 def _take_lines(service: Service, pending: bytes, chunk: bytes) -> bytes:
