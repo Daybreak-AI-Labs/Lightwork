@@ -799,6 +799,12 @@
         if (detail && typeof detail.message === 'string') return detail.message;
         return fallback;
       }
+      // A refused follow-up keeps the server's own plain sentence ("Shorten
+      // the message to ...") and falls back to the page's plain wording.
+      function replyFailureText(response, body) {
+        const plain = window.mvPlainDetail ? window.mvPlainDetail(submissionError(body && body.detail, '')) : '';
+        return plain || cgErr(response, 'send your message');
+      }
 
       function composerMessage(text, danger) {
         if (!composerHint) return;
@@ -895,7 +901,7 @@
           const r = await fetch(answerForm.action, { method: 'POST', body: formData });
           if (r.redirected) { window.location.href = r.url; return; }
           const j = await r.json().catch(function () { return {}; });
-          composerMessage(cgErr(r, 'send your message'), true);
+          composerMessage(replyFailureText(r, j), true);
         } catch (e) {
           composerMessage('Could not send — check your connection and try again.', true);
         } finally {

@@ -294,3 +294,20 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
   assert.equal(meta.textContent, "Failed");  // shown as a plain word
   assert.equal(spin.style.display, "none");
 });
+
+test("a refused chat follow-up shows the server's plain sentence and never raw validation text", () => {
+  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const start = source.indexOf("      function submissionError(");
+  const end = source.indexOf("\n      }\n", source.indexOf("function replyFailureText(", start)) + "\n      }\n".length;
+  assert.ok(start > 0 && end > start, "the follow-up failure helpers are present");
+  const context = {
+    window: { mvPlainDetail: text => (typeof text === "string" && /^[A-Z][^_{}]*[.!?]$/.test(text) ? text : "") },
+    cgErr: (response, what) => "Could not " + what + ". Generic " + response.status + ".",
+  };
+  vm.runInNewContext(source.slice(start, end) + "\nthis.replyFailureText = replyFailureText;", context);
+  const shorten = "Shorten the message to 20,000 characters or fewer.";
+  assert.equal(context.replyFailureText({ status: 422 }, { detail: shorten }), shorten);
+  assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "Please review this message." }] }), "Please review this message.");
+  assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "field_required" }] }), "Could not send your message. Generic 422.");
+  assert.equal(context.replyFailureText({ status: 500 }, {}), "Could not send your message. Generic 500.");
+});
