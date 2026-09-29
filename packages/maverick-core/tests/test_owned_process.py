@@ -12,6 +12,7 @@ import pytest
 from maverick import owned_process
 from maverick.owned_process import OwnedProcess, ProcessOutputLimit, run_owned
 from maverick.providers import codex_cli_provider as codex
+from maverick.run_outcome import owned_task, task_stop
 
 
 def _command(code):
@@ -181,12 +182,12 @@ async def test_provider_cancellation_does_not_run_detached_complete_or_claim_zer
         return _command("import sys,time; sys.stdin.buffer.read(); time.sleep(60)")
 
     monkeypatch.setattr(client, "_launch_cmd", command)
-    task = asyncio.create_task(client.complete_async("system", [{"role": "user", "content": "hello"}]))
+    task = owned_task(client.complete_async("system", [{"role": "user", "content": "hello"}]))
     await _wait(lambda: bool(children))
     task.cancel()
     with pytest.raises(asyncio.CancelledError) as caught:
         await task
-    assert caught.value.usage_status == "unknown"
+    assert task_stop(task, caught.value).usage_status == "unknown"
     from pathlib import Path
     assert paths and not Path(paths[0]).parent.exists()
     _assert_reaped(children)

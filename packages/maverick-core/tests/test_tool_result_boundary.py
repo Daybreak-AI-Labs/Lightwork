@@ -15,6 +15,7 @@ from maverick.agent import Agent, unframe_tool_output
 from maverick.blackboard import Blackboard
 from maverick.budget import Budget
 from maverick.paths import tenant_scope
+from maverick.run_outcome import owned_task, task_stop
 from maverick.tools import Tool, ToolRegistry
 
 
@@ -194,7 +195,7 @@ async def test_cancelled_sync_worker_remains_owned_until_physical_exit():
         finally:
             closed.set()
 
-    task = asyncio.create_task(stream.execute_tool(producer, {}))
+    task = owned_task(stream.execute_tool(producer, {}))
     try:
         for _ in range(200):
             if started.is_set():
@@ -204,7 +205,7 @@ async def test_cancelled_sync_worker_remains_owned_until_physical_exit():
         task.cancel()
         with pytest.raises(asyncio.CancelledError) as caught:
             await task
-        assert caught.value.tool_execution_unknown
+        assert task_stop(task, caught.value).tool_execution_unknown
         assert stream.pending_tool_workers() == 1
     finally:
         release.set()
@@ -247,13 +248,13 @@ async def test_resistant_async_producer_is_owned_after_bounded_cancellation(monk
             await release.wait()  # deliberately noncooperative third-party code
         return "late content"
 
-    task = asyncio.create_task(stream.execute_tool(producer, {}))
+    task = owned_task(stream.execute_tool(producer, {}))
     await started.wait()
     try:
         task.cancel()
         with pytest.raises(asyncio.CancelledError) as caught:
             await asyncio.wait_for(task, timeout=2)
-        assert caught.value.tool_execution_unknown
+        assert task_stop(task, caught.value).tool_execution_unknown
         assert stream.pending_tool_invocations() == 1
         monkeypatch.setattr(stream, "MAX_WORKERS", 1)
         with pytest.raises(stream.ToolWorkerCapacity):

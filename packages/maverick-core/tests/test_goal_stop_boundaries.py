@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import pytest
 from maverick import config, world_model
 from maverick.agent import Agent
-from maverick.budget import Budget
+from maverick.budget import Budget, BudgetExceeded
 from maverick.flow import Flow, FlowNode, execution, store
 from maverick.orchestrator import run_goal
-from maverick.run_outcome import GoalAdmissionRefused, GoalCancelled
+from maverick.run_outcome import GoalAdmissionRefused, GoalCancelled, owned_task, task_stop
 from maverick.sandbox import LocalBackend
 from maverick.verifier import VerifierVerdict
 
@@ -66,17 +66,19 @@ async def test_http_cancel_interrupts_owned_await(stop_world, monkeypatch, wall,
     monkeypatch.setattr(api, "_ground_outcome", lambda *_a, **_k: None)
     app = FastAPI()
     app.add_api_route("/goals/{goal_id}/cancel", api.cancel_goal, methods=["POST"], status_code=204)
-    task = asyncio.create_task(agent._await_wall_clock_guarded(pending, in_flight_note=phase))
+    task = owned_task(agent._await_wall_clock_guarded(pending, in_flight_note=phase))
     try:
         await asyncio.wait_for(started.wait(), 1)
         with TestClient(app, headers={"Origin": "http://testserver"}) as client:
             response = await asyncio.to_thread(client.post, f"/goals/{gid}/cancel")
         assert response.status_code == 204
-        with pytest.raises(GoalCancelled) as stopped:
+        with pytest.raises(asyncio.CancelledError) as caught:
             await asyncio.wait_for(task, 1)
+        stopped = task_stop(task, caught.value)  # the task's own stop, on 3.10 too
+        assert isinstance(stopped, GoalCancelled)
         assert cleaned.is_set()
         assert world.get_goal(gid).status == "cancelled"
-        assert bool(getattr(stopped.value, "tool_execution_unknown", False)) == (phase == "mid-tool-execution")
+        assert bool(getattr(stopped, "tool_execution_unknown", False)) == (phase == "mid-tool-execution")
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -115,20 +117,58 @@ async def test_cancellation_retains_owned_task_until_its_cleanup_finishes(stop_w
             await release.wait()
             return "effect may already have committed"
 
-    task = asyncio.create_task(agent._await_wall_clock_guarded(pending, in_flight_note="mid-tool-execution"))
+    task = owned_task(agent._await_wall_clock_guarded(pending, in_flight_note="mid-tool-execution"))
     try:
         await asyncio.wait_for(started.wait(), 1)
         world.set_goal_status(gid, "cancelled")
         await asyncio.wait_for(draining.wait(), 1)
         assert not task.done()
         release.set()
-        with pytest.raises(GoalCancelled) as stopped:
+        with pytest.raises(asyncio.CancelledError) as caught:
             await asyncio.wait_for(task, 1)
-        assert stopped.value.tool_execution_unknown is True
+        stopped = task_stop(task, caught.value)
+        assert isinstance(stopped, GoalCancelled)
+        assert stopped.tool_execution_unknown is True
     finally:
         release.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_budget_stop_keeps_the_owned_task_unknown_effect_marker(stop_world):
+    # The guard owns its coroutine as a separate task. Python 3.10 re-raises a
+    # cancelled task as a fresh CancelledError, so the marker must be recovered.
+    world, _ = stop_world
+    gid = world.create_goal("budget stop mid tool", "")
+    agent = _guard_agent(world, gid, Budget(max_wall_seconds=0.05))
+
+    async def pending():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            exc.tool_execution_unknown = True
+            raise
+
+    with pytest.raises(BudgetExceeded) as stopped:
+        await agent._await_wall_clock_guarded(pending, in_flight_note="mid-tool-execution")
+    assert stopped.value.tool_execution_unknown is True
+
+
+@pytest.mark.asyncio
+async def test_owned_task_goal_cancellation_keeps_its_type_and_marker(stop_world):
+    world, _ = stop_world
+    gid = world.create_goal("nested owner stop", "")
+    agent = _guard_agent(world, gid, Budget())
+
+    async def nested():
+        cancelled = GoalCancelled("stopped inside the owned call")
+        cancelled.tool_execution_unknown = True
+        raise cancelled
+
+    with pytest.raises(GoalCancelled) as stopped:
+        await agent._await_wall_clock_guarded(nested, in_flight_note="mid-generation")
+    assert stopped.value.tool_execution_unknown is True
 
 
 @pytest.mark.asyncio

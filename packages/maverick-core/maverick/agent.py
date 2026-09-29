@@ -29,7 +29,7 @@ from .audit.errors import AuditRefused
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .env_setting import env_or_config as _env_or_config
 from .llm import model_for_role
-from .run_outcome import GoalCancelled, cancellation_message
+from .run_outcome import GoalCancelled, cancellation_message, owned_task, task_stop
 from .swarm import SwarmContext
 from .tools import ToolRegistry, base_registry
 from .tools.agent_bus_tool import delegate_to_agent, recv_from_agent, send_to_agent
@@ -4082,7 +4082,7 @@ class Agent:
         if remaining <= 0:
             raise BudgetExceeded(
                 f"wall time {budget.elapsed():.0f}s > {budget.max_wall_seconds:.0f}s")
-        task = asyncio.ensure_future(make_coro())
+        task = owned_task(make_coro())
         loop = asyncio.get_running_loop()
         deadline = loop.time() + remaining
         try:
@@ -4098,10 +4098,11 @@ class Agent:
                         f"wall-clock cap {budget.max_wall_seconds:.0f}s reached "
                         f"{in_flight_note}")
                 killswitch.check()  # raises killswitch.Halted if tripped
-        except BaseException as stop_signal:
+        except BaseException as caught:
             # Wall cap, halt, or an upstream cancellation: cancel the in-flight
             # call (aborts the provider HTTP request / tool coroutine) before
             # propagating.
+            stop_signal = task_stop(task, caught)
             if isinstance(stop_signal, GoalCancelled) and in_flight_note == "mid-tool-execution":
                 # The tool coroutine was admitted. Cancellation cannot prove an
                 # external operation did not commit, even if its coroutine
@@ -4112,17 +4113,19 @@ class Agent:
                 try:
                     await task
                 except BaseException as cancelled:
-                    if getattr(cancelled, "tool_execution_unknown", False):
+                    if getattr(task_stop(task, cancelled), "tool_execution_unknown", False):
                         stop_signal.tool_execution_unknown = True
-            else:
+            elif stop_signal is caught:
                 # Retrieve a racing terminal exception so cancelling the goal
                 # cannot orphan an unobserved exception from the owned task.
                 try:
                     task.result()
                 except BaseException as cancelled:
-                    if getattr(cancelled, "tool_execution_unknown", False):
+                    if getattr(task_stop(task, cancelled), "tool_execution_unknown", False):
                         stop_signal.tool_execution_unknown = True
-            raise
+            if stop_signal is caught:
+                raise
+            raise stop_signal from None
 
     def _answer_stream_for_turn(self) -> _PartialAnswerStream | None:
         """A live answer preview for this turn, or None when the turn must not
