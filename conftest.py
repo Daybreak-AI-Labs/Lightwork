@@ -57,7 +57,7 @@ def pytest_addoption(parser):
         help="run only the test files in slice INDEX (1-based) of COUNT: files "
              "are dealt round-robin in collection order, so the slices are "
              "deterministic, disjoint and together cover the whole suite. CI "
-             "runs three slices per interpreter on two-core runners.",
+             "runs four slices per interpreter on two-core runners.",
     )
 
 
