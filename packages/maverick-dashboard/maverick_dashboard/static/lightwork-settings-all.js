@@ -1,4 +1,6 @@
-/* Settings > All settings: save, reset, search and module switches. */
+/* Settings > All settings: save, reset, search and module switches.
+   The page arrives with the list of groups; a group's settings are loaded
+   when it is opened, and a search asks the server for the matching ones. */
 (function () {
   'use strict';
 
@@ -372,6 +374,8 @@
       await fingerprintFrom(row, null, target);
     } else if (target.dataset.resetGroup) {
       var group = target.closest('.settings-all-group');
+      // Every setting of the group, not only those shown so far.
+      if (!(await loadGroup(target.dataset.resetGroup))) return;
       var name = group.querySelector('h2') ? group.querySelector('h2').textContent : 'this group';
       var list = rows(group).filter(function (r) { return editable(r) && r.dataset.source !== 'default'; });
       if (!list.length) { announce('Everything in ' + name + ' already uses its default.'); return; }
@@ -967,10 +971,6 @@
     select.value = '';
     say(row, 'Added. Choose Save to keep this change.');
   }
-  root.querySelectorAll('[data-grid]').forEach(function (box) {
-    var owner = box.closest('.settings-all-row');
-    if (owner) buildGrid(owner, gridState(owner));
-  });
 
   // ---- rows named from a long list (people who write from a chat app) ------
   async function filterGridKeys(row) {
@@ -1030,12 +1030,6 @@
     parts.splice(Math.min(Math.max(at, 0), parts.length), 0, '{tenant_sha256}');
     return 'https://' + address.host + '/' + parts.join('/');
   }
-  root.querySelectorAll('[data-segment-at]').forEach(function (select) {
-    segmentOptions(select.closest('.settings-all-row'));
-    select.addEventListener('change', function () {
-      select.setAttribute('data-at', select.value);
-    });
-  });
 
   // ---- fingerprints from an uploaded file ----------------------------------
   async function fingerprintFrom(row, file, button) {
@@ -1184,6 +1178,138 @@
     }
   });
 
+  // ---- a row put in the page (with the page, or loaded later) ---------------
+  function prepareRow(row) {
+    if (row.querySelector('[data-grid]')) buildGrid(row, gridState(row));
+    var select = row.querySelector('[data-segment-at]');
+    if (select) {
+      segmentOptions(row);
+      select.addEventListener('change', function () {
+        select.setAttribute('data-at', select.value);
+      });
+    }
+    remember(row);
+  }
+
+  // ---- loading a group's settings, or the settings a search finds ----------
+  var ROWS = root.getAttribute('data-rows-url') || '/settings/all/rows';
+  var fetched = {};
+  function section(slug) {
+    return Array.prototype.slice.call(root.querySelectorAll('.settings-all-group'))
+      .filter(function (group) { return group.dataset.group === slug; })[0] || null;
+  }
+  function complete(group) { return group.dataset.loaded !== '0'; }
+  function place(group, part, fragmentPart) {
+    // The part's heading, rows and Save button, in the group's part order.
+    var box = group.querySelector('[data-rows="' + part + '"]');
+    if (box || !fragmentPart) return box;
+    var holder = group.querySelector('[data-group-rows]');
+    if (!holder) return null;
+    var copy = document.importNode(fragmentPart, true);
+    copy.querySelector('[data-rows]').textContent = '';
+    var order = Number(copy.dataset.partOrder);
+    var next = Array.prototype.slice.call(holder.querySelectorAll('[data-part]'))
+      .filter(function (other) { return Number(other.dataset.partOrder) > order; })[0] || null;
+    holder.insertBefore(copy, next);
+    return copy.querySelector('[data-rows]');
+  }
+  function insertRows(fragment) {
+    var have = {};
+    rows().forEach(function (row) { have[row.dataset.settingId] = true; });
+    var added = [];
+    fragment.querySelectorAll('[data-fragment-group]').forEach(function (source) {
+      var group = section(source.getAttribute('data-fragment-group'));
+      if (!group) return;
+      source.querySelectorAll('.settings-all-row[data-setting-id]').forEach(function (incoming) {
+        if (have[incoming.dataset.settingId]) return;  // keep what the person is changing
+        var part = incoming.dataset.subgroup || '';
+        var box = place(group, part, part ? incoming.closest('[data-part]') : null);
+        if (!box) return;
+        var order = Number(incoming.dataset.order);
+        var next = Array.prototype.slice.call(box.children)
+          .filter(function (other) { return Number(other.dataset.order) > order; })[0] || null;
+        var row = document.importNode(incoming, true);
+        box.insertBefore(row, next);
+        have[row.dataset.settingId] = true;
+        added.push(row);
+      });
+    });
+    added.forEach(prepareRow);
+    var done = fragment.querySelector('[data-rows-fragment]');
+    var whole = done && section(done.getAttribute('data-complete'));
+    if (whole) {
+      whole.dataset.loaded = '1';
+      var offer = whole.querySelector('[data-group-load]');
+      if (offer) offer.hidden = true;
+    }
+  }
+  async function fetchRows(query) {
+    if (fetched[query]) return true;
+    try {
+      var response = await window.fetch(ROWS + '?' + query, {
+        cache: 'no-store', credentials: 'same-origin', headers: {Accept: 'text/html'}
+      });
+      if (!response.ok) throw response;
+      insertRows(new window.DOMParser().parseFromString(await response.text(), 'text/html'));
+      fetched[query] = true;
+      return true;
+    } catch (failure) {
+      announce(errorText(failure, 'load these settings'));
+      return false;
+    }
+  }
+  async function loadGroup(slug) {
+    var group = section(slug);
+    if (!group || complete(group)) return !!group;
+    var offer = group.querySelector('[data-load-group]');
+    if (offer) offer.setAttribute('aria-busy', 'true');
+    var ok = await fetchRows('group=' + encodeURIComponent(slug));
+    if (offer) offer.removeAttribute('aria-busy');
+    return ok;
+  }
+  function incomplete() {
+    return Array.prototype.slice.call(root.querySelectorAll('.settings-all-group'))
+      .some(function (group) { return !complete(group); });
+  }
+  function filterQuery() {
+    // What the filters need from the server, or '' when the page has it.
+    var words = (search && search.value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    var groupWanted = groupPick ? groupPick.value : '';
+    var onlyChanged = changedOnly && changedOnly.checked;
+    if (groupWanted) {
+      var group = section(groupWanted);
+      return group && !complete(group) ? 'group=' + encodeURIComponent(groupWanted) : '';
+    }
+    if (!(words.length || onlyChanged) || !incomplete()) return '';
+    return 'q=' + encodeURIComponent(words.join(' ')) + (onlyChanged ? '&changed=1' : '');
+  }
+  function waitingFor() {
+    // True while the page lacks settings the filters need.
+    var query = filterQuery();
+    return !!query && !fetched[query];
+  }
+  var pendingTimer = null;
+  async function refresh() {
+    var query = filterQuery();
+    // Which settings are changed here moves as settings are saved: ask again.
+    if (query.indexOf('changed=1') !== -1) delete fetched[query];
+    updateFilter();
+    if (!query) return;
+    await fetchRows(query);
+    updateFilter();
+  }
+  function refreshSoon() {
+    window.clearTimeout(pendingTimer);
+    updateFilter();
+    if (filterQuery()) pendingTimer = window.setTimeout(refresh, 250);
+  }
+  root.addEventListener('click', async function (event) {
+    var link = event.target.closest('[data-load-group]');
+    if (!link) return;
+    event.preventDefault();
+    if (await loadGroup(link.getAttribute('data-load-group'))) updateFilter();
+  });
+
   // ---- search and filters --------------------------------------------------
   var search = document.getElementById('settings-all-search');
   var groupPick = document.getElementById('settings-all-group');
@@ -1195,6 +1321,7 @@
     var groupWanted = groupPick ? groupPick.value : '';
     var onlyChanged = changedOnly && changedOnly.checked;
     var shown = 0;
+    var waiting = waitingFor() ? 1 : 0;
     root.querySelectorAll('.settings-all-group').forEach(function (group) {
       var inGroup = !groupWanted || group.dataset.group === groupWanted;
       var partPick = group.querySelector('[data-subgroup-pick]');
@@ -1215,20 +1342,52 @@
       group.querySelectorAll('[data-subgroup-actions]').forEach(function (actions) {
         actions.hidden = !partsShown[actions.dataset.subgroupActions];
       });
-      group.hidden = visible === 0;
+      // A group not loaded yet stays in the list, with its "Show" button,
+      // unless a search or filter is looking for something else.
+      var offered = inGroup && !complete(group) && !words.length && !onlyChanged && !part;
+      group.hidden = visible === 0 && !offered;
+      if (offered) waiting += 1;
       shown += visible;
     });
     var filtering = words.length || groupWanted || onlyChanged;
-    if (status) status.textContent = filtering ? (shown === 1 ? '1 setting shown.' : shown + ' settings shown.') : '';
-    if (empty) empty.hidden = shown !== 0;
+    if (status) status.textContent = filtering && !waitingFor() ? (shown === 1 ? '1 setting shown.' : shown + ' settings shown.') : '';
+    if (empty) empty.hidden = shown !== 0 || waiting !== 0;
   }
   [search, groupPick, changedOnly].forEach(function (node) {
-    if (node) node.addEventListener(node === search ? 'input' : 'change', updateFilter);
+    if (node) node.addEventListener(node === search ? 'input' : 'change', node === search ? refreshSoon : refresh);
   });
+  var form = document.getElementById('settings-all-filter-form');
+  if (form) {
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      window.clearTimeout(pendingTimer);
+      refresh();
+    });
+  }
   root.querySelectorAll('[data-subgroup-pick]').forEach(function (node) {
-    node.addEventListener('change', updateFilter);
+    node.addEventListener('change', function () {
+      var group = node.closest('.settings-all-group');
+      if (node.value && group && !complete(group)) loadGroup(group.dataset.group).then(updateFilter);
+      updateFilter();
+    });
   });
 
-  rows().forEach(remember);
-  updateFilter();
+  rows().forEach(prepareRow);
+  if (root.dataset.served === '1') {
+    // The server already put this search's matches in the page.
+    var served = filterQuery();
+    if (served) fetched[served] = true;
+  }
+  refresh();
+  var focus = root.dataset.focus && rowById(root.dataset.focus);
+  var hash = /^#group-([a-z0-9-]+)$/.exec(window.location.hash || '');
+  if (focus && focus.scrollIntoView) focus.scrollIntoView();
+  else if (hash && section(hash[1])) {
+    // A link to one group (e.g. "Change in All settings"): open it there.
+    loadGroup(hash[1]).then(function () {
+      updateFilter();
+      var head = document.getElementById('group-' + hash[1]);
+      if (head && head.scrollIntoView) head.scrollIntoView();
+    });
+  }
 })();

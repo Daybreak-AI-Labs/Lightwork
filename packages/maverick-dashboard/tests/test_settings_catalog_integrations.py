@@ -13,6 +13,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_integrations as integrations
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = integrations.entries(catalog.S, catalog.C, catalog.Column)
@@ -372,7 +374,7 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
     r = _save([{"id": key, "value": value} for key, value in secrets.items()])
     assert r.status_code == 200, r.text
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
-    page = client.get("/settings/all").text
+    page = every_group(client)
     listing = client.get(API).text
     for value in secrets.values():
         assert value not in r.text and value not in stored

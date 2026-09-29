@@ -22,6 +22,8 @@ from maverick_dashboard import settings_catalog_access as access
 from maverick_dashboard import settings_tests
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 CHECK = API + "/test"
@@ -249,7 +251,7 @@ def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeyp
     if setting.secret:
         assert row["value"] is None and row["is_set"] is True
         assert value not in r.text and value not in client.get(API).text
-        assert value not in client.get("/settings/all").text
+        assert value not in client.get("/settings/all", params={"id": setting.id}).text
         audited = [a for a in audit_rows if a["key"] == setting.key]
         assert audited and audited[-1]["new"] == "set" and value not in repr(audit_rows)
     else:
@@ -733,7 +735,7 @@ def test_the_dashboard_session_key_is_sealed_in_the_settings_file(tmp_path, as_t
 def test_the_page_shows_the_new_controls_in_plain_language(workspaces):
     from test_support.plain_language import developer_terms
 
-    html = client.get("/settings/all").text
+    html = every_group(client)
     assert "Server &amp; deployment" in html
     assert "Test connection" in html and "Check this location" in html
     assert 'data-control="path"' in html

@@ -259,7 +259,7 @@ def test_row_saves_reads_back_and_resets(setting, audit_rows):
     if setting.secret:
         assert row["value"] is None and row["is_set"] is True
         assert stored not in r.text and stored not in client.get(API).text
-        assert stored not in client.get("/settings/all").text
+        assert stored not in client.get("/settings/all", params={"id": setting.id}).text
         text = __import__("maverick.config", fromlist=["x"]).dashboard_overrides_path() \
             .read_text(encoding="utf-8")
         assert stored not in text and "MVKAR1:" in text

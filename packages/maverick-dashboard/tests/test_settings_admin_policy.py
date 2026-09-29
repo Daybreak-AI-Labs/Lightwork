@@ -16,6 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 
@@ -98,7 +100,7 @@ def test_page_shows_the_new_controls_in_plain_language(monkeypatch):
     from test_support.plain_language import developer_terms
 
     _installer('[channels.slack]\nenabled = true\n')
-    page = client.get("/settings/all").text
+    page = every_group(client)
     for text in ("Tools allowed in each chat app", "Most to spend with each AI service",
                  "Pause for a review after spending", "Who reviews which approvals",
                  "Apps Ekko may notice", "Use the careful improvement profile",
@@ -127,7 +129,7 @@ def test_chat_apps_and_services_come_from_what_is_set_up():
 
 
 def test_empty_selectors_say_what_to_do_first():
-    page = client.get("/settings/all").text
+    page = every_group(client)
     assert "No chat apps are set up yet. Set one up on the Channels page first." in page
     assert "No groups have arrived from your sign-in provider yet." in page
 

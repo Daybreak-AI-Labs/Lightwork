@@ -22,6 +22,8 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 
@@ -252,7 +254,7 @@ def test_grc_sync_form_is_accepted_by_the_kernel(audit_rows):
 def test_page_shows_the_guided_forms_in_plain_language():
     from test_support.plain_language import developer_terms
 
-    page = client.get("/settings/all").text
+    page = every_group(client)
     for text in ("Chat channels", "Protected work area", "Finance", "Security suite",
                  "AI governance", "Who may use Matrix", "Trusted skill publishers",
                  "Upload a publisher", "Usage limits for other tools",
@@ -360,7 +362,7 @@ def test_a_new_channel_is_set_up_with_sealed_sign_in(audit_rows):
     assert token not in stored and "MVKAR1:" in stored
     matrix = _loaded()["channels"]["matrix"]
     assert matrix["access_token"] == token and matrix["enabled"] is True
-    assert token not in client.get("/settings/all").text
+    assert token not in every_group(client)
     assert token not in repr(audit_rows)
     assert _row("channels.matrix.access_token")["value_text"] == "Set"
     assert _row("channels.matrix.enabled")["restart"] is True
@@ -391,7 +393,7 @@ def test_trusting_a_publisher_needs_confirmation_and_shows_a_fingerprint(audit_r
     fingerprint = hashlib.sha256(_KEY).hexdigest().upper()[:16]
     assert row["key_items"][0]["fingerprint"].replace(" ", "") == fingerprint
     assert row["value_text"] == "1 trusted key"
-    page = client.get("/settings/all").text
+    page = every_group(client)
     assert row["key_items"][0]["fingerprint"] in page
     # The activity record names the key by fingerprint only.
     assert audit_rows[-1]["new"] == [row["key_items"][0]["fingerprint"]]
@@ -489,7 +491,7 @@ def test_payment_limits_reach_the_governance_policy(audit_rows):
     assert _save([{"id": "governance.require_human_above.*", "value": 9000}]).status_code == 409
     assert _save([{"id": "finance.regimes", "value": ["sox"]}]).status_code == 409
     assert _save([{"id": "governance.require_human_above.*", "value": 1000}]).status_code == 200
-    page = client.get("/settings/all").text
+    page = every_group(client)
     assert 'id="sa-governance-require_human_above-all"' in page
 
 
@@ -563,7 +565,7 @@ def test_agent_dependency_map_switch_turns_on_its_chain(audit_rows):
     cfg = _loaded()
     assert cfg["agent_topology"]["enable"] is True
     assert cfg["model_risk_assurance"]["enable"] is True
-    assert "Agent dependency map" in client.get("/settings/all").text
+    assert "Agent dependency map" in every_group(client)
 
 
 # ------------------------------------------------ tool gateway (sidecar)
@@ -721,6 +723,9 @@ def test_page_does_not_build_the_long_tool_list(monkeypatch):
 
     monkeypatch.setattr(settings_all_page, "_tool_names", slow)
     assert client.get("/settings/all").status_code == 200
+    for group in ("safety", "security", "performance"):  # the groups with tool lists
+        assert client.get("/settings/all", params={"group": group}).status_code == 200
+        assert client.get("/settings/all/rows", params={"group": group}).status_code == 200
     assert client.get(API).status_code == 200
 
 

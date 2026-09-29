@@ -15,6 +15,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.settings_pages import every_group
+
 ORIGIN = {"Origin": "http://testserver"}
 LO = "/api/v1/learning-ops"
 TO = "/api/v1/training-ops"
@@ -616,7 +618,7 @@ def test_every_destination_named_in_a_message_exists(client):
 
     from maverick_dashboard import learning_ops_api as ops
     from maverick_dashboard import settings_catalog as catalog
-    page = html.unescape(client.get("/settings/all").text)
+    page = html.unescape(every_group(client))
     for setting_id in ("self_harness.eval_corpus", "self_harness.holdout_ledger", "harness_refine.enable",
                        "self_modify.editable_paths", "self_modify.eval_tests"):
         s = catalog.BY_ID[setting_id]

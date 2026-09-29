@@ -19,6 +19,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_privacy as privacy
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 
@@ -268,7 +270,7 @@ def test_privacy_rows_are_grouped_and_plain():
         assert setting.subgroup or setting.id == "privacy.redact_egress", setting.id
         assert developer_terms(f"<main>{setting.label} {setting.help} {setting.warning}</main>") \
             == [], setting.id
-    page = client.get("/settings/all").text
+    page = every_group(client)
     assert developer_terms(page) == []
     for heading in ("Consent preferences — privacy signals",
                     "Consent preferences — Salesforce delivery",
@@ -426,7 +428,7 @@ def test_sealed_key_names_are_never_shown_or_audited(audit_rows):
     assert r.status_code == 200
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
     assert salt not in stored and "SALESFORCE_CONSENT" not in stored and "MVKAR1:" in stored
-    for text in (r.text, client.get(API).text, client.get("/settings/all").text,
+    for text in (r.text, client.get(API).text, every_group(client),
                  repr(audit_rows)):
         assert salt not in text and "SALESFORCE_CONSENT_TOKEN" not in text
     loaded = _loaded()

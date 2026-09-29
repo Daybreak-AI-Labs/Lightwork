@@ -1,7 +1,10 @@
 """Settings > All settings: every catalogued product setting with a real control.
 
-``GET /settings/all`` renders the page; ``GET /api/v1/settings/catalog`` lists
-the current state and ``POST /api/v1/settings/catalog`` saves or resets one or
+``GET /settings/all`` renders the page: the list of groups, and a group's
+settings only when asked for (``?group=``, ``?q=``, ``?changed=1``, ``?id=``); the
+page loads the rest from ``GET /settings/all/rows`` as the person opens a group or
+searches. ``GET /api/v1/settings/catalog`` lists the current state (with the same
+filters) and ``POST /api/v1/settings/catalog`` saves or resets one or
 more settings in a single overlay write. Every route is global-admin only (the
 overlay is deployment-wide), every write is same-origin checked, and each
 changed setting lands one ``setting_changed`` audit row that never carries a
@@ -11,14 +14,16 @@ enforces it independently of the page.
 """
 from __future__ import annotations
 
+import contextvars
 import dataclasses
+import itertools
 import os
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -29,6 +34,7 @@ from . import settings_catalog as catalog
 router = APIRouter()
 
 PAGE_PATH = "/settings/all"
+ROWS_PATH = PAGE_PATH + "/rows"
 API_PATH = "/api/v1/settings/catalog"
 
 SOURCE_TEXT = {
@@ -210,7 +216,22 @@ def _people_choices() -> list[tuple[str, str]]:
     return out
 
 
-def _source_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one branch per source
+# One listing of the page reuses each live list (several settings share one,
+# and some are slow to build: the specialist packs are read from disk).
+_CHOICE_MEMO: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "settings_choice_memo", default=None)
+
+
+def _source_choices(source: str) -> list[tuple[str, str]]:
+    memo = _CHOICE_MEMO.get()
+    if memo is None:
+        return _build_source_choices(source)
+    if source not in memo:
+        memo[source] = tuple(_build_source_choices(source))
+    return list(memo[source])
+
+
+def _build_source_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one branch per source
     from . import identity_format
 
     if source == "people":
@@ -692,22 +713,94 @@ def _working_values(layers: dict[str, Any]) -> dict[str, object]:
     return values
 
 
-def catalog_state() -> dict[str, Any]:
+def _search_text(setting: catalog.Setting) -> str:
+    """What a search matches (the page filters its loaded rows on the same words)."""
+    return " ".join((setting.label, setting.help, setting.aliases, setting.group,
+                     setting.subgroup)).lower()
+
+
+def _words(query: str) -> tuple[str, ...]:
+    return tuple(query.strip().lower().split())
+
+
+def _group_named(slug: str) -> str | None:
+    return next((name for name in catalog.GROUPS if _slug(name) == slug), None)
+
+
+def catalog_state(
+    group: str = "", words: tuple[str, ...] = (), *, changed: bool = False,
+) -> dict[str, Any]:
+    """Every setting's state, by group; or only one group (``group``, its slug),
+    the settings matching every search word, or only those changed here."""
+    layers = _sources()
+    groups = []
+    filtered = bool(group or words or changed)
+    order = itertools.count()
+    token = _CHOICE_MEMO.set({})
+    try:
+        for name in catalog.GROUPS:
+            settings = [(next(order), s) for s in _in_page_order(name)]
+            parts = _parts([s for _i, s in settings])
+            if group and _slug(name) != group:
+                continue
+            if words:
+                settings = [(i, s) for i, s in settings
+                            if all(w in _search_text(s) for w in words)]
+            if changed:
+                settings = [(i, s) for i, s in settings
+                            if _resolve(s, layers)["source"] == "here"]
+            if filtered and not settings:
+                continue
+            rows = []
+            for index, setting in settings:
+                rows.append(_row(setting, layers))
+                rows[-1]["order"] = index
+            groups.append(_group_state(name, rows, parts))
+    finally:
+        _CHOICE_MEMO.reset(token)
+    return {"groups": groups}
+
+
+def _parts(settings: list[catalog.Setting]) -> dict[str, int]:
+    """A group's parts (subgroups), numbered in page order from 1."""
+    names = dict.fromkeys(s.subgroup for s in settings if s.subgroup)
+    return {name: index for index, name in enumerate(names, 1)}
+
+
+def _group_state(
+    name: str, rows: list[dict[str, Any]], parts: dict[str, int],
+) -> dict[str, Any]:
+    subgroups = list(dict.fromkeys(r["subgroup"] for r in rows if r["subgroup"]))
+    for r in rows:
+        r["subgroup_slug"] = _slug(name + " " + r["subgroup"]) if r["subgroup"] else ""
+    return {
+        "name": name,
+        "slug": _slug(name),
+        "intro": catalog.GROUP_INTROS.get(name, ""),
+        "settings": rows,
+        "subgroups": [{"name": sub, "slug": _slug(name + " " + sub), "order": parts[sub]}
+                      for sub in subgroups],
+    }
+
+
+def _outline() -> list[dict[str, Any]]:
+    """Every group with its parts and counts, without building its rows."""
     layers = _sources()
     groups = []
     for name in catalog.GROUPS:
-        rows = [_row(s, layers) for s in _in_page_order(name)]
-        subgroups = list(dict.fromkeys(r["subgroup"] for r in rows if r["subgroup"]))
-        for r in rows:
-            r["subgroup_slug"] = _slug(name + " " + r["subgroup"]) if r["subgroup"] else ""
+        settings = _in_page_order(name)
         groups.append({
             "name": name,
             "slug": _slug(name),
             "intro": catalog.GROUP_INTROS.get(name, ""),
-            "settings": rows,
-            "subgroups": [{"name": sub, "slug": _slug(name + " " + sub)} for sub in subgroups],
+            "subgroups": [{"name": sub, "slug": _slug(name + " " + sub), "order": index}
+                          for sub, index in _parts(settings).items()],
+            "count": len(settings),
+            "changed": sum(1 for s in settings if _resolve(s, layers)["source"] == "here"),
+            "settings": [],
+            "loaded": False,
         })
-    return {"groups": groups}
+    return groups
 
 
 def _in_page_order(group: str) -> list[catalog.Setting]:
@@ -774,20 +867,68 @@ async def settings_all_styles() -> FileResponse:
 
 
 # ---------------------------------------------------------------- page
+def _filters(group: str, q: str) -> tuple[str, tuple[str, ...]]:
+    return (group if _group_named(group) else ""), _words(q)
+
+
 @router.get(PAGE_PATH, response_class=HTMLResponse)
-def all_settings_page(request: Request) -> HTMLResponse:
+def all_settings_page(
+    request: Request,
+    group: str = Query("", max_length=80),
+    q: str = Query("", max_length=100),
+    changed: bool = False,
+    setting_id: str = Query("", alias="id", max_length=120),
+) -> HTMLResponse:
+    """The list of groups; a group's settings are loaded when it is opened.
+
+    ``?group=`` (or ``?id=``, a setting's group) and ``?q=`` / ``?changed=1``
+    put those settings in the page itself, so every setting can be reached and
+    read without the page's script."""
     auth.require_global_permission(request, "admin")
-    state = catalog_state()
-    count = sum(len(g["settings"]) for g in state["groups"])
-    changed = sum(
-        1 for g in state["groups"] for s in g["settings"] if s["source"] == "here"
-    )
+    focus = catalog.BY_ID.get(setting_id)
+    if focus is not None:
+        group = _slug(focus.group)
+    group, words = _filters(group, q)
+    groups = _outline()
+    if group or words or changed:
+        loaded = {g["slug"]: g["settings"]
+                  for g in catalog_state(group, words, changed=changed)["groups"]}
+        for g in groups:
+            g["settings"] = loaded.get(g["slug"], [])
+            g["loaded"] = g["slug"] == group and not words and not changed
     return _app().templates.TemplateResponse(request, "settings_all.html", {
-        "groups": state["groups"],
+        "groups": groups,
         "modules": _module_rows(),
-        "setting_count": count,
-        "changed_count": changed,
+        "setting_count": sum(g["count"] for g in groups),
+        "changed_count": sum(g["changed"] for g in groups),
+        "group": group,
+        "query": " ".join(words),
+        "only_changed": changed,
+        "focus_id": focus.id if focus is not None else "",
+        "served": bool(words or changed),
     })
+
+
+@router.get(ROWS_PATH, response_class=HTMLResponse)
+def all_settings_rows(
+    request: Request,
+    group: str = Query("", max_length=80),
+    q: str = Query("", max_length=100),
+    changed: bool = False,
+) -> HTMLResponse:
+    """The rows of one group, or of the settings matching a search, as the page
+    shows them (the page puts them in place)."""
+    auth.require_global_permission(request, "admin")
+    group, words = _filters(group, q)
+    if not (group or words or changed):
+        return HTMLResponse("", status_code=400, headers={"Cache-Control": "no-store"})
+    state = catalog_state(group, words, changed=changed)
+    response = _app().templates.TemplateResponse(request, "settings_all_rows.html", {
+        "groups": state["groups"],
+        "complete": group if not (words or changed) else "",
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ---------------------------------------------------------------- API
@@ -827,9 +968,20 @@ async def catalog_choices(
 
 
 @router.get(API_PATH)
-async def catalog_list(request: Request) -> JSONResponse:
+async def catalog_list(
+    request: Request,
+    group: str = Query("", max_length=80),
+    q: str = Query("", max_length=100),
+    changed: bool = False,
+) -> JSONResponse:
+    """The settings' state: all of it, one group (``?group=``, the group's
+    slug), those matching every word of ``?q=``, or those changed here."""
     auth.require_global_permission(request, "admin")
-    state = await run_in_threadpool(catalog_state)
+    if group and not _group_named(group):
+        message = "There is no group of settings with that name."
+        return JSONResponse({"detail": message, "message": message}, status_code=404,
+                            headers={"Cache-Control": "no-store"})
+    state = await run_in_threadpool(catalog_state, group, _words(q), changed=changed)
     return JSONResponse(state, headers={"Cache-Control": "no-store"})
 
 
@@ -1329,4 +1481,4 @@ async def catalog_preview(request: Request, setting_id: str, value: str = "") ->
     return JSONResponse(shown, headers=headers)
 
 
-__all__ = ["router", "catalog_state", "PAGE_PATH", "API_PATH"]
+__all__ = ["router", "catalog_state", "PAGE_PATH", "ROWS_PATH", "API_PATH"]

@@ -20,6 +20,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_structured as structured
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = [catalog.BY_ID[s.id] for s in structured.entries(catalog.S, catalog.C, catalog.Column)]
@@ -115,7 +117,7 @@ def test_rows_are_plain_and_named_by_their_readers():
     for row in ROWS:
         assert row.help.endswith(".") and "_" not in row.label, row.id
         assert row.control != "text" or row.pattern or row.workspace_segment, row.id
-    page_text = client.get("/settings/all").text
+    page_text = every_group(client)
     for marker in ("data-picks", "data-document", "data-fingerprint", "data-segment-at",
                    "data-preview-url", "data-grid-keysearch"):
         assert marker in page_text, marker
