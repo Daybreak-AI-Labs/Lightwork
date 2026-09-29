@@ -420,7 +420,7 @@
   $('sg-trust').addEventListener('change', () => guarded('read the trust file', async () => {
     const file = $('sg-trust').files && $('sg-trust').files[0];
     state.trust = file ? await readJsonFile(file) : null;
-    say(file ? 'Signed examples will be checked against the chosen trust file.' : 'Signed examples are checked against this workspace’s keys.');
+    say(file ? 'The chosen trust file only previews who signed an example. Learning uses this workspace’s keys.' : 'Signed examples are checked against this workspace’s keys.');
   }));
   $('sg-package').addEventListener('change', () => guarded('open the learned file', async () => {
     const file = $('sg-package').files && $('sg-package').files[0];
@@ -443,18 +443,17 @@
         { okText: 'Learn and approve' });
       if (!ok) return;
     }
-    const result = await api('/api/v1/flow-teach/signed/learn', { bundles: state.bundles, tools: tools.slice(0, 8), style: style,
-      trust: state.trust || undefined });
+    const result = await api('/api/v1/flow-teach/signed/learn', { bundles: state.bundles, tools: tools.slice(0, 8), style: style });
     if (result.package) showPackage(result);
     else { say('Learned and approved for governed use.'); await loadApproved(); }
   }));
   $('sg-refine').addEventListener('click', () => guarded('add the signed examples', async () => {
     if (!state.pkg || !state.bundles.length) { say('Add signed examples first.'); return; }
-    showPackage(await api('/api/v1/flow-teach/signed/refine', { package: state.pkg, bundles: state.bundles, trust: state.trust || undefined }));
+    showPackage(await api('/api/v1/flow-teach/signed/refine', { package: state.pkg, bundles: state.bundles }));
   }));
   $('sg-inspect').addEventListener('click', () => guarded('show it as a flow', async () => {
     if (!state.pkg) return;
-    const result = await api('/api/v1/flow-teach/signed/inspect', { package: state.pkg, name: 'Learned flow', trust: state.trust || undefined });
+    const result = await api('/api/v1/flow-teach/signed/inspect', { package: state.pkg, name: 'Learned flow' });
     const list = $('sg-steps');
     list.replaceChildren();
     (result.steps || []).forEach(s => list.append(make('li', null, human(s.kind) + ': ' + human(s.label))));

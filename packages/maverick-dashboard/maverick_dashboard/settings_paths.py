@@ -93,6 +93,21 @@ def _check_new_file(real: Path, normalized: Path) -> str:
     return str(normalized)
 
 
+def _others_can_replace(info: os.stat_result, *folders: Path) -> bool:
+    """A program everyone may change, or swap in a folder everyone may change
+    (a shared folder with the sticky bit only lets owners swap their own)."""
+    if info.st_mode & stat.S_IWOTH:
+        return True
+    for folder in folders:
+        try:
+            mode = folder.stat().st_mode
+        except OSError:
+            return True
+        if mode & stat.S_IWOTH and not mode & stat.S_ISVTX:
+            return True
+    return False
+
+
 def check(value: str, *, kind: str, writable: bool = False, private: bool = False,
           new_ok: bool = False, scope: str = "", program: bool = False) -> str:
     """Validate one location; return it as it will be stored.
@@ -110,6 +125,11 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
     normalized = Path(os.path.normpath(str(entered)))
     try:
         real = entered.resolve()
+        # "link/.." names one file to the server and another once stored:
+        # store only a location that leads to the file checked below.
+        if normalized.resolve() != real:
+            raise PathRefused("that location goes through a link and then back up with \"..\". "
+                              "Enter the location without \"..\".")
     except (OSError, RuntimeError) as exc:
         raise PathRefused("that location could not be checked on the server.") from exc
     roots = allowed_roots(scope, programs=program)
@@ -141,6 +161,11 @@ def check(value: str, *, kind: str, writable: bool = False, private: bool = Fals
             raise PathRefused("Lightwork isn't allowed to save changes to that file.")
         if program and not os.access(real, os.X_OK):
             raise PathRefused("that file is not a program Lightwork is allowed to run.")
+        if program and os.name != "nt" and _others_can_replace(info, real.parent, normalized.parent):
+            raise PathRefused(
+                "anyone on the server can change that program or its folder. Limit who can "
+                "change them, then try again."
+            )
         if private and os.name != "nt" and info.st_mode & stat.S_IROTH:
             raise PathRefused(
                 "anyone on the server can read that key file. Limit who can read it, "

@@ -330,6 +330,53 @@ def test_typescript_plugins_start_the_program_chosen(audit_rows, monkeypatch, tm
     assert _save([{"id": "plugins.ts", "value": outside}], confirm=True).status_code == 400
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_program_other_accounts_can_replace_is_refused(audit_rows, tmp_path):
+    # Lightwork later runs the chosen program, so any account on the server that
+    # can change the file, or swap it inside its folder, could run code as Lightwork.
+    writable = _program(tmp_path, "shared-node")
+    writable.chmod(0o777)
+    rules = [{"program": str(writable), "file": "", "args": ""}]
+    r = _save([{"id": "plugins.ts", "value": rules}], confirm=True)
+    assert r.status_code == 400 and "change" in r.text
+    open_folder = tmp_path / "open"
+    open_folder.mkdir()
+    open_folder.chmod(0o777)
+    swappable = open_folder / "node"
+    swappable.write_text("#!/bin/sh\n", encoding="utf-8")
+    swappable.chmod(0o755)
+    rules = [{"program": str(swappable), "file": "", "args": ""}]
+    r = _save([{"id": "plugins.ts", "value": rules}], confirm=True)
+    assert r.status_code == 400 and "change" in r.text
+    safe = _program(tmp_path, "node")
+    _saved([{"id": "plugins.ts", "value": [{"program": str(safe), "file": "", "args": ""}]}])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX links and permission bits")
+def test_a_location_is_stored_as_the_file_that_was_checked(tmp_path):
+    # "link/.." means a different file to the server (which follows the link)
+    # than to the stored text (which drops "link/.."), so the checks would
+    # pass on one file and Lightwork would later use another.
+    from maverick_dashboard import settings_paths
+
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    checked = tmp_path / "a" / "key.pem"
+    checked.write_text("private", encoding="utf-8")
+    checked.chmod(0o600)
+    stored = tmp_path / "key.pem"
+    stored.write_text("readable by anyone", encoding="utf-8")
+    stored.chmod(0o644)
+    (tmp_path / "lnk").symlink_to(tmp_path / "a" / "b")
+    with pytest.raises(settings_paths.PathRefused):
+        settings_paths.check(str(tmp_path / "lnk" / ".." / "key.pem"), kind="file", private=True)
+    with pytest.raises(settings_paths.PathRefused):
+        settings_paths.check(str(stored), kind="file", private=True)
+    assert settings_paths.check(str(checked), kind="file", private=True) == str(checked)
+    assert settings_paths.check(str(tmp_path / "a" / "b" / ".." / "key.pem"), kind="file",
+                                private=True) == str(checked)
+    assert settings_paths.check(str(tmp_path / "lnk"), kind="folder") == str(tmp_path / "lnk")
+
+
 def test_network_plugins_connect_only_on_this_server(audit_rows, monkeypatch, tmp_path):
     from maverick import grpc_plugin_host
 

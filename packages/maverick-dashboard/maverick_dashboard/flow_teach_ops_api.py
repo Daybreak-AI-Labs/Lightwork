@@ -15,8 +15,10 @@ save (version checks, owner stamping); publishing stays separate.
   (:func:`maverick.flow.recipe_flow.make_flow`), ``verify-bundle``,
   ``learn-verified`` / ``learn-workflow-verified`` / ``learn-memory-verified``,
   ``refine-verified`` and ``draft-verified`` (:mod:`maverick.flow.recipe_lineage`).
-  Signed copies are checked against this workspace's own trusted keys unless
-  a trust file is chosen; the workspace is never typed. Data descriptions are
+  Signed copies are confirmed, and learned from, only against this workspace's
+  own trusted keys (the ones approval checks); a chosen trust file only
+  previews a copy and is reported as a key the person supplied. The workspace
+  is never typed. Data descriptions are
   taken from the examples' capture contracts, never typed.
 
 Access: ``operate``, flows enabled, and the per-flow access check of the flow
@@ -517,14 +519,26 @@ async def draft_recipe(request: Request, flow_id: str) -> dict:
 
 # ---- signed copies and approved recipes (flow recipe *-verified) -----------------
 
-def _trust_and_workspace(trust: dict | None):
+def _workspace_trust():
+    """This workspace's own trusted keys (the ones approval checks) and the workspace."""
     from maverick.flow.action_provenance import local_trust
     from maverick.paths import current_tenant_id_strict
 
     tenant = current_tenant_id_strict()
     if not tenant:
         raise HTTPException(409, "Choose a workspace first.")
-    return (trust if trust is not None else local_trust(tenant)), tenant
+    return local_trust(tenant), tenant
+
+
+def _workspace_keys_only(trust: dict | None) -> None:
+    """Learning never uses keys the caller supplied: anyone can sign with their own."""
+    if trust is not None:
+        raise HTTPException(400, "Lightwork only learns from signed examples checked against keys this "
+                                 "workspace trusts. Remove the chosen trust file and try again.")
+
+
+_SUPPLIED_KEY = ("This copy is signed by a key you supplied, not one this workspace trusts, so it isn't "
+                 "confirmed and can't be learned from here.")
 
 
 _CHECK = {"verified": "Confirmed", "valid": "Confirmed", "accepted": "Confirmed", "not_checked": "Not checked here",
@@ -542,8 +556,20 @@ async def check_signed_copy(request: Request) -> dict:
     body = await _body(request, BundleCheckIn, MAX_LINEAGE_BODY)
 
     def work():
-        trust, tenant = _trust_and_workspace(body.trust)
-        return verify_bundle(body.bundle, trust=trust, expected_tenant=tenant, now=time.time())
+        from maverick.flow.action_provenance import local_trust
+        from maverick.paths import current_tenant_id_strict
+
+        tenant = current_tenant_id_strict()
+        if not tenant:
+            raise HTTPException(409, "Choose a workspace first.")
+        try:
+            return verify_bundle(body.bundle, trust=local_trust(tenant), expected_tenant=tenant, now=time.time())
+        except (ValueError, TypeError, PermissionError, KeyError):
+            if body.trust is None:
+                raise
+        # A preview against the chosen trust file; it never makes the copy genuine.
+        verify_bundle(body.bundle, trust=body.trust, expected_tenant=tenant, now=time.time())
+        return None
 
     try:
         result = await run_in_threadpool(work)
@@ -552,6 +578,8 @@ async def check_signed_copy(request: Request) -> dict:
     except (ValueError, TypeError, PermissionError, KeyError):
         return {"genuine": False, "message": "This signed example couldn't be confirmed. It may be from another "
                                              "workspace, signed by a key that isn't trusted here, or changed."}
+    if result is None:
+        return {"genuine": False, "supplied_key": True, "message": _SUPPLIED_KEY}
     return {"genuine": True, "signature": _CHECK.get(str(result.get("signature_status")), "Confirmed"),
             "contents": _CHECK.get(str(result.get("commitments_status")), "Confirmed"),
             "time": _CHECK.get(str(result.get("time_status")), str(result.get("time_status"))),
@@ -567,6 +595,7 @@ async def learn_from_signed(request: Request):
 
     _gate(request)
     body = await _body(request, VerifiedLearnIn, MAX_LINEAGE_BODY)
+    _workspace_keys_only(body.trust)
     tools = sorted(set(body.tools))
     if body.style in ("workflow", "memory"):
         from .api_flow_recipe_lineage import (
@@ -594,7 +623,7 @@ async def learn_from_signed(request: Request):
     def work():
         from maverick.flow import recipe_lineage
 
-        trust, tenant = _trust_and_workspace(body.trust)
+        trust, tenant = _workspace_trust()
         domain = None
         if body.style == "choices":
             episodes = [b.get("body", {}).get("episode") or {} for b in body.bundles]
@@ -618,9 +647,10 @@ async def refine_signed(request: Request) -> dict:
 
     _gate(request)
     body = await _body(request, VerifiedRefineIn, MAX_LINEAGE_BODY)
+    _workspace_keys_only(body.trust)
 
     def work():
-        trust, tenant = _trust_and_workspace(body.trust)
+        trust, tenant = _workspace_trust()
         return refine_package(body.package, body.bundles, trust=trust, expected_tenant=tenant, now=time.time())
 
     package = await _compute(work, "These signed examples couldn't be added.")
@@ -637,9 +667,10 @@ async def inspect_signed(request: Request) -> dict:
 
     _gate(request)
     body = await _body(request, VerifiedInspectIn, MAX_LINEAGE_BODY)
+    _workspace_keys_only(body.trust)
 
     def work():
-        trust, tenant = _trust_and_workspace(body.trust)
+        trust, tenant = _workspace_trust()
         validate_package(body.package, trust=trust, expected_tenant=tenant, now=time.time())
         flow = make_flow(body.package["artifact"], flow_id=_new_flow_id(body.name), name=body.name.strip(),
                          teaching=body.teaching)
