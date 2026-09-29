@@ -126,13 +126,13 @@ class ProxyServer:
 
         try:
             await asyncio.wait_for(reply(), .25)
-        except (OSError, ValueError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError):
+        except (OSError, ValueError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
             pass
         finally:
             writer.close()
             try:
                 await asyncio.wait_for(writer.wait_closed(), .1)
-            except (OSError, TimeoutError):
+            except (OSError, asyncio.TimeoutError):
                 pass
 
     async def aclose(self):
@@ -290,7 +290,7 @@ class ProxyServer:
             if not state["started"] and not writer.is_closing():
                 if isinstance(exc, ProxyHTTPError):
                     status, body = exc.status, exc.message
-                elif isinstance(exc, TimeoutError):
+                elif isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
                     status, body = 504, b"proxy request deadline exceeded"
                 elif isinstance(exc, (h11.RemoteProtocolError, UnicodeError, ValueError)):
                     status, body = 400, b"invalid proxy request"
@@ -298,7 +298,7 @@ class ProxyServer:
                     status, body = 502, b"proxy upstream request failed"
                 try:
                     await asyncio.wait_for(self._error(writer, status, body), 1.0)
-                except (OSError, TimeoutError):
+                except (OSError, asyncio.TimeoutError):
                     pass
             # After headers, closing WITHOUT EndOfMessage makes a broken stream
             # detectable. Never append a JSON error or fabricate a normal end.
@@ -308,7 +308,7 @@ class ProxyServer:
             writer.close()
             try:
                 await asyncio.wait_for(writer.wait_closed(), 1.0)
-            except (OSError, TimeoutError):
+            except (OSError, asyncio.TimeoutError):
                 pass
 
 

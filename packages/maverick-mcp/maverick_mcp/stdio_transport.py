@@ -5,6 +5,7 @@ import asyncio
 import logging
 import threading
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from concurrent.futures import wait
 
 from maverick import killswitch
@@ -165,7 +166,7 @@ class StdioSession:
         drained.add_done_callback(lambda _: self.loop.call_soon_threadsafe(self.loop.stop))
         try:
             drained.result(timeout=2)
-        except TimeoutError:
+        except FutureTimeoutError:
             # An uninterruptible synchronous authority check may still own the
             # loop. It stops only once its pending coroutine cleanup completes.
             log.warning("stdio dispatch cleanup remains in progress")
