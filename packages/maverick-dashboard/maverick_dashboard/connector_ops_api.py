@@ -79,23 +79,24 @@ async def registry_preview(body: RegistryNameIn, request: Request) -> dict:
     }
 
 
-def _refuse_inside_network(spec) -> None:
+def _pinned_transport(spec):
     """An online server must be a public address, like every guarded fetch
     (``MAVERICK_FETCH_ALLOW_PRIVATE`` / ``[tools] fetch_allow_private`` allow
-    internal ones). Registry entries come from outside this installation."""
-    from urllib.parse import urlsplit
-
-    from maverick.tools._ssrf import BlockedHost, resolve_pinned_ip
+    internal ones). Registry entries come from outside this installation. The
+    address is looked up once, here, and the probe connects to exactly that
+    address, so a name that changes afterwards cannot move it inside."""
+    from maverick.tools._ssrf import BlockedHost, pinned_async_transport
     try:
-        resolve_pinned_ip(urlsplit(spec.url or "").hostname or "")
+        return pinned_async_transport(spec.url or "")
     except BlockedHost as exc:
         raise HTTPException(422, "Lightwork will not contact this tool server: its web address is "
                                  "inside this server's own network, or cannot be found.") from exc
 
 
-async def _list_tools(spec) -> list[dict[str, str]]:
+async def _list_tools(spec, transport=None) -> list[dict[str, str]]:
     from maverick.mcp_client import MCPClient, StreamableHttpMCPClient
-    client = StreamableHttpMCPClient(spec, timeout=8.0) if spec.is_http else MCPClient(spec, timeout=8.0)
+    client = (StreamableHttpMCPClient(spec, timeout=8.0, transport=transport) if spec.is_http
+              else MCPClient(spec, timeout=8.0))
     try:
         await asyncio.wait_for(client.start(), timeout=12.0)
         return [{"name": str(t.get("name") or "")[:120],
@@ -119,11 +120,10 @@ async def registry_tools(body: RegistryProbeIn, request: Request) -> dict:
     spec = await run_in_threadpool(_registry_spec, body.name)
     if spec_fingerprint(spec.to_dict()) != body.fingerprint:
         raise HTTPException(409, "This tool server's details changed since you looked. Look again first.")
-    if spec.is_http:
-        await run_in_threadpool(_refuse_inside_network, spec)
+    transport = await run_in_threadpool(_pinned_transport, spec) if spec.is_http else None
     record(request, "mcp_registry_probe", installation=True, server=spec.name)
     try:
-        tools = await _list_tools(spec)
+        tools = await _list_tools(spec, transport)
     except Exception as exc:  # noqa: BLE001 -- a probe failure is one plain answer
         raise HTTPException(502, "The tool server did not answer. Nothing was added.") from exc
     return {"tools": tools}

@@ -383,7 +383,7 @@ def test_registry_tools_are_asked_only_on_confirmation(client, monkeypatch):
     started = []
 
     class FakeClient:
-        def __init__(self, spec, timeout):
+        def __init__(self, spec, timeout, **kwargs):
             self.tools = [{"name": "forecast", "description": "Tomorrow's weather"}]
 
         async def start(self):
@@ -420,7 +420,7 @@ def test_registry_tools_refuse_an_online_server_inside_the_network(client, monke
     started = []
 
     class FakeClient:
-        def __init__(self, spec, timeout):
+        def __init__(self, spec, timeout, **kwargs):
             self.tools = []
 
         async def start(self):
@@ -436,6 +436,54 @@ def test_registry_tools_refuse_an_online_server_inside_the_network(client, monke
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # the same escape hatch as every fetch
     r = client.post("/api/v1/mcp-registry/tools", json={"name": "weather", "fingerprint": fp, "confirm": True})
     assert r.status_code == 200 and started == [True]
+
+
+
+def test_registry_tools_connect_to_the_address_that_was_checked(client, monkeypatch):
+    """DNS that answers a public address for the check and an internal one
+    afterwards must not move the connection inside the network."""
+    import json as _json
+    import socket
+
+    import httpx
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    answers = iter(["93.184.216.34"])
+
+    def rebinding(host, *a, **k):
+        ip = next(answers, "10.0.0.5")  # first lookup public, every later one internal
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding)
+    connected: list[tuple[str, str, str]] = []
+
+    class Wire(httpx.AsyncBaseTransport):
+        """Stands in for the network: records where each request would go."""
+
+        async def handle_async_request(self, request):
+            host = request.url.host
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:  # a name: the connection layer would look it up again
+                host = socket.getaddrinfo(host, None)[0][4][0]
+            connected.append((host, request.headers.get("host", ""),
+                              str(request.extensions.get("sni_hostname", ""))))
+            body = _json.loads(request.content or b"{}")
+            if "id" not in body:
+                return httpx.Response(202, request=request)
+            result = ({"protocolVersion": "2025-11-25", "capabilities": {}} if body["method"] == "initialize"
+                      else {"tools": [{"name": "forecast", "description": "Tomorrow's weather",
+                                  "inputSchema": {"type": "object"}}]})
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result},
+                                  request=request)
+    import ipaddress
+    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **k: Wire())
+    monkeypatch.setattr(httpx._client, "AsyncHTTPTransport", lambda *a, **k: Wire())
+    _registry(monkeypatch, {"url": "https://mcp.example.com/weather"})
+    fp = client.post("/api/v1/mcp-registry/preview", json={"name": "weather"}).json()["fingerprint"]
+    r = client.post("/api/v1/mcp-registry/tools", json={"name": "weather", "fingerprint": fp, "confirm": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["tools"][0]["name"] == "forecast"
+    assert connected and {c[0] for c in connected} == {"93.184.216.34"}  # never 10.0.0.5
+    assert all(c[1] == "mcp.example.com" and c[2] == "mcp.example.com" for c in connected)
 
 
 # ---- governed connectors: list and preview a change ----------------------------
