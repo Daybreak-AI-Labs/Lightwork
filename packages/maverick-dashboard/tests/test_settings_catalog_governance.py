@@ -16,6 +16,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_governance as governance
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = tuple(governance.entries(catalog.S, catalog.C, catalog.Column))
@@ -175,12 +177,11 @@ def test_rows_are_in_the_catalog_and_plain():
     for row in ROWS:
         assert catalog.BY_ID[row.id] == row
         assert row.help.endswith(".") and "_" not in row.label
-    page = client.get("/settings/all")
-    assert page.status_code == 200
-    assert developer_terms(page.text) == []
+    page = every_group(client)
+    assert developer_terms(page) == []
     for label in ("Read text in pictures", "Open files in an isolated area",
                   "Microsoft Entra sign-in key", "Rating providers"):
-        assert label in page.text
+        assert label in page
 
 
 # Values that keep the all-rows sample a working combination
@@ -234,7 +235,7 @@ def test_every_row_saves_reads_back_and_resets(audit_rows):
             assert state[row.id]["value"] is None and state[row.id]["is_set"] is True
     assert "k" * 40 not in stored and "k" * 40 not in repr(audit_rows)
     assert "k" * 40 not in r.text and "k" * 40 not in client.get(API).text
-    assert "k" * 40 not in client.get("/settings/all").text
+    assert "k" * 40 not in every_group(client)
 
     # Going back to a looser default is confirmed like any other loosening.
     everything = [{"id": row.id, "reset": True} for row in ROWS]

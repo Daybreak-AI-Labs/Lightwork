@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 
@@ -172,7 +174,7 @@ def test_page_offers_the_installer_values():
     assert values("finance.approvals.timeout") == profile.APPROVAL_TIMEOUTS
     table = catalog.BY_ID["finance.automation.*"]
     assert {v for v, _ in table.choices} == set(profile.FINANCE_ACTIONS)
-    page = client.get("/settings/all").text
+    page = every_group(client)
     for setting_id in ("finance.framework", "finance.materiality", "finance.automation.default",
                        "finance.automation.*", "finance.sod.mode", "finance.approvals.timeout"):
         assert catalog.BY_ID[setting_id].label in page, setting_id

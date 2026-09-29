@@ -20,6 +20,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_structured as structured
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = [catalog.BY_ID[s.id] for s in structured.entries(catalog.S, catalog.C, catalog.Column)]
@@ -115,7 +117,7 @@ def test_rows_are_plain_and_named_by_their_readers():
     for row in ROWS:
         assert row.help.endswith(".") and "_" not in row.label, row.id
         assert row.control != "text" or row.pattern or row.workspace_segment, row.id
-    page_text = client.get("/settings/all").text
+    page_text = every_group(client)
     for marker in ("data-picks", "data-document", "data-fingerprint", "data-segment-at",
                    "data-preview-url", "data-grid-keysearch"):
         assert marker in page_text, marker
@@ -642,7 +644,13 @@ def test_a_governance_level_is_previewed_then_applied_with_its_settings(audit_ro
     assert asked.status_code == 409
     asked_ids = {item["id"] for item in asked.json()["confirm"]}
     assert {"retention.audit_days", "learning.dreaming"} <= asked_ids
-    assert _save(change, confirm=True).status_code == 200
+    saved = _save(change, confirm=True)
+    assert saved.status_code == 200
+    # The reply carries the level and every setting it changed, not every row.
+    shown = {row["id"]: row for group in saved.json()["groups"] for row in group["settings"]}
+    assert {"governance.profile", "actions.enable", "retention.audit_days"} <= set(shown)
+    assert shown["retention.audit_days"]["value"] == 365
+    assert set(saved.json()["changed"]) <= set(shown) and len(shown) < len(catalog.SETTINGS) // 4
     loaded = _loaded()
     assert loaded["governance"]["profile"] == "regulated"
     assert loaded["actions"]["enable"] is True and loaded["retention"]["audit_days"] == 365

@@ -14,6 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import every_group
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 
@@ -77,12 +79,179 @@ def test_page_lists_groups_controls_and_speaks_plain_language():
                   "Memory &amp; learning", "Privacy", "Data retention", "Integrations",
                   "Performance", "Modules"):
         assert group in page
-    assert 'role="switch"' in page and "<select" in page and 'type="number"' in page
-    assert "Reset to default" in page and "Save changes in Safety" in page
+    assert "Save changes in Safety" in page
     assert 'id="settings-all-search"' in page
     assert "/static/lightwork-settings-all.js" in page
     assert "What can&#39;t be changed here" in page or "What can't be changed here" in page
     assert developer_terms(page) == []
+    group = client.get("/settings/all?group=safety").text
+    assert 'role="switch"' in group and "<select" in group and 'type="number"' in group
+    assert "Reset to default" in group and "Save changes in Safety" in group
+    assert developer_terms(group) == []
+
+
+# ------------------------------------------------- loading a group at a time
+def _row_ids(html: str) -> list[str]:
+    import re
+
+    return re.findall(r'data-setting-id="([^"]+)"', html)
+
+
+def test_first_load_is_the_list_of_groups_without_their_settings():
+    from maverick_dashboard import settings_catalog as catalog
+
+    r = client.get("/settings/all")
+    assert r.status_code == 200 and len(r.content) < 300_000
+    assert _row_ids(r.text) == []
+    for name in catalog.GROUPS:
+        count = sum(1 for s in catalog.SETTINGS if s.group == name)
+        slug = name.lower().replace(" & ", "-").replace(" ", "-")
+        assert f'data-group="{slug}" data-loaded="0"' in r.text, name
+        # Works without the page's script too: a plain link to the group.
+        assert f'href="/settings/all?group={slug}#group-{slug}"' in r.text, name
+        assert f"Show the {count} settings in" in r.text, name
+    assert f"0 of {len(catalog.SETTINGS)} settings" in r.text
+    assert 'data-module="' in r.text  # the module switches are always there
+
+
+def test_each_group_lists_all_its_settings_and_every_setting_has_a_group():
+    from maverick_dashboard import settings_catalog as catalog
+
+    seen: list[str] = []
+    for name in catalog.GROUPS:
+        slug = name.lower().replace(" & ", "-").replace(" ", "-")
+        page = client.get("/settings/all", params={"group": slug}).text
+        rows = client.get("/settings/all/rows", params={"group": slug})
+        assert rows.status_code == 200 and rows.headers["cache-control"] == "no-store"
+        assert f'data-complete="{slug}"' in rows.text
+        ids = [s.id for s in catalog.SETTINGS if s.group == name]
+        assert sorted(_row_ids(page)) == sorted(ids) == sorted(_row_ids(rows.text)), name
+        assert f'data-group="{slug}" data-loaded="1"' in page
+        assert f'<option value="{slug}" selected>' in page
+        listed = client.get(API, params={"group": slug}).json()["groups"]
+        assert [g["name"] for g in listed] == [name]
+        assert [s["id"] for s in listed[0]["settings"]] == _row_ids(rows.text)
+        seen += ids
+    assert sorted(seen) == sorted(s.id for s in catalog.SETTINGS)
+    assert client.get(API, params={"group": "nothing-here"}).status_code == 404
+
+
+def test_rows_keep_their_place_in_page_order():
+    whole = [s["id"] for g in client.get(API).json()["groups"] for s in g["settings"]]
+    orders = {s["id"]: s["order"] for g in client.get(API).json()["groups"]
+              for s in g["settings"]}
+    assert [orders[i] for i in whole] == list(range(len(whole)))
+    part = client.get(API, params={"group": "safety"}).json()["groups"][0]
+    assert all(orders[s["id"]] == s["order"] for s in part["settings"])
+    assert [p["order"] for p in part["subgroups"]] == sorted(p["order"] for p in part["subgroups"])
+
+
+def test_search_finds_matching_settings_in_every_group_without_the_rest():
+    import html
+    import re
+
+    from maverick_dashboard import settings_catalog as catalog
+
+    words = ("records", "keep")
+    expected = [s.id for s in catalog.SETTINGS
+                if all(w in " ".join((s.label, s.help, s.aliases, s.group, s.subgroup)).lower()
+                       for w in words)]
+    assert 1 < len(expected) < len(catalog.SETTINGS) // 10
+    assert len({catalog.BY_ID[i].group for i in expected}) > 1
+    found = client.get("/settings/all/rows", params={"q": "Records  KEEP"})
+    assert found.status_code == 200 and 'data-complete=""' in found.text
+    assert sorted(_row_ids(found.text)) == sorted(expected)
+    # The page's own filter matches the same words on the rows it gets.
+    for text in re.findall(r'data-search="([^"]*)"', found.text):
+        assert all(w in html.unescape(text) for w in words)
+    listed = client.get(API, params={"q": "records keep"}).json()["groups"]
+    assert sorted(s["id"] for g in listed for s in g["settings"]) == sorted(expected)
+    # Without the script: the search box sends the same words to the page.
+    page = client.get("/settings/all", params={"q": "records keep"}).text
+    assert sorted(_row_ids(page)) == sorted(expected) and 'value="records keep"' in page
+    assert 'data-served="1"' in page
+    assert _row_ids(client.get("/settings/all/rows", params={"q": "zzzz-nothing"}).text) == []
+    assert client.get("/settings/all/rows").status_code == 400
+
+
+def test_only_changed_settings_and_a_link_to_one_setting(audit_rows):
+    from maverick_dashboard import settings_catalog as catalog
+
+    assert _save([{"id": "ifc.mode", "value": "block"}]).status_code == 200
+    changed = client.get("/settings/all/rows", params={"changed": "1"})
+    assert _row_ids(changed.text) == ["ifc.mode"]
+    assert [s["id"] for g in client.get(API, params={"changed": "1"}).json()["groups"]
+            for s in g["settings"]] == ["ifc.mode"]
+    page = client.get("/settings/all", params={"changed": "1"}).text
+    assert _row_ids(page) == ["ifc.mode"] and "1 changed here" in page
+    assert f"1 of {len(catalog.SETTINGS)} settings" in page
+    # ?id= opens the setting's group and points the page at the setting.
+    group = catalog.BY_ID["ifc.mode"].group
+    linked = client.get("/settings/all", params={"id": "ifc.mode"}).text
+    assert 'data-focus="ifc.mode"' in linked
+    assert sorted(_row_ids(linked)) == sorted(s.id for s in catalog.SETTINGS if s.group == group)
+    assert _row_ids(client.get("/settings/all", params={"id": "no.such"}).text) == []
+
+
+def test_loading_rows_is_for_administrators_only(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:vera", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vera")
+    assert client.get("/settings/all/rows", params={"group": "safety"}).status_code == 403
+    assert client.get("/settings/all", params={"group": "safety"}).status_code == 403
+    assert client.get(API, params={"q": "retention"}).status_code == 403
+
+
+def test_a_save_replies_with_the_rows_it_touched_not_every_row(audit_rows):
+    from maverick_dashboard import settings_catalog as catalog
+
+    r = _save([{"id": "ifc.mode", "value": "block"}])
+    assert r.status_code == 200 and r.json()["changed"] == ["ifc.mode"]
+    rows = [s for g in r.json()["groups"] for s in g["settings"]]
+    assert [s["id"] for s in rows] == ["ifc.mode"]
+    assert rows[0]["source"] == "here" and rows[0]["value"] == "block"
+    assert len(r.content) < 10_000
+    # Nothing changed: the named row still comes back, so the page shows it.
+    again = _save([{"id": "ifc.mode", "value": "block"}])
+    assert again.json()["changed"] == []
+    assert [s["id"] for g in again.json()["groups"] for s in g["settings"]] == ["ifc.mode"]
+    # ?full=1 keeps the whole listing for a caller that wants it.
+    whole = client.post(API + "?full=1", json={"changes": [{"id": "ifc.mode", "reset": True}],
+                                                "confirm": True})
+    assert whole.status_code == 200
+    assert sum(len(g["settings"]) for g in whole.json()["groups"]) == len(catalog.SETTINGS)
+
+
+def test_rows_changed_by_a_save_come_back_even_when_not_named():
+    from maverick_dashboard import settings_all_page
+
+    before = settings_all_page.catalog_state()
+    target = before["groups"][2]["settings"][0]
+    target["value_text"] = "something older"  # as if the save changed this row too
+    state = settings_all_page._saved_state(before, {"ifc.mode"})
+    ids = [s["id"] for g in state["groups"] for s in g["settings"]]
+    assert sorted(ids) == sorted({"ifc.mode", target["id"]})
+    for group in state["groups"]:
+        parts = {s["subgroup"] for s in group["settings"] if s["subgroup"]}
+        assert {p["name"] for p in group["subgroups"]} == parts
+    assert settings_all_page._saved_state(None, set())["groups"] == \
+        settings_all_page.catalog_state()["groups"]
+
+
+def test_one_listing_builds_each_live_list_once(monkeypatch):
+    from maverick_dashboard import settings_all_page
+
+    calls: list[str] = []
+    real = settings_all_page._build_source_choices
+
+    def counted(source):
+        calls.append(source)
+        return real(source)
+
+    monkeypatch.setattr(settings_all_page, "_build_source_choices", counted)
+    settings_all_page.catalog_state()
+    assert calls and len(calls) == len(set(calls))
 
 
 def test_settings_page_links_to_all_settings():
@@ -100,7 +269,7 @@ def test_page_shows_where_each_value_comes_from(tmp_path):
     assert _row("ifc.mode")["source_text"] == "Default"
     assert _save([{"id": "ifc.mode", "value": "block"}]).status_code == 200
     assert _row("ifc.mode")["source_text"] == "Set here"
-    assert "Set by your installer" in client.get("/settings/all").text
+    assert "Set by your installer" in client.get("/settings/all?group=safety").text
 
 
 # ------------------------------------------------------------ round trip
@@ -295,7 +464,7 @@ def test_secrets_are_sealed_never_shown_and_never_audited(audit_rows):
     assert _loaded()["notifications"]["ntfy_topic"] == secret
     row = _row("notifications.ntfy_topic")
     assert row["is_set"] is True and row["value"] is None
-    assert secret not in client.get("/settings/all").text
+    assert secret not in every_group(client)
     assert secret not in client.get(API).text
     assert audit_rows[-1]["old"] == "not set" and audit_rows[-1]["new"] == "set"
     assert secret not in repr(audit_rows)
