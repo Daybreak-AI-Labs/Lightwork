@@ -12,7 +12,7 @@ from maverick import config, connections
 from maverick import connection_oauth as oauth
 from maverick.paths import tenant_scope
 
-OWNER = "user:owner"
+from test_support.connection_refresh_native import OWNER, _process_renew, _renew
 
 
 @pytest.fixture(autouse=True)
@@ -30,11 +30,6 @@ def isolated(tmp_path, monkeypatch):
     with tenant_scope(tenant="tenant-a"):
         yield
     config.reset_config_cache()
-
-
-def _renew():
-    with tenant_scope(tenant="tenant-a"):
-        return oauth.renew(connections.get_connection("evidence"), actor=OWNER)
 
 
 def _seed(monkeypatch):
@@ -132,37 +127,6 @@ def test_authority_change_during_refresh_prevents_stale_promotion(monkeypatch, c
     assert latest is None or latest["token"] != "must-not-publish"
     if change in {"application", "grants", "disabled"}:
         assert latest["oauth"]["refresh_state"] == "pending"
-
-
-def _process_renew(entered, release, counter, results, *, crash=""):
-    """Spawned child uses the same on-disk sealed store and native file locks."""
-    import os
-
-    config.reset_config_cache()
-
-    def post(*args):
-        with counter.get_lock():
-            counter.value += 1
-        entered.set()
-        if crash == "pending":
-            os._exit(17)
-        if not release.wait(15):
-            raise TimeoutError("test release did not arrive")
-        return {"access_token": "process-fixture-token", "expires_in": 3600}
-
-    def identity(*args):
-        if crash == "consumed":
-            os._exit(18)
-        return {"provider": "google", "subject": "fixture-account", "display_name": "Fixture",
-                "email": "fixture@example.test", "email_verified": True, "hosted_domain": "example.test"}
-
-    oauth._post_token = post
-    oauth._provider_identity = identity
-    try:
-        result = _renew()
-        results.put(("ready", result["revision"]))
-    except Exception as exc:
-        results.put(("error", type(exc).__name__))
 
 
 def test_two_native_processes_refresh_one_credential_once(monkeypatch):

@@ -6,18 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
-from maverick.attachment_submissions import SubmissionConflict, SubmissionStore
+from maverick.attachment_submissions import SubmissionConflict
 from maverick.chat_threads import ChatThreads
 from maverick.world_model import WorldModel
 
-
-def _create(world, *, root=None, token="root", owner="user:alice"):
-    return SubmissionStore(world).create(
-        token=token, fingerprint=token, owner=owner, title="Report",
-        description="Keep budget BUDGET-ALPHA-731", manifest=[], parent_id=root,
-        chat_text="Keep budget BUDGET-ALPHA-731" if root is None else "Revise the report",
-        chat_root_id=root,
-    )
+from test_support.chat_threads_native import _create, _process_reply
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
@@ -249,16 +242,6 @@ def test_parallel_question_answers_restart_once_across_connections(worlds):
         results = list(executor.map(answer, questions))
     assert sum(result.admitted for result in results) == 1
     assert not world.open_questions(root) and world.get_goal(root).status == "pending"
-
-
-def _process_reply(path, root, index, barrier, output):
-    with WorldModel(path) as world:
-        barrier.wait(timeout=30)
-        try:
-            receipt = _create(world, root=root, token=f"process-{index}")
-            output.put(("admitted", receipt["goal_id"]))
-        except SubmissionConflict:
-            output.put(("refused", None))
 
 
 def test_independent_processes_admit_only_one_followup(tmp_path):
