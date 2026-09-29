@@ -186,6 +186,28 @@ test('the tool server list is searchable, shows what a server starts, and adding
   assert.deepEqual(JSON.parse(add.options.body), {name: 'weather', fingerprint: fp});
 });
 
+test('a local tool server that is handed every server setting says so before it is added', async (t) => {
+  const markup = slice('mcp.html', '<section class="panel" id="fa-registry"', '</section>');
+  const preview = {name: 'files', online: false, address: '', program: '/opt/mcp/files', arguments: [], settings: ['FILES_ROOT'],
+    extra_headers: [], program_checked: true, fingerprint: 'a'.repeat(64)};
+  let gets = true;
+  const ui = await fixture(markup, (url) => {
+    if (url.endsWith('/preview')) return response({...preview, gets_every_server_setting: gets});
+    return response({configured: true, servers: [{name: 'files', summary: 'Local files', verified: false, online: false}]});
+  });
+  t.after(() => ui.window.close());
+  ui.document.getElementById('fa-registry-load').click();
+  await ui.settle();
+  ui.document.querySelector('#fa-registry-out tbody tr button').click();
+  await ui.settle();
+  const box = ui.document.getElementById('fa-registry-preview');
+  assert.match(box.textContent, /Also givenEvery setting of this server, including its passwords and keys/);
+  gets = false;
+  ui.document.querySelector('#fa-registry-out tbody tr button').click();
+  await ui.settle();
+  assert.doesNotMatch(box.textContent, /Also given/);
+});
+
 test('screening test shows caught and wrongly stopped rates in words', async (t) => {
   const markup = slice('safety.html', '<section class="panel" aria-labelledby="fa-calibration-title">', '</section>');
   const ui = await fixture(markup, () => response({cases: 40, thresholds: {high: {recall: 0.9, precision: 1, fp_rate: 0.05}}, rule_hits: {injection: 3}}));

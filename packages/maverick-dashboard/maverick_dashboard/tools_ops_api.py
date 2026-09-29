@@ -109,6 +109,10 @@ def _recorded_source(source: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))[:200]
 
 
+_INSTALL_OFF = ("Adding skills from a web address is turned off. A global administrator can "
+                "turn it on in Settings > All settings.")
+
+
 def _install_allowed() -> bool:
     # The server's MAVERICK_ALLOW_SKILL_INSTALL wins; otherwise the All settings
     # switch "Install skills from a typed web address" ([skills] allow_url_install).
@@ -153,9 +157,12 @@ def _preview(source: str) -> dict[str, Any]:
 async def skill_source_preview(body: SkillSourceIn, request: Request) -> dict:
     same_origin(request)
     require_permission(request, "admin")
+    # Switched off means off: the server reads nothing from the address either.
+    if not _install_allowed():
+        raise HTTPException(403, _INSTALL_OFF)
     out = await run_in_threadpool(_preview, _skill_source(body.source))
-    out["can_add"] = bool(out["ok"] and _install_allowed())
-    out["adding_allowed"] = _install_allowed()
+    out["can_add"] = bool(out["ok"])
+    out["adding_allowed"] = True
     return out
 
 
@@ -164,8 +171,7 @@ async def skill_source_install(body: SkillInstallIn, request: Request) -> dict:
     same_origin(request)
     require_permission(request, "admin")
     if not _install_allowed():
-        raise HTTPException(403, "Adding skills from a web address is turned off. A global "
-                                 "administrator can turn it on in Settings > All settings.")
+        raise HTTPException(403, _INSTALL_OFF)
     source = _skill_source(body.source)
     if not body.confirm:
         raise HTTPException(422, "Confirm that you want to add this skill.")

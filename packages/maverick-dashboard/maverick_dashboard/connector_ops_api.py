@@ -72,8 +72,25 @@ async def registry_preview(body: RegistryNameIn, request: Request) -> dict:
         "settings": sorted(str(k)[:80] for k in (spec.env or {}))[:50],
         "extra_headers": sorted(str(k)[:80] for k in (spec.headers or {}))[:50],
         "program_checked": bool(spec.pin_sha256),
+        # The program is handed every setting of this server (passwords and
+        # keys included), not only the ones listed above.
+        "gets_every_server_setting": bool(not spec.is_http and spec.inherit_env),
         "fingerprint": spec_fingerprint(spec.to_dict()),
     }
+
+
+def _refuse_inside_network(spec) -> None:
+    """An online server must be a public address, like every guarded fetch
+    (``MAVERICK_FETCH_ALLOW_PRIVATE`` / ``[tools] fetch_allow_private`` allow
+    internal ones). Registry entries come from outside this installation."""
+    from urllib.parse import urlsplit
+
+    from maverick.tools._ssrf import BlockedHost, resolve_pinned_ip
+    try:
+        resolve_pinned_ip(urlsplit(spec.url or "").hostname or "")
+    except BlockedHost as exc:
+        raise HTTPException(422, "Lightwork will not contact this tool server: its web address is "
+                                 "inside this server's own network, or cannot be found.") from exc
 
 
 async def _list_tools(spec) -> list[dict[str, str]]:
@@ -102,6 +119,8 @@ async def registry_tools(body: RegistryProbeIn, request: Request) -> dict:
     spec = await run_in_threadpool(_registry_spec, body.name)
     if spec_fingerprint(spec.to_dict()) != body.fingerprint:
         raise HTTPException(409, "This tool server's details changed since you looked. Look again first.")
+    if spec.is_http:
+        await run_in_threadpool(_refuse_inside_network, spec)
     record(request, "mcp_registry_probe", installation=True, server=spec.name)
     try:
         tools = await _list_tools(spec)
