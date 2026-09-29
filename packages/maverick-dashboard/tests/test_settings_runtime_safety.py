@@ -175,6 +175,23 @@ def test_protected_areas_can_be_chosen(audit_rows):
                    "value": "https://rules.example.com/b.json"}]).status_code == 202
 
 
+def test_quorum_settings_stay_protected_whatever_areas_are_chosen(audit_rows):
+    """One administrator must not switch the approvals off, or narrow them,
+    even when the safety settings are not in the protected list."""
+    from maverick import quorum
+
+    assert _save([{"id": "safety.quorum_protected_keys", "value": ["shield.*"]}],
+                 confirm=True).status_code == 200
+    assert _save([{"id": "safety.quorum_required", "value": "2"}]).status_code == 200
+    for change in ({"id": "safety.quorum_required", "value": ""},
+                   {"id": "safety.quorum_protected_keys", "value": ["audit.*"]},
+                   {"id": "safety.quorum_ttl_days", "value": 90}):
+        r = _save([change], confirm=True)
+        assert r.status_code == 202, (change, r.text)
+    assert quorum.configured_policy().required == 2
+    assert quorum.configured_policy().protected_keys == frozenset({"shield.*"})
+
+
 # ------------------------------------------------ scan limit per task
 def test_scan_limit_refuses_text_over_the_limit(monkeypatch, audit_rows):
     from maverick.logging_config import reset_goal_context, set_goal_context

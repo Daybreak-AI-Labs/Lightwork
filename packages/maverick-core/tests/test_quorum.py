@@ -252,6 +252,11 @@ def test_policy_from_config(monkeypatch, tmp_path):
     assert policy.ttl_days == 1.0
     assert quorum.is_protected("models.orchestrator", policy)
     assert not quorum.is_protected("budget.max_dollars", policy)
+    # The quorum's own settings stay protected whatever the list says.
+    for key in ("safety.quorum_required", "safety.quorum_protected_keys",
+                "safety.quorum_ttl_days"):
+        assert quorum.is_protected(key, policy)
+        assert not quorum.apply_gate(key, policy=policy)
 
 
 def test_required_env_wins(monkeypatch, tmp_path):
