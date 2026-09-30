@@ -125,6 +125,27 @@ def _read_json_text(path: str | Path) -> str:
     return raw.decode("utf-8")
 
 
+def _shared_case_current(row: Mapping) -> bool:
+    from .self_harness import _shared_sources_current
+    return (row.get("privacy_schema") == "shared-unowned-sources-v1"
+            and _shared_sources_current(row.get("source_goal_ids")))
+
+
+def case_current(row: Mapping) -> bool:
+    derived = any(key in row for key in ("added_at", "privacy_schema", "source_goal_ids"))
+    return not derived or _shared_case_current(row)
+
+
+def require_cases_current(cases) -> None:
+    if any(not case_current(row) for row in cases):
+        raise PermissionError("Evaluation source ownership or learning permission changed.")
+
+
+def _case_identity(row: Mapping) -> str:
+    return json.dumps({k: row.get(k) for k in
+                       ("goal", "expected", "privacy_schema", "source_goal_ids")}, sort_keys=True)
+
+
 def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
     """Load a ``{key: [{"goal":..., "expected":...}, ...]}`` eval corpus from JSON.
 
@@ -139,14 +160,20 @@ def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
     if not isinstance(data, dict):
         return {}
     out: dict[str, list[dict]] = {}
+    pending = str(path).endswith(".pending.json")
     for key, rows in data.items():
         if not isinstance(rows, list):
             continue
         cases = []
         for r in rows:
             if isinstance(r, Mapping) and str(r.get("goal") or "").strip():
-                cases.append({"goal": str(r["goal"]),
-                              "expected": str(r.get("expected") or "")})
+                derived = pending or "added_at" in r or "privacy_schema" in r or "source_goal_ids" in r
+                if derived and not _shared_case_current(r):
+                    continue  # unknown historical harvest is retained, not inherited
+                case = {"goal": str(r["goal"]), "expected": str(r.get("expected") or "")}
+                if derived:
+                    case.update(privacy_schema=r["privacy_schema"], source_goal_ids=list(r["source_goal_ids"]))
+                cases.append(case)
         if cases:
             out[str(key)] = cases
     return out
@@ -460,16 +487,23 @@ def corpus_ab_scorers(
         details.update(collector.details())
         return details
 
+    def _judge_current(line, goal):
+        require_cases_current(cases)
+        hint = expected_of(goal) or ""
+        output = run_fn(line, goal)
+        require_cases_current(cases)
+        return judge(goal, output, hint)
+
     def score_with(line: str, goals: list[str]) -> object:
         before = _degraded()
         result = _score(
-            goals, lambda g: judge(g, run_fn(line, g), expected_of(g) or ""))
+            goals, lambda g: _judge_current(line, g))
         return _finish(result, before, score_with)
 
     def score_without(_line: str, goals: list[str]) -> object:
         before = _degraded()
         result = _score(
-            goals, lambda g: judge(g, run_fn("", g), expected_of(g) or ""))
+            goals, lambda g: _judge_current("", g))
         return _finish(result, before, score_without)
 
     # ``last_clean`` marks whether the most recent call completed without any
@@ -477,6 +511,8 @@ def corpus_ab_scorers(
     # score (an outage 0.0 is indistinguishable from a real 0.0 afterwards).
     score_with.last_clean = True
     score_without.last_clean = True
+    score_with.authorize_sources = lambda: require_cases_current(cases)
+    score_without.authorize_sources = score_with.authorize_sources
     return score_with, score_without
 
 
@@ -760,7 +796,7 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
 
 
 def llm_paraphraser(llm, *, budget=None, model: str | None = None,
-                    max_tokens: int = 256,
+                    max_tokens: int = 256, authorize_sources=None,
                     work_item_id: str | None = None) -> Callable[[list[str]], list[str]]:
     """An LLM-backed ``metamorphic_fn`` for ``validate_proposal``: rewrite each
     held-out goal in different words, preserving its meaning, so a candidate
@@ -777,6 +813,8 @@ def llm_paraphraser(llm, *, budget=None, model: str | None = None,
         out: list[str] = []
         for g in goals or []:
             try:
+                if authorize_sources is not None:
+                    authorize_sources()
                 safe_goal = _redact_provider_text(g)
                 if safe_goal is None:
                     continue
@@ -862,18 +900,26 @@ def harvest_corpus_candidates(reflexions: list, done_goals: list, *,
     out of the slice. Deterministic and pure: same inputs, same candidates,
     ordered by goal text; deduped; goals with empty results yield nothing (no
     hint, no case)."""
-    from .self_harness import _jaccard
+    from .self_harness import _jaccard, _shared_sources_current
     skip = known or set()
     done = []
     for g in done_goals or []:
+        goal_id = getattr(g, "id", 0)
+        if getattr(g, "owner", None) != "" or not _shared_sources_current([goal_id]):
+            continue
         text = f"{getattr(g, 'title', '') or ''}\n{getattr(g, 'description', '') or ''}".strip()
         hint = _result_hint(getattr(g, "result", "") or "")
         ts = getattr(g, "updated_at", None) or getattr(g, "created_at", None) or 0
         if text and hint and text not in skip:
             done.append((text, hint, float(ts or 0), _htokens(text),
-                         _htokens(text[:_REFL_TEXT_CLIP])))
-    out: dict[str, str] = {}
+                         _htokens(text[:_REFL_TEXT_CLIP]), goal_id))
+    out: dict[str, dict] = {}
     for r in reflexions or []:
+        record = r if isinstance(r, dict) else vars(r)
+        source_id = record.get("goal_id", 0)
+        if (record.get("owner") != "" or record.get("channel") is not None
+                or record.get("user_id") is not None or not _shared_sources_current([source_id])):
+            continue
         rtext = str((r.get("goal_text") if isinstance(r, dict)
                      else getattr(r, "goal_text", "")) or "")
         rts = float((r.get("ts") if isinstance(r, dict)
@@ -881,13 +927,14 @@ def harvest_corpus_candidates(reflexions: list, done_goals: list, *,
         rtok = _htokens(rtext)
         if not rtok:
             continue
-        for text, hint, ts, ttok, ttok_clip in done:
+        for text, hint, ts, ttok, ttok_clip, goal_id in done:
             if not (ts and rts) or ts < rts:
                 continue  # need BOTH timestamps, and the success at/after the failure
             if max(_jaccard(rtok, ttok), _jaccard(rtok, ttok_clip)) >= min_overlap:
-                out.setdefault(text, hint)
-    return [{"goal": g, "expected": out[g]}
-            for g in sorted(out)][:max(0, int(max_candidates))]
+                out.setdefault(text, {"goal": text, "expected": hint,
+                                      "privacy_schema": "shared-unowned-sources-v1",
+                                      "source_goal_ids": sorted({source_id, goal_id})})
+    return [out[g] for g in sorted(out)][:max(0, int(max_candidates))]
 
 
 def pending_corpus_path(corpus_path: str | Path) -> Path:
@@ -976,7 +1023,8 @@ def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
     goal is non-empty, labeled, and not in ``known`` to the RAW ``dest_raw[key]``
     rows and write the file. Returns how many were added (0 writes nothing)."""
     fresh = [c for c in candidates or []
-             if c.get("goal") and c.get("expected") and c["goal"] not in known]
+             if c.get("goal") and c.get("expected") and c["goal"] not in known
+             and _shared_case_current(c)]
     if not fresh:
         return 0
     rows = dest_raw.get(str(key))
@@ -985,7 +1033,8 @@ def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
     # ``added_at`` rides in the RAW file only (the normalized eval view strips
     # it): it is what lets the quality lifecycle age harvested cases later.
     now = time.time()
-    rows.extend({"goal": c["goal"], "expected": c["expected"], "added_at": now}
+    rows.extend({"goal": c["goal"], "expected": c["expected"], "added_at": now,
+                 "privacy_schema": c["privacy_schema"], "source_goal_ids": list(c["source_goal_ids"])}
                 for c in fresh)
     _write_corpus_file(dest_path, dest_raw, seal=seal)
     return len(fresh)
@@ -1061,10 +1110,13 @@ def resolve_pending(corpus_path: str | Path, key: str, *,
                 f"({len(rows)} candidate(s) pending)")
         accepted = [c for i, c in enumerate(rows, 1) if i in acc_idx]
         rejected_rows = [c for i, c in enumerate(rows, 1) if i in rej_idx]
-        kept = [c for i, c in enumerate(rows, 1)
-                if i not in acc_idx and i not in rej_idx]
         added = _merge_locked(corpus_path, key, accepted) if accepted else 0
         pending_raw = _load_raw(pending_corpus_path(corpus_path))
+        resolved = {_case_identity(c) for c in accepted + rejected_rows}
+        # Preserve withheld historical rows and all unknown raw fields; a review
+        # of visible cases never erases inaccessible evidence as a side effect.
+        kept = [c for c in pending_raw.get(str(key), [])
+                if not isinstance(c, Mapping) or _case_identity(c) not in resolved]
         if kept:
             pending_raw[str(key)] = kept
         else:
@@ -1113,18 +1165,23 @@ def corpus_quality(cases: list[dict], *, run_fn: Callable[[str, str], str],
     for c in cases or []:
         goal = str(c.get("goal") or "")
         expected = str(c.get("expected") or "")
-        if not goal:
+        if not goal or not case_current(c):
             continue
         passes = judged = 0
         for _ in range(n):
             try:
-                if judge(goal, run_fn("", goal), expected):
+                require_cases_current([c])
+                output = run_fn("", goal)
+                require_cases_current([c])
+                if judge(goal, output, expected):
                     passes += 1
                 judged += 1
             except BudgetExceeded:
                 raise
             except Exception:  # one bad sample is indeterminate, excluded
                 log.debug("eval: quality sample failed", exc_info=True)
+        if not case_current(c):
+            continue
         rate = (passes / judged) if judged else None
         out.append({"goal": goal, "expected": expected, "passes": passes,
                     "samples": judged, "baseline_rate": rate,

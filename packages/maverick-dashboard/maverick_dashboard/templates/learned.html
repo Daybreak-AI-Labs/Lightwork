@@ -53,7 +53,10 @@
   <div class="panel" id="harness-guidance">
     <p class="muted">
       Reminders Lightwork now gives itself before similar work, learned from its own repeated mistakes.
-      Any lesson can be removed.
+      Any displayed lesson can be removed.
+      Older lessons or suggested test cases without verified shared sources are retained
+      separately and withheld from prompts and this page. Private employee work is never
+      made shared by an administrator role.
     </p>
     {% if harness and not harness_enabled %}
       <p><strong>Self-coaching is off.</strong> These lessons are kept but not used until it is switched on on the
@@ -127,7 +130,7 @@
         </div>
       {% endfor %}
     {% else %}
-      <p class="muted" id="no-harness">No lessons learned yet.</p>
+      <p class="muted" id="no-harness">No shared lessons are currently available.</p>
     {% endif %}
   </div>
 

@@ -151,6 +151,10 @@ def test_read_outs_use_offered_models_only(client, monkeypatch):
     monkeypatch.setattr(sh, "_store_path", lambda: Path(store))
     sh._write_addenda({"claude-x": "Operating guidance learned for this model:\n"
                                    "- always cite the source\n- never cite the source"}, Path(store))
+    meta = {}
+    for line in ("always cite the source", "never cite the source"):
+        sh._upsert_line_meta(meta, "claude-x", line, {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, Path(store))
     models = client.get(API + "/models").json()["models"]
     assert "claude-x" in [m["value"] for m in models]
     eff = client.get(API + "/efficacy", params={"model_id": "claude-x"}).json()
@@ -231,6 +235,9 @@ def test_run_for_the_chosen_model_and_preview_threshold(client, monkeypatch):
     from pathlib import Path
     monkeypatch.setattr(self_harness, "_store_path", lambda: Path(store))
     self_harness._write_addenda({"claude-x": "Operating guidance learned for this model:\n- cite"}, Path(store))
+    meta = {}
+    self_harness._upsert_line_meta(meta, "claude-x", "cite", {"source_goal_ids": [0]}, now=1)
+    self_harness._write_line_meta(meta, Path(store))
     monkeypatch.setattr(self_harness, "enabled", lambda: True)
     seen: list[dict] = []
     monkeypatch.setattr(runner, "run_self_harness_cycle",

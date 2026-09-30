@@ -554,12 +554,13 @@ class _G:
     """A minimal done-goal stand-in (title/description/result/timestamps)."""
 
     def __init__(self, title, result, ts=100.0, desc=""):
+        self.owner, self.id = "", 0
         self.title, self.description, self.result = title, desc, result
         self.updated_at = self.created_at = ts
 
 
 def test_harvest_pairs_failed_then_done_goals():
-    refl = [{"goal_text": "export the nightly ledger report", "ts": 50.0}]
+    refl = [{"owner": "", "goal_id": 0, "goal_text": "export the nightly ledger report", "ts": 50.0}]
     goals = [
         _G("export the nightly ledger report", "Ledger exported: 42 rows."),
         _G("unrelated cleanup task entirely", "done fine"),      # no overlap
@@ -567,7 +568,7 @@ def test_harvest_pairs_failed_then_done_goals():
         _G("export the nightly ledger report", ""),              # no result -> no hint
     ]
     out = ev.harvest_corpus_candidates(refl, goals)
-    assert out == [{"goal": "export the nightly ledger report",
+    assert out == [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "export the nightly ledger report",
                     "expected": "Ledger exported: 42 rows."}]
     # deterministic: same inputs, same candidates
     assert ev.harvest_corpus_candidates(refl, goals) == out
@@ -576,10 +577,10 @@ def test_harvest_pairs_failed_then_done_goals():
 
 def test_stage_review_and_auto_merge(tmp_path):
     cpath = tmp_path / "corpus.json"
-    cpath.write_text(json.dumps({"M": [{"goal": "live", "expected": "x"}]}))
-    cands = [{"goal": "live", "expected": "dup"},        # already live -> skipped
-             {"goal": "g1", "expected": "e1"},
-             {"goal": "g2", "expected": "e2"}]
+    cpath.write_text(json.dumps({"M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "live", "expected": "x"}]}))
+    cands = [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "live", "expected": "dup"},        # already live -> skipped
+             {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g1", "expected": "e1"},
+             {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g2", "expected": "e2"}]
     assert ev.stage_candidates(cpath, "M", cands) == 2
     assert ev.stage_candidates(cpath, "M", cands) == 0   # idempotent
     assert [c["goal"] for c in ev.load_pending(cpath)["M"]] == ["g1", "g2"]
@@ -593,7 +594,7 @@ def test_stage_review_and_auto_merge(tmp_path):
     assert ev.stage_candidates(cpath, "M", cands) == 0
     assert ev.load_rejected(cpath) == {"M": ["g2"]}
     # auto mode merges straight into the live corpus
-    assert ev.merge_candidates(cpath, "M", [{"goal": "g3", "expected": "e3"}]) == 1
+    assert ev.merge_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g3", "expected": "e3"}]) == 1
     assert any(c["goal"] == "g3" for c in ev.load_eval_corpus(cpath)["M"])
 
 
@@ -602,8 +603,8 @@ def test_resolve_pending_duplicate_accept_is_reported_not_silent(tmp_path):
     # not a silent "accepted 0" indistinguishable from a typo'd index.
     cpath = tmp_path / "corpus.json"
     cpath.write_text("{}")
-    ev.stage_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"}])
-    ev.merge_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"}])
+    ev.stage_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g1", "expected": "e1"}])
+    ev.merge_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g1", "expected": "e1"}])
     res = ev.resolve_pending(cpath, "M", accept=[1])
     assert res["merged"] == 0 and res["duplicates"] == 1
     assert res["accepted_goals"] == ["g1"]
@@ -614,7 +615,7 @@ def test_resolve_pending_rejects_out_of_range_index(tmp_path):
     import pytest
     cpath = tmp_path / "corpus.json"
     cpath.write_text("{}")
-    ev.stage_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"}])
+    ev.stage_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g1", "expected": "e1"}])
     with pytest.raises(ValueError, match="out of range"):
         ev.resolve_pending(cpath, "M", accept=[2])
     assert [c["goal"] for c in ev.load_pending(cpath)["M"]] == ["g1"]  # untouched
@@ -625,9 +626,9 @@ def test_accept_all_still_honors_explicit_rejects(tmp_path):
     # not ride into the live ground truth on the bulk flag.
     cpath = tmp_path / "corpus.json"
     cpath.write_text("{}")
-    ev.stage_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"},
-                                     {"goal": "g2", "expected": "e2"},
-                                     {"goal": "g3", "expected": "e3"}])
+    ev.stage_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g1", "expected": "e1"},
+                                     {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g2", "expected": "e2"},
+                                     {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g3", "expected": "e3"}])
     res = ev.resolve_pending(cpath, "M", reject=[2], accept_all=True)
     assert res["merged"] == 2 and res["rejected"] == 1
     assert res["rejected_goals"] == ["g2"]
@@ -640,13 +641,13 @@ def test_merge_preserves_operator_fields_and_unknown_keys(tmp_path):
     # round-trip.
     cpath = tmp_path / "corpus.json"
     cpath.write_text(json.dumps({
-        "M": [{"goal": "live", "expected": "x", "notes": "keep me",
+        "M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "live", "expected": "x", "notes": "keep me",
                "reviewed": True}],
         "_meta": {"owner": "ops"},
     }))
-    assert ev.merge_candidates(cpath, "M", [{"goal": "g", "expected": "e"}]) == 1
+    assert ev.merge_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g", "expected": "e"}]) == 1
     raw = json.loads(cpath.read_text())
-    assert raw["M"][0] == {"goal": "live", "expected": "x", "notes": "keep me",
+    assert raw["M"][0] == {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "live", "expected": "x", "notes": "keep me",
                            "reviewed": True}
     assert raw["_meta"] == {"owner": "ops"}
     added = raw["M"][1]
@@ -658,9 +659,9 @@ def test_corpus_quality_flags_dead_cases_and_retire_prunes_raw(tmp_path):
     # A case the baseline always passes is DEAD ground truth; one it can fail
     # is discriminative; an all-indeterminate probe stays discriminative
     # (unknown is not dead). --retire drops only the dead rows, raw-preserving.
-    cases = [{"goal": "easy", "expected": "yes"},
-             {"goal": "hard", "expected": "yes"},
-             {"goal": "flaky", "expected": "yes"}]
+    cases = [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "easy", "expected": "yes"},
+             {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "hard", "expected": "yes"},
+             {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "flaky", "expected": "yes"}]
 
     calls = {"hard": 0}
 
@@ -680,8 +681,8 @@ def test_corpus_quality_flags_dead_cases_and_retire_prunes_raw(tmp_path):
 
     cpath = tmp_path / "corpus.json"
     cpath.write_text(json.dumps({
-        "M": [{"goal": "easy", "expected": "yes", "notes": "keep the field"},
-              {"goal": "hard", "expected": "yes"}],
+        "M": [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "easy", "expected": "yes", "notes": "keep the field"},
+              {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "hard", "expected": "yes"}],
         "_meta": {"owner": "ops"},
     }))
     assert ev.retire_corpus_cases(cpath, "M", ["easy"]) == 1
@@ -697,8 +698,8 @@ def test_harvest_rejects_pairs_missing_timestamps_and_honors_known():
     # long-known goals can't starve fresh candidates out of the slice.
     goals = [_G("export the nightly ledger report", "Ledger exported.")]
     assert ev.harvest_corpus_candidates(
-        [{"goal_text": "export the nightly ledger report"}], goals) == []
-    refl = [{"goal_text": "export the nightly ledger report", "ts": 50.0}]
+        [{"owner": "", "goal_id": 0, "goal_text": "export the nightly ledger report"}], goals) == []
+    refl = [{"owner": "", "goal_id": 0, "goal_text": "export the nightly ledger report", "ts": 50.0}]
     assert ev.harvest_corpus_candidates(
         refl, goals, known={"export the nightly ledger report"}) == []
     assert ev.harvest_corpus_candidates(refl, goals, max_candidates=1) != []
@@ -721,7 +722,7 @@ def test_scorers_mark_dirty_on_fail_open_degradation():
             return type("R", (), {"text": "WIN"})()
 
     run = ev.llm_runner(_FlakyLLM())
-    _sw, swo = ev.corpus_ab_scorers([{"goal": "g", "expected": "WIN"}], run_fn=run)
+    _sw, swo = ev.corpus_ab_scorers([{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g", "expected": "WIN"}], run_fn=run)
     assert swo.last_clean is True            # untouched until the first call
     swo("", ["g"])                           # outage -> degraded fail-open
     assert swo.last_clean is False
@@ -740,7 +741,7 @@ def test_pending_and_rejected_sidecars_seal_at_rest(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     cpath = tmp_path / "corpus.json"
     cpath.write_text("{}")
-    assert ev.stage_candidates(cpath, "M", [{"goal": "secret-ish goal",
+    assert ev.stage_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "secret-ish goal",
                                              "expected": "hint"}]) == 1
     raw = ev.pending_corpus_path(cpath).read_bytes()
     assert b"secret-ish goal" not in raw          # sealed on disk
@@ -750,7 +751,7 @@ def test_pending_and_rejected_sidecars_seal_at_rest(tmp_path, monkeypatch):
     assert b"secret-ish goal" not in ev.rejected_corpus_path(cpath).read_bytes()
     assert ev.load_rejected(cpath) == {"M": ["secret-ish goal"]}
     # live corpus (operator data) remains plaintext-readable JSON
-    assert ev.merge_candidates(cpath, "M", [{"goal": "g2", "expected": "e"}]) == 1
+    assert ev.merge_candidates(cpath, "M", [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g2", "expected": "e"}]) == 1
     assert "g2" in cpath.read_text()
 
 
@@ -810,7 +811,7 @@ def test_exhausted_budget_is_indeterminate_through_the_scorers():
     # rejects. The evaluation fails closed end to end.
     import math
     sw, _wo = ev.corpus_ab_scorers(
-        [{"goal": "g", "expected": "x"}], run_fn=ev.llm_runner(_BrokeLLM()))
+        [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g", "expected": "x"}], run_fn=ev.llm_runner(_BrokeLLM()))
     assert math.isnan(sw("candidate line", ["g"]))
 
 
@@ -917,7 +918,7 @@ def test_corpus_scorers_judge_unknown_scores_paraphrases():
     def run(line, goal):
         return "OK" if line else "no"
 
-    cases = [{"goal": "g", "expected": "x"}]
+    cases = [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g", "expected": "x"}]
     sw, _ = ev.corpus_ab_scorers(cases, run_fn=run, judge_fn=judge)
     assert math.isnan(sw("line", ["not-in-corpus"]))              # unchanged default
     sw2, swo2 = ev.corpus_ab_scorers(cases, run_fn=run, judge_fn=judge,
@@ -929,7 +930,7 @@ def test_corpus_scorers_judge_unknown_scores_paraphrases():
 
 def test_corpus_scorer_indeterminate_for_unknown_goal():
     import math
-    cases = [{"goal": "g0", "expected": "ok"}]
+    cases = [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": "g0", "expected": "ok"}]
     sw, _wo = ev.corpus_ab_scorers(cases, run_fn=lambda line, g: "ok")
     assert sw("line", ["g0"]) == 1.0                  # corpus goal judged
     assert math.isnan(sw("line", ["not-in-corpus"]))  # unknown -> indeterminate -> NaN
@@ -937,7 +938,7 @@ def test_corpus_scorer_indeterminate_for_unknown_goal():
 
 def test_metamorphic_fails_closed_with_corpus_heuristic_scorer():
     from maverick import self_harness as sh
-    cases = [{"goal": f"g{i}", "expected": "ok"} for i in range(6)]
+    cases = [{"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "goal": f"g{i}", "expected": "ok"} for i in range(6)]
     held_in, held_out = ev.corpus_split(cases, held_out_frac=0.5)
     sw, wo = ev.corpus_ab_scorers(cases, run_fn=lambda line, g: "ok" if line else "no")
     p = sh.HarnessProposal("M", "sig", "Bound the window.", "r")
