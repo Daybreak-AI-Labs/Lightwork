@@ -179,7 +179,8 @@ class JobQueue:
 
     def _ensure_schema(self) -> None:
         with self._conn() as c:
-            from .schedule_definitions import SCHEMA as schedule_schema, adopt_existing
+            from .schedule_definitions import SCHEMA as schedule_schema
+            from .schedule_definitions import adopt_existing
 
             c.executescript(_SCHEMA + schedule_schema)
             c.execute("BEGIN IMMEDIATE")
@@ -726,9 +727,9 @@ class JobQueue:
                 ).fetchall()
         return [self._row_to_job(r) for r in rows]
 
-    def iter_pending(self, kind: str, *, page_size: int = 256,
+    def iter_pending(self, kind: str | None = None, *, page_size: int = 256,
                      include_running: bool = False) -> Iterator[Job]:
-        """Inspect every pending job of one kind, without a dashboard page cutoff.
+        """Inspect pending jobs of one kind, or all kinds, without a page cutoff.
 
         Keyset pages tolerate cancellation during reconciliation. A fixed high
         water mark bounds the pass if producers keep appending new jobs.
@@ -740,13 +741,15 @@ class JobQueue:
         status = "status IN ('pending','running')" if include_running else "status='pending'"
         with self._conn() as c:
             upper = c.execute("SELECT COALESCE(MAX(id), 0) FROM jobs").fetchone()[0]
+        kind_sql = "kind=? AND " if kind is not None else ""
+        kind_args = (kind,) if kind is not None else ()
         after = 0
         while after < upper:
             with self._conn() as c:
                 rows = c.execute(
-                    f"SELECT * FROM jobs WHERE kind=? AND {status} "
+                    f"SELECT * FROM jobs WHERE {kind_sql}{status} "
                     "AND id>? AND id<=? ORDER BY id LIMIT ?",
-                    (kind, after, upper, page_size),
+                    (*kind_args, after, upper, page_size),
                 ).fetchall()
             if not rows:
                 return

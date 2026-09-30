@@ -200,3 +200,22 @@ def linked_principals(*, limit: int = 200, after: str = "") -> list[str]:
         return []
     principals = sorted({link["principal"] for link in _read()["links"] if link["principal"] > after})
     return [principal for principal in principals if principal_current(principal)][:max(1, min(limit, 1000))]
+
+
+def recorded_channels(principal: str) -> list[dict]:
+    """Exact verified links for governance inventory, including retired members.
+
+    This does not authorize memory recall or delivery. The caller must separately
+    authorize installation governance; records never infer an unlinked identity.
+    """
+    return [dict(link) for link in _read()["links"] if link["principal"] == principal]
+
+
+def channel_membership_current(channel: str, user_id: str) -> bool:
+    """A known linked identity cannot bypass retirement by disabling sharing.
+
+    Unknown/unlinked senders still follow the channel adapter's own ACL. A
+    recorded link to a retired or removed named member denies new channel work.
+    """
+    matches = [link for link in _read()["links"] if link["channel"] == channel and link["user_id"] == user_id]
+    return all(principal_current(link["principal"]) for link in matches)

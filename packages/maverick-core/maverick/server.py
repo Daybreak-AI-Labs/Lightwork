@@ -269,6 +269,9 @@ class Server:
         account_sha256 = getattr(msg, "_verified_channel_account_sha256", None)
         memory_user_id = (account_identity(principal_id, account_sha256)
                           if msg.channel in CHANNELS and account_sha256 else principal_id)
+        identity_refusal = _linked_channel_refusal(msg.channel, memory_user_id, account_sha256)
+        if identity_refusal:
+            return identity_refusal
         try:
             proof_reply = prove_channel_command(msg.text, channel=msg.channel or "unknown", user_id=memory_user_id,
                                                 sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256)
@@ -1048,3 +1051,16 @@ def _extract_oidc_token(msg) -> str:
             return authorization[len(prefix):].strip()
         return authorization.strip()
     return ""
+
+
+def _linked_channel_refusal(channel, user_id, account_sha256):
+    from .personal_identity import CHANNELS, channel_membership_current
+    if channel not in CHANNELS or not account_sha256:
+        return None
+    try:
+        if not channel_membership_current(channel, user_id):
+            return "Your linked workspace membership is no longer active. Ask your administrator to review access."
+    except Exception:
+        log.warning("Linked channel membership could not be verified")
+        return "Workspace identity policy is unavailable. No task was started; try again later."
+    return None

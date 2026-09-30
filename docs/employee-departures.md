@@ -1,34 +1,11 @@
 # Reviewed employee departure
 
-Draft implementation; regression and installed acceptance tests remain unrun.
+Enable `features.employee_departures` in Settings or the installer. A named installation administrator opens **Users → Review employee departure**. Inventory uses exact named and verified channel ownership across the main workspace and registered tenants. It includes tasks, projects, pending approvals, review packets, all owned queued job kinds, recurring schedule definitions, local connection generations, role memberships and verified identity bindings. It contains IDs/statuses, never task titles or private messages. More than 5,000 tasks per exact owner or 10,000 local inventory rows blocks the operation as incomplete.
 
-Enable `features.employee_departures` in Settings or the installer. A named
-installation administrator can open **Users → Review employee departure**.
-The reviewed inventory includes exact-owner tasks, projects, pending approvals,
-project review packets, run-goal schedules, local owned connections and role
-memberships in the main workspace and registered tenants. No task title or
-private message is needed for this inventory. The supported task window is
-5,000 per workspace; a larger inventory prevents the action.
+Starting a departure requires a fresh inventory fingerprint, a different active administrator as retained-data custodian and explicit preservation confirmation. Self-deactivation and administrator deactivation require separate role changes. The workflow records review, retires the exact named identity through the SCIM/session boundary, removes reviewed local connection credentials, retires reviewed recurring definitions and cancels still-pending owned jobs. It records dispatch before each effect and confirmation afterward. Interrupted dispatch is unknown; retrying activity recording never repeats an uncertain effect. Known verified channel bindings deny new work when the named membership is no longer current, even if personal sharing was disabled. Unlinked external identities are not inferred.
 
-Starting a departure requires a fresh inventory fingerprint, a different active
-administrator as retained-data custodian and explicit preservation confirmation.
-The workflow refuses self-deactivation and administrator deactivation until a
-separate role change. It records the review, retires the exact named identity
-through the existing SCIM/session boundary, removes the reviewed generations of
-local connection credentials and cancels still-pending run-goal jobs. It records
-dispatch before each effect and confirmation afterward. An interrupted dispatch
-has an unknown outcome; an audit retry does not blindly repeat the effect.
+A separate closure review reads a fresh inventory, rejects reactivated identities and incomplete coverage, and requires every original/new item plus the external boundary to have an active named responsible administrator. Refreshing case inventory adds newly discovered obligations without removing original evidence. Retained, transfer-reported and revocation-reported dispositions retain the named owner's responsibility; reports remain human attestations, never provider verification. A changed inventory rejects stale closure. The saved result is `closed_with_retained_obligations`: running work, provider consent, unlinked identities and uncertain outcomes remain the explicit responsibility of their named owner.
 
-Every case remains `handoff_required`. Running work, provider-side consent,
-external identity accounts, and other module queues need separate closure.
-Per-item retained, transfer-reported and revocation-reported dispositions name
-an active administrator and preserve a human evidence reference. Those reports
-are visibly human attestations, not provider verification. They never grant
-private-content authority. Existing records and holds are retained; this action
-does not erase personal preferences or make a legal-hold determination.
+Existing data and preservation holds are retained. Custodian assignment and closing a case never transfer private-content ACLs or erase preferences. The user must separately use the governed content-access/deletion processes where appropriate. Closure is a record of accountable retained obligations, not a claim that external systems were verified or all data erased.
 
-The UI, API, feature flag and installer expose actual supported effects. Copilot
-page guidance explains the controls. Executing departure operations through the
-global Copilot remains an integration gap, as does verified closure across every
-module/provider and safe resume of an uncertain interrupted effect. These gaps
-must remain open in LW-094; the presence of a page is not complete offboarding.
+Local mocked regression tests cover incomplete/stale closure, new work, reactivation, inactive custodians, unknown dispatch, channel retirement despite feature disablement and all-kind queue high-water paging. The related local departure/identity/scheduler/dispatcher test group passed 45 tests. Installed authenticated browser and provider-side qualification remain unrun; no live provider calls were made.

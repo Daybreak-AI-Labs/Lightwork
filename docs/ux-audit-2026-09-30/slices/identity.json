@@ -29,14 +29,16 @@
   },
   {
     "id": "LW-094",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "ef7c5b6: employee_departures.py + API/template, config/installer feature and documented exact-owner cross-workspace inventory.",
       "Reviewed identity/session retirement, generation-bound local credential removal, pending run-goal cancellation, durable dispatch/result steps and retained-data custodian.",
-      "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer."
+      "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer.",
+      "Fresh-inventory closure requires every reviewed item and external boundary to have a current active named owner; explicit preserved obligations remain human-attested, with no private-content ACL grant.",
+      "All owned queued kinds and recurring schedule definitions inventoried; recurring definitions retired before cancellation. Exact verified-channel task scopes included, and linked inactive members denied new channel work even with sharing disabled."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Provider-side revocation, running and other-module work closure, safe uncertain-effect resume, and global Copilot operation integration remain open. Cases deliberately cannot claim complete offboarding."
+    "validation": "45 local departure/identity/recurrence/dispatcher regression tests passed. Ruff import/bug/complexity checks and extracted inline JavaScript syntax passed. Installed authenticated browser/provider acceptance remains unrun.",
+    "remaining": "Installed offboarding with running work, OAuth consent and pending reviews must be qualified. Provider-side revocation and unlinked external identities remain explicit named retained obligations, never automatically verified. Native global Copilot adapter integration is tracked by consolidated PR owner."
   },
   {
     "id": "LW-095",

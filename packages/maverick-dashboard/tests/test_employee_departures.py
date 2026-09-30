@@ -77,3 +77,40 @@ def test_interrupted_connection_has_dispatch_receipt(reviewed, monkeypatch):
     row = next(iter(store.rows.values()))
     assert row["steps"][-1] == {"kind": "connection", "tenant": None, "id": "mail", "status": "dispatching"}
     assert row["status"] != "completed"
+
+
+def test_departure_closure_requires_all_items_and_fresh_active_owners(reviewed, monkeypatch):
+    inventory, store = reviewed
+    item = {"kind": "task", "id": "42", "tenant": None, "owner": "user:employee", "status": "running"}
+    inventory.update(items=[item], active=False, coverage="test")
+    row = store.create({"id": "EDP-case", "principal": "user:employee", "inventory": inventory,
+                        "status": "handoff_required", "steps": [], "handoffs": {}})
+    assert departures.closure_preview(row["id"], 1)["can_close"] is False
+    for key in (departures._item_key(item), "external"):
+        row = departures.record_handoff(row["id"], row["revision"], item_key=key,
+            owner="user:reviewer", disposition="retained", evidence="Explicit retained responsibility.",
+            actor="user:admin", authorize=lambda: None)
+    review = departures.closure_preview(row["id"], row["revision"])
+    assert review["can_close"] is True
+    with pytest.raises(HTTPException):
+        departures.close_case(row["id"], row["revision"], "stale", "user:admin", lambda: None)
+    result = departures.close_case(row["id"], row["revision"], review["snapshot"], "user:admin", lambda: None)
+    assert result["status"] == "closed_with_retained_obligations"
+    assert result["closure"]["external_verification"] == "human_attestation"
+    assert result["closure"]["private_content_access"] == "unchanged"
+    monkeypatch.setattr(departures, "candidates", lambda: [])
+    assert departures.closure_preview(row["id"], result["revision"])["can_close"] is False
+
+
+def test_new_items_and_reactivated_identity_block_closure(reviewed):
+    inventory, store = reviewed
+    store.create({"id": "EDP-case", "principal": "user:employee", "inventory": {**inventory, "items": []},
+                  "status": "handoff_required", "handoffs": {"external": {"owner": "user:reviewer"}}})
+    inventory["items"] = [{"kind": "connection", "id": "new", "tenant": None}]
+    result = departures.closure_preview("EDP-case", 1)
+    assert len(result["new_items"]) == 1 and not result["can_close"]
+    assert any("still active" in text for text in result["blockers"])
+    inventory["coverage"] = "test"
+    result = departures.refresh_inventory("EDP-case", 1, "user:admin", lambda: None)
+    assert result["inventory"]["items"] == inventory["items"]
+    assert len(departures.closure_preview("EDP-case", result["revision"])["missing_handoffs"]) == 1

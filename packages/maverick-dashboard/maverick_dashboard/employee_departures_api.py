@@ -8,7 +8,8 @@ from fastapi.responses import HTMLResponse
 from maverick.authority_effects import authority_effect_fence
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import auth, employee_departures as departures
+from . import auth
+from . import employee_departures as departures
 from .content_access_api import _call
 
 router = APIRouter(tags=["employee-departures"])
@@ -109,3 +110,28 @@ async def retry_audit(request: Request, case_id: str, body: RevisionIn):
                 raise HTTPException(404, "No such departure case.")
             return departures.public(row)
     return await _call(retry)
+
+
+class CloseIn(RevisionIn):
+    snapshot: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirm_retained_obligations: Literal[True]
+
+
+@router.post("/api/v1/employee-departures/{case_id}/refresh-inventory")
+async def refresh_inventory(request: Request, case_id: str, body: RevisionIn):
+    actor = _authority(request, write=True)
+    return await _call(lambda: departures.public(departures.refresh_inventory(
+        case_id, body.expected_revision, actor, lambda: _authority(request, write=True))))
+
+
+@router.post("/api/v1/employee-departures/{case_id}/closure-preview")
+async def closure_preview(request: Request, case_id: str, body: RevisionIn):
+    _authority(request, write=True)
+    return await _call(lambda: departures.closure_preview(case_id, body.expected_revision))
+
+
+@router.post("/api/v1/employee-departures/{case_id}/close")
+async def close_case(request: Request, case_id: str, body: CloseIn):
+    actor = _authority(request, write=True)
+    return await _call(lambda: departures.public(departures.close_case(
+        case_id, body.expected_revision, body.snapshot, actor, lambda: _authority(request, write=True))))
