@@ -140,6 +140,8 @@ class DreamInsight:
     evidence: int = 1          # how many episodes back this insight
     channel: str | None = None # reflexion scope; None = unscoped local runs
     user_id: str | None = None # reflexion scope; None = unscoped local runs
+    owner: str | None = None  # None means legacy ownership is unverified
+    source_goal_ids: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -306,6 +308,8 @@ def cluster_failures(
                 f.get("channel"), f.get("user_id"),
             ):
                 continue
+            if head.get("owner") != f.get("owner"):
+                continue
             if _jaccard(ft, _tokens(str(head.get("goal_text", "")))) >= similarity:
                 cluster.append(f)
                 placed = True
@@ -439,10 +443,14 @@ def synthesize_insight(
     user_ids = {f.get("user_id") for f in cluster}
     channel = next(iter(channels)) if len(channels) == 1 else None
     user_id = next(iter(user_ids)) if len(user_ids) == 1 else None
+    owners = {f.get("owner") for f in cluster}
+    owner = next(iter(owners)) if len(owners) == 1 else None
+    goal_ids = sorted({f["goal_id"] for f in cluster if type(f.get("goal_id")) is int and f["goal_id"] > 0})
     return DreamInsight(
         ts=now if now is not None else time.time(),
         kind=kind, domain=domain, text=text, evidence=len(cluster),
         channel=channel, user_id=user_id,
+        owner=owner, source_goal_ids=goal_ids,
     )
 
 
@@ -466,6 +474,7 @@ def promote_shared_insights(
         if not f.get("domain")
         and f.get("channel") is None
         and f.get("user_id") is None
+        and f.get("owner") == ""
     ]
     for cluster in cluster_failures(generic_unscoped_failures, min_cluster=min_cluster):
         promoted.append(synthesize_insight(
@@ -521,6 +530,8 @@ def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
                     if "channel" in d else _LEGACY_SCOPE_UNKNOWN,
                     user_id=d.get("user_id")
                     if "user_id" in d else _LEGACY_SCOPE_UNKNOWN,
+                    owner=d.get("owner"),
+                    source_goal_ids=[gid for gid in d.get("source_goal_ids", []) if type(gid) is int and gid > 0],
                 ))
             except (ValueError, TypeError):
                 continue
@@ -562,6 +573,7 @@ def append_insights(
                      if e.domain == ins.domain
                      and e.channel == ins.channel
                      and e.user_id == ins.user_id
+                     and e.owner == ins.owner
                      and _containment(it, _tokens(e.text)) >= _DEDUP_THRESHOLD),
                     None,
                 )
@@ -570,6 +582,7 @@ def append_insights(
                     # standing insight is refreshed instead of aging out.
                     dup.ts = max(dup.ts, ins.ts)
                     dup.evidence += max(1, ins.evidence)
+                    dup.source_goal_ids = sorted(set(dup.source_goal_ids) | set(ins.source_goal_ids))
                     refreshed += 1
                     continue
                 existing.append(ins)
@@ -592,6 +605,7 @@ def recall_insights(
     goal_text: str, *, domain: str | None = None, k: int = 2,
     path: Path | str | None = None, min_score: float = 0.05,
     channel: str | None = None, user_id: str | None = None,
+    owner: str | None = None,
 ) -> list[tuple[float, DreamInsight]]:
     """Top-k consolidated insights for this goal, same-department boosted.
 
@@ -602,12 +616,21 @@ def recall_insights(
     entries = load_insights(path)
     if not entries:
         return []
+    from .memory_ownership import current_owner, source_allowed
+    try:
+        owner = current_owner() if owner is None else owner
+    except Exception:
+        return []
     qt = _tokens(goal_text)
     newest = max(e.ts for e in entries)
     oldest = min(e.ts for e in entries)
     span = newest - oldest
     scored: list[tuple[float, DreamInsight]] = []
     for e in entries:
+        if e.owner != owner or (owner and not e.source_goal_ids):
+            continue
+        if any(not source_allowed(goal_id, owner) for goal_id in e.source_goal_ids):
+            continue
         if e.channel != channel or e.user_id != user_id:
             continue
         sim = _jaccard(qt, _tokens(e.text))
@@ -951,7 +974,7 @@ def build_rehearsal_cases(
     # unscoped local failures are eligible for offline practice.
     trusted_failures = [
         f for f in failures
-        if f.get("channel") is None and f.get("user_id") is None
+        if f.get("channel") is None and f.get("user_id") is None and f.get("owner") == ""
     ]
 
     cases: list[dict] = []
@@ -1163,6 +1186,13 @@ def _replay_critiques(
         from .pilot_learning import excluded
         if excluded(d.get("goal_id")):
             continue
+        from .memory_ownership import current_owner
+        if not d.get("goal_id"):
+            continue
+        try:
+            owner = current_owner(goal_id=d["goal_id"])
+        except Exception:
+            continue
         critique = str(d.get("verifier_critique", "") or "").strip()
         brief = str(d.get("task_brief_text", "") or "").strip()
         try:
@@ -1177,6 +1207,7 @@ def _replay_critiques(
             "failure_class": "verifier_critique",
             "reflection": critique[:240],
             "domain": None,
+            "owner": owner, "goal_id": d["goal_id"],
         })
     return out
 
@@ -1206,6 +1237,10 @@ def _replay_donations(
         from .pilot_learning import excluded
         if excluded(rec.get("goal_id")):
             continue
+        # Imported donation directories have no authenticated local subject
+        # binding. Only explicitly unowned source records may become shared.
+        if rec.get("source_ownership") != "unowned":
+            continue
         brief = str(rec.get("task_brief_text", "") or "").strip()
         if not brief:
             continue  # hash-only donations carry no consolidatable text
@@ -1219,6 +1254,7 @@ def _replay_donations(
                 "goal": brief, "success": True,
                 "tools": list(rec.get("tools_used", []) or []),
                 "t": ts, "domain": None,
+                "owner": "", "goal_id": rec.get("goal_id"),
             })
         elif outcome:
             failures.append({
@@ -1226,12 +1262,14 @@ def _replay_donations(
                 "failure_class": f"fleet_{outcome}",
                 "reflection": str(rec.get("verifier_critique", "") or "")[:240],
                 "domain": None,
+                "owner": "", "goal_id": rec.get("goal_id"),
             })
     return successes, failures
 
 
 def _replay_failures(reflexion_path: Path | str | None) -> list[dict]:
     from . import reflexion as _r
+    from .memory_ownership import source_allowed
     kwargs: dict = {"limit": 200}
     if reflexion_path is not None:
         kwargs["path"] = Path(reflexion_path)
@@ -1242,8 +1280,10 @@ def _replay_failures(reflexion_path: Path | str | None) -> list[dict]:
             "channel": getattr(r, "channel", None),
             "user_id": getattr(r, "user_id", None),
             "domain": getattr(r, "domain", None),
+            "owner": getattr(r, "owner", None), "goal_id": getattr(r, "goal_id", None),
         }
         for r in _r.list_recent(**kwargs)
+        if isinstance(r.owner, str) and source_allowed(r.goal_id, r.owner)
     ]
 
 

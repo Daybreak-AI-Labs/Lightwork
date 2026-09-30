@@ -2618,12 +2618,12 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return _dec_goal_row(row) if row else None
 
-    def candidate_goals(self, include_running: bool, limit: int = 500) -> list[PGGoal]:
+    def candidate_goals(self, include_running: bool, limit: int = 500, *, owner: str = "") -> list[PGGoal]:
         """Goals with comparable text for recall (mirrors SQLite). Finished set
         is the written vocabulary done/blocked/cancelled, not the never-written
         succeeded/failed the old query used."""
-        conds = ["(COALESCE(title, '') != '' OR COALESCE(description, '') != '')"]
-        params: list = []
+        conds = ["(COALESCE(title, '') != '' OR COALESCE(description, '') != '')", "owner = %s"]
+        params: list = [owner]
         if not include_running:
             conds.insert(0, "status IN ('done', 'blocked', 'cancelled')")
         frag, fparams = _tenant_scope()

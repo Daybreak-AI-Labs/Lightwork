@@ -44,3 +44,7 @@ Static Python 3.10 parsing, JavaScript syntax and whitespace checks passed. The
 new regression tests were authored. After the user authorized local execution,
 the targeted test command could not collect tests because this executor lacks
 `pytest`; no passing runtime result is claimed.
+
+## Recalled content isolation
+
+Task content ownership is checked before lexical/embedding ranking. Reflections and dream insights retain exact owner and source task IDs; a missing owner on an older record is not a shared-content grant. Generated skills retain server-stamped task lineage, which is rechecked before load, ranking and prompt rendering. Deleted or excluded sources stop future automatic recall. Private namespace facts never enter the workspace standing prompt. The model-managed memory tool uses a separate tenant/owner root; legacy shared files are retained outside automatic recall. Private failures cannot become shared rehearsals or organization harness lessons. These controls do not erase previously trained models or external copies.

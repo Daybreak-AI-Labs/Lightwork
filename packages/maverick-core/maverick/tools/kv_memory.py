@@ -139,19 +139,19 @@ def _run_factory(world, goal_id: int | None):
                 return "(no facts stored for this goal)"
             return "\n".join(f"{_unscope(k)}  ({sz} bytes)" for k, sz in rows)
         if op == "search":
-            q = (args.get("query") or "").strip()
-            if not q:
-                return "ERROR: search requires query"
-            rows = world.search_facts(prefix, q, cap)
-            if not rows:
-                return f"no matches for {q!r}"
-            out = []
-            for k, v in rows:
-                snippet = (v or "")[:200]
-                out.append(f"{_unscope(k)}: {snippet}")
-            return "\n".join(out)
+            return _search(world, prefix, args, cap)
         return f"ERROR: unknown op {op!r}"
     return _run
+
+
+def _search(world, prefix, args, cap):
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "ERROR: search requires query"
+    rows = world.search_facts(prefix, query, cap)
+    if not rows:
+        return f"no matches for {query!r}"
+    return "\n".join(f"{_unscope(key)}: {(value or '')[:200]}" for key, value in rows)
 
 
 def kv_memory(world, goal_id: int | None) -> Tool:

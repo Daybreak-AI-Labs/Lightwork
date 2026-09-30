@@ -95,6 +95,8 @@ class Reflexion:
     # scope the learned guidance so an orchestrator lesson doesn't tax worker
     # prompts of the same model. Older lines load as None — backward compatible.
     role: str | None = None
+    owner: str | None = None  # absent legacy ownership is not inferred
+    goal_id: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -112,6 +114,8 @@ def record(
     domain: str | None = None,
     model_id: str | None = None,
     role: str | None = None,
+    owner: str | None = None,
+    goal_id: int | None = None,
     path: Path | None = None,
 ) -> bool:
     """Append a Reflexion. Returns True on success.
@@ -121,6 +125,15 @@ def record(
     """
     from .learning_guard import learning_write_allowed
     if not learning_write_allowed("reflexion"):
+        return False
+    from .logging_config import current_goal_id
+    from .memory_ownership import current_owner, source_allowed
+    goal_id = current_goal_id() if goal_id is None else goal_id
+    try:
+        owner = current_owner(goal_id=goal_id) if owner is None else owner
+        if not source_allowed(goal_id, owner):
+            return False
+    except Exception:
         return False
     default_store = path is None
     path = path if path is not None else default_path()
@@ -156,6 +169,7 @@ def record(
         domain=optional(domain, 128),
         model_id=optional(model_id, 256),
         role=optional(role, 128),
+        owner=owner, goal_id=goal_id,
     )
     with _lock:
         try:
@@ -271,6 +285,7 @@ def recall(
     user_id: str | None = None,
     domain: str | None = None,
     scan_cap: int = _SCAN_CAP,
+    owner: str | None = None,
 ) -> list[tuple[float, Reflexion]]:
     """Return the top-k most similar prior reflections.
 
@@ -287,6 +302,11 @@ def recall(
     """
     path = path if path is not None else default_path()
     if not goal_text or not path.exists():
+        return []
+    from .memory_ownership import current_owner, source_allowed
+    try:
+        owner = current_owner() if owner is None else owner
+    except Exception:
         return []
     qt = _tokens(goal_text)
     entries: list[Reflexion] = []
@@ -309,12 +329,14 @@ def recall(
                 key: data.get(key) for key in (
                     "ts", "goal_text", "failure_class",
                     "failure_msg", "reflection", "tools_used",
-                    "channel", "user_id", "domain",
+                    "channel", "user_id", "domain", "owner", "goal_id",
                 )
             })
         except TypeError:
             continue
         if not _scope_matches(entry, channel=channel, user_id=user_id):
+            continue
+        if entry.owner != owner or not source_allowed(entry.goal_id, owner):
             continue
         entries.append(entry)
 
@@ -390,7 +412,7 @@ def list_recent(
                         "ts", "goal_text", "failure_class",
                         "failure_msg", "reflection", "tools_used",
                         "channel", "user_id", "domain", "model_id",
-                        "role",
+                        "role", "owner", "goal_id",
                     )
                 }))
             except TypeError:

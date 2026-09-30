@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
-from maverick import personal_identity as identity, personal_memory as memory
+from maverick import personal_identity as identity
+from maverick import personal_memory as memory
 
 
 @pytest.fixture
@@ -100,3 +100,14 @@ def test_note_edit_conflict_keeps_current_revision(personal_store):
     with pytest.raises(identity.IdentityConflict):
         memory.update("user:alice", "dashboard", "alice", expected_revision=0, recall=True)
     assert memory.controls("dashboard", "alice")["recall"] is False
+
+
+def test_existing_source_exclusion_stops_prompt_recall(personal_store, monkeypatch):
+    from maverick import pilot_learning, user_notes
+    path = personal_store / "user_notes.ndjson"
+    row = {"channel": "dashboard", "user_id": "alice", "note": "I prefer metric units.", "source_goal_id": 7}
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    monkeypatch.setattr(user_notes, "default_path", lambda: path)
+    monkeypatch.setattr(pilot_learning, "excluded", lambda gid: gid == 7)
+    assert memory.records("dashboard", "alice")
+    assert memory.recall("dashboard", "alice") == []

@@ -95,7 +95,7 @@ def records(channel, user_id, *, path=None):
     except FileNotFoundError:
         pass
     record = controls(channel, user_id)
-    rows = [row for row in rows if not _suppressed(row.get("note", ""), record)] + record["edits"]
+    rows = [row for row in rows + record["edits"] if not _suppressed(row.get("note", ""), record)]
     return [{**row, "id": note_id(row), "source_state": "personal correction" if row.get("manual") else
              "source recorded" if row.get("conversation_id") and row.get("turn_id") else "legacy source unavailable"}
             for row in rows]
@@ -127,6 +127,8 @@ def update(principal, channel, user_id, *, expected_revision, recall=None,
                     from .safety.secret_detector import scan
                     if not isinstance(replacement, str) or not replacement.strip() or len(replacement) > 160 or scan(replacement):
                         raise ValueError("Enter a preference of up to 160 characters without credentials.")
+                    if replacement.strip() == row["note"] or _suppressed(replacement.strip(), record):
+                        raise ValueError("Choose a different preference outside an existing suppressed topic.")
                     record["edits"].append({"channel": channel, "user_id": user_id, "note": replacement.strip(),
                                             "ts": time.time(), "source_ts": time.time(), "manual": True})
             if len(record["suppressed"]) > 5000 or len(record["edits"]) > 100:
@@ -182,4 +184,9 @@ def recall(channel, user_id, *, path=None, k=8, execution_identity=False):
             channel, user_id = target["channel"], target["user_id"]
     if not controls(channel, user_id)["recall"]:
         return []
-    return [row["note"] for row in records(channel, user_id, path=path)][:max(1, k)]
+    from .pilot_learning import excluded
+    rows = records(channel, user_id, path=path)
+    # Inspection still shows retained source records, but prompt enrichment
+    # immediately stops using a source excluded after it was consolidated.
+    return [row["note"] for row in rows
+            if not row.get("source_goal_id") or not excluded(int(row["source_goal_id"]))][:max(1, k)]

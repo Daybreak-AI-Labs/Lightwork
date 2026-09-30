@@ -621,6 +621,8 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
             for score, meta in sem:
                 gid = meta.get("goal_id")
                 g = world.get_goal(gid) if gid is not None else None
+                if g is None or g.owner != (goal.owner or ""):
+                    continue
                 rows.append((
                     score, gid,
                     (getattr(g, "title", None) or "") if g else "",
@@ -628,7 +630,7 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
                 ))
         else:
             from .tools.recall import recall_past_goals
-            for score, g in recall_past_goals(query, num_results=k + 2, world=world):
+            for score, g in recall_past_goals(query, num_results=k + 2, world=world, owner=goal.owner or ""):
                 rows.append((score, g.id, g.title or "", g.result or ""))
         lines: list[str] = []
         for score, gid, title, raw_result in rows:
@@ -821,6 +823,7 @@ def _maybe_record_reflexion(
             # mining scopes the resulting guidance so an orchestrator lesson
             # doesn't tax worker prompts of the same model.
             role="orchestrator",
+            owner=getattr(goal, "owner", "") or "", goal_id=goal.id,
         )
 
 
@@ -901,6 +904,8 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
             )
         else:
             facts = world.get_facts()
+        from .fact_revision import is_private_fact_key
+        facts = {key: value for key, value in facts.items() if not is_private_fact_key(key)}
     # Bound the block: facts are a standing brief section on EVERY goal, and
     # the store grows forever (kv_memory, dashboard, MCP all write it). Keep
     # the newest N (get_facts orders newest-first) and cap each value, the
@@ -1039,6 +1044,7 @@ async def _apply_brief_enrichments(
                 channel=channel,
                 user_id=user_id,
                 domain=domain,
+                owner=goal.owner or "",
             )
             ctx_block = reflexion.format_context(recalled, shield=shield)
             if ctx_block:
@@ -1056,6 +1062,7 @@ async def _apply_brief_enrichments(
             _dreamed = dreaming.recall_insights(
                 f"{goal.title}\n{goal.description or ''}", domain=domain,
                 channel=channel, user_id=user_id,
+                owner=goal.owner or "",
             )
             _dream_block = dreaming.format_context(_dreamed, shield=shield)
             if _dream_block:
@@ -2546,7 +2553,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 trajectories = [
                     {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
-                    for g in world.list_goals(status="done", limit=10, order="desc")
+                    for g in world.list_goals(status="done", limit=10, order="desc", owner="")
                 ]
                 # v2: gate on evidence + dedup against the learned-skills store
                 # so the loop doesn't accumulate near-duplicate skills each run.

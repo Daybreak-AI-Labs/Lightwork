@@ -821,7 +821,8 @@ def _is_minable(r: object, model_id: str) -> bool:
     considers."""
     return (isinstance(r, dict)
             and str(r.get("model_id") or "") == str(model_id)
-            and r.get("channel") is None and r.get("user_id") is None)
+            and r.get("channel") is None and r.get("user_id") is None
+            and r.get("owner") == "")
 
 
 def count_eligible(reflexions: list[dict], *, model_id: str) -> int:

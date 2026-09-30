@@ -95,6 +95,7 @@ class TrajectoryRecord:
     # reconstruct the DPO text sidecar). Without it both lookups hit goal_id=0,
     # fetch nothing, and every trajectory ends up with zero steps / no transcript.
     goal_id: int = 0
+    source_ownership: str = "unknown"  # metadata only; never expose a principal
     model_id: str = ""
     tools_used: list[str] = field(default_factory=list)
     action_sequence: list[str] = field(default_factory=list)
@@ -249,6 +250,11 @@ def write_record(
         return None
     from .pilot_learning import excluded
     if excluded(record.goal_id):
+        return None
+    from .memory_ownership import current_owner
+    try:
+        record.source_ownership = "unowned" if current_owner(goal_id=record.goal_id) == "" else "private"
+    except Exception:
         return None
     # Calibration interlock: if the verifier has drifted (no longer
     # discriminates correct from incorrect on the labeled set), freeze learning

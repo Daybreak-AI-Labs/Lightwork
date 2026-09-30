@@ -370,7 +370,7 @@ def _preview(model_id: str | None, min_support: int) -> dict:
     if not model_id:
         from maverick.llm import model_for_role
         model_id = model_for_role("orchestrator")
-    records = [r.to_dict() for r in reflexion.list_recent(limit=500)]
+    records = [r.to_dict() for r in reflexion.list_recent(limit=500) if r.owner == ""]
     eligible = self_harness.count_eligible(records, model_id=model_id)
     sigs = self_harness.mine_failures(records, model_id=model_id, min_support=min_support)
     out = []

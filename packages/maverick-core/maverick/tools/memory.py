@@ -21,6 +21,8 @@ on ``view`` — treat it with the same care as any tool output.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -51,13 +53,21 @@ def _write_text(target: Path, text: str) -> None:
 
 
 def _memory_root() -> Path:
+    from ..memory_ownership import current_owner
+    return memory_root_for(current_owner())
+
+
+def memory_root_for(owner: str) -> Path:
+    """Exact tenant/owner root; legacy shared memory is never inherited."""
+    from ..paths import current_tenant_id_strict, data_dir
+    if not isinstance(owner, str):
+        raise ValueError("A current content owner is required for memory")
     # Explicit override wins; otherwise the (optionally tenant-scoped) default,
     # which is the legacy ~/.maverick/memory when no tenant is active.
     raw = os.environ.get("MAVERICK_MEMORY_DIR")
-    if raw:
-        return Path(raw).expanduser()
-    from ..paths import data_dir
-    return data_dir("memory")
+    base = Path(raw).expanduser() if raw else data_dir("memory")
+    key = hashlib.sha256(json.dumps([current_tenant_id_strict(), owner], separators=(",", ":")).encode()).hexdigest()
+    return (base / "owned" / key).resolve()
 
 
 def _resolve(root: Path, rel: str) -> Path:
@@ -139,7 +149,13 @@ def _fits(root: Path, target: Path, new_text: str) -> str | None:
 def _run(args: dict) -> str:
     from ..crypto_at_rest import EncryptionUnavailable
     try:
+        if args.get("command") not in {"view", "delete"}:
+            from ..learning_guard import learning_write_allowed
+            if not learning_write_allowed("personal_memory"):
+                return "ERROR: This task cannot write durable memory under its current learning policy."
         return _run_impl(args)
+    except ValueError:
+        return "ERROR: Current memory ownership could not be verified."
     except EncryptionUnavailable as e:
         return f"ERROR: at-rest encryption unavailable: {e}"
 

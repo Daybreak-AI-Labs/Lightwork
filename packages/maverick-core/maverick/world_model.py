@@ -2338,7 +2338,7 @@ class WorldModel:
         )
         return _goal_from_row(row) if row else None
 
-    def candidate_goals(self, include_running: bool, limit: int = 500) -> list[Goal]:
+    def candidate_goals(self, include_running: bool, limit: int = 500, *, owner: str = "") -> list[Goal]:
         """Goals with comparable text, for cross-run recall. Locked read.
 
         ``include_running`` widens to in-flight goals too; otherwise only
@@ -2355,9 +2355,9 @@ class WorldModel:
         rows = self._read_all(
             "SELECT id, parent_id, title, description, status, created_at, "
             f"updated_at, deadline, result, owner, execution_principal "
-            f"FROM goals {where} "
+            f"FROM goals {where} AND owner = ? "
             "ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            (owner, limit),
         )
         return [_goal_from_row(r) for r in rows]
 

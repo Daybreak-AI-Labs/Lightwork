@@ -1756,7 +1756,7 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
             from .llm import model_for_role
             key = model_for_role("orchestrator")
         refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
-                if _scope_matches(r, channel=None, user_id=None)]
+                if _scope_matches(r, channel=None, user_id=None) and r.owner == ""]
         # Isolation parity with the reflexion side: owner-scoped goals stay
         # out of the shared corpus -- one tenant's goal text must never be
         # mined into ground truth other contexts evaluate against.
