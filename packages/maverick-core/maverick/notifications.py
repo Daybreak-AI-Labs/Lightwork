@@ -203,6 +203,93 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         return False
 
 
+def _legacy_url(section: dict, backend: str):
+    # Older installers wrote ``webhook_url`` next to a single backend.
+    return section.get("webhook_url") if section.get("backend") == backend else None
+
+def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) -> bool:
+    if backend == "ntfy":
+        # ``topic`` is what older installers wrote; keep honouring it.
+        topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
+        server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
+        if not topic:
+            topic = os.environ.get("MAVERICK_NTFY_TOPIC")
+        if not topic:
+            log.debug("notify ntfy: no topic configured")
+            return False
+        return _send_ntfy(title, body, priority, server, topic)
+    if backend == "pushover":
+        return _send_pushover(title, body, priority, cfg)
+    if backend == "discord":
+        url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
+              os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
+        return _send_discord(title, body, url or "")
+    if backend == "slack":
+        url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
+              os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
+        return _send_slack(title, body, url or "")
+    log.warning("notify: unknown backend %r", backend)
+    return False
+
+def _admit(cfg, requested, event, delivery_kind, retry):
+    from .notification_receipts import DeliveryReceipts
+    receipts = DeliveryReceipts() if cfg.get("delivery_receipts", True) is not False else None
+    if len(event) > 200:
+        raise ValueError("Delivery reference is too long")
+    if retry and (receipts is None or delivery_kind != "test"):
+        return receipts, []
+    admitted = []
+    for backend in dict.fromkeys(requested):
+        if receipts is None:
+            admitted.append((backend, None))
+        else:
+            try:
+                ident, acquired = receipts.claim(event, backend, kind=delivery_kind, retry=retry)
+            except Exception as exc:
+                log.warning("notify receipt admission unavailable: %s", type(exc).__name__)
+                if delivery_kind == "test":
+                    raise RuntimeError("Delivery history is unavailable; the test was not sent.") from None
+                continue
+            if acquired:
+                admitted.append((backend, ident))
+
+    return receipts, admitted
+
+
+def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize):
+    from .authority_effects import authority_effect_fence
+    token = _outcome.set(("failed", "Not sent. Check the channel configuration and installed backend dependencies.", True))
+    started = False
+    try:
+        with authority_effect_fence():
+            if authorize is not None:
+                authorize()
+            if cfg != _load_config():
+                raise ValueError("Notification configuration changed")
+            if receipts is not None:
+                receipts.update(ident, "sending", "Contacting the notification service.")
+            started = True
+            result = _dispatch(backend, cfg=cfg, title=title, body=body, priority=priority)
+            outcome = _outcome.get()
+            if result and outcome[0] != "delivered":
+                outcome = ("delivered", "Accepted by the notification service. This does not mean the person saw it.", False)
+            if receipts is not None:
+                receipts.update(ident, outcome[0], outcome[1], safe_to_retry=outcome[2])
+            return result
+    except Exception as exc:
+        log.warning("notify dispatch unavailable: %s", type(exc).__name__)
+        if receipts is not None:
+            try:
+                message = ("Delivery could not be confirmed. Check the destination before sending again." if started
+                           else "Not sent. Current access, configuration or delivery storage could not be verified.")
+                receipts.update(ident, "unknown" if started else "failed", message)
+            except Exception:
+                log.warning("notify receipt could not be saved")
+        return False
+    finally:
+        _outcome.reset(token)
+
+
 def notify(
     body: str,
     *,
@@ -251,84 +338,12 @@ def notify(
             return batcher.submit(body, title=title, priority=priority,
                                   category=category)
 
-    def _legacy_url(section: dict, backend: str):
-        # Older installers wrote ``webhook_url`` next to a single backend.
-        return section.get("webhook_url") if section.get("backend") == backend else None
-
-    def _dispatch(backend: str) -> bool:
-        if backend == "ntfy":
-            # ``topic`` is what older installers wrote; keep honouring it.
-            topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
-            server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
-            if not topic:
-                topic = os.environ.get("MAVERICK_NTFY_TOPIC")
-            if not topic:
-                log.debug("notify ntfy: no topic configured")
-                return False
-            return _send_ntfy(title, body, priority, server, topic)
-        if backend == "pushover":
-            return _send_pushover(title, body, priority, cfg)
-        if backend == "discord":
-            url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
-                  os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
-            return _send_discord(title, body, url or "")
-        if backend == "slack":
-            url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
-                  os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
-            return _send_slack(title, body, url or "")
-        log.warning("notify: unknown backend %r", backend)
-        return False
-
-    from .notification_receipts import DeliveryReceipts
-    receipts = DeliveryReceipts() if cfg.get("delivery_receipts", True) is not False else None
     event = delivery_key or uuid.uuid4().hex
-    if len(event) > 200:
-        raise ValueError("Delivery reference is too long")
-    if retry and (receipts is None or delivery_kind != "test"):
-        return 0
-    admitted = []
-    for backend in dict.fromkeys(requested):
-        if receipts is None:
-            admitted.append((backend, None))
-        else:
-            try:
-                ident, acquired = receipts.claim(event, backend, kind=delivery_kind, retry=retry)
-            except Exception as exc:
-                log.warning("notify receipt admission unavailable: %s", type(exc).__name__)
-                if delivery_kind == "test":
-                    raise RuntimeError("Delivery history is unavailable; the test was not sent.") from None
-                continue
-            if acquired:
-                admitted.append((backend, ident))
+    receipts, admitted = _admit(cfg, requested, event, delivery_kind, retry)
 
-    def tracked(backend: str, ident: str | None) -> bool:
-        token = _outcome.set(("failed", "Not sent. Check the channel configuration and installed backend dependencies.", True))
-        try:
-            if authorize is not None:
-                authorize()
-            # Avoid dispatching to a destination that changed after review/queue.
-            if cfg != _load_config():
-                raise ValueError("Notification configuration changed")
-            if receipts is not None:
-                receipts.update(ident, "sending", "Contacting the notification service.")
-            result = _dispatch(backend)
-            outcome = _outcome.get()
-            if result and outcome[0] != "delivered":
-                outcome = ("delivered", "Accepted by the notification service. This does not mean the person saw it.", False)
-            if receipts is not None:
-                receipts.update(ident, outcome[0], outcome[1], safe_to_retry=outcome[2])
-            return result
-        except Exception as exc:
-            # Never include exception text: it can contain secret webhook URLs.
-            log.warning("notify dispatch unavailable: %s", type(exc).__name__)
-            if receipts is not None:
-                try:
-                    receipts.update(ident, "unknown", "Delivery could not be confirmed. Refresh status and check the destination before sending again.")
-                except Exception:
-                    log.warning("notify receipt could not be saved")
-            return False
-        finally:
-            _outcome.reset(token)
+    def tracked(backend, ident):
+        return _tracked(backend, ident, cfg=cfg, title=title, body=body,
+                        priority=priority, receipts=receipts, authorize=authorize)
 
     if async_dispatch:
         exec_ = _get_executor()

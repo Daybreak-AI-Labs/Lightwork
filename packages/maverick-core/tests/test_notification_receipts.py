@@ -2,7 +2,6 @@ import json
 from uuid import uuid4
 
 import pytest
-
 from maverick.notification_receipts import DeliveryReceipts
 
 
@@ -37,7 +36,7 @@ def test_receipt_has_no_event_content_or_destination(tmp_path):
     assert saved[0]['request_id'] is None
 
 
-def test_capacity_does_not_evict_accepted_delivery_and_allow_a_duplicate(tmp_path, monkeypatch):
+def test_capacity_does_not_evict_accepted_delivery_and_allow_a_duplicate(tmp_path):
     receipts = DeliveryReceipts(tmp_path / 'receipts.json')
     ident, _ = receipts.claim('first', 'ntfy')
     receipts.update(ident, 'delivered', 'Accepted')
@@ -46,6 +45,22 @@ def test_capacity_does_not_evict_accepted_delivery_and_allow_a_duplicate(tmp_pat
     with pytest.raises(ValueError, match='full'):
         receipts.claim('another event', 'ntfy')
     assert receipts.claim('first', 'ntfy') == (ident, False)
+
+
+def test_revoked_authority_never_dispatches_and_is_not_reported_uncertain(tmp_path, monkeypatch):
+    from maverick import notifications
+    path = tmp_path / 'receipts.json'
+    monkeypatch.setattr('maverick.paths.data_dir', lambda *parts: path)
+    monkeypatch.setattr(notifications, '_load_config', lambda: {'backend': 'ntfy'})
+    monkeypatch.setattr(notifications, '_dispatch', lambda *args, **kwargs: pytest.fail('must not dispatch after revocation'))
+    def refuse():
+        raise PermissionError('revoked')
+    assert notifications.notify('synthetic', batch=False, async_dispatch=False, authorize=refuse,
+                                delivery_key='revoked') == 0
+    record = DeliveryReceipts(path).recent()[0]
+    assert record['state'] == 'failed'
+    assert record['message'].startswith('Not sent.')
+    assert record['safe_to_retry'] is False
 
 
 def test_async_queue_is_not_delivery_and_failed_backend_visible(tmp_path, monkeypatch):
