@@ -94,20 +94,25 @@ def test_workflow_builder_preserves_context_and_traps_picker_focus():
     assert "if (!isTpl && playbookWorkspaceStarted) pbPreview.hidden = false" in source
 
 
-def test_settings_warns_before_one_section_discards_another():
+def test_settings_saves_one_section_and_keeps_other_drafts():
     source = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
     assert "var dirty = new Set()" in source
-    assert "otherDirty" in source
-    assert "discard unsaved changes" in source
+    assert "dirty.delete(form)" in source
+    assert "dirty.clear()" not in source
+    assert "Your other section drafts are kept" in source
+    assert "var response = await fetch(url" in source
     assert "window.addEventListener('beforeunload'" in source
 
 
 def test_goal_destructive_actions_and_attachment_failures_recover():
     source = (TEMPLATES / "chat_goal.html").read_text(encoding="utf-8")
-    assert "Could not stop the task. Check your connection and try again." in source
+    assert "cgErr(r, 'stop the task')" in source
+    assert "The stop response was lost. Checking task state" in source
+    assert "openPollingFallback(true)" in source
     assert "if (!accepted) cancelBtn.disabled = false" in source
-    assert "Revoke this share link?" in source
-    assert "Could not turn off the link. Check your connection" in source
+    sharing = (TEMPLATES.parent / "static" / "lightwork-deliverable-sharing.js").read_text(encoding="utf-8")
+    assert "mvConfirm" in sharing
+    assert "window.mvRenderError(status, error, 'revoke this link'); button.disabled = false" in sharing
     assert "Attachments could not be loaded. You can still add a file" in source
     assert "panel.style.display = 'block'" in source
     assert 'id="attach-add" multiple aria-label="Add files to this task"' in source
@@ -119,7 +124,7 @@ def test_webhook_deletion_is_confirmed_and_surfaces_server_failure():
     assert "Other apps will no longer be able to start this workflow." in source
     assert "var detail = plainErr(resp, 'delete it');" in source
     assert "var message = plainErr(e, 'delete it');" in source
-    assert "'Delete the start ' + t.name" in source
+    assert "translated('Delete the start {name}',{name:t.name})" in source
 
 
 def test_high_impact_learning_workforce_and_agent_actions_confirm():

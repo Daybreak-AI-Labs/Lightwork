@@ -5,7 +5,7 @@ that fetches /api/v1/goals/{id}/tree and polls it. These tests lock in:
   - the interactive container (#plan-tree) + the SRI-pinned CDN script,
   - the existing tree JSON API still works unchanged,
   - the CSP on the plan page allows the CDN host (and only that page),
-  - the no-JS <noscript> fallback still renders.
+  - the accessible list renders with and without JavaScript.
 """
 from __future__ import annotations
 
@@ -56,13 +56,17 @@ def test_plan_page_renders_interactive_container_and_script(client, world_with_t
     assert "Refresh to see live state" not in body
 
 
-def test_plan_page_keeps_noscript_fallback(client, world_with_tree):
+def test_plan_page_keeps_always_available_accessible_list(client, world_with_tree):
     _, g1, *_ = world_with_tree
     body = client.get(f"/goals/{g1}/plan").text
-    assert "<noscript>" in body
+    assert '<section aria-label="Task steps and relationships">' in body
+    assert 'id="plan-tree-list"' in body
     # The root task links from the fallback markup (by address, not a "#id").
     assert f'href="/chat/goal/{g1}"' in body
-    assert "in_progress" not in body.split("<noscript>")[1].split("</noscript>")[0]
+    fallback = body.split('id="plan-tree-list"')[1].split("</section>")[0]
+    assert "in_progress" not in fallback
+    assert "root task" in fallback and "subtask A" in fallback and "subtask B" in fallback
+    assert "hidden" not in fallback
 
 
 def test_tree_api_still_returns_json(client, world_with_tree):

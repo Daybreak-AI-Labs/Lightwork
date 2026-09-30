@@ -532,20 +532,22 @@
     "category": "Accessibility language and mobile",
     "status": "planned",
     "implementation_evidence": [
-      "Added 340 source-keyed product-copy entries with draft French/German/Japanese/Chinese translations, shared existing catalog validation; Arabic seed unchanged.",
+      "Added 644 source-keyed product-copy entries with draft French/German/Japanese/Chinese translations, shared existing catalog validation; Arabic seed unchanged.",
       "Explicit server regions/browser bindings across first-task, preferences, answer, project reviews and task-file recovery. Source documents, inputs, result streams and parameter values remain escaped/verbatim and independently directed.",
       "Independent interface_language account/workspace/organization inheritance, portable profile field, device/account header controls, legacy display API key normalization. Response language and response prompts remain unchanged; saves preserve editor drafts.",
       "BCP47 regional browser formatting, weighted Accept-Language, Intl date/number/currency/plurals, calendar-date no-UTC-drift, actual fallback-region lang and RTL dialog/table rules, opt-in native confirmation and field validation.",
-      "docs/ux-audit-2026-09-30/web-localization-coverage.json contains exact remaining literal HTML fragments and explicit measurement exclusions."
+      "docs/ux-audit-2026-09-30/web-localization-coverage.json contains exact remaining literal HTML fragments and explicit measurement exclusions.",
+      "Workflow builder static controls, reviewed publication/restoration, version history, semantic samples, scheduling and trigger feedback now use explicit product bindings. Stored names, field labels, choices, instructions and diffs remain verbatim; canonical tool/parameter identifier examples remain literal."
     ],
     "validation": [
       "47 selected Python tests passed: new locale/identity/escaping checks, catalog/portal, preferences, activation and project-review APIs.",
       "65 selected DOM cases passed across the first run plus repaired navigation/plain-language fixture reruns: five localization cases and existing forms/halt/reviews/recovery behavior. No assertions removed.",
-      "Two additional task_file_recovery_api tests remain blocked by Windows ancestor CreateFileW admission in untouched recovery backend; three other cases passed.",
-      "Ruff, Python 3.10 AST, changed controller Node syntax, Jinja parsing and whitespace checks passed."
+      "All five isolated task_file_recovery_api cases passed with sandbox escalation for synthetic Windows parent-handle admission; recovery guards are unchanged.",
+      "Ruff, Python 3.10 AST, changed controller Node syntax, Jinja parsing and whitespace checks passed.",
+      "Workflow follow-on: 85 focused Python cases and 36 browser-controller cases passed, including publication/source isolation and localized classified request failures; Python 3.10 AST, Ruff, Jinja, Node syntax and whitespace checks passed."
     ],
     "remaining": [
-      "Continue current chat composer/001 guidance, workflow editing and dynamic validation/error/confirmation strings; static HTML inventory is not end-to-end journey qualification.",
+      "Continue current chat composer/001 guidance and dynamic validation/error/confirmation strings across the complete first-task-to-recovery journey; static HTML inventory is not end-to-end journey qualification.",
       "Human native-language and consequence/legal-copy review for draft catalogs; Arabic community contribution and RTL keyboard/screen-reader qualification. No non-English complete-body locale advertised.",
       "Language-specific browser rendering/assistive-technology and native surface acceptance remain pending."
     ],
@@ -993,13 +995,14 @@
     "category": "Connections and extensibility",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142/f3c7716: admin-approved fixed OAuth profiles and workspace app registration; operators consent only for their own private account; callback/refresh recheck current self-connect policy. Config/installer controls default off."
+      "71c1142/f3c7716: admin-approved fixed OAuth profiles and workspace app registration; operators consent only for their own private account; callback/refresh recheck current self-connect policy. Config/installer controls default off.",
+      "e5421ea: configured own-account authorization also governs Connections page floor/default and finder; explicit admin visibility override still wins. Native provider-application controls remain global-admin-only."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Installed local Chrome enterprise journey: actual invited employee completes approved own Google Drive authorization with synthetic local token exchange and cannot register provider application; colleague cannot see the connection. One page-policy unit test and all ten real workspace/connection workflow regressions pass."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Live provider consent/refresh/revocation qualification requires approved sandbox accounts; no provider contacted."
     ],
     "evidence_slice": "slices/connections.json"
   },
@@ -2066,10 +2069,21 @@
     "id": "LW-149",
     "title": "Qualify actual enterprise employee journeys",
     "category": "Onboarding support and qualification",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "test-needed",
+    "implementation_evidence": [
+      "Installed Chrome/Playwright browser qualification against isolated real dashboard and encrypted local stores; docs/ux-audit-2026-09-30/browser-qualification.md records exact evidence and limits.",
+      "enterprise_server.py and enterprise_lifecycle.spec.js exercise actual invitation/session/RBAC/own-account/knowledge/review/export/departure flows for five roles with socket-blocked synthetic provider/source boundaries.",
+      "Production fixes:23 advertised static assets and current companion navigation; lazy ordinary-record search; approved employee Connections page policy; My Data private state clears/locks on revoked sign-in, permission loss or proven context mismatch."
+    ],
+    "validation": [
+      "Original69-case complete run:64passed5failed. All five corrected/environment-qualified cases pass targeted reruns; independent pilot passes25.1s after four exact owner-approved five-minute content grants and explicit audited read-only source resolver f96eabe. Together with the new enterprise journey,70distinct local cases pass across complete+targeted runs, not a single final-commit70-case run.",
+      "New enterprise lifecycle passes55.0s. Seven controller access-loss/preservation regressions pass; ten native workspace/connection regressions and own-connect visibility regression pass.174 advertised asset HTTP/MIME contracts pass."
+    ],
+    "remaining": [
+      "Run the complete browser gate against the final consolidated commit; current evidence spans the complete baseline plus focused fix qualification.",
+      "Approved real IdP/provider sandbox accounts were not supplied or invoked. Live consent/refresh/revocation, provider-grounded model answer quality, actual paid-cost reconciliation, packaged desktop/native OS integration and customer acceptance remain unqualified. Captured artifact and provider exchange in the local enterprise journey are explicitly synthetic; no real model was run."
+    ],
+    "evidence_slice": "slices/browser.json"
   },
   {
     "id": "LW-150",
