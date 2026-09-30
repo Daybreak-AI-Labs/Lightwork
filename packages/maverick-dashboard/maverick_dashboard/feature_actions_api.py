@@ -125,6 +125,16 @@ def _account(request: Request) -> dict[str, Any]:
     tools = "Every tool" if not cap.allow_tools else f"{len(cap.allow_tools)} chosen tools"
     blocked = len(cap.deny_tools)
     suites = auth.caller_suites(request)
+    from maverick.enterprise import enterprise_enabled
+    from maverick.paths import current_tenant_id
+    from maverick.profile import active_profile
+
+    from . import rbac
+
+    tenant_role = rbac.get_tenant_role(current_tenant_id(), principal) if current_tenant_id() and principal else None
+    role_source = "Workspace membership" if tenant_role else "Installation role or first-login default"
+    profile = active_profile()
+    boundary = enterprise_enabled()
     return {
         "signed_in": signed_in,
         "name": humanize_principal(principal).name if signed_in else "You (this computer)",
@@ -138,6 +148,15 @@ def _account(request: Request) -> dict[str, Any]:
         "blocked_tools": blocked,
         "risk": _RISK_LABELS.get(cap.max_risk or "", "No limit"),
         "limits_enforced": bool(capability_enforced()),
+        "role_source": role_source,
+        "access_owner": "Workspace administrator" if tenant_role else "Installation administrator",
+        "allowed_tool_names": sorted(cap.allow_tools),
+        "blocked_tool_names": sorted(cap.deny_tools),
+        "tool_policy_source": "Installation and workspace tool policy, runtime blocks, role limits and regulatory ceilings",
+        "profile": profile,
+        "enterprise_boundary": boundary,
+        "profile_overridden": profile == "enterprise" and not boundary,
+        "privacy_scope": "Your employee companion conversation is private to your account. Ordinary tasks and shared work keep their existing workspace access rules.",
         "can": {name: bool(has_permission(request, name)) for name in ("view", "operate", "audit", "admin")}
         | {"installation_admin": bool(has_global_permission(request, "admin"))},
     }

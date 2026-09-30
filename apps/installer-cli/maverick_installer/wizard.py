@@ -5631,12 +5631,14 @@ def pick_department_access(sso_enabled: bool) -> dict[str, Any]:
     console.print(
         "[dim]Department scoping limits which specialist teams each signed-in "
         "user can see and run — a finance analyst gets the Finance department, "
-        "not Legal. OFF by default (everyone sees every department); you can "
+        "not Legal. The recommended first-login baseline is viewer with no departments; you can "
         "always assign per-user access later on the dashboard Users page.[/dim]"
     )
-    if not _q_confirm("Restrict users to specific departments by default?", default=False):
-        return {}
+    if not _q_confirm("Start new signed-in users as viewers with no departments until granted access?", default=True):
+        console.print("[yellow]New users will be operators with access to every department. Existing deployments keep their chosen settings until you save this choice.[/yellow]")
+        return {"default_role": "operator"}
     result: dict[str, Any] = {
+        "default_role": "viewer",
         "default_suites": _split_csv(
             _q_text(
                 "  Departments a new user may use until granted more (comma-separated "
@@ -8646,7 +8648,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
     if isinstance(dept, dict) and (
-        dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
+        "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
         or "local_owner_setup" in advanced or compress_off
     ):
         # Department (job-function) scoping for signed-in users. default_suites
@@ -8660,7 +8662,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
-        if dept.get("default_suites"):
+        if "default_role" in dept:
+            _emit_kv(lines, "default_role", dept["default_role"])
+        if "default_suites" in dept:
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
         # Group names contain spaces, so the TOML key must be a quoted string

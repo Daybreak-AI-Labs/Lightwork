@@ -69,7 +69,7 @@
     </ul>
     {% else %}
     <p class="muted">{% if membership_filtered %}You do not have access to a workspace yet.{% else %}No workspaces exist yet.{% endif %}</p>
-    {% if is_admin %}
+    {% if is_admin and not env_tenant %}
     <button type="button" class="btn btn--primary" id="tsel-quick">Set up my workspace</button>
     <p class="tsel__note">Creates your first workspace, called "My workspace", and
       opens it. You can add more later.</p>
@@ -78,7 +78,7 @@
 
     <p class="tsel__err" id="tsel-err" role="alert" aria-live="assertive"></p>
 
-    {% if not can_select %}
+    {% if not can_select and not env_tenant %}
     <p class="tsel__note">Ask an administrator to grant your account access to a
       workspace. Workspace names and plans stay hidden until you are a member.</p>
     {% elif not is_admin %}
@@ -87,7 +87,7 @@
     {% endif %}
   </div>
 
-  {% if is_admin %}
+  {% if is_admin and not env_tenant %}
   <div class="panel tsel__create">
     <h2 class="tsel__title">Create a workspace</h2>
     <p class="muted tsel__lede">Create a new workspace and switch to it.</p>
@@ -116,6 +116,7 @@
   var returnTo = {{ return_to|tojson }};
 
   function resume() {
+    try { localStorage.setItem('lightwork-workspace-changed', String(Date.now())); } catch (_) {}
     if (returnTo) location.assign(returnTo);
     else location.reload();
   }

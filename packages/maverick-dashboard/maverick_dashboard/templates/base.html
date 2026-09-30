@@ -30,6 +30,7 @@
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
 <body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+  <p class="muted" style="margin: .5rem 1rem" aria-label="Active workspace">Workspace: <a href="/workspace/tenant">{{ workspace_tenant_name or 'Main workspace' }}</a></p>
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
   <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>

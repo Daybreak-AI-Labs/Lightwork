@@ -398,6 +398,10 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
     selected tenant, and a preference never grants access by itself.
     """
     require_permission(request, "view")
+    import os
+
+    if os.environ.get("MAVERICK_TENANT", "").strip():
+        raise HTTPException(409, "This installation uses a fixed workspace. Ask your installation administrator to change it.")
     from maverick import config as _cfg
     from maverick.tenant import registry as tenant_registry
 

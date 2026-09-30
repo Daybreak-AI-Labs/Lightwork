@@ -47,7 +47,7 @@ import time
 from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from maverick.oidc import (
     OIDCError,
     VerifiedPrincipal,
@@ -397,7 +397,7 @@ async def auth_login(request: Request):
     return response
 
 
-def _fail():
+def _fail(return_to: str | None = None):
     """Build a failure response that also clears both auth cookies.
 
     Used on every callback error path so a half-finished/forged login leaves no
@@ -406,7 +406,10 @@ def _fail():
     page, not a JSON blob (the CSRF/state-mismatch case is the documented
     exception — it returns a 400 inline).
     """
-    response = RedirectResponse("/auth/error", status_code=303)
+    from urllib.parse import urlencode
+
+    response = RedirectResponse(
+        "/auth/error?" + urlencode({"return_to": _safe_return_to(return_to)}), status_code=303)
     _clear_cookie(response, TX_COOKIE)
     _clear_cookie(response, SESSION_COOKIE)
     return response
@@ -449,24 +452,24 @@ async def auth_callback(request: Request):
     code = request.query_params.get("code") or ""
     if not code:
         log.warning("OIDC callback: no authorization code present")
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (3) resolve + https-check the token endpoint, then exchange the code.
     try:
         endpoints = resolve_endpoints(cfg)
     except OIDCError:
         log.warning("OIDC callback: could not resolve token endpoint")
-        return _fail()
+        return _fail(tx.get("return_to"))
     token_endpoint = endpoints["token_endpoint"]
     if not token_endpoint.lower().startswith("https://"):
         log.warning("OIDC callback: refusing non-https token endpoint")
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     tx_id = str(tx.get("jti") or "")
     tx_exp = int(tx.get("exp") or 0)
     if not await _consume_tx_once(tx_id, tx_exp):
         log.warning("OIDC callback: replayed or malformed transaction cookie")
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     code_verifier = tx.get("cv") or ""
     try:
@@ -479,7 +482,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     id_token = ""
     if isinstance(token_data, dict):
@@ -489,7 +492,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (4) verify the ID token — reuse the kernel verifier (no re-implementation).
     try:
@@ -499,7 +502,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (4b) bind the ID token to THIS login: its nonce must match the one we
     # sent on /auth/login (OIDC replay protection — a spec-compliant IdP echoes
@@ -511,7 +514,7 @@ async def auth_callback(request: Request):
         await asyncio.get_running_loop().run_in_executor(
             None, _shared_release_tx, tx_id
         )
-        return _fail()
+        return _fail(tx.get("return_to"))
 
     # (5) success: set the signed session cookie, clear the tx cookie, redirect.
     return_to = _safe_return_to(tx.get("return_to"))
@@ -542,7 +545,7 @@ async def auth_callback(request: Request):
 
 def _csrf_reject():
     """Return a 400 that also clears both auth cookies (state mismatch / CSRF)."""
-    out = PlainTextResponse("invalid state", status_code=400)
+    out = _login_error_response(status_code=400)
     _clear_cookie(out, TX_COOKIE)
     _clear_cookie(out, SESSION_COOKIE)
     return out
@@ -702,7 +705,18 @@ async def auth_error(request: Request):
     """Generic login-failure landing page (no detail that aids an attacker)."""
     if not login_enabled():
         raise HTTPException(status_code=404)
-    return PlainTextResponse("login failed", status_code=401)
+    return _login_error_response(request.query_params.get("return_to"))
+
+
+def _login_error_response(return_to: str | None = None, *, status_code: int = 401):
+    from urllib.parse import urlencode
+
+    from .app import templates
+
+    template = templates.env.get_template("auth_error.html")
+    return HTMLResponse(template.render(
+        restart_url="/auth/login?" + urlencode({"return_to": _safe_return_to(return_to)}),
+    ), status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
 __all__ = [

@@ -12,6 +12,21 @@
       window.mvWorkspaceTenant = expected;
       if (!expected) return;
 
+      var contextChanged = false;
+      function invalidateWorkspace() {
+        if (contextChanged) return;
+        contextChanged = true;
+        var notice = document.createElement('section');
+        notice.className = 'panel'; notice.setAttribute('role', 'alert');
+        notice.textContent = 'Your workspace changed in another tab. Changes here are paused. Keep any draft you need, then reopen this page in the current workspace. ';
+        var reopen = document.createElement('a'); reopen.href = window.location.href;
+        reopen.textContent = 'Reopen in current workspace'; notice.appendChild(reopen);
+        document.body.insertBefore(notice, document.body.firstChild);
+        window.dispatchEvent(new CustomEvent('lightwork:context-changed'));
+      }
+      window.addEventListener('storage', function (event) {
+        if (event.key === 'lightwork-workspace-changed') invalidateWorkspace();
+      });
       var nativeFetch = window.fetch.bind(window);
       window.fetch = function (input, init) {
         var opts = init ? Object.assign({}, init) : {};
@@ -22,6 +37,7 @@
         try { sameOrigin = new URL(String(rawUrl), window.location.href).origin === window.location.origin; }
         catch (e) { sameOrigin = false; }
         if (!unsafe || !sameOrigin) return nativeFetch(input, init);
+        if (contextChanged) return Promise.reject(new Error('Workspace changed. Reopen this page before saving.'));
 
         var headers = new Headers(opts.headers || (input instanceof Request ? input.headers : undefined));
         if (!headers.has('X-Lightwork-Expected-Tenant')) {
@@ -41,6 +57,7 @@
         try { sameOrigin = new URL(form.action || window.location.href, window.location.href).origin === window.location.origin; }
         catch (e) { sameOrigin = false; }
         if (!sameOrigin) return;
+        if (contextChanged) { event.preventDefault(); event.stopImmediatePropagation(); return; }
         var field = form.querySelector('input[name="_expected_tenant"]');
         if (!field) {
           field = document.createElement('input');

@@ -1,0 +1,100 @@
+[
+  {
+    "id": "LW-091",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Fresh form cannot submit admin without explicit choice; test keyboard submission and custom roles."
+  },
+  {
+    "id": "LW-092",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Viewer-to-operator fallback is visible before confirmation and in success; never claim account removed."
+  },
+  {
+    "id": "LW-093",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Tenant admin sees actionable membership controls and no global roster/editor; presented controls do not lead to predictable 403; global admin retains both."
+  },
+  {
+    "id": "LW-094",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Employee with running work/OAuth/pending review cannot be marked fully offboarded until every item is transferred, revoked or explicitly retained with owner; retain legal holds."
+  },
+  {
+    "id": "LW-095",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Admin can manage policies but private employee content reads are denied; audit projection omits raw prompts/tool payloads; exceptional reads produce explicit scoped receipts."
+  },
+  {
+    "id": "LW-096",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Denied action explains precise ceiling and appropriate approver without revealing inaccessible resources; explanation matches runtime decision."
+  },
+  {
+    "id": "LW-097",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Fresh enterprise setup cannot leave unexplained operator/all-department defaults; upgrades preserve chosen behavior and show migration choice."
+  },
+  {
+    "id": "LW-098",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Enterprise named profile with mode=false visibly states overridden; account/readiness surfaces agree on actual enforcement."
+  },
+  {
+    "id": "LW-099",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Switch in tab A leaves tab B unable to act on new tenant silently; draft/approval shows clear context change and safe reopen; fixed deployment has no misleading switch."
+  },
+  {
+    "id": "LW-100",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Viewer/member/admin sessions see only allowed task actions; permission changes disable stale affordances after fresh state; denial preserves entered work where lawful."
+  },
+  {
+    "id": "LW-101",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Denial, expiry, token exchange outage, invalid transaction and state mismatch have safe actionable outcomes; keyboard focus and narrow layout work; no provider tokens, secrets or sensitive account-existence detail appear. Restart does not replay old codes."
+  },
+  {
+    "id": "LW-102",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Starting with a 30-day period, choosing indefinite removes the effective pruning period or clearly refuses an enforced external-policy override.\n2. Clearing all fields and clearing one while saving another both have explicit semantics.\n3. Readback and reload match effective state; policy-change audit and organizational ceilings remain intact."
+  },
+  {
+    "id": "LW-103",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. Review a dry run containing actual effective periods, tenant scope, counts, holds and dependencies before deletion.\n2. Invalidate review if policy or scope changes; unsaved edits are saved/reviewed or explicitly excluded.\n3. Qualify global-administrator behavior with an active tenant; irreversible deletion uses current authority."
+  },
+  {
+    "id": "LW-104",
+    "status": "partial-planned",
+    "implementation_evidence": [],
+    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
+    "remaining": "1. An expired locked file cannot produce a nothing-old-enough success message.\n2. Return persistent per-store and workspace deleted, skipped, failed or unknown outcomes, including partial sequential execution.\n3. Retry only unresolved steps; never imply already removed data can be undone or an audit record succeeded without evidence."
+  }
+]

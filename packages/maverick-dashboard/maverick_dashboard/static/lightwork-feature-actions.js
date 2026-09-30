@@ -126,11 +126,19 @@
     function fact(label, value) { facts.appendChild(el('dt', null, label)); facts.appendChild(el('dd', null, value)); }
     fact('Signed in as', me.name);
     fact('Role', me.role);
+    fact('Role set by', me.role_source);
+    fact('Access changes', 'Ask your ' + me.access_owner.toLowerCase() + '. Tool ceilings require an installation administrator.');
     if (me.workspace) fact('Workspace', me.workspace);
     fact('Departments', me.all_departments ? 'All departments' : (me.departments.join(', ') || 'None yet'));
     fact('Tools your tasks may use', me.tools + (me.blocked_tools ? ' (' + plural(me.blocked_tools, 'tool') + ' blocked)' : ''));
     fact('Riskiest action allowed', me.risk);
     fact('Tool limits', me.limits_enforced ? 'Enforced' : 'Advisory only (not enforced)');
+    fact('Allowed tools', me.allowed_tool_names.length ? me.allowed_tool_names.join(', ') : 'All tools within the remaining policy limits');
+    fact('Blocked tools', me.blocked_tool_names.join(', ') || 'No named tool blocks');
+    fact('Tool policy set by', me.tool_policy_source);
+    fact('Deployment profile', me.profile + (me.profile_overridden ? ' — overridden: enterprise boundary is off' : ''));
+    fact('Enterprise boundary', me.enterprise_boundary ? 'Enforced' : 'Off');
+    fact('Private content', me.privacy_scope);
     root.appendChild(facts);
     var list = el('ul', 'fa-list');
     me.abilities.forEach(function (a) {

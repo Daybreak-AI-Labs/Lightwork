@@ -45,6 +45,7 @@
   </div>
   {% endif %}
 
+  {% if global_admin %}
   <div class="section-head"><h2>People</h2></div>
   <div class="panel">
     {% if users %}
@@ -66,9 +67,9 @@
           <td class="users-actions">
             <button type="submit" form="role-form-{{ loop.index }}" class="btn btn--primary" aria-label="Save role for {{ name_of(principal) }}">Save role</button>
             <form method="post" action="/users/remove" class="users-inline"
-                  data-users-confirm="Remove {{ name_of(principal) }}'s role? They go back to the standard {{ default_role | role_label }} role." data-users-ok="Remove">
+                  data-users-confirm="Use the standard {{ default_role | role_label }} role for {{ name_of(principal) }}? This may add permissions and does not deactivate their account." data-users-ok="Use standard role">
               <input type="hidden" name="principal" value="{{ principal }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Remove {{ name_of(principal) }}'s role">Remove</button>
+              <button type="submit" class="btn" aria-label="Use standard role for {{ name_of(principal) }}">Use standard role</button>
             </form>
           </td>
         </tr>
@@ -94,7 +95,8 @@
       </label>
       <label class="users-field">
         <span>Role</span>
-        <select class="select" name="role">
+        <select class="select" name="role" required>
+          <option value="" disabled selected>Choose a role</option>
           {% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
@@ -178,7 +180,9 @@
   </div>
   {% endif %}
 
+  {% endif %}
   <div class="section-head"><h2>Workspace members</h2></div>
+  {% if not global_admin %}<p class="muted">You manage membership only in the workspaces listed below. Ask an installation administrator to invite a new colleague or change installation-wide access.</p>{% endif %}
   <section id="wm-root" class="panel" data-tenant="{{ wm_tenant }}" data-expected="{{ workspace_tenant_selection }}"
            data-labels='{{ people_labels | tojson }}' data-role-labels='{{ role_labels | tojson }}'
            data-autoload="true" aria-labelledby="wm-title">
@@ -198,7 +202,7 @@
         </select>
       </label>
       <label class="users-field" for="wm-role">Role in this workspace
-        <select id="wm-role" class="select">{% for r in roles %}<option value="{{ r }}"{% if r == 'operator' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select>
+        <select id="wm-role" class="select" required><option value="" disabled selected>Choose a role</option>{% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}</select>
       </label>
       <button type="submit" class="btn btn--primary">Save workspace member</button>
       <button id="wm-refresh" type="button" class="btn btn--ghost">Refresh</button>
@@ -209,6 +213,7 @@
     {% endif %}
   </section>
 
+  {% if global_admin %}
   <div class="section-head"><h2>Department access</h2></div>
   <div class="panel">
     <p class="muted settings-lead">Limit a person to the departments their job needs. Someone in
@@ -333,6 +338,7 @@
     </form>
   </div>
 
+  {% endif %}
   <style>
     .users-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }
     .users-note { border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
@@ -361,6 +367,14 @@
   <script>
   (function () {
     'use strict';
+    var rolePermissions = {{ role_permissions | tojson }};
+    var powerNames = {view: 'view work', operate: 'run and change work', audit: 'read the activity record', admin: 'administer people and policy'};
+    document.querySelectorAll('select[name="role"], #wm-role').forEach(function (select) {
+      var preview = document.createElement('p'); preview.className = 'muted users-help'; preview.setAttribute('role', 'status');
+      select.parentNode.appendChild(preview);
+      function update() { preview.textContent = select.value ? 'This role can: ' + (rolePermissions[select.value] || []).map(function (power) { return powerNames[power] || power; }).join(', ') + '.' : 'Choose the access this person needs.'; }
+      select.addEventListener('change', update); update();
+    });
     document.querySelectorAll('form[data-users-confirm]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }

@@ -627,6 +627,9 @@ def _workspace_options(request: Request) -> tuple[list[dict], str]:
         visible = None
         if principal and not auth.has_global_permission(request, "admin"):
             visible = workspace_tenants.accessible_tenant_ids(principal)
+            from . import rbac
+            visible = {tenant for tenant in (visible or ())
+                       if "admin" in rbac.permissions_for(rbac.get_tenant_role(tenant, principal))}
         options = [
             {"id": rec.id, "name": (getattr(rec, "display_name", "") or rec.id)}
             for rec in list_tenants()
@@ -689,6 +692,25 @@ def _users_context(request: Request) -> dict:
     from maverick.proxy_auth import proxy_auth_enabled
 
     from . import rbac
+    global_admin = auth.has_global_permission(request, "admin")
+    workspace_options, wm_tenant = _workspace_options(request)
+    if not global_admin:
+        # Do not even load the installation roster, invitations or department
+        # grants for a workspace administrator. Only current members belong in
+        # this picker; adding a new installation identity remains global work.
+        from .identity_format import role_label
+        members = rbac.list_tenant_roles(wm_tenant) if wm_tenant else {}
+        people = _people(members, {}, [])
+        return {
+            "global_admin": False, "people": people,
+            "people_labels": {p["principal"]: p["label"] for p in people},
+            "role_labels": {r: role_label(r) for r in rbac.known_roles()},
+            "roles": rbac.known_roles(), "users": [], "invite_labels": {},
+            "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+            "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
+            "you": auth.caller_principal(request), "saved": "",
+            "workspace_options": workspace_options, "wm_tenant": wm_tenant,
+        }
     auth_on = (auth.caller_principal(request) is not None
                or oidc_enabled() or proxy_auth_enabled())
     env = (_os.environ.get("MAVERICK_DASHBOARD_ADMINS") or "").strip()
@@ -702,7 +724,9 @@ def _users_context(request: Request) -> dict:
             bootstrap = [str(a).strip() for a in seq if str(a).strip()]
         except Exception:
             bootstrap = []
-    saved = {"set": "Role updated.", "removed": "User removed.",
+    saved = {"set": "Role updated.", "removed": (
+                 f"Explicit role cleared. The standard {rbac.default_role()} role now applies; "
+                 "this person's access has not been removed."),
              "suites": "Department access updated.",
              "suites_removed": "Department access removed.",
              "invite_revoked": "Invitation revoked.",
@@ -729,6 +753,8 @@ def _users_context(request: Request) -> dict:
     from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
     return {
+        "global_admin": True,
+        "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
         "role_labels": {r: role_label(r) for r in rbac.known_roles()},

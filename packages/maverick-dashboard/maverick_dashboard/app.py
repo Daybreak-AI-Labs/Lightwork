@@ -471,7 +471,13 @@ def _workspace_context(request: Request) -> dict:
     except Exception:  # pragma: no cover -- shell rendering stays fail-soft
         tenant_id = ""
     source = str(getattr(request.state, "workspace_tenant_source", "") or "")
+    workspace_name = "Main workspace"
+    if tenant_id:
+        from maverick.tenant.registry import get_tenant
+        record = get_tenant(tenant_id)
+        workspace_name = (record.display_name or record.id) if record else "Selected workspace"
     return {
+        "workspace_tenant_name": workspace_name,
         "workspace_tenant_id": tenant_id,
         "workspace_tenant_selection": tenant_id
         if source in {"local_selection", "principal_selection"}
@@ -10209,6 +10215,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         {
             "goal": g,
             "submission_key": secrets.token_urlsafe(24),
+            "can_operate": has_permission(request, "operate"),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
             "spend_ceiling_text": (
@@ -10230,6 +10237,20 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "voice_only": _voice_only_mode(),
         },
     )
+
+
+@app.get("/api/v1/chat/goal/{goal_id}/permissions")
+def chat_goal_permissions(request: Request, goal_id: int) -> dict:
+    """Fresh task authority for a long-lived page; ownership is not a role."""
+    require_permission(request, "view")
+    goal = _world().get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "no such goal")
+    assert_goal_access(request, goal)
+    allowed = has_permission(request, "operate")
+    return {"can_operate": allowed, "reason": "" if allowed else (
+        "Your current workspace role allows viewing only. Ask a workspace administrator "
+        "for permission to change tasks. Your draft has not been submitted.")}
 
 
 def _voice_only_mode() -> bool:
