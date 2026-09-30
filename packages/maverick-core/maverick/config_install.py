@@ -39,6 +39,17 @@ def config_findings(cfg: dict[str, Any]) -> list[Any]:
 
 def install_config_bytes(data: bytes, dst: Path | None = None, *,
                          backup: bool = False) -> dict[str, Any]:
+    """Serialize provisioning with dashboard settings and other provisioning writers."""
+    from .authority_effects import authority_effect_fence
+    from .config import dashboard_overrides_path
+    from .file_lock import cross_process_lock
+
+    with authority_effect_fence(), cross_process_lock(dashboard_overrides_path(), strict=True):
+        return _install_config_bytes_locked(data, dst, backup=backup)
+
+
+def _install_config_bytes_locked(data: bytes, dst: Path | None = None, *,
+                         backup: bool = False) -> dict[str, Any]:
     """Publish ``data`` as the active config.toml (0600).
 
     Returns ``{"path": dst, "unchanged": bool, "backup": Path | None}``. The
@@ -76,8 +87,9 @@ def install_config_bytes(data: bytes, dst: Path | None = None, *,
     if backup and dst.is_file():
         import shutil
         import time
+        import secrets
 
-        saved = dst.with_name(f"{dst.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+        saved = dst.with_name(f"{dst.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}")
         shutil.copy2(dst, saved)
         ensure_private_file(saved, 0o600)
     atomic_write_bytes(dst, data, mode=0o600)

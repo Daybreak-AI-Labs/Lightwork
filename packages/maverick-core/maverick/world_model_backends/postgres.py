@@ -40,6 +40,7 @@ from urllib.parse import quote
 
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
+from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
 
 log = logging.getLogger(__name__)
@@ -707,6 +708,8 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
         "CREATE INDEX IF NOT EXISTS idx_pg_event_admission_goal ON event_goal_admissions(tenant_id,goal_id)",
     ]),
 ]
+
+MIGRATIONS.append((42, [_GOAL_MUTATION_SCHEMA]))
 
 # Highest migration version = the reported schema version.
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]

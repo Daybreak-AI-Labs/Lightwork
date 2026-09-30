@@ -806,33 +806,57 @@
     forms.filter(function (form) { return form.dataset.settingsLocal !== 'true'; }).forEach(function (form) {
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
-      form.addEventListener('submit', function (event) {
-        if (form.dataset.settingsSubmitApproved === 'true') {
-          delete form.dataset.settingsSubmitApproved;
-          dirty.clear();
-          return;
-        }
-        var otherDirty = Array.from(dirty).filter(function (candidate) {
-          return candidate !== form;
-        });
-        if (!otherDirty.length) {
-          dirty.delete(form);
-          return;
-        }
+      form.addEventListener('submit', async function (event) {
+        if (event.defaultPrevented) return;
         event.preventDefault();
-        var submitter = event.submitter || null;
-        var sections = otherDirty.map(sectionName).filter(function (name, index, all) {
-          return all.indexOf(name) === index;
+        if (form.dataset.saving === 'true') return;
+        form.dataset.saving = 'true';
+        var status = form.querySelector('[data-save-status]');
+        if (!status) { status = document.createElement('p'); status.dataset.saveStatus = '1'; status.setAttribute('role', 'status'); form.append(status); }
+        status.textContent = 'Saving this section.';
+        var body = new FormData(form);
+        if (event.submitter && event.submitter.name) body.append(event.submitter.name, event.submitter.value);
+        var controls = Array.from(form.querySelectorAll('input, button, textarea, select')).map(function (control) {
+          var previous = control.disabled; control.disabled = true; return [control, previous];
         });
-        var prompt = 'Saving this section reloads Settings and will discard unsaved changes in '
-          + sections.join(', ') + '. Continue?';
-        window.mvConfirm(prompt, { okText: 'Discard others and save' }).then(function (approved) {
-          if (!approved) return;
-          dirty.clear();
-          form.dataset.settingsSubmitApproved = 'true';
-          if (form.requestSubmit) form.requestSubmit(submitter || undefined);
-          else form.submit();
-        });
+        try {
+          var method = (form.method || 'get').toUpperCase(), url = new URL(form.action);
+          if (method === 'GET' && ['theme','font','density'].some(function (key) { return body.has(key); })) {
+            var revisionMeta = document.querySelector('meta[name="lightwork-preference-revision"]');
+            var contextMeta = document.querySelector('meta[name="lightwork-preference-context"]');
+            var accountMeta = document.querySelector('meta[name="lightwork-preference-account"]');
+            var savedAppearance = [];
+            for (var key of ['theme','font','density']) {
+              var value = body.get(key); if (!value) continue;
+              var preferenceResponse = await fetch('/api/v1/preferences/display', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:key,value:value,context:contextMeta.content,expected_revision:revisionMeta.content,device_only:!accountMeta || accountMeta.content !== '1'})});
+              if (!preferenceResponse.ok) { status.textContent = (savedAppearance.length ? 'Saved ' + savedAppearance.join(', ') + '. ' : '') + 'This choice was not saved. Your remaining draft is kept.'; return; }
+              var preferenceResult = await preferenceResponse.json();
+              if (preferenceResult.revision) revisionMeta.content = preferenceResult.revision;
+              window.mvApplyDisplayPreference(key,value); savedAppearance.push(key);
+            }
+            dirty.delete(form); status.textContent = 'Display preferences saved. Your other section drafts are kept.'; return;
+          }
+          if (method === 'GET') new URLSearchParams(body).forEach(function (value, key) { url.searchParams.set(key, value); });
+          var response = await fetch(url, {method: method, credentials: 'same-origin',
+            headers: {Accept: 'text/html'}, ...(method === 'GET' ? {} : {body: body})});
+          if (!response.ok) throw response;
+          var documentCopy = new DOMParser().parseFromString(await response.text(), 'text/html');
+          var receipt = documentCopy.querySelector('.settings-saved, #settings-notice');
+          if (!receipt) throw new Error('The save was not confirmed. Your draft is kept; review current settings before retrying.');
+          status.textContent = receipt.textContent.trim();
+          if (response.status !== 202 && receipt.id !== "settings-notice") {
+            dirty.delete(form);
+            form.querySelectorAll('input[type="password"]').forEach(function (input) { input.value = ''; });
+            if (method === 'GET') ['theme', 'font', 'density'].forEach(function (key) {
+              var value = body.get(key); if (value && window.mvApplyDisplayPreference) window.mvApplyDisplayPreference(key, value);
+            });
+          }
+        } catch (failure) {
+          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept.');
+        } finally {
+          controls.forEach(function (item) { item[0].disabled = item[1]; });
+          delete form.dataset.saving;
+        }
       });
     });
 

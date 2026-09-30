@@ -1,0 +1,170 @@
+[
+  {
+    "id": "LW-019",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "goal_mutations.edit_result; migration 42 on SQLite/Postgres; api.edit_deliverable; chat_goal comparison; tests/test_goal_mutations.py",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Runtime concurrency/parity and receipt fault-injection qualification remain unrun. Combine companion worker truthful learning receipt fields during integration."
+  },
+  {
+    "id": "LW-020",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "settings_all_page._revision binds effective layers and catalog environment; _catalog_update_locked compares/revalidates/writes/audits under settings_store RLock+cross-process fence; client explicit conflict comparison",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Concurrent authenticated A/B and deployment-layer qualification unrun. Existing catalog test fixtures need reviewed revision fields for the new required API contract."
+  },
+  {
+    "id": "LW-021",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "lightwork-settings-all.js dirty beforeunload for every loaded row; opt-in recovery only safe scalar/list/picker controls through encrypted draft service; secrets/documents/table content excluded",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser reload/navigation/cancel matrix unrun. Table edits receive loss warnings; policy/credential tables are deliberately not persisted in recovery."
+  },
+  {
+    "id": "LW-022",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "lightwork-settings-all.js commit locks submitted inputs/selects/textareas/buttons, retains prior disabled states, preserves dirty unrelated rows",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Delay-response browser cases unrun."
+  },
+  {
+    "id": "LW-023",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "settings.html section submit uses in-place fetch with submitted control lock, section-only dirty clearing/password clearing, explicit saved vs pending notice and partial appearance receipt",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser/provider form failure matrix unrun; no provider calls made."
+  },
+  {
+    "id": "LW-024",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "preferences_api display POST; shared _display_preferences.html; lightwork-ui immediate class/text-size preview, persistence, rollback and Undo without navigation",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Scroll/focus/editor/reload browser qualification unrun."
+  },
+  {
+    "id": "LW-025",
+    "status": "planned",
+    "implementation_evidence": "lightwork-chat-drafts.js wraps main/followup composer with encrypted account/tenant/thread recovery and attachment reselection copy; successful main sends await draft clear, fields locked during dispatch",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Conversation worker must integrate followup acknowledged-send event AND await clear before navigation while locking submitted fields. Auth expiry/restart/multitab matrix unrun."
+  },
+  {
+    "id": "LW-026",
+    "status": "planned",
+    "implementation_evidence": "setup_guide exact byte digest+actor/tenant/config review revision, expiry; config_install and settings writer share lock; client file-change invalidation and catalog before/after/source/restart impact",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Impact projection covers catalog fields. Dedicated provider/model and other noncatalog file keys still need semantic before/after projection; not claimed fully delivered."
+  },
+  {
+    "id": "LW-027",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "setup_guide durable reviewed/pending/uncertain/confirmed receipts; install requested/confirmed audit stages; GET result + explicit POST reconcile observed current bytes; no-op distinguished; random backup suffix",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Filesystem/audit failure injection and lost-ack qualification unrun. Reconciliation records observed current bytes; it does not claim an uncertain original write occurred."
+  },
+  {
+    "id": "LW-028",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "goal_mutations.create_child durable actor/op/payload receipt transaction; graph_editor pending guard/readonly title; per-account/tenant/parent/title session operation token; created child named+selected",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser lost acknowledgement/reload/double-click and Postgres qualification unrun."
+  },
+  {
+    "id": "LW-029",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "goal_tree nodes include updated_at; required expected revision in RetitleIn/ReparentIn; goal_mutations.edit_structure transaction CAS+cycle check; graph conflict reload preserves title/parent draft",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Concurrent map/backend parity qualification unrun. Shared service available to authorized tool integrations; existing dashboard routes require reviewed versions."
+  },
+  {
+    "id": "LW-030",
+    "status": "planned",
+    "implementation_evidence": "experience_preferences encrypted organization/workspace/personal/conversation records, CAS, allowlist, source snapshots, deployment locked fields; /preferences; features.personal_preferences + installer; runtime only verified dashboard channel principal",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Memory-use narrowing requires verified principal-to-channel/store ownership mapping (confirmed by memory worker); no guessed identity mapping or no-op memory bool. Notification and template adapters, policy lock editing UI, authorized Copilot journeys and complete erasure integration remain. Notification worker coordinating adapter."
+  },
+  {
+    "id": "LW-031",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "persona.style_choices generated from runtime STYLES; settings_catalog uses shared registry and descriptions",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Roundtrip catalog/runtime registry test authored below; runtime suite unrun."
+  },
+  {
+    "id": "LW-032",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "/preferences named personal custom guidance, builtins, inheritance and per-conversation override; ChatThreads canonical root binding; agent dashboard-principal prompt projection with guidance treated as untrusted presentation data",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Two-user/multiple-conversation runtime qualification unrun. Custom guidance cannot mutate tool/policy/retention settings."
+  },
+  {
+    "id": "LW-033",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "persona.render_persona_prompt no longer injects global user_name; personal-only preferred_name; explicit admin migration action on /preferences; legacy control removed from organization catalog",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Anonymous/service receive no preferred name. Single-user migration requires establishing a named account then explicitly migrating, documented; identity/tenant matrix unrun."
+  },
+  {
+    "id": "LW-034",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "experience_preferences encrypted principal display; preferences_api.context-bound device cookies; lock precedence; base/chat display picker; persisted account style used by server rendering",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Two-device/shared-device logout/account/tenant qualification unrun."
+  },
+  {
+    "id": "LW-035",
+    "status": "planned",
+    "implementation_evidence": "settings_experience search metadata catalog plus dedicated controls; new finder setSettings independent record results; exact All Settings id/group links load and scroll; permission-filtered source",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Dedicated main-settings links currently target section rather than each exact individual provider/model/feature control; synonyms/index completeness and focus qualification remain."
+  },
+  {
+    "id": "LW-036",
+    "status": "planned",
+    "implementation_evidence": "settings_experience review endpoint shares catalog coercion/governance/access plan under revision lock; settings-review modal before/after/source/scope/timing/dependencies; exclusions revalidated; saves audit before/after revisions",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Persistent saved revision is implemented; running workers do not yet publish an applied-revision acknowledgement, so UI honestly says next configuration read/running tasks keep captured configuration. Full runtime acknowledgement plumbing remains."
+  },
+  {
+    "id": "LW-037",
+    "status": "planned",
+    "implementation_evidence": "Explicit reset vs inherit controls and backend operations; inherited source preview; scalar built-in default differs correctly from installer; deployment locks rechecked",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Core table overlays merge installer rows and cannot mask them. Reset with installer table rows now refuses clearly instead of pretending to restore product default; full table semantics require a reviewed tombstone/replacement contract or installer edit flow."
+  },
+  {
+    "id": "LW-038",
+    "status": "planned",
+    "implementation_evidence": "Versioned profile export/import for explicit safe voice/display/budget allowlist; no credentials/policy docs/usernames; unsupported keys give migration guidance; imports run common review+CAS+policy gates; config+installer feature knob",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Portable dedicated model routes, personal custom-style bundles and full cross-installation dependency schema remain. Current supported profile roundtrip tests authored, unrun."
+  },
+  {
+    "id": "LW-039",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "settings_experience.history reads bounded deployment audit, labels actor/time/before-after+new revision bindings; safe fields selective restore through ordinary review+CAS; no secret restoration",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Audit reader/rollback concurrency and policy-change qualification unrun. History coverage explicitly last100 changes/30days; legacy revision absent labeled."
+  },
+  {
+    "id": "LW-040",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "settings_experience PRESETS bounded research and existing regulated governance; drift, tradeoffs, expanded exact preview, deselect requested fields, explicit save and normal locks/confirmations",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Preset dependency/locked field runtime matrix unrun. No claim of local-only routing without a configured local model."
+  },
+  {
+    "id": "LW-041",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Principal preferences favorites/start page; permission-filtered destinations at every read/write; keyboard Move up/down/remove; account-owned Today pins",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Cross-device/account/revocation and keyboard browser qualification unrun. Item-level recents/saved filters are not added; acceptance implemented for authorized page destinations."
+  },
+  {
+    "id": "LW-042",
+    "status": "planned",
+    "implementation_evidence": "/today composes own recent goals, in-flight tasks and results with source links/time labels; account-scoped cards/pins/landing page; mandatory Action Center reminder remains",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Root next wave: actual pending-decision projection, upcoming occurrences and pinned workspaces/templates; card ordering controls and narrow-screen/keyboard qualification. No independent work-state data model added."
+  }
+]

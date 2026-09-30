@@ -98,10 +98,6 @@ def _models(S, C) -> tuple:
           "A sentence added to every agent's instructions, for example: Always cite your "
           "sources.", "text", "AI models", "", "maverick.persona",
           subgroup="Effort and planning", max_length=500, pattern=r"[^\n\r<>{}]{0,500}"),
-        S("persona", "user_name", "What agents call you",
-          "The name agents use for the person they work for. Leave empty for no name.",
-          "text", "AI models", "", "maverick.persona", subgroup="Effort and planning",
-          max_length=60, pattern=r"[^\n\r<>{}]{0,60}"),
         S("agent_factory", "jd_hiring", "Hire agents from a job description",
           "Offer the page that turns a written job description into a new agent.", "toggle",
           "AI models", True, "maverick.jd_hiring", subgroup="Effort and planning"),

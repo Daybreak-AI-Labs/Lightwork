@@ -28,7 +28,7 @@ from maverick import config
 # Serializes the overlay load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit
 # provider keys / toggles).
-_SETTINGS_LOCK = threading.Lock()
+_SETTINGS_LOCK = threading.RLock()
 
 
 class SecuritySuiteRevisionConflict(RuntimeError):
@@ -124,6 +124,8 @@ FEATURE_DEFAULTS = {
     "guided_onboarding": True,
     "action_center": True,
     "draft_recovery": True,
+    "personal_preferences": True,
+    "configuration_profiles": True,
     "support_center": True,
     "record_search": True,
     "workspace_recovery": False,

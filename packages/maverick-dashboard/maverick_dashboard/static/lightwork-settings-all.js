@@ -99,6 +99,55 @@
   function editable(row) { return !!row.querySelector('[data-save]'); }
   function remember(row) { row.dataset.initial = snapshot(row); }
 
+  window.addEventListener('beforeunload', function (event) {
+    if (!rows().some(changed)) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
+  // Recovery is opt-in and limited to ordinary, non-policy scalar/list rows.
+  var recovery = null;
+  var recoveryOpt = document.getElementById('settings-recovery-opt');
+  function recoverable(row) {
+    return !row.dataset.warning && ['text', 'number', 'toggle', 'select', 'list', 'picks'].indexOf(row.dataset.control) !== -1;
+  }
+  function recoveryDraft() {
+    var fields = {};
+    rows().filter(function (row) { return recoverable(row) && changed(row); }).forEach(function (row) {
+      fields[row.dataset.settingId] = {value: read(row), revision: row.dataset.revision};
+    });
+    return {fields: fields};
+  }
+  function enableRecovery() {
+    if (!recoveryOpt || !recoveryOpt.checked || recovery || !window.mvDraftRecovery) return;
+    recovery = window.mvDraftRecovery.create({host: root, key: 'settings-all-safe-drafts',
+      read: recoveryDraft, restore: async function (draft) {
+        for (var id of Object.keys(draft.fields || {})) {
+          if (!rowById(id)) await fetchRows('q=' + encodeURIComponent(id.split('.').join(' ')));
+          var row = rowById(id);
+          if (!row || !recoverable(row)) continue;
+          var initial = row.dataset.initial, item = draft.fields[id];
+          var control = row.querySelector('[data-input]');
+          if (row.dataset.control === 'toggle') control.checked = item.value === true;
+          else if (row.dataset.control === 'list') {
+            row.querySelector('.settings-all-list-items').textContent = '';
+            (item.value || []).forEach(function (value) { addListItem(row, value); });
+          } else if (row.dataset.control === 'picks') {
+            row.querySelector('[data-pick-list]').textContent = '';
+            (item.value || []).forEach(function (value) { addChip(row.querySelector('[data-picks]'), value, value); });
+          } else if (control) control.value = item.value == null ? '' : item.value;
+          row.dataset.initial = initial;
+          row.dataset.revision = item.revision;
+          say(row, 'Recovery copy restored. Review and save this draft.');
+        }
+      }});
+  }
+  if (recoveryOpt) recoveryOpt.addEventListener('change', function () {
+    if (recoveryOpt.checked) enableRecovery();
+    else if (recovery) { recovery.dispose(); recovery.panel.remove(); recovery = null; }
+  });
+  window.addEventListener('lightwork:drafts-ready', enableRecovery);
+
   // ---- writing a control from the server's state ---------------------------
   function apply(row, data) {
     var control = row.dataset.control;
@@ -174,23 +223,24 @@
       source.className = 'badge ' + (data.source === 'here' ? 'ok' : (data.source === 'deployment' ? 'warn' : 'idle'));
     }
     row.dataset.source = data.source;
+    row.dataset.revision = data.revision || row.dataset.revision;
     remember(row);
   }
-  function applyAll(payload) {
+  function applyAll(payload, savedIds) {
     (payload.groups || []).forEach(function (group) {
       (group.settings || []).forEach(function (data) {
         var row = rowById(data.id);
-        if (row) apply(row, data);
+        if (row && (!changed(row) || savedIds.indexOf(data.id) !== -1)) apply(row, data);
       });
     });
   }
 
   // ---- saving --------------------------------------------------------------
-  async function send(changes, confirmed) {
+  async function send(changes, confirmed, revision) {
     var response = await window.fetch(API, {
       method: 'POST', cache: 'no-store', credentials: 'same-origin',
       headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      body: JSON.stringify({changes: changes, confirm: !!confirmed})
+      body: JSON.stringify({changes: changes, confirm: !!confirmed, expected_revision: revision})
     });
     var data = null;
     try { data = await response.json(); } catch (ignore) { data = null; }
@@ -243,19 +293,40 @@
       busyRows.forEach(function (row) { say(row, 'Nothing to save.'); });
       return;
     }
+    if (root.dataset.saving === '1') return;
+    var revision = busyRows.length ? busyRows[0].dataset.revision : '';
+    var disabled = [];
+    root.dataset.saving = '1';
     busyRows.forEach(function (row) {
-      say(row, 'Saving…');
-      row.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+      say(row, 'Saving.'); row.setAttribute('aria-busy', 'true');
+      row.querySelectorAll('button,input,select,textarea').forEach(function (control) {
+        disabled.push([control, control.disabled]); control.disabled = true;
+      });
     });
     try {
-      var result = await send(changes, false);
+      if (window.mvReviewSettings) {
+        var reviewed = await window.mvReviewSettings(changes, revision);
+        if (!reviewed) { busyRows.forEach(function (row) { say(row, 'Draft kept. Nothing was changed.'); }); return; }
+        changes = reviewed.changes; revision = reviewed.revision;
+      }
+      var result = await send(changes, false, revision);
+      if (result.response.status === 409 && result.data && result.data.conflicts) {
+        var review = result.data.conflicts.map(function (item) {
+          return item.label + ': current ' + item.current + ' (' + item.source + ')';
+        }).join('\n');
+        var merge = await window.mvConfirm('Your draft is kept. Review the current settings:\n' + review +
+          '\nApply your draft to this newly reviewed configuration?', {okText: 'Apply reviewed draft'});
+        if (!merge) return;
+        revision = result.data.revision;
+        result = await send(changes, false, revision);
+      }
       if (result.response.status === 409 && result.data && Array.isArray(result.data.confirm)) {
         var ok = await window.mvConfirm(warningText(result.data.confirm), {okText: 'Change anyway'});
         if (!ok) {
           busyRows.forEach(function (row) { say(row, 'Not changed.'); });
           return;
         }
-        result = await send(changes, true);
+        result = await send(changes, true, revision);
       }
       if (!result.response.ok) {
         var message = result.data && typeof result.data.message === 'string'
@@ -264,7 +335,6 @@
         if (window.mvToast) window.mvToast(message, {error: true});
         return;
       }
-      applyAll(result.data || {});
       if (result.response.status === 202 && typeof result.data.message === 'string') {
         // Held for approval by other administrators: nothing was saved yet.
         busyRows.forEach(function (row) { say(row, result.data.message); });
@@ -272,6 +342,11 @@
         updateFilter();
         return;
       }
+      applyAll(result.data || {}, changes.map(function (item) { return item.id; }));
+      rows().forEach(function (row) {
+        if (!changed(row)) row.dataset.revision = result.data.revision || row.dataset.revision;
+      });
+      if (recovery) { recovery.changed(); recovery.save(); }
       var done = (result.data.changed || []).length;
       var text = done ? 'Saved.' : 'Nothing changed.';
       if (result.data.restart) text += ' Some changes take effect after Lightwork restarts.';
@@ -282,9 +357,9 @@
       var text2 = errorText(failure, action);
       busyRows.forEach(function (row) { say(row, text2); });
     } finally {
-      busyRows.forEach(function (row) {
-        row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
-      });
+      root.dataset.saving = '0';
+      disabled.forEach(function (item) { item[0].disabled = item[1]; });
+      busyRows.forEach(function (row) { row.removeAttribute('aria-busy'); });
     }
   }
 
@@ -315,6 +390,8 @@
       await commit(single, [row], 'save the setting');
     } else if (target.hasAttribute('data-test') && row) {
       await runCheck(row, target);
+    } else if (target.hasAttribute('data-inherit') && row) {
+      await commit([{id: row.dataset.settingId, inherit: true}], [row], 'use the inherited value');
     } else if (target.hasAttribute('data-reset') && row) {
       if (row.dataset.source === 'default' && !changed(row)) {
         say(row, 'Already using the default.');

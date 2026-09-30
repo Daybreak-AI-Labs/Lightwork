@@ -26,6 +26,7 @@
     );
     var pageOptions = options.slice();
     var recordOptions = [];
+    var settingOptions = [];
     var activeIndex = -1;
     var returnFocus = null;
     var isOpen = false;
@@ -168,8 +169,20 @@
         option.appendChild(label); option.appendChild(description); entry.appendChild(option); results.appendChild(entry);
         recordOptions.push(option); bindOption(option);
       });
-      options = pageOptions.concat(recordOptions); filterResults();
+      options = pageOptions.concat(recordOptions, settingOptions); filterResults();
       if (!isOpen) input.removeAttribute("aria-activedescendant");
+    }
+
+    function setSettings(rows) {
+      settingOptions.forEach(function (option) { option.parentElement.remove(); }); settingOptions = [];
+      rows.forEach(function (row,index) {
+        var entry=doc.createElement('li');entry.setAttribute('role','none');
+        var option=doc.createElement('a');option.id='navfinder-setting-'+index;option.href=row.href;option.setAttribute('role','option');option.setAttribute('tabindex','-1');option.setAttribute('aria-selected','false');
+        var label=doc.createElement('span');label.className='navfinder__label';label.textContent=row.title;
+        var group=doc.createElement('span');group.className='navfinder__group';group.textContent='Setting - '+row.group;
+        option.appendChild(label);option.appendChild(group);entry.appendChild(option);results.appendChild(entry);settingOptions.push(option);bindOption(option);
+      });
+      options=pageOptions.concat(recordOptions,settingOptions);filterResults();
     }
 
     dialog.addEventListener("cancel", function (event) {
@@ -218,6 +231,7 @@
       filter: filterResults,
       visibleOptions: visibleOptions,
       setRecords: setRecords,
+      setSettings: setSettings,
     };
     dialog.lightworkFinder = controller;
     return controller;

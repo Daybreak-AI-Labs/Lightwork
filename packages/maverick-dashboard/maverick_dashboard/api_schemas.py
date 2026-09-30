@@ -382,6 +382,8 @@ class DeliverableEditIn(BaseModel):
     (vs. the agent's draft) grounds a graded outcome -- a verbatim keep is a strong
     positive, a heavy rewrite is graded-negative ground truth."""
     text: str = Field(..., max_length=200_000)
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class OutcomeLinkIn(BaseModel):
@@ -669,14 +671,17 @@ class CachePurgeIn(BaseModel):
 
 
 class RetitleIn(BaseModel):
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
     title: str = Field(..., max_length=200)
 
 
 class ReparentIn(BaseModel):
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
     parent_id: int | None = None
 
 
 class ChildIn(BaseModel):
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(..., max_length=200)
     description: str = ""
 

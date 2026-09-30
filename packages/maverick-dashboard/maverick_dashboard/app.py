@@ -289,11 +289,13 @@ def _resolve_pref(
     [dashboard] config → default ladder, accepting only values in ``valid``.
     ``config_key=None`` skips the config step (cookie-only prefs)."""
     q = (request.query_params.get(param) or "").strip().lower()
-    if q in valid:
+    if q in valid and not caller_principal(request):
         return q
-    c = (request.cookies.get(cookie) or "").strip().lower()
-    if c in valid:
-        return c
+    from .preferences_api import resolved_display
+
+    preferred = resolved_display(request, param)
+    if preferred in valid or (param == "theme" and preferred == "system"):
+        return preferred
     if config_key is not None:
         try:
             from maverick.config import load_config
@@ -1072,6 +1074,12 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(draft_router)
+from .preferences_api import router as preferences_router
+from .preferences_api import display_context as _display_preference_context
+app.include_router(preferences_router)
+from .settings_experience import router as settings_experience_router
+app.include_router(settings_experience_router)
+templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
@@ -8919,6 +8927,15 @@ async def home(request: Request) -> HTMLResponse | RedirectResponse:
 
     if not await run_in_threadpool(selected_model_routes_ready):
         return RedirectResponse("/start", status_code=303)
+    if caller_principal(request):
+        from .preferences_api import _state
+
+        try:
+            start = (await run_in_threadpool(_state, request))["values"]["start_page"]
+            if start != "/chat" and start != "/":
+                return RedirectResponse(start, status_code=303)
+        except (HTTPException, ValueError, OSError):
+            pass
     return await run_in_threadpool(chat_page, request)
 
 

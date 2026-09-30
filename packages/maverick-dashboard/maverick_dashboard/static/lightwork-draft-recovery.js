@@ -268,6 +268,13 @@
     status.textContent = 'Checking for a recovery copy…'; controls();
     var ready = initialize();
     return {ready:ready, changed:markChanged, save:saveChanged, panel:panel,
+      clear:async function () {
+        await ready;
+        if (running || blocked) return false;
+        root.clearTimeout(timer);
+        if (!(await persist(null))) return false;
+        changed = false; lastSaved = JSON.stringify(read()); return true;
+      },
       dispose:function () { disposed = true; root.clearTimeout(timer); root.removeEventListener('beforeunload', unload); options.host.removeEventListener('input', markChanged); options.host.removeEventListener('change', markChanged); }};
   }
   root.mvDraftRecovery = {create:create, assertSafe:assertSafe};

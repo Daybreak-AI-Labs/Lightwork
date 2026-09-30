@@ -37,6 +37,7 @@ from .file_lock import (
     ensure_private_file,
     prepare_private_directory,
 )
+from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
 
 log = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 42
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -422,6 +423,7 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    42: [_GOAL_MUTATION_SCHEMA],
     40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
     41: [
         "ALTER TABLE event_goal_admissions ADD COLUMN request_digest TEXT",

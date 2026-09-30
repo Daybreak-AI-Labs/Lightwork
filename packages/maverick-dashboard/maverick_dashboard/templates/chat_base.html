@@ -9,7 +9,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
+  <meta name="lightwork-preference-context" content="{{ display_preference_context }}">
+  <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
+  <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
+  <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
+  <link rel="stylesheet" href="{{ asset('lightwork-preferences.css') }}">
   <meta name="theme-color" content="#0e1320" />
+  {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
@@ -209,6 +215,7 @@
     <div class="cs-account">
       <span class="cs-avatar" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></span>
       <a href="/settings">Settings</a>
+      {% include "_display_preferences.html" %}
       <span class="cs-spacer"></span>
       {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
     </div>
@@ -261,6 +268,7 @@
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script>
     // Small screens: the Menu button opens the sidebar as a drawer. Esc, the
@@ -329,6 +337,9 @@
       });
     })();
   </script>
+  <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
+  <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
+  <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

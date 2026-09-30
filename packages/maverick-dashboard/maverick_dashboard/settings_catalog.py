@@ -91,6 +91,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from maverick.persona import STYLES, style_choices
+
 GROUPS: tuple[str, ...] = (
     "Safety",
     "Security",
@@ -636,10 +638,10 @@ SETTINGS: tuple[Setting, ...] = (
       "text", "AI models", "", "maverick.persona", max_length=60,
       pattern=r"[^\n\r<>{}]{0,60}"),
     S("persona", "style", "Writing style",
-      "How much detail agents put in their replies.",
+      "Voice and detail in replies. " + " ".join(f"{label}: {STYLES[key]}"
+          for key, label in style_choices() if key),
       "select", "AI models", "", "maverick.persona",
-      choices=(("", "Balanced (default)"), ("concise", "Short and direct"),
-               ("verbose", "Explains its reasoning"))),
+      choices=style_choices()),
     S("voice", "dashboard_commands", "Voice input in chat",
       "Show a microphone button in Chat that turns spoken requests into text.",
       "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),

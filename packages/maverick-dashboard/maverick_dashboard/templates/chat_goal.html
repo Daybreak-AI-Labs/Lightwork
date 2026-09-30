@@ -228,6 +228,7 @@
 {% endblock %}
 
 {% block chat %}
+{% if display_signed_in %}<p><a class="btn btn--ghost" href="/preferences?thread={{ goal.id }}">Conversation response style</a></p>{% endif %}
 {% macro agent_mark() -%}
       <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
         <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
@@ -1338,19 +1339,45 @@
         box.style.display = box.style.display === 'none' ? 'block' : 'none';
         if (box.style.display === 'block') textEl.focus();
       });
-      saveBtn.addEventListener('click', function () {
-        saveBtn.disabled = true; editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving…';
-        fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({text: textEl.value}),
-        }).then(function (r) {
-          saveBtn.disabled = false;
-          if (r.ok) { editMsg.textContent = 'Revision saved. Learning is a separate, policy-governed process.';
-                      setTimeout(function () { location.reload(); }, 900); return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
+      var reviewedAt = {{ goal.updated_at|tojson }};
+      var pendingEdit = null;
+      var savedText = textEl.value;
+      window.addEventListener('beforeunload', function (event) {
+        if (textEl.value !== savedText) { event.preventDefault(); event.returnValue = ''; }
+      });
+      saveBtn.addEventListener('click', async function () {
+        if (saveBtn.disabled) return;
+        if (!pendingEdit || pendingEdit.text !== textEl.value || pendingEdit.expected_updated_at !== reviewedAt) {
+          pendingEdit = {text: textEl.value, expected_updated_at: reviewedAt, operation_id: crypto.randomUUID()};
+        }
+        saveBtn.disabled = true; textEl.readOnly = true;
+        editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving.';
+        try {
+          var response = await fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pendingEdit)
           });
-        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(e, 'save your edit'); });
+          var receipt = await response.json();
+          if (response.status === 409 && receipt.detail && receipt.detail.current_updated_at) {
+            var compare = document.createElement('details');
+            var heading = document.createElement('summary'); heading.textContent = 'Compare with the current saved result';
+            var current = document.createElement('pre'); current.textContent = receipt.detail.current_text || '(empty)';
+            var review = document.createElement('button'); review.type = 'button'; review.className = 'btn btn--ghost';
+            review.textContent = 'Use this current version as the basis for my draft';
+            review.addEventListener('click', function () {
+              reviewedAt = receipt.detail.current_updated_at; pendingEdit = null; compare.remove();
+              editMsg.textContent = 'Draft kept. Review it, then choose Save to apply it to the current result.';
+            });
+            compare.append(heading, current, review); box.append(compare); compare.open = true;
+            editMsg.textContent = 'The result changed. Your draft is kept; compare before saving again.';
+            return;
+          }
+          if (!response.ok || !receipt.revision) throw response;
+          reviewedAt = receipt.revision; savedText = textEl.value; pendingEdit = null;
+          editMsg.textContent = 'Revision saved. Previous versions are kept; any earlier sign-off was cleared. Learning is a separate, policy-governed process.';
+        } catch (failure) {
+          editMsg.style.color = 'var(--danger)';
+          editMsg.textContent = cgErr(failure, 'save your edit') + ' Your draft is kept. Retry uses the same save reference.';
+        } finally { saveBtn.disabled = false; textEl.readOnly = false; }
       });
     })();
   </script>

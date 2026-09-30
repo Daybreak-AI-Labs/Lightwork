@@ -81,11 +81,15 @@ MESSAGES: dict[str, dict[str, str]] = {
 def resolve_lang(request) -> str:
     """``?lang=`` → ``mvk_lang`` cookie → ``Accept-Language`` → en."""
     q = (request.query_params.get("lang") or "").strip().lower()
-    if q in LANGS:
+    from .auth import caller_principal
+
+    if q in LANGS and not caller_principal(request):
         return q
-    c = (request.cookies.get("mvk_lang") or "").strip().lower()
-    if c in LANGS:
-        return c
+    from .preferences_api import resolved_display
+
+    preferred = resolved_display(request, "language")
+    if preferred in LANGS:
+        return preferred
     accept = (request.headers.get("Accept-Language") or "").lower()
     for part in accept.split(","):
         code = part.split(";")[0].strip()[:2]

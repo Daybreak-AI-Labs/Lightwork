@@ -1,0 +1,12 @@
+/* Shared responsive controls for account-scoped experience choices. */
+.preference-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: var(--space-4); }
+.preference-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.preference-field textarea, .preference-field select, .preference-field input { max-width: 100%; }
+.preference-source { color: var(--muted); font-size: var(--text-sm); }
+.today-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--space-4); }
+.prefs__panel { max-height: min(80dvh, 40rem); overflow-y: auto; }
+
+.settings-review { max-width: min(54rem, 95vw); max-height: 90vh; overflow: auto; }
+.settings-review pre, #settings-tools pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.cs-account .prefs__panel { bottom: 100%; top: auto; left: 0; right: auto; }

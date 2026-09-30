@@ -17,6 +17,16 @@
 
   <p><a class="btn btn--ghost" href="/settings">Back to Settings</a></p>
 
+  <details id="settings-tools" class="panel">
+    <summary>Configuration profiles, presets and history</summary>
+    <p>Profiles contain selected supported preferences only. Credentials, personal names, policy documents and deployment identities are excluded. Imported values use the same review, conflict checks and permissions as ordinary settings.</p>
+    <p><button class="btn btn--ghost" type="button" data-profile-export>Export selected preferences</button> Leave selections empty to export every supported preference. Use each row's Export preference checkbox to select fields.</p>
+    <label>Profile file <input type="file" accept=".json,application/json" data-profile-file></label>
+    <button class="btn btn--ghost" type="button" data-profile-import>Review imported profile</button>
+    <p><button class="btn btn--ghost" type="button" data-presets>Compare outcome presets</button> <button class="btn btn--ghost" type="button" data-history>View settings history</button></p>
+    <div data-preset-items></div><ol data-history-items></ol>
+    <p data-tools-status role="status" aria-live="polite"></p>
+  </details>
   <section class="settings-all-index panel" aria-labelledby="settings-all-find">
     <h2 id="settings-all-find">Find a setting</h2>
     <form class="settings-all-filters" id="settings-all-filter-form" method="get" action="/settings/all">
@@ -61,6 +71,8 @@
 
   <div class="panel" role="status" aria-live="polite" id="settings-all-status" hidden></div>
 
+  <p><label><input type="checkbox" id="settings-recovery-opt"> Keep encrypted recovery copies of ordinary settings drafts</label>
+    <span class="muted">Credentials, policy controls and imported documents are excluded. Review recovered drafts before saving.</span></p>
   <div id="settings-all-groups" data-rows-url="/settings/all/rows"
        {% if focus_id %}data-focus="{{ focus_id }}"{% endif %} {% if served %}data-served="1"{% endif %}>
   {% for g in groups %}
@@ -133,6 +145,7 @@
   </div>
 
   <p class="muted" id="settings-all-empty" hidden>No settings match. Clear the search to see every setting.</p>
+  <script src="/static/lightwork-settings-review.js" defer></script>
   <script src="/static/lightwork-settings-all.js" defer></script>
   <script src="/static/lightwork-theme-preview.js" defer></script>
 {% endblock %}

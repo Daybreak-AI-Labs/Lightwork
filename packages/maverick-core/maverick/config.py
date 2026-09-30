@@ -1040,6 +1040,8 @@ def get_features() -> dict:
         "pack_editing": bool(cfg.get("pack_editing", True)),
         "role_editing": bool(cfg.get("role_editing", True)),
         "draft_recovery": cfg.get("draft_recovery", True) is True,
+        "personal_preferences": cfg.get("personal_preferences", True) is True,
+        "configuration_profiles": cfg.get("configuration_profiles", True) is True,
         "support_center": cfg.get("support_center", True) is True,
         "record_search": cfg.get("record_search", True) is True,
         "workspace_recovery": cfg.get("workspace_recovery", False) is True,

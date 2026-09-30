@@ -3,10 +3,10 @@
 {% macro setting_row(s, g) %}
 {% set cid = 'sa-' ~ s.id | replace('.', '-') | replace('*', 'all') %}
 <div class="settings-all-row" data-setting-id="{{ s.id }}" data-control="{{ s.control }}"
-     data-source="{{ s.source }}" data-warning="{{ s.warning }}"
+     data-revision="{{ s.revision }}" data-source="{{ s.source }}" data-warning="{{ s.warning }}"
      data-in-group="{{ g.slug }}" data-order="{{ s.order }}"
      {% if s.subgroup %}data-subgroup="{{ s.subgroup_slug }}"{% endif %}
-     data-search="{{ (s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ s.group ~ ' ' ~ s.subgroup) | lower }}">
+     data-search="{{ (s.id ~ ' ' ~ s.id|replace('.', ' ') ~ ' ' ~ s.label ~ ' ' ~ s.help ~ ' ' ~ s.aliases ~ ' ' ~ s.group ~ ' ' ~ s.subgroup) | lower }}">
   <div class="settings-all-about-row">
     {% if s.control in ['multiselect', 'toggle', 'rate', 'keys', 'table', 'list', 'rules', 'picks', 'fingerprint', 'document'] %}
     <span class="settings-all-label" id="{{ cid }}-label">{{ s.label }}</span>
@@ -25,6 +25,7 @@
     {% if s.warning %}<p class="muted settings-all-warning">{{ s.warning_lead }} {{ s.warning }}</p>{% endif %}
   </div>
   <div class="settings-all-control">
+    {% if s.id in ['persona.name','persona.style','dashboard.theme','dashboard.density','budget.max_wall_seconds','budget.max_tool_calls','budget.max_tokens'] %}<label><input type="checkbox" data-profile-select> Export preference</label>{% endif %}
     {% if s.locked %}
       <p class="muted">Set by your server's deployment settings, so it can't be changed here.</p>
     {% elif s.control == 'toggle' %}
@@ -281,7 +282,8 @@
     <div class="settings-all-actions">
       <button class="btn btn--primary" type="button" data-save>Save</button>
       {% if s.test_label %}<button class="btn btn--ghost" type="button" data-test>{{ s.test_label }}</button>{% endif %}
-      <button class="btn btn--ghost" type="button" data-reset>Reset to default</button>
+      <button class="btn btn--ghost" type="button" data-reset>Reset to product default</button>
+      <button class="btn btn--ghost" type="button" data-inherit>Use inherited value</button>
     </div>
     {% endif %}
     <p class="muted settings-all-row-status" role="status" aria-live="polite" data-row-status></p>

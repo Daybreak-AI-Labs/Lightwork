@@ -1,0 +1,212 @@
+"""Reviewed configuration portability and history over the existing catalog writer."""
+from __future__ import annotations
+
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from urllib.parse import quote
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from . import auth, settings_all_page as page, settings_catalog as catalog, settings_store
+
+router = APIRouter()
+HEADERS = {"Cache-Control": "private, no-store"}
+# Explicit portability boundary: no arbitrary URLs, paths, policy documents,
+# credentials, access grants, identifiers, or deployment data leave the server.
+PORTABLE = frozenset({
+    "persona.style", "persona.name", "persona.role", "persona.custom_instructions",
+    "dashboard.theme", "dashboard.font", "dashboard.density", "dashboard.language",
+    "budget.max_wall_seconds", "budget.max_tool_calls", "budget.max_tokens",
+})
+PRESETS = {
+    "bounded-research": {
+        "label": "Bounded research", "tradeoff": "Limit each task to 10 minutes and 30 actions. Long research may stop earlier; this does not estimate provider prices.",
+        "changes": [{"id": "budget.max_wall_seconds", "value": 600}, {"id": "budget.max_tool_calls", "value": 30}],
+    },
+    "assurance-review": {
+        "label": "High-assurance review", "tradeoff": "Apply the existing regulated governance profile. Additional review and evidence collection can increase latency and cost. Every expanded change is shown before confirmation.",
+        "changes": [{"id": "governance.profile", "value": "regulated"}],
+    },
+}
+
+
+def _allowed(request: Request, *, feature: bool = False):
+    auth.require_global_permission(request, "admin")
+    if feature:
+        from maverick.config import get_features
+        if not get_features().get("configuration_profiles"):
+            raise HTTPException(403, "Configuration profiles are turned off in Settings.")
+
+
+def _can_export(setting) -> bool:
+    return (setting.id in PORTABLE and not setting.secret and not page._secret_columns(setting)
+            and setting.control in {"text", "number", "toggle", "select", "list", "multiselect"})
+
+
+@router.post('/api/v1/settings/catalog/review')
+def review(request: Request, body: page.CatalogUpdate):
+    page._app()._require_same_origin(request)
+    _allowed(request)
+    from . import settings_access_guard, settings_governance_level
+
+    with settings_store._locked(strict=True):
+        current = page._revision()
+        if body.expected_revision != current:
+            # The ordinary writer's conflict projection never writes at a stale revision.
+            return page._catalog_update_locked(request, body)
+        try:
+            expanded, learning = settings_governance_level.expand(body, page.SettingChange)
+            writes, changes, warnings, layers = page._plan(expanded)
+            warnings += page._guard(request, writes, changes, layers) if changes else []
+            warnings += settings_governance_level.confirm_items(learning)
+        except (page._Refused, settings_access_guard.Refused, settings_governance_level.Unavailable) as exc:
+            raise HTTPException(getattr(exc, "status", 409), str(exc)) from exc
+        items = []
+        for change in changes:
+            setting = change['setting']
+            requested = next((item for item in body.changes if item.id == setting.id), None)
+            inherited = {**layers, 'here': {}}
+            resulting_source = (page._resolve(setting, inherited)['source']
+                                if requested and requested.inherit else 'dashboard setting')
+            items.append({
+                'id': setting.id, 'label': setting.label,
+                'before': page._audit_value(setting, change['old']),
+                'after': page._audit_value(setting, change['new']),
+                'source': page._resolve(setting, layers)['source'], 'resulting_source': resulting_source,
+                'scope': 'Organization / installation', 'restart': setting.restart,
+                'automatic': requested is None,
+                'timing': 'After restart' if setting.restart else 'Next configuration read; running tasks keep their captured configuration',
+            })
+        return JSONResponse({'items': items, 'warnings': warnings, 'revision': current,
+                             'learning': [spec['label'] for spec in learning]}, headers=HEADERS)
+
+
+class ExportSelection(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+@router.post('/api/v1/settings/profiles/export')
+def export_profile(request: Request, body: ExportSelection):
+    page._app()._require_same_origin(request)
+    _allowed(request, feature=True)
+    with settings_store._locked(strict=True):
+        layers = page._sources()
+        picked = body.ids or sorted(PORTABLE & catalog.BY_ID.keys())
+        settings, excluded = {}, []
+        for key in picked:
+            setting = catalog.BY_ID.get(key)
+            if setting is None or not _can_export(setting):
+                excluded.append(key)
+                continue
+            resolved = page._resolve(setting, layers)
+            if not resolved['known']:
+                excluded.append(key)
+                continue
+            settings[key] = page._form_value(setting, resolved['value'])
+        return JSONResponse({'format': 'lightwork-preferences-profile', 'version': 1,
+                             'scope': 'organization', 'settings': settings,
+                             'excluded': excluded, 'credentials': 'Not exported. Configure provider credentials separately.'}, headers=HEADERS)
+
+
+class ImportedProfile(BaseModel):
+    profile: dict[str, Any]
+
+
+@router.post('/api/v1/settings/profiles/import')
+def import_profile(request: Request, body: ImportedProfile):
+    page._app()._require_same_origin(request)
+    _allowed(request, feature=True)
+    data = body.profile
+    if data.get('format') != 'lightwork-preferences-profile' or data.get('version') != 1:
+        raise HTTPException(422, 'Use a Lightwork preferences profile, version 1. Re-export older profiles from their original installation; no settings were applied.')
+    if data.get('scope') != 'organization' or not isinstance(data.get('settings'), dict) or len(data['settings']) > 100:
+        raise HTTPException(422, 'This profile must contain up to 100 organization preferences.')
+    unsupported = [key for key in data['settings'] if key not in catalog.BY_ID or not _can_export(catalog.BY_ID[key])]
+    if unsupported:
+        raise HTTPException(422, 'Unsupported or non-portable fields: ' + ', '.join(unsupported[:12]) + '. Remove these fields and configure them through their current Settings controls; no fields were imported.')
+    changes = [{'id': key, 'value': value} for key, value in data['settings'].items()]
+    return JSONResponse({'changes': changes, 'revision': page._revision(), 'scope': 'organization',
+                         'message': 'Loaded for review. Nothing has been saved.'}, headers=HEADERS)
+
+
+@router.get('/api/v1/settings/presets')
+def presets(request: Request):
+    _allowed(request, feature=True)
+    from . import settings_governance_level
+    with settings_store._locked(strict=True):
+        layers = page._sources()
+        results = []
+        for key, preset in PRESETS.items():
+            body = page.CatalogUpdate(changes=preset['changes'], expected_revision=page._revision(layers))
+            try:
+                expanded, _ = settings_governance_level.expand(body, page.SettingChange)
+                drift = [item.id for item in expanded.changes if page._effective(catalog.BY_ID[item.id], layers) != catalog.coerce(page._resolved(catalog.BY_ID[item.id], page._effective(catalog.BY_ID[item.id], layers)), item.value)]
+                results.append({'id': key, **preset, 'drift': drift, 'available': True})
+            except (settings_governance_level.Unavailable, catalog.SettingError):
+                results.append({'id': key, **preset, 'drift': [], 'available': False})
+        return JSONResponse({'presets': results, 'revision': page._revision(layers)}, headers=HEADERS)
+
+
+@router.get('/api/v1/settings/history')
+def history(request: Request):
+    _allowed(request)
+    from maverick.audit.reader import iter_events
+    from maverick.paths import data_dir
+
+    events = deque(maxlen=100)
+    since = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    try:
+        for event in iter_events(since=since, audit_dir=data_dir('audit', tenant=None), strict=True):
+            if event.get('kind') != 'setting_changed':
+                continue
+            payload = event
+            key = str(payload.get('section', '')) + '.' + str(payload.get('key', ''))
+            setting = catalog.BY_ID.get(key)
+            if setting is None:
+                continue
+            old, new = payload.get('old'), payload.get('new')
+            restorable = _can_export(setting) and old is not None
+            events.append({'id': key, 'label': setting.label, 'actor': payload.get('actor', 'Unknown'),
+                           'at': datetime.fromtimestamp(event['ts'], timezone.utc).isoformat(),
+                           'before': page._audit_value(setting, old), 'after': page._audit_value(setting, new),
+                           'before_revision': payload.get('before_revision'), 'after_revision': payload.get('after_revision'),
+                           'restorable': restorable,
+                           'restore_value': page._form_value(setting, old) if restorable else None})
+    except (OSError, ValueError) as exc:
+        raise HTTPException(503, 'Settings history could not be read completely. No rollback is available until the record store is readable.') from exc
+    return JSONResponse({'items': list(reversed(events)), 'revision': page._revision(),
+                         'coverage': 'Last 100 setting changes in the past 30 days. Secret values are never restorable from history.'}, headers=HEADERS)
+
+
+@router.get('/api/v1/settings/search')
+def search(request: Request, q: str = ''):
+    auth.require_permission(request, 'view')
+    terms = q.lower().split()[:15]
+    results = []
+    if auth.has_global_permission(request, 'admin'):
+        for setting in catalog.SETTINGS:
+            if all(word in page._search_text(setting) for word in terms):
+                anchor = 'sa-' + setting.id.replace('.', '-').replace('*', 'all') + '-label'
+                results.append({'title': setting.label, 'href': '/settings/all?group=' + page._slug(setting.group) + '&id=' + quote(setting.id) + '#' + anchor,
+                                'group': setting.group, 'id': setting.id})
+        dedicated = [('/settings#models', 'AI provider credentials and model choices', 'providers keys model routes'),
+                     ('/settings#general', 'Appearance and interface features', 'theme font density features'),
+                     ('/settings#models', 'Task spending cap', 'budget spending per task cost'),
+                     ('/channels', 'Chat channels', 'slack teams telegram whatsapp'),
+                     ('/connections', 'Connected accounts', 'oauth connectors integrations'),
+                     ('/plugins', 'Plugins', 'tools extensions plugins'),
+                     ('/learning', 'Learning controls', 'learning consent improvement'),
+                     ('/settings#access', 'License', 'license subscription install'),
+                     ('/settings#access', 'Page visibility', 'roles navigation visibility')]
+        allowed = {link['href'].split('?')[0] for group in page._app()._nav_context(request)['finder_pages'] for link in group['links']}
+        for href, title, aliases in dedicated:
+            if href.split('?')[0].split('#')[0] in allowed and all(word in (title + ' ' + aliases).lower() for word in terms):
+                results.append({'title': title, 'href': href, 'group': 'Dedicated controls', 'id': href})
+    if auth.caller_principal(request):
+        for title, aliases in [('Your preferences', 'name tone style language verbosity theme font density text size favorites start today')]:
+            if all(word in (title + ' ' + aliases).lower() for word in terms):
+                results.append({'title': title, 'href': '/preferences', 'group': 'Personal', 'id': 'preferences'})
+    return JSONResponse({'items': results[:50], 'total': len(results)}, headers=HEADERS)

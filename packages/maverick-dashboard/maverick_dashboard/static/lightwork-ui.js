@@ -634,10 +634,22 @@
           return;
         }
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+        const submittedForm = new FormData(form);
+        const submittedControls = Array.from(form.querySelectorAll('input,textarea,select')).map(function (control) {
+          const wasDisabled = control.disabled; control.disabled = true; return [control,wasDisabled];
+        });
         try {
-          const resp = await fetch(form.action, { method: 'POST', body: new FormData(form) });
-          if (resp.redirected) { window.location.href = resp.url; return; }
-          if (resp.ok) { window.location.reload(); return; }
+          const resp = await fetch(form.action, { method: 'POST', body: submittedForm });
+          if (resp.redirected && resp.ok && new URL(resp.url).pathname.startsWith('/chat/goal/')) {
+            if (form.mvRecovery) await form.mvRecovery.clear();
+            window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: form, recoveryCleared: true}}));
+            window.location.href = resp.url; return;
+          }
+          if (resp.ok && !resp.redirected) {
+            if (form.mvRecovery) await form.mvRecovery.clear();
+            window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: form, recoveryCleared: true}}));
+            window.location.reload(); return;
+          }
           let serverDetail = '';
           try { const j = await resp.json(); if (j && typeof j.detail === 'string') serverDetail = j.detail; } catch (e) {}
           let detail = window.mvErrorText(resp, 'start the task');
@@ -658,6 +670,7 @@
           errBox.textContent = 'Lightwork is not responding. Check your connection and try again.';
           errBox.style.display = 'block';
         } finally {
+          submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         }
       });
@@ -798,19 +811,76 @@
       syncAria();
     })();
 
+    (function () {
+      var system = window.matchMedia('(prefers-color-scheme: dark)');
+      var themeClass = Array.from(document.body.classList).find(function (name) { return name.startsWith('theme-'); });
+      document.body.dataset.themePreference = themeClass ? themeClass.slice(6) : 'dark';
+      window.mvApplyDisplayPreference = function (key, value) {
+        if (key === 'text_size') {
+          document.documentElement.dataset.textSize = value;
+          document.documentElement.style.fontSize = value === 'larger' ? '125%' : value === 'large' ? '112.5%' : '';
+          return;
+        }
+        if (['theme', 'font', 'density'].indexOf(key) === -1) return;
+        if (key === 'theme') { document.body.dataset.themePreference = value; if (value === 'system') value = system.matches ? 'dark' : 'light'; }
+        Array.from(document.body.classList).forEach(function (name) { if (name.startsWith(key + '-')) document.body.classList.remove(name); });
+        document.body.classList.add(key + '-' + value);
+        window.dispatchEvent(new CustomEvent('lightwork:appearance-changed', {detail:{key:key,value:value}}));
+      };
+      var size = document.querySelector('meta[name="lightwork-text-size"]');
+      window.mvApplyDisplayPreference('text_size', size ? size.content : 'standard');
+      window.mvApplyDisplayPreference('theme', document.body.dataset.themePreference);
+      function sync() { if (document.body.dataset.themePreference === 'system') window.mvApplyDisplayPreference('theme', 'system'); }
+      if (system.addEventListener) system.addEventListener('change', sync); else system.addListener(sync);
+    })();
+
     // Preferences popover: close on outside-click and Escape (it is a native
-    // <details>, so choosing an option already reloads the page and closes it).
+    // <details>; choosing an option keeps both the page and popover open).
     (function () {
       var prefs = document.getElementById('prefs-menu');
       if (!prefs) return;
+      var status = document.getElementById('prefs-status'), undo = document.getElementById('prefs-undo');
+      var saving = false, previous = null;
+      async function savePreference(key, value, select, isUndo) {
+        if (saving) return;
+        saving = true;
+        var old = key === 'text_size' ? (document.documentElement.dataset.textSize || 'standard') :
+          key === 'theme' ? (document.body.dataset.themePreference || 'dark') :
+          Array.from(document.body.classList).find(function (name) { return name.startsWith(key + '-'); });
+        if (old && old.startsWith(key + '-')) old = old.slice(key.length + 1);
+        prefs.querySelectorAll('select, button, input').forEach(function (control) { control.disabled = true; });
+        window.mvApplyDisplayPreference(key, value);
+        if (status) status.textContent = 'Previewing and saving.';
+        try {
+          var context = document.querySelector('meta[name="lightwork-preference-context"]');
+          var revision = document.querySelector('meta[name="lightwork-preference-revision"]');
+          var device = document.getElementById('prefs-device-only');
+          var response = await fetch('/api/v1/preferences/display', {method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key:key, value:value,
+              context:context ? context.content : '', expected_revision:revision ? revision.content : null,
+              device_only:!!(device && device.checked)})});
+          var data = await response.json();
+          if (!response.ok) throw response;
+          if (revision && data.revision) revision.content = data.revision;
+          previous = isUndo ? null : {key:key, value:old, select:select};
+          if (undo) undo.hidden = !previous;
+          if (status) status.textContent = 'Saved. Your editor and unsaved work remain open.';
+        } catch (failure) {
+          window.mvApplyDisplayPreference(key, old);
+          if (select) select.value = old;
+          if (status) status.textContent = 'Appearance was not saved. The earlier appearance is restored; retry or refresh preferences after saving your work.';
+        } finally {
+          saving = false; prefs.querySelectorAll('select, button, input').forEach(function (control) { control.disabled = false; });
+        }
+      }
       prefs.querySelectorAll('[data-ui-preference]').forEach(function (select) {
         select.addEventListener('change', function () {
           var key = select.getAttribute('data-ui-preference');
-          if (!key || !select.value) return;
-          var target = new URL(window.location.href);
-          target.searchParams.set(key, select.value);
-          window.location.assign(target.toString());
+          if (key && select.value) savePreference(key, select.value, select, false);
         });
+      });
+      if (undo) undo.addEventListener('click', function () {
+        if (previous) { previous.select.value = previous.value; savePreference(previous.key, previous.value, previous.select, true); }
       });
       document.addEventListener('click', function (ev) {
         if (prefs.open && !prefs.contains(ev.target)) prefs.open = false;

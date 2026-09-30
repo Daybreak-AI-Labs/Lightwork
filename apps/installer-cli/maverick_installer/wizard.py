@@ -4601,6 +4601,15 @@ def pick_advanced() -> dict[str, Any]:
             "weaken the safety envelope. Turn off to lock the agent roster.",
             default=True,
         ),
+        "allow_configuration_profiles": _q_confirm(
+            "Allow reviewed, secret-free configuration profiles and outcome presets? "
+            "Import previews every change and keeps current policy checks.", default=True,
+        ),
+        "allow_personal_preferences": _q_confirm(
+            "Allow account-scoped writing style, display preferences, pinned pages and daily work layout? "
+            "Personal choices never grant tools or change security or retention policy.",
+            default=True,
+        ),
         "allow_draft_recovery": _q_confirm(
             "Keep encrypted recovery copies of unfinished dashboard work? "
             "Copies are private to each account and workspace. Credentials and "
@@ -8224,6 +8233,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("workspace_recovery = true")
     if advanced.get("allow_signing_identity_transition") is True:
         _feature_locks.append("signing_identity_transition = true")
+    if advanced.get("allow_configuration_profiles") is False:
+        _feature_locks.append("configuration_profiles = false")
+    if advanced.get("allow_personal_preferences") is False:
+        _feature_locks.append("personal_preferences = false")
     if advanced.get("allow_draft_recovery") is False:
         _feature_locks.append("draft_recovery = false")
     if advanced.get("allow_support_center") is False:

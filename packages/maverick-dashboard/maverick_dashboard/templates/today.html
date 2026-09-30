@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Today · Lightwork{% endblock %}
+{% block content %}
+{% from "_hero.html" import hero %}
+{{ hero('Your work', 'Today', subtitle='Your work in this workspace', lede='A private view of current work and recent results. Open each item to check its authoritative state before taking action.') }}
+<p class="muted">Read {{ today_freshness }}. Showing up to 100 recent tasks belonging to your account. <a href="/today">Refresh</a> · <a href="/preferences">Customize this view</a></p>
+<nav aria-label="Pinned pages"><ul>{% for href in today_preferences['values']['favorites'] %}<li><a href="{{ href }}">{{ today_preferences.destinations[href] }}</a></li>{% else %}<li>No pinned pages yet. Add them in Your preferences.</li>{% endfor %}</ul></nav>
+{% if today_decisions_allowed %}<p class="panel"><a href="/action-center">Review outstanding decisions in Action Center</a>. This reminder remains available even when the card is hidden.</p>{% endif %}
+<div class="today-grid">
+{% for card in today_preferences['values']['today_cards'] %}
+{% if card == 'tasks' %}<section class="panel"><h2>In-flight work</h2><ul>{% for goal in today_active %}<li><a href="/chat/goal/{{ goal.id }}">{{ goal.title }}</a> · {{ goal.status|humanize }}</li>{% else %}<li>No in-flight tasks in this recent window.</li>{% endfor %}</ul><a href="/goals">All tasks</a></section>{% endif %}
+{% if card == 'recent' %}<section class="panel"><h2>Recent results</h2><ul>{% for goal in today_recent %}<li><a href="/chat/goal/{{ goal.id }}">{{ goal.title }}</a></li>{% else %}<li>No completed results in this recent window.</li>{% endfor %}</ul></section>{% endif %}
+{% if card == 'decisions' and today_decisions_allowed %}<section class="panel"><h2>Pending decisions</h2><p>Action Center reads the current authorized decisions, reviews and recovery actions.</p><a class="btn" href="/action-center">Open Action Center</a></section>{% endif %}
+{% endfor %}
+</div>
+{% endblock %}

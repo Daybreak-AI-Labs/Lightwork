@@ -464,7 +464,10 @@
     } catch (e) { setStatus("Can't reach Lightwork. Check your connection and refresh."); }
   }
 
+  let mutationBusy = false;
   async function post(url, body, action) {
+    if (mutationBusy) return false;
+    mutationBusy = true;
     action = action || "save that";
     showError("");
     try {
@@ -473,13 +476,20 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (r.status === 409) {
+        const draftTitle = titleEl.value, draftParent = parentEl.value;
+        await load(); titleEl.value = draftTitle; parentEl.value = draftParent;
+        showError("This task changed. Your draft is kept. The map now shows current state; review it before saving again.");
+        return false;
+      }
       if (!r.ok) {
         showError(window.mvErrorText ? window.mvErrorText({ status: r.status }, action)
                                      : "Could not " + action + ". Please try again.");
         return false;
       }
-      return true;
+      return r.status === 204 ? true : await r.json();
     } catch (e) { showError("Could not " + action + " — check your connection and try again."); return false; }
+    finally { mutationBusy = false; }
   }
 
   selectEl.addEventListener("change", () => {
@@ -488,25 +498,41 @@
   document.getElementById("ge-retitle").addEventListener("click", async () => {
     if (selected === null) { showError("Select a task first."); return; }
     if (!titleEl.value.trim()) { showError("Type a title first."); return; }
-    if (await post("/api/v1/goals/" + selected + "/retitle", { title: titleEl.value }, "save the title")) {
+    if (await post("/api/v1/goals/" + selected + "/retitle", { title: titleEl.value, expected_updated_at: byId[selected].updated_at }, "save the title")) {
       setStatus("Title saved"); await load();
     }
   });
   document.getElementById("ge-reparent").addEventListener("click", async () => {
     if (selected === null) { showError("Select a task first."); return; }
     const pid = parentEl.value ? parseInt(parentEl.value, 10) : null;
-    if (await post("/api/v1/goals/" + selected + "/reparent", { parent_id: pid }, "move the task")) {
+    if (await post("/api/v1/goals/" + selected + "/reparent", { parent_id: pid, expected_updated_at: byId[selected].updated_at }, "move the task")) {
       setStatus("Moved"); await load();
     }
   });
-  document.getElementById("ge-add-child").addEventListener("click", async () => {
+  const childButton = document.getElementById("ge-add-child");
+  childButton.addEventListener("click", async () => {
+    if (mutationBusy || childButton.disabled) return;
     if (selected === null) { showError("Select the task to add it under first."); return; }
-    const t = document.getElementById("ge-child-title").value;
+    const parentId = selected;
+    const input = document.getElementById("ge-child-title"), t = input.value;
     if (!t.trim()) { showError("Type a title for the smaller task first."); return; }
-    if (await post("/api/v1/goals/" + selected + "/children", { title: t }, "add the smaller task")) {
-      document.getElementById("ge-child-title").value = "";
-      setStatus("Smaller task added — start it when you are ready"); await load();
-    }
+    childButton.disabled = true; input.readOnly = true;
+    childButton.setAttribute('aria-busy', 'true'); setStatus('Adding the smaller task.');
+    try {
+      const context = document.querySelector('meta[name="lightwork-draft-context"]');
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+      const fingerprint = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+      const key = 'lightwork-child:' + (context ? context.content : '') + ':' + parentId + ':' + fingerprint;
+      let operation = sessionStorage.getItem(key);
+      if (!operation) { operation = crypto.randomUUID(); sessionStorage.setItem(key, operation); }
+      const created = await post('/api/v1/goals/' + parentId + '/children', {title: t, operation_id: operation}, 'add the smaller task');
+      if (created) {
+        sessionStorage.removeItem(key); input.value = '';
+        await load(); select(created.id);
+        setStatus('Added ' + (created.title || t) + '. It has not started.');
+      }
+    } catch (error) { showError('Could not prepare a recoverable request. Your title is kept; allow session storage and retry.'); }
+    finally { childButton.disabled = false; input.readOnly = false; childButton.removeAttribute('aria-busy'); }
   });
 
   // Pan (pointer drag on the empty canvas) + zoom (wheel, anchored at cursor).

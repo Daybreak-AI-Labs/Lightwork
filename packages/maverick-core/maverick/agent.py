@@ -2108,6 +2108,18 @@ class Agent:
         # prior) — global state, not agent-specific. Extracted as the second
         # PromptBuilder collaborator.
         base = apply_global_overlays(base)
+        try:
+            from .experience_preferences import prompt as preference_prompt
+
+            user = getattr(self.ctx, "user_id", None)
+            if user and getattr(self.ctx, "channel", None) == "dashboard":
+                principal = user if str(user).startswith("user:") else "user:" + str(user)
+                from .chat_threads import ChatThreads
+                binding = ChatThreads(self.ctx.world).binding(self.ctx.goal_id)
+                thread_id = binding.root_id if binding and binding.owner == principal else self.ctx.goal_id
+                base += preference_prompt(principal, thread=thread_id)
+        except Exception:
+            log.warning("Account response preferences are unavailable; using organization voice.")
 
         # Per-agent role overlays (client role-addendum + domain-pack persona).
         # Third PromptBuilder collaborator.

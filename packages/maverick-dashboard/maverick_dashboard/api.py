@@ -9720,18 +9720,31 @@ def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    original = g.result or ""
+    from maverick.goal_mutations import GoalMutationConflict, edit_result
+
     revised = payload.text or ""
-    w.set_goal_status(goal_id, g.status, result=revised)  # the edit is the deliverable now
+    try:
+        receipt = edit_result(w, goal_id, text=revised, expected_updated_at=payload.expected_updated_at,
+                              operation_id=payload.operation_id, actor=caller_principal(request) or "local administrator")
+    except GoalMutationConflict as exc:
+        current = w.get_goal(goal_id)
+        raise HTTPException(status_code=409, detail={"message": str(exc),
+            "current_text": current.result if current else "",
+            "current_updated_at": current.updated_at if current else None}) from exc
+    original = receipt.pop("original")
+    receipt.pop("text")
     if not original:
         # Nothing to grade against: the agent produced no draft to keep or
         # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
         # so we save the human's text but ground nothing.
-        return {"similarity": None, "saved": True, "learning_observation": "not_applicable", "training_completed": False}
+        return {"similarity": None, **receipt, "saved": True, "learning_observation": "not_applicable", "training_completed": False}
     similarity = _deliverable_edit_similarity(original, revised)
-    observed = _ground_outcome(w, goal_id, similarity, kind="edit")
-    return {"similarity": round(similarity, 3), "saved": True,
-            "learning_observation": "recorded" if observed else "not_recorded", "training_completed": False}
+    observed = False
+    if not receipt["replayed"]:
+        observed = _ground_outcome(w, goal_id, similarity, kind="edit")
+    return {"similarity": round(similarity, 3), **receipt, "saved": True,
+            "learning_observation": "not_repeated" if receipt["replayed"] else ("recorded" if observed else "not_recorded"),
+            "training_completed": False}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -14259,7 +14272,12 @@ def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    w.set_goal_title(goal_id, title[:200])
+    from maverick.goal_mutations import GoalMutationConflict, edit_structure
+
+    try:
+        edit_structure(w, goal_id, title=title[:200], expected_updated_at=payload.expected_updated_at)
+    except GoalMutationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/goals/{goal_id}/reparent", status_code=204)
@@ -14290,7 +14308,13 @@ def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> None:
                 status_code=400,
                 detail="cannot re-parent a goal under its own descendant",
             )
-    w.set_goal_parent(goal_id, new_parent)
+    from maverick.goal_mutations import GoalMutationConflict, edit_structure
+
+    try:
+        edit_structure(w, goal_id, move=True, parent_id=new_parent,
+                       expected_updated_at=payload.expected_updated_at)
+    except GoalMutationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/goals/{goal_id}/children", response_model=GoalOut, status_code=201)
@@ -14313,12 +14337,17 @@ def create_child_goal(request: Request, goal_id: int, payload: ChildIn) -> GoalO
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    child_id = w.create_goal(
-        title[:200],
-        (payload.description or "")[:8000],
-        parent_id=goal_id,
-        owner=g.owner or (caller_principal(request) or ""),
-    )
+    from maverick.goal_mutations import GoalMutationConflict, create_child
+
+    try:
+        receipt = create_child(w, goal_id, title=title[:200],
+                               description=(payload.description or "")[:8000],
+                               owner=g.owner or (caller_principal(request) or ""),
+                               actor=caller_principal(request) or "local administrator",
+                               operation_id=payload.operation_id)
+    except GoalMutationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    child_id = receipt["child_id"]
     c = w.get_goal(child_id)
     if c is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")

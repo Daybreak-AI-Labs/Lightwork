@@ -8,6 +8,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
+  <meta name="lightwork-preference-context" content="{{ display_preference_context }}">
+  <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
+  <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
+  <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
+  <link rel="stylesheet" href="{{ asset('lightwork-preferences.css') }}">
   <meta name="theme-color" content="#0e1320" />
   {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
@@ -108,39 +113,7 @@
       </a>
       {% endif %}
       <a class="iconbtn" href="/help" aria-label="Help and diagnostics" title="Help and diagnostics"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
-      <details class="prefs" id="prefs-menu">
-        <summary class="iconbtn" aria-label="Display preferences" title="Display preferences">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h3.4M10.4 5h3.1M2.5 11h6.3M13.1 11h.4"/><circle cx="7.7" cy="5" r="1.7"/><circle cx="10.8" cy="11" r="1.7"/></svg>
-        </summary>
-        <div class="prefs__panel" role="group" aria-label="Display preferences">
-          <label class="prefs__row"><span>Theme</span>
-      <select class="ctl" id="theme-select" data-ui-preference="theme" aria-label="Theme">
-        <option value="">Theme</option>
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
-        <option value="solarized" {% if theme == 'solarized' %}selected{% endif %}>Solarized</option>
-        <option value="hicontrast" {% if theme == 'hicontrast' %}selected{% endif %}>High contrast</option>
-        {% for name in custom_theme_names %}
-        <option value="{{ name }}" {% if theme == name %}selected{% endif %}>{{ name }}</option>
-        {% endfor %}
-      </select>
-          </label>
-          <label class="prefs__row"><span>Density</span>
-      <select class="ctl" id="density-select" data-ui-preference="density" aria-label="Density">
-        <option value="">Density</option>
-        <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %}>Comfortable</option>
-        <option value="compact" {% if density == 'compact' %}selected{% endif %}>Compact</option>
-      </select>
-          </label>
-          <label class="prefs__row"><span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('label.font') }}</span>
-      <select class="ctl" id="font-select" data-ui-preference="font" aria-label="{{ t('label.font') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
-        <option value="">{{ t('label.font') }}</option>
-        <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
-        <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
-      </select>
-          </label>
-        </div>
-      </details>
+      {% include "_display_preferences.html" %}
       <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14a5.25 5.25 0 0 1 10.5 0"/></svg>
       </a>
@@ -248,6 +221,7 @@
   <link rel="stylesheet" href="{{ asset('lightwork-guided-actions.css') }}">
   <script src="{{ asset('lightwork-guided-actions.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   {% block scripts_extra %}{% endblock %}
