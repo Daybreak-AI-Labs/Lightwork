@@ -516,6 +516,31 @@
         return /^(wf-|pb-|sched-|trig-)/.test(field.id) && !/^(file|password|hidden|submit|button)$/.test(field.type) && !/secret|password|token|confirm/i.test(field.id);
       });
     }
+    function inputFieldDrafts() {
+      return Array.from(inputFields.querySelectorAll('fieldset')).map(function (row) {
+        var values={}; row.querySelectorAll('[data-input-key]').forEach(function (input) {
+          values[input.dataset.inputKey]=input.type==='checkbox' ? input.checked : input.value;
+        }); return values;
+      });
+    }
+    function validInputDrafts(rows) {
+      var keys=['name','label','type','required','default','choices','help','condition_field','condition_value'];
+      return Array.isArray(rows) && rows.length<=100 && rows.every(function (row) {
+        return row && typeof row==='object' && !Array.isArray(row) && Object.keys(row).every(function (key) {
+          return keys.includes(key) && (key==='required' ? typeof row[key]==='boolean' : typeof row[key]==='string');
+        });
+      });
+    }
+    function restoreInputDrafts(rows) {
+      inputFields.replaceChildren(); rows.forEach(function (values) {
+        addInputField('',{}); var row=inputFields.lastElementChild;
+        row.querySelectorAll('[data-input-key]').forEach(function (input) {
+          if (!Object.prototype.hasOwnProperty.call(values,input.dataset.inputKey)) return;
+          if (input.type==='checkbox') input.checked=values[input.dataset.inputKey];
+          else input.value=values[input.dataset.inputKey];
+        });
+      });
+    }
     function recoveryPayload() {
       var fields = {};
       recoveryFields().forEach(function (field) { fields[field.id] = field.type === 'checkbox' ? field.checked : field.value; });
@@ -523,12 +548,13 @@
         var step = {}; ['name','inst','tools','gate'].forEach(function (key) { step[key] = row.querySelector('.pb-step__' + key).value; }); return step;
       });
       return {format:1, fields:fields, steps:steps, mode:mode, template_started:templateWorkspaceStarted, playbook_started:playbookWorkspaceStarted,
-        template_name:wfEditingName, template_generation:wfEditGeneration, template_wall:wfEditWall, parameter_schema:collectInputFields(),
+        template_name:wfEditingName, template_generation:wfEditGeneration, template_wall:wfEditWall, input_fields:inputFieldDrafts(),
         agent_name:pbEditingName, agent_generation:pbEditGeneration, agent_preserve:pbEditPreserve};
     }
     function restoreRecovery(payload) {
       if (!payload || payload.format !== 1 || !payload.fields || !Array.isArray(payload.steps) || !['template','playbook'].includes(payload.mode)) throw new Error('This recovery copy is not a supported workflow draft.');
-      if (!payload.steps.every(function (step) { return step && ['name','inst','tools','gate'].every(function (key) { return typeof step[key] === 'string'; }); }) ||
+      if ((payload.input_fields !== undefined && !validInputDrafts(payload.input_fields)) ||
+          !payload.steps.every(function (step) { return step && ['name','inst','tools','gate'].every(function (key) { return typeof step[key] === 'string'; }); }) ||
           !Object.values(payload.fields).every(function (value) { return typeof value === 'string' || typeof value === 'boolean'; }) ||
           (payload.template_name && !Number.isInteger(payload.template_generation)) ||
           (payload.agent_name && !/^[0-9a-f]{64}$/.test(payload.agent_generation || ''))) throw new Error('This recovery copy has incomplete fields or saved-version information. Current work was kept.');
@@ -547,8 +573,11 @@
         ['name','inst','tools','gate'].forEach(function (key) { row.querySelector('.pb-step__' + key).value = step[key] || ''; });
         paintGate(row);
       });
-      inputFields.replaceChildren();
-      Object.entries((payload.parameter_schema || {}).fields || {}).forEach(function (entry) { addInputField(entry[0],entry[1]); });
+      if (payload.input_fields !== undefined) restoreInputDrafts(payload.input_fields);
+      else {
+        inputFields.replaceChildren();
+        Object.entries((payload.parameter_schema || {}).fields || {}).forEach(function (entry) { addInputField(entry[0],entry[1]); });
+      }
       renumber(); renderToolSelections();
       templateWorkspaceStarted = !!payload.template_started; playbookWorkspaceStarted = !!payload.playbook_started;
       setForm(payload.mode); schedulePbLint();

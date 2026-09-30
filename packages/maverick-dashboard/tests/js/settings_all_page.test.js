@@ -121,7 +121,7 @@ test("the address list editor adds rows and the group save sends only changed se
     item.value="https://hooks.example/a";
     await click(ui.d.querySelector('[data-save-group="safety"]'));
     assert.deepEqual(ui.calls[0].body.changes,[{id:"webhooks.outbound",value:["https://hooks.example/a"]}]);
-    assert.match(ui.d.getElementById("settings-all-status").textContent,/after Lightwork restarts/);
+    assert.match(ui.d.getElementById("settings-all-status").textContent,/configuration status.*services that need a restart/);
   }finally{ui.dom.window.close();}
 });
 

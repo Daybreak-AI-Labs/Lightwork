@@ -20,12 +20,12 @@
   async function request(url, options) {
     var response = await fetch(url, Object.assign({cache:'no-store', credentials:'same-origin'}, options || {}));
     if (response.status === 401 || response.status === 403) {
-      clearPrivate(); throw new Error('Access changed. Sign in or choose an authorized workspace.');
+      clearPrivate(); var denied=new Error('Access changed. Sign in or choose an authorized workspace.'); denied.accessChanged=true; throw denied;
     }
     if (!response.ok) { var failure = new Error('The request could not be completed. Your draft is preserved.'); failure.status = response.status; throw failure; }
     if (response.status === 204) return null;
     var payload = await response.json();
-    if (payload.context !== context) { clearPrivate(); throw new Error('Your account or workspace changed. Reload to continue.'); }
+    if (payload.context !== context) { clearPrivate(); var changed=new Error('Your account or workspace changed. Reload to continue.'); changed.accessChanged=true; throw changed; }
     return payload;
   }
   function setBusy(value) {
@@ -163,8 +163,19 @@
       setBusy(true);
       try {
         await request('/api/v1/facts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-        reset();
-        try { snapshot = ''; offset = 0; await load(); status.textContent = 'Fact saved.'; }
+        var confirmed;
+        try { confirmed=await current(payload.key); }
+        catch (verificationError) {
+          if (verificationError.accessChanged) throw verificationError;
+          status.textContent='The saved fact could not be confirmed. Your draft is preserved; review the current fact before retrying.'; return;
+        }
+        if (!confirmed.item || confirmed.item.key!==payload.key || confirmed.item.value!==payload.value ||
+            !Number.isInteger(confirmed.item.revision) || confirmed.item.revision<=payload.expected_revision) {
+          status.textContent='The saved fact could not be confirmed. Your draft is preserved; review the current fact before retrying.'; return;
+        }
+        var unchanged=name.value.trim()===payload.key && detail.value===payload.value;
+        if (unchanged) reset();
+        try { snapshot = ''; offset = 0; await load(); status.textContent = unchanged ? 'Fact saved.' : 'Fact saved. Newer edits are kept as an unsaved draft.'; }
         catch (refreshError) { status.textContent = 'Fact saved, but this list could not refresh. Refresh the list to see it.'; }
       }
       catch (error) { if (error.status === 409) await showConflict(payload.key); else status.textContent = error.message; }
