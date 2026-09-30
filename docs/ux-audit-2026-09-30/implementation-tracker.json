@@ -1045,18 +1045,25 @@
     "id": "LW-081",
     "title": "Add a governed extension qualification workbench",
     "category": "Connections and extensibility",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "plugin_workbench.py, sandbox/plugin_probe.py and plugin_workbench_api.py: implemented version/content/policy/image/harness-bound Python tool qualification, strict no-network container, actual schema/sample+expected result checks, durable no-replay ledger, timeout/cancel and cleanup receipts, scoped publication, owned task pins/migration, Plugins UI, Settings/installer. Tests authored unrun."
+      "plugin_workbench.py and sandbox/plugin_contracts.py execute actual Python tool, channel, skill and persona interfaces, plus source-pinned bundled Node NDJSON and local Python/Node gRPC servers inside the existing immutable research container. Schema, admission-denial, expected-result, timeout/cancel observation and cleanup receipts are version/image/harness specific.",
+      "plugin_execution_pins.py binds task and direct-flow execution to durable owner/revision/version fingerprints before import or construction and at dispatch; cached Python drift, changed source or revoked policy fail closed. Native authorized task/flow pin migration retains history and never resumes or replays work.",
+      "Plugins native controls and product_operations_plugins.py provide the same governed status/check/cancel/publish/migrate operations to explicitly enabled Copilot with fresh review, current authority and durable recovery receipts; installer/settings expose the existing workbench and added Plugins action family.",
+      "grpc_plugin_host.py owns subprocess trees, bounds RPC and process output, propagates cancellation, and emits typed unknown-outcome receipts without retrying a possible Call. Malformed or missing terminal results cannot be reported as successful.",
+      "docs/plugin-qualification-workbench.md documents supported executable contracts, immutable-image prerequisites, honest fast-completion interruption observations, publication scope and affected-work migration."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final focused Python regression run: 91 passed (gRPC host, plugin contracts/workbench/loaders/lock, NDJSON host, native/Copilot adapters). Mocked transports and trusted local fixture subprocesses only.",
+      "Existing flow execution/hardening and TS host regression run: 93 passed, 2 SDK-build-dependent tests initially skipped; after building the SDK, both previously skipped actual Node interoperability tests passed. SDK npm test: 24 passed.",
+      "Python 3.10 AST parsing, Ruff on changed Python files, standalone JavaScript syntax and git diff --check passed after correcting fixture import ordering."
     ],
     "remaining": [
-      "Partial implementation, not complete acceptance: add execution qualification adapters for TypeScript transports/channels/skills/personas and durable direct-flow action plugin pins; current scope labels refuse to qualify these contracts.",
-      "Run authored regressions and controlled container/native checks only during the user-authorized testing phase. No plugin, image or live service is qualified by this implementation."
+      "Controlled immutable-container qualification and installed-service acceptance remain unexecuted locally. Image must already contain the exact plugin/runtime dependencies, JSON Schema extra and (for gRPC) generated stubs; no live provider or external service was contacted.",
+      "Connection-only gRPC servers and arbitrary multi-file/argument-heavy Node or gRPC launchers need an exact reviewed bundled local entry before qualification; they are explicitly blocked rather than represented as a verified version.",
+      "Publication records whether timeout/cancellation interrupted dispatch or the exact result finished first; fast completion is never claimed as observed interruption. Customer acceptance should include a deliberately slow synthetic sample where the plugin supports one."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/plugin-adapters.json"
   },
   {
     "id": "LW-082",
@@ -1281,10 +1288,12 @@
     "status": "partial-planned",
     "implementation_evidence": [
       "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
-      "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons."
+      "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons.",
+      "permission_requests.py and direct API/UI provide exact layered root-capability provenance plus tenant-scoped requests to independent current policy owners; no raw resource data and no implicit grant changes.",
+      "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Account now explains base role/department/root-tool provenance and examples. A unified per-task explanation across attenuated agent roles, runtime consent/resource limits and a persisted access-request case remains open; base-grant guidance explicitly does not claim all task checks are resolved.",
+    "validation": "Eight focused local permission/identity regressions passed. Ruff bug/import/complexity checks and JavaScript syntax passed. Installed browser acceptance remains unrun.",
+    "remaining": "Shared global Copilot adapters in progress; final runtime denial/Account consistency sweep remains before closing this entry. Current root explanations explicitly do not claim all task-specific constraints are resolved.",
     "evidence_slice": "slices/identity.json"
   },
   {
@@ -1664,13 +1673,13 @@
     "id": "LW-124",
     "title": "Make projects useful workspaces, not only task groupings",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing project ownership and packet boundary preserved."
+      "maverick.project_workspaces attaches governed metadata to existing project identities: outcome/criteria/labels, explicit metadata-only membership, current task/review milestone projections, separately reviewed planning prerequisites and order, pinned independently authorized context references, latest current approved review, and private reusable project structures. project_workspaces_api and project_workspaces.html/lightwork-project-workspaces.js provide complete direct controls, before/after confirmation, exact CAS/receipts and encrypted draft recovery. product_operations_projects registers ten typed native-service adapters under the existing reviews opt-in family. features.project_workspaces is strict default-off with settings descriptions and an installer question. Existing tasks, execution owners/edges and review packet ACLs are not repurposed."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Project workspace implementation ownership transferred to settings_integrity worker; no duplicate edits here. Root must integrate their complete per-ID evidence.",
-    "evidence_slice": "slices/conversation.json"
+    "validation": "23 focused local Python tests passed across real temporary governed records, native HTTP, typed adapters, private erasure revision barriers and installer feature opt-in; six jsdom UI regressions passed. Ruff, Python AST, Jinja parsing, JavaScript syntax and whitespace checks passed. Broader catalog run recorded 1586 passes and three known old fixture failures omitting required expected_revision in test_settings_catalog_access; settings fixture repair follows in a separate checkpoint.",
+    "remaining": "Postgres multi-process/fault-injection parity, full browser rendering/accessibility and cross-device visual qualification remain unrun. Shared registry multiselect dependency verified present in integrated staging331f01f. My Data adapters should use the provided exact-owner inventory/erasure helpers for private project defaults; identity_privacy is integrating that adapter. Only currently permitted saved results and fixed review packets are bundle sources; attaching context does not implicitly authorize model use or task execution. Configured bounds and the latest-500-task selector are documented in docs/project-workspaces.md.",
+    "evidence_slice": "slices/project-workspaces.json"
   },
   {
     "id": "LW-125",

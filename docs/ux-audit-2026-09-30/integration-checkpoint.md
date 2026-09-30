@@ -2,8 +2,8 @@
 
 This is an implementation checkpoint, not a release or final acceptance report.
 All 195 audit records retain all 24 source fields in source-backlog.json.
-158 entries have integrated implementation awaiting final qualification;
-34 remain planned/partial and three require native/release qualification.
+177 entries have integrated implementation awaiting final qualification;
+15 remain planned/partial and three require native/release qualification.
 No privacy-policy decision is pending. The user approved extending audit-only
 administrator visibility to existing employee tasks and chats.
 
@@ -26,10 +26,24 @@ results, not the final integrated suite. Individual manifests preserve their
 historical evidence; earlier statements about intentionally unrun tests describe
 those earlier checkpoints only.
 
-Integrated static review parsed 283 Python files for Python 3.10 compatibility
-and checked 75 standalone JavaScript files without errors. Final full local
+Integrated static review parsed 349 Python files for Python 3.10 compatibility
+and checked 64 changed static JavaScript files without errors. Final full local
 suites, secure-default mode, builds and authenticated browser qualification
 remain pending. Hosted CI is skipped during draft integration. No live provider
 calls, merge, deployment or credential changes occurred. Native Rust linking
 currently lacks Microsoft C++ Build Tools; signed-device/release evidence is not
 claimed. Remaining implementation continues in this same draft PR.
+
+Current focused additions include Today composition, employee activation, selected
+deliverable bundles, governed project workspaces, exact knowledge-to-task source
+bindings, paired own-account companions, executable plugin contracts and retained
+workflow implementation pins. Local activation/catalog group: 1573 passed.
+Integrated Today/device/activation/task/bundle group: 37 passed and one invalid
+canonical-template fixture failed; correcting its missing template name then
+rerunning the Today file passed all four tests. Project workspace worker: 23
+Python and six jsdom passed; executable plugin worker: 91 focused Python passed
+and 24 SDK tests passed. These still do not replace the final integrated run.
+
+The register now uses explicit slice precedence: newer focused manifests override
+older broad category worklists. This corrects previously understated implementation
+counts without upgrading unimplemented work. No decision is deferred.
