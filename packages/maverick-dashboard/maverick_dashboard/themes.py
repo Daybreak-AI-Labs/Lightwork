@@ -37,6 +37,55 @@ _NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 BUILTIN_THEMES = frozenset({"dark", "light", "solarized", "hicontrast"})
 
 
+def contrast_ratio(first: str, second: str) -> float:
+    """WCAG relative luminance for the validated sRGB palette."""
+    def luminance(value: str) -> float:
+        value = value.lstrip("#")
+        if len(value) == 3:
+            value = "".join(part * 2 for part in value)
+        channels = [int(value[index:index + 2], 16) / 255 for index in (0, 2, 4)]
+        linear = [part / 12.92 if part <= 0.04045 else ((part + 0.055) / 1.055) ** 2.4
+                  for part in channels]
+        return sum(part * weight for part, weight in zip(linear, (0.2126, 0.7152, 0.0722), strict=True))
+
+    light, dark = sorted((luminance(first), luminance(second)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def contrast_issues(values: dict[str, str]) -> list[str]:
+    """Human-readable checks for text, status, controls and focus indicators."""
+    if not all(key in values and _HEX.fullmatch(values[key]) for key in REQUIRED_KEYS):
+        return ["Choose all four required colours first."]
+    issues = []
+    for background in ("bg", "panel"):
+        for foreground, label, minimum in (
+            ("text", "Text", 4.5), ("muted", "Quiet text", 4.5),
+            ("accent", "Highlights and focus", 4.5), ("warn", "Warnings", 4.5),
+            ("danger", "Errors", 4.5), ("border", "Control borders", 3.0),
+        ):
+            colour = values.get(foreground)
+            if colour and _HEX.fullmatch(colour):
+                ratio = contrast_ratio(colour, values[background])
+                if ratio < minimum:
+                    surface = "page background" if background == "bg" else "panels"
+                    issues.append(f"{label} against {surface}: {ratio:.2f}:1; needs {minimum:g}:1.")
+    return issues
+
+
+def readable_palette(values: dict[str, str]) -> dict[str, str]:
+    """Keep older deployment palettes recoverable without hiding their editor."""
+    palette = dict(values)
+    if not contrast_issues(palette):
+        return palette
+    foreground = max(("#000000", "#ffffff"), key=lambda colour: contrast_ratio(colour, palette["bg"]))
+    if contrast_ratio(foreground, palette["panel"]) < 4.5:
+        palette["panel"] = palette["bg"]
+    for key in ("text", "muted", "accent", "warn", "danger", "border"):
+        if key not in palette or min(contrast_ratio(palette[key], palette[surface]) for surface in ("bg", "panel")) < 4.5:
+            palette[key] = foreground
+    return palette
+
+
 def _valid_theme(name: str, values: dict) -> bool:
     if not _NAME.match(name) or name in BUILTIN_THEMES:
         return False
@@ -62,7 +111,7 @@ def custom_themes() -> dict[str, dict[str, str]]:
     for name, values in raw.items():
         name = str(name).strip().lower()
         if _valid_theme(name, values):
-            out[name] = {str(k): str(v) for k, v in values.items()}
+            out[name] = readable_palette({str(k): str(v) for k, v in values.items()})
     return out
 
 

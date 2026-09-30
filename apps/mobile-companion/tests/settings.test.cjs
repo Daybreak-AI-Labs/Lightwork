@@ -7,6 +7,7 @@ function fixture(initial = {}) {
   const values = new Map(Object.entries(initial));
   const secure = {
     getItemAsync: async key => values.get(key) ?? null,
+    deleteItemAsync: async key => { values.delete(key); },
     setItemAsync: async (key, value) => { values.set(key, value); },
   };
   return { values, secure, load: () => source('src/settings.ts', { 'expo-secure-store': secure }) };

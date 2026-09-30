@@ -889,3 +889,14 @@
   // field, which would renew the reference on the click that submits it.
   document.addEventListener('input', renew, true);
 })();
+
+// Shared reveal helper respects the person's motion setting on every workspace.
+window.mvReveal = function (element, options) {
+  if (!element) return;
+  var opts = Object.assign({block: 'nearest'}, options || {});
+  opts.behavior = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
+  element.scrollIntoView(opts);
+  // Only explicit reveal actions use this helper, never background polling.
+  if (!element.matches('input, button, select, textarea, a[href], [tabindex]')) element.tabIndex = -1;
+  element.focus({preventScroll: true});
+};

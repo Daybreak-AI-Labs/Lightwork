@@ -12,6 +12,9 @@ public struct ConnectionSettingsView: View {
     @State private var error: String?
     @State private var note: String?
     @State private var testing = false
+    @State private var active = true
+    @State private var corrupt = false
+    @State private var confirmReset = false
 
     /// `testPath` is the read-only dashboard page this app shows; when given,
     /// a "Test connection" button checks the entered details without saving.
@@ -34,7 +37,7 @@ public struct ConnectionSettingsView: View {
                     TextField("https://lightwork.yourcompany.com", text: $connection.address)
                         .accessibilityLabel("Dashboard address")
                         .autocorrectionDisabled()
-                        .disabled(!loaded)
+                        .disabled(!loaded || testing)
                 } header: {
                     Text("Dashboard address")
                 } footer: {
@@ -43,7 +46,7 @@ public struct ConnectionSettingsView: View {
                 Section {
                     SecureField("Paste the code from your administrator", text: $connection.token)
                         .accessibilityLabel("Access token")
-                        .disabled(!loaded)
+                        .disabled(!loaded || testing)
                 } header: {
                     Text("Access token")
                 } footer: {
@@ -59,8 +62,9 @@ public struct ConnectionSettingsView: View {
                 }
                 Section {
                     if !loaded { Button("Retry loading settings", action: load) }
+                    if corrupt { Button("Reset saved connection", role: .destructive) { confirmReset = true } }
                     Button("Save") { save() }
-                        .disabled(!loaded)
+                        .disabled(!loaded || testing)
                     if testPath != nil {
                         Button(testing ? "Testing…" : "Test connection") { Task { await test() } }
                             .disabled(!loaded || testing)
@@ -69,7 +73,16 @@ public struct ConnectionSettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .task { load() }
+            .task { active = true; load() }
+            .onDisappear { active = false }
+            .onChange(of: connection) { _ in note = nil }
+            .confirmationDialog("Remove this app’s saved connection?", isPresented: $confirmReset) {
+                Button("Reset saved connection", role: .destructive) {
+                    do { try store.reset(); connection = DashboardConnection(); loaded = true; corrupt = false; error = nil }
+                    catch { self.error = plainMessage(for: error) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Only this app’s connection is removed. Your dashboard is unchanged.") }
         }
     }
 
@@ -101,9 +114,10 @@ public struct ConnectionSettingsView: View {
         note = nil
         do {
             _ = try await dashboardData(path: testPath, connection: candidate)
+            guard active && normalized() == candidate else { testing = false; return }
             note = "Connected. Tap Save to start using this connection."
         } catch {
-            self.error = plainMessage(for: error)
+            if active && normalized() == candidate { self.error = plainMessage(for: error) }
         }
         testing = false
     }
@@ -112,9 +126,11 @@ public struct ConnectionSettingsView: View {
         do {
             connection = try store.load()
             loaded = true
+            corrupt = false
             error = nil
         } catch {
             loaded = false
+            corrupt = error is DecodingError
             self.error = error is ConnectionError ? plainMessage(for: error)
                 : "Could not open your saved settings. Unlock this device and try again. If this keeps happening, ask your administrator for help."
         }

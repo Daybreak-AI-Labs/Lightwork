@@ -75,6 +75,11 @@ public func addressWithScheme(_ address: String) -> String {
 public protocol ConnectionStorage {
     func read() throws -> Data?
     func write(_ data: Data) throws
+    func delete() throws
+}
+
+public extension ConnectionStorage {
+    func delete() throws { throw ConnectionError.secureStorage(errSecUnimplemented) }
 }
 
 public struct KeychainConnectionStorage: ConnectionStorage {
@@ -97,6 +102,10 @@ public struct KeychainConnectionStorage: ConnectionStorage {
             throw ConnectionError.secureStorage(status)
         }
         return data
+    }
+    public func delete() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw ConnectionError.secureStorage(status) }
     }
     public func write(_ data: Data) throws {
         // One record changes the address and token together. Never delete the
@@ -128,7 +137,10 @@ public struct ConnectionStore {
                     ?? UserDefaults.standard.string(forKey: "dashboard_token") ?? ""
             )
         }
-        clearLegacy = { UserDefaults.standard.removeObject(forKey: "dashboard_token") }
+        clearLegacy = {
+            UserDefaults.standard.removeObject(forKey: "dashboard_token")
+            UserDefaults.standard.removeObject(forKey: defaultsURLKey)
+        }
     }
 
     public init(storage: any ConnectionStorage, legacy: @escaping () -> DashboardConnection,
@@ -141,6 +153,12 @@ public struct ConnectionStore {
     public func load() throws -> DashboardConnection {
         guard let data = try storage.read() else { return legacy() }
         return try JSONDecoder().decode(DashboardConnection.self, from: data)
+    }
+
+    public func reset() throws {
+        _ = try storage.read() // Refuse to erase a locked or inaccessible store.
+        try storage.delete()
+        clearLegacy()
     }
 
     public func save(_ input: DashboardConnection) throws {

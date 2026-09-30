@@ -4,7 +4,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { theme } from "../theme";
+import { useTheme, type Palette } from "../theme";
 
 export function ConnectionNotice({ message, accessDenied = false, unsupported = false, onRetry, onOpenSettings }: {
   message: string;
@@ -13,6 +13,7 @@ export function ConnectionNotice({ message, accessDenied = false, unsupported = 
   onRetry?: () => void;
   onOpenSettings?: () => void;
 }): React.JSX.Element {
+  const theme = useTheme(), styles = stylesFor(theme);
   const headline = unsupported ? "Update needed"
     : accessDenied ? "Access problem"
       : "Can't get the latest information";
@@ -37,16 +38,16 @@ export function ConnectionNotice({ message, accessDenied = false, unsupported = 
   );
 }
 
-const styles = StyleSheet.create({
+const stylesFor = (theme: Palette) => StyleSheet.create({
   notice: {
     margin: 12, padding: 12, borderRadius: 8,
     backgroundColor: theme.dangerBg, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.danger,
   },
   headline: { color: theme.danger, fontSize: 15, fontWeight: "700" },
   body: { color: theme.text, fontSize: 14, marginTop: 4, lineHeight: 20 },
-  actions: { flexDirection: "row", gap: 10, marginTop: 10 },
-  primary: { backgroundColor: theme.accent, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14 },
-  primaryText: { color: "#ffffff", fontSize: 14, fontWeight: "600" },
-  secondary: { borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: theme.border },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
+  primary: { minHeight: 48, justifyContent: "center", backgroundColor: theme.accent, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14 },
+  primaryText: { color: theme.onAccent, fontSize: 14, fontWeight: "600" },
+  secondary: { minHeight: 48, justifyContent: "center", borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: theme.border },
   secondaryText: { color: theme.accent, fontSize: 14, fontWeight: "600" },
 });

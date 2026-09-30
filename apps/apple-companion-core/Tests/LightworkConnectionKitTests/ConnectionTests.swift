@@ -5,6 +5,10 @@ final class MemoryStorage: ConnectionStorage {
     var data: Data?
     var failWrites = false
     func read() throws -> Data? { data }
+    func delete() throws {
+        if failWrites { throw ConnectionError.secureStorage(-1) }
+        data = nil
+    }
     func write(_ data: Data) throws {
         if failWrites { throw ConnectionError.secureStorage(-1) }
         self.data = data
@@ -12,6 +16,18 @@ final class MemoryStorage: ConnectionStorage {
 }
 
 final class ConnectionTests: XCTestCase {
+    func testExplicitResetRemovesCorruptRecordAndKeepsOtherStorageOnFailure() throws {
+        let memory = MemoryStorage()
+        let store = ConnectionStore(storage: memory, legacy: { DashboardConnection() })
+        memory.data = Data("invalid".utf8)
+        memory.failWrites = true
+        XCTAssertThrowsError(try store.reset())
+        XCTAssertNotNil(memory.data)
+        memory.failWrites = false
+        try store.reset()
+        XCTAssertNil(memory.data)
+    }
+
     func testRemoteAddressRequiresHTTPSAndRejectsEmbeddedCredentials() throws {
         for address in ["http://example.com", "https://u:p@example.com", "https://example.com?q=x", "file:///tmp/a", "https:///missing"] {
             XCTAssertThrowsError(try DashboardConnection(address: address).validatedURL())

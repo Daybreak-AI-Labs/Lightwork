@@ -183,7 +183,7 @@
     templateForm.elements.namedItem("title").value = from ? words(from.title_ref) : "";
     templateForm.elements.namedItem("title").disabled = !!from;
     (from ? from.questions : [null]).forEach(addQuestion);
-    templateForm.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(templateForm);
     templateForm.elements.namedItem("title").focus();
   }
   function parseValue(type, text, choiceRefs) {
@@ -345,7 +345,7 @@
       { label: "Not needed", when: function (t) { return t.existing && t.status === "open" && a.owner_ref === state.me; }, run: function (t) { setTask(a, t, "waived"); } },
       { label: "Reopen", when: function (t) { return t.existing && t.status !== "open" && a.owner_ref === state.me; }, run: function (t) { setTask(a, t, "open"); } },
     ], { text: "No follow-up tasks. Use Check answers to see what needs fixing." });
-    box.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(box);
   }
   function answer(a, q) {
     var field;
@@ -494,7 +494,7 @@
       { label: "Reopen", when: function (t) { return t.status !== "open"; }, run: function (t) { planTask(p, t, "open"); } },
     ]);
     if ((p.blockers || []).length) { box.appendChild(el("p", "muted", "Still to do: " + p.blockers.map(words).join(", ") + ".")); }
-    box.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(box);
   }
   function planTask(p, t, status) {
     var ask = status === "completed" ? askEvidence("Mark the task done", "Save") : Promise.resolve({});

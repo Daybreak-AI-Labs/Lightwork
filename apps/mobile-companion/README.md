@@ -36,7 +36,7 @@ npx expo start         # scan the QR code with the Expo Go app
 Requirements:
 
 - **Network**: the phone must reach the dashboard (`maverick dashboard`,
-  default port 8400) — same Wi-Fi, VPN, or a tunnel. Set the base URL in the
+  default port 8765) — same Wi-Fi, VPN, or a tunnel. Set the base URL in the
   Settings tab (e.g. `https://lightwork.example.com`).
 - **Token**: if dashboard auth is enabled, paste a bearer token in Settings.
   It is stored in the device keychain via `expo-secure-store`, never in
@@ -89,3 +89,17 @@ isolation when the dashboard or token changes. Native iOS/Android layout and
 keychain acceptance still require a device build.
 
 See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.
+
+Offline task data is optional in Settings, is limited to 2 MB and 24 hours, and
+is removed on connection replacement or explicit disconnect. A phone's
+127.0.0.1 address refers to the phone itself: use the organization's reachable
+HTTPS dashboard address (including its configured proxy port), not the desktop's
+loopback address. Native streaming and accessibility qualification are still
+pending; this source scaffold is not a signed device release.
+
+Named connections can be added, switched and removed in Settings; their tokens
+remain in the same device secure store. Switching clears the previous offline
+copy and resets the visible task. The initial connection screen is also the
+mobile setup flow for the offline-saving choice. Native screens follow the
+system light/dark preference and system text size. Product copy is currently
+English; selecting other languages must wait for reviewed translations.

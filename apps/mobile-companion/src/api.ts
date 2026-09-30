@@ -17,7 +17,7 @@
 
 import { connectionValidationError } from "./connectionValidation";
 
-export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean };
+export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean; offlineEnabled?: boolean };
 
 export type Goal = {
   id: number;
@@ -186,8 +186,12 @@ async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Pro
   }
 }
 
-export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal): Promise<Goal[]> {
-  return apiGet<Goal[]>(cfg, `/api/v1/goals?limit=${limit}`, signal);
+export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = ""): Promise<Goal[]> {
+  return apiGet<Goal[]>(cfg, `/api/v1/goals?limit=${limit}&offset=${offset}&status=${encodeURIComponent(status)}`, signal);
+}
+
+export function searchGoals(cfg: Settings, query: string, signal?: AbortSignal): Promise<Goal[]> {
+  return apiGet<Goal[]>(cfg, `/api/v1/goals/search?q=${encodeURIComponent(query)}&limit=200`, signal);
 }
 
 export function getGoal(cfg: Settings, id: number, signal?: AbortSignal): Promise<Goal> {

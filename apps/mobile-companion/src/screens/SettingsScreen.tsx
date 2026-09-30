@@ -2,13 +2,13 @@
  * keychain via expo-secure-store. The app stays read-only regardless of the
  * token's privileges: it only ever issues GETs (including "Test connection"). */
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Switch, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { getActive } from "../api";
 import { Button } from "../components/ui";
-import { loadSettings, saveSettings } from "../settings";
+import { activateProfile, listProfiles, loadSettings, removeProfile, resetSettings, saveProfile, saveSettings, type ConnectionProfile } from "../settings";
 import { connectionValidationError } from "../connectionValidation";
-import { theme } from "../theme";
+import { useTheme, type Palette } from "../theme";
 
 // People often type "lightwork.example.com"; assume the secure scheme.
 export function withScheme(address: string): string {
@@ -20,7 +20,10 @@ export function SettingsScreen(props: {
   onSaved: () => void;
   firstRun?: boolean;
 }): React.JSX.Element {
+  const theme = useTheme(), styles = stylesFor(theme);
   const { firstRun = false } = props;
+  const [profiles, setProfiles] = useState<ConnectionProfile[]>([]), [profileId, setProfileId] = useState<string | undefined>();
+  const [profileName, setProfileName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -32,6 +35,21 @@ export function SettingsScreen(props: {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const saveInFlight = useRef(false);
+  const mounted = useRef(true), generation = useRef(0), testController = useRef<AbortController | null>(null);
+  const [offlineEnabled, setOfflineEnabled] = useState(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1; testController.current?.abort(); }; }, []);
+  function edited(update: () => void): void {
+    generation.current += 1; testController.current?.abort(); setTesting(false); setNote(""); setError(""); update();
+  }
+  function disconnect(): void {
+    Alert.alert("Remove saved connection?", "This removes this app’s saved access token and offline task data. It does not change the dashboard.", [
+      {text: "Cancel", style: "cancel"},
+      {text: "Remove connection", style: "destructive", onPress: () => {
+        edited(() => {});
+        void resetSettings().then(props.onSaved, () => setError("Could not remove saved data. Unlock your device and try again."));
+      }},
+    ]);
+  }
 
   useEffect(() => {
     let current = true;
@@ -44,6 +62,12 @@ export function SettingsScreen(props: {
       // example shows instead of a placeholder address.
       setBaseUrl(s.needsSetup ? "" : s.baseUrl);
       setToken(s.token);
+      setOfflineEnabled(s.offlineEnabled !== false);
+      void listProfiles().then(store => {
+        if (!current) return;
+        setProfiles(store.profiles); setProfileId(store.active || undefined);
+        setProfileName(store.profiles.find(profile => profile.id === store.active)?.name || '');
+      }, () => { if (current) setError('Could not read saved connections. Unlock your device and retry.'); });
     }, () => {
       if (!current) return;
       setLoadFailed(true);
@@ -54,6 +78,22 @@ export function SettingsScreen(props: {
     return () => { current = false; };
   }, [loadAttempt]);
 
+  function switchProfile(id: string): void {
+    Alert.alert('Switch saved connection?', 'Unsaved connection edits will be discarded and the previous offline cache removed.', [
+      {text: 'Cancel', style: 'cancel'}, {text: 'Switch', onPress: () => {
+        edited(() => {});
+        void activateProfile(id).then(() => {setLoadAttempt(value => value + 1); props.onSaved();}, () => setError('Could not switch the connection. Unlock the device and retry.'));
+      }},
+    ]);
+  }
+  function removeSelected(): void {
+    if (!profileId) return;
+    Alert.alert('Remove this saved connection?', 'Only this connection and its cached task data will be removed.', [
+      {text: 'Cancel', style: 'cancel'}, {text: 'Remove', style: 'destructive', onPress: () => {
+        void removeProfile(profileId).then(() => {setLoadAttempt(value => value + 1); props.onSaved();}, () => setError('Could not remove this connection. Unlock the device and retry.'));
+      }},
+    ]);
+  }
   function checked(): string | null {
     const address = withScheme(baseUrl);
     if (address !== baseUrl) setBaseUrl(address);
@@ -67,7 +107,7 @@ export function SettingsScreen(props: {
   }
 
   async function save(): Promise<void> {
-    if (loading || loadFailed || saveInFlight.current) return;
+    if (loading || loadFailed || testing || saveInFlight.current) return;
     const address = checked();
     if (address === null) return;
     saveInFlight.current = true;
@@ -75,7 +115,9 @@ export function SettingsScreen(props: {
     setError("");
     setNote("");
     try {
-      await saveSettings({ baseUrl: address, token });
+      if (profileName.trim()) await saveProfile(profileName, {baseUrl: address, token, offlineEnabled}, profileId);
+      else if (profiles.length) { setError('Enter a name for this connection.'); return; }
+      else await saveSettings({ baseUrl: address, token, offlineEnabled });
       setNote("Saved. The app now uses this connection.");
       props.onSaved();
     } catch {
@@ -87,21 +129,25 @@ export function SettingsScreen(props: {
   }
 
   async function testConnection(): Promise<void> {
-    if (loading || loadFailed || testing) return;
+    if (loading || loadFailed || saving || testing) return;
     const address = checked();
     if (address === null) return;
+    const request = ++generation.current;
+    const controller = new AbortController(); testController.current = controller;
     setTesting(true);
     setError("");
     setNote("");
     try {
-      await getActive({ baseUrl: address, token });
+      await getActive({ baseUrl: address, token }, controller.signal);
+      if (!mounted.current || request !== generation.current) return;
       setNote("Connected. Save to start using this connection.");
     } catch (e) {
+      if (!mounted.current || request !== generation.current) return;
       const known = e instanceof Error && typeof (e as { kind?: unknown }).kind === "string";
       setError(known ? (e as Error).message
         : "Could not reach the dashboard. Check the address and that you are on your organization's network or VPN.");
     } finally {
-      setTesting(false);
+      if (mounted.current && request === generation.current) { setTesting(false); testController.current = null; }
     }
   }
 
@@ -119,6 +165,13 @@ export function SettingsScreen(props: {
       {loadFailed ? (
         <Button label="Retry loading settings" onPress={() => setLoadAttempt(loadAttempt + 1)} />
       ) : null}
+      {profiles.length ? <Text style={styles.label}>Saved connections</Text> : null}
+      {profiles.map(profile => <Button key={profile.id} label={(profileId === profile.id ? 'Current: ' : 'Switch to ') + profile.name} kind="secondary" disabled={disabled || testing || profileId === profile.id} onPress={() => switchProfile(profile.id)} />)}
+      {profileId ? <Button label="Remove this saved connection" kind="secondary" disabled={disabled || testing} onPress={removeSelected} /> : null}
+      <Button label="Add another connection" kind="secondary" disabled={disabled || testing} onPress={() => edited(() => {setProfileId(undefined); setProfileName(''); setBaseUrl(''); setToken('');})} />
+      <Text style={styles.label}>Connection name (optional for a single connection)</Text>
+      <TextInput style={styles.input} accessibilityLabel="Connection name" maxLength={80} editable={!disabled} value={profileName} onChangeText={setProfileName} />
+      <Text style={styles.fieldHelp}>Choose a name to keep this connection securely alongside your other deployments. The app follows your device appearance and text size; interface language is currently English.</Text>
       <Text style={styles.label} nativeID="address-label">Dashboard address</Text>
       <TextInput
         style={styles.input}
@@ -126,7 +179,7 @@ export function SettingsScreen(props: {
         accessibilityHint="The web address you use to open Lightwork on a computer"
         editable={!disabled}
         value={baseUrl}
-        onChangeText={setBaseUrl}
+        onChangeText={value => edited(() => setBaseUrl(value))}
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="url"
@@ -141,7 +194,7 @@ export function SettingsScreen(props: {
           accessibilityHint="A private code from your administrator"
           editable={!disabled}
           value={token}
-          onChangeText={setToken}
+          onChangeText={value => edited(() => setToken(value))}
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry={!showToken}
@@ -154,8 +207,12 @@ export function SettingsScreen(props: {
         </Pressable>
       </View>
       <Text style={styles.fieldHelp}>A private code from your administrator. Leave it empty only if your administrator says sign-in is not needed.</Text>
+      <Text style={styles.label}>Save offline task data on this device</Text>
+      <Switch accessibilityLabel="Save offline task data for up to 24 hours" value={offlineEnabled} disabled={disabled} onValueChange={setOfflineEnabled} />
+      <Text style={styles.fieldHelp}>Saved task content can be sensitive. Up to 2 MB is kept for 24 hours; turn this off and save to remove the previous cache.</Text>
+      {!firstRun ? <Button label="Disconnect and remove saved data" kind="secondary" disabled={disabled || testing} onPress={disconnect} /> : null}
       <Button label={saving ? "Saving…" : loading ? "Loading…" : firstRun ? "Save and connect" : "Save"}
-        disabled={disabled} busy={saving} onPress={save} />
+        disabled={disabled || testing} busy={saving} onPress={save} />
       <Button label={testing ? "Testing…" : "Test connection"} kind="secondary"
         disabled={disabled || testing} busy={testing} onPress={testConnection}
         hint="Checks the address and token without saving them" />
@@ -171,7 +228,7 @@ export function SettingsScreen(props: {
   );
 }
 
-const styles = StyleSheet.create({
+const stylesFor = (theme: Palette) => StyleSheet.create({
   fill: { flexGrow: 1, padding: 16 },
   heading: { fontSize: 22, fontWeight: "700", color: theme.text },
   label: { fontSize: 14, fontWeight: "600", color: theme.text, marginTop: 16, marginBottom: 4 },
@@ -182,7 +239,7 @@ const styles = StyleSheet.create({
   },
   tokenRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   tokenInput: { flex: 1 },
-  show: { paddingHorizontal: 10, paddingVertical: 8 },
+  show: { minHeight: 48, minWidth: 48, paddingHorizontal: 10, paddingVertical: 8 },
   showText: { color: theme.accent, fontSize: 14, fontWeight: "600" },
   note: { marginTop: 10, color: theme.success },
   error: { marginTop: 10, color: theme.danger },

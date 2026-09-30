@@ -41,9 +41,9 @@
     return n;
   }
 
-  var panel = el("div", null, {
-    position: "fixed", bottom: "84px", right: "20px", width: "320px",
-    maxHeight: "60vh", display: "none", flexDirection: "column",
+  var panel = el("div", {id: "lightwork-widget-panel", role: "region", "aria-label": TITLE}, {
+    position: "fixed", bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", insetInlineEnd: "12px", width: "min(320px, calc(100vw - 24px))", boxSizing: "border-box",
+    maxHeight: "min(60dvh, calc(100dvh - 100px))", display: "none", flexDirection: "column",
     background: "#fff", border: "1px solid #ddd", borderRadius: "12px",
     boxShadow: "0 8px 30px rgba(0,0,0,.18)", overflow: "hidden",
     font: "14px/1.4 system-ui, sans-serif", zIndex: 2147483647
@@ -52,13 +52,15 @@
   var header = el("div", { textContent: TITLE }, {
     padding: "10px 14px", fontWeight: "600", background: "#111", color: "#fff"
   });
-  var log = el("div", null, {
-    flex: "1", padding: "12px", overflowY: "auto", color: "#111"
+  var closeButton = el('button', {type: 'button', textContent: 'Close', 'aria-label': 'Close ' + TITLE}, {marginInlineStart: 'auto', minHeight: '44px'});
+  header.style.display = 'flex'; header.style.alignItems = 'center'; header.appendChild(closeButton);
+  var log = el("div", {'aria-label': 'Conversation'}, {
+    flex: "1", minHeight: "0", overflowWrap: "anywhere", padding: "12px", overflowY: "auto", color: "#111"
   });
   var form = el("form", null, { display: "flex", borderTop: "1px solid #eee" });
   var input = el("input", {
-    type: "text", placeholder: "Type a goal…", required: true
-  }, { flex: "1", border: "0", padding: "12px", outline: "none" });
+    type: "text", placeholder: "Type a goal…", "aria-label": "Message to Lightwork", required: true
+  }, { flex: "1", minWidth: "0", boxSizing: "border-box", border: "0", padding: "12px" });
   var send = el("button", { type: "submit", textContent: "Send" }, {
     border: "0", background: "#111", color: "#fff", padding: "0 16px",
     cursor: "pointer"
@@ -67,6 +69,8 @@
   panel.appendChild(header); panel.appendChild(log); panel.appendChild(form);
   var check = el("button", { type: "button", textContent: "Check start status", hidden: true });
   panel.appendChild(check);
+  var status = el('p', {role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true'}, {margin: '8px 12px', color: '#111'});
+  panel.appendChild(status);
 
   var fab = el("button", { textContent: "💬", "aria-label": TITLE }, {
     position: "fixed", bottom: "20px", right: "20px", width: "52px",
@@ -75,7 +79,9 @@
     boxShadow: "0 6px 20px rgba(0,0,0,.25)", zIndex: 2147483647
   });
 
+  fab.setAttribute('aria-controls', panel.id); fab.setAttribute('aria-expanded', 'false');
   function line(who, text) {
+    if (who === 'Lightwork') status.textContent = text;
     var row = el("div", null, { margin: "6px 0" });
     row.appendChild(el("b", { textContent: who + ": " }));
     row.appendChild(document.createTextNode(text));
@@ -83,14 +89,27 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  fab.addEventListener("click", function () {
-    var open = panel.style.display === "flex";
-    panel.style.display = open ? "none" : "flex";
-    if (!open) input.focus();
+  function setOpen(open) {
+    panel.style.display = open ? 'flex' : 'none';
+    fab.setAttribute('aria-expanded', String(open));
+    if (open) input.focus(); else fab.focus();
+  }
+  fab.addEventListener('click', function () { setOpen(panel.style.display !== 'flex'); });
+  closeButton.addEventListener('click', function () { setOpen(false); });
+  panel.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { event.preventDefault(); setOpen(false); }
   });
+  if (window.visualViewport) {
+    var fit = function () {
+      panel.style.maxHeight = Math.max(80, window.visualViewport.height - 110) + 'px';
+      panel.style.bottom = (window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop + 84) + 'px';
+    };
+    window.visualViewport.addEventListener('resize', fit); fit();
+  }
 
   function controls() {
     send.disabled = busy || unknown;
+    form.setAttribute("aria-busy", String(busy));
     check.hidden = !unknown;
     check.disabled = busy;
   }
@@ -108,6 +127,7 @@
     row.appendChild(el("a", { textContent: "watch it live", href: BASE + "/chat/goal/" + id,
       target: "_blank", rel: "noopener" }));
     log.appendChild(row);
+    status.textContent = "Task accepted. Open the task to follow its progress.";
     if (localStorage.getItem(storageKey) === pendingId) localStorage.removeItem(storageKey);
     pendingId = null;
     unknown = false;
@@ -170,6 +190,7 @@
     var msg = input.value.trim();
     if (!msg || busy || unknown || !alive) return;
     busy = true;
+    status.textContent = "Sending your request. Waiting for its receipt.";
     line("You", msg);
     controls();
     try {

@@ -1173,6 +1173,13 @@ def _plan_table(
                 for name, spec in wanted.items()
             }
         wanted = _keep_named_secrets(setting, before, wanted)
+        if setting.id == "dashboard.themes":
+            from .themes import contrast_issues
+
+            for name, palette in wanted.items():
+                issues = contrast_issues(palette)
+                if issues:
+                    raise _Refused(400, f"Theme {name}: " + " ".join(issues))
     writes: dict[tuple[str, ...], object] = {}
     if setting.key_kind == "entries":
         for name in here_rows:

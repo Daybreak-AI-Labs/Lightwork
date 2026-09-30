@@ -142,6 +142,7 @@
     /* ---- small screens: the sidebar becomes a drawer behind a Menu button ---- */
     .cs-topbar { display: none; }
     .cs-backdrop { display: none; }
+    .cs-side__close { display: none; margin-inline-start: auto; }
     @media (max-width: 860px) {
       body.chat-shell { grid-template-columns: 1fr; }
       body.chat-shell main { grid-column: 1; }
@@ -161,7 +162,6 @@
       body.cs-drawer-open .cs-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim, rgba(0,0,0,.45)); }
       .cs-side__close { display: flex; }
     }
-    .cs-side__close { display: none; margin-inline-start: auto; }
     @media (prefers-reduced-motion: reduce) { .cs-side { transition: none !important; } }
     @media (prefers-reduced-motion: no-preference) {
       .cs-anim { opacity: 0; transform: translateY(8px); animation: csUp 0.4s ease forwards; }
@@ -270,20 +270,36 @@
       var openBtn = document.getElementById('cs-menu'), closeBtn = document.getElementById('cs-menu-close');
       var backdrop = document.getElementById('cs-backdrop');
       if (!side || !openBtn) return;
+      var covered = [];
       function isOpen() { return body.classList.contains('cs-drawer-open'); }
       function open() {
+        if (window.matchMedia && !window.matchMedia('(max-width: 860px)').matches) return;
+        covered = Array.prototype.filter.call(body.children, function (node) {
+          return node !== side && node !== backdrop && node.tagName !== 'SCRIPT'
+            && node.tagName !== 'DIALOG' && !node.contains(side);
+        }).map(function (node) { var previous = node.inert; node.inert = true; return [node, previous]; });
         body.classList.add('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'true');
         var first = side.querySelector('a, button, input'); if (first) first.focus();
       }
       function close(refocus) {
         if (!isOpen()) return;
         body.classList.remove('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'false');
+        covered.forEach(function (entry) { entry[0].inert = entry[1]; }); covered = [];
         if (refocus !== false) openBtn.focus();
       }
       openBtn.addEventListener('click', function () { if (isOpen()) close(); else open(); });
       if (closeBtn) closeBtn.addEventListener('click', function () { close(); });
       if (backdrop) backdrop.addEventListener('click', function () { close(); });
-      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen()) { e.preventDefault(); close(); } });
+      document.addEventListener('keydown', function (e) {
+        if (!isOpen()) return;
+        if (e.key === 'Escape') { e.preventDefault(); close(); }
+        if (e.key === 'Tab') {
+          var items = Array.prototype.filter.call(side.querySelectorAll('a[href], button, input, [tabindex="0"]'), function (node) { return !node.disabled && !node.hidden && node.getClientRects().length; });
+          var first = items[0], last = items[items.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      });
       // Opening "Find a page" from the drawer hands focus to its dialog.
       var finder = document.getElementById('navfinder-open');
       if (finder) finder.addEventListener('click', function () { close(false); });

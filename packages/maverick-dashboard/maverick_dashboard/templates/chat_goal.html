@@ -522,7 +522,7 @@
   <div id="composer" class="ask">
     <div id="question-panel" class="ask__question" style="display: none;" role="alert" aria-live="assertive">
       <p class="ask__eyebrow">Lightwork needs one thing from you</p>
-      <p id="question-text" class="ask__text"></p>
+      <p id="question-text" class="ask__text" role="status" aria-live="polite"></p>
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
@@ -566,6 +566,7 @@
   <script src="/static/lightwork-insight-ops.js" defer></script>
   <script src="/static/lightwork-code-sandbox.js" defer></script>
   <script src="/static/lightwork-planning-steps.js" defer></script>
+  <script src="{{ asset('lightwork-read-aloud.js') }}"></script>
   <script>
     // Plain-language failure text for this page (no status codes or server text).
     function cgErr(failure, what) {
@@ -796,10 +797,10 @@
           const qs = ['cancelled', 'done', 'failed'].includes(currentStatus) ? [] : j.open_questions;
           questionsFresh = true; status.textContent = ''; retry.hidden = true;
           if (qs.length) {
+            const changed = currentQuestionId !== qs[0].id;
             currentQuestionId = qs[0].id;
-            questionText.textContent = qs[0].question;
             questionPanel.style.display = 'block';
-            answerInput.focus();
+            if (changed) questionText.textContent = qs[0].question;
           } else {
             currentQuestionId = null;
             questionPanel.style.display = 'none';
@@ -1671,41 +1672,9 @@
         });
       }
 
-      var speakBtn = document.getElementById('read-aloud');
-      if (!speakBtn) return;
-      var player = null;
-      speakBtn.addEventListener('click', function () {
-        if (player) { player.pause(); player = null; speakBtn.setAttribute('aria-pressed', 'false'); return; }
-        var src = document.getElementById('result') || document.getElementById('deliverable') || document.getElementById('result-section');
-        var text = src ? (src.innerText || '').trim().slice(0, 4096) : '';
-        if (!text) return;
-        speakBtn.disabled = true;
-        fetch('/api/v1/voice/speak', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: text }),
-        }).then(function (r) {
-          if (!r.ok) {
-            // No TTS backend / disabled: fall back to the browser — through
-            // the natural-voice layer (ranked voice, humanized text), never
-            // the bare default utterance.
-            if (window.lwVoice) { window.lwVoice.speak(text); }
-            else if ('speechSynthesis' in window) {
-              window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-            }
-            return null;
-          }
-          return r.blob();
-        }).then(function (blob) {
-          if (!blob) return;
-          player = new Audio(URL.createObjectURL(blob));
-          speakBtn.setAttribute('aria-pressed', 'true');
-          player.onended = function () { player = null; speakBtn.setAttribute('aria-pressed', 'false'); };
-          player.play();
-        }).catch(function () {}).finally(function () { speakBtn.disabled = false; });
-      });
-      // Voice-only mode: read the finished result aloud as soon as it is
-      // shown (the browser may still ask for a click before playing sound).
-      if (speakBtn.getAttribute('data-voice-only') === '1') speakBtn.click();
+      function setupReadAloud() { if (window.lwReadAloud) window.lwReadAloud(document.getElementById('read-aloud')); }
+      setupReadAloud();
+      document.addEventListener('lightwork:answer-ready', setupReadAloud);
     })();
   </script>
 {% endblock %}
