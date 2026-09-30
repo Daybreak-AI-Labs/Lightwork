@@ -77,7 +77,8 @@ export function loadSettings(): Promise<Settings> {
       }
       const cacheScope = "cacheScope" in value && typeof value.cacheScope === "string"
         && UUID.test(value.cacheScope) ? value.cacheScope : undefined;
-      return { baseUrl: value.baseUrl, token: value.token, cacheScope, offlineEnabled: !("offlineEnabled" in value) || value.offlineEnabled !== false };
+      return { baseUrl: value.baseUrl, token: value.token, cacheScope, offlineEnabled: !("offlineEnabled" in value) || value.offlineEnabled !== false,
+        pairedDevice: "pairedDevice" in value ? value.pairedDevice as Settings['pairedDevice'] : undefined };
     }
     // Legacy installs are read without a migration write. The next successful
     // save creates the atomic record; failure leaves the old pair untouched.
@@ -106,6 +107,7 @@ export function saveSettings(s: Settings): Promise<void> {
       ...connection,
       cacheScope: newCacheScope(),
       offlineEnabled: s.offlineEnabled !== false,
+      pairedDevice: s.pairedDevice,
     }));
   });
 }

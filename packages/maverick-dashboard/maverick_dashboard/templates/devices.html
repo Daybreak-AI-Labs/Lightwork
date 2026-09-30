@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Your devices - Lightwork{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Your paired devices</h1>
+  <p>Connect a companion to your own tasks and costs in this workspace. Your account's current access still applies. Device credentials cannot open general dashboard controls.</p>
+  <p><a href="/account">Your account</a> · <a href="/preferences">Preferences</a></p>
+  <p id="device-status" role="status" aria-live="polite"></p>
+  <p id="device-error" role="alert" hidden></p>
+  <form id="device-review-form">
+    <label>Pairing code shown on your device <input class="input" name="code" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" required></label>
+    <button class="btn btn--primary" type="submit">Review device</button>
+  </form>
+  <section id="device-review" hidden tabindex="-1" aria-labelledby="device-review-title">
+    <h2 id="device-review-title">Confirm this device</h2>
+    <p id="device-review-description"></p>
+    <p>Compare the full code with the device you are holding. Approve only a request you started. Pairing expires after five minutes; the device must finish connecting within one minute of approval.</p>
+    <label id="device-actions-option" hidden><input type="checkbox" id="device-actions"> Also allow reviewed answers and Stop on my own tasks when organization policy permits</label>
+    <button class="btn btn--primary" id="device-confirm" type="button">Approve this device</button>
+    <button class="btn btn--ghost" id="device-cancel" type="button">Cancel review</button>
+  </section>
+</section>
+<section class="panel">
+  <h2>Connections in this workspace</h2>
+  <p>Remove a lost or unused device to deny its next request. Previously saved offline copies expire under offline-retention policy; a disconnected device cannot learn a new revocation until it reconnects.</p>
+  <button class="btn btn--ghost" id="device-refresh" type="button">Refresh devices</button>
+  <div id="device-list"></div>
+</section>
+<script src="/static/lightwork-devices.js" defer></script>
+{% endblock %}

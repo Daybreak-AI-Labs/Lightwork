@@ -1,6 +1,6 @@
 /* Read-only client for the Lightwork dashboard REST API.
  *
- * Every function here is a GET against an endpoint that exists today in
+ * Task readers use GET endpoints in
  * packages/maverick-dashboard/maverick_dashboard/api.py:
  *
  *   GET /api/v1/goals?limit=&status=          listGoals()
@@ -12,12 +12,14 @@
  *       served once the integrator adds the maverick.offline_bundle endpoint;
  *       404 from older dashboards is handled by the caller)
  *
- * This app is READ-ONLY by design: no POST/DELETE/PUT anywhere.
+ * Task browsing remains read-only. Separately typed POSTs below perform only
+ * the expiring device pairing and protected connection-renewal protocol.
  */
 
 import { connectionValidationError } from "./connectionValidation";
 
-export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean; offlineEnabled?: boolean };
+export type DeviceInfo = {id: string; generation: number; expires_at: number; enrollment_expires_at: number; principal: string; tenant: string | null; actions: boolean};
+export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean; offlineEnabled?: boolean; pairedDevice?: DeviceInfo };
 
 export type Goal = {
   id: number;
@@ -146,7 +148,7 @@ async function boundedResponseText(res: Response, signal: AbortSignal): Promise<
   }
 }
 
-async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Promise<T> {
+async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, body?: object): Promise<T> {
   const error = connectionValidationError(cfg.baseUrl, cfg.token);
   if (error) throw new ApiError(error, undefined, "settings");
   // Fail before the native bridge fetches/buffers a body when its Fetch API
@@ -158,6 +160,7 @@ async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Pro
   }
   const base = cfg.baseUrl.trim().replace(/\/+$/, "");
   const headers: Record<string, string> = { Accept: "application/json" };
+  if (body) headers["Content-Type"] = "application/json";
   if (path === "/api/v1/offline/bundle") headers["X-Lightwork-Offline-Policy"] = "1";
   if (cfg.token) {
     headers.Authorization = `Bearer ${cfg.token.trim()}`;
@@ -174,9 +177,14 @@ async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Pro
   try {
     return await Promise.race([cancelled, (async () => {
       if (signal?.aborted) throw new ApiError("Request cancelled.", undefined, "cancelled");
-      const res = await fetch(`${base}${path}`, { method: "GET", headers, signal: controller.signal, redirect: "error" });
-      if (!res.ok) throw new ApiError(statusMessage(res.status), res.status,
-        res.status === 401 || res.status === 403 ? "access" : "transient");
+      const res = await fetch(`${base}${path}`, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal, redirect: "error" });
+      if (!res.ok) {
+        const pairing = path.startsWith('/api/v1/devices/');
+        const message = pairing && res.status === 401 ? 'This device connection or pairing request expired or was removed. Start device pairing again.'
+          : pairing && res.status === 403 ? 'Device pairing is turned off or this account no longer has access. Check with your administrator.'
+          : pairing && res.status === 409 ? 'This device connection changed. Review pairing again.' : statusMessage(res.status);
+        throw new ApiError(message, res.status, res.status === 401 || res.status === 403 ? "access" : "transient");
+      }
       const raw = await boundedResponseText(res, controller.signal);
       try {
         return JSON.parse(raw) as T;
@@ -188,6 +196,22 @@ async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Pro
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
+}
+
+function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Promise<T> {
+  return apiRequest<T>(cfg, path, signal);
+}
+
+export type PairingRequest = {pairing_token: string; code: string; expires_at: number; interval: number};
+export type PairingResult = {status: "pending" | "approved"; token?: string; device?: DeviceInfo};
+export function beginPairing(baseUrl: string, label: string, signal?: AbortSignal): Promise<PairingRequest> {
+  return apiRequest({baseUrl, token: ''}, '/api/v1/devices/pairing/begin', signal, {label});
+}
+export function pollPairing(baseUrl: string, pairingToken: string, signal?: AbortSignal): Promise<PairingResult> {
+  return apiRequest({baseUrl, token: pairingToken}, '/api/v1/devices/pairing/poll', signal, {});
+}
+export function renewPairing(cfg: Settings, generation: number, signal?: AbortSignal): Promise<{token: string; device: DeviceInfo}> {
+  return apiRequest(cfg, '/api/v1/devices/renew', signal, {generation});
 }
 
 export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = ""): Promise<Goal[]> {

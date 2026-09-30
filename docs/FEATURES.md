@@ -1,4 +1,10 @@
-# Lightwork — Shipped Features
+# Lightwork - Shipped Features
+
+- **Personal device pairing preview** — default-off `[device_pairing] enabled`
+  lets named members approve an expiring device code. Scoped credentials read
+  only their own work in one workspace, with protected renewal and explicit
+  removal in Your paired devices. Mobile/watch/vision settings store the
+  connection securely. See [scope, retention and qualification](device-pairing.md).
 
 What Lightwork **does today**, grounded in the code on `main`. This is the
 catalogue of built features and tools; the forward backlog (what's *not* done

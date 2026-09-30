@@ -2,6 +2,11 @@
 
 **Preview source; no signed customer installer.**
 
+Settings now offers expiring [device pairing](../../docs/device-pairing.md)
+with explicit browser approval and own-work credentials, plus protected renewal.
+Advanced manual token setup remains available. Pairing manages the connection;
+vision task reads remain GET-only.
+
 A minimal SwiftUI + RealityKit visionOS app rendering a Lightwork goal
 forest as a 3D plan tree in a volumetric window: each goal is a small
 sphere colored by status, parent links are thin connecting bars, and

@@ -9,11 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
-
+from .device_pairing_api import router as device_pairing_router
 from .personal_notifications_api import router as personal_notifications_router
 
 router = APIRouter()
 router.include_router(personal_notifications_router)
+router.include_router(device_pairing_router)
 
 
 class TestRequest(BaseModel):

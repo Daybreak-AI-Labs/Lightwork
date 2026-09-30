@@ -44,9 +44,9 @@
   {
     "id": "LW-049",
     "status": "planned",
-    "implementation_evidence": "README and native/mobile request client remain explicitly read-only; no mutation authority was added based on a broad bearer token.",
+    "implementation_evidence": "README and native/mobile request client remain explicitly read-only; no mutation authority was added based on a broad bearer token. LW185 scoped own-work credentials now support separately opted-in, default-off reviewed action enrollment; scope allowlist reserves only device answer/stop preparation/execution endpoints. No ordinary API write becomes authorized by token breadth.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Scoped pairing LW185 and same-handler explicit confirmed/idempotent answer/stop actions remain implementation prerequisites. Native signing/device qualification is validation, not a user decision or reason to stop feasible engineering."
+    "remaining": "Implement reviewed own-task answer/Stop adapters and mobile controls through the existing governed native handlers, with fresh revisions and idempotent receipts. Native signing/device qualification remains separate validation."
   },
   {
     "id": "LW-050",
@@ -253,9 +253,9 @@
   },
   {
     "id": "LW-185",
-    "status": "planned",
-    "implementation_evidence": "Mobile detail and vision selection now hand off exact task paths to separately authenticated dashboard browsers without tokens in URLs; denied access clears native private views. Clients remain deliberately read-only.",
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
-    "remaining": "Short-lived device pairing, scoped device credentials/renewal/revocation UI and QR flow remain unimplemented. Current setup still requires manual credentials and does not satisfy pairing acceptance."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Mobile detail and vision selection now hand off exact task paths to separately authenticated dashboard browsers without tokens in URLs; denied access clears native private views. Clients remain deliberately read-only. device_pairing.py/API and /devices implement five-minute code approval bound to exact named principal/tenant, encrypted bounded registry, closed own-task route credentials, current SCIM/membership/session revocation checks, explicit removal and rotating renewal with sixty-second exact-generation recovery. Admin paired devices remain own-work scoped. Mobile and shared Apple settings pair/save/renew in secure storage; no proof or credential appears in navigation URLs. Config, installer and direct status/removal UI included; product_operations_devices.py supplies the same-service reviewed own-device Copilot status/removal adapter.",
+    "validation": "2026-09-30: mocked Python pairing/auth regressions11/11; mobile mock suite79/79 including four pairing protocol/lifecycle/save failures; strict TypeScript zero diagnostics; Python AST/Ruff and JavaScript syntax checks passed. Apple protocol/persistence regressions authored; Swift/Xcode unavailable, so native builds and installed-device qualification unrun.",
+    "remaining": "Parent must add product_operations_devices to the shared registry (settings worker coordinating that additive entry) and run integrated auth/middleware tests. Real keychain, TLS transport, installed-device, signing, accessibility and revocation/cache timing qualification remain. Pairing uses a human-readable expiring device code; no QR scanner is required. Full offline revocation cannot reach a disconnected device before its previously accepted retention expiry."
   }
 ]

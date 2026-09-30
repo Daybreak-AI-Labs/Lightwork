@@ -16,6 +16,25 @@ final class MemoryStorage: ConnectionStorage {
 }
 
 final class ConnectionTests: XCTestCase {
+    func testLegacyConnectionStillDecodesWithoutPairingMetadata() throws {
+        let value = try JSONDecoder().decode(DashboardConnection.self,
+            from: Data("{\"address\":\"https://example.test\",\"token\":\"synthetic\"}".utf8))
+        XCTAssertNil(value.pairedDevice)
+        XCTAssertEqual(value.token, "synthetic")
+    }
+
+    func testPairingMetadataAndCredentialAreOneAtomicSecureWrite() throws {
+        let storage = MemoryStorage()
+        let store = ConnectionStore(storage: storage, legacy: { DashboardConnection() })
+        let device = PairedDevice(id: "device", generation: 1, expires_at: 100,
+            enrollment_expires_at: 200, principal: "user:alice", tenant: "workspace", actions: false)
+        let before = DashboardConnection(address: "https://example.test", token: "first", pairedDevice: device)
+        try store.save(before)
+        storage.failWrites = true
+        XCTAssertThrowsError(try store.save(DashboardConnection(address: "https://example.test", token: "rotated")))
+        XCTAssertEqual(try store.load(), before)
+    }
+
     func testOnlyTransientFailuresMayRetainPrivateSnapshots() {
         for status in [400, 401, 403, 404] {
             XCTAssertFalse(mayRetainSnapshot(after: ConnectionError.response(status)))

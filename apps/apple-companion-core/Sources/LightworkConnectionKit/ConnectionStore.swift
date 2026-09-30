@@ -4,10 +4,12 @@ import Security
 public struct DashboardConnection: Codable, Equatable {
     public var address: String
     public var token: String
+    public var pairedDevice: PairedDevice?
 
-    public init(address: String = "", token: String = "") {
+    public init(address: String = "", token: String = "", pairedDevice: PairedDevice? = nil) {
         self.address = address
         self.token = token
+        self.pairedDevice = pairedDevice
     }
 
     public func validatedURL() throws -> URL {
@@ -166,7 +168,8 @@ public struct ConnectionStore {
     public func save(_ input: DashboardConnection) throws {
         let connection = DashboardConnection(
             address: input.address.trimmingCharacters(in: .whitespacesAndNewlines),
-            token: input.token.trimmingCharacters(in: .whitespacesAndNewlines)
+            token: input.token.trimmingCharacters(in: .whitespacesAndNewlines),
+            pairedDevice: input.pairedDevice
         )
         _ = try connection.validatedURL()
         try storage.write(JSONEncoder().encode(connection))
@@ -185,8 +188,19 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
 
 /// Read-only requests, with no redirects that could move a token to another host.
 public func dashboardData(path: String, connection: DashboardConnection, maxBytes: Int = 2_097_152) async throws -> Data {
+    try await dashboardRequest(path: path, connection: connection, maxBytes: maxBytes)
+}
+
+/// Private transport also serves the bounded pairing protocol. Task reads above
+/// remain GET-only; this does not expose arbitrary authenticated writes to apps.
+func dashboardRequest(path: String, connection: DashboardConnection, maxBytes: Int = 65_536, body: Data? = nil) async throws -> Data {
     let url = try connection.validatedURL().appendingPathComponent(path)
     var request = URLRequest(url: url)
+    if let body {
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    }
     request.cachePolicy = .reloadIgnoringLocalCacheData
     if !connection.token.isEmpty {
         request.setValue("Bearer \(connection.token)", forHTTPHeaderField: "Authorization")

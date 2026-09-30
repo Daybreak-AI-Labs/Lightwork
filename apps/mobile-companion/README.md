@@ -12,9 +12,11 @@ Watch your Lightwork swarm from a phone: runs list, run detail with a live
 event timeline, and an at-a-glance fleet summary — with an offline cache so
 losing the network shows "as of 12 min ago" instead of a blank screen.
 
-**Read-only by design.** The app only ever issues GET requests. It cannot
+**Task browsing remains read-only.** The app reads task data with GET requests. It cannot
 start, cancel, resume, approve, or answer anything — oversight actions stay
 on the dashboard, where auth, same-origin checks, and rate limits live.
+Separately typed POSTs pair and renew this device connection. See
+[device pairing](../../docs/device-pairing.md) for the exact scope and limits.
 
 ## Endpoints used (all existing dashboard routes)
 
@@ -41,7 +43,7 @@ for the policy protocol. Upgrade older companion builds; no retroactive promise
 is made about copies already retained by unqualified old builds. A disconnected
 device cannot learn a new server policy until it reconnects, so the last accepted
 expiry remains the offline bound. Native timing/storage qualification is still
-deferred; regression tests are authored but unrun.
+pending on native hosts; the local mocked regression suite has been run.
 
 Updates are plain polling (5–15s per screen) — dependency-light and
 battery-predictable; no SSE/websocket client to maintain.
@@ -62,7 +64,12 @@ Requirements:
 - **Network**: the phone must reach the dashboard (`maverick dashboard`,
   default port 8765) — same Wi-Fi, VPN, or a tunnel. Set the base URL in the
   Settings tab (e.g. `https://lightwork.example.com`).
-- **Token**: if dashboard auth is enabled, paste a bearer token in Settings.
+- **Pairing**: choose **Start device pairing** in Settings, approve the displayed
+  code from **Your account → Your paired devices** on the signed-in dashboard,
+  then return and check approval. The administrator must enable device pairing.
+  Named members receive an own-work credential for one workspace. Renew before
+  its displayed expiry or pair again. Removing the device denies its next request.
+- **Advanced token setup**: administrators may still paste a bearer in Settings.
   It is stored in the device keychain via `expo-secure-store`, never in
   plain storage. With auth off (local trusted networks only), leave it empty.
   **Security:** connection setup and requests require HTTPS for a remote

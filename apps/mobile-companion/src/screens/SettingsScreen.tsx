@@ -1,11 +1,11 @@
-/* Settings — dashboard address + access token, stored in the device
- * keychain via expo-secure-store. The app stays read-only regardless of the
- * token's privileges: it only ever issues GETs (including "Test connection"). */
+/* Connection credentials and pairing metadata are committed together to secure
+ * storage. Pairing/renewal POSTs change only this device connection. */
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Switch, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { getActive } from "../api";
+import { getActive, renewPairing, type DeviceInfo } from "../api";
 import { Button } from "../components/ui";
+import { PairingPanel } from "../components/PairingPanel";
 import { activateProfile, listProfiles, loadSettings, removeProfile, resetSettings, saveProfile, saveSettings, type ConnectionProfile } from "../settings";
 import { connectionValidationError } from "../connectionValidation";
 import { useTheme, useAppearance, saveAppearance, type AppearanceChoice, type Palette } from "../theme";
@@ -28,6 +28,7 @@ export function SettingsScreen(props: {
   const [profileName, setProfileName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
+  const [pairedDevice, setPairedDevice] = useState<DeviceInfo | undefined>();
   const [showToken, setShowToken] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -64,6 +65,7 @@ export function SettingsScreen(props: {
       // example shows instead of a placeholder address.
       setBaseUrl(s.needsSetup ? "" : s.baseUrl);
       setToken(s.token);
+      setPairedDevice(s.pairedDevice);
       setOfflineEnabled(s.offlineEnabled !== false);
       void listProfiles().then(store => {
         if (!current) return;
@@ -117,9 +119,9 @@ export function SettingsScreen(props: {
     setError("");
     setNote("");
     try {
-      if (profileName.trim()) await saveProfile(profileName, {baseUrl: address, token, offlineEnabled}, profileId);
+      if (profileName.trim()) await saveProfile(profileName, {baseUrl: address, token, offlineEnabled, pairedDevice}, profileId);
       else if (profiles.length) { setError('Enter a name for this connection.'); return; }
-      else await saveSettings({ baseUrl: address, token, offlineEnabled });
+      else await saveSettings({ baseUrl: address, token, offlineEnabled, pairedDevice });
       setNote("Saved. The app now uses this connection.");
       props.onSaved();
     } catch {
@@ -128,6 +130,29 @@ export function SettingsScreen(props: {
       saveInFlight.current = false;
       setSaving(false);
     }
+  }
+
+  async function paired(nextToken: string, device: DeviceInfo): Promise<void> {
+    if (saveInFlight.current) throw new Error('Wait for the current save to finish.');
+    saveInFlight.current = true; setSaving(true);
+    const settings = {baseUrl: withScheme(baseUrl), token: nextToken, offlineEnabled, pairedDevice: device};
+    try {
+      if (profileName.trim()) await saveProfile(profileName, settings, profileId);
+      else if (profiles.length) throw new Error('Enter a connection name before pairing.');
+      else await saveSettings(settings);
+      if (mounted.current) {setToken(nextToken); setPairedDevice(device); props.onSaved();}
+    } finally {saveInFlight.current = false; if (mounted.current) setSaving(false);}
+  }
+
+  async function renew(): Promise<void> {
+    if (!pairedDevice || saving || testing) return;
+    const revision = ++generation.current, controller = new AbortController();
+    testController.current = controller; setTesting(true); setError('');
+    try {
+      const reply = await renewPairing({baseUrl: withScheme(baseUrl), token}, pairedDevice.generation, controller.signal);
+      if (mounted.current && revision === generation.current) {await paired(reply.token, reply.device); setNote('Device connection renewed and stored securely.');}
+    } catch {if (mounted.current && revision === generation.current) setError('Renewal could not be saved. Retry within one minute; if the connection expired, pair again.');}
+    finally {if (mounted.current && revision === generation.current) setTesting(false);}
   }
 
   async function testConnection(): Promise<void> {
@@ -173,7 +198,7 @@ export function SettingsScreen(props: {
       <Text style={styles.heading} accessibilityRole="header">{firstRun ? "Connect to Lightwork" : "Settings"}</Text>
       <Text style={styles.help}>
         {firstRun
-          ? "This app shows your organization's Lightwork tasks on your phone. To start, enter two things your administrator can give you."
+          ? "Enter your dashboard address, then pair with your signed-in account."
           : "The dashboard this app shows information from."}
       </Text>
       {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
@@ -195,7 +220,7 @@ export function SettingsScreen(props: {
       {profiles.length ? <Text style={styles.label}>Saved connections</Text> : null}
       {profiles.map(profile => <Button key={profile.id} label={(profileId === profile.id ? 'Current: ' : 'Switch to ') + profile.name} kind="secondary" disabled={disabled || testing || profileId === profile.id} onPress={() => switchProfile(profile.id)} />)}
       {profileId ? <Button label="Remove this saved connection" kind="secondary" disabled={disabled || testing} onPress={removeSelected} /> : null}
-      <Button label="Add another connection" kind="secondary" disabled={disabled || testing} onPress={() => edited(() => {setProfileId(undefined); setProfileName(''); setBaseUrl(''); setToken('');})} />
+      <Button label="Add another connection" kind="secondary" disabled={disabled || testing} onPress={() => edited(() => {setProfileId(undefined); setProfileName(''); setBaseUrl(''); setToken(''); setPairedDevice(undefined);})} />
       <Text style={styles.label}>Connection name (optional for a single connection)</Text>
       <TextInput style={styles.input} accessibilityLabel="Connection name" maxLength={80} editable={!disabled} value={profileName} onChangeText={setProfileName} />
       <Text style={styles.fieldHelp}>Choose a name to keep this connection securely alongside your other deployments.</Text>
@@ -206,14 +231,19 @@ export function SettingsScreen(props: {
         accessibilityHint="The web address you use to open Lightwork on a computer"
         editable={!disabled}
         value={baseUrl}
-        onChangeText={value => edited(() => setBaseUrl(value))}
+        onChangeText={value => edited(() => {setBaseUrl(value); setPairedDevice(undefined);})}
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="url"
         placeholder="https://lightwork.yourcompany.com"
       />
       <Text style={styles.fieldHelp}>The web address you use to open Lightwork on a computer.</Text>
-      <Text style={styles.label}>Access token</Text>
+      <PairingPanel address={withScheme(baseUrl)} label={profileName} disabled={disabled || testing} onPaired={paired} />
+      {pairedDevice ? <>
+        <Text style={styles.fieldHelp}>Paired to {pairedDevice.principal} in {pairedDevice.tenant || 'the default workspace'}. Credential expires {new Date(pairedDevice.expires_at * 1000).toLocaleString()}.</Text>
+        <Button label="Renew paired connection" disabled={disabled || testing} onPress={() => void renew()} />
+      </> : null}
+      <Text style={styles.label}>Advanced administrative token connection</Text>
       <View style={styles.tokenRow}>
         <TextInput
           style={[styles.input, styles.tokenInput]}
@@ -221,7 +251,7 @@ export function SettingsScreen(props: {
           accessibilityHint="A private code from your administrator"
           editable={!disabled}
           value={token}
-          onChangeText={value => edited(() => setToken(value))}
+          onChangeText={value => edited(() => {setToken(value); setPairedDevice(undefined);})}
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry={!showToken}

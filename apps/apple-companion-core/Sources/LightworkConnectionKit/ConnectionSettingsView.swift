@@ -30,11 +30,11 @@ public struct ConnectionSettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("This app shows your organization's Lightwork work. Enter two things your administrator can give you. The app only views information; it never changes anything.")
+                    Text("Enter your dashboard address, then pair with your signed-in account. This companion reads your own work. Its pairing and renewal controls manage only its connection.")
                         .font(.footnote)
                 }
                 Section {
-                    TextField("https://lightwork.yourcompany.com", text: $connection.address)
+                    TextField("https://lightwork.yourcompany.com", text: Binding(get: { connection.address }, set: { connection.address = $0; connection.pairedDevice = nil }))
                         .accessibilityLabel("Dashboard address")
                         .autocorrectionDisabled()
                         .disabled(!loaded || testing)
@@ -43,12 +43,25 @@ public struct ConnectionSettingsView: View {
                 } footer: {
                     Text("The web address you use to open Lightwork on a computer.")
                 }
+                DevicePairingSection(address: connection.address, disabled: !loaded || testing) { candidate in
+                    try store.save(candidate)
+                    connection = candidate
+                    onSaved()
+                    close()
+                }
+                if let device = connection.pairedDevice {
+                    Section {
+                        Text("Paired to " + device.principal + " in " + (device.tenant ?? "the default workspace"))
+                        Text("Expires " + Date(timeIntervalSince1970: device.expires_at).formatted())
+                        Button("Renew paired connection") { Task { await renew() } }.disabled(!loaded || testing)
+                    }
+                }
                 Section {
-                    SecureField("Paste the code from your administrator", text: $connection.token)
+                    SecureField("Paste the code from your administrator", text: Binding(get: { connection.token }, set: { connection.token = $0; connection.pairedDevice = nil }))
                         .accessibilityLabel("Access token")
                         .disabled(!loaded || testing)
                 } header: {
-                    Text("Access token")
+                    Text("Advanced administrative token connection")
                 } footer: {
                     Text("A private code kept in this device's secure storage. Leave it empty only if your administrator says sign-in is not needed.")
                 }
@@ -88,7 +101,21 @@ public struct ConnectionSettingsView: View {
 
     private func normalized() -> DashboardConnection {
         DashboardConnection(address: addressWithScheme(connection.address),
-                            token: connection.token.trimmingCharacters(in: .whitespacesAndNewlines))
+                            token: connection.token.trimmingCharacters(in: .whitespacesAndNewlines), pairedDevice: connection.pairedDevice)
+    }
+
+    private func renew() async {
+        guard !testing else { return }
+        let candidate = normalized(); testing = true; error = nil; note = nil
+        do {
+            let next = try await renewDevicePairing(connection: candidate)
+            guard active && normalized() == candidate else { testing = false; return }
+            try store.save(next); connection = next; onSaved()
+            note = "Device connection renewed and stored securely."
+        } catch {
+            if active { self.error = "Renewal could not be saved. Retry within one minute; if the connection expired, pair again." }
+        }
+        testing = false
     }
 
     private func save() {

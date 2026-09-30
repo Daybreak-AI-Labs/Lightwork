@@ -109,7 +109,7 @@ def _self_authenticated_path(path: str) -> bool:
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
-         "/api/v1/public/consent/", "/api/v1/public/policies/")
+         "/api/v1/public/consent/", "/api/v1/public/policies/", "/api/v1/devices/pairing/")
     )
 
 
@@ -689,7 +689,10 @@ def can_access_goal(request: Request, goal) -> bool:
     scoped read approval for another person's content or unowned legacy work.
     A read approval never grants mutation or publishing authority.
     """
-    if can_access_goal_principal(_authorization_principal(request), goal):
+    principal = _authorization_principal(request)
+    if getattr(request.state, "paired_device_id", None):
+        return bool(principal) and getattr(goal, "owner", "") == principal
+    if can_access_goal_principal(principal, goal):
         return True
     # A reviewed content read never confers authority to mutate or publish.
     if str(getattr(request, "method", "GET")).upper() not in {"GET", "HEAD"}:
@@ -841,6 +844,11 @@ def _resolve_principal(
         if _dashboard_token_authenticated(request):
             return None
         explicit_token = _bearer_token(request)
+        if explicit_token.startswith("lwdev1_"):
+            from .device_pairing import authenticate
+            principal = authenticate(explicit_token, request.method, request.url.path)
+            request.state.paired_device_verified = True
+            return principal
         if explicit_token and oidc_enabled():
             return _authenticate_oidc_bearer(request, explicit_token)
         raise HTTPException(
@@ -896,7 +904,9 @@ def _bind_principal(connection, principal):
     """The only phase that mutates request identity or the task's tenant pin."""
     if connection is not None and principal is not None:
         connection.state.principal = principal
-        _pin_tenant_from_principal(connection, principal)
+        from .device_pairing import bind as bind_device
+        if not bind_device(connection, principal):
+            _pin_tenant_from_principal(connection, principal)
     return principal
 
 

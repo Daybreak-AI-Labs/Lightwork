@@ -2,6 +2,11 @@
 
 **Preview source; no signed customer installer or delivered complication.**
 
+Settings now offers expiring [device pairing](../../docs/device-pairing.md)
+with explicit browser approval and own-work credentials, plus protected renewal.
+Advanced manual token setup remains available. Pairing manages the connection;
+watch task reads remain GET-only.
+
 A minimal SwiftUI watchOS app rendering the fixed glance
 payload from a self-hosted Lightwork dashboard:
 

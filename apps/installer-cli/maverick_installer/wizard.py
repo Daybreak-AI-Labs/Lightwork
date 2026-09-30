@@ -5561,6 +5561,13 @@ def pick_advanced() -> dict[str, Any]:
     advanced["mobile_offline"] = {"enabled": _q_confirm(
         "Allow mobile companions to save task copies for up to 24 hours and 2 MB? Shorter limits are available in All settings.", default=True,
     ), "max_age_seconds": 86400, "max_bytes": 2097152}
+    advanced["device_pairing"] = {"enabled": _q_confirm(
+        "Let named members pair personal companions with an expiring code and explicit browser approval? Devices can read only their own work in the chosen workspace.", default=False,
+    ), "credential_hours": 24, "allow_actions": False}
+    if advanced["device_pairing"]["enabled"]:
+        advanced["device_pairing"]["allow_actions"] = _q_confirm(
+            "Also allow separately opted-in companions to review and submit answers or Stop on their own tasks? Approvals remain on the dashboard.", default=False,
+        )
     advanced["model_guidance"] = _q_confirm(
         "Show dated model pricing evidence and provider-reported capabilities in Settings?",
         default=True,
@@ -9280,6 +9287,7 @@ def write_config(
     lines += _cfg_table("persona", persona)
     lines += _cfg_table("notifications", notifications)
     lines += _cfg_table("mobile_offline", (advanced or {}).get("mobile_offline"))
+    lines += _cfg_table("device_pairing", (advanced or {}).get("device_pairing"))
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)

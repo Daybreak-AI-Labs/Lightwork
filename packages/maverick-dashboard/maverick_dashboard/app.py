@@ -2192,6 +2192,9 @@ async def bearer_auth(request: Request, call_next):
         # a private bearer. The admin policy-publication prefix remains
         # under normal dashboard authentication.
         or request.url.path.startswith("/api/v1/public/policies/")
+        # Pairing bootstrap authenticates its own opaque, expiring device proof.
+        # Browser approval and device administration remain under normal auth.
+        or request.url.path.startswith("/api/v1/devices/pairing/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -2323,7 +2326,7 @@ async def bearer_auth(request: Request, call_next):
         # A non-static bearer may be an OIDC token in a mixed deployment. Let
         # the global dependency verify it; malformed/invalid credentials never
         # fall back to proxy or cookie identity there.
-        if _configured_oidc_bearer_present(request):
+        if header_token.startswith("lwdev1_") or _configured_oidc_bearer_present(request):
             return await call_next(request)
         _auth_metrics.record_auth_failure("bad_token")
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
