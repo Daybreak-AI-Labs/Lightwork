@@ -112,11 +112,11 @@ def test_recall_uses_exact_user_scope_and_preserves_local_scope(monkeypatch):
         channel="api", user_id="alice", domain="finance_sox",
     )
     dreaming.append_insights([
-        dreaming.DreamInsight(
+        dreaming.DreamInsight(owner="", source_goal_ids=[0],
             ts=1.0, kind="failure_pattern", domain="finance_sox",
             text="LOCAL_OPERATOR_DREAM", evidence=3,
         ),
-        dreaming.DreamInsight(
+        dreaming.DreamInsight(owner="", source_goal_ids=[0],
             ts=2.0, kind="failure_pattern", domain="finance_sox",
             text="ALICE_PRIVATE_DREAM", evidence=3,
             channel="api", user_id="alice",
@@ -150,7 +150,7 @@ def test_recall_uses_exact_user_scope_and_preserves_local_scope(monkeypatch):
     assert "ALICE_PRIVATE" not in local
 
 
-def test_success_lands_in_inbox_for_dream_consolidation():
+def test_external_success_is_stored_but_unknown_source_is_not_shared():
     _register()
     ok, _ = fleet_memory.ingest({
         "agent_id": "order-bot", "vendor": "agentforce", "kind": "success",
@@ -158,7 +158,7 @@ def test_success_lands_in_inbox_for_dream_consolidation():
     })
     assert ok
     successes, failures = dreaming._replay_donations(fleet_memory.inbox_dir())
-    assert len(successes) == 1 and failures == []
+    assert successes == [] and failures == []  # no authenticated local source lineage
     st = fleet_memory.status()
     assert st["ingested"]["agentforce:order-bot"]["success"] == 1
 

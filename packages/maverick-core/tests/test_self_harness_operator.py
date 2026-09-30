@@ -24,6 +24,15 @@ from maverick.swarm import SwarmContext
 from maverick.world_model import WorldModel
 
 
+def _write_shared_fixture(blocks, path):
+    sh._write_addenda(blocks, path)
+    meta = sh.load_line_meta(path)
+    for model, block in blocks.items():
+        for line in sh._bullets(block):
+            sh._upsert_line_meta(meta, model, line, {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, path)
+
+
 @pytest.fixture
 def ctx(tmp_path):
     world = WorldModel(tmp_path / "world.db")
@@ -53,7 +62,7 @@ def test_recalled_block_is_char_bounded(store, monkeypatch):
     for i in range(40):
         sh._apply_addendum(sh.HarnessProposal(
             model_id="model-x", signature=f"s{i}",
-            addendum_line=f"line {i} " + "x" * 250, rationale="r"), path=store)
+            addendum_line=f"line {i} " + "x" * 250, rationale="r", source_goal_ids=(0,)), path=store)
     block = sh.recall_addendum("model-x", store)
     assert len(block) <= sh._MAX_ADDENDUM_CHARS
     assert len([b for b in block.splitlines() if b.startswith("- ")]) <= sh._MAX_LINES_PER_MODEL
@@ -65,7 +74,7 @@ def test_prompt_growth_is_bounded(ctx, store, monkeypatch):
     for i in range(40):
         sh._apply_addendum(sh.HarnessProposal(
             model_id="model-x", signature=f"s{i}",
-            addendum_line=f"guidance {i} " + "y" * 250, rationale="r"), path=store)
+            addendum_line=f"guidance {i} " + "y" * 250, rationale="r", source_goal_ids=(0,)), path=store)
     grown = _agent(ctx, "model-x").system
     # the prompt grows by at most the block budget (+ a small framing margin),
     # however much was learned -- the per-turn token tax is bounded.
@@ -83,7 +92,7 @@ def test_recall_scopes_to_agent_role(ctx, store, monkeypatch):
     # lesson stays off a verifier prompt of the same model.
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     key = sh._scoped_key("model-x", "role=orchestrator")
-    sh._write_addenda(
+    _write_shared_fixture(
         {key: "Operating guidance learned for this model:\n- plan tighter"}, store)
     assert "plan tighter" in _agent(ctx, "model-x").system     # orchestrator agent
     verifier = Agent(ctx=ctx, role="verifier", brief="check a thing",
@@ -98,7 +107,7 @@ def test_recall_registers_model_for_outcome_credit(ctx, store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     sh._apply_addendum(sh.HarnessProposal(
         model_id="model-w", signature="s",
-        addendum_line="verify the export window", rationale="r"), path=store)
+        addendum_line="verify the export window", rationale="r", source_goal_ids=(0,)), path=store)
     assert "verify the export window" in _agent(ctx, "model-w").system
     assert ctx.harness_models == {"model-w"}
     # a model with nothing learned registers nothing
@@ -111,7 +120,7 @@ def test_recall_registers_model_for_outcome_credit(ctx, store, monkeypatch):
 
 def test_forget_removes_guidance_from_the_next_prompt(ctx, store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
-    sh._write_addenda({"model-x": "Operating guidance learned for this model:\n"
+    _write_shared_fixture({"model-x": "Operating guidance learned for this model:\n"
                        "- verify the export window first\n- check the second thing"}, store)
     assert "verify the export window first" in _agent(ctx, "model-x").system
 
@@ -130,7 +139,7 @@ def test_forget_removes_guidance_from_the_next_prompt(ctx, store, monkeypatch):
 
 def test_inspection_works_while_feature_is_off(store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")  # explicit opt-out
-    sh._write_addenda({"model-x": "Operating guidance learned for this model:\n- kept lesson"},
+    _write_shared_fixture({"model-x": "Operating guidance learned for this model:\n- kept lesson"},
                       store)
     # recall is inert (nothing injected), but the operator can still see + roll back
     assert sh.recall_addendum("model-x", store) == ""
@@ -141,6 +150,6 @@ def test_inspection_works_while_feature_is_off(store, monkeypatch):
 
 def test_disabled_install_is_inert_in_the_prompt(ctx, store, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
-    sh._write_addenda({"model-x": "Operating guidance learned for this model:\n- a lesson"},
+    _write_shared_fixture({"model-x": "Operating guidance learned for this model:\n- a lesson"},
                       store)
     assert "a lesson" not in _agent(ctx, "model-x").system

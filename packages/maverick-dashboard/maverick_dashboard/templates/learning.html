@@ -672,8 +672,8 @@
 
   function render(D) {
     var acc = D.accumulated || {};
-    var learned = acc.learned_capabilities || 0;
-    var grounded = acc.grounded_outcomes || 0;
+    var learned = Number.isFinite(acc.learned_capabilities) ? acc.learned_capabilities : null;
+    var grounded = Number.isFinite(acc.grounded_outcomes) ? acc.grounded_outcomes : null;
 
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
@@ -682,8 +682,8 @@
     k.appendChild(B.kpi({ label: 'Decisions recorded', value: acc.decisions }));
     k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
       sub: 'approvals: ' + B.fmt(acc.approvals) }));
-    k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned,
-      sub: B.fmt(grounded) + ' results checked against real outcomes' }));
+    k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned === null ? 'Not available' : learned,
+      sub: grounded === null ? 'Source-scoped counts are unavailable; no workspace total or zero is implied.' : B.fmt(grounded) + ' results checked against real outcomes' }));
 
     B.donut(document.getElementById('bd-systems'), {
       segments: [
@@ -698,9 +698,9 @@
     var rows = [
       { label: 'Decisions', value: acc.decisions || 0 },
       { label: 'Human decisions', value: acc.human_decisions || 0 },
-      { label: 'Approvals', value: acc.approvals || 0 },
-      { label: 'Learned capabilities', value: learned },
-      { label: 'Results checked against real outcomes', value: grounded }];
+      { label: 'Approvals', value: acc.approvals || 0 }];
+    if (learned !== null) rows.push({label: 'Learned capabilities', value: learned});
+    if (grounded !== null) rows.push({label: 'Results checked against real outcomes', value: grounded});
     if ((acc.flow_self_improvements || 0) > 0) {
       rows.push({ label: 'Workflow self-improvements',
                   value: acc.flow_self_improvements, cls: 'info' });

@@ -46,6 +46,7 @@ GOAL_LINKED_STORES = (
     "attachment_submissions",
     "goal_events",
     "goal_origins",
+    "goal_mutation_receipts",
     "messages",
     "processed_messages",
     "questions",

@@ -40,7 +40,7 @@ def test_learning_api_reports_governed_components_on_and_dgm_off_by_default(
     assert data["dgm"]["live_adoption"] is False
     assert set(data["accumulated"]) >= {
         "decisions", "human_decisions", "approvals",
-        "grounded_outcomes", "learned_capabilities", "departments",
+        "departments",
     }
 
 
@@ -117,15 +117,15 @@ def test_consequence_flag_flips_component_on(tmp_path, monkeypatch):
     assert data["components_on"] >= 1
 
 
-def test_signoff_shows_up_as_a_grounded_outcome(tmp_path, monkeypatch):
+def test_signoff_grounds_locally_without_exposing_unscoped_totals(tmp_path, monkeypatch):
     # End-to-end moat proof: a human sign-off becomes a grounded outcome the
     # Learning view counts -- the loop from human judgement to accumulated asset.
     monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
     w = _isolate(tmp_path, monkeypatch)
     gid = w.create_goal("Refresh the cash forecast", "", domain="finance_cash13w")
     w.set_goal_status(gid, "done", result=_TABLE)
-    w.start_episode(gid)
-    assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 0
+    episode = w.start_episode(gid)
+    assert "grounded_outcomes" not in client.get("/api/v1/learning").json()["accumulated"]
     r = client.post(
         f"/api/v1/goals/{gid}/signoff",
         json={
@@ -134,7 +134,9 @@ def test_signoff_shows_up_as_a_grounded_outcome(tmp_path, monkeypatch):
         },
     )
     assert r.status_code == 200
-    assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 1
+    from maverick import consequence
+    assert consequence.resolve(gid, episode) is not None
+    assert "grounded_outcomes" not in client.get("/api/v1/learning").json()["accumulated"]
 
 
 def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
@@ -155,7 +157,7 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
     assert client.get("/api/v1/learning").json()["components_on"] == total
 
 
-def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
+def test_flow_improvements_do_not_expose_unscoped_workspace_totals(tmp_path, monkeypatch):
     # A forward flow self-rewrite (the loop enacting a proposal) shows up as a
     # counted moat number for an admin caller; auto-reverts don't inflate it.
     _isolate(tmp_path, monkeypatch)
@@ -165,7 +167,8 @@ def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
     evolution_log.record_apply("f", "b", "action", "agent", 2, source="auto-apply")   # then undone
     evolution_log.record_apply("f", "b", "agent", "action", 3, source="auto-revert")
     acc = client.get("/api/v1/learning").json()["accumulated"]
-    assert acc["flow_self_improvements"] == 1   # only the rewrite that stuck is counted
+    assert evolution_log.improvement_count() == 1
+    assert "flow_self_improvements" not in acc
 
 
 def test_flow_autonomy_is_its_own_opt_in_not_the_blanket_button(tmp_path, monkeypatch):
@@ -449,3 +452,16 @@ def test_learning_page_is_configured_in_app_not_in_server_files(tmp_path, monkey
     assert 'id="lrn-switch-members"' in t
     # threat_hunt / env_hunt switches belong to the Security page, not here.
     assert "threat_hunt" in t and "env_hunt" in t    # named only in the exclusion list
+
+
+def test_learning_policy_authority_is_separate_from_owned_content(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    from maverick_dashboard import api, auth
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:admin")
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: True)
+    data = api._learning_snapshot(None)
+    assert data["dgm"] is not None and data["flow_autonomy"] is not None
+    assert "grounded_outcomes" not in data["accumulated"]
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: False)
+    data = api._learning_snapshot(None)
+    assert data["dgm"] is None and data["flow_autonomy"] is None

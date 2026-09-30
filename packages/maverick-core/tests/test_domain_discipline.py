@@ -148,7 +148,7 @@ class TestSpawnIntegration:
     def test_memory_includes_dream_insights(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MAVERICK_DREAMING", "1")
         ipath = tmp_path / "insights.ndjson"
-        dreaming.append_insights([dreaming.DreamInsight(
+        dreaming.append_insights([dreaming.DreamInsight(owner="", source_goal_ids=[0],
             ts=1.0, kind="failure_pattern", domain="finance_sox",
             text="Recurring failure (budget, seen 3x) on ledger goals.",
             evidence=3,
@@ -162,11 +162,11 @@ class TestSpawnIntegration:
         monkeypatch.setenv("MAVERICK_DREAMING", "1")
         ipath = tmp_path / "insights.ndjson"
         dreaming.append_insights([
-            dreaming.DreamInsight(
+            dreaming.DreamInsight(owner="", source_goal_ids=[0],
                 ts=1.0, kind="failure_pattern", domain="finance_sox",
                 text="LOCAL_OPERATOR_LEDGER_LESSON", evidence=3,
             ),
-            dreaming.DreamInsight(
+            dreaming.DreamInsight(owner="", source_goal_ids=[0],
                 ts=2.0, kind="failure_pattern", domain="finance_sox",
                 text="ALICE_PRIVATE_LEDGER_LESSON", evidence=3,
                 channel="api", user_id="alice",
@@ -200,7 +200,7 @@ class TestSpawnIntegration:
         sibling reflexion recall passed it."""
         monkeypatch.setenv("MAVERICK_DREAMING", "1")
         ipath = tmp_path / "insights.ndjson"
-        dreaming.append_insights([dreaming.DreamInsight(
+        dreaming.append_insights([dreaming.DreamInsight(owner="", source_goal_ids=[0],
             ts=1.0, kind="failure_pattern", domain="finance_sox",
             text="INJECT_IGNORE_PRIOR_INSTRUCTIONS on ledger goals.",
             evidence=3,

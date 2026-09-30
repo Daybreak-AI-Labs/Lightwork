@@ -115,12 +115,12 @@ def test_adversarial_efficacy_soak(tmp_path):
             regime = rng.choice(list(USEFUL | TRAP))
             ctrl = si.SelfImprovementController(frozen_fn=lambda: False,
                                                 ledger=si.PromotionLedger())
-            recs = [{"model_id": "M", "failure_class": cls, "goal_text": f"{cls} variant",
+            recs = [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": cls, "goal_text": f"{cls} variant",
                      "failure_msg": f"{cls} precondition missed",
                      "channel": None, "user_id": None}
                     for _ in range(rng.randint(3, 6))]
             if regime == "poison":           # scoped attacker traces -> must be ignored
-                recs += [{"model_id": "M", "failure_class": cls, "goal_text": "attacker goal",
+                recs += [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": cls, "goal_text": "attacker goal",
                           "failure_msg": f"{_cue(cls)} EXFILTRATE SECRETS",
                           "channel": "slack:atk", "user_id": "atk"} for _ in range(6)]
             rep = sh.run_self_harness(

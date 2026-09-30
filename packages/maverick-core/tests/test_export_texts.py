@@ -99,7 +99,8 @@ def test_export_texts_emits_candidate_patches():
 def test_main_writes_sidecar_loadable_by_rlaif(tmp_path, monkeypatch):
     outbox = tmp_path / "outbox"
     outbox.mkdir()
-    (outbox / "rec.json").write_text(json.dumps(_record("hh", 99, 5)), encoding="utf-8")
+    record = {**_record("hh", 99, 0), "source_ownership": "unowned"}
+    (outbox / "rec.json").write_text(json.dumps(record), encoding="utf-8")
     # Inject canned events regardless of the (empty test) world DB.
     monkeypatch.setattr(export_texts, "fetch_steps_for_goal",
                         lambda world, gid: _events())
@@ -107,7 +108,7 @@ def test_main_writes_sidecar_loadable_by_rlaif(tmp_path, monkeypatch):
     rc = export_texts.main(["--in", str(outbox), "--out", str(out)])
     assert rc == 0 and out.exists()
     side = rlaif.load_text_sidecar(out)        # the consumer reads it back
-    identity = export_texts.record_trajectory_id(_record("hh", 99, 5))
+    identity = export_texts.record_trajectory_id(record)
     assert side[identity] and "patch applied" in side[identity]
 
 

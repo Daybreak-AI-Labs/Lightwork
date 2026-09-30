@@ -4671,7 +4671,7 @@ class PostgresWorldModel:
             # after receipt issuance but before its table's DELETE.
             cur.execute(
                 "LOCK TABLE conversations, turns, goals, episodes, artifacts, "
-                "attachments, goal_events, goal_origins, messages, "
+                "attachments, goal_events, goal_origins, goal_mutation_receipts, messages, "
                 "processed_messages, questions, share_links, signoffs, "
                 "fact_history, facts IN SHARE ROW EXCLUSIVE MODE"
             )
@@ -4714,6 +4714,7 @@ class PostgresWorldModel:
                     "attachments",
                     "goal_events",
                     "goal_origins",
+                    "goal_mutation_receipts",
                     "messages",
                     "processed_messages",
                     "questions",

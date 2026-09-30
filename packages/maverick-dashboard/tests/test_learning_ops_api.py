@@ -186,13 +186,15 @@ def test_a_job_that_cannot_stop_refuses_the_stop_button(client):
     gate.set()
 
 
-def test_stop_budget_only_tightens_the_wall_clock():
+@pytest.mark.parametrize("elapsed", [0.0, 0.0001, 12.0])
+@pytest.mark.parametrize("cap", [None, 0.0001, 3600.0])
+def test_stop_budget_only_tightens_the_wall_clock(monkeypatch, elapsed, cap):
     from maverick.budget import Budget, BudgetExceeded
     from maverick_dashboard.learning_jobs import stop_budget
-    budget = Budget(max_wall_seconds=3600.0)
-    time.sleep(0.01)
+    budget = Budget(max_wall_seconds=cap)
+    monkeypatch.setattr(Budget, "elapsed", lambda self: elapsed)
     stop_budget(budget)()
-    assert budget.max_wall_seconds < 3600.0
+    assert budget.max_wall_seconds == (elapsed if cap is None else min(cap, elapsed))
     with pytest.raises(BudgetExceeded):
         budget.check()
 
@@ -264,6 +266,10 @@ def _harness(monkeypatch, tmp_path, *, corpus: bool = True, ledger: str = ""):
     monkeypatch.setattr(self_harness, "_store_path", lambda: store)
     self_harness._write_addenda({"claude-x": "Operating guidance learned for this model:\n"
                                              "- always cite the source\n- never cite the source"}, store)
+    meta = {}
+    for line in ("always cite the source", "never cite the source"):
+        self_harness._upsert_line_meta(meta, "claude-x", line, {"source_goal_ids": [0]}, now=1)
+    self_harness._write_line_meta(meta, store)
 
 
 def test_clash_check_asks_the_checker_model_within_a_spending_limit(client, monkeypatch, tmp_path, audit_rows):
@@ -603,7 +609,7 @@ def test_page_scripts_are_served_and_use_the_shared_confirm(client):
 # ---- every "go here" in a message is a real place, and saving there works ---------
 
 def _save_setting(client, changes):
-    return client.post("/api/v1/settings/catalog", json={"changes": changes, "confirm": True})
+    return client.post("/api/v1/settings/catalog", json={"changes": changes, "confirm": True, "expected_revision": client.get("/api/v1/settings/catalog").json()["revision"]})
 
 
 def _data_file(name: str) -> str:
@@ -634,14 +640,14 @@ def test_every_destination_named_in_a_message_exists(client):
     for key in ("self_improvement", "data_engine", "factory_learning"):
         label = ops.part_place(key).split("”")[0].lstrip("“")
         assert label in learning, key
-    assert ops._DGM_SECTION in open(Path(__file__).parents[1] / "maverick_dashboard/templates/learning.html").read()
+    assert ops._DGM_SECTION in (Path(__file__).parents[1] / "maverick_dashboard/templates/learning.html").read_text(encoding="utf-8")
 
 
 def test_test_case_location_is_checked_on_the_server_and_then_used(client):
     from maverick.paths import maverick_home
     plan = client.get(f"{LO}/self-harness/plan").json()
     assert plan["test_cases_set_up"] is False and "“Test cases for improvements”" in plan["places"]["test_cases"]
-    outside = _save_setting(client, [{"id": "self_harness.eval_corpus", "value": "/etc/test-cases.json"}])
+    outside = _save_setting(client, [{"id": "self_harness.eval_corpus", "value": str(maverick_home().parent / "outside-test-cases.json")}])
     assert outside.status_code == 400 and "data folder" in outside.json()["message"]
     no_folder = _save_setting(client, [{"id": "self_harness.eval_corpus",
                                         "value": str(maverick_home() / "missing" / "c.json")}])

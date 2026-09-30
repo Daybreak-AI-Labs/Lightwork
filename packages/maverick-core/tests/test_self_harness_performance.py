@@ -28,7 +28,7 @@ from maverick import self_harness as sh
 
 
 def _recs(goals, *, fclass="timeout"):
-    return [{"model_id": "M", "failure_class": fclass, "goal_text": g,
+    return [{"owner": "", "goal_id": 0, "model_id": "M", "failure_class": fclass, "goal_text": g,
              "failure_msg": "x", "channel": None, "user_id": None} for g in goals]
 
 

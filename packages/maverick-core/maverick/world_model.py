@@ -4061,6 +4061,7 @@ class WorldModel:
                         "attachments",
                         "goal_events",
                         "goal_origins",
+                        "goal_mutation_receipts",
                         "messages",
                         "processed_messages",
                         "questions",

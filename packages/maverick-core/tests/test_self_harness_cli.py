@@ -19,6 +19,15 @@ from maverick import self_harness as sh
 from maverick.cli import main
 
 
+def _write_shared_fixture(blocks, path):
+    sh._write_addenda(blocks, path)
+    meta = sh.load_line_meta(path)
+    for model, block in blocks.items():
+        for line in sh._bullets(block):
+            sh._upsert_line_meta(meta, model, line, {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, path)
+
+
 @pytest.fixture
 def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -28,7 +37,7 @@ def _home(tmp_path, monkeypatch):
 
 def _seed(model="claude-x", lines=("verify the precondition", "check inputs first")):
     block = "Operating guidance learned for this model:\n" + "\n".join(f"- {x}" for x in lines)
-    sh._write_addenda({model: block}, sh._store_path())
+    _write_shared_fixture({model: block}, sh._store_path())
 
 
 def test_show_lists_learned_guidance(_home):
@@ -49,7 +58,7 @@ def test_show_json_is_machine_readable(_home):
 
 def test_show_filters_by_model(_home):
     _seed("model-a", ["line a"])
-    sh._write_addenda({**sh.load_addenda(sh._store_path()),
+    _write_shared_fixture({**sh.load_addenda(sh._store_path()),
                        "model-b": "Operating guidance learned for this model:\n- line b"},
                       sh._store_path())
     r = CliRunner().invoke(main, ["self-harness", "show", "--model", "model-a"])
@@ -154,7 +163,7 @@ def test_preview_explains_scoped_exclusion(_home):
     for i in range(4):
         reflexion.record(goal_text=f"export ledger {i}", failure_class="timeout",
                          failure_msg="timed out", reflection="x",
-                         model_id="claude-x", channel="slack:x", user_id="u1")
+                         model_id="claude-x", channel="slack:x", user_id="u1", goal_id=0)
     r = CliRunner().invoke(main, ["self-harness", "preview", "--model", "claude-x"])
     assert r.exit_code == 0, r.output
     assert "0 eligible" in r.output
@@ -167,7 +176,7 @@ def test_preview_counts_eligible_unscoped(_home):
     from maverick import reflexion
     for i in range(4):
         reflexion.record(goal_text=f"export ledger {i}", failure_class="timeout",
-                         failure_msg="timed out", reflection="x", model_id="claude-x")
+                         failure_msg="timed out", reflection="x", model_id="claude-x", goal_id=0)
     r = CliRunner().invoke(
         main, ["self-harness", "preview", "--model", "claude-x", "--min-support", "99"])
     assert r.exit_code == 0, r.output
@@ -186,8 +195,8 @@ def test_preview_rejects_nonpositive_min_support(_home):
 
 def _seed_with_meta(model, line, **prov):
     block = "Operating guidance learned for this model:\n- " + line
-    sh._write_addenda({model: block}, sh._store_path())
-    rec = {"model_id": model, "text": line, "learned_at": 1700000000.0,
+    _write_shared_fixture({model: block}, sh._store_path())
+    rec = {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "model_id": model, "text": line, "learned_at": 1700000000.0,
            "updated_at": 1700000000.0, **prov}
     sh._write_line_meta({sh._line_id(model, line): rec}, sh._store_path())
 
@@ -231,7 +240,7 @@ def test_conflicts_cli_flags_contradictions(_home):
     block = ("Operating guidance learned for this model:\n"
              "- Prefer streaming for large exports\n"
              "- Avoid streaming for large exports")
-    sh._write_addenda({"claude-x": block}, sh._store_path())
+    _write_shared_fixture({"claude-x": block}, sh._store_path())
     r = CliRunner().invoke(main, ["self-harness", "conflicts"])
     assert r.exit_code == 0, r.output
     assert "possible conflict" in r.output
@@ -239,7 +248,7 @@ def test_conflicts_cli_flags_contradictions(_home):
 
 
 def test_conflicts_cli_clean(_home):
-    sh._write_addenda(
+    _write_shared_fixture(
         {"claude-x": "Operating guidance learned for this model:\n- Verify the token first"},
         sh._store_path())
     r = CliRunner().invoke(main, ["self-harness", "conflicts"])
@@ -314,7 +323,7 @@ def test_run_cli_dry_pass(_home, monkeypatch):
     monkeypatch.setattr(si, "enabled", lambda: True)         # gate ON, so "dry" is the reason
     for i in range(3):
         reflexion.record(goal_text=f"export the nightly ledger {i}", failure_class="timeout",
-                         failure_msg="timed out", reflection="r", model_id="claude-x")
+                         failure_msg="timed out", reflection="r", model_id="claude-x", goal_id=0)
     r = CliRunner().invoke(
         main, ["self-harness", "run", "--model", "claude-x", "--no-retire"])
     assert r.exit_code == 0, r.output
@@ -332,7 +341,7 @@ def test_run_cli_retires_stale(_home, monkeypatch):
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
         "self_harness": {"enable": True, "retire_after_days": 30}})
     block = "Operating guidance learned for this model:\n- ancient line"
-    sh._write_addenda({"claude-x": block}, sh._store_path())
+    _write_shared_fixture({"claude-x": block}, sh._store_path())
     rec = {"model_id": "claude-x", "text": "ancient line",
            "learned_at": time.time() - 100 * 86400, "updated_at": time.time() - 100 * 86400}
     sh._write_line_meta({sh._line_id("claude-x", "ancient line"): rec}, sh._store_path())
@@ -473,7 +482,7 @@ def test_corpus_review_lists_and_resolves(_home, monkeypatch, tmp_path):
     cpath.write_text(_json.dumps({"m1": [{"goal": "live", "expected": "x"}]}))
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
         "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
-    ev.stage_candidates(cpath, "m1", [{"goal": "g1", "expected": "e1"}])
+    ev.stage_candidates(cpath, "m1", [{"goal": "g1", "expected": "e1", "privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0]}])
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1"])
     assert r.exit_code == 0, r.output
@@ -481,7 +490,7 @@ def test_corpus_review_lists_and_resolves(_home, monkeypatch, tmp_path):
     # Harvested goal text is run-history text: terminal control bytes are
     # stripped before echoing (ANSI/OSC injection).
     ev.stage_candidates(cpath, "m1", [{"goal": "evil \x1b[31mred\x1b[0m goal",
-                                       "expected": "\x1b]0;t\x07done"}])
+                                       "expected": "\x1b]0;t\x07done", "privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0]}])
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1"])
     assert r.exit_code == 0, r.output
@@ -541,11 +550,12 @@ def _seed_scoped(model, domain, line, **meta):
     block = "Operating guidance learned for this model:\n- " + line
     store = sh.load_addenda(sh._store_path())
     store[key] = block
-    sh._write_addenda(store, sh._store_path())
+    _write_shared_fixture(store, sh._store_path())
     if meta:
-        rec = {"model_id": model, "text": line, "learned_at": 1700000000.0,
+        rec = {"privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0], "model_id": model, "text": line, "learned_at": 1700000000.0,
                "updated_at": 1700000000.0, **meta}
         m = sh.load_line_meta(sh._store_path())
+        rec["model_id"] = key
         m[sh._line_id(key, line)] = rec
         sh._write_line_meta(m, sh._store_path())
 
@@ -593,13 +603,14 @@ def test_canary_review_graduates_and_demotes(_home):
     # a proven canary graduates (flag cleared, line kept); a failing one is pulled.
     _seed_with_meta("claude-x", "proven line", canary=True,
                     recall_success=3, recall_failure=0)
-    sh._write_addenda(
+    _write_shared_fixture(
         {**sh.load_addenda(sh._store_path()),
          "claude-x": ("Operating guidance learned for this model:\n"
                       "- proven line\n- failing line")},
         sh._store_path())
     m = sh.load_line_meta(sh._store_path())
     m[sh._line_id("claude-x", "failing line")] = {
+        "privacy_schema": "shared-unowned-sources-v1", "source_goal_ids": [0],
         "model_id": "claude-x", "text": "failing line", "canary": True,
         "recall_success": 0, "recall_failure": 2}
     sh._write_line_meta(m, sh._store_path())

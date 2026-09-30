@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from maverick import user_notes
+
+
+@pytest.fixture(autouse=True)
+def _personal_collection_enabled(monkeypatch):
+    from maverick import config
+    original = config.get_dreaming
+    monkeypatch.setattr(config, "get_dreaming", lambda: {**original(), "user_notes": True})
 
 
 class TestExtractPreferences:

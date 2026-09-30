@@ -14,7 +14,7 @@ class _World:
         self.conversation_key = (channel, user_id)
         return type("Conversation", (), {"id": 1})()
 
-    def append_turn(self, conversation_id, role, text):
+    def append_turn(self, conversation_id, role, text, *, goal_id=None):
         self.turns.append((conversation_id, role, text))
 
     def create_goal(self, title, text, *, owner="", execution_principal=""):

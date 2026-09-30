@@ -31,7 +31,7 @@ def _clean_killswitch(monkeypatch, tmp_path):
 
 def _reflexions() -> list[dict]:
     return [
-        {
+        {"owner": "", "goal_id": 0,
             "model_id": "M",
             "failure_class": "timeout",
             "goal_text": f"reconcile the recurring ledger export {index}",

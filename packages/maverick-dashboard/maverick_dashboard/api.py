@@ -15640,9 +15640,12 @@ def _learning_snapshot(request: Request) -> dict:
             accumulated["flow_self_improvements"] = improvements
     # Autonomous flow self-improvement: its own opt-in, deliberately NOT folded
     # into the blanket "turn learning on" button -- autonomously rewriting a live
-    # workflow is a heavier consequence than passive learning. Admin/unscoped view.
+    # workflow is a heavier consequence than passive learning. Policy visibility
+    # uses installation authority separately from private content ownership.
+    from .auth import has_global_permission
+    can_manage = has_global_permission(request, "admin")
     flow_autonomy = None
-    if owner is None:
+    if can_manage:
         try:
             from maverick import flow as _flow_mod
 
@@ -15654,7 +15657,7 @@ def _learning_snapshot(request: Request) -> dict:
         except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
             flow_autonomy = None
     dgm = None
-    if owner is None:
+    if can_manage:
         try:
             from maverick import self_modify
 
