@@ -1553,7 +1553,7 @@ def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None
             EventKind.LEARNING_UPDATE,
             agent="self_learning",
             operation="generated_tool_authority_revoked",
-            name=name,
+            name_sha256=hashlib.sha256(name.encode("utf-8")).hexdigest(),
             tenant=tenant,
             source_sha256=digest,
             consent_revoked=consent_revoked,
