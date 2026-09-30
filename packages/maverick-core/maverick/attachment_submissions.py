@@ -158,7 +158,6 @@ class SubmissionStore:
             goal_id = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
             detail = {"manifest": manifest, "kind": kind,
                       "message": "Submission admitted as a draft; preparing attachments."}
-            detail = {"manifest": manifest, "message": "Submission admitted as a draft; preparing attachments."}
             if chat is not None:
                 detail["conversation_id"] = chat.record(connection, root_id=chat_root_id or goal_id,
                                                        goal_id=goal_id, owner=owner, text=chat_text)

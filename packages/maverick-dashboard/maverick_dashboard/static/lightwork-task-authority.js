@@ -4,7 +4,7 @@
   var root = document.getElementById('task-authority');
   if (!root) return;
   var allowed = root.dataset.operate === '1', checking = null;
-  var selector = '#answer-send,#cancel-btn,#edit-toggle,#edit-save,#feedback-up,#feedback-down,#share-create,.share-revoke,#signoff-approve,#signoff-reject,#attach-add-btn,#reply-attach,#halt-resume,#ps-run,#answer-mic';
+  var selector = '#answer-send,#cancel-btn,#edit-toggle,#edit-save,#feedback-up,#feedback-down,#share-create,#share-confirm,.share-revoke,#signoff-approve,#signoff-reject,#attach-add-btn,#reply-attach,#halt-resume,#ps-run,#answer-mic';
   var restoring = new WeakMap(), passed = new WeakSet();
   function project() {
     document.querySelectorAll(selector).forEach(function (node) {

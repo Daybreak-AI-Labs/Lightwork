@@ -309,6 +309,7 @@
       </svg>
       Lightwork
     </div>
+    <p><a href="/my-work">View my background work</a></p>
     <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}"></p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
@@ -462,7 +463,7 @@
     <div class="goal-share" data-goal="{{ goal.id }}">
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
       <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download or share full history</a>
-      <button type="button" id="share-create" class="btn btn--ghost">Create share link</button>
+      <button type="button" id="share-create" class="btn btn--ghost">Review share link</button>
       <input type="text" id="share-url" class="input" readonly aria-label="Share link"
              style="display: none; max-width: 28rem;" onclick="this.select()">
       <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
@@ -906,9 +907,10 @@
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({question_id: qid, answer: ans}),
             });
-            if (r.ok) {
+            if (r.status === 204 && !r.redirected) {
+              if (answerForm.mvRecovery) await answerForm.mvRecovery.clear();
               resetField();
-              window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm}}));
+              window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm, recoveryCleared: true}}));
               currentQuestionId = null;
               questionPanel.style.display = 'none';
               recordExchange(questionText.textContent, ans);
@@ -935,21 +937,34 @@
         // earlier turns as context. The server answers with the new page.
         // Disabled controls are excluded from native form serialization.
         const formData = new FormData(answerForm);
+        let navigatingAfterReceipt = false;
+        const submittedControls = Array.from(answerForm.querySelectorAll('input,select,textarea,button'));
+        const disabledBefore = submittedControls.map(function (control) { return control.disabled; });
+        submittedControls.forEach(function (control) { control.disabled = true; });
         submitting = true;
         if (sendBtn) sendBtn.disabled = true;
         answerInput.disabled = true;
         composerMessage('Sending…');
         try {
           const r = await fetch(answerForm.action, { method: 'POST', body: formData });
-          if (r.redirected) { window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm}})); window.location.href = r.url; return; }
+          if (r.redirected) {
+            const destination = new URL(r.url, window.location.origin);
+            if (destination.origin === window.location.origin && /^\/chat\/goal\/\d+$/.test(destination.pathname)) {
+              if (answerForm.mvRecovery) await answerForm.mvRecovery.clear();
+              window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm, recoveryCleared: true}})); navigatingAfterReceipt = true; window.location.href = r.url; return;
+            }
+            composerMessage('Your sign-in changed. The message was not confirmed; your draft has been kept.', true); return;
+          }
           const j = await r.json().catch(function () { return {}; });
           composerMessage(replyFailureText(r, j), true);
         } catch (e) {
           composerMessage('Could not send — check your connection and try again.', true);
         } finally {
           submitting = false;
-          if (sendBtn) sendBtn.disabled = false;
-          answerInput.disabled = false;
+          if (!navigatingAfterReceipt) {
+            submittedControls.forEach(function (control, index) { control.disabled = disabledBefore[index]; });
+            syncComposer();
+          }
         }
       });
 
@@ -1448,75 +1463,7 @@
     });
   </script>
 
-  <script>
-    // Share links: create (token shown once, in a copyable field) + revoke.
-    (function () {
-      const wrap = document.querySelector('.goal-share');
-      if (!wrap) return;
-      const goal = wrap.dataset.goal;
-      const createBtn = document.getElementById('share-create');
-      const urlField = document.getElementById('share-url');
-      const msg = document.getElementById('share-msg');
-      const list = document.getElementById('share-list');
-
-      createBtn.addEventListener('click', async function () {
-        createBtn.disabled = true;
-        msg.textContent = 'Creating…';
-        try {
-          const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) + '/share', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-          });
-          const j = await r.json().catch(function () { return {}; });
-          if (r.ok && j.url) {
-            urlField.value = j.url;
-            urlField.style.display = '';
-            urlField.focus();
-            urlField.select();
-            msg.textContent = 'Copy this link now — it is shown only once.';
-            if (j.id) addRow(j.id);
-          } else {
-            msg.textContent = cgErr(r, 'create the link');
-          }
-        } catch (e) { msg.textContent = cgErr(e, 'create the link'); }
-        finally { createBtn.disabled = false; }
-      });
-
-      function addRow(id) {
-        const li = document.createElement('li');
-        li.dataset.id = id;
-        li.appendChild(document.createTextNode('Link #' + id + ' (read-only) '));
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'btn btn--ghost share-revoke';
-        b.dataset.id = id; b.textContent = 'Revoke';
-        li.appendChild(b);
-        list.appendChild(li);
-      }
-
-      list.addEventListener('click', async function (ev) {
-        const btn = ev.target.closest('.share-revoke');
-        if (!btn) return;
-        if (!(await mvConfirm('Revoke this share link? Anyone using it will immediately lose access.', { okText: 'Revoke link' }))) return;
-        btn.disabled = true;
-        msg.textContent = '';
-        try {
-          const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) +
-                                '/share/' + encodeURIComponent(btn.dataset.id) + '/revoke',
-                                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-          if (r.ok) {
-            const li = btn.closest('li');
-            if (li) li.remove();
-          } else {
-            const detail = await r.json().catch(function () { return {}; });
-            msg.textContent = cgErr(r, 'turn off the link');
-            btn.disabled = false;
-          }
-        } catch (e) {
-          msg.textContent = 'Could not turn off the link. Check your connection and try again.';
-          btn.disabled = false;
-        }
-      });
-    })();
-  </script>
+  <script src="/static/lightwork-deliverable-sharing.js" defer></script>
   <script>
     // Attachments panel: list the goal's files (uploads + machine-generated
     // transcript/extract companions), download each, add more to a goal.

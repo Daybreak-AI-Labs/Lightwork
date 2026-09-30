@@ -64,8 +64,11 @@ def prepare(context, goal_id):
                 old = _read(path)
                 if old.get("state") == "prepared":
                     path.unlink()
-        if sum(1 for _ in directory.glob("*.preview")) >= 100:
-            raise ValueError("The sharing receipt limit has been reached. Resolve existing attempts before preparing another copy.")
+        receipts = list(directory.glob("*.preview"))
+        if len(receipts) >= 10000:
+            raise ValueError("The sharing history reached its supported limit. Ask an administrator to review receipt retention before preparing another copy.")
+        if sum(_read(path).get("state") in {"prepared", "dispatching", "unknown"} for path in receipts) >= 100:
+            raise ValueError("There are too many unresolved sharing attempts. Reconcile those attempts before preparing another copy.")
         _write(directory / (identifier + ".preview"), envelope)
     return {"preview_id": identifier, "sha256": digest, "account": account,
             "payload": payload, "scope": "Redacted audit replay and proof evidence; different from the technical task archive. Business content may remain. Anyone with the secret gist link can read it."}
@@ -100,6 +103,9 @@ def send(context, goal_id, identifier, digest):
             raise ValueError("The saved content no longer matches its reviewed fingerprint.")
         if item["state"] == "shared":
             return {"shared": True, "url": item["url"], "attempt": identifier}
+        if item["state"] == "rejected":
+            return {"shared": False, "outcome": "rejected", "attempt": identifier,
+                    "message": "GitHub rejected this request. Prepare a new reviewed copy after correcting the connection."}
         if item["state"] in {"dispatching", "unknown"}:
             return {"shared": False, "outcome": "unknown", "attempt": identifier,
                     "message": "GitHub may have received this copy. Check the attempt on GitHub before creating another copy."}

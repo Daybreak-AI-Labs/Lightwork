@@ -83,7 +83,7 @@
 {% else %}
   <div class="approval-empty">
     <p class="muted">Nothing needs your decision right now.</p>
-    <p><a class="btn btn--ghost" href="/audit">See past decisions</a></p>
+    <p><a class="btn btn--ghost" href="#request-decision-history">See decisions on your requests</a></p>
   </div>
 {% endif %}
 
@@ -292,3 +292,12 @@
   });
 }());
 </script>
+
+<details id="request-decision-history" class="panel">
+  <summary>Decisions on your requests</summary>
+  <p>Authorization, execution and external verification are separate. These records show the decisions on requests you made; current task status does not prove an external change occurred.</p>
+  <div id="request-decision-rows"></div>
+  <p id="request-decision-status" role="status" aria-live="polite"></p>
+  <button type="button" id="request-decision-more" class="btn btn--ghost">Load decisions</button>
+</details>
+<script src="/static/lightwork-approval-history.js" defer></script>

@@ -287,17 +287,49 @@ def _vendor_reconciliation_source(
         return [], [{"kind": "vendor_reconciliation", "status": "unavailable"}]
 
 
+def _owned_task_attention(world, principal, task_allowed=None):
+    """Private task questions and recovery never inherit a fleet-wide view."""
+    items, coverage = [], []
+    owner = principal or ""
+    for task_status in ("blocked", "failed"):
+        try:
+            rows = world.list_goals(status=task_status, owner=owner, limit=SOURCE_LIMIT + 1, order="desc")
+            for goal in rows[:SOURCE_LIMIT]:
+                if goal.owner != owner or (task_allowed is not None and not task_allowed(goal)):
+                    continue
+                questions = world.open_questions(goal_id=goal.id) if task_status == "blocked" else []
+                version = [[question.id, question.asked_at, question.question] for question in questions]
+                reason = (f"{len(questions)} clarification question(s) waiting for your answer" if questions
+                          else "Review the stopped task before choosing whether to restart; no retry happens automatically")
+                items.append(_item("task_attention", goal.id, goal.title,
+                                   href=f"/chat/goal/{goal.id}", owner=owner,
+                                   updated_at=goal.updated_at, version=[task_status, version], reason=reason))
+            coverage.append({"kind": "task_attention", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
+        except Exception:
+            coverage.append({"kind": "task_attention", "status": "unavailable"})
+    states = [source["status"] for source in coverage]
+    return items, [{"kind": "task_attention", "status": "unavailable" if "unavailable" in states else "partial" if "partial" in states else "current"}]
+
+
 def collect(world, *, principal: str | None, owner: str | None, specs: list[dict],
             assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
             project_reviews: Callable[[], list[dict]] | None = None,
             vendor_reconciliations: Callable[[], dict] | None = None,
+            connection_attention: Callable[[], dict] | None = None,
+            approval_allowed: Callable[[object], bool] | None = None,
+            task_allowed: Callable[[object], bool] | None = None,
             now: float | None = None) -> dict:
     """Project only authorized content; report failed or bounded sources honestly."""
     now = time.time() if now is None else now
     items, coverage = [], []
+    task_items, task_coverage = _owned_task_attention(world, principal, task_allowed)
+    items.extend(task_items)
+    coverage.extend(task_coverage)
     try:
         rows = world.pending_approvals()
         for row in rows[:SOURCE_LIMIT]:
+            if approval_allowed is None or not approval_allowed(row):
+                continue
             if row.claimed_by and row.claimed_by != principal:
                 continue
             state = world.approval_state(row.id)
@@ -318,13 +350,13 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         candidates = [goal for goal in rows[:SOURCE_LIMIT] if goal.domain in scoped_specs]
         signed = world.signoffs_for_goals([goal.id for goal in candidates])
         for goal in candidates:
-            if signed.get(goal.id):
+            if signed.get(goal.id) == "approved":
                 continue
             spec = scoped_specs[goal.domain]
             items.append(_item("signoff", goal.id, spec["deliverable"],
                 href=f"/chat/goal/{goal.id}", owner=getattr(goal, "owner", ""),
                 updated_at=goal.updated_at, version=[goal.title, spec.get("gate")],
-                reason="Completed work awaiting sign-off"))
+                reason="Result was rejected; revise and request fresh sign-off" if signed.get(goal.id) == "rejected" else "Completed work awaiting sign-off"))
         coverage.append({"kind": "signoff", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
     except Exception:
         coverage.append({"kind": "signoff", "status": "unavailable"})
@@ -352,16 +384,33 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         try:
             reviews = project_reviews()
             for review in reviews:
-                if review["reviewer"] != principal or review["status"] != "pending":
+                owner_action = review.get("owner") == principal and (review["status"] == "changes_requested" or review["stale"])
+                if not owner_action and (review["reviewer"] != principal or review["status"] != "pending"):
                     continue
                 items.append(_item("project_review", review["id"], review["title"],
-                    href="/project-reviews#packet=" + review["id"], owner=review["reviewer"],
+                    href="/project-reviews#packet=" + review["id"], owner=principal if owner_action else review["reviewer"],
                     due_at=review["due_at"], updated_at=review["updated_at"],
                     version=[review["revision"], review["source_version"], review["stale"]],
-                    reason="Source changed; ask the owner for a fresh result" if review["stale"] else "Assigned project result review"))
+                    reason=("Address reviewer changes and submit a fresh packet" if review["status"] == "changes_requested" else "Source changed; submit a fresh result") if owner_action else ("Source changed; ask the owner for a fresh result" if review["stale"] else "Assigned project result review")))
             coverage.append({"kind": "project_review", "status": "current"})
         except Exception:
             coverage.append({"kind": "project_review", "status": "unavailable"})
+    if connection_attention is not None:
+        try:
+            connections = connection_attention()
+            if connections.get("coverage") not in {"current", "disabled", "unavailable", "partial"} or not isinstance(connections.get("items"), list):
+                raise ValueError("Connection coverage is unavailable")
+            for connection in connections["items"][:SOURCE_LIMIT]:
+                href = str(connection["href"])
+                if not href.startswith("/") or href.startswith("//"):
+                    raise ValueError("Invalid connection recovery destination")
+                items.append(_item("connection_attention", connection["name"], connection["title"],
+                                   href=href, owner=principal or "", version=connection["revision"], reason=connection["reason"]))
+            coverage.append({"kind": "connection_attention", "status": "partial" if len(connections["items"]) > SOURCE_LIMIT else connections["coverage"]})
+        except Exception:
+            coverage.append({"kind": "connection_attention", "status": "unavailable"})
+    else:
+        coverage.append({"kind": "connection_attention", "status": "unavailable"})
     reconciliations, reconciliation_coverage = _vendor_reconciliation_source(
         vendor_reconciliations,
     )

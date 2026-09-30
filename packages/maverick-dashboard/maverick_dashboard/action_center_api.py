@@ -125,9 +125,18 @@ def _model(request):
     if config.get_features().get("vendor_onboarding") is True:
         def vendor_reconciliations():
             return _vendor_reconciliation_rows(request)
+    from .content_access import can_read_approval
+    from .auth import can_access_goal
+    from maverick.domain import suite_for
+    def connection_attention():
+        from .connection_dependencies import connection_attention as owned_connections
+        return owned_connections(request)
     return action_center.collect(_world(), principal=principal, owner=goal_owner_filter(request),
         specs=specs, assessments=list_saved, assessment_allowed=allowed,
-        project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations)
+        project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
+        connection_attention=connection_attention,
+        approval_allowed=lambda row: can_read_approval(request, row, world=_world()),
+        task_allowed=lambda goal: can_access_goal(request, goal) and suite_allowed(request, suite_for(goal.domain)))
 
 
 async def _snapshot(request):
@@ -148,7 +157,7 @@ async def _snapshot(request):
 async def inbox(request: Request, response: Response,
                 kind: Literal[
                     "all", "approval", "signoff", "assessment", "project_review",
-                    "vendor_reconciliation",
+                    "vendor_reconciliation", "task_attention", "connection_attention",
                 ] = "all",
                 view: Literal["active", "unread", "snoozed", "overdue", "all"] = "active",
                 assignment: Literal["all", "mine", "available"] = "all",

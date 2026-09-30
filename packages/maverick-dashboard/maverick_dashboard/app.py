@@ -1086,6 +1086,8 @@ app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
+from .my_work_api import router as my_work_router
+app.include_router(my_work_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
@@ -10378,6 +10380,12 @@ def shared_goal(request: Request, token: str) -> HTMLResponse:
         # path; known factory failures fail closed here.
         if g.domain:
             raise HTTPException(status_code=404, detail="not found") from exc
+    from .deliverable_sharing import release_matches
+    try:
+        if not release_matches(w, g, token):
+            raise HTTPException(404, "not found")
+    except Exception as exc:
+        raise HTTPException(404, "not found") from exc
     contract, rendered = _goal_deliverable(g)
     artifacts = _goal_artifacts(w, goal_id)
     # Re-check after materializing the composite payload. If an artifact or
@@ -10391,6 +10399,12 @@ def shared_goal(request: Request, token: str) -> HTMLResponse:
             raise
         except Exception as exc:
             raise HTTPException(status_code=404, detail="not found") from exc
+    try:
+        fresh_goal = w.get_goal(goal_id)
+        if fresh_goal is None or w.resolve_share_link(token) != goal_id or not release_matches(w, fresh_goal, token):
+            raise HTTPException(404, "not found")
+    except Exception as exc:
+        raise HTTPException(404, "not found") from exc
     return templates.TemplateResponse(
         request,
         "shared_goal.html",

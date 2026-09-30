@@ -129,6 +129,14 @@ class AssessmentEvidenceIn(BaseModel):
     evidence: str = Field(..., max_length=2000)
 
 
+class ShareLinkIn(BaseModel):
+    """Informed confirmation of the exact current public release preview."""
+    confirm: bool = False
+    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    lifetime_seconds: int = Field(86400, ge=3600, le=604800)
+    label: str = Field("Read-only deliverable", min_length=1, max_length=120)
+
+
 class SignoffIn(BaseModel):
     """A human's sign-off on a finished, gated deliverable -- the certify/reject
     decision the pack's output gate calls for, bound to the version the client

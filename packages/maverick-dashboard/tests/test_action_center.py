@@ -43,6 +43,8 @@ class World:
 
     def list_goals(self, **kwargs):
         assert kwargs["owner"] == "user:alice"
+        if kwargs.get("status") != "done":
+            return []
         return [SimpleNamespace(id=1, domain="forecast", title="Forecast", owner="user:alice", updated_at=20),
                 SimpleNamespace(id=2, domain="restricted", title="Restricted", owner="user:alice", updated_at=20)]
 
@@ -60,7 +62,8 @@ def model(world=None):
     ]
     return center.collect(world or World(), principal="user:alice", owner="user:alice",
         specs=[{"domain":"forecast", "gate":"human", "deliverable":"Cash forecast"}],
-        assessments=lambda: assessments, assessment_allowed=lambda row: row["type"] == "privacy", now=100)
+        assessments=lambda: assessments, assessment_allowed=lambda row: row["type"] == "privacy",
+        approval_allowed=lambda row: True, connection_attention=lambda: {"items": [], "coverage": "current"}, now=100)
 
 
 def test_unified_items_respect_owner_suite_assignment_and_due_state():
@@ -492,3 +495,29 @@ def test_api_and_page_permission_floor_and_private_caching(monkeypatch):
     assert client.get("/api/v1/action-center").headers["cache-control"] == "private, no-store"
     monkeypatch.setattr(auth, "has_permission", lambda request, permission: False)
     assert client.get("/api/v1/action-center").status_code == 403
+
+
+def test_owned_questions_are_grouped_and_a_changed_question_invalidates_snooze():
+    class Questions(World):
+        questions = [SimpleNamespace(id=10, question="Confirm the period", asked_at=30), SimpleNamespace(id=11, question="Which account?", asked_at=31)]
+        def list_goals(self, **kwargs):
+            if kwargs["status"] == "blocked":
+                return [SimpleNamespace(id=8, title="Waiting task", owner="user:alice", updated_at=32)]
+            return []
+        def open_questions(self, **kwargs):
+            return self.questions
+    world = Questions()
+    first = model(world)
+    item = next(row for row in first["items"] if row["kind"] == "task_attention")
+    assert len([row for row in first["items"] if row["kind"] == "task_attention"]) == 1
+    preference = {"revision": 1, "states": {item["id"]: {"source_version": item["source_version"], "read": True, "snoozed_until": 500}}}
+    world.questions = [SimpleNamespace(id=12, question="A different prerequisite?", asked_at=40)]
+    changed = center.apply_preferences(model(world), preference, now=100)
+    new = next(row for row in changed["items"] if row["kind"] == "task_attention")
+    assert not new["snoozed"] and not new["read"]
+
+
+def test_approval_source_refuses_content_without_explicit_authority_callback():
+    result = center.collect(World(), principal="user:alice", owner="user:alice", specs=[],
+                            assessments=lambda: [], assessment_allowed=lambda row: False)
+    assert not any(row["kind"] == "approval" for row in result["items"])

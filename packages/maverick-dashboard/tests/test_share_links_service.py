@@ -9,7 +9,12 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def _world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from maverick import world_model, config, audit
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    (tmp_path / "config.toml").write_text("", encoding="utf-8")
+    config.reset_config_cache()
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: True)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     return world_model.WorldModel(tmp_path / "world.db")
 
@@ -22,11 +27,21 @@ def _make_goal(w, *, approve=True):
     return gid
 
 
+def _create(goal_id, **changes):
+    preview = client.post(f"/api/v1/goals/{goal_id}/share/preview")
+    if preview.status_code != 200:
+        return preview
+    payload = {"confirm": True, "source_sha256": preview.json()["source"]["sha256"],
+               "lifetime_seconds": 3600, "label": "Forecast review"}
+    payload.update(changes)
+    return client.post(f"/api/v1/goals/{goal_id}/share", json=payload)
+
+
 def test_create_and_view_then_revoke(tmp_path, monkeypatch):
     w = _world(tmp_path, monkeypatch)
     gid = _make_goal(w)
-    # create (operator; no-token mode == owns everything)
-    r = client.post(f"/api/v1/goals/{gid}/share")
+    # create (operator in auth-off mode owns this unowned task)
+    r = _create(gid)
     assert r.status_code == 201, r.text
     body = r.json()
     assert "/share/" in body["url"]
@@ -68,10 +83,10 @@ def test_existing_token_fails_closed_when_domain_policy_is_missing(
 def test_gated_share_requires_current_approval(tmp_path, monkeypatch):
     w = _world(tmp_path, monkeypatch)
     gid = _make_goal(w, approve=False)
-    assert client.post(f"/api/v1/goals/{gid}/share").status_code == 403
+    assert _create(gid).status_code == 409
 
     w.record_signoff(gid, "approved", decided_by="reviewer")
-    created = client.post(f"/api/v1/goals/{gid}/share")
+    created = _create(gid)
     assert created.status_code == 201
     token = created.json()["url"].split("/share/")[1]
     assert TestClient(app).get(f"/share/{token}").status_code == 200
@@ -81,22 +96,58 @@ def test_gated_share_requires_current_approval(tmp_path, monkeypatch):
     w.set_goal_status(gid, "done", result="replacement")
     assert w.signoff_for(gid) is None
     assert TestClient(app).get(f"/share/{token}").status_code == 404
-    assert client.post(f"/api/v1/goals/{gid}/share").status_code == 403
+    assert _create(gid).status_code == 409
 
 
 def test_share_section_on_goal_page(tmp_path, monkeypatch):
     w = _world(tmp_path, monkeypatch)
     gid = _make_goal(w)
     t = client.get(f"/chat/goal/{gid}").text
-    assert "share-create" in t and "Create share link" in t
+    assert "share-create" in t and "Review share link" in t
 
 
 def test_revoke_is_goal_scoped(tmp_path, monkeypatch):
     w = _world(tmp_path, monkeypatch)
     g1 = _make_goal(w)
     g2 = _make_goal(w)
-    token = client.post(f"/api/v1/goals/{g1}/share").json()["url"].split("/share/")[1]
+    token = _create(g1).json()["url"].split("/share/")[1]
     lid = w.share_links_for_goal(g1)[0]["id"]
     # try to revoke g1's link via g2's path -> no-op, link stays live
     client.post(f"/api/v1/goals/{g2}/share/{lid}/revoke")
     assert TestClient(app).get(f"/share/{token}").status_code == 200
+
+
+def test_preview_does_not_mint_and_changed_result_requires_a_new_preview(tmp_path, monkeypatch):
+    w = _world(tmp_path, monkeypatch)
+    gid = _make_goal(w)
+    preview = client.post(f"/api/v1/goals/{gid}/share/preview")
+    assert preview.status_code == 200
+    assert not w.share_links_for_goal(gid)
+    w.set_goal_status(gid, "done", result="A changed release")
+    w.record_signoff(gid, "approved", decided_by="reviewer")
+    response = client.post(f"/api/v1/goals/{gid}/share", json={"confirm": True,
+        "source_sha256": preview.json()["source"]["sha256"], "lifetime_seconds": 3600, "label": "Review"})
+    assert response.status_code == 409
+    assert not w.share_links_for_goal(gid)
+
+
+def test_explicit_confirmation_and_policy_lifetime_are_required(tmp_path, monkeypatch):
+    w = _world(tmp_path, monkeypatch)
+    gid = _make_goal(w)
+    assert _create(gid, confirm=False).status_code == 409
+    assert _create(gid, lifetime_seconds=900000).status_code == 422
+    assert not w.share_links_for_goal(gid)
+
+
+def test_new_link_does_not_release_changed_ungated_content(tmp_path, monkeypatch):
+    w = _world(tmp_path, monkeypatch)
+    gid = w.create_goal("Private draft", "")
+    w.set_goal_status(gid, "done", result="Reviewed bytes")
+    response = _create(gid)
+    assert response.status_code == 201
+    token = response.json()["url"].split("/share/")[1]
+    w.set_goal_status(gid, "done", result="Unreviewed replacement")
+    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    listing = client.get(f"/api/v1/goals/{gid}/share").json()["links"]
+    assert listing[0]["label"] == "Forecast review"
+    assert listing[0]["state"] == "source changed"

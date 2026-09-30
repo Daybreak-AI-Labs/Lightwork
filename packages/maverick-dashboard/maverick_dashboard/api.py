@@ -152,6 +152,7 @@ from .api_schemas import (
     ScheduleOut,
     SchemaImportIn,
     SharePointSyncIn,
+    ShareLinkIn,
     SignoffIn,
     SiteScanIn,
     SkillCreateIn,
@@ -1718,7 +1719,7 @@ def goal_thread_history(request: Request, goal_id: int, before_id: int | None = 
     if before_id is not None and before_id < 1:
         raise HTTPException(400, "The history position is invalid.")
     principal = caller_principal(request)
-    if principal and principal != goal.owner:
+    if (principal or "") != (goal.owner or ""):
         raise HTTPException(403, "Access to one task does not grant access to the employee conversation.")
     turns, more = ChatThreads(world).history(goal_id, before_id=before_id)
     return {"turns": [asdict(turn) for turn in turns], "has_more": more,
@@ -9874,38 +9875,73 @@ def goal_artifact_history(request: Request, goal_id: int, title: str) -> dict:
     return {"title": title, "versions": out}
 
 
-# Default share-link lifetime (7 days). Operators revoke early from the goal page.
-_SHARE_TTL_SECONDS = 7 * 24 * 3600
+def _share_goal(request, goal_id):
+    from .app import _require_same_origin
+    require_permission(request, "operate")
+    if request.method != "GET":
+        _require_same_origin(request)
+    world = _world()
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "No such task.")
+    assert_goal_access(request, goal)
+    if (caller_principal(request) or "") != (goal.owner or ""):
+        raise HTTPException(403, "Only the task owner can release its content publicly.")
+    return world, goal
+
+
+def _share_prerequisites(world, goal):
+    from maverick.domain import available_domains
+    if goal.status != "done" or not (goal.result or "").strip():
+        raise HTTPException(409, "Finish this task with a saved result before creating a public link.")
+    if goal.domain and goal.domain not in available_domains():
+        raise HTTPException(409, "This task's release policy is unavailable. Ask an administrator to restore its department before sharing.")
+    gate = _goal_gate(goal.domain)
+    signoff = world.signoff_for(goal.id)
+    if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
+        raise HTTPException(409, f"{gate} sign-off is required for the current result. Review and sign off before sharing.")
+
+
+@router.post("/goals/{goal_id}/share/preview")
+def preview_goal_share(request: Request, goal_id: int) -> dict:
+    from .deliverable_sharing import LIFETIMES, snapshot
+    world, goal = _share_goal(request, goal_id)
+    _share_prerequisites(world, goal)
+    source = snapshot(world, goal)
+    return {"source": source, "allowed_lifetimes": LIFETIMES,
+            "audience": "Anyone holding the link can read this title, saved result and listed artifacts until expiry or revocation. Forwarded or downloaded copies cannot be recalled.",
+            "scope": "Conversation history, attachments, task activity and controls are excluded. Editing this result or its artifacts makes this link unavailable; create a newly reviewed link to release changes."}
+
+
+@router.get("/goals/{goal_id}/share")
+def goal_share_links(request: Request, goal_id: int) -> dict:
+    from .deliverable_sharing import listing
+    world, goal = _share_goal(request, goal_id)
+    return {"links": listing(world, goal)}
 
 
 @router.post("/goals/{goal_id}/share", status_code=201)
-def create_goal_share(request: Request, goal_id: int) -> dict:
-    """Mint a read-only share link to a goal's deliverable (default 7-day
-    expiry). Operator role + goal access. The clear token is returned ONCE --
-    only its hash is stored, so it can't be re-fetched later, only revoked."""
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    require_permission(request, "operate")
-    if g.status != "done":
-        raise HTTPException(
-            status_code=409,
-            detail="only a finished deliverable can be shared",
-        )
-    gate = _goal_gate(g.domain)
-    signoff = w.signoff_for(goal_id)
-    if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
-        raise HTTPException(
-            status_code=403,
-            detail=f"{gate} sign-off is required before sharing this deliverable",
-        )
-    link_id, token = w.create_share_link(
-        goal_id, created_by=caller_principal(request) or "", ttl_seconds=_SHARE_TTL_SECONDS
-    )
+def create_goal_share(request: Request, goal_id: int, body: ShareLinkIn) -> dict:
+    """Mint only after informed confirmation of a fresh public-result preview."""
+    from .deliverable_sharing import LIFETIMES, remember, snapshot
+    world, goal = _share_goal(request, goal_id)
+    _share_prerequisites(world, goal)
+    if body.confirm is not True or body.lifetime_seconds not in LIFETIMES:
+        raise HTTPException(409, "Review the audience and choose an allowed lifetime before confirming.")
+    source = snapshot(world, goal)
+    if not hmac.compare_digest(source["sha256"], body.source_sha256):
+        raise HTTPException(409, "The result changed after your preview. Review the new version before creating a link.")
+    link_id, token = world.create_share_link(goal_id, created_by=caller_principal(request) or "",
+                                            ttl_seconds=body.lifetime_seconds, token_prefix="r1_")
+    try:
+        remember(world, goal, link_id=link_id, source=source, label=body.label.strip(),
+                 lifetime=body.lifetime_seconds, actor=caller_principal(request) or "")
+    except Exception as exc:
+        world.revoke_share_link(link_id, goal_id=goal_id)
+        raise HTTPException(503, "This link could not be published. Review the link list before trying again.") from exc
     url = str(request.base_url).rstrip("/") + "/share/" + token
-    return {"id": link_id, "url": url}
+    return {"id": link_id, "url": url, "label": body.label.strip(),
+            "expires_at": next(row["expires_at"] for row in world.share_links_for_goal(goal_id) if row["id"] == link_id)}
 
 
 @router.post("/goals/{goal_id}/share/{link_id}/revoke")
@@ -12058,6 +12094,9 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
 
     permissions = _copilot_permissions(request)
     result = public_context(context_for_page(page), permissions)
+    from .draft_api import context_for
+
+    result["client_context"] = context_for(request)
     configured = bool(_any_provider_key_set())
     result["model_provider_configured"] = configured
     from maverick.config import get_features
@@ -12113,6 +12152,14 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         sanitize_model_reply,
     )
 
+    from .draft_api import context_for
+
+    expected_context = request.headers.get("X-Lightwork-Copilot-Context")
+    if expected_context is not None:
+        import hmac
+
+        if not hmac.compare_digest(expected_context, context_for(request)):
+            raise HTTPException(409, "Your account or workspace changed. Reopen Copilot before sending this question.")
     check_goal_rate_limit(request, source="copilot")
     msg = payload.message.strip()
     if not msg:
@@ -13552,6 +13599,48 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
             ),
         },
     )
+
+
+@router.get("/approvals/history")
+def requested_approval_history(request: Request, before_id: int | None = None) -> dict:
+    """Requester-scoped decision records, independent from global audit access."""
+    from maverick.attachment_submissions import SubmissionStore
+    from maverick.safety.secret_detector import redact
+
+    from .app import _approval_queue_context
+    from .auth import can_access_goal
+
+    require_permission(request, "operate")
+    world = _world()
+    who = _supervisor(request)
+    store = SubmissionStore(world)
+    scope, values = ("1=1", ()) if store.sqlite else store.scope("tenant_id")
+    cursor = " AND id < ?" if before_id is not None else ""
+    cursor_values = (before_id,) if before_id is not None else ()
+    rows = world.query(f"SELECT id FROM approvals WHERE requested_by=? AND {scope}{cursor} ORDER BY id DESC LIMIT 51",
+                       (who, *values, *cursor_values))
+    result = []
+    for row in rows[:50]:
+        approval = world.get_approval(int(row[0]))
+        if approval is None or approval.requested_by != who:
+            continue
+        goal = world.get_goal(approval.goal_id) if approval.goal_id else None
+        if approval.goal_id and (goal is None or not can_access_goal(request, goal)):
+            continue
+        context = _approval_queue_context([approval])
+        card = context["cards"].get(approval.id)
+        def text(value):
+            return redact(str(value or ""))[0]
+        result.append({"id": approval.id, "action": context["approval_actions"][approval.id],
+                       "summary": text(context["approval_details"][approval.id]), "status": approval.status,
+                       "decided_by": text(approval.decided_by), "decided_at": approval.decided_at,
+                       "expires_at": card.get("expires_at") if card else None,
+                       "before": text(card["preview"]["before"]) if card else "",
+                       "after": text(card["preview"]["after"]) if card else "",
+                       "goal_id": approval.goal_id,
+                       "execution": "Current task state: " + goal.status if goal else "No task execution outcome is attached to this decision."})
+    return {"items": result, "has_more": len(rows) > 50,
+            "before_id": int(rows[min(49, len(rows) - 1)][0]) if rows else before_id}
 
 
 @router.get("/approvals/{approval_id}/state")

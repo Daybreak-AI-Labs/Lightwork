@@ -2165,11 +2165,13 @@ class PostgresWorldModel:
     # ---- Share links (migration v17) ----------------------------------------
 
     def create_share_link(
-        self, goal_id: int, *, created_by: str = "", ttl_seconds: float | None = None,
+        self, goal_id: int, *, created_by: str = "", ttl_seconds: float | None = None, token_prefix: str = "",
     ) -> tuple[int, str]:
         """Mint a read-only share link; returns ``(id, clear_token)``. Only the
         token's SHA-256 is persisted, so the clear token is shown exactly once."""
-        token = secrets.token_urlsafe(32)
+        if token_prefix not in {"", "r1_"}:
+            raise ValueError("Unsupported share token version")
+        token = token_prefix + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = time.time()
         exp = now + float(ttl_seconds) if ttl_seconds else None

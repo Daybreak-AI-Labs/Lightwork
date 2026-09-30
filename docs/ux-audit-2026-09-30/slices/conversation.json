@@ -22,24 +22,24 @@
   },
   {
     "id": "LW-004",
-    "status": "planned",
-    "implementation_evidence": "Existing companion private task projection preserved.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "my_work_api.py /my-work projects exact-owner tasks and saved outcomes, schedule occurrences, authorized immutable flow definitions and owner connection dependencies; explicit partial/unavailable coverage, status truth, fresh request context, paused bounded polling, native-control links from conversation. Reuses schedule_definitions and connection_dependencies from the connections slice.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Join task/schedule/flow/connection/result sources with coverage and per-owner authorized controls."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-005",
-    "status": "planned",
-    "implementation_evidence": "Existing Action Center sources preserved.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "action_center.py adds one versioned task-attention row per owned blocked/failed task, current question identity, rejected signoffs, owner changes-requested/stale review packets and exact-owner connection dependencies; explicit adapter coverage and existing private version-bound snooze/read preferences. Approval projections now require can_read_approval; task rows require current goal and suite authority.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Add question/failed-work/rejected-review/expiring-dependency adapters, deduplicate and bind private snooze/read preferences."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-006",
-    "status": "planned",
-    "implementation_evidence": "Failed Copilot request retains editable text; successful matched response clears it; obsolete generation results stay suppressed.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "lightwork-copilot.js retains failed text, blocks in-flight prompt replacement, reuses visible retry row, rejects late generation replies and fresh-checks server-bound account/workspace context before sending and publishing. Transient operation-source failures preserve drafts; auth/scope changes clear private state. Copilot endpoint validates current context before a model call.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Bind general Copilot drafts/history to freshly verified account/workspace scope even on pages without a learning-example controller."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-007",
@@ -141,10 +141,10 @@
   },
   {
     "id": "LW-125",
-    "status": "planned",
-    "implementation_evidence": "Existing version-bound review packets preserved.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "ProjectReviews.revision_draft creates an idempotent owner-private unstarted task from the exact packet/comments using durable native admission. Review UI opens its spending/start review, then links a changed result to the predecessor with required change summary and fresh reviewer/team/source checks. New packet identity/status cannot inherit prior acceptance; source and packet reads remain freshly authorized.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Owner revise-and-resubmit task binding, exact prior-packet provenance, change summary and duplicate resubmission receipt remain."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-126",
@@ -155,17 +155,17 @@
   },
   {
     "id": "LW-127",
-    "status": "planned",
-    "implementation_evidence": "Existing global audit boundary preserved.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "GET /approvals/history filters requested_by plus currently accessible attached task, keyset pages exact requester records without global audit atom, uses integrity-checked/redacted approval cards and separate authorization versus current execution fields. _approvals_queue now links this history and deadline/retry controller.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Owner/requester-scoped decision history projection and UI without global audit access remain."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-128",
-    "status": "planned",
-    "implementation_evidence": "Approval feedback now explicitly distinguishes action authorization from execution.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Project-review captured-result outcome timeline labels acceptance, pending/changes/withdrawal and next owner separately from task execution, final signoff and external verification. Approval queue and private history independently label recorded authorization versus unconfirmed execution; no packet approval signs off or runs a task.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Cross-surface timeline must join packet review, deliverable signoff, execution and external verification with next owner/action."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-129",
@@ -190,10 +190,10 @@
   },
   {
     "id": "LW-132",
-    "status": "planned",
-    "implementation_evidence": "Existing current completion/signoff/hashed expiry/revocation checks preserved; PR2529 overlaps audience/prerequisite UI and routing.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Explicit POST share/preview returns exact title/result/latest artifacts, anyone-with-link scope and allowed 1-hour/1-day/7-day lifetimes under the existing seven-day ceiling. Create requires confirmation plus matching source SHA; governed metadata stores label and reviewed version. New r1_ tokens fail closed until metadata exists and after any result/artifact change; public page preserves live release gates. Management shows expiry, revoked/stale state and uncertain-response recovery; legacy tokens retain existing release checks.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Version-bound public-result preview, explicit creation confirmation, policy-bounded lifetime and lifecycle display remain; coordinate2529."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-133",

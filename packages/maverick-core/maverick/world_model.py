@@ -1937,11 +1937,13 @@ class WorldModel:
     # ---- share links: revocable, expiring read-only access to a goal --------
 
     def create_share_link(self, goal_id: int, *, created_by: str = "",
-                          ttl_seconds: float | None = None) -> tuple[int, str]:
+                          ttl_seconds: float | None = None, token_prefix: str = "") -> tuple[int, str]:
         """Mint a read-only share link for a goal. Returns ``(id, clear_token)``;
         only the token's SHA-256 is persisted, so the clear token is shown to the
         creator exactly once and the DB never holds anything that grants access."""
-        token = secrets.token_urlsafe(32)
+        if token_prefix not in {"", "r1_"}:
+            raise ValueError("Unsupported share token version")
+        token = token_prefix + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = time.time()
         exp = now + float(ttl_seconds) if ttl_seconds else None

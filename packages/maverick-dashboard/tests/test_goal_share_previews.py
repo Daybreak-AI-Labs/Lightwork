@@ -65,3 +65,10 @@ def test_review_digest_cannot_be_replaced(prepared, monkeypatch):
     monkeypatch.setattr(shares, "upload_payload", lambda *args: pytest.fail("must not disclose"))
     with pytest.raises(ValueError, match="fingerprint"):
         shares.send("context", 7, "a" * 32, digest)
+
+
+def test_rejected_attempt_cannot_be_resent_without_a_new_review(prepared, monkeypatch):
+    record, digest = prepared
+    record["state"] = "rejected"
+    monkeypatch.setattr(shares, "upload_payload", lambda *args: pytest.fail("must not resend"))
+    assert shares.send("context", 7, "a" * 32, digest)["outcome"] == "rejected"

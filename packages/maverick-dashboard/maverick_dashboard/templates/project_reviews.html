@@ -30,6 +30,11 @@
         <label for="pr-reviewer">Assigned reviewer</label><select id="pr-reviewer" class="input" required></select>
         <label for="pr-due">Review due</label><input id="pr-due" class="input" type="datetime-local" required>
         <label for="pr-note">What should they review?</label><textarea id="pr-note" class="input" rows="3" maxlength="4000" required></textarea>
+        <fieldset id="pr-resubmit" hidden><legend>Fresh review after revision</legend>
+          <p id="pr-previous-label"></p>
+          <label for="pr-change-summary">What changed since the previous review?</label><textarea id="pr-change-summary" class="input" rows="3" maxlength="4000"></textarea>
+          <button id="pr-unlink" class="btn btn--ghost" type="button">Send as an unrelated review instead</button>
+        </fieldset>
         <button id="pr-send-button" class="btn btn--primary" type="submit">Send captured result for review</button>
       </form>
     </div>
@@ -37,6 +42,7 @@
   <section id="pr-packet" class="panel" hidden aria-labelledby="pr-packet-title">
     <h2 id="pr-packet-title" tabindex="-1"></h2><p id="pr-packet-summary"></p><p id="pr-stale" role="status"></p>
     <h3>Owner's review request</h3><p id="pr-packet-note"></p>
+    <p id="pr-review-provenance"></p><ol id="pr-outcome-timeline"></ol>
     <h3>Captured result</h3><pre id="pr-result"></pre>
     <p id="pr-owner-task"></p>
     <h3>Comments and decisions</h3><ol id="pr-history"></ol>

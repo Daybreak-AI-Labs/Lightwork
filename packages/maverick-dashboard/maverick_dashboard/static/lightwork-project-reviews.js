@@ -3,9 +3,9 @@
   const root=document.getElementById("pr-root"); if(!root)return;
   const el=id=>document.getElementById("pr-"+id),base="/api/v1/project-reviews";
   let model=null,setup=null,preview=null,packet=null,busy=false,offset=0,expired=false,packetUnavailable=false;
-  let savedRequestNote="",savedResponseNote="";
+  let savedRequestNote="",savedResponseNote="",resubmission=null;
   const responseDirty=()=>el("response-note").value!==savedResponseNote;
-  const hasDraft=()=>responseDirty()||el("note").value!==savedRequestNote;
+  const hasDraft=()=>responseDirty()||el("note").value!==savedRequestNote||!!el("change-summary").value;
   window.addEventListener("beforeunload",event=>{if(!expired&&hasDraft()){event.preventDefault();event.returnValue="";}});
   const refs={};
   function reference(name){if(!refs[name])refs[name]=crypto.randomUUID();return refs[name];}
@@ -64,7 +64,7 @@
     el("project").value=model.projects.some(row=>String(row.id)===selected)?selected:"";el("owner").hidden=!model.projects.length;
     el("status").textContent="Review list is up to date. Only reviews you can open are shown.";
   }
-  function invalidateView(){model=null;packet=null;setup=null;preview=null;
+  function invalidateView(){model=null;packet=null;setup=null;preview=null;resubmission=null;el("change-summary").value="";el("resubmit").hidden=true;el("review-provenance").replaceChildren();el("outcome-timeline").replaceChildren();
     for(const id of ["inbox","members","counts","page","result","preview-text","preview-title","packet-title","packet-summary","packet-note","stale","history","owner-task","project","member","reviewer","goal"])el(id).replaceChildren();
     el("response-note").value="";el("note").value="";el("due").value="";savedRequestNote="";savedResponseNote="";
     el("packet").hidden=true;el("owner").hidden=true;el("setup").hidden=true;el("preview-panel").hidden=true;Object.keys(refs).forEach(key=>delete refs[key]);permissions();}
@@ -90,7 +90,29 @@
     el("stale").textContent=packet.stale?"The source task changed after this result was captured. Ask the owner to share it again before making a decision.":"You are reviewing the captured result shown below.";
     el("packet-note").textContent=packet.note;el("result").textContent=packet.snapshot.result;el("history").replaceChildren();
     packet.history.forEach(row=>el("history").append(node("li",who(row.actor)+" · "+words(row.action)+" · "+new Date(row.at*1000).toLocaleString()+" — "+row.note)));
-    el("owner-task").replaceChildren();if(packet.owner===model.principal){const link=node("a","Open your task to decide its next step");link.href="/chat/goal/"+encodeURIComponent(packet.snapshot.goal_id);el("owner-task").append(link);}
+    el("review-provenance").replaceChildren();
+    if(packet.previous_packet_id){
+      el("review-provenance").append(node("span","Changed since the previous captured result: "+packet.change_summary+" "));
+      const previous=node("button","Open previous review");previous.type="button";previous.className="btn btn--ghost";
+      previous.addEventListener("click",()=>action(()=>openPacket(packet.previous_packet_id)));el("review-provenance").append(previous);
+    }
+    el("outcome-timeline").replaceChildren();
+    const decision=packet.status==="approved"?"Review accepted for this captured version":packet.status==="changes_requested"?"Changes requested from the owner":packet.status==="cancelled"?"Review withdrawn":"Review decision pending";
+    el("outcome-timeline").append(node("li",decision+(packet.stale?"; the source has changed since capture":"")),node("li","Next owner: "+who(packet.status==="pending"?packet.reviewer:packet.owner)),node("li","Task execution and deliverable sign-off: separate decisions; this packet grants neither."),node("li","External delivery and verification: not established by this review packet."));
+    el("owner-task").replaceChildren();if(packet.owner===model.principal){
+      const link=node("a","Open your task to decide its next step");link.href="/chat/goal/"+encodeURIComponent(packet.snapshot.goal_id);el("owner-task").append(link);
+      if(packet.status==="changes_requested"||packet.stale){
+        const revise=node("button","Address this review in a private draft");revise.type="button";revise.className="btn";
+        revise.addEventListener("click",()=>action(async()=>{
+          const saved=await api("/packets/"+encodeURIComponent(packet.id)+"/revision-draft",{method:"POST",body:JSON.stringify({expected_revision:packet.revision,source_version:packet.source_version,request_id:reference("revision-"+packet.id)})});
+          const draft=node("a","Open prepared revision and review its spending limit");draft.href=saved.href;el("owner-task").append(node("p","Private revision prepared. Nothing has run; no prior approval applies."),draft);el("status").textContent="Open the revision draft when ready. Starting it is a separate action.";
+        }));el("owner-task").append(revise);
+      }
+      if(packet.status!=="pending"){
+        const again=node("button","Resubmit a changed result for fresh review");again.type="button";again.className="btn";
+        again.addEventListener("click",()=>action(async()=>{const prior=packet;el("project").value=String(prior.project_id);await loadProject();resubmission={id:prior.id,project_id:prior.project_id};el("previous-label").textContent="Previous review: "+prior.snapshot.title+" ("+prior.id+"). Its decision will not carry forward.";el("resubmit").hidden=false;el("goal").focus();el("status").textContent="Choose and preview a changed result, then explain the changes and send a fresh review packet.";}));el("owner-task").append(again);
+      }
+    }
     permissions();
   }
   async function openPacket(id){
@@ -108,7 +130,8 @@
   el("search-button").addEventListener("click",()=>action(async()=>{offset=0;await refresh();}));
   el("previous").addEventListener("click",()=>action(async()=>{offset=Math.max(0,offset-50);await refresh();}));
   el("next").addEventListener("click",()=>action(async()=>{if(model?.has_more){offset+=50;await refresh();}}));
-  el("project").addEventListener("change",()=>action(loadProject));el("goal").addEventListener("change",clearPreview);
+  el("project").addEventListener("change",()=>action(async()=>{resubmission=null;el("resubmit").hidden=true;await loadProject();}));
+  el("unlink").addEventListener("click",()=>{resubmission=null;el("change-summary").value="";el("resubmit").hidden=true;resetReference("send");});el("goal").addEventListener("change",clearPreview);
   el("member").addEventListener("change",()=>resetReference("membership"));
   el("grant").addEventListener("click",()=>action(async()=>{await saveMember(el("member").value,true);await loadProject();}));
   el("preview").addEventListener("click",()=>action(async()=>{
@@ -119,9 +142,10 @@
   el("send").addEventListener("submit",event=>{event.preventDefault();action(async()=>{
     if(!setup||!preview)throw new Error("Preview the selected result before sending.");
     const payload={goal_id:preview.snapshot.goal_id,reviewer:el("reviewer").value,note:el("note").value,due_at:new Date(el("due").value).getTime()/1000,source_version:preview.source_version,expected_team_revision:setup.team.revision,request_id:reference("send")};
+    if(resubmission){if(Number(el("project").value)!==resubmission.project_id)throw new Error("Choose the original project for this resubmission.");payload.previous_packet_id=resubmission.id;payload.change_summary=el("change-summary").value;if(!payload.change_summary.trim())throw new Error("Explain what changed before resubmitting.");}
     if(!payload.reviewer||!payload.note.trim()||!Number.isFinite(payload.due_at))throw new Error("Choose a reviewer, future due date and review note.");
     if(!(await ask("Share exactly the captured result shown above with "+who(payload.reviewer)+"?","Share for review")))return;
-    const saved=await api("/projects/"+el("project").value+"/packets",{method:"POST",body:JSON.stringify(payload)});savedRequestNote=el("note").value;resetReference("send");await refresh();packet=saved;renderPacket();el("status").textContent="Sent for review. No task was run or signed off.";
+    const saved=await api("/projects/"+el("project").value+"/packets",{method:"POST",body:JSON.stringify(payload)});savedRequestNote=el("note").value;resubmission=null;el("change-summary").value="";el("resubmit").hidden=true;resetReference("send");await refresh();packet=saved;renderPacket();el("status").textContent="Sent for review. No task was run or signed off.";
   });});
   el("respond").addEventListener("submit",event=>{event.preventDefault();action(async()=>{
     if(!packet||packetUnavailable)throw new Error("Open a review first.");const kind=el("action").value,note=el("response-note").value;
