@@ -299,6 +299,13 @@ def _providers(S) -> tuple:
           subgroup="AI service addresses", env=("MAVERICK_PER_TENANT_KEYS",), weaker=True,
           warning="Workspaces with their own key will send their work to the AI service "
                   "under that key instead of the shared one."),
+        S("providers", "test_receipt_max_age_days", "Trust a passing connection test for",
+          "How long a passing AI service connection test counts as \"Connected\". After this, "
+          "the service reads \"not tested yet\" again until you test it.", "number",
+          "Integrations", 30, "maverick.config", subgroup="AI service addresses", minimum=1,
+          maximum=365, integer=True, unit="days", env=("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS",),
+          weaker="higher",
+          warning="A longer period means a key that stopped working can show as connected for longer."),
         S("provider_failover.policy", "failover_on", "Move to a backup model after",
           "The kinds of failure that send a request on to the backup models. With none "
           "ticked, every failure except a wrong key or a bad request does.", "multiselect",

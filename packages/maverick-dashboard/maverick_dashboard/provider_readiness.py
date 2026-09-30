@@ -195,6 +195,10 @@ def _provider_row(name: str, label: str, cfg: dict[str, Any], roles: list[str]) 
         reason = plain_reason(live.get("detail") or runtime.get("detail") or "")
         row["last_test"].update(status="failed", reason=reason)
         row.update(status="failed", status_label="Connection failed: " + reason, reason=reason)
+    elif live.get("stale"):
+        word = _saved_word(saved)
+        row.update(status="untested", status_label=f"{word} saved, not tested yet",
+                   reason=f"{live['detail']} Test it again to make sure it still works.")
     else:
         word = _saved_word(saved)
         row.update(status="untested", status_label=f"{word} saved, not tested yet",
@@ -228,6 +232,8 @@ def _verdict(rows: list[dict[str, Any]]) -> tuple[str, str, dict[str, str] | Non
         return "not_ready", f"{row['label']} connection failed: {row['reason']}", dict(CHECK_AND_RETEST)
     if by_status["untested"]:
         row = by_status["untested"][0]
+        if row["readiness"]["live"].get("stale"):
+            return "needs_test", f"{row['label']}: {row['readiness']['live']['detail']}", dict(TEST_CONNECTION)
         return "needs_test", f"{row['label']}: {_saved_word(row['saved']).lower()} saved, not tested yet.", dict(TEST_CONNECTION)
     names = ", ".join(r["label"] for r in by_status["connected"])
     return "ready", f"{names} connected: the last connection test worked.", None

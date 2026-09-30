@@ -234,3 +234,129 @@ def test_plain_reason_never_leaks_technical_wording(detail, expected):
     assert expected in reason
     for word in ("HTTP 4", "ConnectError", "SDK", "egress", "probe", "binary"):
         assert word not in reason
+
+
+# ---- persisted test receipts -------------------------------------------------
+
+def _receipts_file(tmp_path):
+    return tmp_path / "mvhome" / "provider_test_receipts.json"
+
+
+def test_receipt_survives_a_fresh_process(workspace, monkeypatch, tmp_path):
+    """The receipt is written to disk (0600, fingerprint hash only) and is
+    read back once the in-process memory is gone, as after a restart."""
+    import json
+    import stat
+
+    from maverick_dashboard import integration_readiness
+    from maverick_dashboard.provider_readiness import workspace_readiness
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
+    workspace("")
+    _record("openai", verified=True)
+    path = _receipts_file(tmp_path)
+    assert path.exists()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    text = path.read_text(encoding="utf-8")
+    assert "sk-test" not in text
+    stored = json.loads(text)["providers"]["openai"]
+    assert stored["verified"] is True and len(stored["fingerprint"]) == 64
+    integration_readiness._clear_for_testing()  # a new process has no memory
+    readiness = workspace_readiness()
+    assert readiness["verdict"] == "ready"
+    assert _row(readiness, "openai")["last_test"]["tested_at"] == stored["tested_at"]
+
+
+def test_failed_receipt_survives_a_fresh_process_with_its_plain_reason(workspace, monkeypatch, tmp_path):
+    import json
+
+    from maverick_dashboard import integration_readiness
+    from maverick_dashboard.provider_readiness import workspace_readiness
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
+    workspace("")
+    _record("openai", verified=False, detail="provider readiness request returned HTTP 401")
+    stored = json.loads(_receipts_file(tmp_path).read_text(encoding="utf-8"))["providers"]["openai"]
+    assert "did not accept the key" in stored["reason"]
+    integration_readiness._clear_for_testing()
+    openai = _row(workspace_readiness(), "openai")
+    assert openai["status"] == "failed" and "did not accept the key" in openai["reason"]
+
+
+def test_receipt_older_than_max_age_reads_as_not_tested_yet(workspace, monkeypatch, tmp_path):
+    from maverick_dashboard import integration_readiness
+    from maverick_dashboard.provider_readiness import workspace_readiness
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
+    workspace("")
+    _record("openai", verified=True)
+    integration_readiness._clear_for_testing()
+    real_time = integration_readiness.time.time
+    monkeypatch.setattr(integration_readiness.time, "time", lambda: real_time() + 31 * 86400)
+    readiness = workspace_readiness()
+    openai = _row(readiness, "openai")
+    assert openai["status"] == "untested"
+    assert openai["status_label"] == "Key saved, not tested yet"
+    assert "Last successful test was 31 days ago." in openai["reason"]
+    assert readiness["verdict"] == "needs_test"
+    assert "Last successful test was 31 days ago." in readiness["reason"]
+    assert ">Connected<" not in readiness["verdict_label"]
+    # A longer configured window keeps the receipt valid.
+    monkeypatch.setenv("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS", "60")
+    assert workspace_readiness()["verdict"] == "ready"
+    monkeypatch.delenv("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS")
+    workspace("[providers]\ntest_receipt_max_age_days = 45\n")
+    assert workspace_readiness()["verdict"] == "ready"
+
+
+def test_max_age_knob_defaults_and_clamps(workspace, monkeypatch):
+    from maverick.config import provider_test_receipt_max_age_days
+
+    workspace("")
+    assert provider_test_receipt_max_age_days() == 30
+    workspace("[providers]\ntest_receipt_max_age_days = 0\n")
+    assert provider_test_receipt_max_age_days() == 1
+    workspace('[providers]\ntest_receipt_max_age_days = "soon"\n')
+    assert provider_test_receipt_max_age_days() == 30
+    monkeypatch.setenv("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS", "7")
+    assert provider_test_receipt_max_age_days() == 7
+
+
+def test_stored_receipt_is_ignored_after_the_key_changes(workspace, monkeypatch):
+    from maverick_dashboard import integration_readiness
+    from maverick_dashboard.provider_readiness import workspace_readiness
+
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
+    workspace('[providers.openai]\napi_key = "sk-old"\n')  # pragma: allowlist secret
+    _record("openai", verified=True)
+    integration_readiness._clear_for_testing()
+    assert workspace_readiness()["verdict"] == "ready"
+    workspace('[providers.openai]\napi_key = "sk-new"\n')  # pragma: allowlist secret
+    assert workspace_readiness()["verdict"] == "needs_test"
+    assert _row(workspace_readiness(), "openai")["last_test"]["status"] == "never"
+
+
+def test_unreadable_receipt_file_means_never_tested_without_crashing(workspace, monkeypatch, tmp_path):
+    from maverick_dashboard import integration_readiness
+    from maverick_dashboard.provider_readiness import workspace_readiness
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
+    workspace("")
+    path = _receipts_file(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    readiness = workspace_readiness()
+    assert readiness["verdict"] == "needs_test"
+    assert _row(readiness, "openai")["last_test"]["status"] == "never"
+    # A directory in the file's place is just as harmless, and a new receipt
+    # that cannot be saved still counts in this process.
+    path.unlink()
+    path.mkdir()
+    _record("openai", verified=True)
+    assert workspace_readiness()["verdict"] == "ready"
+    integration_readiness._clear_for_testing()
+    assert workspace_readiness()["verdict"] == "needs_test"

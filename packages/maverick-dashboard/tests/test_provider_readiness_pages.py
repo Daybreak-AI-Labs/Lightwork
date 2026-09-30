@@ -157,3 +157,26 @@ def test_fresh_install_with_wizard_ollama_address_is_not_connected(workspace):
     assert api["providers"]["configured_count"] == 1 and api["providers"]["connected_count"] == 0
     assert api["system"]["fix_href"] == "/settings#settings-integrations"
     assert api["copilot"]["next_action"]["href"] == "/settings#settings-integrations"
+
+
+@pytest.mark.parametrize("verified", [True, False])
+def test_connection_test_button_stores_a_receipt_that_survives_restart(workspace, monkeypatch, verified):
+    from maverick_dashboard import integration_readiness
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
+    monkeypatch.setattr(integration_readiness, "probe_provider", lambda name, cfg: {
+        "verified": verified,
+        "detail": "provider accepted the bounded models request" if verified
+        else "provider probe failed (ConnectError)",
+        "evidence": {"kind": "live_status_probe"},
+    })
+    tested = workspace.client.post("/settings/providers/test", data={"provider": "openai", "next": "providers"},
+                                   follow_redirects=False)
+    assert tested.status_code == 303
+    integration_readiness._clear_for_testing()  # as after a restart
+    row = next(r for r in workspace.client.get("/api/v1/providers").json()["providers"] if r["name"] == "openai")
+    assert row["status"] == ("connected" if verified else "failed")
+    assert row["last_test"]["status"] == ("passed" if verified else "failed")
+    verdict = workspace.client.get("/api/v1/providers").json()["workspace"]["verdict"]
+    assert verdict == ("ready" if verified else "not_ready")
