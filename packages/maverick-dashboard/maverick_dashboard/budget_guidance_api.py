@@ -7,7 +7,7 @@ import json
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from maverick import budget_guidance as guidance
 from maverick.authority_effects import authority_effect_fence
 from maverick.governed_records import GovernedRecordStore

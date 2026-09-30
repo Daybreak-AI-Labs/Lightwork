@@ -745,7 +745,6 @@
             const changed = currentQuestionId !== qs[0].id;
             currentQuestionId = qs[0].id;
             currentQuestionVersion = qs[0].version;
-            questionText.textContent = qs[0].question;
             questionPanel.style.display = 'block';
             if (changed) questionText.textContent = qs[0].question;
           } else {

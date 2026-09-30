@@ -20,6 +20,7 @@ def _app():
 def projection(request, *, day: str | None = None, goal_id: int | None = None):
     from maverick import cost_provenance, quotas
     from maverick.episode_reporting import iter_episodes
+
     from .budget_guidance_api import _goal
     auth.require_permission(request, "view")
     owner = auth.caller_principal(request) or ""

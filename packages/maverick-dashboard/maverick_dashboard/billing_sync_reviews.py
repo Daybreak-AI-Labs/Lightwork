@@ -48,6 +48,7 @@ def _unpack(record):
 
 def scope(request):
     from maverick.paths import current_tenant_id_strict
+
     from .auth import caller_principal
     return {"actor": caller_principal(request) or "local administrator",
             "workspace_context": current_tenant_id_strict() or ""}
@@ -72,8 +73,8 @@ def _same_scope(record, context):
 
 
 def _fresh(fields):
-    from maverick.billing_stripe import _secret_key, preview_charges
     from maverick.billing import RateCard
+    from maverick.billing_stripe import _secret_key, preview_charges
     from maverick.tenant.registry import get_tenant
     result = preview_charges(fields["workspace"], RateCard(markup_pct=fields["markup"], minimum_charge=fields["minimum"]),
                              since=fields["since"], until=fields["until"])
@@ -155,6 +156,79 @@ def receipt(context, workspace, offset=0):
             "next_offset": offset + 25 if offset + 25 < len(history) else None}
 
 
+class _DispatchSession:
+    def __init__(self, record, context, fields, snapshot, token, authorize):
+        self.record, self.context, self.fields = record, context, fields
+        self.snapshot, self.token, self.authorize = snapshot, token, authorize
+
+    def save(self, action, change):
+        current = STORE.get(self.record["id"])
+        if not current or current.get("claim") != self.token:
+            raise HTTPException(409, "Another recovery owns this receipt. Read its current state.")
+        self.record = _saved(current, self.context["actor"], action, change)
+        return self.record
+
+    def check(self):
+        self.authorize()
+        current = _fresh(self.fields)
+        if any(self.snapshot.get(key) != current.get(key) for key in SETTINGS_FIELDS):
+            raise HTTPException(409, "Billing settings changed during sync. Remaining stages were held; inspect the retained receipt.")
+        customer = self.record["stages"]["customer"]
+        if customer["state"] == "confirmed" and current.get("initial_customer") != customer.get("result", {}).get("customer"):
+            raise HTTPException(409, "The workspace's billing customer changed. Reconcile the retained receipt before further dispatch.")
+
+
+class _GuardedClient:
+    def __init__(self, delegate, session):
+        self.delegate = delegate
+        self.session = session
+
+    def list_subscriptions(self, customer_id):
+        self.session.check()
+        return self.delegate.list_subscriptions(customer_id)
+
+    def dispatch(self, method, stage, args):
+        self.session.check()
+        identity = _digest({"method": method, "idempotency_key": args.get("idempotency_key"),
+                            "subscription_id": args.get("subscription_id")})
+        arguments_digest = _digest(args)
+        existing = next((d for d in self.session.record["dispatches"] if d["identity"] == identity), None)
+        if existing and existing.get("arguments_sha256") != arguments_digest:
+            raise HTTPException(409, "The provider request parameters changed after dispatch. Reconcile the original request before retrying.")
+        if existing and method in {"create_customer", "create_subscription"} and time.time() - existing["started_at"] > SAFE_RETRY_SECONDS:
+            raise HTTPException(409, "A prior provider dispatch is outside the safe idempotency retry window. Reconcile it in Stripe; a fresh preview cannot bypass it.")
+        if len(self.session.record["dispatches"]) >= 5000 and not existing:
+            raise HTTPException(409, "Dispatch receipt capacity reached. Remaining effects were held.")
+        def pending(value):
+            value["claim_until"] = time.time() + CLAIM_SECONDS
+            if not existing:
+                value["dispatches"].append({"identity": identity, "arguments_sha256": arguments_digest, "method": method, "stage": stage,
+                                            "started_at": time.time(), "state": "pending"})
+        _audited(self.session.save("provider_dispatch", pending))
+        result = getattr(self.delegate, method)(**args)
+        def confirmed(value):
+            dispatch = next(d for d in value["dispatches"] if d["identity"] == identity)
+            dispatch.update(state="confirmed", provider_id=str(result.get("id", ""))[:128], confirmed_at=time.time())
+        self.session.save("provider_result", confirmed)
+        return result
+
+    def create_customer(self, **kwargs):
+        return self.dispatch("create_customer", "customer", kwargs)
+
+    def create_subscription(self, **kwargs):
+        if kwargs.get("price_id") != self.session.snapshot["platform_fee_price"]:
+            raise HTTPException(409, "The subscription price differs from the review.")
+        return self.dispatch("create_subscription", "subscription", kwargs)
+
+    def update_subscription(self, subscription_id, **kwargs):
+        if kwargs.get("price_id") != self.session.snapshot["platform_fee_price"]:
+            raise HTTPException(409, "The subscription price differs from the review.")
+        return self.dispatch("update_subscription", "subscription", {"subscription_id": subscription_id, **kwargs})
+
+    def create_invoice_item(self, **kwargs):
+        return self.dispatch("create_invoice_item", "usage", kwargs)
+
+
 def execute(context, fields, review, digest, authorize, *, client=None):
     """Explicit invocation only. CAS prevents concurrent ownership of a dispatch."""
     from maverick import billing_stripe as stripe
@@ -195,75 +269,12 @@ def execute(context, fields, review, digest, authorize, *, client=None):
     record = _audited(_saved(record, context["actor"], "claim_dispatch",
         lambda value: value.update(state="running", claim=token, claim_until=time.time() + CLAIM_SECONDS)))
 
-    def save(action, change):
-        nonlocal record
-        current = STORE.get(record["id"])
-        if not current or current.get("claim") != token:
-            raise HTTPException(409, "Another recovery owns this receipt. Read its current state.")
-        record = _saved(current, context["actor"], action, change)
-        return record
-
-    def check():
-        authorize()
-        current = _fresh(fields)
-        if any(snapshot.get(key) != current.get(key) for key in SETTINGS_FIELDS):
-            raise HTTPException(409, "Billing settings changed during sync. Remaining stages were held; inspect the retained receipt.")
-        customer = record["stages"]["customer"]
-        if customer["state"] == "confirmed" and current.get("initial_customer") != customer.get("result", {}).get("customer"):
-            raise HTTPException(409, "The workspace's billing customer changed. Reconcile the retained receipt before further dispatch.")
-
-    class GuardedClient:
-        def __init__(self, delegate):
-            self.delegate = delegate
-
-        def list_subscriptions(self, customer_id):
-            check()
-            return self.delegate.list_subscriptions(customer_id)
-
-        def dispatch(self, method, stage, args):
-            check()
-            identity = _digest({"method": method, "idempotency_key": args.get("idempotency_key"),
-                                "subscription_id": args.get("subscription_id")})
-            arguments_digest = _digest(args)
-            existing = next((d for d in record["dispatches"] if d["identity"] == identity), None)
-            if existing and existing.get("arguments_sha256") != arguments_digest:
-                raise HTTPException(409, "The provider request parameters changed after dispatch. Reconcile the original request before retrying.")
-            if existing and method in {"create_customer", "create_subscription"} and time.time() - existing["started_at"] > SAFE_RETRY_SECONDS:
-                raise HTTPException(409, "A prior provider dispatch is outside the safe idempotency retry window. Reconcile it in Stripe; a fresh preview cannot bypass it.")
-            if len(record["dispatches"]) >= 5000 and not existing:
-                raise HTTPException(409, "Dispatch receipt capacity reached. Remaining effects were held.")
-            def pending(value):
-                value["claim_until"] = time.time() + CLAIM_SECONDS
-                if not existing:
-                    value["dispatches"].append({"identity": identity, "arguments_sha256": arguments_digest, "method": method, "stage": stage,
-                                                "started_at": time.time(), "state": "pending"})
-            _audited(save("provider_dispatch", pending))
-            result = getattr(self.delegate, method)(**args)
-            def confirmed(value):
-                dispatch = next(d for d in value["dispatches"] if d["identity"] == identity)
-                dispatch.update(state="confirmed", provider_id=str(result.get("id", ""))[:128], confirmed_at=time.time())
-            save("provider_result", confirmed)
-            return result
-
-        def create_customer(self, **kwargs):
-            return self.dispatch("create_customer", "customer", kwargs)
-
-        def create_subscription(self, **kwargs):
-            if kwargs.get("price_id") != snapshot["platform_fee_price"]:
-                raise HTTPException(409, "The subscription price differs from the review.")
-            return self.dispatch("create_subscription", "subscription", kwargs)
-
-        def update_subscription(self, subscription_id, **kwargs):
-            if kwargs.get("price_id") != snapshot["platform_fee_price"]:
-                raise HTTPException(409, "The subscription price differs from the review.")
-            return self.dispatch("update_subscription", "subscription", {"subscription_id": subscription_id, **kwargs})
-
-        def create_invoice_item(self, **kwargs):
-            return self.dispatch("create_invoice_item", "usage", kwargs)
+    session = _DispatchSession(record, context, fields, snapshot, token, authorize)
+    save, check = session.save, session.check
 
     current_stage = None
     try:
-        guarded = GuardedClient(stripe._client(client))
+        guarded = _GuardedClient(stripe._client(client), session)
         steps = (
             ("customer", lambda: {"customer": stripe.ensure_customer(fields["workspace"], client=guarded)}),
             ("subscription", lambda: stripe.ensure_subscription(fields["workspace"], client=guarded)),
@@ -271,12 +282,12 @@ def execute(context, fields, review, digest, authorize, *, client=None):
         )
         for name, operation in steps:
             current_stage = name
-            if record["stages"][name]["state"] == "confirmed":
+            if session.record["stages"][name]["state"] == "confirmed":
                 continue
             check()
-            _audited(save("stage_started", lambda value: value["stages"][name].update(state="pending", started_at=time.time())))
+            _audited(save("stage_started", lambda value, name=name: value["stages"][name].update(state="pending", started_at=time.time())))
             result = operation()
-            save("stage_confirmed", lambda value: value["stages"][name].update(state="confirmed", result=result, confirmed_at=time.time()))
+            save("stage_confirmed", lambda value, name=name, result=result: value["stages"][name].update(state="confirmed", result=result, confirmed_at=time.time()))
         save("sync_complete", lambda value: value.update(state="complete", claim_until=0))
     except Exception:
         def uncertain(value):
@@ -288,8 +299,8 @@ def execute(context, fields, review, digest, authorize, *, client=None):
         except Exception:
             # The durable pre-dispatch receipt remains pending when a result
             # cannot be persisted. Never replace it with a success claim.
-            latest = STORE.get(record["id"])
+            latest = STORE.get(session.record["id"])
             if latest:
-                record = latest
-        return public_receipt(record)
-    return public_receipt(record)
+                session.record = latest
+        return public_receipt(session.record)
+    return public_receipt(session.record)

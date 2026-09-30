@@ -1087,6 +1087,8 @@ from .budget_guidance_api import router as budget_guidance_router
 app.include_router(budget_guidance_router)
 from .cost_reconciliation_api import router as cost_reconciliation_router
 app.include_router(cost_reconciliation_router)
+from .task_diagnostics import router as task_diagnostics_router
+app.include_router(task_diagnostics_router)
 from .settings_experience import router as settings_experience_router
 app.include_router(settings_experience_router)
 templates.context_processors.append(_display_preference_context)
@@ -10305,7 +10307,6 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "goal": g,
             "can_operate": has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "submission_key": secrets.token_urlsafe(24),
-            "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
             "spend_ceiling_text": (

@@ -6,8 +6,8 @@ count physical calls. Unknown reservations remain held until reconciled.
 """
 from __future__ import annotations
 
-import math
 import hashlib
+import math
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -66,7 +66,6 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
     from .quotas import UsageLedger, _quota_config
     from .runner import clamp_task_limit, configured_max_dollars, configured_max_wall_seconds
     from .tenant import registry
-    from . import provider_cost_cap as caps, provider_spending_recovery
 
     for value in (max_dollars, max_wall_seconds):
         if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0):
@@ -146,6 +145,20 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
         result["workspace"] = {"state": "unavailable", "message": "Workspace accounting is unavailable or has an unknown amount. Nothing was refunded or reset."}
         result.update(headroom_complete=False, admission_allowed=False)
 
+    _provider_projection(result, provider, goal_id, candidates)
+    if candidates:
+        headroom, binding = min(candidates)
+        result.update(headroom=_number(headroom), binding_ceiling=binding)
+        if headroom <= 0:
+            result["admission_allowed"] = False
+    if not result["headroom_complete"]:
+        result["headroom"] = None
+    return result
+
+
+def _provider_projection(result, provider, goal_id, candidates):
+    from . import provider_cost_cap as caps
+    from . import provider_spending_recovery
     try:
         names = {str(provider).strip().lower()} if provider else set(caps.caps_from_config())
         result["provider_coverage"] = "Selected provider" if provider else "Configured provider ceilings and this task's recorded providers; a future route may use another provider."
@@ -176,14 +189,6 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
     except (ValueError, OSError, RuntimeError):
         result.update(headroom_complete=False, admission_allowed=False)
         result["provider_error"] = "Provider reservation accounting could not be read. A missing receipt is not evidence of zero cost."
-    if candidates:
-        headroom, binding = min(candidates)
-        result.update(headroom=_number(headroom), binding_ceiling=binding)
-        if headroom <= 0:
-            result["admission_allowed"] = False
-    if not result["headroom_complete"]:
-        result["headroom"] = None
-    return result
 
 
 def _warnings_store():
