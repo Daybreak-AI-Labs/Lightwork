@@ -18,6 +18,7 @@ from pathlib import Path
 
 CONFIG = '''
 [features]
+employee_content_access_requests = true
 draft_recovery = true
 record_search = true
 action_center = true
