@@ -29,8 +29,8 @@ def workspace(tmp_path, monkeypatch):
     config_path.write_text("", encoding="utf-8")
     monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
     from maverick import config, world_model
-    from maverick_dashboard import integration_readiness
     from maverick_dashboard import app as dash_app
+    from maverick_dashboard import integration_readiness
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
