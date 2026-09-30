@@ -163,6 +163,18 @@ function getOutput(): vscode.OutputChannel {
   return outputChannel;
 }
 
+function budgetReview(value: unknown): string {
+  const preview = value as {effective?: {max_dollars?: unknown; max_wall_seconds?: unknown}; available?: boolean; notice?: unknown; person?: {status?: string}};
+  const dollars = preview?.effective?.max_dollars, seconds = preview?.effective?.max_wall_seconds;
+  if (typeof dollars !== "number" || !Number.isFinite(dollars) || dollars < 0 || typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 1) {
+    throw new Error("Effective task ceilings could not be verified. Check budget settings and update the CLI before starting paid work.");
+  }
+  return `Resolved task ceilings: $${dollars}, ${seconds} seconds. ` +
+    (preview.available === true ? "Budget headroom is a current advisory snapshot. " : "Budget headroom or identity could not be fully established. ") +
+    (typeof preview.notice === "string" ? stripTerminalControl(preview.notice).slice(0, 1000) + " " : "") +
+    "This preview reserves nothing; launch rechecks current policy.";
+}
+
 async function startGoalCommand() {
   if (starting) { void vscode.window.showWarningMessage("A Lightwork start is already being prepared or supervised."); return; }
   if (!vscode.workspace.isTrusted) { void vscode.window.showErrorMessage("Trust this workspace before starting a local agent."); return; }
@@ -184,7 +196,9 @@ async function startGoalCommand() {
     if (!dollars) return;
     const seconds = await vscode.window.showInputBox({prompt: "Requested maximum duration in seconds", value: String(config.get("maxWallSeconds", 1800)), validateInput: value => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 86400 ? null : "Enter whole seconds from 1 to 86400."});
     if (!seconds) return;
-    if (await vscode.window.showWarningMessage(`Start in ${cwd || "the CLI default location"} with requested limits $${Number(dollars)} and ${Number(seconds)} seconds? Deployment policy still applies.`, {modal: true}, "Start task") !== "Start task") return;
+    const preview = JSON.parse(await runCliCapture(["budget-preview", "--json", "--max-dollars", dollars, "--max-wall-seconds", seconds], cwd));
+    const limits = budgetReview(preview);
+    if (await vscode.window.showWarningMessage(`Start in ${cwd || "the CLI default location"}? Requested limits: $${Number(dollars)}, ${Number(seconds)} seconds. ${limits}`, {modal: true}, "Start task") !== "Start task") return;
     const saved: {startedAt: number; goalId?: number} = {startedAt: Date.now()};
     await extensionContext.globalState.update(pendingKey, saved); // Refuse dispatch if durable recovery metadata cannot be saved.
     const out = getOutput(); out.show(true); out.appendLine(`Starting local task in ${cwd || "CLI default"}; requested caps $${dollars}, ${seconds}s.`);
@@ -251,8 +265,9 @@ async function controlTask(action: "cancel" | "resume"): Promise<void> {
   try {
     const connection = await connections.current();
     const id = await pickDashboardTask(connection); if (!id) return;
+    const preview = action === "resume" ? budgetReview(await connections.request(connection, `/api/v1/budget/preview?goal_id=${id}`)) : "";
     const explanation = action === "cancel" ? "Cancel only this task at its next safe work boundary? Completed external effects cannot be undone." : "Resume only this task under current deployment policy? This may incur further cost.";
-    if (await vscode.window.showWarningMessage(`${connection.label} · task ${id}: ${explanation}`, {modal: true}, action === "cancel" ? "Cancel this task" : "Resume this task") !== (action === "cancel" ? "Cancel this task" : "Resume this task")) return;
+    if (await vscode.window.showWarningMessage(`${connection.label} · task ${id}: ${explanation} ${preview}`, {modal: true}, action === "cancel" ? "Cancel this task" : "Resume this task") !== (action === "cancel" ? "Cancel this task" : "Resume this task")) return;
     await connections.request(connection, `/api/v1/goals/${id}/${action}`, {});
     void vscode.window.showInformationMessage(action === "cancel" ? "Task cancellation was acknowledged. Work stops cooperatively; existing effects may remain." : "Task resume was acknowledged. Check its progress; acknowledgement is not completion.");
   } catch (error) { showFailure("Task control was not confirmed. Review current task status before retrying.", error); }

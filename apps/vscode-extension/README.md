@@ -54,8 +54,12 @@ automatically.
 
 Task cancellation targets exactly one selected dashboard task; the local emergency
 stop remains a separate checkpoint-based control. Resume acknowledges scheduling,
-not successful completion. Requested start caps are visible; this extension does
-not yet preview the resolved administrator ceiling before dispatch.
+not successful completion. Local start calls `maverick budget-preview --json` in
+the same selected workspace/environment and shows requested caps and resolved local
+task ceilings separately. Unknown identity/headroom is stated explicitly. Missing
+or malformed preview prevents dispatch with a repair remedy. Dashboard resume uses
+that connection's scoped budget preview. No preview reserves budget; launch still
+rechecks current policy.
 
 ## Configuration and troubleshooting
 

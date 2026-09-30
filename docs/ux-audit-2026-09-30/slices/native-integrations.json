@@ -57,10 +57,10 @@
   },
   {
     "id": "LW-190",
-    "status": "planned",
-    "implementation_evidence": "VS Code reviews requested dollar/time caps and sends both CLI flags; selected authorized dashboard task cancel/resume are separate from accurately acknowledged local checkpoint emergency stop. Current UI explicitly does not label requested caps as effective.",
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Wire the administrator-resolved effective budget preview hook owned by the root budget workstream. Requested values are currently shown honestly; this ID remains planned until effective caps are visible."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "VS Code local starts run budget-preview --json in the identical launch cwd/environment before confirmation; core budget_guidance.preview resolves configured/clamped effective task ceilings without constructing Budget or guessing a principal. Person/workspace/provider headroom is shown separately as available/unknown; resume previews use the scoped dashboard endpoint for the selected goal. Requested values and launch enforcement remain intact; preview failure blocks confirmation with repair guidance.",
+    "validation": "CLI Python3.10 AST and VS Code TypeScript syntax; CLI preview fixtures authored unrun. Core hook supplied in integration commit fb292c5.",
+    "remaining": "Execute policy/profile/cap-change/start/resume regressions and native confirmation qualification later per user."
   },
   {
     "id": "LW-191",

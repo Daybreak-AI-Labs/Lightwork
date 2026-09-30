@@ -234,6 +234,7 @@ pub fn run() {
             native_oauth::consume_oauth_return,
             native_oauth::cancel_oauth_return,
             updates::maintenance_status,
+            updates::review_maintenance_handoff,
             updates::check_desktop_update,
             updates::install_desktop_update,
             updates::rollback_desktop_update,

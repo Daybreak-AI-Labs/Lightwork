@@ -15,6 +15,8 @@ pub struct Maintenance {
     pending: Mutex<Option<(String, tauri_plugin_updater::Update, bool)>>,
     #[cfg(windows)]
     sequence: Mutex<u64>,
+    #[cfg(windows)]
+    handoff: Mutex<Option<String>>,
 }
 
 struct Busy<'a>(&'a AtomicBool);
@@ -43,12 +45,69 @@ fn local_controls(window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+fn reviewed_authorization(state: &Maintenance, manual: Option<String>) -> Result<String, String> {
+    if let Some(value) = manual.filter(|value| !value.trim().is_empty()) {
+        return Ok(value);
+    }
+    #[cfg(windows)]
+    {
+        state
+            .handoff
+            .lock()
+            .map_err(|_| "Maintenance approval is unavailable.")?
+            .take()
+            .ok_or_else(|| {
+                "Load the protected administrator handoff or paste its accessible fallback code."
+                    .into()
+            })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = state;
+        Err("Customer maintenance is currently supported on Windows.".into())
+    }
+}
+
+#[tauri::command]
+pub fn review_maintenance_handoff(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Maintenance>,
+) -> Result<serde_json::Value, String> {
+    local_controls(&window)?;
+    let _busy = acquire(&state)?;
+    #[cfg(windows)]
+    {
+        let runtime = maintenance_runtime_path()?;
+        let mut details = protocol(&runtime, "inspect-handoff", &serde_json::json!({}))?;
+        let token = details
+            .get("authorization")
+            .and_then(|value| value.as_str())
+            .ok_or("The protected handoff is incomplete.")?
+            .to_string();
+        *state
+            .handoff
+            .lock()
+            .map_err(|_| "Maintenance approval is unavailable.")? = Some(token);
+        if let Some(object) = details.as_object_mut() {
+            for key in ["authorization", "actor", "schema", "target"] {
+                object.remove(key);
+            }
+        }
+        Ok(details)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Customer maintenance is currently supported on Windows.".into())
+    }
+}
+
 #[derive(Serialize)]
 pub struct MaintenanceStatus {
     version: String,
     packaged_runtime: bool,
     updates_configured: bool,
     recovery: serde_json::Value,
+    reviewed_update: Option<ReviewedUpdate>,
 }
 
 fn channel_configured(app: &tauri::AppHandle) -> bool {
@@ -89,6 +148,7 @@ pub fn maintenance_status(
         version: app.package_info().version.to_string(),
         packaged_runtime: cfg!(feature = "customer-runtime"),
         updates_configured: channel_configured(&app),
+        reviewed_update: pending_review(&app.state::<Maintenance>())?,
         recovery: if cfg!(feature = "customer-runtime") {
             selected_maintenance_runtime()
                 .map(|(_, status)| status)
@@ -109,6 +169,41 @@ pub struct ReviewedUpdate {
     notes: String,
     repair: bool,
     identity_transition: Option<serde_json::Value>,
+}
+
+fn pending_review(state: &Maintenance) -> Result<Option<ReviewedUpdate>, String> {
+    #[cfg(windows)]
+    {
+        let pending = state
+            .pending
+            .lock()
+            .map_err(|_| "Update state is unavailable.")?;
+        Ok(pending
+            .as_ref()
+            .map(|(review, update, repair)| ReviewedUpdate {
+                review: review.clone(),
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: update
+                    .body
+                    .clone()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(16_000)
+                    .collect(),
+                repair: *repair,
+                identity_transition: update
+                    .raw_json
+                    .get("identity_transition")
+                    .filter(|v| !v.is_null())
+                    .cloned(),
+            }))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = state;
+        Ok(None)
+    }
 }
 
 fn manifest_sha256(
@@ -255,6 +350,18 @@ pub async fn check_desktop_update(
                 .map_err(|_| "Update state is unavailable.")?;
             *sequence += 1;
             let review = sequence.to_string();
+            if !repair {
+                let runtime = maintenance_runtime_path()?;
+                protocol(
+                    &runtime,
+                    "save-native-review",
+                    &serde_json::json!({
+                        "release": {"version": update.version, "signature": update.signature,
+                            "runtime_sha256": manifest_sha256(&update.raw_json, "runtime_sha256", "runtime")?,
+                            "installer_sha256": manifest_sha256(&update.raw_json, "installer_sha256", "installer")?}
+                    }),
+                )?;
+            }
             let result = ReviewedUpdate {
                 review: review.clone(),
                 version: update.version.clone(),
@@ -309,6 +416,19 @@ pub async fn install_desktop_update(
                 return Err(
                     "This update review has expired. Check again before installing.".into(),
                 );
+            }
+            if !pending.as_ref().expect("checked pending update").2 {
+                let candidate = authorization
+                    .clone()
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| state.handoff.lock().ok().and_then(|value| value.clone()))
+                    .ok_or("Load a current administrator approval first.")?;
+                let runtime = maintenance_runtime_path()?;
+                protocol(
+                    &runtime,
+                    "inspect",
+                    &serde_json::json!({"authorization": candidate}),
+                )?;
             }
             pending.take().expect("checked pending update")
         };
@@ -365,8 +485,7 @@ pub async fn install_desktop_update(
             return Ok(());
         } else {
             use tauri_plugin_updater::UpdaterExt;
-            let authorization =
-                authorization.ok_or("Authorize this installation in Workspace recovery first.")?;
+            let authorization = reviewed_authorization(&state, authorization)?;
             let runtime = maintenance_runtime_path()?;
             let details = protocol(
                 &runtime,
@@ -376,6 +495,15 @@ pub async fn install_desktop_update(
             if details["operation"] != "upgrade" || details["old_version"] != update.current_version
             {
                 return Err("The authorization does not match the reviewed installation.".into());
+            }
+            if let Some(reviewed) = details.get("reviewed_new").filter(|value| !value.is_null()) {
+                if reviewed["version"] != update.version
+                    || reviewed["signature"] != update.signature
+                    || reviewed["runtime_sha256"] != update.raw_json["runtime_sha256"]
+                    || reviewed["installer_sha256"] != update.raw_json["installer_sha256"]
+                {
+                    return Err("The administrator handoff is for a different exact release. Review this update again.".into());
+                }
             }
             let transition = update
                 .raw_json
@@ -1125,7 +1253,7 @@ pub fn rollback_desktop_update(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Maintenance>,
-    authorization: String,
+    authorization: Option<String>,
     confirm: bool,
 ) -> Result<(), String> {
     local_controls(&window)?;
@@ -1133,6 +1261,7 @@ pub fn rollback_desktop_update(
     if !confirm {
         return Err("Review and confirm the completed-upgrade rollback first.".into());
     }
+    let authorization = reviewed_authorization(&state, authorization)?;
     let runtime = maintenance_runtime_path()?;
     let details = protocol(
         &runtime,

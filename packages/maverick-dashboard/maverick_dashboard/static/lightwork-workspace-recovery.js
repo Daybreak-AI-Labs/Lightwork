@@ -3,7 +3,7 @@
   var root = document.getElementById("workspace-recovery");
   if (!root) return;
   var get = function (id) { return document.getElementById("wrec-" + id); };
-  var state = null, review = null, busy = false, installationPoints = [], accessDenied = false;
+  var state = null, review = null, busy = false, installationPoints = [], nativeReview = null, accessDenied = false;
   var comparison = null, comparisonContext = null, comparisonGeneration = 0;
   var drillEvidence = null, drillContext = null, drillGeneration = 0;
   var custodyEvidence = null, custodyContext = null, custodyGeneration = 0;
@@ -684,6 +684,8 @@
     if (selected) get("snapshot").value = selected;
     try {
       var installation = await request("installation");
+      nativeReview = installation.native_review || null;
+      get("installation-native-review").textContent = nativeReview ? "Native release: " + nativeReview.release.version + ". Review expires " + new Date(nativeReview.expires_at * 1000).toLocaleString() + "." : "For a protected update, first select Check for updates in the native app, then refresh this page.";
       get("installation-point").replaceChildren();
       var choose = document.createElement("option"); choose.value = ""; choose.textContent = "Choose a completed upgrade"; get("installation-point").appendChild(choose);
       (installation.recovery_points || []).filter(function (item) { return item.status === "upgraded"; }).forEach(function (item) {
@@ -1007,16 +1009,24 @@
   async function authorizeInstallation(rollback) {
     if (!get("installation-confirm").checked) return;
     get("installation-code").value = "";
-    var body = { confirm: true, confirm_all_workspaces: true };
+    var body = { confirm: true, confirm_all_workspaces: true, native_handoff: get("installation-handoff").checked };
+    if (!rollback) {
+      if (!nativeReview || nativeReview.expires_at * 1000 <= Date.now()) throw new Error("Check for updates in the native app and refresh this page to review the exact release.");
+      body.review_id = nativeReview.id;
+    }
     if (rollback) { if (!get("installation-point").value) return; body.rollback_id = get("installation-point").value; }
     else if (get("installation-transition-file").files.length) {
       if (!identityTransition || !get("installation-transition-confirm").checked || identityTransition.context !== state.context) return;
       body.identity_transition = identityTransition.envelope; body.transition_sha256 = identityTransition.sha256; body.confirm_identity_transition = true;
     }
     var result = await request("installation/authorize", body);
+    if (result.native_handoff === true) {
+      get("installation-result").textContent = "Protected approval ready until " + new Date(result.expires_at * 1000).toLocaleString() + ". In Install & updates, select Load protected approval, review its administrator, action and scope, then confirm. Nothing has been installed.";
+    } else {
     if (typeof result.authorization !== "string" || !/^[0-9a-f]{32}:[0-9a-f]{64}$/.test(result.authorization)) throw new Error("The maintenance authorization was incomplete. Review again.");
     get("installation-code").value = result.authorization;
     get("installation-result").textContent = "Authorization ready for 15 minutes. Continue in the desktop app's Install & updates controls and confirm the exact " + (rollback ? "rollback" : "update") + ".";
+    }
     get("installation-confirm").checked = false;
     clearIdentityTransition(); get("installation-transition-file").value = "";
   }

@@ -445,6 +445,7 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     type=click.Choice([
         "status", "repair-capability", "authorize-repair", "inspect", "prepare",
         "execute", "resume", "logs",
+        "save-native-review", "inspect-handoff",
     ]),
 )
 def installation_maintenance_cmd(step: str) -> None:
@@ -459,6 +460,12 @@ def installation_maintenance_cmd(step: str) -> None:
         request = json.loads(raw)
         if step == "status":
             result = recovery.status()
+        elif step == "save-native-review":
+            from ..installation_handoff import save_review
+            result = save_review(request.get("release"))
+        elif step == "inspect-handoff":
+            from ..installation_handoff import inspect_handoff
+            result = inspect_handoff()
         elif step == "repair-capability":
             result = recovery.repair_capability(
                 expected_runtime_sha256=request.get("runtime_sha256"),
@@ -7317,6 +7324,7 @@ def _soc2_posture_ready(evidence) -> bool:
 from . import (  # noqa: E402,F401
     _a2a_groups,
     _agent_control_plane_groups,
+    _budget_preview,
     _code_groups,
     _codec_groups,
     _compliance_groups,

@@ -7,6 +7,8 @@
   var review = null;
   var repairReview = false;
   var identityTransition = null;
+  var handoff = null;
+  function protectedApproval(operation) { return handoff && handoff.operation === operation && handoff.expires_at * 1000 > Date.now(); }
   var AUTHORIZATION = /^[0-9a-f]{32}:[0-9a-f]{64}$/;
   var FAILED = "Lightwork could not complete that step.";
   var STATUS_LABELS = {
@@ -30,7 +32,8 @@
   }
   function describeCode() {
     var value = code();
-    if (!value) hint("No code yet. Copy it in Workspace recovery mode, then select Paste code.");
+    if (!value && handoff) hint("Protected " + handoff.operation + " approval from " + handoff.actor_label + ". Expires " + new Date(handoff.expires_at * 1000).toLocaleString() + ". " + handoff.scope, protectedApproval(handoff.operation) ? "ok" : "bad");
+    else if (!value) hint("No code yet. Copy it in Workspace recovery mode, then select Paste code.");
     else if (AUTHORIZATION.test(value)) hint("Code ready. It works for 15 minutes after it was made.", "ok");
     else hint("This isn't a complete approval code. Copy the whole code again in Workspace recovery mode and paste it here.", "bad");
   }
@@ -38,12 +41,13 @@
     get("check-update").disabled = busy || !configured || !recoveryAvailable;
     get("repair-install").disabled = busy || !configured;
     var authorized = AUTHORIZATION.test(code());
-    get("install-update").disabled = busy || !review || (!repairReview && !authorized);
-    get("rollback-install").disabled = busy || !authorized;
+    get("install-update").disabled = busy || !review || (!repairReview && !authorized && !protectedApproval("upgrade"));
+    get("rollback-install").disabled = busy || (!authorized && !protectedApproval("rollback"));
     get("resume-maintenance").disabled = busy || !get("maintenance-incomplete").value;
     get("maintenance-logs").disabled = busy || !get("maintenance-log-point").value;
     get("back").disabled = busy;
     get("save-identity-transition").disabled = busy || !identityTransition;
+    if (get("load-handoff")) get("load-handoff").disabled = busy;
     if (get("paste-authorization")) get("paste-authorization").disabled = busy;
     if (get("clear-authorization")) get("clear-authorization").disabled = busy;
   }
@@ -67,18 +71,7 @@
     var label = waiting ? "needs finishing" : STATUS_LABELS[point.status] || "unknown state";
     return point.old_version + " → " + point.new_version + " · " + label;
   }
-  async function check(repair) {
-    if (busy || !configured || (!repair && !recoveryAvailable)) return;
-    busy = true;
-    review = null;
-    identityTransition = null;
-    get("identity-transition-notice").hidden = true; get("save-identity-transition").hidden = true;
-    get("update-review").hidden = true;
-    controls();
-    status(repair ? "Looking for a safe copy of your installed version…" : "Checking for updates…");
-    try {
-      var result = await invoke("check_desktop_update", { repair: repair });
-      if (result) {
+  function showReview(result) {
         if (typeof result.review !== "string" || typeof result.version !== "string") throw new Error("The update response was incomplete. Check again.");
         review = result.review;
         repairReview = result.repair === true;
@@ -96,6 +89,20 @@
         status(repairReview
           ? "Review the repair below. Nothing changes until you select Repair and restart."
           : "Review the update below and follow its steps. Nothing is installed until you select Install and restart.");
+  }
+  async function check(repair) {
+    if (busy || !configured || (!repair && !recoveryAvailable)) return;
+    busy = true;
+    review = null;
+    identityTransition = null;
+    get("identity-transition-notice").hidden = true; get("save-identity-transition").hidden = true;
+    get("update-review").hidden = true;
+    controls();
+    status(repair ? "Looking for a safe copy of your installed version…" : "Checking for updates…");
+    try {
+      var result = await invoke("check_desktop_update", { repair: repair });
+      if (result) {
+        showReview(result);
       } else {
         status(repair ? "A repair copy of this version isn't available right now. Contact your administrator." : "You have the latest version. No update is available.");
       }
@@ -107,6 +114,19 @@
     var link = document.createElement("a"); link.href = url; link.download = name; link.click();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
+  if (get("load-handoff")) get("load-handoff").addEventListener("click", async function () {
+    if (busy) return;
+    busy = true; controls();
+    try {
+      var result = await invoke("review_maintenance_handoff");
+      if (!result || typeof result.actor_label !== "string" || ["upgrade", "rollback"].indexOf(result.operation) < 0 || !Number.isFinite(result.expires_at) || result.expires_at * 1000 <= Date.now() || "authorization" in result) throw new Error("The protected approval is unavailable or expired. Review it again in Workspace recovery.");
+      handoff = result; get("maintenance-authorization").value = "";
+      status("Protected " + result.operation + " reviewed for " + (result.new_version || result.old_version) + ". Nothing changes until your final action below.");
+      describeCode();
+    } catch (error) { handoff = null; failure(error); }
+    finally { busy = false; controls(); }
+  });
+  setInterval(function () { if (!busy) { describeCode(); controls(); } }, 1000);
   get("check-update").addEventListener("click", function () { return check(false); });
   get("repair-install").addEventListener("click", function () { return check(true); });
   get("save-identity-transition").addEventListener("click", function () {
@@ -122,13 +142,16 @@
     status("Downloading and checking the installer. Lightwork will close when installation begins…");
     try {
       var args = { review: selected, confirm: true };
-      if (!repairReview) args.authorization = code();
+      if (!repairReview && code()) args.authorization = code();
       get("maintenance-authorization").value = "";
       describeCode();
       await invoke("install_desktop_update", args);
       status("The installer has started. Lightwork will reopen when it finishes.");
-    } catch (error) { failure(error); }
-    finally { busy = false; get("update-review").hidden = true; controls(); }
+    } catch (error) {
+      failure(error);
+      try { var current = await invoke("maintenance_status"); if (current.reviewed_update) showReview(current.reviewed_update); } catch (_) {}
+    }
+    finally { busy = false; get("update-review").hidden = !review; controls(); }
   });
   get("back").addEventListener("click", function () {
     if (!busy) window.location.replace("index.html");
@@ -148,7 +171,7 @@
   });
   if (get("clear-authorization")) get("clear-authorization").addEventListener("click", function () {
     if (busy) return;
-    get("maintenance-authorization").value = "";
+    get("maintenance-authorization").value = ""; handoff = null;
     describeCode(); controls();
   });
   get("maintenance-incomplete").addEventListener("change", controls);
@@ -173,7 +196,8 @@
   async function recover(resume) {
     if (busy || (resume ? get("resume-maintenance").disabled : get("rollback-install").disabled)) return;
     busy = true; controls();
-    var args = resume ? { id: get("maintenance-incomplete").value, confirm: true } : { authorization: code(), confirm: true };
+    var args = resume ? { id: get("maintenance-incomplete").value, confirm: true } : { confirm: true };
+    if (!resume && code()) args.authorization = code();
     get("maintenance-authorization").value = "";
     describeCode();
     status(resume ? "Finishing the interrupted update. Lightwork will reopen with the result…" : "Getting ready to go back to the previous version. Lightwork will reopen with the result…");
@@ -187,6 +211,7 @@
   controls();
   invoke("maintenance_status").then(function (result) {
     get("installed-version").textContent = result.version;
+    if (result.reviewed_update) showReview(result.reviewed_update);
     configured = result.updates_configured === true;
     var recovery = result.recovery || {};
     recoveryAvailable = recovery.unavailable !== true;

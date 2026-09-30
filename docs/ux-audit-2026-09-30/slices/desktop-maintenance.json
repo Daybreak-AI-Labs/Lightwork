@@ -18,14 +18,14 @@
     "status": "planned",
     "implementation_evidence": "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice.",
     "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Supported non-Windows customer target set and production distribution/signing/notarization require owner decision. Current macOS/Linux engineering/private-source channel labels remain truthful; self-contained staging and verified release-channel engineering still required."
+    "remaining": "Owner confirmed existing Windows-candidate support boundary. macOS/Linux engineering setup and signed-artifact verification remain in progress; production signing/notarization and customer qualification are not claimed."
   },
   {
     "id": "LW-156",
-    "status": "planned",
-    "implementation_evidence": "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice.",
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build protected native handoff bound to reviewed release/recovery point and authenticated administrator; keep manual code fallback and final explicit native action."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Private authenticated local review/handoff records bind the exact release version, runtime/MSI hash/signature or retained rollback point to the authenticated recovery administrator and 15-minute grant. The native helper revalidates the private grant; raw authorization remains in native state/pipe and private OS storage, never either webview. UI reviews administrator/action/scope/expiry with explicit final native action and manual fallback. Pending release metadata survives bundled-page navigation; expired approval is checked before consuming the reviewed update. Remote dashboard content has no new native capability.",
+    "validation": "Python3.10 AST, JavaScript syntax and Rustfmt syntax/format only. Exact-review/expiry/admin-binding/public-token-exclusion fixtures authored unrun.",
+    "remaining": "Run Windows/Tauri browser navigation, expiry, tampering, clipboard-disabled, concurrent administrators and exact-release/rollback qualification later."
   },
   {
     "id": "LW-157",

@@ -7,6 +7,7 @@ fn main() {
             "startup_support_report",
             "switch_recovery_mode",
             "maintenance_status",
+            "review_maintenance_handoff",
             "check_desktop_update",
             "install_desktop_update",
             "rollback_desktop_update",

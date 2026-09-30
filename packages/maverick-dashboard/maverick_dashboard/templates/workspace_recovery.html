@@ -118,6 +118,8 @@
   </section>
   <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
     <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>
+    <p id="wrec-installation-native-review" role="status"></p>
+    <label class="wrec-confirm"><input id="wrec-installation-handoff" type="checkbox" checked>Use the protected desktop handoff. Keep the approval out of the clipboard. Uncheck for the manual code fallback.</label>
     <label class="wrec-confirm"><input id="wrec-installation-confirm" type="checkbox">I am authorized to pause and recover all local workspaces and shared administration on this computer.</label>
     <details><summary>Review a signing identity transition</summary>
       <p>Ordinary updates keep the same signing identities. A publisher or update-key change requires the default-off Signing identity transition setting, a dual-signed exact-release bridge, and your separate approval. Save the proposed review file from Install &amp; updates, then select it here. No new identity is trusted merely by selecting a file.</p>
