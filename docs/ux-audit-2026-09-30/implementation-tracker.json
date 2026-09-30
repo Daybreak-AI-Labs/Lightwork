@@ -3,26 +3,27 @@
     "id": "LW-001",
     "title": "Keep conversation responsive while governed tasks run",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing employee companion supports conversation independent from tasks."
+      "conversation_inbox.py separates sealed durable messages and immutable operation receipts from native execution jobs. conversation_inbox_api.py plus supervised conversation_inbox_scheduler.py preserve exact-owner authority, CAS, native thread fencing, submission identities, attachment admission and no automatic repeat of uncertain runner handoffs. Agent root checkpoints deliver exact separately approved guidance without creating a new task. The coordinated lightwork-conversation-inbox.js composer supports guidance/queue/independent choices, text/file edits and cancellation, pinned explicit snapshots, durable recovery and fresh closure/permission checks. Four product_operations_conversation adapters share the native services. Typed administrator settings, installer opt-in and inherited conversation mode/detail preferences complete configuration. docs/conversation-inbox.md records limits, recovery and owner-bound My Data helper contracts."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Transferred to settings_integrity by root; dedicated slice-conversation-inbox owns durable queue/guidance/independent submission and safe checkpoint acknowledgement. No placeholder implementation claimed here.",
-    "evidence_slice": "slices/conversation.json"
+    "validation": "18 focused local Python tests passed (core encrypted records, native HTTP/scheduler/Copilot, partial-draft cancellation/FIFO and closed-source recovery); 18 jsdom controller tests passed. One asset-response test was deselected in the final run because its route registration belongs to consolidated peer checkpoint f61d43d; the same test passed in an earlier 17-test run with those equivalent routes present locally. Ruff on seven new Python modules/tests, changed Python AST/Jinja parsing, JavaScript syntax and git diff whitespace checks passed. No live provider or network-credential calls.",
+    "remaining": "Integrated full-suite and real-browser qualification is coordinated by root. Postgres multi-process/fault-injection and visual/accessibility qualification remain unrun for this slice. Identity/privacy worker is wiring the exported owner-bound inbox helpers into the reviewed My Data inventory/export/erasure UI; do not claim that adapter wired before its checkpoint. Consolidated asset registrations depend on f61d43d; coordinated UI commits4504720,aad84a3,9326cbf,27c6cca are required. Delivery acknowledgements prove exact checkpoint insertion, not model compliance or attachment reading.",
+    "evidence_slice": "slices/conversation-inbox.json"
   },
   {
     "id": "LW-002",
     "title": "Graduate page-help Copilot into a shared product operation interface",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Shared typed operation catalog foundation/settings adapter supplied by settings worker 5b22e3b.",
-      "product_operations_tasks.py registers native current task projection, text clarification admission/receipt recovery, CAS saved-result edit and fixed project-review responses. Explicit human confirmation, current owner/membership, source revision and exact native receipt replay remain shared with UI.",
-      "docs/ux-audit-2026-09-30/conversation-operation-matrix.md tracks actual behavior and limits."
+      "product_operations typed native registry and lightwork-product-operations.js use sealed source/context/revision, explicit review and confirmation, native receipt recovery and deterministic controls when AI suggestions are unavailable.",
+      "conversation-operation-matrix.md traces all registered families including current task, clarification, reviews, schedule lifecycle and repair, connection diagnostics, selected bundles, handoffs, task Stop/restart, and worker-owned preference/identity/knowledge/project/budget/model/notification adapters.",
+      "tasks.resume uses shared reviewed_resume/goal_resume reserve transaction and native runner lease, with native UI separate review/confirmation, exact admitted-restart receipt replay and opaque reload receipt lookup; no automatic retry or duplicate dispatch.",
+      "schedules.repair uses native recurrence_recovery_apply/JobQueue.reconcile_recurrence with exact evidence, stopped-worker confirmation and actor-bound atomic durable recovery receipt; previous historical work is not replayed."
     ],
-    "validation": "Ruff, AST and whitespace checks passed. Native regression tests authored; root coordinates full local suites after implementation per latest user authorization. No provider calls.",
-    "remaining": "Family coverage and remaining stop/restart, accepted transfer and selected bundle native adapters still in progress; do not count catalog infrastructure alone as full product parity.",
+    "validation": "39 focused Python lifecycle tests passed, including native restart/readiness, schedule definitions and typed repair; four restart-controller jsdom regressions passed. Prior native task/handoff/bundle tests and shared registry tests are recorded by their owning checkpoints. Ruff/AST/Jinja/JS/whitespace passed. Root integrated and installed-browser/PostgreSQL qualification remains separate.",
+    "remaining": "Integrate companion LW001 native service/catalog checkpoint and final UI snapshot contract alongside lifecycle changes, then run root shared catalog and broader local suites. No universal arbitrary UI automation or unregistered operation is implied.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -531,11 +532,24 @@
     "category": "Accessibility language and mobile",
     "status": "planned",
     "implementation_evidence": [
-      "i18n.py still truthfully declares CONTENT_LANGS={en} and community Arabic SEED_LANGS. No invented translations or changed user content."
+      "Added 340 source-keyed product-copy entries with draft French/German/Japanese/Chinese translations, shared existing catalog validation; Arabic seed unchanged.",
+      "Explicit server regions/browser bindings across first-task, preferences, answer, project reviews and task-file recovery. Source documents, inputs, result streams and parameter values remain escaped/verbatim and independently directed.",
+      "Independent interface_language account/workspace/organization inheritance, portable profile field, device/account header controls, legacy display API key normalization. Response language and response prompts remain unchanged; saves preserve editor drafts.",
+      "BCP47 regional browser formatting, weighted Accept-Language, Intl date/number/currency/plurals, calendar-date no-UTC-drift, actual fallback-region lang and RTL dialog/table rules, opt-in native confirmation and field validation.",
+      "docs/ux-audit-2026-09-30/web-localization-coverage.json contains exact remaining literal HTML fragments and explicit measurement exclusions."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "Human-reviewed end-to-end catalogs and Arabic community contribution review are required before any locale can be claimed complete; locale formatting and all operational copy still require implementation.",
-    "evidence_slice": "slices/mobile.json"
+    "validation": [
+      "47 selected Python tests passed: new locale/identity/escaping checks, catalog/portal, preferences, activation and project-review APIs.",
+      "65 selected DOM cases passed across the first run plus repaired navigation/plain-language fixture reruns: five localization cases and existing forms/halt/reviews/recovery behavior. No assertions removed.",
+      "Two additional task_file_recovery_api tests remain blocked by Windows ancestor CreateFileW admission in untouched recovery backend; three other cases passed.",
+      "Ruff, Python 3.10 AST, changed controller Node syntax, Jinja parsing and whitespace checks passed."
+    ],
+    "remaining": [
+      "Continue current chat composer/001 guidance, workflow editing and dynamic validation/error/confirmation strings; static HTML inventory is not end-to-end journey qualification.",
+      "Human native-language and consequence/legal-copy review for draft catalogs; Arabic community contribution and RTL keyboard/screen-reader qualification. No non-English complete-body locale advertised.",
+      "Language-specific browser rendering/assistive-technology and native surface acceptance remain pending."
+    ],
+    "evidence_slice": "slices/web-localization.json"
   },
   {
     "id": "LW-044",
@@ -702,7 +716,7 @@
       "No transport workaround weakening byte bounds added. README explicitly retains source-scaffold/native streaming qualification limitation."
     ],
     "validation": "2026-09-30: user superseded the test deferral; mobile mock suite passed75/75 and strict TypeScript source analysis passed. Actual iOS/Android keychain/network/accessibility qualification still requires native hosts.",
-    "remaining": "Real iOS/Android requests, chunked-body limit abort, cancellation and offline recovery are not run because user deferred testing; signed-device tooling still required.",
+    "remaining": "Real iOS/Android requests, chunked-body limit abort, cancellation and offline recovery require native SDK/device qualification; Apple SDK and Android SDK are unavailable in this Windows execution environment. Local mocks and source checks are evidence only, not native transport acceptance.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -1269,7 +1283,7 @@
     "id": "LW-095",
     "title": "Define and enforce admin audit-metadata-only default",
     "category": "Identity administration and privacy",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "027751b + 072ae1c: exact goal ownership, no shared-installation-credential bypass, resource-scoped independent expiring access with audit acknowledgement and reviewer membership checks.",
       "Audit tail/search/export projections, governed subject export, feature/installer/UI and preservation of explicit result sharing.",
@@ -1277,10 +1291,13 @@
       "4424b8f: source ownership and stop-use rechecks before task/reflection/dream/skill recall and model-memory tools; 144 passed, 6 unavailable native-adapter tests skipped.",
       "7f65700: canonical bundled/publication receipt/exact-owner template visibility across catalog, builders, workflow history, suggestions and consumers.",
       "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed.",
-      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed.",
+      "Shared harness lessons and harvested evaluation cases require durable exact-source lineage, current known-unowned ownership and stop-use authorization. Unknown legacy rows remain stored but are withheld from prompt/search/shared UI, trial reporting, transfer and evaluation; audit learning logs remove arbitrary lesson/model/phase text. Root separately closes learned capability/generated-tool metadata and execution paths.",
+      "Root e363f91 + 6660857 bind learned-capability history and generated-tool discovery/execution/deletion to exact owner and current source digest. Personal My Data adds opaque source-bound generated-tool deletion requests and exact available lineage inventory without implying all retained derivatives are gone.",
+      "product_operations_personal_data.py shares 14 native ownership/revision/independent-review journeys, including identity proof, preference suppression, provenance, exclusions, owned exports and per-store deletion status."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Complete consolidated route/model-recall review across sibling slices, integration of all embedded approval surfaces and global Copilot operations; authenticated cross-user acceptance remains unrun.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun. Learning closure:339 local core/privacy cases and13 dashboard learning cases passed;4 task-authority Node tests passed. Ruff and syntax checks passed. Personal-data completion:51 local Python tests and6 Node tests passed; Ruff, JavaScript syntax and whitespace passed.",
+    "remaining": "Final integrated registry/module qualification and authenticated cross-user installed/browser acceptance remain required. No live-provider, production or external-custodian deletion result is claimed.",
     "evidence_slice": "slices/identity.json"
   },
   {
@@ -1432,10 +1449,11 @@
     "status": "implemented-test-needed",
     "implementation_evidence": [
       "personal_memory.py provides revision-bound owned note corrections, durable exact/topic suppression read by consolidation and recall; personal_data_api.py and My Data show source date/revision or legacy unavailable and re-authorize source reads.",
-      "Encrypted controls and metadata-only audit preserve administrator content privacy; feature knob, installer and Account entry provide the direct journey."
+      "Encrypted controls and metadata-only audit preserve administrator content privacy; feature knob, installer and Account entry provide the direct journey.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay."
     ],
-    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending.",
-    "remaining": "Local runtime and installed/browser acceptance remain unexecuted; global Copilot integration is tracked separately.",
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending. Completion checkpoint:51 focused local Python tests and6 Node tests passed; Ruff and syntax/whitespace checks passed.",
+    "remaining": "Final integrated registry/module and authenticated browser qualification remain required; no live provider or external copy/model deletion is claimed.",
     "evidence_slice": "slices/personal-memory.json"
   },
   {
@@ -1447,10 +1465,11 @@
       "personal_identity.py implements two-sided challenge proof, exact tenant/account/sender bindings, explicit dashboard confirmation, unlink and fresh membership checks.",
       "Durable incoming account proof binds new channel conversations and goal owners without changing execution ACL principals; legacy accountless histories remain unverified.",
       "My Data exposes explicit authoritative-source conflict choice and channel-only default; personal note and style recall consume current verified links.",
-      "memory_ownership.py, owner-filtered recall SQL, source-bound reflections/dream insights, generated skill lineage and owner-separated model memory prevent adjacent cross-account enrichment. Legacy unknown-source records are retained but not inherited."
+      "memory_ownership.py, owner-filtered recall SQL, source-bound reflections/dream insights, generated skill lineage and owner-separated model memory prevent adjacent cross-account enrichment. Legacy unknown-source records are retained but not inherited.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay."
     ],
-    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
-    "remaining": "Installed multi-adapter and browser acceptance remains pending; source-bound unit and existing recall tests passed.",
+    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending. Completion checkpoint:51 focused local Python tests and6 Node tests passed; Ruff and syntax/whitespace checks passed.",
+    "remaining": "Final integrated registry/module and authenticated browser qualification remain required; no live provider or external copy/model deletion is claimed.",
     "evidence_slice": "slices/personal-memory.json"
   },
   {
@@ -1461,10 +1480,11 @@
     "implementation_evidence": [
       "My Data separates personal recall and collection, organization lesson promotion, workflow examples, source-bound local training and prior/external derivatives.",
       "Exact task owners can apply existing durable local-learning exclusions; user turns now bind goal_id for exclusion lineage. Personal choices cannot expand administrator ceilings or companion policy.",
-      "My Data now projects effective personal collection, organization shared-source promotion and local skill/self-learning ceilings. restriction_state distinguishes unavailable enforcement from a confirmed exclusion; source-bound recall and capture honor task exclusion."
+      "My Data now projects effective personal collection, organization shared-source promotion and local skill/self-learning ceilings. restriction_state distinguishes unavailable enforcement from a confirmed exclusion; source-bound recall and capture honor task exclusion.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay."
     ],
-    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending.",
-    "remaining": "Installed acceptance remains pending. Prior models and external/manual datasets are explicitly not claimed unlearned; shared knowledge requires its separate purpose/rights process.",
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending. Completion checkpoint:51 focused local Python tests and6 Node tests passed; Ruff and syntax/whitespace checks passed.",
+    "remaining": "Final integrated registry/module and authenticated browser qualification remain required; no live provider or external copy/model deletion is claimed.",
     "evidence_slice": "slices/personal-memory.json"
   },
   {
@@ -1509,10 +1529,12 @@
       "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims.",
       "personal_data_requests.py provides owner-requested exact-scope deletion, distinct current administrator review, held/requested/dispatching/purged/unconfirmed per-store records, signed database-closure receipts, fresh preservation gates, and retained/external exceptions.",
       "Adapters cover selected conversations/tasks/attachments, personal notes, stale-tab-safe encrypted draft deletion, employee-companion history, personal style/display records, scoped model memory, private notification receipts and owned diagnostic reports. Current account identity and privacy restrictions remain explicit retained stores.",
-      "Selected activation drafts and personal project defaults now use owner/revision-bound erasure helpers with durable tombstones; active/uncertain activation dispatch blocks erasure, created workflows/source tasks remain explicit exceptions, and pending audit acknowledgments stay unconfirmed."
+      "Selected activation drafts and personal project defaults now use owner/revision-bound erasure helpers with durable tombstones; active/uncertain activation dispatch blocks erasure, created workflows/source tasks remain explicit exceptions, and pending audit acknowledgments stay unconfirmed.",
+      "product_operations_personal_data.py exposes the same 14 native scoped control/read/export/review journeys through the closed shared registry, with fresh revisions and no implicit mutation replay.",
+      "My Data inventories/exports/reviews erasure for exact named-owner model-test history and queued conversation text/files, retains no-replay/generation tombstones, blocks active/uncertain outcomes and treats audit-pending deletion as unconfirmed. Current generated tools use opaque reviewer keys and locked expected-digest CAS; readable learning lineage and retained/withheld exceptions are explicit."
     ],
-    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending. Follow-up:22 local activation/deletion/shared-operation tests and9 project-workspace tests passed.",
-    "remaining": "Browser and installed multi-worker acceptance pending. Source/knowledge derivatives, shared packets, prior models, provider data and copied support downloads are explicit retained/external-unverified exceptions with governed rights handoff; local purge never claims whole-person deletion.",
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending. Follow-up:22 local activation/deletion/shared-operation tests and9 project-workspace tests passed. Completion checkpoint:51 focused local Python tests and6 Node tests passed; Ruff and syntax/whitespace checks passed.",
+    "remaining": "Final integrated registry/module and authenticated browser qualification remain required; no live provider or external copy/model deletion is claimed.",
     "evidence_slice": "slices/personal-memory.json"
   },
   {
@@ -2498,12 +2520,12 @@
     "id": "LW-184",
     "title": "Distribution/native qualification unfinished",
     "category": "Native clients and developer integrations",
-    "status": "planned",
+    "status": "test-needed",
     "implementation_evidence": [
-      "Apple project.yml plus pinned XcodeGen2.42.0, application entry points and four app/hosted-test targets remove manual source/target assembly. mobile npm lock, exact Expo52 template version+SHA512, build-native.cjs and local Swift/Kotlin bounded no-redirect transport provide reproducible local native generation and build commands. Previews and support/signing gates remain explicit in native-companion-release.md; watch complication promise stays removed."
+      "Apple project.yml plus pinned XcodeGen2.42.0, application entry points and four app/hosted-test targets remove manual source/target assembly. mobile npm lock, exact Expo52 template version+SHA512, build-native.cjs and local Swift/Kotlin bounded no-redirect transport provide reproducible local native generation and build commands. Previews and support/signing gates remain explicit in native-companion-release.md; watch complication promise stays removed. JetBrains now has complete pinned Gradle8.13 wrapper/checksum, SDK2024.3.6 project, Kotlin2.1.20/Gson2.11.0 dependency lock, local loopback check and unsigned installable ZIP plus SHA/input manifest. Zed exact API0.7.0/Cargo lock/Rust1.97.1 WASIp2 build emits source+component preview archive with compiler/input hashes. Both documented commands build without manual project assembly; compatibility remains deliberately preview and target-specific."
     ],
-    "validation": "2026-09-30: locked npm install succeeded; actual dependency tsc --noEmit passed; Android project generation succeeded twice; Android/Apple local-module autolinking verified. All91 mobile mocks passed, including native adapter routing/denial/cancellation/no unsafe Fetch fallback. Apple YAML four target/source/package paths and Python build-script Ruff verified. xcodebuild/XcodeGen/JDK/Android SDK absent on Windows; no native binary was compiled or installed, no signing/upload occurred.",
-    "remaining": "JetBrains Gradle project/distribution and Zed locked artifact packaging remain engineering work outside this Apple/mobile checkpoint; root coordinating. Apple/mobile native SDK compilation, installed-host accessibility/keychain/network tests and release-owner signing/export/privacy/support approval are still required. No signed end-user installer is delivered or claimed.",
+    "validation": "2026-09-30:91 mobile mocks and installed-dependency TypeScript passed; Android native generation twice and Apple/Android autolinking passed. JetBrains real IntelliJ SDK compile and all12 local synthetic JVM transport cases passed; check buildPlugin and python build.py generated unsigned ZIP. Zed locked release WASIp2 compile and python build.py succeeded; component header and every bundled input hash verified. Python Ruff and git whitespace checks passed. Exact toolchain pins, commands and artifact hashes are in native-build-evidence.json. No installed-editor/device or signed-release qualification is implied.",
+    "remaining": "Qualification remains open: Apple/iOS native SDK compilation requires macOS/Xcode; Android SDK unavailable; installed IDE/device auth, revocation, protected storage, accessibility and host lifecycle tests remain unrun. Zed host must support API0.7.0; JetBrains compatibility is limited to compile target243 until installed tests pass. Release owner must select/approve distribution/signing and privacy/export/support gates. No signed end-user installer or publication is delivered; this row is test-needed, not completed distribution.",
     "evidence_slice": "slices/mobile.json"
   },
   {

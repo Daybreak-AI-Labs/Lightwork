@@ -102,7 +102,7 @@
     "status": "test-needed",
     "implementation_evidence": "No transport workaround weakening byte bounds added. README explicitly retains source-scaffold/native streaming qualification limitation.",
     "validation": "2026-09-30: user superseded the test deferral; mobile mock suite passed75/75 and strict TypeScript source analysis passed. Actual iOS/Android keychain/network/accessibility qualification still requires native hosts.",
-    "remaining": "Real iOS/Android requests, chunked-body limit abort, cancellation and offline recovery are not run because user deferred testing; signed-device tooling still required."
+    "remaining": "Real iOS/Android requests, chunked-body limit abort, cancellation and offline recovery require native SDK/device qualification; Apple SDK and Android SDK are unavailable in this Windows execution environment. Local mocks and source checks are evidence only, not native transport acceptance."
   },
   {
     "id": "LW-058",

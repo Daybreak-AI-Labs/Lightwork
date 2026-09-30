@@ -17,7 +17,7 @@ LAYERS = (
     "desktop-maintenance", "knowledge", "personal-memory", "budget",
     "today", "task-diagnostics", "source-checkpoint-lookup", "activation",
     "plugin-adapters", "project-workspaces", "personal-notifications",
-    "preference-scopes", "model-tests", "web-localization",
+    "preference-scopes", "model-tests", "web-localization", "conversation-inbox",
 )
 
 

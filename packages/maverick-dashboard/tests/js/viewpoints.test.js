@@ -7,7 +7,8 @@ const { JSDOM } = require('jsdom');
 
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const template = fs.readFileSync(path.join(folder, 'templates/chat.html'), 'utf8');
-const panel = template.slice(template.indexOf('<details class="panel cs-viewpoints"'), template.indexOf('</details>', template.indexOf('cs-viewpoints')) + 10);
+const panelStart = template.indexOf('<details class="panel cs-viewpoints"');
+const panel = template.slice(panelStart, template.indexOf('</details>', panelStart) + 10);
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-viewpoints.js'), 'utf8');
 const answer = {
   ran: true, rounds: 1, verdict: 'against', reason: 'The risks outweigh the gain.', key_point: 'Mondays are busy.', cost: 0.0123,

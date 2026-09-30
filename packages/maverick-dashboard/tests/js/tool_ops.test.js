@@ -99,12 +99,12 @@ test('a skill with problems cannot be added and a bad address is caught before a
 
 test('when adding skills from a web address is off, the check says so plainly and shows nothing to add', async (t) => {
   // The server's own sentence, read from the route, through the page's real plain-sentence filter.
-  const api = fs.readFileSync(path.join(folder, 'tools_ops_api.py'), 'utf8');
+  const api = fs.readFileSync(path.join(folder, 'tools_ops_api.py'), 'utf8').replace(/\r\n/g, '\n');
   const off = /_INSTALL_OFF = \(([\s\S]*?)\)\n/.exec(api)[1].match(/"([^"]*)"/g).map((q) => q.slice(1, -1)).join('');
   const ui = await fixture(slice('skills.html', '<details class="sk-more" id="to-skill-install">', '</details>'),
     () => response({detail: off}, 403));
   t.after(() => ui.window.close());
-  const lib = fs.readFileSync(path.join(folder, 'static/lightwork-ui.js'), 'utf8');
+  const lib = fs.readFileSync(path.join(folder, 'static/lightwork-ui.js'), 'utf8').replace(/\r\n/g, '\n');
   const filter = /var JARGON = [\s\S]*?window\.mvPlainDetail = function \(detail\) \{[\s\S]*?return text;\n\s*\};/.exec(lib)[0];
   ui.window.eval(filter);
   ui.document.getElementById('to-skill-url').value = 'https://example.com/s.md';

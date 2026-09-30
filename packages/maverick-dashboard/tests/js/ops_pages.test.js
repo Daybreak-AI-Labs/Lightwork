@@ -79,8 +79,11 @@ test('stripe send is offered after a preview and confirmed first', async (t) => 
   const markup = '<select name="workspace"></select>' + body('templates/billing.html', '<div class="panel" id="stripe-billing">', '{% endif %}');
   const ui = await fixture(markup.replace('<select class="select" name="workspace" required>', '<select class="select" name="workspace" required><option value="acme">Acme</option>'),
     'lightwork-billing-ops.js', (url) => {
-      if (url.includes('/stripe/preview')) return response({summary: 'The plan fee is set up in Stripe.', can_sync: true});
-      if (url.endsWith('/stripe/sync')) return response({summary: 'Acme is set up in Stripe.', technical: []});
+      if (url.includes('/stripe/preview')) return response({summary: 'The plan fee is set up in Stripe.', can_sync: true,
+        review_id: 'review-1', sha256: 'a'.repeat(64), review_expires: Date.now() / 1000 + 600, workspace: 'acme', plan: 'free', snapshot: {}});
+      if (url.endsWith('/stripe/sync')) return response({message: 'Acme is set up in Stripe.', attempt: 'attempt-1',
+        updated_at: Date.now() / 1000, stages: {}, dispatches: [], state: 'complete',
+        receipt_href: '/api/v1/admin/billing-ops/stripe/receipt?workspace=acme', reconciliation_href: 'https://dashboard.stripe.com/'});
       return response({ready: true, summary: 'Stripe billing is ready.', facts: []});
     });
   t.after(() => ui.window.close());
@@ -91,15 +94,19 @@ test('stripe send is offered after a preview and confirmed first', async (t) => 
   assert.equal(sync.hidden, false);
   sync.click();
   await ui.settle();
-  assert.match(ui.confirms[0], /Send Acme to Stripe/);
-  assert.equal(JSON.parse(ui.calls.find((c) => c.url.endsWith('/stripe/sync')).options.body).confirm, true);
+  assert.match(ui.confirms[0], /Send exactly this reviewed billing change to Stripe/);
+  const sent = JSON.parse(ui.calls.find((c) => c.url.endsWith('/stripe/sync')).options.body);
+  assert.equal(sent.confirm, true);
+  assert.equal(sent.review_id, 'review-1');
+  assert.equal(sent.sha256, 'a'.repeat(64));
 });
 
 test('bug report lists stopped tasks and opens only after confirming', async (t) => {
   const markup = body('templates/support.html', '<section class="panel" id="issue-report"', '</section>') + '</section>';
   const ui = await fixture(markup, 'lightwork-support-ops.js', (url) => {
-    if (url.endsWith('/tasks')) return response({tasks: [{id: 7, title: 'Quarterly summary', when: 1}]});
-    return response({url: 'https://github.com/x/issues/new?title=a', summary: 'The report is ready.'});
+    if (url.includes('/tasks?')) return response({tasks: [{id: 7, title: 'Quarterly summary', when: 1}], next_offset: null});
+    return response({title: 'Quarterly summary', body: 'Reviewed local draft.',
+      url: '#reviewed-report', summary: 'The report is ready.'});
   });
   t.after(() => ui.window.close());
   const select = ui.document.getElementById('issue-report-task');
@@ -107,8 +114,19 @@ test('bug report lists stopped tasks and opens only after confirming', async (t)
   select.value = '7';
   submit(ui, ui.document.getElementById('issue-report-form'));
   await ui.settle();
-  assert.match(ui.confirms[0], /public bug-report page/);
-  assert.deepEqual(ui.opened, ['https://github.com/x/issues/new?title=a']);
+  assert.equal(ui.document.getElementById('issue-report-preview').hidden, false);
+  const open = ui.document.getElementById('issue-report-open');
+  assert.equal(open.disabled, true);
+  assert.equal(ui.calls.filter((c) => c.url.endsWith('/review')).length, 0);
+  assert.deepEqual(ui.opened, []);
+  const confirmed = ui.document.getElementById('issue-report-confirm');
+  confirmed.checked = true;
+  confirmed.dispatchEvent(new ui.window.Event('change'));
+  open.click();
+  await ui.settle();
+  assert.deepEqual(JSON.parse(ui.calls.find((c) => c.url.endsWith('/review')).options.body),
+    {task: 7, title: 'Quarterly summary', body: 'Reviewed local draft.'});
+  assert.equal(ui.window.location.hash, '#reviewed-report');
 });
 
 test('savings and performance additions draw plain rows', async (t) => {
@@ -127,7 +145,7 @@ test('savings and performance additions draw plain rows', async (t) => {
 test('a prepared settings file is checked before it can be installed', async (t) => {
   const markup = body('templates/setup_guide.html', '<div class="panel" id="guide-file">', '<p><a class="btn btn--ghost" href="/start">');
   const ui = await fixture(markup, 'lightwork-setup-guide.js', (url) => {
-    if (url.endsWith('/check')) return response({valid: true, summary: 'The file is valid and ready to install.', technical: []});
+    if (url.endsWith('/check')) return response({valid: true, review: 'review-1', summary: 'The file is valid and ready to install.', technical: []});
     return response({installed: true, summary: 'Installed the settings file.'});
   });
   t.after(() => ui.window.close());
@@ -141,6 +159,6 @@ test('a prepared settings file is checked before it can be installed', async (t)
   install.click();
   await ui.settle();
   assert.match(ui.confirms[0], /backup copy/);
-  assert.ok(ui.calls.some((c) => c.url.endsWith('/install?confirm=true')));
+  assert.ok(ui.calls.some((c) => c.url.endsWith('/install?confirm=true&review=review-1')));
   assert.equal(ui.document.getElementById('guide-file-status').textContent, 'Installed the settings file.');
 });

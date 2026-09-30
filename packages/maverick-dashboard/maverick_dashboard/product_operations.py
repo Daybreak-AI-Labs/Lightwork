@@ -144,6 +144,7 @@ def _adapter_modules():
         product_operations_knowledge,
         product_operations_models,
         product_operations_notifications,
+        product_operations_personal_data,
         product_operations_plugins,
         product_operations_preferences,
         product_operations_projects,
@@ -170,6 +171,7 @@ def _adapter_modules():
         product_operations_identity,
         product_operations_record_history,
         product_operations_conversation,
+        product_operations_personal_data,
     )
 
 

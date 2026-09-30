@@ -26,6 +26,13 @@ def test_registry_exposes_native_personal_journeys():
     assert [e.id for e in entries if e.execute is None] == ["personal_data.status", "personal_data.note_source", "personal_data.deletion_status", "personal_data.export_scope", "personal_data.export_account"]
 
 
+def test_shared_registry_advertises_every_native_personal_journey():
+    from maverick_dashboard.product_operations import adapters
+
+    registered = adapters()
+    assert {entry.id for entry in operations.entries()} <= registered.keys()
+
+
 def test_memory_mutation_uses_current_verified_scope_and_prepared_revision(state, monkeypatch):
     prepared = operations.prepare(None, {}, {"scope_id": "dashboard", "recall": False}, action="recall")
     calls = []
