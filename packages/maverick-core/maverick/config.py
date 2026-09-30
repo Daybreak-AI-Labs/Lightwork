@@ -540,7 +540,8 @@ def load_global_config() -> dict:
     # keys / capability+feature toggles merge over config.toml without touching it.
     dash = dashboard_overrides_path()
     if dash.exists():
-        cfg = _deep_merge_config(cfg, _load_config_file(dash))
+        from .config_resets import merge_dashboard
+        cfg = merge_dashboard(cfg, _load_config_file(dash), _deep_merge_config)
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         cfg = _deep_merge_config(cfg, _load_config_file(Path(overlay).expanduser()))

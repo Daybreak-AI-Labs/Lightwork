@@ -225,3 +225,28 @@ def test_file_review_binds_new_environment_references(monkeypatch):
     first = _file_review_revision(raw)
     monkeypatch.setenv('TEAM_DISPLAY_NAME', 'After')
     assert _file_review_revision(raw) != first
+
+
+def test_table_reset_and_inherit_match_actual_runtime_merge(monkeypatch):
+    from maverick.config import load_global_config, config_path
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[rate_limits]\nshell="2/minute"\ncustom="3/minute"\n', encoding='utf-8')
+    row = 'rate_limits.other'
+    def save(change):
+        revision = client.get(API).json()['revision']
+        return client.post(API, json={'expected_revision': revision, 'confirm': True, 'changes': [{'id': row, **change}]})
+    assert save({'reset': True}).status_code == 200
+    assert 'custom' not in load_global_config()['rate_limits']
+    assert load_global_config()['rate_limits']['shell'] == '2/minute'
+    assert page._resolve(page.catalog.BY_ID[row], page._sources())['source'] == 'here'
+    assert save({'inherit': True}).status_code == 200
+    assert load_global_config()['rate_limits']['custom'] == '3/minute'
+
+
+def test_internal_reset_metadata_cannot_target_an_arbitrary_path():
+    from maverick_dashboard import settings_store
+    from maverick.config_resets import METADATA
+    with pytest.raises(ValueError):
+        settings_store.set_catalog_values({(METADATA, 'rate_limits.other'): {
+            'path': ['dashboard', 'admins'], 'keep': [], 'entries': False, 'preserve_tables': False, 'remove_value': False}})

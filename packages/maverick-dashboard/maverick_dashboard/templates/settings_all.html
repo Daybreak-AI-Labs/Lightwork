@@ -105,7 +105,8 @@
       </div>
       <p class="settings-all-group-actions">
         <button class="btn btn--primary" type="button" data-save-group="{{ g.slug }}">Save changes in {{ g.name }}</button>
-        <button class="btn btn--ghost" type="button" data-reset-group="{{ g.slug }}">Reset all in {{ g.name }}</button>
+        <button class="btn btn--ghost" type="button" data-reset-group="{{ g.slug }}">Reset {{ g.name }} to product defaults</button>
+        <button class="btn btn--ghost" type="button" data-inherit-group="{{ g.slug }}">Use inherited values in {{ g.name }}</button>
       </p>
     </div>
   </section>

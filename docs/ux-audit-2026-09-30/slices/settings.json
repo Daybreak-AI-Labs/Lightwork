@@ -127,10 +127,10 @@
   },
   {
     "id": "LW-037",
-    "status": "planned",
-    "implementation_evidence": "Explicit reset vs inherit controls and backend operations; inherited source preview; scalar built-in default differs correctly from installer; deployment locks rechecked",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "config_resets reviewed global-dashboard metadata implements product default for tables and absent/no-limit scalar defaults; ordinary writer derives/validates exact catalog paths; reset/inherit groups/rows explicitly labelled; source preview and sign-in guard use same merge; installer bytes untouched and operator precedence retained",
     "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Core table overlays merge installer rows and cannot mask them. Reset with installer table rows now refuses clearly instead of pretending to restore product default; full table semantics require a reviewed tombstone/replacement contract or installer edit flow."
+    "remaining": "Core merge, fixed-entry preservation, runtime/catalog parity, invalid metadata and writer-path tests authored but unrun. Metadata only interpreted in global dashboard overlay, never tenant or operator inputs; group actions exclude locked rows."
   },
   {
     "id": "LW-038",

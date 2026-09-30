@@ -127,8 +127,11 @@ def _layer_value(setting: catalog.Setting, layer: object) -> tuple[bool, object]
 
 def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
     """Tables merge like the kernel's config loader: later layers add rows."""
+    from maverick.config_resets import apply_to_base, is_reset
+    masked = is_reset(layers["here"], setting)
+    layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
     merged: dict[str, object] = {}
-    source = "default"
+    source = "here" if masked else "default"
     for name, label in (("base", "installer"), ("here", "here")):
         present, value = _layer_value(setting, layers[name])
         if present and isinstance(value, dict):
@@ -138,7 +141,7 @@ def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str
     if present:
         merged.update(value if isinstance(value, dict) else {})
         return {"source": "deployment", "locked": True, "value": merged, "known": True}
-    return {"source": source, "locked": False, "value": merged, "known": True}
+    return {"source": "here" if masked else source, "locked": False, "value": merged, "known": True}
 
 
 def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
@@ -153,6 +156,9 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     present, value = catalog.lookup(layers["here"], setting.path)
     if present:
         return {"source": "here", "locked": False, "value": value, "known": True}
+    from maverick.config_resets import is_reset
+    if is_reset(layers["here"], setting):
+        return {"source": "here", "locked": False, "value": _default_in(setting, layers), "known": True}
     present, value = catalog.lookup(layers["base"], setting.path)
     if present:
         return {"source": "installer", "locked": False, "value": value, "known": True}
@@ -1093,11 +1099,16 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 "so it can't be changed here.",
             )
         old = state["value"]
+        from maverick.config_resets import METADATA, is_reset, reset_spec
+        marker = (METADATA, setting.id)
+        was_reset = is_reset(layers["here"], setting)
         if item.reset and item.inherit:
             raise _Refused(400, "Choose either product default or inherited value.")
         if item.inherit and setting.control != "table":
-            if not catalog.lookup(layers["here"], setting.path)[0]:
+            if not catalog.lookup(layers["here"], setting.path)[0] and not was_reset:
                 continue
+            if was_reset:
+                writes[marker] = None
             inherited = {**layers, "here": {}}
             new = _resolve(setting, inherited)["value"]
             writes[setting.path] = None
@@ -1109,7 +1120,7 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
             continue
         if setting.control == "table":
             new, table_writes = _plan_table(setting, item, old, layers)
-            if old == new and not (item.reset and table_writes):
+            if old == new and not ((item.reset or item.inherit) and table_writes):
                 continue
             writes.update(table_writes)
             prospective[setting.id] = new
@@ -1121,13 +1132,16 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         if item.reset:
             default = _default_of(setting)
             base_present, base_value = catalog.lookup(layers["base"], setting.path)
-            if _has_partial_default(setting):
+            if default is None and base_present:
+                writes[marker] = reset_spec(setting)
+                writes[setting.path] = None
+                new = None
+            elif _has_partial_default(setting):
                 # Removing the value could let an older default apply: write
                 # the default itself.
                 writes[setting.path] = default
                 new = default
-            elif (not setting.secret and base_present and default is not None
-                    and base_value != default):
+            elif (base_present and default is not None and base_value != default):
                 # The installer chose something else: write the default so the
                 # setting really returns to it.
                 writes[setting.path] = default
@@ -1136,6 +1150,8 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 writes[setting.path] = None  # drop the value set here
                 new = base_value if base_present else default
         else:
+            if was_reset:
+                writes[marker] = None
             try:
                 new = catalog.coerce(_resolved(setting, old), item.value)
                 if setting.control == "document":
@@ -1152,7 +1168,7 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
             else:
                 writes[setting.path] = _sealed_rows(setting, new)
         unchanged = old == new and (not item.reset or state["source"] != "here")
-        if unchanged and (item.reset or not setting.secret):
+        if unchanged and marker not in writes and (item.reset or not setting.secret):
             writes.pop(setting.path, None)
             continue
         prospective[setting.id] = new
@@ -1187,11 +1203,21 @@ def _plan_table(
     base_rows = dict(base_rows) if isinstance(base_rows, dict) else {}
     _present, here_rows = _layer_value(setting, layers["here"])
     here_rows = dict(here_rows) if isinstance(here_rows, dict) else {}
-    if item.reset and base_rows:
-        raise _Refused(409, "This table includes installer rows that cannot be masked by an overlay. Use inherited value, or review and remove those rows in the installer configuration.")
-    if item.reset or item.inherit:
+    from maverick.config_resets import METADATA, is_reset, reset_spec
+    marker = (METADATA, setting.id)
+    was_reset = is_reset(layers["here"], setting)
+    metadata_writes = {}
+    if item.inherit:
+        if was_reset:
+            metadata_writes[marker] = None
         wanted = dict(base_rows)
+    elif item.reset:
+        wanted = dict(_default_of(setting))
+        metadata_writes[marker] = reset_spec(setting)
+        base_rows = {}
     else:
+        if was_reset:
+            base_rows = {}
         try:
             wanted = catalog.coerce(_resolved(setting, before), item.value)
         except catalog.SettingError as exc:
@@ -1218,7 +1244,7 @@ def _plan_table(
                 issues = contrast_issues(palette)
                 if issues:
                     raise _Refused(400, f"Theme {name}: " + " ".join(issues))
-    writes: dict[tuple[str, ...], object] = {}
+    writes: dict[tuple[str, ...], object] = dict(metadata_writes)
     if setting.key_kind == "entries":
         for name in here_rows:
             if name not in wanted or wanted[name] == base_rows.get(name):

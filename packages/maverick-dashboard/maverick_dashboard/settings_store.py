@@ -648,7 +648,7 @@ def _dump(data: dict) -> str:
     for section in dict.fromkeys((
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
-                    "security_suite_control", "oauth", "workspace",
+                    "security_suite_control", "oauth", "workspace", "_dashboard_resets",
                     # Portal link keyring (portal_routing_key_api); sealed values.
                     "third_party_portal",
                     # Consent publication signing keyring
@@ -1492,6 +1492,7 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     if the change cannot be recorded in the audit trail.
     """
     from .settings_catalog import SETTINGS
+    from maverick.config_resets import METADATA, reset_spec
 
     by_path = {s.path: s for s in SETTINGS if s.key_kind != "entries"}
     # "entries" tables (usage limits for any tool) own every other key of
@@ -1499,7 +1500,15 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     entries = {s.path: s for s in SETTINGS if s.key_kind == "entries"}
     if not isinstance(changes, dict) or not changes:
         raise ValueError("no settings given")
+    reset_tables = {s.id: s for s in SETTINGS}
     for path in changes:
+        if len(path) == 2 and path[0] == METADATA:
+            table = reset_tables.get(path[1])
+            value = changes[path]
+            if table is None or (value is not None and value is not REMOVE and value != reset_spec(table)):
+                raise ValueError("unknown product-default reset")
+            by_path[path] = table
+            continue
         table = entries.get(tuple(path[:-1]))
         if path in by_path:
             continue

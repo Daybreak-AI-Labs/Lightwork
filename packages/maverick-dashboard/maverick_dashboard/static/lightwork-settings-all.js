@@ -449,6 +449,12 @@
       if (pickSelect) pickSelect.focus();
     } else if (target.hasAttribute('data-fingerprint-server') && row) {
       await fingerprintFrom(row, null, target);
+    } else if (target.dataset.inheritGroup) {
+      var inheritedGroup = target.closest('.settings-all-group');
+      if (!(await loadGroup(target.dataset.inheritGroup))) return;
+      var inheritedRows = rows(inheritedGroup).filter(function (r) { return editable(r) && r.dataset.source === 'here'; });
+      if (!inheritedRows.length) { announce('This group has no editable dashboard overrides to remove.'); return; }
+      await commit(inheritedRows.map(function (r) { return {id:r.dataset.settingId,inherit:true}; }), inheritedRows, 'use inherited values');
     } else if (target.dataset.resetGroup) {
       var group = target.closest('.settings-all-group');
       // Every setting of the group, not only those shown so far.
@@ -456,7 +462,7 @@
       var name = group.querySelector('h2') ? group.querySelector('h2').textContent : 'this group';
       var list = rows(group).filter(function (r) { return editable(r) && r.dataset.source !== 'default'; });
       if (!list.length) { announce('Everything in ' + name + ' already uses its default.'); return; }
-      var ok = await window.mvConfirm('Put every setting in ' + name + ' back to its default?', {okText: 'Reset all'});
+      var ok = await window.mvConfirm('Put every setting in ' + name + ' back to its product default? Deployment-locked rows are excluded.', {okText: 'Review product defaults'});
       if (!ok) return;
       await commit(list.map(function (r) { return {id: r.dataset.settingId, reset: true}; }), list, 'reset the settings');
     } else if (target.hasAttribute('data-secret-replace') && row) {

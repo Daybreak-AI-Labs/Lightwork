@@ -74,7 +74,8 @@ def merged_config(layers: dict[str, Any], writes: dict | None = None) -> dict:
             node.pop(path[-1], None)
         else:
             node[path[-1]] = value
-    cfg = _deep_merge(layers.get("base") or {}, here)
+    from maverick.config_resets import merge_dashboard
+    cfg = merge_dashboard(layers.get("base") or {}, here, _deep_merge)
     return _deep_merge(cfg, layers.get("operator") or {})
 
 
