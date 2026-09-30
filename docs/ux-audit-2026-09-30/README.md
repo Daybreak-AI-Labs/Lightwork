@@ -23,7 +23,7 @@ implementation worklist, not acceptance or release evidence.
 
 `implementation-tracker.json` retains exactly one row per audit ID. Statuses:
 `planned`, `implemented-test-needed`, `already-fixed-test-needed`,
-`blocked-source`, and `deferred-decision` (must name the actual decision and why
+`test-needed` (qualification work explicitly deferred), `blocked-source`, and `deferred-decision` (must name the actual decision and why
 implementation depends on it). Partial code is not an implemented disposition.
 
 Independent slices write their evidence to `slices/`; integration reconciles it
