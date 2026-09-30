@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
+Current dispositions: 190 implemented-test-needed, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -37,7 +37,7 @@ Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
 | LW-026 | Built; acceptance pending | Settings-file check and install are not bound to one reviewed change |
 | LW-027 | Built; acceptance pending | Settings-file activity claims installation before the write succeeds |
 | LW-028 | Built; acceptance pending | Fence duplicate child-task creation in the task map |
-| LW-029 | Active implementation | Protect task-map edits from overwriting another user's current state |
+| LW-029 | Built; acceptance pending | Protect task-map edits from overwriting another user's current state |
 | LW-030 | Built; acceptance pending | Define personal workspace and organization preference scopes |
 | LW-031 | Built; acceptance pending | Expose all supported persona styles consistently |
 | LW-032 | Built; acceptance pending | Add personal and per-conversation custom output styles |
@@ -51,7 +51,7 @@ Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
 | LW-040 | Built; acceptance pending | Save and compare outcome-oriented configuration presets |
 | LW-041 | Built; acceptance pending | Personal favorites and saved navigation views |
 | LW-042 | Built; acceptance pending | Create a configurable daily work home from existing projections |
-| LW-043 | Active implementation | Localize complete employee journeys |
+| LW-043 | Built; acceptance pending | Localize complete employee journeys |
 | LW-044 | Built; acceptance pending | Add follow-system appearance and readable text scaling |
 | LW-045 | Built; acceptance pending | Make custom themes accessible before applying them |
 | LW-046 | Built; acceptance pending | Make read-aloud complete and reliably stoppable |

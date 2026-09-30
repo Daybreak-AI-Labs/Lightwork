@@ -233,10 +233,10 @@
     "category": "Save integrity and draft protection",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "goal_mutations.edit_result; migration 42 on SQLite/Postgres; api.edit_deliverable; chat_goal comparison; tests/test_goal_mutations.py"
+      "goal_mutations.edit_result performs result-only CAS with durable actor/operation receipts and atomic approval invalidation on SQLite/Postgres schema42. Native edit_deliverable and lifecycle-mounted editor preserve local draft/current comparison, task status, exact saved revision and truthful saved/learning_observation/training_completed fields."
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Runtime concurrency/parity and receipt fault-injection qualification remain unrun. Combine companion worker truthful learning receipt fields during integration.",
+    "validation": "Local core edit-result cases passed in the final 63-case settings/preference batch; existing native integrity tests and graph batch passed. Prior human versions, stale result/status preservation and idempotent replay have exercised regression coverage. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "PostgreSQL multi-process and crash-boundary parity plus final installed editor qualification remain; no claim of model learning from an ordinary result save.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -247,8 +247,8 @@
     "implementation_evidence": [
       "settings_all_page._revision binds effective layers and catalog environment; _catalog_update_locked compares/revalidates/writes/audits under settings_store RLock+cross-process fence; client explicit conflict comparison"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Concurrent authenticated A/B and deployment-layer qualification unrun. Existing catalog test fixtures need reviewed revision fields for the new required API contract.",
+    "validation": "Catalog matrix on frozen b546225:2600 passed,3 failed,6 platform skips. All3 identified fixture failures were repaired and passed at3abdd3e; no claim of a complete rerun after those repairs. Current audit-settings-integrity CAS/environment tests passed in63 focused cases. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final consolidated catalog and authenticated two-browser/deployment-layer qualification are coordinated by root; the6 recorded platform skips remain explicit.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -259,8 +259,8 @@
     "implementation_evidence": [
       "lightwork-settings-all.js dirty beforeunload for every loaded row; opt-in recovery only safe scalar/list/picker controls through encrypted draft service; secrets/documents/table content excluded"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Browser reload/navigation/cancel matrix unrun. Table edits receive loss warnings; policy/credential tables are deliberately not persisted in recovery.",
+    "validation": "Final settings/editor JS batch:61 of62 passed; the sole localized workflow fixture was fixed without weakening recovery assertions and the overlapping41-case saved-views/editor/forms/settings batch passed. Scalar/list/table, structured controls and recovery behavior retain targeted coverage. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed navigation/theme/reload and accessibility matrix remains. Tables receive loss warnings; protected policy/credential documents are deliberately excluded from ordinary draft recovery.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -271,8 +271,8 @@
     "implementation_evidence": [
       "lightwork-settings-all.js commit locks submitted inputs/selects/textareas/buttons, retains prior disabled states, preserves dirty unrelated rows"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Delay-response browser cases unrun.",
+    "validation": "Settings commit locking is covered by local page/grid/structured JS suites in the61 passing cases; overlapping settings/form cases passed in41-case follow-up. New map/view tests also verify owned pending locks and duplicate submission fencing. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed delayed-response tests for every specialized credential/table control remain distinct from synthetic-controller coverage.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -283,8 +283,8 @@
     "implementation_evidence": [
       "settings.html section submit uses in-place fetch with submitted control lock, section-only dirty clearing/password clearing, explicit saved vs pending notice and partial appearance receipt"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Browser/provider form failure matrix unrun; no provider calls made.",
+    "validation": "Native reviewed settings fixture families and local in_app_forms/settings page suites passed; selected editor/forms/settings batch passed41 including saved-view cases. Unrelated draft preservation and explicit pending/saved outcomes remain in the implementation. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final authenticated browser qualification of all provider-form partial-failure combinations remains; no provider was called.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -295,8 +295,8 @@
     "implementation_evidence": [
       "preferences_api display POST; shared _display_preferences.html; lightwork-ui immediate class/text-size preview, persistence, rollback and Undo without navigation"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Scroll/focus/editor/reload browser qualification unrun.",
+    "validation": "Local audit-settings-integrity display-cookie checks passed in63 focused cases. Existing installed Chrome settings/display journey was among70 distinct passing cases across baseline and targeted browser runs; that evidence is not a single final-commit rerun. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed focus/scroll/undo across the integrated editor set and shared-device qualification remain. Persistence failures restore prior display and retain drafts.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -320,8 +320,8 @@
     "implementation_evidence": [
       "setup_guide prepare/install binds bytes + account/workspace + current sources and referenced environment; complete catalog and opaque dedicated-field impact rows include Added/Removed/Changed, inherited override/disabled flags and activation timing; exact receipts and conflict fence from 6eaca67"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Controlled config races and exact-byte/environment-reference scenarios authored, unrun. Unclassified dedicated fields withhold values and conservatively flag possible restart rather than claiming live activation.",
+    "validation": "Exact-file installation case passed after the reviewed-token fixture correction, verifying stale rejection, backup bytes, intent-before-confirmation, replay and unchanged-file review. Current audit-settings-integrity file/config/environment binding tests passed in63 focused cases. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed concurrent-administrator and supported-platform filesystem matrix remains. Unclassified dedicated fields withhold values and conservatively report possible restart.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -332,8 +332,8 @@
     "implementation_evidence": [
       "setup_guide durable reviewed/pending/uncertain/confirmed receipts; install requested/confirmed audit stages; GET result + explicit POST reconcile observed current bytes; no-op distinguished; random backup suffix"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Filesystem/audit failure injection and lost-ack qualification unrun. Reconciliation records observed current bytes; it does not claim an uncertain original write occurred.",
+    "validation": "Native installation fixture verifies intent-before-confirmation audit order, acknowledged readback, backup identity, replay without a second backup and no-op handling. Reviewed setup/integrity regressions passed locally; truthful receipt UI is retained. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Exhaustive process-kill/filesystem/audit fault injection across deployment filesystems remains qualification work. Reconciliation proves currently observed bytes, never an invented historical write.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -342,22 +342,22 @@
     "category": "Save integrity and draft protection",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "goal_mutations.create_child durable actor/op/payload receipt transaction; graph_editor pending guard/readonly title; per-account/tenant/parent/title session operation token; created child named+selected"
+      "goal_mutations.create_child binds actor/op/payload in one transaction. d0de3d1 graph controller owns bounded pending requests and duplicate guards, retains account/workspace/parent/title operation tokens across unclear acknowledgements, locks controls, preserves failures and identifies/selects the durable child. Handoff closure is rechecked before child mutation."
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Browser lost acknowledgement/reload/double-click and Postgres qualification unrun.",
+    "validation": "Native map/core/adapter coverage:30 distinct tests passed across29 initial plus the added ceiling case. Five graph-controller jsdom cases passed, including unclear child acknowledgement, same-operation explicit retry, draft preservation, named child and no automatic retry. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed browser reload/multiple-process and PostgreSQL child-receipt qualification remain.",
     "evidence_slice": "slices/settings.json"
   },
   {
     "id": "LW-029",
     "title": "Protect task-map edits from overwriting another user's current state",
     "category": "Save integrity and draft protection",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "goal_tree nodes include updated_at; required expected revision in RetitleIn/ReparentIn; goal_mutations.edit_structure transaction CAS+cycle check; graph conflict reload preserves title/parent draft"
+      "d0de3d1 adds product_operations_task_map tasks.rename/tasks.move over exact native API/CAS, real map selection events, durable kind=structure receipts and read-only historical recovery. Native refresh preserves drafted title/parent while showing current state. Atomic cycle/owner/handoff checks prevent moved descendants escaping inherited handoff spending ceilings. Parent registers the explicit lazy adapter module."
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Native graph edit CAS is implemented. Final acceptance review found the typed Copilot map-edit adapter and actual page selection handoff missing, and network acknowledgement unbounded. The native-authority adapter, bounded recovery and durable receipt are now in progress; no stub completion is claimed.",
+    "validation": "Seven new task-map adapter cases plus native graph/core coverage total30 distinct passing tests. Five actual graph-controller jsdom cases passed, covering selection, duplicate/unknown responses, stale draft preservation and context revocation; Ruff/whitespace passed. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final consolidated registry/installed browser and PostgreSQL multi-process qualification remain; source and controller behavior are locally exercised.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -380,8 +380,8 @@
     "implementation_evidence": [
       "persona.style_choices generated from runtime STYLES; settings_catalog uses shared registry and descriptions"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Roundtrip catalog/runtime registry test authored below; runtime suite unrun.",
+    "validation": "Runtime registry/catalog roundtrip regression passed in63 focused cases. Catalog matrix qualified2600 cases with3 subsequently repaired failures; all supported persona styles remain generated from the runtime registry. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed visual/sample-copy qualification remains; no runtime style is intentionally omitted.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -392,8 +392,8 @@
     "implementation_evidence": [
       "/preferences named personal custom guidance, builtins, inheritance and per-conversation override; ChatThreads canonical root binding; agent dashboard-principal prompt projection with guidance treated as untrusted presentation data"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Two-user/multiple-conversation runtime qualification unrun. Custom guidance cannot mutate tool/policy/retention settings.",
+    "validation": "Nine experience-preference cases passed in63 focused cases, covering independent people, conversation inheritance, policy locks, operation receipts and source resolution. Personal profile review/import tests also passed. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed two-person/conversation and accessibility qualification remains. Custom style is presentation guidance and grants no execution authority.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -404,8 +404,8 @@
     "implementation_evidence": [
       "persona.render_persona_prompt no longer injects global user_name; personal-only preferred_name; explicit admin migration action on /preferences; legacy control removed from organization catalog"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Anonymous/service receive no preferred name. Single-user migration requires establishing a named account then explicitly migrating, documented; identity/tenant matrix unrun.",
+    "validation": "The repaired current runtime regression verifies that legacy global user_name does not enter arbitrary prompts and the named owner's preferred_name does. This was one of3 catalog failures repaired/passed at3abdd3e. Own-profile isolation passed again in63 focused cases. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Named-account migration is explicit; anonymous/service work receives no preferred name. Final installed single-user migration walkthrough remains.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -416,8 +416,8 @@
     "implementation_evidence": [
       "experience_preferences encrypted principal display; preferences_api.context-bound device cookies; lock precedence; base/chat display picker; persisted account style used by server rendering"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Two-device/shared-device logout/account/tenant qualification unrun.",
+    "validation": "Context-bound cookie/display and named-principal preference regression cases passed in63 focused cases. Account interface locale and response language are distinct after the integrated locale follow-up. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final two-browser/shared-device sign-out and cookie-expiry qualification remains; account persistence is separate from local override cookies.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -428,8 +428,8 @@
     "implementation_evidence": [
       "Permission-aware settings_experience.search returns scoped role/source/effective metadata, aliases and exact provider/model/display/account/notification controls; lazy catalog id loading + input focus, workspace choice focus, personal results prioritized"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Browser focus/search/permission matrix unrun. Notification anchor supplied by peer cdab036 must be integrated. Plugin/connection/channel results link to their dedicated editors; exact provider/default-model/account targets included.",
+    "validation": "Permission-aware search and dedicated targets passed in final audit-settings-integrity cases. Shared-shell localization checkpoint308aedd passed120 Python and61 JS checks; native finder/search privacy and field links retain exact source/role metadata. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed keyboard focus into every lazy/dedicated surface remains; unavailable settings are not shown as editable.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -440,8 +440,8 @@
     "implementation_evidence": [
       "settings_experience.review + mixed immediate/next-task/restart metadata, exact before/after/source/affected module/scope; review exclusion preserves draft. runtime_configuration immutable first-read startup snapshots and heartbeats; native dashboard/worker/channels/gRPC lifecycle acknowledgements; admin runtime-status API and refreshable saved-vs-running UI."
     ],
-    "validation": "18 focused local tests passed for immutable startup/heartbeat, restart comparison, stale/wrong-consumer/tenant refusal, environment changes, malformed receipts, timing projection and installer choices. AST/Jinja, JS syntax, targeted Ruff and whitespace checks passed. No live providers or production processes. The slice settings catalog suite passed all 1,542 tests.",
-    "remaining": "Full integrated process restart/browser qualification pending. Coverage is explicitly limited to observed processes sharing this configuration data folder; tenant-scoped or manually overridden gRPC processes remain unconfirmed, and startup acknowledgement never claims service health or work success.",
+    "validation": "Immutable startup snapshot/heartbeat and dashboard runtime-status cases passed in63 focused cases, including wrong/stale consumer, tenant isolation, source changes and broken receipts. Mixed review and exclude-with-draft behavior retain native/JS coverage. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Full installed process restart qualification remains. Only observed processes sharing the configuration folder are covered; tenant/manual gRPC overrides remain unconfirmed. Startup acknowledgement proves captured configuration, never service health or successful work.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -452,8 +452,8 @@
     "implementation_evidence": [
       "config_resets reviewed global-dashboard metadata implements product default for tables and absent/no-limit scalar defaults; ordinary writer derives/validates exact catalog paths; reset/inherit groups/rows explicitly labelled; source preview and sign-in guard use same merge; installer bytes untouched and operator precedence retained"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Core merge, fixed-entry preservation, runtime/catalog parity, invalid metadata and writer-path tests authored but unrun. Metadata only interpreted in global dashboard overlay, never tenant or operator inputs; group actions exclude locked rows.",
+    "validation": "All4 core config_resets tests and native audit-settings-integrity reset cases passed in63 focused cases: product default versus installer inheritance, fixed entries, absent scalars, invalid metadata and actual table/runtime semantics. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed grouped reset/locked-row qualification remains. Reset metadata is accepted only from the controlled global dashboard overlay and does not edit installer/operator sources.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -464,8 +464,8 @@
     "implementation_evidence": [
       "Versioned selective organization profiles for approved voice/display/budget/model-preference keys plus personal named-style/display bundles; credential fields excluded and credential-like text rejected; unknown-version/key guidance; import validates ordinary dependencies/policy/review/CAS before writes"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Authored roundtrip/review-only/secret-exclusion/policy tests unrun. Only enumerated portable keys are accepted; other deployment controls remain explicit unsupported fields with migration guidance.",
+    "validation": "Local profile roundtrip, review-only import, secret/credential-like text exclusion, unknown-key and policy validation cases passed in audit-settings-integrity. Personal styles/display are allowlisted; imports use ordinary reviewed writes. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final clean-workspace installed import/export qualification remains. Portability is deliberately selective; unsupported deployment/credential fields require migration guidance and are never silently imported.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -476,8 +476,8 @@
     "implementation_evidence": [
       "settings_experience.history reads bounded deployment audit, labels actor/time/before-after+new revision bindings; safe fields selective restore through ordinary review+CAS; no secret restoration"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Audit reader/rollback concurrency and policy-change qualification unrun. History coverage explicitly last100 changes/30days; legacy revision absent labeled.",
+    "validation": "Native reviewed settings/history fixtures and CAS integrity cases passed locally; source preserves actor/time/revision evidence and routes selective restore through ordinary review/policy rather than file replacement. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed history/rollback and audit retention qualification remains. Coverage is last100 changes/30days, secret values are never restorable, and absent legacy revisions stay labelled.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -488,8 +488,8 @@
     "implementation_evidence": [
       "settings_experience PRESETS bounded research and existing regulated governance; drift, tradeoffs, expanded exact preview, deselect requested fields, explicit save and normal locks/confirmations"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Preset dependency/locked field runtime matrix unrun. No claim of local-only routing without a configured local model.",
+    "validation": "Native catalog, dependency/governance and reviewed settings fixture families passed locally; preset expansion and explicit-confirm behavior retain catalog/controller regression coverage. Exact field drift is shown before applying. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed preset policy/locked-row matrix remains. Bounded research and high-assurance profiles state qualitative/cap tradeoffs; no unconfigured local-only routing or invented provider-cost estimate is claimed.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -498,10 +498,10 @@
     "category": "Personalization and settings",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Principal preferences favorites/start page; permission-filtered destinations at every read/write; keyboard Move up/down/remove; account-owned Today pins"
+      "Existing account preferences provide permission-filtered page/template pins, keyboard reorder/remove, starting page and owned Today recents. f6ac623 completes missing saved task filters using existing UxStore and /api/v1/views, typed native/Copilot operations, same-owner context/CAS, explicit replacement/removal, safe generated links and bounded uncertain readback. Existing personal-preferences feature and installer step cover the journey; parent registers product_operations_task_views."
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Cross-device/account/revocation and keyboard browser qualification unrun. Item-level recents/saved filters are not added; acceptance implemented for authorized page destinations.",
+    "validation": "Saved-view native/core/legacy suite29 passed; final8 passed again after incompatible legacy-name collision protection. New6 saved-view jsdom cases and editor/forms/settings follow-up total41 passed. Existing preference/Today scope and revoked-template cases passed in63 focused cases. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
+    "remaining": "Final installed cross-device/keyboard/revocation qualification remains. Filters explicitly cover200 recent or100 matching search rows. UxStore is the existing deployment-local store; distributed/cross-process qualification and complete My Data store inventory remain separate integration concerns.",
     "evidence_slice": "slices/settings.json"
   },
   {
@@ -522,9 +522,9 @@
     "id": "LW-043",
     "title": "Localize complete employee journeys",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Added 1055 source-keyed product-copy entries with draft French/German/Japanese/Chinese translations, shared existing catalog validation; Arabic seed unchanged.",
+      "Integrated 1659 wired source-keyed product-copy entries with draft French/German/Japanese/Chinese translations and shared catalog/placeholder validation; Arabic seed unchanged.",
       "Explicit server regions/browser bindings across first-task, preferences, answer, project reviews and task-file recovery. Source documents, inputs, result streams and parameter values remain escaped/verbatim and independently directed.",
       "Independent interface_language account/workspace/organization inheritance, portable profile field, device/account header controls, legacy display API key normalization. Response language and response prompts remain unchanged; saves preserve editor drafts.",
       "BCP47 regional browser formatting, weighted Accept-Language, Intl date/number/currency/plurals, calendar-date no-UTC-drift, actual fallback-region lang and RTL dialog/table rules, opt-in native confirmation and field validation.",
@@ -534,7 +534,8 @@
       "Live chat clarification, exact answer acknowledgement, prepared-file upload states, stop/live-update recovery, work summaries, speech-input feedback and inherited restart USD use explicit product bindings and locale formatting. User questions, answers, tool output, trace text, filenames and prior drafts remain verbatim.",
       "Preference effective-source/lock state, reviewed saves/profile operations, closed validation failures and channel-memory posture use explicit product bindings. Interface-language saves retain the current editor and apply on the next page load. Theme names and custom guidance remain verbatim; select options contain valid text-only labels.",
       "First-task composer dynamic template review, file-selection controls and microphone feedback use explicit translations; file names, MIME values and dictated text remain verbatim. Browser DOM regressions caught and fixed two malformed title-input selectors in template/voice handling. Shared voice first-use setup feedback is localized without changing transcription data.",
-      "Coverage scanner now parses literal Jinja ui/ut arguments and separately lists any bound source missing a catalog; the selected journey templates have no missing bound-source translations in this checkpoint. Remaining literal brand/canonical identifier examples stay unchanged."
+      "Coverage scanner now parses literal Jinja ui/ut arguments and separately lists any bound source missing a catalog; the selected journey templates have no missing bound-source translations in this checkpoint. Remaining literal brand/canonical identifier examples stay unchanged.",
+      "Frozen integration d38832161d1eea7e7c7bef823704b2457859e64c includes shared navigation, budget, saved answers/planning/viewpoints, recovery/review, external voice and connected-account picker catalogs/controllers. This qualification adds the missing Task files page-title entry and checks inventoried catalog count against actual wired catalogs."
     ],
     "validation": [
       "47 selected Python tests passed: new locale/identity/escaping checks, catalog/portal, preferences, activation and project-review APIs.",
@@ -544,12 +545,15 @@
       "Workflow follow-on: 85 focused Python cases and 36 browser-controller cases passed, including publication/source isolation and localized classified request failures; Python 3.10 AST, Ruff, Jinja, Node syntax and whitespace checks passed.",
       "Conversation follow-on: 60 unique focused Python cases passed across initial55 passes plus22-case targeted rerun including repaired explicit-lang link assertion and four new draft-language route cases. 54 DOM cases passed, including source/attachment/acknowledgement preservation, exact receipt retries, current-state guidance and restart admission. Ruff, AST3.10, Jinja parsing, Node syntax and whitespace passed.",
       "Live chat/preferences follow-on: 27 focused chat/stream/attachment Python cases passed; 31 locale/catalog/memory Python cases passed, followed by 13 targeted cases after the added select/custom-theme regression. Browser checks: 41 existing workflow/authority/CLI cases, 9 locale/preferences cases and 5 final preferences/restart cases passed. These reruns overlap and are not a unique-test total. Ruff, AST3.10, Jinja parsing, inline/external JavaScript syntax and whitespace checks passed.",
-      "First-task follow-on: 19 focused Python cases passed; 29 DOM cases passed including actual file review, SpeechRecognition and prepared-template input selectors plus existing workflow handoff and draft integrity checks. Earlier locale/file-selection cohort passed 11 DOM cases before added real-composer cases. AST3.10, Jinja, actual inline JavaScript syntax, Ruff and whitespace passed."
+      "First-task follow-on: 19 focused Python cases passed; 29 DOM cases passed including actual file review, SpeechRecognition and prepared-template input selectors plus existing workflow handoff and draft integrity checks. Earlier locale/file-selection cohort passed 11 DOM cases before added real-composer cases. AST3.10, Jinja, actual inline JavaScript syntax, Ruff and whitespace passed.",
+      "Final integrated qualification: 90 unique Python cases passed across the 75-case main cohort and 22-case follow-on (seven overlap), based on JUnit case identities. The 135-case DOM cohort passed 134 initially; the remaining fixture lacked the LW068 hidden connection reference field. Updating the fixture to the actual form and asserting exact metadata preservation yielded 35/35 affected cases passing. No production controller bypass or assertion removal.",
+      "Final inventory: 1659 actual wired source messages; every literal ui/ut binding in the 10 selected journey templates has a catalog entry. Placeholder validation, Python3.10 AST, Ruff, JavaScript syntax and whitespace passed. See web-localization-qualification.md for commands and boundaries."
     ],
     "remaining": [
-      "Integrate shared shell/navigation, answer/planning/viewpoints, budget and recovery/review/voice worker checkpoints; regenerate the combined inventory and run the final integrated journey cohort. The 1055-source local inventory excludes those additive catalogs and is not end-to-end journey qualification.",
-      "Human native-language and consequence/legal-copy review for draft catalogs; Arabic community contribution and RTL keyboard/screen-reader qualification. No non-English complete-body locale advertised.",
-      "Language-specific browser rendering/assistive-technology and native surface acceptance remain pending."
+      "Native-language review of French/German/Japanese/Chinese draft translations, including approval, spending, privacy, restore and publication consequences. Automated tests do not qualify linguistic or legal wording.",
+      "Arabic remains the documented community seed. Community-authored translations, RTL keyboard, browser layout and screen-reader review remain required; no machine completion or complete Arabic support is claimed.",
+      "Language-specific browser and assistive-technology acceptance remains pending. English remains the only qualified complete-body locale; broader administrative pages and unknown backend messages retain explicit English/source fallbacks. The completed code scope is the prioritized employee onboarding/preferences/first-task/answer/review/recovery/workflow journey, not every product page.",
+      "Native application localization and installed-device qualification are tracked by their separate audit entries; this web cohort does not qualify them."
     ],
     "evidence_slice": "slices/web-localization.json"
   },
