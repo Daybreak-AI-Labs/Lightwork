@@ -1097,6 +1097,23 @@ def pick_budget() -> dict[str, Any]:
         "(recommended; choose No only for estimate-only custom gateways)",
         default=True,
     )
+    budget["guidance"] = _q_confirm(
+        "  Show known budget headroom before work? This never changes execution limits.", default=True)
+    budget["warnings"] = _q_confirm(
+        "  Show in-product warnings as tasks approach their limits?", default=True)
+    if budget["warnings"]:
+        import math
+        while True:
+            raw_thresholds = _q_text("  Warning thresholds, as fractions of the limit", default="0.8, 0.95, 1.0")
+            try:
+                values = [float(part.strip()) for part in raw_thresholds.split(",")]
+                if not 1 <= len(values) <= 10 or any(not math.isfinite(value) or not 0 < value <= 1 for value in values):
+                    raise ValueError
+            except (TypeError, ValueError):
+                console.print("[yellow]Enter one to ten finite numbers above 0 and at most 1, separated by commas.[/yellow]")
+                continue
+            budget["warning_thresholds"] = sorted(set(values))
+            break
     return budget
 
 

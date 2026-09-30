@@ -179,7 +179,7 @@
         var entry=doc.createElement('li');entry.setAttribute('role','none');
         var option=doc.createElement('a');option.id='navfinder-setting-'+index;option.href=row.href;option.setAttribute('role','option');option.setAttribute('tabindex','-1');option.setAttribute('aria-selected','false');
         var label=doc.createElement('span');label.className='navfinder__label';label.textContent=row.title;
-        var group=doc.createElement('span');group.className='navfinder__group';group.textContent='Setting - '+row.group;
+        var group=doc.createElement('span');group.className='navfinder__group';group.textContent='Setting - '+row.group + (row.effective ? ' - '+row.effective : '') + (row.required_role ? ' - '+row.required_role : '');
         option.appendChild(label);option.appendChild(group);entry.appendChild(option);results.appendChild(entry);settingOptions.push(option);bindOption(option);
       });
       options=pageOptions.concat(recordOptions,settingOptions);filterResults();

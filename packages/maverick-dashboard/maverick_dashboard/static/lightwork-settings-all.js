@@ -1458,7 +1458,10 @@
   refresh();
   var focus = root.dataset.focus && rowById(root.dataset.focus);
   var hash = /^#group-([a-z0-9-]+)$/.exec(window.location.hash || '');
-  if (focus && focus.scrollIntoView) focus.scrollIntoView();
+  if (focus && focus.scrollIntoView) {
+    focus.scrollIntoView(); var target = focus.querySelector('[data-input],.settings-all-label');
+    if (target) { if (!target.matches('input,select,textarea,button')) target.tabIndex = -1; target.focus({preventScroll:true}); }
+  }
   else if (hash && section(hash[1])) {
     // A link to one group (e.g. "Change in All settings"): open it there.
     loadGroup(hash[1]).then(function () {

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import contextvars
 import dataclasses
-import itertools
 import hashlib
+import itertools
 import json
 import os
 import threading
@@ -91,8 +91,14 @@ def _sources() -> dict[str, Any]:
 def _revision(layers: dict[str, Any] | None = None) -> str:
     """Opaque review binding, including deployment overrides and environment."""
     sources = _sources() if layers is None else layers
-    environment = {name: os.environ.get(name, "") for setting in catalog.SETTINGS
-                   for name in setting.env}
+    names = {name for setting in catalog.SETTINGS for name in setting.env}
+    names.update(name for provider in settings_store.PROVIDERS for name in provider.get("env", ()))
+    names.update(name for name in os.environ if name.startswith("MAVERICK_"))
+    # Variable references may be chosen by the installer rather than named in
+    # the catalog. Bind their values without ever sending those values out.
+    from maverick.config import _ENV_PATTERN
+    names.update(_ENV_PATTERN.findall(json.dumps(sources, default=str)))
+    environment = {name: os.environ.get(name, "") for name in names}
     return hashlib.sha256(json.dumps([sources, environment], sort_keys=True,
                                      default=str).encode()).hexdigest()
 
@@ -434,6 +440,7 @@ def _structured_sources() -> dict[str, Any]:
 
 _ACCESS_SOURCES = {
     "themes": _theme_choices,
+    "preference_themes": lambda: [("system", "Follow system"), *_theme_choices()],
     "capability_roles": _capability_role_choices,
     "workspaces": _workspace_choices,
     "model_roles": _model_role_choices,

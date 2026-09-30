@@ -50,10 +50,10 @@
   },
   {
     "id": "LW-026",
-    "status": "planned",
-    "implementation_evidence": "setup_guide exact byte digest+actor/tenant/config review revision, expiry; config_install and settings writer share lock; client file-change invalidation and catalog before/after/source/restart impact",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "setup_guide prepare/install binds bytes + account/workspace + current sources and referenced environment; complete catalog and opaque dedicated-field impact rows include Added/Removed/Changed, inherited override/disabled flags and activation timing; exact receipts and conflict fence from 6eaca67",
     "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Impact projection covers catalog fields. Dedicated provider/model and other noncatalog file keys still need semantic before/after projection; not claimed fully delivered."
+    "remaining": "Controlled config races and exact-byte/environment-reference scenarios authored, unrun. Unclassified dedicated fields withhold values and conservatively flag possible restart rather than claiming live activation."
   },
   {
     "id": "LW-027",
@@ -79,9 +79,9 @@
   {
     "id": "LW-030",
     "status": "planned",
-    "implementation_evidence": "experience_preferences encrypted organization/workspace/personal/conversation records, CAS, allowlist, source snapshots, deployment locked fields; /preferences; features.personal_preferences + installer; runtime only verified dashboard channel principal",
+    "implementation_evidence": "Encrypted scoped hierarchy, global-only policy ceilings, named-account runtime, source/inherit controls and in-place conflict comparison; organization policy editor settings_catalog_personalization; display defaults and personal-only pins/cards; notification adapter e3ad241 + peer cdab036",
     "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Memory-use narrowing requires verified principal-to-channel/store ownership mapping (confirmed by memory worker); no guessed identity mapping or no-op memory bool. Notification and template adapters, policy lock editing UI, authorized Copilot journeys and complete erasure integration remain. Notification worker coordinating adapter."
+    "remaining": "Memory narrowing and erasure require verified dashboard-principal-to-channel/store mapping. Root owns template preference adapters and Today projections. Authorized Copilot preference journey remains to implement; no placeholder memory toggle."
   },
   {
     "id": "LW-031",
@@ -113,10 +113,10 @@
   },
   {
     "id": "LW-035",
-    "status": "planned",
-    "implementation_evidence": "settings_experience search metadata catalog plus dedicated controls; new finder setSettings independent record results; exact All Settings id/group links load and scroll; permission-filtered source",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Permission-aware settings_experience.search returns scoped role/source/effective metadata, aliases and exact provider/model/display/account/notification controls; lazy catalog id loading + input focus, workspace choice focus, personal results prioritized",
     "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Dedicated main-settings links currently target section rather than each exact individual provider/model/feature control; synonyms/index completeness and focus qualification remain."
+    "remaining": "Browser focus/search/permission matrix unrun. Notification anchor supplied by peer cdab036 must be integrated. Plugin/connection/channel results link to their dedicated editors; exact provider/default-model/account targets included."
   },
   {
     "id": "LW-036",
@@ -134,10 +134,10 @@
   },
   {
     "id": "LW-038",
-    "status": "planned",
-    "implementation_evidence": "Versioned profile export/import for explicit safe voice/display/budget allowlist; no credentials/policy docs/usernames; unsupported keys give migration guidance; imports run common review+CAS+policy gates; config+installer feature knob",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Versioned selective organization profiles for approved voice/display/budget/model-preference keys plus personal named-style/display bundles; credential fields excluded and credential-like text rejected; unknown-version/key guidance; import validates ordinary dependencies/policy/review/CAS before writes",
     "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Portable dedicated model routes, personal custom-style bundles and full cross-installation dependency schema remain. Current supported profile roundtrip tests authored, unrun."
+    "remaining": "Authored roundtrip/review-only/secret-exclusion/policy tests unrun. Only enumerated portable keys are accepted; other deployment controls remain explicit unsupported fields with migration guidance."
   },
   {
     "id": "LW-039",

@@ -200,6 +200,28 @@ def _read_receipt(request: Request, token: str) -> tuple[Path, dict]:
     return path, receipt
 
 
+def _file_preview_value(setting, value):
+    from . import settings_all_page as page
+    from .draft_store import validate_payload
+    shown = page._audit_value(setting, value)
+    try:
+        validate_payload({'value': shown})
+    except (ValueError, TypeError):
+        return 'Configured (value withheld)'
+    return shown
+
+
+def _file_review_revision(raw: bytes, layers: dict | None = None) -> str:
+    import hashlib
+    import json
+    import os
+    from maverick.config import _ENV_PATTERN
+    from . import settings_all_page as page
+    names = set(_ENV_PATTERN.findall(raw.decode("utf-8")))
+    environment = {name: os.environ.get(name, "") for name in names}
+    return hashlib.sha256(json.dumps([page._revision(layers), environment], sort_keys=True).encode()).hexdigest()
+
+
 def _prepare_file(request: Request, raw: bytes) -> dict:
     import hashlib
     import secrets
@@ -217,26 +239,86 @@ def _prepare_file(request: Request, raw: bytes) -> dict:
         if not checked["valid"]:
             return checked
         layers = page._sources()
-        proposed = {**layers, "base": parse_config_bytes(raw)}
+        from maverick.config import _interp
+        preview_layers = {key: _interp(value) for key, value in layers.items()}
+        proposed = {**preview_layers, "base": _interp(parse_config_bytes(raw))}
         impact = []
         for setting in catalog.SETTINGS:
-            old, new = page._resolve(setting, layers), page._resolve(setting, proposed)
-            old_base = catalog.lookup(layers["base"], setting.path)
+            old, new = page._resolve(setting, preview_layers), page._resolve(setting, proposed)
+            old_base = catalog.lookup(preview_layers["base"], setting.path)
             new_base = catalog.lookup(proposed["base"], setting.path)
             if old_base == new_base:
                 continue
             impact.append({"label": setting.label, "source": page.SOURCE_TEXT[new["source"]],
-                           "before": page._audit_value(setting, old["value"]),
-                           "after": page._audit_value(setting, new["value"]),
+                           "change": "Added" if not old_base[0] else "Removed" if not new_base[0] else "Changed",
+                           "before": _file_preview_value(setting, old["value"]),
+                           "after": _file_preview_value(setting, new["value"]),
                            "overridden": new["source"] in {"here", "deployment"},
                            "impact": "After restart" if setting.restart else "Next task"})
+        impact.extend(_other_file_impact(preview_layers, proposed['base']))
         token = secrets.token_hex(32)
         _write_receipt(_receipt_path(token), {
             "context": context_for(request), "digest": hashlib.sha256(raw).hexdigest(),
-            "revision": page._revision(layers), "created_at": time.time(), "status": "reviewed",
+            "revision": _file_review_revision(raw, layers), "created_at": time.time(), "status": "reviewed",
         })
         return {**checked, "review": token, "impact": impact,
                 "scope": "All users and workspaces on this installation"}
+
+
+def _other_file_impact(layers: dict, proposed_base: dict) -> list[dict]:
+    """Account for dedicated/unknown fields without displaying unclassified values.
+
+    The catalog provides typed/redacted values above. Remaining file fields may
+    contain credentials even when their names look innocent, so this projection
+    exposes presence/change/source only. It never guesses that a value is public.
+    """
+    import os
+
+    from . import settings_catalog as catalog, settings_store
+
+    def leaves(value, prefix=()):
+        result = {}
+        if isinstance(value, dict) and value:
+            for key, item in value.items():
+                result.update(leaves(item, (*prefix, key)))
+        else:
+            result[prefix] = value
+        return result
+
+    before, after = leaves(layers['base']), leaves(proposed_base)
+    paths = [setting.path for setting in catalog.SETTINGS]
+    providers = {item['name']: item for item in settings_store.PROVIDERS}
+    result = []
+    for path in sorted(before.keys() | after.keys()):
+        if not path or any(path[:len(known)] == known for known in paths):
+            continue
+        existed, exists = path in before, path in after
+        if existed == exists and before.get(path) == after.get(path):
+            continue
+        source = 'Settings file'
+        overridden = False
+        for name, label in [('here', 'Saved dashboard override'), ('operator', 'Deployment override')]:
+            if catalog.lookup(layers[name], path)[0]:
+                source, overridden = label, True
+        if len(path) == 3 and path[0] == 'providers' and path[2] == 'api_key':
+            provider = providers.get(path[1], {})
+            if any(os.environ.get(name, '').strip() for name in provider.get('env', ())):
+                source, overridden = 'Deployment environment', True
+        # Only boolean feature switches are interpreted as enabled/disabled.
+        # Other values remain opaque, including lists of credentials or names.
+        def state(present, value):
+            if not present:
+                return 'Not present in file'
+            if path[0] in {'features', 'capabilities'} and isinstance(value, bool):
+                return 'Enabled' if value else 'Disabled'
+            return 'Present (value withheld)'
+        result.append({'label': '.'.join(path), 'source': source,
+                       'change': 'Added' if not existed else 'Removed' if not exists else 'Changed',
+                       'before': state(existed, before.get(path)), 'after': state(exists, after.get(path)),
+                       'overridden': overridden,
+                       'impact': 'Dedicated setting: restart may be required; validate this field on its owning page',
+                       'unclassified': True})
+    return result
 
 
 @router.post("/api/v1/setup/settings-file/check")
@@ -269,7 +351,7 @@ def _install_reviewed(request: Request, raw: bytes, token: str) -> dict:
                     "review": token, "audit_pending": receipt.get("audit_pending", False)}
         if receipt["status"] != "reviewed":
             raise HTTPException(409, "This installation needs its result checked before another attempt.")
-        if time.time() - receipt["created_at"] > 900 or receipt["revision"] != page._revision():
+        if time.time() - receipt["created_at"] > 900 or receipt["revision"] != _file_review_revision(raw):
             raise HTTPException(409, "Settings changed or this review expired. Check the file again.")
         receipt["status"] = "pending"
         _write_receipt(path, receipt)

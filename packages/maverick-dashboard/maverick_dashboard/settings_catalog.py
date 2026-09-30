@@ -641,7 +641,7 @@ SETTINGS: tuple[Setting, ...] = (
       "Voice and detail in replies. " + " ".join(f"{label}: {STYLES[key]}"
           for key, label in style_choices() if key),
       "select", "AI models", "", "maverick.persona",
-      choices=style_choices()),
+      choices=style_choices(), aliases="writing tone personality voice"),
     S("voice", "dashboard_commands", "Voice input in chat",
       "Show a microphone button in Chat that turns spoken requests into text.",
       "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),
@@ -2261,17 +2261,19 @@ SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt
 # Rows kept in per-group modules (one module per group of settings).
 from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_access,
+    settings_catalog_budget_guidance,
     settings_catalog_governance,
     settings_catalog_integrations,
     settings_catalog_learning,
     settings_catalog_privacy,
+    settings_catalog_personalization,
     settings_catalog_runtime,
     settings_catalog_structured,
 )
 
 _GROUP_MODULES = (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
                   settings_catalog_privacy, settings_catalog_governance,
-                  settings_catalog_integrations, settings_catalog_structured)
+                  settings_catalog_integrations, settings_catalog_structured, settings_catalog_personalization, settings_catalog_budget_guidance)
 for _group in _GROUP_MODULES:
     SETTINGS += tuple(_group.entries(S, C, Column))
 
@@ -2353,6 +2355,11 @@ def coerce(setting: Setting, value: object) -> object:
     ``None`` is only accepted for numbers without a default (meaning "no
     limit"), which callers treat as removing the dashboard value.
     """
+    if setting.id == "budget.warning_thresholds":
+        try:
+            return settings_catalog_budget_guidance.thresholds(value)
+        except ValueError as exc:
+            raise SettingError(str(exc)) from exc
     result = _coerce_value(setting, value)
     if not _storable(result):
         raise SettingError(

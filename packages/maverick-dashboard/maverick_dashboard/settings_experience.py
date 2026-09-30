@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -17,9 +17,10 @@ HEADERS = {"Cache-Control": "private, no-store"}
 # Explicit portability boundary: no arbitrary URLs, paths, policy documents,
 # credentials, access grants, identifiers, or deployment data leave the server.
 PORTABLE = frozenset({
-    "persona.style", "persona.name", "persona.role", "persona.custom_instructions",
-    "dashboard.theme", "dashboard.font", "dashboard.density", "dashboard.language",
-    "budget.max_wall_seconds", "budget.max_tool_calls", "budget.max_tokens",
+    "persona.style", "persona.name", "persona.addendum",
+    "dashboard.theme", "dashboard.density",
+    "budget.max_wall_seconds", "budget.max_tool_calls", "budget.max_output_tokens",
+    "models.vision", "speculative.draft_model", "verification.cross_family_model",
 })
 PRESETS = {
     "bounded-research": {
@@ -36,8 +37,8 @@ PRESETS = {
 def _allowed(request: Request, *, feature: bool = False):
     auth.require_global_permission(request, "admin")
     if feature:
-        from maverick.config import get_features
-        if not get_features().get("configuration_profiles"):
+        from maverick.config import get_features, load_global_config
+        if load_global_config().get("features", {}).get("configuration_profiles", True) is not True or not get_features().get("configuration_profiles"):
             raise HTTPException(403, "Configuration profiles are turned off in Settings.")
 
 
@@ -55,8 +56,17 @@ def review(request: Request, body: page.CatalogUpdate):
     with settings_store._locked(strict=True):
         current = page._revision()
         if body.expected_revision != current:
-            # The ordinary writer's conflict projection never writes at a stale revision.
-            return page._catalog_update_locked(request, body)
+            # A review never calls a mutation handler, even if an external file
+            # source changes again while the conflict projection is assembled.
+            state = page.catalog_state()
+            asked = {item.id for item in body.changes}
+            conflicts = [{"id": row["id"], "label": row["label"],
+                          "current": row["value_text"], "source": row["source_text"]}
+                         for group in state["groups"] for row in group["settings"]
+                         if row["id"] in asked]
+            return JSONResponse({"message": "Settings changed. Your draft is kept.",
+                                 "conflicts": conflicts, "revision": state['revision']},
+                                status_code=409, headers=HEADERS)
         try:
             expanded, learning = settings_governance_level.expand(body, page.SettingChange)
             writes, changes, warnings, layers = page._plan(expanded)
@@ -105,7 +115,14 @@ def export_profile(request: Request, body: ExportSelection):
             if not resolved['known']:
                 excluded.append(key)
                 continue
-            settings[key] = page._form_value(setting, resolved['value'])
+            from .draft_store import validate_payload
+            value = page._form_value(setting, resolved['value'])
+            try:
+                validate_payload({key: value})
+            except ValueError:
+                excluded.append(key)
+            else:
+                settings[key] = value
         return JSONResponse({'format': 'lightwork-preferences-profile', 'version': 1,
                              'scope': 'organization', 'settings': settings,
                              'excluded': excluded, 'credentials': 'Not exported. Configure provider credentials separately.'}, headers=HEADERS)
@@ -128,8 +145,20 @@ def import_profile(request: Request, body: ImportedProfile):
     if unsupported:
         raise HTTPException(422, 'Unsupported or non-portable fields: ' + ', '.join(unsupported[:12]) + '. Remove these fields and configure them through their current Settings controls; no fields were imported.')
     changes = [{'id': key, 'value': value} for key, value in data['settings'].items()]
-    return JSONResponse({'changes': changes, 'revision': page._revision(), 'scope': 'organization',
-                         'message': 'Loaded for review. Nothing has been saved.'}, headers=HEADERS)
+    from .draft_store import validate_payload
+    try:
+        validate_payload(data['settings'])
+    except ValueError as exc:
+        raise HTTPException(422, 'This profile contains credential-like data. Remove it and configure credentials separately.') from exc
+    with settings_store._locked(strict=True):
+        revision = page._revision()
+        # Use the ordinary coercion, dependency and authority review before an
+        # import is even offered as a proposed change. Nothing is written here.
+        preview = review(request, page.CatalogUpdate(changes=changes, expected_revision=revision))
+        if preview.status_code != 200:
+            return preview
+        return JSONResponse({'changes': changes, 'revision': revision, 'scope': 'organization',
+                             'message': 'Loaded for review. Nothing has been saved.'}, headers=HEADERS)
 
 
 @router.get('/api/v1/settings/presets')
@@ -182,31 +211,65 @@ def history(request: Request):
 
 
 @router.get('/api/v1/settings/search')
-def search(request: Request, q: str = ''):
+def search(request: Request, q: str = Query('', max_length=200)):
     auth.require_permission(request, 'view')
     terms = q.lower().split()[:15]
     results = []
+    allowed = {link['href'].split('?')[0] for group in page._app()._nav_context(request)['finder_pages'] for link in group['links']}
+    def matches(text):
+        return all(word in text.lower() for word in terms)
+    def add(title, href, aliases, *, scope='Organization', value='Open this control to review current state', source='Dedicated control', role='Global administrator'):
+        if href.split('?')[0].split('#')[0] in allowed and matches(title + ' ' + aliases):
+            results.append({'title': title, 'href': href, 'group': scope, 'id': href,
+                            'scope': scope, 'required_role': role, 'effective': value, 'source': source})
     if auth.has_global_permission(request, 'admin'):
-        for setting in catalog.SETTINGS:
-            if all(word in page._search_text(setting) for word in terms):
+        layers = page._sources()
+        for setting in (catalog.SETTINGS if "/settings/all" in allowed else ()):
+            if matches(page._search_text(setting)):
+                state = page._resolve(setting, layers)
+                if setting.secret:
+                    value = 'Set' if state['value'] else 'Not set'
+                elif setting.control in {'table', 'rules', 'document', 'keys', 'picks'}:
+                    value = 'Configured' if state['value'] else 'Not configured'
+                else:
+                    value = catalog.display_value(setting, state['value'])
                 anchor = 'sa-' + setting.id.replace('.', '-').replace('*', 'all') + '-label'
                 results.append({'title': setting.label, 'href': '/settings/all?group=' + page._slug(setting.group) + '&id=' + quote(setting.id) + '#' + anchor,
-                                'group': setting.group, 'id': setting.id})
-        dedicated = [('/settings#models', 'AI provider credentials and model choices', 'providers keys model routes'),
-                     ('/settings#general', 'Appearance and interface features', 'theme font density features'),
-                     ('/settings#models', 'Task spending cap', 'budget spending per task cost'),
-                     ('/channels', 'Chat channels', 'slack teams telegram whatsapp'),
-                     ('/connections', 'Connected accounts', 'oauth connectors integrations'),
-                     ('/plugins', 'Plugins', 'tools extensions plugins'),
-                     ('/learning', 'Learning controls', 'learning consent improvement'),
-                     ('/settings#access', 'License', 'license subscription install'),
-                     ('/settings#access', 'Page visibility', 'roles navigation visibility')]
-        allowed = {link['href'].split('?')[0] for group in page._app()._nav_context(request)['finder_pages'] for link in group['links']}
-        for href, title, aliases in dedicated:
-            if href.split('?')[0].split('#')[0] in allowed and all(word in (title + ' ' + aliases).lower() for word in terms):
-                results.append({'title': title, 'href': href, 'group': 'Dedicated controls', 'id': href})
-    if auth.caller_principal(request):
-        for title, aliases in [('Your preferences', 'name tone style language verbosity theme font density text size favorites start today')]:
-            if all(word in (title + ' ' + aliases).lower() for word in terms):
-                results.append({'title': title, 'href': '/preferences', 'group': 'Personal', 'id': 'preferences'})
+                                'group': setting.group, 'id': setting.id, 'scope': 'Organization', 'required_role': 'Global administrator',
+                                'effective': value if state['known'] else 'Controlled by deployment', 'source': state['source'], 'locked': state['locked']})
+        for provider in settings_store.state()['providers']:
+            add(provider['label'] + ' provider key', '/settings?focus=provider-key-' + quote(provider['name']), 'api credentials provider key password ' + provider['name'],
+                value='Set' if provider['configured'] else 'Not set', source=provider['api_key_source'])
+        add('Default AI model', '/settings?focus=settings-model-default', 'models route provider model choices')
+        add('Your colour theme', '/settings?focus=settings-theme', 'appearance theme color display', scope='Personal / device')
+        add('Your page spacing', '/settings?focus=settings-density', 'appearance density compact display', scope='Personal / device')
+        add('Your font', '/settings?focus=settings-font', 'appearance accessibility dyslexic font display', scope='Personal / device')
+        add('Task spending cap', '/settings?focus=settings-task-budget', 'budget spending per task cost')
+        add('License', '/settings?focus=maintenance-license', 'license subscription install')
+        add('Page visibility', '/settings?focus=ui-visibility', 'roles navigation visibility')
+        for href, title, aliases in [('/channels','Chat channels','slack teams telegram whatsapp'),
+                                     ('/connections','Connected accounts','oauth connectors integrations'),
+                                     ('/plugins','Plugins','tools extensions plugins'),
+                                     ('/learning','Learning controls','learning consent improvement')]:
+            add(title, href, aliases)
+    add('Choose a workspace', '/workspace/tenant#tsel-title', 'workspace tenant switch current', scope='Current workspace', role='Signed-in member')
+    principal = auth.caller_principal(request)
+    if principal:
+        from maverick import experience_preferences
+        personal = experience_preferences.state(principal) if experience_preferences.enabled() else None
+        for key, title, aliases in [('tone','Your writing tone','writing tone voice personality'),
+                                    ('preferred_name','Your preferred name','name personalization'),
+                                    ('output_style','Your response style','style format response output'),
+                                    ('language','Your response language','language locale'),
+                                    ('verbosity','Your response detail','verbosity detail concise'),
+                                    ('start_page','Your starting page','home start today landing'),
+                                    ('theme','Your theme','theme colors appearance system'),
+                                    ('font','Your font','font dyslexia accessibility'),
+                                    ('density','Your page spacing','density display compact'),
+                                    ('text_size','Your text size','text size reading accessibility')]:
+            if personal:
+                add(title, '/preferences#preference-' + key, aliases, scope='Personal', role='Signed-in member',
+                    value=str(personal['values'][key]) or 'Inherited', source=personal['sources'][key])
+        add('Your notifications', '/notifications#notification-preferences', 'notification alerts digest quiet hours mute', scope='Personal', role='Signed-in member')
+    results.sort(key=lambda item: (item['scope'] != 'Personal', item['title'].casefold()))
     return JSONResponse({'items': results[:50], 'total': len(results)}, headers=HEADERS)

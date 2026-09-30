@@ -52,12 +52,13 @@
   <div id="settings-sections">
   <div class="section-head" data-settings-group="general"><h2>Appearance</h2></div>
   <div class="panel" data-settings-group="general">
-    <p class="muted settings-lead">Theme, density and font for this browser. Applies when you save.</p>
+    <p class="muted settings-lead">Theme, density and font follow your signed-in account. Use Display preferences for an explicit device-only override. Applies without leaving your draft.</p>
     <form method="get" action="/settings" class="settings-row-form">
       <input type="hidden" name="saved" value="appearance" />
       <label class="settings-field">
         <span>Theme</span>
-        <select class="select" name="theme">
+        <select class="select" id="settings-theme" name="theme">
+          <option value="system" {% if theme == 'system' %}selected{% endif %}>Follow system</option>
           <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
           <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
           <option value="solarized" {% if theme == 'solarized' %}selected{% endif %}>Solarized</option>
@@ -69,14 +70,14 @@
       </label>
       <label class="settings-field">
         <span>Density</span>
-        <select class="select" name="density">
+        <select class="select" id="settings-density" name="density">
           <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %}>Comfortable</option>
           <option value="compact" {% if density == 'compact' %}selected{% endif %}>Compact</option>
         </select>
       </label>
       <label class="settings-field">
         <span>Font</span>
-        <select class="select" name="font">
+        <select class="select" id="settings-font" name="font">
           <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
           <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
         </select>
@@ -169,7 +170,7 @@
     <form method="post" action="/settings/models" class="model-pick-form">
       <label class="model-pick">
         <span>Default model</span>
-        <select class="select" name="model" data-model-picker="default-model-custom" aria-label="Default model">
+        <select class="select" id="settings-model-default" name="model" data-model-picker="default-model-custom" aria-label="Default model">
           <option value=""{% if not pinned_model %} selected{% endif %}>Lightwork's recommended model</option>
           {% for pg in picker_groups %}
           <optgroup label="{{ pg.label }}">
@@ -312,7 +313,7 @@
         <label><input type="radio" name="mode" value="configured"{% if limit_mode == 'amount' %} checked{% endif %} /> Stop a task when it has spent</label>
         <label class="settings-field settings-amount">
           <span>Amount per task (US dollars)</span>
-          <input class="input" type="number" name="max_dollars" min="0.01" step="0.5" inputmode="decimal"
+          <input class="input" id="settings-task-budget" type="number" name="max_dollars" min="0.01" step="0.5" inputmode="decimal"
                  value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
                  aria-describedby="task-limit-help" />
         </label>
@@ -364,14 +365,14 @@
           {% if p.base_url_field %}
           <label class="settings-field">
             <span>Server address (only for self-hosted models)</span>
-            <input class="input" type="url" name="base_url" value="{{ p.base_url }}"
+            <input class="input" id="provider-url-{{ p.name }}" type="url" name="base_url" value="{{ p.base_url }}"
                    placeholder="http://localhost:11434" autocomplete="off"
                    {% if not p.dashboard_can_set_base_url %}disabled{% endif %} />
           </label>
           {% endif %}
           <label class="settings-field">
             <span>{{ p.label }} key</span>
-            <input class="input" type="password" name="api_key"
+            <input class="input" id="provider-key-{{ p.name }}" type="password" name="api_key"
                    placeholder="Paste your key" autocomplete="off"
                    {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
           </label>
@@ -790,6 +791,17 @@
     });
     if (search) search.addEventListener('input', applySearch);
     selectGroup(active, false);
+    var requestedFocus = new URLSearchParams(window.location.search).get('focus');
+    if (requestedFocus) {
+      var focusTarget = document.getElementById(requestedFocus);
+      if (focusTarget && document.getElementById('settings-sections').contains(focusTarget)) {
+        var targetGroup = focusTarget.closest('[data-settings-group]');
+        if (targetGroup) selectGroup(targetGroup.dataset.settingsGroup, false);
+        var disclosure = focusTarget.closest('details'); if (disclosure) disclosure.open = true;
+        if (!focusTarget.matches('input,select,textarea,button,a')) focusTarget.tabIndex = -1;
+        focusTarget.focus(); focusTarget.scrollIntoView({block:'center'});
+      }
+    }
 
     var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^="/settings"]'));
     var dirty = new Set();

@@ -13,6 +13,8 @@ from . import auth
 from .draft_api import context_for
 
 router = APIRouter()
+PROFILE_FIELDS = frozenset({'tone', 'language', 'verbosity', 'output_style', 'custom_style_name',
+                            'custom_style', 'theme', 'font', 'density', 'text_size'})
 
 
 def _app():
@@ -67,8 +69,13 @@ def preferences_page(request: Request, thread: int | None = None):
     state = _state(request, thread)
     return _app().templates.TemplateResponse(request, 'preferences.html', {
         "preference_state": state, "preference_thread": thread, "tones": style_choices(),
-        "output_styles": BUILTIN_STYLES, "legacy_name": load_persona().get("user_name", "") if auth.has_global_permission(request, "admin") else "",
+        "output_styles": BUILTIN_STYLES, "preference_themes": [("system", "Follow system")] + [(name, name.capitalize()) for name in sorted(_app()._valid_theme_names())], "legacy_name": load_persona().get("user_name", "") if auth.has_global_permission(request, "admin") else "",
     }, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get('/api/v1/preferences')
+def current_preferences(request: Request, thread: int | None = None):
+    return JSONResponse(_state(request, thread), headers={"Cache-Control": "private, no-store"})
 
 
 class PreferenceUpdate(BaseModel):
@@ -90,7 +97,7 @@ def _check_display(key: str, value: str) -> None:
 
 
 @router.post('/api/v1/preferences')
-def update_preferences(request: Request, body: PreferenceUpdate) -> dict:
+def update_preferences(request: Request, body: PreferenceUpdate) -> JSONResponse:
     _app()._require_same_origin(request)
     principal = _principal(request)
     if body.thread is not None and body.scope != "personal":
@@ -122,7 +129,11 @@ def update_preferences(request: Request, body: PreferenceUpdate) -> dict:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _state(request, body.thread)
+    response = JSONResponse(_state(request, body.thread), headers={"Cache-Control": "private, no-store"})
+    if body.scope == 'personal' and body.thread is None:
+        for key in set(body.changes) & {'theme', 'font', 'density', 'text_size', 'language'}:
+            response.delete_cookie('mvk_lang' if key == 'language' else 'mvk_' + key)
+    return response
 
 
 class DisplayUpdate(BaseModel):
@@ -163,6 +174,70 @@ def display_preference(request: Request, body: DisplayUpdate) -> JSONResponse:
     else:
         response.delete_cookie(cookie)
     return response
+
+
+def _profiles_allowed(request: Request) -> None:
+    from maverick.config import get_features, load_global_config
+    _principal(request)
+    if load_global_config().get('features', {}).get('configuration_profiles', True) is not True or not get_features().get('configuration_profiles'):
+        raise HTTPException(403, 'Portable profiles are turned off by your administrator.')
+
+
+@router.get('/api/v1/preferences/profile')
+def export_personal_profile(request: Request):
+    _profiles_allowed(request)
+    from .draft_store import validate_payload
+    current = _state(request)
+    values, excluded = {}, []
+    for key in sorted(PROFILE_FIELDS):
+        value = current['values'][key]
+        try:
+            validate_payload({key: value})
+        except ValueError:
+            excluded.append(key)
+        else:
+            values[key] = value
+    if values.get('output_style') == 'custom' and 'custom_style' not in values:
+        values.pop('output_style', None)
+        values.pop('custom_style_name', None)
+        excluded.extend(['output_style', 'custom_style_name'])
+    return JSONResponse({'format': 'lightwork-personal-style-profile', 'version': 1,
+                         'scope': 'personal', 'settings': values, 'excluded': excluded},
+                        headers={'Cache-Control': 'private, no-store'})
+
+
+class PersonalProfileImport(BaseModel):
+    profile: dict[str, Any]
+
+
+@router.post('/api/v1/preferences/profile/import')
+def import_personal_profile(request: Request, body: PersonalProfileImport):
+    _app()._require_same_origin(request)
+    _profiles_allowed(request)
+    from .draft_store import validate_payload
+    data = body.profile
+    if data.get('format') != 'lightwork-personal-style-profile' or data.get('version') != 1 or data.get('scope') != 'personal':
+        raise HTTPException(422, 'Use a version 1 personal style profile. Re-export older profiles from their original installation.')
+    values = data.get('settings')
+    if not isinstance(values, dict) or not values or set(values) - PROFILE_FIELDS:
+        raise HTTPException(422, 'This file contains unknown or non-portable fields. Keep writing and display preferences only; permissions, names, tools and memory policy cannot be imported.')
+    current = _state(request)
+    locked = set(values) & set(current['locked'])
+    if locked:
+        raise HTTPException(409, 'Organization policy owns these preferences: ' + ', '.join(sorted(locked)) + '. Remove them from this profile before importing.')
+    try:
+        validate_payload(values)
+        changes = {key: preferences._validate(key, value) for key, value in values.items()}
+        for key, value in changes.items():
+            if key in {'theme', 'font', 'density', 'language', 'text_size'}:
+                _check_display(key, value)
+    except ValueError as exc:
+        raise HTTPException(422, 'The profile includes an unsupported value or credential-like data. Review the file; nothing was changed.') from exc
+    if changes.get('output_style') == 'custom' and not changes.get('custom_style'):
+        raise HTTPException(422, 'A named custom style must include its guidance. Export the complete style again.')
+    return JSONResponse({'changes': changes, 'state': current,
+                         'message': 'Loaded for review only. Nothing was saved.'},
+                        headers={'Cache-Control': 'private, no-store'})
 
 
 def display_context(request: Request) -> dict:

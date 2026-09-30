@@ -10,6 +10,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(prefs.config, 'config_path', lambda: tmp_path / 'config.toml')
     monkeypatch.setattr(prefs.config, 'dashboard_overrides_path', lambda: tmp_path / 'overlay.toml')
     monkeypatch.setattr(prefs.config, 'load_config', lambda: {})
+    monkeypatch.setattr(prefs.config, 'load_global_config', lambda: {})
     monkeypatch.setattr(prefs.config, 'config_source_errors', lambda: [])
     monkeypatch.setattr(prefs.config, 'get_features', lambda: {'personal_preferences': True})
     monkeypatch.setattr(prefs, 'current_tenant_id_strict', lambda: None)
@@ -46,7 +47,7 @@ def test_inheritance_and_stale_save(isolated):
 
 
 def test_policy_lock_cannot_be_removed_by_inherit(isolated, monkeypatch):
-    monkeypatch.setattr(prefs.config, 'load_config', lambda: {'personalization': {
+    monkeypatch.setattr(prefs.config, 'load_global_config', lambda: {'personalization': {
         'locked_fields': ['tone', 'preferred_name'], 'defaults': {'tone': 'formal', 'preferred_name': 'Wrong person'}}})
     assert prefs.state('user:bob')['values']['preferred_name'] == ''
     with pytest.raises(ValueError, match='organization policy'):
@@ -63,3 +64,19 @@ def test_personal_name_and_authority_cannot_be_shared_preferences(isolated):
     write('user:bob', {'preferred_name': 'Bob'})
     assert prefs.erase_personal('user:alice') == 1
     assert prefs.state('user:bob')['values']['preferred_name'] == 'Bob'
+
+
+def test_workspace_overlay_cannot_remove_organization_locks(isolated, monkeypatch):
+    monkeypatch.setattr(prefs.config, 'load_global_config', lambda: {'personalization': {
+        'locked_fields': ['tone'], 'defaults': {'tone': 'formal'}}})
+    monkeypatch.setattr(prefs.config, 'load_config', lambda: {'personalization': {'locked_fields': []}})
+    assert prefs.state('user:alice')['values']['tone'] == 'formal'
+    with pytest.raises(ValueError, match='organization policy'):
+        write('user:alice', {'tone': 'friendly'}, scope='workspace')
+
+
+def test_workspace_cannot_enable_globally_disabled_preferences(isolated, monkeypatch):
+    monkeypatch.setattr(prefs.config, 'load_global_config', lambda: {'features': {'personal_preferences': False}})
+    assert not prefs.enabled()
+    with pytest.raises(ValueError, match='turned off'):
+        write('user:alice', {'tone': 'friendly'})

@@ -126,3 +126,102 @@ def test_supported_profile_round_trip_uses_ordinary_conflict_checked_writer():
                        'changes': imported['changes']}).status_code == 200
     after = client.post('/api/v1/settings/profiles/export', json={'ids': ['persona.name']}).json()
     assert after['settings'] == original['settings']
+
+
+def test_file_review_covers_non_catalog_fields_without_leaking_values(monkeypatch):
+    from maverick_dashboard.setup_guide import _other_file_impact
+    monkeypatch.setenv('OPENAI_API_KEY', 'deployment-secret')
+    layers = {'base': {'features': {'personal_preferences': True}, 'private_table': {'secret': 'old'}},
+              'here': {'features': {'personal_preferences': True}}, 'operator': {}}
+    proposed = {'features': {'personal_preferences': False}, 'providers': {'openai': {'api_key': 'new-secret'}}}
+    rows = _other_file_impact(layers, proposed)
+    assert {row['label'] for row in rows} >= {'features.personal_preferences', 'private_table.secret'}
+    feature = next(row for row in rows if row['label'] == 'features.personal_preferences')
+    assert feature['after'] == 'Disabled' and feature['overridden']
+    assert next(row for row in rows if row['label'] == 'private_table.secret')['change'] == 'Removed'
+    assert 'new-secret' not in str(rows) and 'deployment-secret' not in str(rows)
+
+
+def test_review_conflict_never_calls_the_catalog_writer(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError('A review may not enter the mutation handler')
+    monkeypatch.setattr(page, '_catalog_update_locked', forbidden)
+    result = client.post(API + '/review', json={'expected_revision': '0' * 64,
+                         'changes': [{'id': 'persona.name', 'value': 'Draft'}]})
+    assert result.status_code == 409
+
+
+def test_personal_profile_import_is_review_only_and_rejects_authority(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from maverick_dashboard import preferences_api
+    current = {'values': {'tone': 'formal'}, 'locked': [], 'revision': 'a' * 64, 'context': 'alice'}
+    monkeypatch.setattr(preferences_api, '_profiles_allowed', lambda request: None)
+    monkeypatch.setattr(preferences_api, '_state', lambda request: current)
+    monkeypatch.setattr(preferences_api, '_app', lambda: SimpleNamespace(_require_same_origin=lambda request: None))
+    profile = {'format': 'lightwork-personal-style-profile', 'version': 1, 'scope': 'personal',
+               'settings': {'tone': 'friendly'}}
+    response = preferences_api.import_personal_profile(None, preferences_api.PersonalProfileImport(profile=profile))
+    assert json.loads(response.body)['changes'] == {'tone': 'friendly'}
+    assert current['values']['tone'] == 'formal'
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as refused:
+        preferences_api.import_personal_profile(None, preferences_api.PersonalProfileImport(profile={**profile, 'settings': {'tools': ['browser']}}))
+    assert refused.value.status_code == 422
+    current['locked'] = ['tone']
+    with pytest.raises(HTTPException) as locked:
+        preferences_api.import_personal_profile(None, preferences_api.PersonalProfileImport(profile=profile))
+    assert locked.value.status_code == 409
+
+
+def test_personal_profile_excludes_identity_and_credential_like_guidance(monkeypatch):
+    import json
+    from maverick_dashboard import preferences_api
+    from maverick.experience_preferences import DEFAULTS
+    monkeypatch.setattr(preferences_api, '_profiles_allowed', lambda request: None)
+    monkeypatch.setattr(preferences_api, '_state', lambda request: {'values': {
+        **DEFAULTS, 'preferred_name': 'Private Alice', 'output_style': 'custom',
+        'custom_style': 'Authorization: Bearer ' + 'a' * 45}})
+    exported = json.loads(preferences_api.export_personal_profile(None).body)
+    assert 'preferred_name' not in exported['settings']
+    assert 'custom_style' not in exported['settings']
+    assert 'output_style' not in exported['settings']
+
+
+def test_member_search_finds_exact_personal_fields_without_admin_settings(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from maverick_dashboard import settings_experience
+    from maverick import experience_preferences
+    monkeypatch.setattr(settings_experience.auth, 'require_permission', lambda *args: None)
+    monkeypatch.setattr(settings_experience.auth, 'has_global_permission', lambda *args: False)
+    monkeypatch.setattr(settings_experience.auth, 'caller_principal', lambda request: 'user:alice')
+    monkeypatch.setattr(settings_experience.page, '_app', lambda: SimpleNamespace(_nav_context=lambda request: {
+        'finder_pages': [{'links': [{'href': '/preferences', 'label': 'Preferences'}]}]}))
+    monkeypatch.setattr(experience_preferences, 'enabled', lambda: True)
+    monkeypatch.setattr(experience_preferences, 'state', lambda principal: {
+        'values': experience_preferences.DEFAULTS, 'sources': dict.fromkeys(experience_preferences.DEFAULTS, 'product default')})
+    theme = json.loads(settings_experience.search(None, 'theme').body)['items']
+    assert theme[0]['href'] == '/preferences#preference-theme'
+    assert json.loads(settings_experience.search(None, 'provider key').body)['items'] == []
+
+
+@pytest.mark.parametrize('value', [[0], [1.1], [True], ['nan'], ['inf'], [], list(range(11))])
+def test_budget_warning_thresholds_reject_invalid_or_unbounded_values(value):
+    from maverick_dashboard.settings_catalog import BY_ID, SettingError, coerce
+    with pytest.raises(SettingError):
+        coerce(BY_ID['budget.warning_thresholds'], value)
+
+
+def test_budget_warning_thresholds_preserve_numeric_toml_shape():
+    from maverick_dashboard.settings_catalog import BY_ID, coerce
+    assert coerce(BY_ID['budget.warning_thresholds'], ['1', '0.8', '0.95', '0.8']) == [0.8, 0.95, 1.0]
+
+
+def test_file_review_binds_new_environment_references(monkeypatch):
+    from maverick_dashboard.setup_guide import _file_review_revision
+    monkeypatch.setenv('TEAM_DISPLAY_NAME', 'Before')
+    raw = b'[persona]\nname="${TEAM_DISPLAY_NAME}"\n'
+    first = _file_review_revision(raw)
+    monkeypatch.setenv('TEAM_DISPLAY_NAME', 'After')
+    assert _file_review_revision(raw) != first

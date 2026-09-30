@@ -33,7 +33,9 @@ class PreferenceConflict(ValueError):
 
 
 def enabled() -> bool:
-    return not config.config_source_errors() and config.get_features().get("personal_preferences") is True
+    return (not config.config_source_errors()
+            and config.load_global_config().get("features", {}).get("personal_preferences", True) is True
+            and config.get_features().get("personal_preferences") is True)
 
 
 def _principal_key(principal: str) -> str:
@@ -91,7 +93,9 @@ def state(principal: str, *, thread: int | None = None) -> dict:
     tone = tone if tone in STYLES else ""
     if tone:
         values["tone"], sources["tone"] = _validate("tone", tone), "installation settings"
-    policy = cfg.get("personalization", {})
+    # Organization ceilings are read before tenant overlays. A workspace may
+    # choose presentation defaults, but cannot remove an organization lock.
+    policy = config.load_global_config().get("personalization", {})
     locks = set(policy.get("locked_fields", [])) & (DEFAULTS.keys() - PERSONAL_ONLY)
     effective_by_scope = {}
     for scope, record in layers:
@@ -184,13 +188,17 @@ def erase_personal(principal: str) -> int:
     """Delete only the named principal's encrypted account/conversation records."""
     directory = data_dir("experience-preferences")
     prefix = _principal_key(principal)
-    paths = [directory / (prefix + ".enc"), *directory.glob(prefix + "-thread-*.enc")]
-    count = 0
-    for path in paths:
-        if path.is_file():
-            path.unlink()
-            count += 1
-    return count
+    lock = config.config_path().parent / "experience-preferences" / "hierarchy"
+    ensure_private_directory(lock.parent)
+    from .authority_effects import authority_effect_fence
+    with authority_effect_fence(), cross_process_lock(config.dashboard_overrides_path(), strict=True), cross_process_lock(lock, strict=True):
+        paths = [directory / (prefix + ".enc"), *directory.glob(prefix + "-thread-*.enc")]
+        count = 0
+        for path in paths:
+            if path.is_file():
+                path.unlink()
+                count += 1
+        return count
 
 
 def prompt(principal: str, *, thread: int | None = None) -> str:
