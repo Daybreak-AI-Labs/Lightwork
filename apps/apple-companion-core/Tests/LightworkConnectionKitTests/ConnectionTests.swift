@@ -16,6 +16,33 @@ final class MemoryStorage: ConnectionStorage {
 }
 
 final class ConnectionTests: XCTestCase {
+    func testOnlyTransientFailuresMayRetainPrivateSnapshots() {
+        for status in [400, 401, 403, 404] {
+            XCTAssertFalse(mayRetainSnapshot(after: ConnectionError.response(status)))
+        }
+        XCTAssertTrue(mayRetainSnapshot(after: ConnectionError.response(503)))
+        XCTAssertTrue(mayRetainSnapshot(after: URLError(.timedOut)))
+        XCTAssertFalse(mayRetainSnapshot(after: ConnectionError.secureStorage(-1)))
+        XCTAssertFalse(mayRetainSnapshot(after: ConnectionError.responseTooLarge))
+    }
+
+    func testStreamingCapStopsAtLimitWithoutRequiringContentLength() async throws {
+        let stream = AsyncStream<UInt8> { continuation in
+            for _ in 0..<17 { continuation.yield(42) }
+            continuation.finish()
+        }
+        do {
+            _ = try await boundedResponse(stream, maxBytes: 16)
+            XCTFail("An oversized stream must fail")
+        } catch ConnectionError.responseTooLarge { }
+        let exact = AsyncStream<UInt8> { continuation in
+            for _ in 0..<16 { continuation.yield(42) }
+            continuation.finish()
+        }
+        let data = try await boundedResponse(exact, maxBytes: 16)
+        XCTAssertEqual(data.count, 16)
+    }
+
     func testExplicitResetRemovesCorruptRecordAndKeepsOtherStorageOnFailure() throws {
         let memory = MemoryStorage()
         let store = ConnectionStore(storage: memory, legacy: { DashboardConnection() })

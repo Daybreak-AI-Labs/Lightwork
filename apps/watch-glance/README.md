@@ -1,6 +1,8 @@
 # Lightwork watch glance (watchOS scaffold)
 
-A minimal SwiftUI watchOS app + complication rendering the fixed glance
+**Preview source; no signed customer installer or delivered complication.**
+
+A minimal SwiftUI watchOS app rendering the fixed glance
 payload from a self-hosted Lightwork dashboard:
 
 ```
@@ -24,3 +26,13 @@ Security model: the watch talks only to YOUR dashboard host; include the
 `Authorization: Bearer <MAVERICK_DASHBOARD_TOKEN>` header when the dashboard
 sets one. Because that bearer token grants dashboard API access, never send
 it to a remote dashboard over cleartext HTTP. Nothing else leaves the watch.
+
+The view labels the source timestamp and the UTC reporting day explicitly.
+Transient failures can show a marked saved snapshot; authentication/permission
+failures remove it. Refreshes have one owner, cancellation on leaving/background,
+and a 64 KB streamed-response cap. These changes are not device-qualified.
+
+`Tests/GlanceModelTests.swift` is authored for a future `MaverickGlanceTests`
+Xcode test target; it has not run. Shared transport cap and error-classification
+tests live in `apps/apple-companion-core`. No signing identity, provisioning
+profile, store upload or production service was changed.

@@ -1,5 +1,7 @@
 # Lightwork AR plan tree (visionOS scaffold)
 
+**Preview source; no signed customer installer.**
+
 A minimal SwiftUI + RealityKit visionOS app rendering a Lightwork goal
 forest as a 3D plan tree in a volumetric window: each goal is a small
 sphere colored by status, parent links are thin connecting bars, and
@@ -37,3 +39,17 @@ marked in the source.
 Security model: the app talks only to YOUR dashboard host; include the
 `Authorization: Bearer <MAVERICK_DASHBOARD_TOKEN>` header when the
 dashboard sets one. Read-only — the app calls no mutating endpoint.
+
+Task list provides a searchable, paginated text hierarchy with named statuses,
+parent relationships and task selection without precision gaze. It pages 50
+nodes at a time; the spatial view bounds entity construction to 200 nodes and
+fits received coordinates, with zoom and reset controls. Selection stores a task
+ID and reads its card from the newest forest. Errors remain visible while a
+same-identity transient snapshot is retained; denied access clears the forest.
+The dashboard handoff contains only the task path and requires browser sign-in.
+
+`Tests/PlanTreeModelTests.swift` is authored for a future `MaverickPlanTreeTests`
+Xcode test target and remains unrun. The source uses a 2 MB streamed-response
+cap and cancels active refreshes on disposal/background. Signed packaging,
+RealityKit comfort/layout/accessibility and 1/100/1000-node installed acceptance
+are not qualified. No signing or platform account was used.

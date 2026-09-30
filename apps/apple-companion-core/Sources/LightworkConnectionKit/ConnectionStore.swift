@@ -26,7 +26,7 @@ public struct DashboardConnection: Codable, Equatable {
 }
 
 public enum ConnectionError: LocalizedError {
-    case missingAddress, invalidAddress, invalidToken, secureStorage(Int32), response(Int), unreadable
+    case missingAddress, invalidAddress, invalidToken, secureStorage(Int32), response(Int), unreadable, responseTooLarge
 
     // Shown to people as written: plain sentences, no status numbers or codes.
     public var errorDescription: String? {
@@ -48,6 +48,8 @@ public enum ConnectionError: LocalizedError {
             case 500...599: return "The dashboard had a problem answering. Try again in a few minutes."
             default: return "The dashboard could not answer. Check the address and access token in Settings, then try again."
             }
+        case .responseTooLarge:
+            return "The dashboard reply was too large for this device. Narrow the view on the dashboard and try again."
         case .unreadable:
             return "The dashboard sent a reply this app could not read. Update the app, or ask your administrator to check the dashboard."
         }
@@ -182,7 +184,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
 }
 
 /// Read-only requests, with no redirects that could move a token to another host.
-public func dashboardData(path: String, connection: DashboardConnection) async throws -> Data {
+public func dashboardData(path: String, connection: DashboardConnection, maxBytes: Int = 2_097_152) async throws -> Data {
     let url = try connection.validatedURL().appendingPathComponent(path)
     var request = URLRequest(url: url)
     request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -191,11 +193,41 @@ public func dashboardData(path: String, connection: DashboardConnection) async t
     }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.timeoutIntervalForRequest = 20
+    configuration.timeoutIntervalForResource = 25
     let session = URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
-    defer { session.finishTasksAndInvalidate() }
-    let (data, response) = try await session.data(for: request)
+    defer { session.invalidateAndCancel() }
+    let (bytes, response) = try await session.bytes(for: request)
     guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
         throw ConnectionError.response((response as? HTTPURLResponse)?.statusCode ?? -1)
     }
+    let limit = min(max(1, maxBytes), 2_097_152)
+    guard response.expectedContentLength <= Int64(limit) else { throw ConnectionError.responseTooLarge }
+    return try await boundedResponse(bytes, maxBytes: limit)
+}
+
+/// A byte cap applies even when Content-Length is absent or misleading.
+public func boundedResponse<Bytes: AsyncSequence>(_ bytes: Bytes, maxBytes: Int) async throws -> Data where Bytes.Element == UInt8 {
+    let limit = min(max(1, maxBytes), 2_097_152)
+    var data = Data()
+    data.reserveCapacity(min(limit, 65_536))
+    for try await byte in bytes {
+        if data.count % 4096 == 0 { try Task.checkCancellation() }
+        guard data.count < limit else { throw ConnectionError.responseTooLarge }
+        data.append(byte)
+    }
+    try Task.checkCancellation()
     return data
+}
+
+/// Only explicitly transient failures may retain same-connection snapshots.
+public func mayRetainSnapshot(after error: Error) -> Bool {
+    if let known = error as? ConnectionError, case .response(let status) = known {
+        return status == 429 || (500...599).contains(status)
+    }
+    if let network = error as? URLError {
+        let transient: [URLError.Code] = [.timedOut, .notConnectedToInternet, .networkConnectionLost,
+                                        .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed]
+        return transient.contains(network.code)
+    }
+    return false
 }
