@@ -65,6 +65,8 @@ PAGES: tuple[dict, ...] = (
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/deliverable-bundles", "label": "Selected deliverable bundles", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/task-handoffs", "label": "Accepted task handoffs", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
         "path": "/action-center", "label": "Action Center", "group": "Operate",
         "icon": "check", "floor": "operate", "default": "operate",

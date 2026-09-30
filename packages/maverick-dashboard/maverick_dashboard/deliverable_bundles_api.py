@@ -173,9 +173,9 @@ def export(request: Request, bundle_id: str):
 
 @router.get(BASE + "/{bundle_id}/render")
 def render(request: Request, bundle_id: str):
-    from maverick.deliverable_bundle_export import files_for
+    from maverick.deliverable_bundle_export import rendered_preview
 
-    content = _prepared_file(request, bundle_id, lambda row: files_for(row)["index.html"])
+    content = _prepared_file(request, bundle_id, rendered_preview)
     return HTMLResponse(content, headers={"Cache-Control": "private, no-store",
                         "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'"})
 

@@ -395,6 +395,9 @@ def run_goal_in_thread(
         goal = world.get_goal(goal_id)
         if goal is None:
             return None
+        from .task_handoffs import closure
+        if closure(world, goal_id):
+            return "blocked"
         principal_matches = _runner_principal_binding(world, goal, execution_principal)
         if principal_matches is None:
             return None

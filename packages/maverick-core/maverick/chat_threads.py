@@ -124,6 +124,7 @@ class ChatThreads:
 
     def require_idle(self, connection, root_id, owner, *, except_goal=None):
         self._lock(connection, root_id)
+        self._require_open(connection, root_id)
         scope, values = self._scope("g")
         rows = self._rows("SELECT g.status FROM goals g WHERE g.id=? AND g.parent_id IS NULL "
                           f"AND g.owner=? AND {scope}", (root_id, owner, *values), connection=connection)
@@ -189,7 +190,18 @@ class ChatThreads:
             binding = self.binding(goal_id, connection=connection)
             yield connection, binding, current[0][2]
 
+    def _require_open(self, connection, goal_id):
+        from .goal_mutations import GoalMutationConflict
+        from .task_handoffs import require_open
+        try:
+            require_open(self.world, goal_id,
+                         execute=lambda sql, args: self.store.execute(connection, sql, args),
+                         decode=self.store.open)
+        except GoalMutationConflict as exc:
+            raise SubmissionConflict(str(exc)) from exc
+
     def _pending(self, connection, goal_id):
+        self._require_open(connection, goal_id)
         advance = "MAX" if self.store.sqlite else "GREATEST"
         scope, values = self._scope("goals")
         changed = self.store.execute(connection, "UPDATE goals SET status='pending',completed_at=NULL,"

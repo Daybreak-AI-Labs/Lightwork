@@ -130,3 +130,18 @@ def export_zip(record):
             if hashlib.sha256(archive.read(name)).digest() != hashlib.sha256(content).digest():
                 raise ValueError("The export content changed during packaging.")
     return target.getvalue()
+
+
+def rendered_preview(record):
+    """Online safe preview with working, separately authorized download links."""
+    files = files_for(record)
+    document = files["index.html"].decode("utf-8")
+    sources = json.loads(files["review.json"])["selected_sources"]
+    base = "/api/v1/deliverable-bundles/" + record["id"]
+    mapping = {row["filename"]: base + "/files/" + row["key"] for row in sources}
+    # Supplementary CSV/review/manifest/verifier are delivered together in the
+    # verified ZIP, rather than linking to nonexistent relative HTTP routes.
+    for name in files:
+        destination = mapping.get(name, base + "/export")
+        document = document.replace('href="' + name + '"', 'href="' + html.escape(destination, quote=True) + '"')
+    return document.encode("utf-8")

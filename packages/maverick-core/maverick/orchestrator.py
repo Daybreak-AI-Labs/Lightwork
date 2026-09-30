@@ -2697,6 +2697,12 @@ async def run_goal(
     allowed_suites: frozenset[str] | None = None,
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
+    from .goal_mutations import GoalMutationConflict
+    from .task_handoffs import apply_ceiling, require_open
+    try:
+        require_open(world, goal_id)
+    except GoalMutationConflict as exc:
+        return f"BLOCKED: {exc}"
     from .federation_admission import FederationAdmissionRequired, require_execution
     try:
         require_execution(world, goal_id, capability=capability, budget=budget, consume=True)
@@ -2730,17 +2736,25 @@ async def run_goal(
                 except Exception:  # pragma: no cover - status write must not mask the block
                     log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
             return f"BLOCKED: {reason}"
+    from .task_execution_guard import TaskBusy
+    from .task_execution_guard import lease as execution_lease
     from .task_file_recovery import run_scope
     from .tenant.provider_admission import run_scope as organization_run_scope
     sandbox = sandbox or LocalBackend()
-    with run_scope(world, goal_id, sandbox), organization_run_scope(
-        budget, _execution_principal(user_id=user_id, capability=capability),
-    ):
-        return await _run_goal_accounted(
-            llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
-            channel, user_id, capability, orchestrator_model_override, resume,
-            resume_episode_id, domain, allowed_suites,
-        )
+    try:
+        with execution_lease(world, goal_id):
+            require_open(world, goal_id)
+            apply_ceiling(world, goal_id, budget)
+            with run_scope(world, goal_id, sandbox), organization_run_scope(
+                budget, _execution_principal(user_id=user_id, capability=capability),
+            ):
+                return await _run_goal_accounted(
+                    llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
+                    channel, user_id, capability, orchestrator_model_override, resume,
+                    resume_episode_id, domain, allowed_suites,
+                )
+    except (TaskBusy, GoalMutationConflict) as exc:
+        return f"BLOCKED: {exc}"
 
 
 def run_goal_sync(*args, **kwargs) -> str:

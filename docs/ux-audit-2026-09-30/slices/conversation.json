@@ -4,7 +4,7 @@
     "status": "planned",
     "implementation_evidence": "Existing employee companion supports conversation independent from tasks.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Durable editable queued turns/files, guidance consumption receipts/conflict decisions and checkpoint execution still required."
+    "remaining": "Transferred to settings_integrity by root; dedicated slice-conversation-inbox owns durable queue/guidance/independent submission and safe checkpoint acknowledgement. No placeholder implementation claimed here."
   },
   {
     "id": "LW-002",
@@ -162,7 +162,7 @@
     "status": "planned",
     "implementation_evidence": "Existing project ownership and packet boundary preserved.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Project workspace implementation ownership transferred to settings_integrity worker; no duplicate edits here. Root must integrate their complete per-ID evidence."
+    "remaining": "Implemented by settings_integrity checkpoint049894174225c5baaaa8061cc24d72599d7b493e; root must use slices/project-workspaces.json evidence (23 Python +6 jsdom local tests passed)."
   },
   {
     "id": "LW-125",
@@ -194,10 +194,15 @@
   },
   {
     "id": "LW-129",
-    "status": "planned",
-    "implementation_evidence": "User chose explicit recipient acceptance; existing ownership remains unchanged.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Build selected-evidence transfer service with named recipient acceptance, safe in-flight boundary, independent authority/connection rebind and revocation."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "task_handoffs.py native named selected-bundle offer, exact source/recipient/cost/commitment/ceiling preview, explicit acceptance, decline/withdrawal and expiry. Current membership and source rights checked under the effect fence.",
+      "Acceptance holds shared native execution leases until safe boundary, then atomically creates a blocked recipient-owned selected-copy successor, closes the source conversation/subtask tree and persists original-author lineage and exact idempotency receipt; interrupted governed projection recovers from world receipt. Original private history and ownership remain unchanged.",
+      "Common runner and chat follow-up/restart gates reject closed source work; persistent successor spending ceiling can only tighten runtime budget. Credentials, connections, source bindings, learned memory and project memberships are not transferred.",
+      "Native /task-handoffs review/receipt UI, feature/settings/installer controls and tasks.offer_handoff/respond_handoff Copilot adapters use same service. Distinct continuation link requires explicit start; no automatic provider or external messaging."
+    ],
+    "validation": "25 focused local Python handoff/bundle/typed-operation tests passed (13 handoff, nine bundle, three operation cases), plus 10 task-operation/answer-projection tests and six jsdom answer/handoff controller tests. Static Python/JS/Jinja/Ruff/whitespace checked. No live provider calls.",
+    "remaining": "Qualify native PostgreSQL/distributed session leases and installed authenticated browser. Accepted/downloaded copies cannot be recalled. Root-coordinated full integrated suite remains required."
   },
   {
     "id": "LW-130",
@@ -208,7 +213,7 @@
       "Native /deliverable-bundles UI, per-file/export authorization, feature knob, settings labels, installer question and source-task link implemented. Copilot artifact share/accept/revoke/download adapters use same service.",
       "Root confirmed shared catalog multiselect typed arrays and safe local href links implemented for bundle create/download and pending integration commit."
     ],
-    "validation": "Ruff, Python AST, Jinja syntax and JavaScript syntax/whitespace checks. Native selection/replay/revocation/source-change/ZIP-integrity/render-safety/export-failure tests authored, pending root-coordinated local run. No provider calls or installed-browser/PostgreSQL qualification.",
+    "validation": "Nine bundle cases within 21 passing native SQLite bundle/handoff tests. Added online safe preview routes map captured originals to authorized file endpoints; supplemental CSV/manifest/verifier links retrieve complete ZIP. Python/JS/Jinja/Ruff and whitespace reviewed; full PostgreSQL/installed browser acceptance pending.",
     "remaining": "Root must preserve shared catalog multiselect/local-link additions during integration. Local native/browser/PostgreSQL acceptance still required; offline consistency is not source authenticity, factual validation or external filing."
   },
   {
@@ -310,9 +315,10 @@
     "status": "implemented-test-needed",
     "implementation_evidence": [
       "Complements identity fresh scope projection: lightwork-task-authority.js gates send, stop, edit, feedback, share, sign-off, upload and resume controls, rechecks permissions on focus/visibility and before click/submit, fails closed and preserves draft.",
-      "chat_goal.html uses can_operate and read-only reason; live _chat_answer_panel.html exposes mutations only when fresh exact-owner operate projection permits them. MutationObserver applies revocation to replaced controls. Server ownership and role revalidation remains authoritative."
+      "chat_goal.html uses can_operate and read-only reason; live _chat_answer_panel.html exposes mutations only when fresh exact-owner operate projection permits them. MutationObserver applies revocation to replaced controls. Server ownership and role revalidation remains authoritative.",
+      "Identity complementary c2b07919356e6e9b33150db39e8ca634a39aecf0 adds initial disabled controls/read-only notice, project requestSubmit and selector gating; four Node tests pass including mid-session revocation preserving project choice. Root integrates this alongside f27330d reason text."
     ],
-    "validation": "Static source review and existing authority/projection regression cases authored; root-coordinated local authenticated role/revocation qualification pending.",
+    "validation": "Four complementary identity Node tests passed; my task/answer projection tests passed locally. Installed authenticated browser role/revocation qualification remains separate.",
     "remaining": "Verify viewer/member/admin and mid-session revocation with the integrated application; exceptional content read grants must continue to render read-only."
   }
 ]

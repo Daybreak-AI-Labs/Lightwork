@@ -1,3 +1,4 @@
+{% if handoff_closed %}<p role="status">Responsibility was accepted by {{ handoff_closed.actor }}. This original conversation is closed to further execution and its history remains private. <a href="/task-handoffs">View the handoff receipt</a>.</p>{% endif %}
 {# Shared full-page/live result projection. All values remain autoescaped. #}
 <section id="answer-panel" data-goal="{{ goal.id }}" data-updated-at="{{ goal.updated_at }}"
          data-version="{{ answer_version|default('') }}" data-context="{{ conversation_context }}"

@@ -261,6 +261,7 @@ def review_recover(request, selection, args, native, operation_id):
 
 def entries():
     from .product_operations_bundles import entries as bundle_entries
+    from .product_operations_handoffs import entries as handoff_entries
 
     return (
         Adapter("tasks.current_status", "Read this task's status and saved result", "tasks", "/chat", TASK_PAGES,
@@ -272,4 +273,4 @@ def entries():
         Adapter("reviews.respond", "Respond to a project review", "reviews", "/project-reviews",
                 ("/project-reviews", "/projects", "/projects/*"),
                 ReviewInput, review_snapshot, review_preview, review_execute, review_recover),
-    ) + bundle_entries()
+    ) + bundle_entries() + handoff_entries()

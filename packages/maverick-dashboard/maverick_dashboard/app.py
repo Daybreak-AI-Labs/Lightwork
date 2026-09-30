@@ -112,6 +112,7 @@ from .outcome_pilots_api import router as outcome_pilots_router
 from .project_reviews_api import router as project_reviews_router
 from .deliverable_bundles_api import router as deliverable_bundles_router
 from .project_workspaces_api import router as project_workspaces_router
+from .task_handoffs_api import router as task_handoffs_router
 from .record_search_api import page_context as _record_search_page_context
 from .record_search_api import router as record_search_router
 from .route_identity import (
@@ -1116,6 +1117,7 @@ app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
 app.include_router(deliverable_bundles_router)
 app.include_router(project_workspaces_router)
+app.include_router(task_handoffs_router)
 from .my_work_api import router as my_work_router
 
 app.include_router(my_work_router)
@@ -10332,12 +10334,20 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
 
+    from maverick.task_handoffs import apply_ceiling, closure
+    from types import SimpleNamespace
+    handed_off = closure(w, goal_id)
+    handoff_budget = SimpleNamespace(max_dollars=spend_ceiling)
+    apply_ceiling(w, goal_id, handoff_budget)
+    spend_ceiling = handoff_budget.max_dollars
+
     return templates.TemplateResponse(
         request,
         "chat_goal.html",
         {
             "goal": g,
-            "can_operate": has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
+            "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
+            "handoff_closed": handed_off,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
@@ -10372,6 +10382,9 @@ def chat_goal_permissions(request: Request, goal_id: int) -> dict:
     if goal is None:
         raise HTTPException(404, "no such goal")
     assert_goal_access(request, goal)
+    from maverick.task_handoffs import CLOSED, closure
+    if closure(_world(), goal_id):
+        return {"can_operate": False, "reason": CLOSED}
     allowed = has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), goal)
     return {"can_operate": allowed, "reason": "" if allowed else (
         "Your current access allows viewing this task only. A reviewed content read does not grant changes. "
