@@ -2739,13 +2739,14 @@ async def run_goal(
     from .task_execution_guard import TaskBusy
     from .task_execution_guard import lease as execution_lease
     from .task_file_recovery import run_scope
+    from .template_connections import SelectionUnavailable, bind_goal
     from .tenant.provider_admission import run_scope as organization_run_scope
     sandbox = sandbox or LocalBackend()
     try:
         with execution_lease(world, goal_id):
             require_open(world, goal_id)
             apply_ceiling(world, goal_id, budget)
-            with run_scope(world, goal_id, sandbox), organization_run_scope(
+            with bind_goal(world, goal_id, _execution_principal(user_id=user_id, capability=capability)), run_scope(world, goal_id, sandbox), organization_run_scope(
                 budget, _execution_principal(user_id=user_id, capability=capability),
             ):
                 return await _run_goal_accounted(
@@ -2753,6 +2754,10 @@ async def run_goal(
                     channel, user_id, capability, orchestrator_model_override, resume,
                     resume_episode_id, domain, allowed_suites,
                 )
+    except SelectionUnavailable as exc:
+        if goal is not None and goal.owner == _execution_principal(user_id=user_id, capability=capability):
+            world.set_goal_status(goal_id, "blocked", result=str(exc))
+        return f"BLOCKED: {exc}"
     except (TaskBusy, GoalMutationConflict) as exc:
         return f"BLOCKED: {exc}"
 

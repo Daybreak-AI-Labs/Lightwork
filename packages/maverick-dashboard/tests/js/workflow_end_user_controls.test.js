@@ -9,10 +9,11 @@ const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
 
 async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx") {
   const details = { open: false }, title = { value: existing.title || "" };
+  const references = {value:"[]"};
   const description = { value: existing.description || "", closest: () => details };
   const notice = { hidden: true }, storage = new Map([["lightwork:template-draft:v1", JSON.stringify(draft)]]);
   let submits = 0;
-  const form = { querySelector: selector => selector.startsWith("input") ? title : description, submit() { submits++; } };
+  const form = { querySelector: selector => selector.includes("connection_references") ? references : selector.startsWith("input") ? title : description, submit() { submits++; } };
   for (const input of [title, description]) { input.listeners = {}; input.addEventListener = (type, callback) => { input.listeners[type] = callback; }; input.removeEventListener = type => { delete input.listeners[type]; }; }
   const context = { window: {}, Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
     sessionStorage: { getItem: key => storage.get(key), removeItem: key => storage.delete(key) },
@@ -21,7 +22,7 @@ async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx
   vm.runInNewContext(source.slice(source.indexOf("  function chatCopy("), source.indexOf("  // A prepared template")), context);
   const start = source.indexOf("  (async function receiveTemplateDraft()");
   await vm.runInNewContext(source.slice(start, source.indexOf("  })();", start) + 7), context);
-  return { title, description, details, notice, storage, submits };
+  return { title, description, references, details, notice, storage, submits };
 }
 
 test("prepared template becomes a visible ordinary Chat draft once, without submitting", async () => {
@@ -315,4 +316,11 @@ test("a refused chat follow-up shows the server's plain sentence and never raw v
   assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "Please review this message." }] }), "Please review this message.");
   assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "field_required" }] }), "Could not send your message. Generic 422.");
   assert.equal(context.replyFailureText({ status: 500 }, {}), "Could not send your message. Generic 500.");
+});
+
+
+test("prepared account references remain separate from the editable brief",async()=>{
+ const refs=[{name:"chosen",owner:"user:owner",tenant:"one",connector:"slack_api",revision:"fixed"}];
+ const ui=await receiveTemplateFixture({title:"Review",description:"Brief",connection_references:refs,created_at:Date.now(),context:"ctx"});
+ assert.deepEqual(JSON.parse(ui.references.value),refs);assert.equal(ui.description.value,"Brief");assert.equal(ui.submits,0);
 });

@@ -437,7 +437,8 @@
     </div>
   </div>
 
-  <script>
+  <script src="/static/lightwork-template-connections.js"></script>
+<script>
   (function () {
     var mode = 'template';
     var brief = document.getElementById('wf-brief');
@@ -802,7 +803,7 @@
       function control(key,label,type,value) {
         var wrap=document.createElement('label'); productText(wrap,label);
         var input=document.createElement(type==='select' ? 'select' : 'input'); input.className='input'; input.dataset.inputKey=key;
-        if (type==='select') ['text','date','enum','number','email'].forEach(function (kind) { var option=new Option('',kind);productText(option,{text:'Text',date:'Date',enum:'Choice',number:'Number',email:'Email'}[kind]);input.appendChild(option); });
+        if (type==='select') ['text','date','enum','number','email','connection'].forEach(function (kind) { var option=new Option('',kind);productText(option,{text:'Text',date:'Date',enum:'Choice',number:'Number',email:'Email',connection:'Connected account'}[kind]);input.appendChild(option); });
         else input.type=type;
         if (type==='checkbox') input.checked=value; else input.value=value || '';
         input.maxLength=key==='help' ? 500 : 100; wrap.appendChild(input); row.appendChild(wrap); return input;
@@ -920,8 +921,8 @@
         var runNow = document.getElementById('wf-run-now');
         if (runNow) runNow.href = '/chat?title=' + encodeURIComponent(data.title || data.name);
         showSaved('/templates', 'Open Templates');
-        showScheduling({ name: data.name, params: data.params || [] });
-        showTriggers({ name: data.name, params: data.params || [] });
+        showScheduling({ name: data.name, params: data.params || [], parameter_schema: data.parameter_schema || {} });
+        showTriggers({ name: data.name, params: data.params || [], parameter_schema: data.parameter_schema || {} });
       } catch (e) {
         setStatus(plainErr(e, 'save the workflow'), true);
       } finally {
@@ -995,33 +996,35 @@
       Object.keys(show).forEach(function (id) { var e = document.getElementById(id); if (e) e.hidden = !show[id]; });
     }
     var fmtWhen = function(value){return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : window.mvWhen(value);};
+    function automationInput(parent, p, i, prefix, schema, changed) {
+      var spec=(schema && schema.fields || {})[p] || {required:true}, id=prefix+'-param-'+i;
+      var label=document.createElement('label');label.htmlFor=id;label.lang='und';label.dir='auto';label.textContent=spec.label || p;
+      var input=document.createElement(spec.type==='enum'||spec.type==='connection'?'select':'input');
+      input.id=id;input.className='input '+prefix+'-param';input.dataset.param=p;input.required=spec.required!==false;
+      input.dataset.showWhen=JSON.stringify(spec.show_when || {});
+      if(spec.type==='enum'){var empty=new Option('','');productText(empty,'Choose an option');input.append(empty);(spec.choices||[]).forEach(function(choice){var option=new Option(choice,choice);option.lang='und';input.append(option);});}
+      else if(spec.type!=='connection'){input.type=['date','number','email'].includes(spec.type)?spec.type:'text';if(spec.type==='number')input.step='any';}
+      input.value=spec.default||'';input.addEventListener('input',changed);input.addEventListener('change',changed);
+      var row=document.createElement('div');row.dataset.parameterRow=p;row.append(label,input);parent.append(row);
+      if(spec.help){var help=document.createElement('p');help.lang='und';help.textContent=spec.help;row.append(help);}
+      if(spec.type==='connection'){input.dataset.connectedAccount='';window.LightworkTemplateConnections.mount(input);}
+    }
+    function automationValues(parent, selector){
+      var values={}, ok=true;parent.querySelectorAll(selector).forEach(function(input){values[input.dataset.param]=input.value;});
+      parent.querySelectorAll(selector).forEach(function(input){
+        var when=JSON.parse(input.dataset.showWhen||'{}'), hidden=Boolean(when.field&&values[when.field]!==when.value);
+        input.closest('[data-parameter-row]').hidden=hidden;input.disabled=hidden;
+        if(hidden)values[input.dataset.param]='';else if(!input.checkValidity())ok=false;
+      });return ok?values:null;
+    }
     function renderSchedParams(params) {
       schedParams.textContent = '';
       if (!params || !params.length) { schedParamsWrap.hidden = true; return; }
       schedParamsWrap.hidden = false;
-      params.forEach(function (p, i) {
-        var id = 'sched-param-' + i;
-        var label = document.createElement('label');
-        label.htmlFor = id;   // associate the visible label with the field
-        label.style.cssText = 'display:block; font-size: var(--text-xs); color: var(--muted); margin: var(--space-2) 0 2px;';
-        label.textContent = window.mvHuman ? window.mvHuman(p) : p;
-        var inp = document.createElement('input');
-        inp.id = id;
-        inp.className = 'input sched-param';
-        inp.dataset.param = p;
-        inp.addEventListener('input', updateSchedBtn);
-        schedParams.appendChild(label);
-        schedParams.appendChild(inp);
-      });
+      params.forEach(function(p,i){automationInput(schedParams,p,i,'sched',lastSavedTemplate.parameter_schema,updateSchedBtn);});
     }
-    function schedParamValues() {
-      var out = {}; var ok = true;
-      schedParams.querySelectorAll('.sched-param').forEach(function (i) {
-        var v = i.value.trim(); out[i.dataset.param] = v;
-        if (!v) ok = false;
-      });
-      return ok ? out : null;   // null => some required value is still blank
-    }
+    function schedParamValues() {return automationValues(schedParams,'.sched-param');}
+
     function updateSchedBtn() {
       syncSchedInputs();
       var cron = currentCron();
@@ -1128,29 +1131,10 @@
       trigParams.textContent = '';
       if (!params || !params.length) { trigParamsWrap.hidden = true; return; }
       trigParamsWrap.hidden = false;
-      params.forEach(function (p, i) {
-        var id = 'trig-param-' + i;
-        var label = document.createElement('label');
-        label.htmlFor = id;   // associate the visible label with the field
-        label.style.cssText = 'display:block; font-size: var(--text-xs); color: var(--muted); margin: var(--space-2) 0 2px;';
-        label.textContent = window.mvHuman ? window.mvHuman(p) : p;
-        var inp = document.createElement('input');
-        inp.id = id;
-        inp.className = 'input trig-param';
-        inp.dataset.param = p;
-        inp.addEventListener('input', updateTrigBtn);
-        trigParams.appendChild(label);
-        trigParams.appendChild(inp);
-      });
+      params.forEach(function(p,i){automationInput(trigParams,p,i,'trig',trigTpl.parameter_schema,updateTrigBtn);});
     }
-    function trigParamValues() {
-      var out = {}; var ok = true;
-      trigParams.querySelectorAll('.trig-param').forEach(function (i) {
-        var v = i.value.trim(); out[i.dataset.param] = v;
-        if (!v) ok = false;
-      });
-      return ok ? out : null;   // null => some default is still blank
-    }
+    function trigParamValues() {return automationValues(trigParams,'.trig-param');}
+
     function updateTrigBtn() { trigBtn.disabled = trigParamValues() === null; }
     function showTriggers(tpl) {
       if (!trigWrap) return;            // no-op when [features] triggers is off
@@ -1743,8 +1727,8 @@
       setForm('template');
       productText(savedMsg,'Automate {name}: schedule it or start it from another app.',{name:WF_PREFILL.title || WF_PREFILL.name});
       showSaved('/templates', 'Open Templates');
-      showScheduling({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
-      showTriggers({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
+      showScheduling({ name: WF_PREFILL.name, params: WF_PREFILL.params || [], parameter_schema: WF_PREFILL.parameter_schema || {} });
+      showTriggers({ name: WF_PREFILL.name, params: WF_PREFILL.params || [], parameter_schema: WF_PREFILL.parameter_schema || {} });
     }
     receiveAuthoringHandoff(!!(PB_EDIT || PB_EDIT_DENIED || WF_EDIT || WF_PREFILL));
     initializeRecovery();

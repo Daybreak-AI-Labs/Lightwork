@@ -415,6 +415,10 @@ def resolve_named(name: str, *, expected_revision: str, connector: str, origin: 
     principal = current_principal()
     if not principal:
         raise PermissionError("saved connection requires a named authenticated principal")
+    from .template_connections import selected
+    pin = selected(connector, principal)
+    if pin is not None and (pin["name"] != name or pin["revision"] != expected_revision):
+        raise PermissionError("This task selected a different account or saved revision.")
     record = get_connection(name)
     if not record or not _may_use(record, principal) or not record.get("token"):
         raise PermissionError("named connection access is unavailable or denied")
@@ -442,9 +446,13 @@ def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] 
     # a connection named exactly after the connector wins; else the first one
     # whose "connector" field points at it AND whose use grant admits the
     # authenticated caller.  Sort the fallback so selection is deterministic.
+    from .template_connections import selected
+    pin = selected(slug, caller)
     data = _load()
-    rec = data.get(slug)
-    if not isinstance(rec, dict) or not _may_use(rec, caller):
+    rec = data.get(pin["name"] if pin else slug)
+    if pin is not None and (not rec or rec.get("revision") != pin["revision"] or not _may_use(rec, caller)):
+        raise PermissionError("Selected account changed before credential resolution.")
+    if pin is None and (not isinstance(rec, dict) or not _may_use(rec, caller)):
         rec = next((r for _, r in sorted(data.items())
                     if isinstance(r, dict) and r.get("connector") == slug
                     and _may_use(r, caller)), None)

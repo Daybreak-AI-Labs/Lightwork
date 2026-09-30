@@ -717,6 +717,7 @@ MIGRATIONS.append((43, ["ALTER TABLE facts ADD COLUMN IF NOT EXISTS tags_json TE
 # Highest migration version = the reported schema version.
 MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
 MIGRATIONS.append((45, _HISTORY_INDEXES))
+MIGRATIONS.append((46, ["ALTER TABLE goals ADD COLUMN IF NOT EXISTS connection_selection TEXT NOT NULL DEFAULT ''"]))
 
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -1505,6 +1506,7 @@ class PostgresWorldModel:
         execution_principal: str = "",
         domain: str = "",
         project_id: int | None = None,
+        connection_references: list | None = None,
     ) -> int:
         # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
         # `project_id` mirror the SQLite backend's create_goal signature. Both
@@ -1522,14 +1524,16 @@ class PostgresWorldModel:
 
             if not valid_principal(execution_principal):
                 raise ValueError("invalid execution principal")
+        from ..template_connections import packed
+        selection = packed(owner, connection_references or [])
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
             cur.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
                 "created_at, updated_at, owner, execution_principal, domain, "
-                "project_id, tenant_id) "
-                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "project_id, tenant_id, connection_selection) "
+                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     parent_id,
                     _seal(title),
@@ -1541,10 +1545,22 @@ class PostgresWorldModel:
                     domain or "",
                     project_id,
                     tenant,
+                    _seal(selection),
                 ),
             )
             row = cur.fetchone()
         return int(row[0])
+
+    def goal_connection_selection(self, goal_id: int) -> str:
+        frag, params = _tenant_scope()
+        sql, args = "SELECT connection_selection FROM goals WHERE id=%s", [goal_id]
+        if frag:
+            sql += " AND " + frag
+            args += params
+        with self._tx() as cur:
+            cur.execute(sql, args)
+            row = cur.fetchone()
+        return _unseal(row[0]) if row and row[0] else ""
 
     def get_goal(self, goal_id: int) -> PGGoal | None:
         frag, params = _tenant_scope()

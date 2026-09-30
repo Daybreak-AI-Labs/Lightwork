@@ -65,7 +65,7 @@
         if (!response.ok) throw plain(failText(response, 'prepare the task'));
         var result = await response.json();
         if (result.started !== false || typeof result.title !== 'string' || typeof result.description !== 'string' || typeof result.context !== 'string') throw plain('The task could not be prepared. Your details are still here.');
-        sessionStorage.setItem('lightwork:template-draft:v1', JSON.stringify({title:result.title, description:result.description, context:result.context, created_at:Date.now()}));
+        sessionStorage.setItem('lightwork:template-draft:v1', JSON.stringify({title:result.title, description:result.description, context:result.context, connection_references:result.connection_references || [], created_at:Date.now()}));
         window.location.assign('/chat');
       } catch (error) { message.textContent = error && error.plain ? error.message : failText(error, 'prepare the task'); button.disabled = false; }
     });

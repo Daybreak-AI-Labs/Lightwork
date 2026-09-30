@@ -201,6 +201,7 @@ class GoalIn(BaseModel):
     # tighten consent and review checkpoints and lower the spending cap.
     director_profile: str | None = Field(None, max_length=40)
     knowledge_context: KnowledgeContextIn | None = None
+    connection_references: list[dict[str, str]] = Field(default_factory=list, max_length=100)
 
 
 class GoalOut(BaseModel):

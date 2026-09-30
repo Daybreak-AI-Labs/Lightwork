@@ -110,7 +110,7 @@ def record_fixture(name, actor, *, expected_version, inputs, expected_contains="
         template, current, content = _current(name, actor, admin=admin)
         if current != expected_version:
             raise FileExistsError("The draft changed. Review the current version before checking the sample.")
-        title, body = template.render(**inputs)
+        title, body = template.render_for(actor, **inputs)
         passed = not expected_contains or expected_contains in body
         state = _load(name)
         _snapshot(state, content, name)

@@ -121,7 +121,9 @@ class SubmissionStore:
 
     def create(self, *, token, fingerprint, owner, title, description, manifest,
                parent_id=None, domain="", project_id=None, kind="chat",
-               chat_text=None, chat_root_id=None):
+               chat_text=None, chat_root_id=None, connection_references=None):
+        from .template_connections import packed
+        selection = packed(owner, connection_references or [])
         key = self.token_key(token, owner)
         with self.transaction("submission:" + key) as connection:
             prior = self._receipt(connection, key)
@@ -148,8 +150,8 @@ class SubmissionStore:
                     parent_values += scoped_values
                 if self.execute(connection, parent_sql, parent_values).fetchone() is None:
                     raise SubmissionConflict("Parent task is unavailable in this tenant")
-            columns = "parent_id,title,description,status,created_at,updated_at,owner,domain,project_id"
-            values = [parent_id, self.seal(title), self.seal(description), "draft", now, now, owner, domain, project_id]
+            columns = "parent_id,title,description,status,created_at,updated_at,owner,domain,project_id,connection_selection"
+            values = [parent_id, self.seal(title), self.seal(description), "draft", now, now, owner, domain, project_id, self.seal(selection)]
             if not self.sqlite:
                 columns += ",tenant_id"
                 values.append(self.tenant)

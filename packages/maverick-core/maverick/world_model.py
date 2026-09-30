@@ -52,7 +52,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 45
+SCHEMA_VERSION = 46
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -425,6 +425,7 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    46: ["ALTER TABLE goals ADD COLUMN connection_selection TEXT NOT NULL DEFAULT ''"],
     45: _HISTORY_INDEXES,
     44: _PERSONAL_ALERT_MIGRATION,
     43: ["ALTER TABLE facts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"],
@@ -1640,7 +1641,8 @@ class WorldModel:
     # ----- goals -----
     def create_goal(self, title: str, description: str = "", parent_id: int | None = None,
                     *, owner: str = "", execution_principal: str = "",
-                    domain: str = "", project_id: int | None = None) -> int:
+                    domain: str = "", project_id: int | None = None,
+                    connection_references: list | None = None) -> int:
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -1650,16 +1652,22 @@ class WorldModel:
 
             if not valid_principal(execution_principal):
                 raise ValueError("invalid execution principal")
+        from .template_connections import packed
+        selection = packed(owner, connection_references or [])
         now = time.time()
         with self._writing() as conn:
             cur = conn.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, owner, execution_principal, domain, project_id) "
-                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+                "created_at, updated_at, owner, execution_principal, domain, project_id, connection_selection) "
+                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
                 (parent_id, _enc_field(title), _enc_field(description), now, now,
-                 owner, execution_principal, domain or "", project_id),
+                 owner, execution_principal, domain or "", project_id, _enc_field(selection)),
             )
             return cur.lastrowid
+
+    def goal_connection_selection(self, goal_id: int) -> str:
+        row = self._read_one("SELECT connection_selection FROM goals WHERE id=?", (goal_id,))
+        return _dec_field(row[0]) if row and row[0] else ""
 
     def record_goal_origin(self, goal_id: int, kind: str, ref: str) -> None:
         """Record which automation spawned a goal, so the Automations page can

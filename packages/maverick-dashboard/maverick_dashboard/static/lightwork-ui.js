@@ -659,6 +659,13 @@
         errBox.style.display = 'none';
         const kindEl = form.querySelector('[name="authoring_kind"]');
         const kind = kindEl ? kindEl.value : 'goal';
+        const accountSelection=(form.querySelector('[name="connection_references"]')||{}).value||'[]';
+        if(kind!=='goal'&&accountSelection!=='[]'){
+          var accountNotice='This draft has selected accounts. Run it as a task, or return to Templates to prepare a new reusable draft without private account selections.';
+          if(window.LightworkI18n)window.LightworkI18n.set(errBox,accountNotice);else errBox.textContent=accountNotice;
+          errBox.style.display='block';return;
+        }
+
         const files = form.querySelector('input[type="file"]');
         // Stage an unsaved brief in the selected editor; never silently execute
         // a goal when the selected authoring action cannot accept attachments.

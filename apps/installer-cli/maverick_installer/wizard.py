@@ -5003,7 +5003,7 @@ def pick_advanced() -> dict[str, Any]:
         "workflow_versioning": _q_confirm(
             "Keep workflow version history, safe input fixtures and administrator-reviewed publication before new schedules?", default=True),
         "workflow_typed_inputs": _q_confirm(
-            "Allow workflow authors to add dates, choices, optional inputs and defaults?", default=True),
+            "Allow workflow authors to add dates, choices, optional inputs, defaults and own connected-account selections? Account selections are checked again before execution.", default=True),
         "connections_self_connect": _q_confirm(
             "Allow employees to connect their own read-only Google Drive account after an administrator registers the workspace provider app? Other profiles require explicit approval in Settings.", default=False),
         "extension_form_values": _q_confirm(

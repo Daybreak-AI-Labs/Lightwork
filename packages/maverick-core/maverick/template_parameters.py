@@ -24,7 +24,7 @@ def normalize_schema(value, names):
         if not isinstance(field, dict) or set(field) - {"type", "label", "help", "required", "default", "choices", "show_when"}:
             raise ValueError("Unsupported input definition.")
         kind = field.get("type", "text")
-        if kind not in {"text", "date", "enum", "number", "email"}:
+        if kind not in {"text", "date", "enum", "number", "email", "connection"}:
             raise ValueError("Choose a supported input type.")
         required = field.get("required", True)
         if not isinstance(required, bool):
@@ -46,6 +46,8 @@ def normalize_schema(value, names):
             if not isinstance(when, dict) or set(when) != {"field", "value"} or when["field"] not in names or when["field"] == name or not isinstance(when["value"], str):
                 raise ValueError("Conditional input must refer to another listed input and a text value.")
             item["show_when"] = when
+        if kind == "connection" and item["default"]:
+            raise ValueError("Connected account inputs cannot save a default; each person selects their own account.")
         if item["default"]:
             _validate_value(name, item["default"], item)
         cleaned[name] = item
@@ -60,6 +62,9 @@ def _validate_value(name, value, field):
         if field.get("required", True):
             raise ValueError(f"{name}: enter a value.")
         return
+    if kind == "connection":
+        from .template_connections import decode
+        decode(value)
     if kind == "enum" and value not in field.get("choices", []):
         raise ValueError(f"{name}: choose one of the listed options.")
     if kind == "date":

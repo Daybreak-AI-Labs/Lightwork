@@ -15,6 +15,33 @@ class ConnectionInput(StrictInput):
     name: str = Field(min_length=1, max_length=64)
 
 
+class TemplateAccountInput(StrictInput):
+    account: str = Field(min_length=1, max_length=2048)
+
+
+def account_snapshot(request, selection):
+    from .in_app_routes import template_connection_choices
+    current = template_connection_choices(request)
+    choices = current["choices"]
+    return Snapshot(digest(current), "Your current connected accounts",
+        "Review an exact account for a workflow input. Selection grants no additional tools or permissions.",
+        fields=[{"name": "account", "label": "Connected account", "kind": "select", "required": True,
+                 "choices": [{"value": row["value"], "label": row["name"] + " (" + row["connector"] + ")"} for row in choices]}],
+        blocked="No eligible connected accounts. Open Connections to connect your own account." if not choices else "")
+
+
+def account_prepare(request, selection, arguments):
+    from maverick.template_connections import decode, validate
+    require_permission(request, "operate")
+    try:
+        reference = validate(caller_principal(request) or "", [decode(arguments["account"])])[0]
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Preview("This account selection is current. Choose this account in the template form; task admission checks it again. No provider check or task execution occurred.",
+        native={"account": reference["name"], "service": reference["connector"], "next_step": "/templates",
+                "scope": "Your own saved account; no additional tools or permissions", "executed": False})
+
+
 def connection_snapshot(request, selection):
     from .api import _require_connections
     from .connection_dependencies import owned_connections
@@ -216,6 +243,7 @@ def repair_execute(request, selection, arguments, native, operation):
 
 def entries():
     return (
+        Adapter("templates.accounts", "Review a workflow account selection", "connections", "/templates", ("/templates", "/workflow-builder", "/connections"), TemplateAccountInput, account_snapshot, account_prepare),
         Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, connection_execute, aliases=("check my connection",)),
         Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",)),
         Adapter("schedules.recovery", "Review parked schedule recovery", "schedules", "/automations", ("/automations",), RecoveryInput, recovery_snapshot, recovery_prepare, recovery_execute),

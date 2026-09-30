@@ -69,6 +69,7 @@
 
 {% block dock %}
 <form method="post" action="/chat/send" data-product-validation class="composer cs-anim" enctype="multipart/form-data">
+  <input type="hidden" name="connection_references" value="[]">
   <input type="hidden" name="submission_key" value="{{ submission_key }}" />
   <fieldset class="composer__controls"{% if not model_route_ready %} disabled{% endif %}>
   <legend class="sr-only">{{ ui('Start governed AI work') }}</legend>
@@ -167,6 +168,7 @@
       if (!response.ok || !current || current.context !== draft.context) throw new Error('The prepared template does not match this workspace or session. Return to Templates and prepare it again.');
       if (touched || title.value.trim() || description.value.trim()) return;
       title.value = draft.title; description.value = draft.description;
+      form.querySelector('[name="connection_references"]').value=JSON.stringify(draft.connection_references || []);
       var details = description.closest('details'); if (details) details.open = true;
       chatCopy(notice, 'Template ready. Review the task and details, then choose Start task when you are ready.'); notice.hidden = false;
     } catch (e) {

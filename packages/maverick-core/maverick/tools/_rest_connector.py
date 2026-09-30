@@ -112,7 +112,8 @@ def _requires_scoped_connection() -> bool:
         from maverick import connections
         from maverick.enterprise import enterprise_enabled
 
-        return bool(enterprise_enabled() and connections.current_principal())
+        from ..template_connections import active
+        return active() or bool(enterprise_enabled() and connections.current_principal())
     except Exception:  # pragma: no cover -- policy lookup fails closed elsewhere
         return False
 

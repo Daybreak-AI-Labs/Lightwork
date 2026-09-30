@@ -58,7 +58,9 @@
             {% for p in e.params %}
             {% set field = e.parameter_schema.get('fields', {}).get(p, {}) %}
             <label class="tplm__field" data-parameter-row="{{ p }}" data-show-when="{{ field.get('show_when', {}) | tojson | forceescape }}">{{ field.get('label') or p | humanize }}
-              {% if field.get('type') == 'enum' %}
+              {% if field.get('type') == 'connection' %}
+              <select class="select" data-connected-account data-template-param="{{ p }}" {% if field.get('required', true) %}required{% endif %}></select>
+              {% elif field.get('type') == 'enum' %}
               <select class="select" data-template-param="{{ p }}" {% if field.get('required', true) %}required{% endif %}>
                 <option value="">Choose an option</option>
                 {% for choice in field.get('choices', []) %}<option value="{{ choice }}" {% if choice == field.get('default') %}selected{% endif %}>{{ choice }}</option>{% endfor %}
@@ -140,7 +142,8 @@
   .tplm__library-list p { margin: 0; overflow-wrap: anywhere; }
 </style>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-template-library.js" defer></script>
+{% block scripts_extra %}
+<script src="/static/lightwork-template-connections.js"></script><script src="/static/lightwork-template-library.js" defer></script>
 <script src="/static/lightwork-tool-ops.js" defer></script>
 <script src="/static/lightwork-template-outcomes.js" defer></script>
 <script src="/static/lightwork-community-templates.js" defer></script>{% endblock %}

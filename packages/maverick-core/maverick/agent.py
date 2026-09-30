@@ -4097,6 +4097,8 @@ class Agent:
         no equivalent guard, so it could hold a goal 'active' past
         ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
         """
+        from .template_connections import recheck_active
+        recheck_active()
         budget = self.ctx.budget
         if Agent._goal_cancelled(self):
             raise GoalCancelled("cancelled by the goal owner before dispatch")

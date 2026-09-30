@@ -9056,11 +9056,19 @@ async def chat_send(
     files: list[UploadFile] = File(default=[]),
     submission_key: str = Form(""),
     director_profile: str = Form(""),
+    connection_references: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
     require_provider_or_400()
     check_goal_rate_limit(request)
+    from maverick.template_connections import validate as validate_connections
+    try:
+        if len(connection_references) > 200000:
+            raise ValueError("The account selection is too large.")
+        refs = validate_connections(caller_principal(request) or "", json.loads(connection_references or "[]"))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="goal text is required")
@@ -9094,7 +9102,7 @@ async def chat_send(
 
     receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
                            owner=owner, title=title, description=description,
-                           chat_text=chat_text)
+                           chat_text=chat_text, connection_references=refs)
     goal_id = receipt["goal_id"]
     if director is not None and receipt.get("created"):
         from maverick.director_mode import record
@@ -9414,7 +9422,7 @@ def _fire_stored_trigger(
             raise HTTPException(
                 status_code=409, detail="trigger template binding is unavailable"
             ) from exc
-        declared = set(tpl.params)
+        declared = set(tpl.params) - {key for key, spec in tpl.parameter_schema.get("fields", {}).items() if spec["type"] == "connection"}
         params = dict(trigger.get("params") or {})
         inbound = payload.get("data")
         if isinstance(inbound, dict):
@@ -9422,7 +9430,9 @@ def _fire_stored_trigger(
                 if key in declared:
                     params[str(key)] = str(value)[:2000]
         try:
-            title, description = tpl.render(**params)
+            from maverick.template_connections import parameters as connection_parameters
+            _, refs = connection_parameters(tpl, owner, params)
+            title, description = tpl.render_for(owner, **params)
         except ValueError as exc:
             from maverick.secrets import scrub
 
@@ -9431,7 +9441,8 @@ def _fire_stored_trigger(
 
         check_goal_rate_limit(request, source="webhook")
         world = _world()
-        goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
+        goal_id = world.create_goal(title[:200], description[:8000], owner=owner,
+            **({"connection_references": refs} if refs else {}))
         world.record_goal_origin(goal_id, "trigger", name)
         from maverick.runner import (
             clamp_task_limit,
@@ -11033,6 +11044,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-connection-setup.js")
 @app.get("/static/lightwork-native-account-return.js")
 @app.get("/static/lightwork-template-library.js")
+@app.get("/static/lightwork-template-connections.js")
 @app.get("/static/lightwork-guided-actions.js")
 @app.get("/static/lightwork-ai-business-intake.js")
 @app.get("/static/lightwork-guided-actions.css")

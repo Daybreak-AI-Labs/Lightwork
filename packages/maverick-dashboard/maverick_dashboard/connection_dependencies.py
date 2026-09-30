@@ -50,8 +50,16 @@ def connection_attention(request):
 def _references(value, name):
     """Only declared named-credential references; do not mine prose for names."""
     if isinstance(value, str):
+        if value.startswith("lwconn1."):
+            from maverick.template_connections import decode
+            try:
+                return decode(value)["name"] == name
+            except ValueError:
+                return False
         return value.startswith("connection:" + name + ":")
     if isinstance(value, dict):
+        if set(value) == {"name", "revision", "owner", "tenant", "connector"}:
+            return value["name"] == name
         return any(_references(item, name) for item in value.values())
     if isinstance(value, list):
         return any(_references(item, name) for item in value)

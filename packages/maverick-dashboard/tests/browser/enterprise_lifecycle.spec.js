@@ -25,7 +25,7 @@ test('invited employee connects only an approved own account, shares a captured 
   async function accept(value,link){
     const page=await value.newPage();page.on('pageerror',error=>errors.push(error.message));
     await page.goto(link);await expect(page.getByRole('heading',{name:"You're invited"})).toBeVisible();
-    await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
+    await page.getByRole('button',{name:'Accept invitation',exact:true}).click({timeout:45000});
     await expect(page).not.toHaveURL(/\/auth\/invite\//);
     expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     return page;
@@ -78,6 +78,31 @@ test('invited employee connects only an approved own account, shares a captured 
     expect((await employee.request.put('/api/v1/connection-setup/application',{headers:{Origin:origin},data:{context:own.context,confirm:true,provider:'google',client_id:'forbidden',client_secret:'synthetic-forbidden'}})).status()).toBe(403);
     const colleague=await(await manager.request.get('/api/v1/connection-setup')).json();
     expect(colleague.connections.some(row=>row.name==='employee-own-drive')).toBe(false);
+
+    console.info('Enterprise journey: exact own-account template input');
+    const savedTemplate=await employee.request.post('/api/v1/workflows',{headers:{Origin:origin},data:{
+      name:'employee-connected-review',title:'Connected review',body:'Review {{account}}',params:['account'],overwrite:false,
+      parameter_schema:{version:1,fields:{account:{type:'connection',label:'Evidence account',required:true}}}
+    }});
+    expect(savedTemplate.status(),await savedTemplate.text()).toBe(201);
+    await page.goto('/templates');
+    const card=page.locator('[data-template-name="employee-connected-review"]');
+    await card.locator('[data-prepare-template]').click();
+    const accountPicker=card.locator('[data-connected-account]');
+    await expect(accountPicker.locator('option')).toHaveCount(2);
+    await accountPicker.selectOption({label:'employee-own-drive (gdrive)'});
+    await card.getByRole('button',{name:'Check in Chat',exact:true}).click();
+    await expect(page).toHaveURL(/\/chat$/);
+    await expect(page.locator('textarea[name="description"]')).toHaveValue('Review employee-own-drive (gdrive)');
+    const binding=JSON.parse(await page.locator('input[name="connection_references"]').inputValue());
+    expect(binding).toHaveLength(1);expect(binding[0].name).toBe('employee-own-drive');expect(binding[0].owner).toBe(fixture.employee);
+    // Preparing a template never starts paid work; discard this synthetic draft before the next journey.
+    // This socket-blocked fixture has no configured model, so the composer is
+    // intentionally disabled. Clear fixture state without pretending to run it.
+    await page.locator('form[action="/chat/send"]').evaluate(form=>{
+      for(const name of ['title','description'])form.querySelector('[name="'+name+'"]').value='';
+      form.querySelector('[name="connection_references"]').value='[]';
+    });
 
     console.info('Enterprise journey: governed source and correction');
     await page.goto('/knowledge-access');await page.locator('#ka-query').fill('synthetic governed browser policy');

@@ -1372,6 +1372,12 @@ def create_goal(
 
     check_goal_rate_limit(request)
     source_selection = _source_analysis_selection(request, payload)
+    from maverick.template_connections import parameters as connection_parameters
+    from maverick.template_connections import validate as validate_connections
+    try:
+        connection_refs = validate_connections(caller_principal(request) or "", payload.connection_references)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     title = payload.title
     description = payload.description
     if payload.template:
@@ -1390,7 +1396,9 @@ def create_goal(
                 status_code=404, detail=f"template not found: {payload.template!r}"
             ) from e
         try:
-            title, description = tpl.render(**(payload.params or {}))
+            _, template_refs = connection_parameters(tpl, caller_principal(request) or "", payload.params or {})
+            connection_refs = validate_connections(caller_principal(request) or "", connection_refs + template_refs)
+            title, description = tpl.render_for(caller_principal(request) or "", **(payload.params or {}))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     title = (title or "").strip()
@@ -1424,6 +1432,7 @@ def create_goal(
 
         receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
             payload=payload, title=title, description=description, domain=domain,
+            connection_references=connection_refs,
             caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth})
         goal_id = receipt["goal_id"]
         if not receipt["created"]:
@@ -1445,7 +1454,8 @@ def create_goal(
         else:
             replay_resume = False
     else:
-        goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
+        goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "",
+            **({"connection_references": connection_refs} if connection_refs else {}))
         if domain:
             w.set_goal_domain(goal_id, domain)
     _bind_source_analysis(w, goal_id, caller_principal(request) or "", source_selection)
@@ -10295,7 +10305,9 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
             tpl, published_version = execution_template(payload.template)
             if tpl.owner:
                 assert_template_access(request, tpl)
-            rtitle, body = tpl.render(**(payload.params or {}))
+            from maverick.template_connections import parameters as connection_parameters
+            _, connection_refs = connection_parameters(tpl, caller_principal(request) or "", payload.params or {})
+            rtitle, body = tpl.render_for(caller_principal(request) or "", **(payload.params or {}))
         except ValueError as e:  # unknown template / missing params
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -10322,6 +10334,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
         job_payload["template_name"] = tpl.name
         job_payload["template_generation"] = tpl.generation
         job_payload["template_version"] = published_version
+        job_payload["connection_references"] = connection_refs
 
     if tz:
         job_payload["__tz__"] = tz
@@ -10510,7 +10523,7 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
         try:
             target_template = load_template(payload.template)
             assert_template_access(request, target_template)
-            target_template.render(**(payload.params or {}))
+            target_template.render_for(caller_principal(request) or "", **(payload.params or {}))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -11041,7 +11054,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             try:
                 imported_template = load_template(res.template_name)
                 assert_template_access(request, imported_template)
-                imported_template.render(**sug_params)
+                imported_template.render_for(caller_principal(request) or "", **sug_params)
             except (ValueError, FileNotFoundError) as e:
                 res.notes.append(
                     f"webhook trigger not created: template needs param values "

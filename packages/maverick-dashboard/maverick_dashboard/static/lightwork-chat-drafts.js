@@ -6,7 +6,7 @@
     document.querySelectorAll('form[action="/chat/send"], #answer-form').forEach(function (form) {
       if (form.dataset.draftReady) return;
       form.dataset.draftReady = 'true';
-      var fields = Array.from(form.querySelectorAll('[name="title"], [name="description"], [name="message"]'));
+      var fields = Array.from(form.querySelectorAll('[name="title"], [name="description"], [name="message"], [name="connection_references"]'));
       var sent = false;
       function read() {
         var value = {};
@@ -21,12 +21,12 @@
       form.mvRecovery = window.mvDraftRecovery.create({host: host,
         key: 'chat-composer:' + new URL(form.action).pathname, read: read,
         restore: function (draft) {
-          fields.forEach(function (field) { if (typeof draft[field.name] === 'string') field.value = draft[field.name]; });
+          fields.forEach(function (field) { if(field.name==="connection_references")field.value="[]"; if (typeof draft[field.name] === 'string') field.value = draft[field.name]; });
           note.textContent = 'Text restored for review. Select any attachments again before sending.';
           sent = false;
         }});
       window.addEventListener('beforeunload', function (event) {
-        if (!sent && fields.some(function (field) { return field.value.trim(); })) {
+        if (!sent && fields.some(function (field) { return field.name!=="connection_references" && field.value.trim(); })) {
           event.preventDefault(); event.returnValue = '';
         }
       });

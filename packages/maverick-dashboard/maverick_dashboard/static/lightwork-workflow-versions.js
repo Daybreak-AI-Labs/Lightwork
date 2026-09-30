@@ -38,7 +38,9 @@
       const sampleName=field(samples,'Sample name',text('Reviewed sample')), inputs={};
       for(const key of data.params){
         const spec=(data.parameter_schema.fields||{})[key]||{},label=spec.label||key;
-        if(spec.type==='enum'){
+        if(spec.type==='connection'){
+          const wrapper=node('label'), select=node('select');wrapper.append(node('bdi',label,true),select);samples.append(wrapper);inputs[key]=select;window.LightworkTemplateConnections.mount(select);
+        }else if(spec.type==='enum'){
           const wrapper=node('label'),select=node('select',null,true);wrapper.append(node('bdi',label,true));select.className='input';select.append(node('option','Choose an option'));
           for(const choice of spec.choices||[]){const option=node('option',choice,true);option.value=choice;select.append(option);}select.value=spec.default||'';wrapper.append(select);samples.append(wrapper);inputs[key]=select;
         }else inputs[key]=field(samples,label,spec.default||'',spec.type==='date'?'date':spec.type==='number'?'number':spec.type==='email'?'email':'text',true);

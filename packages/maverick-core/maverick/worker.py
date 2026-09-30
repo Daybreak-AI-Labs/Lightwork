@@ -254,7 +254,10 @@ class Worker:
                 world = open_world()  # client/tenant-floored canonical world
                 try:
                     owner = str(job.payload.get("owner") or "")
-                    goal_id = world.create_goal(title, text, owner=owner)
+                    from .template_connections import validate
+                    refs = validate(owner, job.payload.get("connection_references", []))
+                    goal_id = world.create_goal(title, text, owner=owner,
+                        **({"connection_references": refs} if refs else {}))
                     # Provenance: link this run to its schedule so the dashboard
                     # Automations page can show the schedule's run history. Only
                     # on first creation (not retries, which reuse goal_id).

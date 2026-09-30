@@ -144,13 +144,14 @@ class Template:
 
         Missing required params raise ValueError.
         """
-        from .template_parameters import resolve_parameters
+        from .connections import current_principal
+        return self.render_for(current_principal(), **params)
 
-        params = resolve_parameters(self.params, self.parameter_schema, params)
-        return (
-            _substitute(self.title, params),
-            _substitute(self.body, params),
-        )
+    def render_for(self, actor, **params: str) -> tuple[str, str]:
+        from .template_connections import parameters
+        resolved, _ = parameters(self, actor, params)
+        return _substitute(self.title, resolved), _substitute(self.body, resolved)
+
 
 
 def _parse_frontmatter(front: str) -> dict:

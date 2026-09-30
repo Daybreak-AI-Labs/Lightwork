@@ -42,6 +42,8 @@ function workflowFixture(){
     paintGate(){},renumber(){},renderToolSelections(){},schedulePbLint(){},setStatus(){},setForm(mode){context.mode=mode;},collectPlaybook(){return {workflow:[]};}};
   context.addStep();context.pbSteps.querySelector('.pb-step__inst').value='  Work without a step name yet  ';
   const source=fs.readFileSync(path.join(templates,'workflow_builder.html'),'utf8');
+  context.window=dom.window;
+  vm.runInNewContext(source.slice(source.indexOf('    function productText('),source.indexOf('    function appendSource(')),context);
   vm.runInNewContext(source.slice(source.indexOf('    var inputFields ='),source.indexOf('    function renderDraft(')),context);
   vm.runInNewContext(source.slice(source.indexOf('    function recoveryFields('),source.indexOf('    var existingNames',source.indexOf('    function recoveryFields('))),context);
   vm.runInNewContext(source.slice(source.indexOf('    function playbookPayload('),source.indexOf('    // --- live governance feedback',source.indexOf('    function playbookPayload('))),context);
