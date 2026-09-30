@@ -21,7 +21,7 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
@@ -126,6 +126,14 @@ def preview(actor, channel, user_id, selected, world):
                 raise ValueError("Notification history exceeds the complete review window; ask the records owner to narrow it.")
         elif kind == "diagnostic_reports":
             target["records"] = _diagnostic_records(actor)
+        elif kind == "activation_drafts":
+            from .employee_activation import owned_activation_inventory
+            target["records"] = owned_activation_inventory(actor, world=world)
+            if any(record["blocked"] for record in target["records"]):
+                raise ValueError("Some activation drafts have active or uncertain task work. Reconcile them before reviewing draft erasure.")
+        elif kind == "project_defaults":
+            from maverick.project_workspaces import owned_defaults_inventory
+            target["records"] = owned_defaults_inventory(actor)
         targets.append(target)
     holds = preservation_snapshot()
     result = {"owner": actor, "channel": channel, "user_id": user_id, "targets": targets,
@@ -215,6 +223,22 @@ def _erase_target(world, row, target):
             if not DIAGNOSTICS.delete(item["id"], expected_revision=item["revision"]):
                 raise ValueError("A diagnostic report changed during deletion.")
         return {"state": "purged", "removed": len(target["records"]), "retained": "Download audit and any manually shared support copies are separate."}
+    if kind == "activation_drafts":
+        from .employee_activation import erase_owned_activation
+        for item in target["records"]:
+            result = erase_owned_activation(actor, item["id"], expected_revision=item["revision"],
+                actor=row["reviewer"], operation_id=_digest([row["id"], kind, item["id"]])[:32], world=world)
+            if result["status"] == "unconfirmed":
+                raise ValueError("Activation erasure receipt is not confirmed.")
+        return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free erasure tombstones, task/admission history, audit evidence and separately created owned workflows remain."}
+    if kind == "project_defaults":
+        from maverick.project_workspaces import erase_owned_defaults
+        for item in target["records"]:
+            result = erase_owned_defaults(actor, record_id=item["id"], expected_revision=item["revision"],
+                actor=row["reviewer"], operation_id=_digest([row["id"], kind, item["id"]])[:32])
+            if result["status"] not in {"confirmed", "replayed"}:
+                raise ValueError("Project-default erasure receipt is not confirmed.")
+        return {"state": "purged", "removed": len(target["records"]), "retained": "Revision tombstones, erasure receipts and existing shared project plans remain."}
     if kind == "model_memory":
         from maverick.tools.memory import memory_root_for
         owner = scope_owner(actor, channel, user_id)

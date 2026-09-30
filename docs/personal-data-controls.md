@@ -38,12 +38,13 @@ the existing strict data-rights exporter. Shared knowledge derivatives, copied
 packets, external systems and prior models are explicitly separate. A task owner
 can narrow future automatic local reuse and learning using the existing durable
 learning exclusion policy; it is not model unlearning. Consolidated per-store
-erasure and detailed authorized knowledge-lineage integration are still in progress.
+erasure uses the reviewed request process below; authorized knowledge-lineage
+requests remain in Knowledge Access.
 
-Static Python 3.10 parsing, JavaScript syntax and whitespace checks passed. The
-new regression tests were authored. After the user authorized local execution,
-the targeted test command could not collect tests because this executor lacks
-`pytest`; no passing runtime result is claimed.
+Static Python 3.10 parsing, JavaScript syntax and whitespace checks passed.
+After local testing was authorized, focused personal-data, recall and deletion
+tests passed in the shared Python 3.12 environment. Installed-browser and live
+provider qualification are separate and remain unclaimed.
 
 ## Recalled content isolation
 
@@ -56,3 +57,5 @@ My Data previews a verified conversation scope plus explicitly selected account-
 Each store has durable requested, held, dispatching, purged, partial or unconfirmed state. An interrupted dispatch is never automatically repeated. Conversation deletion requires a signed durable exact-ID receipt and reports database residual counts plus attachment-file outcomes. Independently owned tasks outside that conversation closure are not silently included. Draft erasure publishes an encrypted revision barrier before file removal so old tabs cannot resurrect its content. Notes are removed with personal recall disabled; hashed suppression restrictions remain separate. Administrator companion policy remains intact.
 
 Shared packets, knowledge derivatives, already trained models, external copies, source-linked learning files, legacy memory with unknown ownership and content-minimized governance evidence remain explicit exceptions. Knowledge Access provides source-purpose and rights-request follow-up. Diagnostic downloads are separate owned records; expiry of a link never means deletion. Notification delivery history uses the mobile worker's ownership-verified adapter. Point-in-time deletion does not disable accounts or every future collection path.
+
+Activation preparation records and personal project defaults are separately selectable stores. Erasure keeps content-free revision tombstones, so an old save or deterministic activation operation cannot recreate removed private inputs. Activation records with an admitting, active, missing or ambiguously owned task are blocked; source tasks, admission receipts and created workflows stay separate. Project defaults erasure never changes shared project structure. Both adapters require exact ownership, reviewed revisions and acknowledged audit receipts; an unacknowledged receipt is reported as unconfirmed.

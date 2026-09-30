@@ -69,11 +69,11 @@ def erase_owned_defaults(principal, *, record_id, expected_revision, operation_i
     if previous is not None:
         if previous != request_sha:
             raise RecordConflict("This erasure request identity belongs to another review")
-        return {"status": "replayed", "revision": current["revision"]}
+        return {"status": "unconfirmed" if current.get("_audit_pending") else "replayed", "revision": current["revision"]}
     if current["structure"] is None:
         if current["revision"] != expected_revision:
             raise RecordConflict("Project defaults changed after the erasure review")
-        return {"status": "confirmed", "revision": current["revision"]}
+        return {"status": "unconfirmed" if current.get("_audit_pending") else "confirmed", "revision": current["revision"]}
     def clear(record):
         _validate(record, DEFAULT_SCHEMA)
         if record["owner"] != principal:
@@ -85,7 +85,7 @@ def erase_owned_defaults(principal, *, record_id, expected_revision, operation_i
                              action="erase_personal_project_defaults", actor=actor)
     if saved is None:
         raise RecordConflict("The reviewed project defaults record is unavailable")
-    return {"status": "confirmed", "revision": saved["revision"]}
+    return {"status": "unconfirmed" if saved.get("_audit_pending") else "confirmed", "revision": saved["revision"]}
 
 
 class ProjectWorkspaces:

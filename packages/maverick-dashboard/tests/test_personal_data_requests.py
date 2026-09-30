@@ -126,3 +126,24 @@ def test_reviewer_revocation_prevents_next_store(request_store, monkeypatch):
     with pytest.raises(HTTPException):
         deletion.apply("PDR-case", 1, "user:reviewer", authorize, None, external_holds_clear=True)
     assert request_store.row["targets"][0]["state"] == "requested"
+
+
+def test_activation_adapter_preserves_reviewed_owner_and_tombstone_receipt(monkeypatch):
+    from maverick_dashboard import employee_activation
+    calls = []
+    monkeypatch.setattr(employee_activation, "erase_owned_activation", lambda *args, **kwargs: calls.append((args, kwargs)) or {"status": "confirmed", "revision": 2})
+    row = {"id": "PDR-case", "owner": "user:alice", "reviewer": "user:reviewer", "channel": "dashboard", "user_id": "alice"}
+    target = {"store": "activation_drafts", "records": [{"id": "EAP-one", "revision": 1}]}
+    receipt = deletion._erase_target(None, row, target)
+    assert receipt["state"] == "purged"
+    assert calls[0][0] == ("user:alice", "EAP-one")
+    assert calls[0][1]["actor"] == "user:reviewer" and calls[0][1]["expected_revision"] == 1
+    assert "created owned workflows" in receipt["retained"]
+
+
+def test_project_defaults_adapter_refuses_unconfirmed_receipt(monkeypatch):
+    from maverick import project_workspaces
+    monkeypatch.setattr(project_workspaces, "erase_owned_defaults", lambda *args, **kwargs: {"status": "unconfirmed"})
+    row = {"id": "PDR-case", "owner": "user:alice", "reviewer": "user:reviewer", "channel": "dashboard", "user_id": "alice"}
+    with pytest.raises(ValueError, match="receipt is not confirmed"):
+        deletion._erase_target(None, row, {"store": "project_defaults", "records": [{"id": "PWD-one", "revision": 1}]})

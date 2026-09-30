@@ -140,7 +140,8 @@ def departure_prepare(request, _selection, args, *, action):
 
 def departure_execute(request, _selection, args, prepared, _operation_id, *, action):
     actor = employee_departures_api._authority(request, write=True)
-    authorize = lambda: employee_departures_api._authority(request, write=True)
+    def authorize():
+        return employee_departures_api._authority(request, write=True)
     if action == "begin":
         row = employee_departures.begin(args["principal"], args["custodian"], prepared["snapshot"], actor, authorize)
     elif action == "handoff":

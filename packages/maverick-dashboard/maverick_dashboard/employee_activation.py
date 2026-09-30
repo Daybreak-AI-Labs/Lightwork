@@ -95,6 +95,8 @@ def _read(request, identity, *, operate=False):
     row = DRAFTS.get(identity)
     if row is None or row.get("owner") != owner:
         raise product_error(404, "activation_draft_missing", "This draft is not available in your account and workspace.")
+    if row.get("state") == "erased":
+        raise product_error(410, "activation_draft_erased", "This activation draft was erased. Start a new draft instead of restoring old inputs.")
     if row["job"] not in jobs(request):
         raise product_error(403, "activation_job_unavailable", "This job is no longer enabled or allowed for your account. Its private draft is retained.")
     return row
@@ -206,6 +208,8 @@ def save(request: Request, body: DraftIn, draft: str | None = None):
         if row:
             if row.get("owner") != owner:
                 raise product_error(404, "activation_draft_missing", "This draft is unavailable.")
+            if row.get("state") == "erased":
+                raise product_error(410, "activation_draft_erased", "This saved operation was erased. It cannot restore the old activation draft.")
             if not draft:
                 if _contents(row) != values:
                     raise product_error(409, "activation_operation_changed", "The draft reference belongs to different inputs. Reopen the saved draft.")
@@ -352,3 +356,72 @@ async def workflow(request: Request, identity: str, body: ActionIn):
     actor(request, operate=True)
     row = _update(row, {"workflow": spec["name"], "message": "Reusable private workflow draft saved. Review its inputs and publication in Workflow Builder before scheduling."}, row["revision"], owner, "save_workflow")
     return public(request, row)
+
+
+def _erasure_block(row, world):
+    """Do not remove reconciliation inputs for an active or uncertain admission."""
+    if row.get("state") == "admitting":
+        return "Task admission is unconfirmed; reconcile this same draft before erasure."
+    receipt = SubmissionStore(world).lookup(token="activation:" + row["id"], owner=row["owner"])
+    goal_ids = {value for value in (row.get("goal_id"), receipt.get("goal_id") if receipt else None) if value}
+    for goal_id in goal_ids:
+        goal = world.get_goal(goal_id)
+        if goal is None or goal.owner != row["owner"]:
+            return "A task receipt cannot be reconciled to the exact current owner; retain the draft for review."
+        if goal.status not in {"done", "completed", "failed", "cancelled", "error"}:
+            return "This draft has active or recoverable task work; finish or stop it before erasure."
+    if row.get("state") not in {"draft", "erased"} and not goal_ids:
+        return "The task admission outcome is unavailable; retain the draft for reconciliation."
+    return ""
+
+
+def owned_activation_inventory(owner, *, world=None):
+    """Content-free exact-owner My Data inventory, independent of feature enablement."""
+    if not isinstance(owner, str) or not owner.startswith("user:"):
+        raise ValueError("Select an exact named activation-draft owner.")
+    world = _app()._world() if world is None else world
+    rows = DRAFTS.list(limit=10001)
+    if len(rows) > 10000:
+        raise ValueError("Activation drafts exceed the complete inventory window.")
+    return [{"id": row["id"], "revision": row["revision"], "state": row["state"],
+             "blocked": _erasure_block(row, world)} for row in rows
+            if row.get("owner") == owner and row.get("state") != "erased"]
+
+
+def erase_owned_activation(owner, identifier, *, expected_revision, actor, operation_id, world=None):
+    """Caller owns consent/holds/reviewer authority; this enforces owner and CAS.
+
+    A minimal revision tombstone prevents replaying an old deterministic create
+    operation. The task, admission receipt, created workflow and audit records
+    remain outside this draft erasure and are never claimed deleted.
+    """
+    if (not isinstance(owner, str) or not owner.startswith("user:") or not isinstance(actor, str)
+            or not actor.startswith("user:") or not isinstance(operation_id, str) or not 8 <= len(operation_id) <= 192):
+        raise ValueError("A verified owner, reviewer and bounded erasure reference are required.")
+    world = _app()._world() if world is None else world
+    with authority_effect_fence():
+        row = DRAFTS.get(identifier)
+        if row is None or row.get("owner") != owner:
+            raise ValueError("The activation draft is outside the reviewed owner scope.")
+        if row.get("state") == "erased" and row.get("erasure_operation") == operation_id and row.get("erasure_reviewer") == actor:
+            return {"status": "unconfirmed" if row.get("_audit_pending") else "replayed", "revision": row["revision"]}
+        if row["revision"] != expected_revision:
+            raise RecordConflict("Activation draft changed after erasure review")
+        blocked = _erasure_block(row, world)
+        if blocked:
+            raise ValueError(blocked)
+        def erase(record):
+            if record.get("owner") != owner:
+                raise ValueError("Activation owner changed during erasure")
+            # Store bookkeeping is retained by GovernedRecordStore; remove every
+            # application payload field, including source refs and acceptance.
+            keep = {"id", "revision", "owner", "created_at", "updated_at", "tenant_id"}
+            for key in list(record):
+                if key not in keep and not key.startswith("_"):
+                    record.pop(key)
+            record.update(state="erased", erasure_operation=operation_id, erasure_reviewer=actor)
+        saved = DRAFTS.update(identifier, erase, expected_revision=expected_revision,
+                              action="erase_activation_draft", actor=actor)
+        if saved is None:
+            raise RecordConflict("Activation draft disappeared during erasure")
+        return {"status": "unconfirmed" if saved.get("_audit_pending") else "confirmed", "revision": saved["revision"]}

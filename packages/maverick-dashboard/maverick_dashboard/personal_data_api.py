@@ -86,7 +86,7 @@ class ShareIn(RevisionIn):
 
 
 class DeletionPreviewIn(ScopeIn):
-    stores: list[str] = Field(min_length=1, max_length=8)
+    stores: list[str] = Field(min_length=1, max_length=10)
 
 
 class DeletionRequestIn(DeletionPreviewIn):
@@ -237,6 +237,23 @@ def _inventory(request):
                        "action": "Select Diagnostic reports in the reviewed deletion request below."})
     except Exception:
         stores.append({"name": "Owned diagnostic reports", "state": "unavailable", "action": "Report inventory could not be confirmed; no zero count is claimed."})
+    try:
+        from .employee_activation import owned_activation_inventory
+        activation = owned_activation_inventory(actor, world=world)
+        stores.append({"name": "Private activation drafts", "state": "available", "count": len(activation),
+                       "blocked": sum(bool(item["blocked"]) for item in activation),
+                       "use": "Owned onboarding inputs; active or uncertain admission must be reconciled before erasure.",
+                       "action": "Select Activation drafts below. Source tasks, created workflows and evidence are separately retained."})
+    except Exception:
+        stores.append({"name": "Private activation drafts", "state": "unavailable", "action": "The exact inventory could not be confirmed; no zero count is claimed."})
+    try:
+        from maverick.project_workspaces import owned_defaults_inventory
+        defaults = owned_defaults_inventory(actor)
+        stores.append({"name": "Personal project defaults", "state": "available", "count": len(defaults),
+                       "use": "Your reusable outcome, acceptance criteria and milestone/label defaults in this workspace.",
+                       "action": "Select Personal project defaults below; existing shared project plans remain."})
+    except Exception:
+        stores.append({"name": "Personal project defaults", "state": "unavailable", "action": "Select the workspace that owns these defaults; no zero count is claimed."})
     return {"context": context_for(request), "holds": holds, "scopes": scopes, "conversations": conversations,
             "tasks": tasks, "tasks_truncated": len(goals) > 5000, "stores": stores,
             "limits": "Links authorize this personal-data view, not task mutation. Copies, shared packets, external systems and prior trained derivatives are separate; nothing here claims they are deleted."}
