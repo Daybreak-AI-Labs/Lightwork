@@ -2658,7 +2658,8 @@ class WorldModel:
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-    ) -> None:
+        expected_revision: int | None = None,
+    ) -> int:
         """Write the current value of ``key``.
 
         ``source``/``trust_tier``/``sensitivity`` are Memory Guard provenance
@@ -2670,7 +2671,12 @@ class WorldModel:
         """
         now = time.time()
         enc = _enc_field(value)
+        from .fact_revision import check_expected_revision
         with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()
+            check_expected_revision(expected_revision, int(current[0]) if current else 0)
             if self._temporal_memory:
                 prior = self._open_temporal_fact(conn, key)
                 # A new version is recorded when the value changes OR the trust
@@ -2706,13 +2712,47 @@ class WorldModel:
                 "INSERT INTO facts(key, value, source_episode_id, updated_at, "
                 "source, trust_tier, sensitivity) VALUES(?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET "
-                "id = (SELECT COALESCE(MAX(id), 0) + 1 FROM facts), "
+                "id = excluded.id, "
                 "value = excluded.value, "
                 "source_episode_id = excluded.source_episode_id, "
                 "updated_at = excluded.updated_at, source = excluded.source, "
                 "trust_tier = excluded.trust_tier, sensitivity = excluded.sensitivity",
                 (key, enc, episode_id, now, source, int(trust_tier), sensitivity),
             )
+            return int(conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()[0])
+
+    def fact_record(self, key: str) -> dict | None:
+        row = self._read_one(
+            "SELECT key, value, id AS revision, updated_at, source, source_episode_id, "
+            "trust_tier, sensitivity FROM facts WHERE key = ?", (key,),
+        )
+        if not row:
+            return None
+        result = dict(row)
+        result["value"] = _dec_field(result["value"])
+        return result
+
+    def fact_records(self, *, query: str = "", source: str = "",
+                     updated_before: float | None = None, limit: int = 50,
+                     offset: int = 0, shared_only: bool = False) -> list[dict]:
+        """Bounded metadata-filtered page; encrypted values are not indexed."""
+        clauses, params = [], []
+        if shared_only:
+            clauses.extend(("LOWER(key) NOT LIKE 'goal:%'", "LOWER(key) NOT LIKE 'user:%'"))
+        for column, value in (("key", query), ("source", source)):
+            if value:
+                clauses.append(f"{column} LIKE ? ESCAPE '\\'")
+                params.append("%" + self._like_escape(value) + "%")
+        if updated_before is not None:
+            clauses.append("updated_at < ?")
+            params.append(float(updated_before))
+        sql = ("SELECT key, value, id AS revision, updated_at, source, "
+               "source_episode_id, trust_tier, sensitivity FROM facts")
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY key LIMIT ? OFFSET ?"
+        rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
+        return [{**dict(row), "value": _dec_field(row["value"])} for row in rows]
 
     def get_facts(self) -> dict[str, str]:
         """All current facts as ``{key: value}``, newest first."""
@@ -2796,7 +2836,8 @@ class WorldModel:
         row = self._read_one("SELECT value FROM facts WHERE key = ? LIMIT 1", (key,))
         return _dec_field(row["value"]) if row else None
 
-    def fact_history(self, key: str, *, limit: int = 50) -> list[FactVersion]:
+    def fact_history(self, key: str, *, limit: int = 50,
+                     owned_only: bool = False) -> list[FactVersion]:
         """Every recorded version of ``key``, newest first (requires ``[memory]
         temporal``). The entry whose ``valid_to is None`` is the current value;
         the rest are superseded values with the window they were believed in."""
@@ -2843,13 +2884,18 @@ class WorldModel:
             ))
         return out
 
-    def delete_fact(self, key: str) -> int:
+    def delete_fact(self, key: str, *, expected_revision: int | None = None) -> int:
         """Delete one fact by exact key; return rows removed (0 or 1).
 
         When ``[memory] temporal`` is on, the open ``fact_history`` window is
         closed (valid_to = now) rather than erased, so the record that the fact
         existed until this moment survives the delete."""
+        from .fact_revision import check_expected_revision
         with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()
+            check_expected_revision(expected_revision, int(current[0]) if current else 0)
             if self._temporal_memory:
                 open_row = self._open_temporal_fact(conn, key)
                 closed_at = self._temporal_write_time(time.time(), open_row)

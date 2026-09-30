@@ -5241,8 +5241,11 @@ async def download_goal_attachment(
 
 
 @router.get("/facts", response_model=dict[str, str])
-def list_facts() -> dict[str, str]:
-    return _world().get_facts()
+def list_facts(request: Request) -> dict[str, str]:
+    require_permission(request, "view")
+    from maverick.fact_revision import is_private_fact_key
+    return {key: value for key, value in _world().get_facts().items()
+            if not is_private_fact_key(key)}
 
 
 @router.post("/facts", status_code=204)
@@ -5251,7 +5254,20 @@ def set_fact(request: Request, payload: FactIn) -> None:
     key = (payload.key or "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="fact key is required")
-    _world().upsert_fact(key, payload.value)
+    from maverick.fact_revision import FactConflict, is_private_fact_key
+    if is_private_fact_key(key):
+        raise HTTPException(400, "Choose a shared fact name without a reserved personal or task prefix.")
+    from .draft_api import context_for
+    from .auth import caller_principal
+    if (payload.context is not None and payload.context != context_for(request)) or (
+        payload.expected_revision > 0 and payload.context is None
+    ):
+        raise HTTPException(409, "Your account or workspace changed. Reload before saving.")
+    try:
+        _world().upsert_fact(key, payload.value, expected_revision=payload.expected_revision,
+                             source=caller_principal(request) or "dashboard")
+    except FactConflict as exc:
+        raise HTTPException(409, "This fact changed. Compare the current value with your draft.") from exc
 
 
 @router.post("/outcomes", status_code=204)

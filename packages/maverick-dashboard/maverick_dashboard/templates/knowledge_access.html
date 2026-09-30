@@ -7,6 +7,7 @@
       data-tenant="{{ knowledge_tenant }}"
       data-actor="{{ knowledge_actor }}"
       data-api-base="{{ knowledge_api_base }}"
+      data-purpose-state="{{ knowledge_purpose_state }}"
       data-can-review="{{ 'true' if knowledge_can_review else 'false' }}">
   <header class="ka-hero">
     <div>
@@ -48,6 +49,7 @@
       </label>
       <input type="hidden" id="ka-limit" name="limit" value="20">
       <div class="ka-actions ka-field--wide">
+        <button class="btn" id="ka-retry-purposes" type="button">Refresh available uses</button>
         <button class="btn btn--primary" id="ka-search" type="submit">Search current sources</button>
         <button class="btn" id="ka-export" type="button" disabled>Download these results</button>
       </div>
@@ -70,7 +72,6 @@
         <h2 id="ka-request-heading">Request a correction or removal</h2>
         <span class="muted">For one source</span>
       </div>
-      {% if knowledge_can_review %}
       <form id="ka-request-form" class="ka-form" aria-labelledby="ka-request-heading" autocomplete="off">
         <p class="ka-selected" id="ka-request-source">Open a source with View details, then come back here.</p>
         <label class="ka-field" for="ka-request-type">
@@ -91,15 +92,13 @@
         </label>
         <label class="ka-check ka-field--wide">
           <input type="checkbox" name="confirm" required>
-          <span>I checked this source and the other material that depends on it.</span>
+          <span>I checked this source. An independent administrator will review its dependencies and decide any change.</span>
         </label>
         <div class="ka-actions ka-field--wide">
           <button class="btn btn--primary" id="ka-submit-request" type="submit" disabled>Submit request</button>
         </div>
       </form>
-      {% else %}
-      <p class="muted" id="ka-request-locked">Only an administrator can send or decide correction and removal requests. Ask your administrator if something needs to change.</p>
-      {% endif %}
+      <p class="muted">You can submit feedback on a source you can currently open. Only administrators can approve or apply changes; training rights remain separate.</p>
       <p class="ka-honesty">Removing a source does not remove what AI models already learned from it. Those models need to be reviewed for retirement or retraining.</p>
     </div>
 

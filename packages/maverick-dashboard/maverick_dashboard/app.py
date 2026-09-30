@@ -3625,7 +3625,10 @@ async def learned_page(request: Request) -> HTMLResponse:
 
 @app.get("/facts", response_class=HTMLResponse)
 def facts_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "facts.html", {"facts": _world().get_facts()})
+    from .draft_api import context_for
+    return templates.TemplateResponse(request, "facts.html", {
+        "fact_records": _world().fact_records(limit=51, shared_only=True), "fact_context": context_for(request),
+    })
 
 
 @app.get("/spend", response_class=HTMLResponse)

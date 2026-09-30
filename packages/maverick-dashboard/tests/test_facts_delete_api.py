@@ -18,16 +18,24 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def _remove(client, key):
+    current = client.get("/api/v1/facts/record", params={"key": key}).json()
+    from urllib.parse import quote
+    return client.delete("/api/v1/facts/" + quote(key, safe=""), params={
+        "expected_revision": current["item"]["revision"], "context": current["context"],
+    })
+
+
 def test_a_saved_fact_can_be_removed(client) -> None:
     assert client.post("/api/v1/facts", json={"key": "business_hours", "value": "9 to 5"}).status_code == 204
     assert client.post("/api/v1/facts", json={"key": "Office/branch", "value": "Leeds"}).status_code == 204
-    assert client.delete("/api/v1/facts/business_hours").status_code == 204
+    assert _remove(client, "business_hours").status_code == 204
     facts = client.get("/api/v1/facts").json()
     assert "business_hours" not in facts and facts["Office/branch"] == "Leeds"
     # Names with a slash still address exactly one fact.
-    assert client.delete("/api/v1/facts/Office%2Fbranch").status_code == 204
+    assert _remove(client, "Office/branch").status_code == 204
     assert client.get("/api/v1/facts").json() == {}
-    assert client.delete("/api/v1/facts/business_hours").status_code == 404
+    assert client.delete("/api/v1/facts/business_hours").status_code == 422
 
 
 def test_removing_a_fact_needs_the_same_permission_as_saving_one(client, monkeypatch) -> None:
@@ -41,8 +49,9 @@ def test_removing_a_fact_needs_the_same_permission_as_saving_one(client, monkeyp
         raise HTTPException(status_code=403, detail="forbidden")
 
     client.post("/api/v1/facts", json={"key": "kept", "value": "yes"})
+    current = client.get("/api/v1/facts/record", params={"key": "kept"}).json()
     monkeypatch.setattr(facts_api, "require_permission", deny)
-    assert client.delete("/api/v1/facts/kept").status_code == 403
+    assert client.delete("/api/v1/facts/kept", params={"expected_revision": current["item"]["revision"], "context": current["context"]}).status_code == 403
     assert seen == ["operate"]
     assert client.get("/api/v1/facts").json() == {"kept": "yes"}
 
@@ -53,7 +62,7 @@ def test_removal_only_touches_the_active_workspace(client, tmp_path, monkeypatch
     client.post("/api/v1/facts", json={"key": "shared_name", "value": "workspace A"})
     other = world_model.WorldModel(tmp_path / "other.db")
     other.upsert_fact("shared_name", "workspace B")
-    assert client.delete("/api/v1/facts/shared_name").status_code == 204
+    assert _remove(client, "shared_name").status_code == 204
     assert other.get_fact("shared_name") == "workspace B"
 
 
@@ -65,3 +74,41 @@ def test_facts_page_offers_remove_and_reads_plainly(client) -> None:
     assert "data-remove-fact" in page and ">Remove</button>" in page
     assert 'data-key="company_name"' in page and ">Company name<" in page
     assert developer_terms(page) == []
+
+
+def test_two_editors_compare_revisions_and_stale_delete_preserves_new_value(client):
+    client.post("/api/v1/facts", json={"key": "hours", "value": "nine"})
+    original = client.get("/api/v1/facts/record", params={"key": "hours"}).json()
+    payload = {"key": "hours", "value": "ten", "context": original["context"],
+               "expected_revision": original["item"]["revision"]}
+    assert client.post("/api/v1/facts", json=payload).status_code == 204
+    assert client.post("/api/v1/facts", json=payload | {"value": "stale draft"}).status_code == 409
+    assert client.delete("/api/v1/facts/hours", params={
+        "context": original["context"], "expected_revision": original["item"]["revision"],
+    }).status_code == 409
+    assert client.get("/api/v1/facts").json()["hours"] == "ten"
+    assert client.post("/api/v1/facts", json={"key": "hours", "value": "blind overwrite"}).status_code == 409
+
+
+def test_browsing_and_mutation_never_expose_personal_or_task_namespaces(client):
+    from maverick_dashboard.api import _world
+
+    world = _world()
+    world.upsert_fact("goal:72:private", "PRIVATE TASK TEXT")
+    world.upsert_fact("user:alice:note", "PRIVATE PERSONAL TEXT")
+    world.upsert_fact("company_name", "Shared")
+    assert client.get("/api/v1/facts").json() == {"company_name": "Shared"}
+    page = client.get("/api/v1/facts/records").json()
+    assert [row["key"] for row in page["items"]] == ["company_name"]
+    assert page["has_more"] is False
+    assert "PRIVATE" not in client.get("/facts").text
+    for key in ("goal:72:private", "user:alice:note"):
+        assert client.get("/api/v1/facts/record", params={"key": key}).status_code == 404
+        assert client.post("/api/v1/facts", json={"key": key, "value": "overwrite"}).status_code == 400
+
+
+def test_fact_save_rejects_stale_workspace_context(client):
+    assert client.post("/api/v1/facts", json={
+        "key": "company_name", "value": "wrong workspace", "context": "0" * 64,
+    }).status_code == 409
+    assert client.get("/api/v1/facts").json() == {}

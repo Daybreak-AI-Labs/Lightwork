@@ -420,7 +420,10 @@ here.
   preference statements ("I prefer tables", "call me Sam") distilled from
   recent conversations into briefing notes injected ONLY for their exact
   (channel, user) scope; the store rewrites every cycle, so deleted
-  conversations stop feeding notes.
+  conversations stop feeding notes. Each person's own recent-conversation window
+  is bounded independently; coworkers cannot evict it. Newest matching source
+  turns take precedence over opposite preferences, source turn/version metadata
+  is retained, and an unavailable rebuild preserves the last complete store.
 - **Learned behavior selection** — `[planning] mode = "auto"` picks
   tree-of-thought per task class from a learned outcome record
   (`planning_stats.py`, bandit-lite + deterministic); budget task classes
@@ -1750,7 +1753,11 @@ here.
   Raw deletion is never described as erasing learned-weight influence. The
   production projector currently supports exact approved evidence-graph nodes
   and immutable fleet-memory inbox records; unsupported or mismatched stores
-  fail closed. See [Governed Knowledge](knowledge-access.md).
+  fail closed. The purpose picker walks every authorized registry page and
+  distinguishes unavailable from empty with retry. Operators can submit an
+  exact visible source/version for independent administrator review and inspect
+  their own limited status receipts; this grants no approval, deletion, hold or
+  training authority. See [Governed Knowledge](knowledge-access.md).
 - **Cortex — the company brain** (`cortex.py`, default-on `[cortex] enable`
   / `MAVERICK_CORTEX`; CLI `maverick cortex status|recall|deposit`; dashboard
   compatibility page `/cortex`; audit kinds `cortex_recall` / `cortex_deposit`) — ONE

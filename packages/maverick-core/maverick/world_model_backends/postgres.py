@@ -3007,10 +3007,59 @@ class PostgresWorldModel:
         cur.execute(sql, tuple(p))
         return cur.fetchone(), frag, params
 
+    def _check_fact_revision(self, cur, key: str, expected: int | None) -> None:
+        from ..fact_revision import check_expected_revision
+        # Also lock unconditional writers so a compare-and-write cannot race
+        # an agent or background write when temporal history is disabled.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"fact:{_active_tenant() or ''}:{key}",))
+        frag, params = _mutation_tenant_scope()
+        cur.execute(f"SELECT write_seq FROM facts WHERE key = %s AND {frag}",
+                    (key, *params))
+        row = cur.fetchone()
+        check_expected_revision(expected, int(row[0]) if row else 0)
+
+    def fact_record(self, key: str) -> dict | None:
+        rows = self.fact_records(query=key, exact=True, limit=1)
+        return rows[0] if rows else None
+
+    def fact_records(self, *, query: str = "", source: str = "",
+                     updated_before: float | None = None, limit: int = 50,
+                     offset: int = 0, exact: bool = False,
+                     shared_only: bool = False) -> list[dict]:
+        # Interactive fact editing uses exact tenant ownership, including in
+        # legacy compatibility mode. It never offers another tenant's record.
+        frag, params = _mutation_tenant_scope()
+        clauses, values = [frag], list(params)
+        if shared_only:
+            clauses.extend(("LOWER(key) NOT LIKE 'goal:%%'", "LOWER(key) NOT LIKE 'user:%%'"))
+        if query:
+            clauses.append("key = %s" if exact else "key ILIKE %s ESCAPE '\\'")
+            values.append(query if exact else "%" + self._like_escape(query) + "%")
+        if source:
+            clauses.append("source ILIKE %s ESCAPE '\\'")
+            values.append("%" + self._like_escape(source) + "%")
+        if updated_before is not None:
+            clauses.append("updated_at < %s")
+            values.append(float(updated_before))
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT key, value, write_seq, updated_at, source, source_episode_id, "
+                "trust_tier, sensitivity FROM facts WHERE " + " AND ".join(clauses)
+                + " ORDER BY key LIMIT %s OFFSET %s",
+                (*values, max(1, min(limit, 101)), max(0, offset)),
+            )
+            rows = cur.fetchall()
+        names = ("key", "value", "revision", "updated_at", "source", "source_episode_id",
+                 "trust_tier", "sensitivity")
+        return [{**dict(zip(names, row, strict=True)), "value": _unseal(row[1])}
+                for row in rows]
+
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-    ) -> None:
+        expected_revision: int | None = None,
+    ) -> int:
         """Write the current value of ``key``.
 
         When ``[memory] temporal`` is on, a *changed* value (or a changed trust
@@ -3024,6 +3073,7 @@ class PostgresWorldModel:
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
+            self._check_fact_revision(cur, key, expected_revision)
             if _temporal_memory_enabled():
                 # Serialize concurrent writers for THIS key across replicas: the
                 # close-prior-window/open-new-window sequence is a read-modify-
@@ -3071,10 +3121,11 @@ class PostgresWorldModel:
                 "updated_at = EXCLUDED.updated_at, "
                 "source = EXCLUDED.source, "
                 "trust_tier = EXCLUDED.trust_tier, "
-                "sensitivity = EXCLUDED.sensitivity",
+                "sensitivity = EXCLUDED.sensitivity RETURNING write_seq",
                 (key, _seal(value), episode_id, now, source,
                  int(trust_tier), sensitivity, tenant),
             )
+            return int(cur.fetchone()[0])
 
     def get_facts(self) -> dict[str, str]:
         frag, params = _tenant_scope()
@@ -3259,15 +3310,16 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return _unseal(row[0]) if row else None
 
-    def fact_history(self, key: str, *, limit: int = 50) -> list:
+    def fact_history(self, key: str, *, limit: int = 50,
+                     owned_only: bool = False) -> list:
         """Every recorded version of ``key``, newest first (requires ``[memory]
         temporal``). The row whose ``valid_to is None`` is the current value."""
         from ..world_model import FactVersion
-        frag, params = _tenant_scope()
+        frag, params = _mutation_tenant_scope() if owned_only else _tenant_scope()
         tenant = _active_tenant()
         row_limit = max(1, int(limit))
         compatibility_tenant = (
-            tenant if tenant is not None and not _strict_tenant_isolation()
+            tenant if not owned_only and tenant is not None and not _strict_tenant_isolation()
             else None
         )
         columns = (
@@ -3346,7 +3398,7 @@ class PostgresWorldModel:
             for r in rows
         ]
 
-    def delete_fact(self, key: str) -> int:
+    def delete_fact(self, key: str, *, expected_revision: int | None = None) -> int:
         """Delete one fact by exact key; return rows removed (0 or 1).
 
         When ``[memory] temporal`` is on, the open ``fact_history`` window is
@@ -3356,6 +3408,7 @@ class PostgresWorldModel:
         frag, params = _mutation_tenant_scope()
         tenant = _active_tenant()
         with self._tx() as cur:
+            self._check_fact_revision(cur, key, expected_revision)
             if _temporal_memory_enabled():
                 open_row, frag, params = self._locked_open_fact_history(
                     cur, key, tenant

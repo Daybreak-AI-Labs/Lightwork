@@ -41,8 +41,8 @@ def _conv(cid, channel, user_id, last_seen=1.0):
                            created_at=0.0, last_seen=last_seen)
 
 
-def _turn(role, content):
-    return SimpleNamespace(role=role, content=content, ts=1.0)
+def _turn(role, content, *, tid=1, cid=1, ts=1.0):
+    return SimpleNamespace(id=tid, conversation_id=cid, goal_id=None, role=role, content=content, ts=ts)
 
 
 class TestConsolidateAndRecall:
@@ -172,3 +172,56 @@ def test_concurrent_erase_of_different_users_all_apply(tmp_path):
     for i in range(n):
         assert user_notes.notes_for("slack", f"u{i:03d}", path) == []
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_quiet_person_is_not_evicted_by_twenty_one_coworkers(tmp_path):
+    path = tmp_path / "notes.ndjson"
+    convs = [_conv(1, "slack", "quiet", last_seen=1)]
+    turns = {1: [_turn("user", "I prefer metric units.")]}
+    for number in range(2, 24):
+        convs.append(_conv(number, "slack", f"coworker-{number}", last_seen=number))
+        turns[number] = [_turn("user", "I prefer short replies.", tid=number, cid=number, ts=number)]
+    world = _World(convs, turns)
+    user_notes.consolidate(world, path=path)
+    assert user_notes.notes_for("slack", "quiet", path) == ["I prefer metric units."]
+    world._convs = convs[1:]
+    user_notes.consolidate(world, path=path)
+    assert user_notes.notes_for("slack", "quiet", path) == []
+
+
+def test_latest_opposite_preference_wins_and_tracks_source_edit(tmp_path):
+    import hashlib
+    import json
+
+    path = tmp_path / "notes.ndjson"
+    old = _turn("user", "Always use emoji.", tid=1, ts=1)
+    new = _turn("user", "Never use emoji.", tid=2, ts=2)
+    world = _World([_conv(1, "slack", "person")], {1: [old, new]})
+    assert user_notes.consolidate(world, path=path) == 1
+    assert user_notes.notes_for("slack", "person", path) == ["Never use emoji."]
+    [record] = [json.loads(line) for line in path.read_text().splitlines()]
+    assert record["turn_id"] == 2 and record["source_ts"] == 2
+    assert record["source_revision"] == hashlib.sha256(new.content.encode()).hexdigest()
+    new.content = "That was an ordinary question."
+    user_notes.consolidate(world, path=path)
+    assert user_notes.notes_for("slack", "person", path) == ["Always use emoji."]
+
+
+def test_failed_source_rebuild_preserves_prior_notes(tmp_path):
+    path = tmp_path / "notes.ndjson"
+    world = _World([_conv(1, "slack", "person")], {1: [_turn("user", "I prefer tables.")]})
+    user_notes.consolidate(world, path=path)
+    before = path.read_bytes()
+    world.recent_turns = lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline"))
+    assert user_notes.consolidate(world, path=path) == 0
+    assert path.read_bytes() == before
+
+
+def test_tenant_resolution_error_never_falls_back_to_legacy(tmp_path, monkeypatch):
+    import pytest
+    from maverick import paths
+
+    monkeypatch.setattr(paths, "current_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(paths, "data_dir", lambda *_args: (_ for _ in ()).throw(OSError("unavailable")))
+    with pytest.raises(OSError):
+        user_notes._tenant_path("dreams/user_notes.ndjson", tmp_path / "legacy.ndjson")

@@ -184,6 +184,21 @@
     };
   }
 
+  function feedback(value) {
+    if (!value || value.schema !== "lightwork.knowledge-feedback.v1" || !/^knowledge-req-[a-f0-9]{40}$/.test(value.id) ||
+        ["submitted", "applying", "approved", "denied"].indexOf(value.status) < 0) throw failure("Invalid feedback receipt");
+    return {schema:value.schema, id:value.id, status:value.status,
+      request_type:text(value.request_type, "request type", 20, false),
+      reason:text(value.reason, "request reason", 2000, false),
+      proposed_correction:value.proposed_correction === null ? null : text(value.proposed_correction, "correction", 8192, true),
+      created_at:finiteTime(value.created_at, "request time", false),
+      updated_at:finiteTime(value.updated_at, "request update time", false),
+      notice:text(value.notice, "request notice", 1000, false),
+      source_use_status:text(value.source_use_status, "source use status", 96, false),
+      raw_record_status:text(value.raw_record_status, "record status", 96, false),
+      retention_review_status:text(value.retention_review_status, "retention review", 96, false)};
+  }
+
   function rightsRequest(value) {
     if (!value || typeof value !== "object" ||
         value.schema !== "lightwork.knowledge-rights-request.v1" ||
@@ -423,7 +438,7 @@
     pending = value;
     root.setAttribute("aria-busy", value ? "true" : "false");
     value = value || access.blocked;
-    searchButton.disabled = value;
+    searchButton.disabled = value || !searchForm.elements.purpose.value;
     nextButton.disabled = value || !nextCursor;
     refreshRequests.disabled = value;
     exportButton.disabled = value || !currentItems.length || deniedPaths.has("/export");
@@ -531,7 +546,7 @@
         !["matched", "no_match", "incomplete", "unavailable"].includes(payload.status) ||
         !Array.isArray(payload.incomplete_reasons) ||
         payload.incomplete_reasons.some(function (value) {
-          return !["more_matches", "more_candidates", "content_unavailable"].includes(value);
+          return !["more_matches", "more_candidates", "content_unavailable", "partial_source_coverage"].includes(value);
         }) ||
         (payload.next_cursor !== null &&
           (typeof payload.next_cursor !== "string" || !payload.next_cursor.length || payload.next_cursor.length > 2048)) ||
@@ -681,7 +696,7 @@
         typeof payload.can_review !== "boolean") {
       throw failure("The rights-request response failed validation.");
     }
-    var clean = payload.items.map(rightsRequest);
+    var clean = payload.items.map(canReview ? rightsRequest : feedback);
     if (payload.count !== clean.length) {
       throw failure("The rights-request count did not match its records.");
     }
@@ -956,11 +971,19 @@
   function renderRequests(items) {
     requests.textContent = "";
     if (!items.length) {
-      requests.appendChild(node("p", "muted", "No correction, exclusion, or deletion requests are recorded in this workspace."));
+      requests.appendChild(node("p", "muted", "No correction, exclusion, or deletion requests are available in this view."));
       return;
     }
     items.forEach(function (record) {
       var card = node("article", "ka-request");
+      if (record.schema === "lightwork.knowledge-feedback.v1") {
+        card.appendChild(node("h3", "", friendly(record.request_type) + " request · " + friendly(record.status)));
+        card.appendChild(node("p", "", record.reason));
+        if (record.proposed_correction) card.appendChild(node("p", "", "Your suggested correction: " + record.proposed_correction));
+        card.appendChild(node("p", "muted", "Updated " + date(record.updated_at) + ". Source use: " + friendly(record.source_use_status) + ". Record: " + friendly(record.raw_record_status) + ". Retention review: " + friendly(record.retention_review_status) + "."));
+        card.appendChild(node("p", "muted", record.notice));
+        requests.appendChild(card); return;
+      }
       var head = node("div", "ka-request__head");
       head.appendChild(node("h3", "", friendly(record.request_type) + " request"));
       head.appendChild(node("span", "muted", friendly(record.status).toLowerCase()));
@@ -1220,6 +1243,7 @@
         context: context,
         confirm: true,
         reference: selectedReference,
+        purpose: activeSearch ? activeSearch.purpose : searchForm.elements.purpose.value,
         request_type: type,
         reason: reason,
         request_key: requestForm.dataset.requestKey,
@@ -1229,12 +1253,12 @@
       announce("Recording the exact source and its derivative impact…", false);
       try {
         var payload = await api("/requests", body);
-        rightsRequest(payload);
+        (canReview ? rightsRequest : feedback)(payload);
         requestForm.reset();
         delete requestForm.dataset.requestKey;
         updateCorrectionField();
         await loadRequests();
-        announce("The source-rights request and affected derivatives are recorded.", true);
+        announce("Your request is recorded for independent administrator review. Source access and training policy are unchanged.", true);
       } catch (error) {
         announce((error.message || "Could not send the request.") + " Your answers are still here, so you can try again.", true, error);
       } finally {
@@ -1261,5 +1285,37 @@
     var note = node("p", "muted", error.message || "Requests are not available right now.");
     if (error && error.technical) { note.dataset.technical = error.technical; }
     requests.appendChild(note);
+  });
+  var purposePicker = document.getElementById("ka-purpose");
+  var retryPurposes = document.getElementById("ka-retry-purposes");
+  if (root.dataset.purposeState === "unavailable") {
+    announce("Approved uses could not be loaded. Your query is still here. Refresh available uses to retry.");
+  }
+  if (retryPurposes) retryPurposes.addEventListener("click", async function () {
+    if (pending) return;
+    var prior = purposePicker.value;
+    setBusy(true);
+    retryPurposes.disabled = true;
+    announce("Loading the uses currently available to your account.");
+    try {
+      var payload = await api("/purposes", undefined, "GET");
+      if (payload.context !== context || !Array.isArray(payload.items)) throw new Error(UNVERIFIED);
+      var options = payload.items.map(function (item) {
+        if (!item || !PURPOSE.test(item.code)) throw new Error(UNVERIFIED);
+        var option = document.createElement("option");
+        option.value = item.code;
+        option.textContent = window.mvHuman ? window.mvHuman(item.code) : item.code;
+        return option;
+      });
+      purposePicker.replaceChildren.apply(purposePicker, options);
+      if (options.some(function (option) { return option.value === prior; })) purposePicker.value = prior;
+      clearEligibleResults();
+      announce(options.length ? "Available uses refreshed. Your query is unchanged." : "No approved uses are currently available to your account. Ask your administrator to review source access.");
+    } catch (error) {
+      announce(error.message || "Approved uses are temporarily unavailable. Retry when ready.");
+    } finally {
+      retryPurposes.disabled = access.blocked;
+      setBusy(false);
+    }
   });
 })();

@@ -356,8 +356,10 @@ class GoalEventsResponse(BaseModel):
 
 
 class FactIn(BaseModel):
-    key: str
-    value: str
+    key: str = Field(max_length=200)
+    value: str = Field(max_length=20000)
+    expected_revision: int = Field(default=0, ge=0, strict=True)
+    context: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class OutcomeIn(BaseModel):

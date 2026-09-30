@@ -31,7 +31,8 @@
       <select id="navfinder-kind" class="ctl"><option value="all">All types</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
       <button type="button" id="navfinder-search" class="btn">Search records</button>
     </div>
-    <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Search by name or reference. Document contents and private notes are excluded.</p>
+    <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Metadata search by name or reference. Document contents and private notes are excluded.</p>
+    <p class="navfinder__count"><a href="/knowledge-access">Search approved knowledge content</a> — choose a permitted purpose and review exact source versions. Content access and training permission remain separate.</p>
     {% endif %}
     <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages">
       {% for _group in finder_pages %}

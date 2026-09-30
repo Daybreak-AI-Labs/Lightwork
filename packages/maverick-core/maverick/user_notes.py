@@ -15,6 +15,7 @@ text and frames it as untrusted data. Produced by ``maverick dream``
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -37,12 +38,9 @@ def _tenant_path(name: str, legacy):
     """Item-30 isolation: with an ACTIVE tenant, this store lives under the
     tenant's data dir (one tenant's learned memory can never feed another's
     runs); single-tenant resolution keeps the legacy location unchanged."""
-    try:
-        from .paths import current_tenant, data_dir
-        if current_tenant():
-            return data_dir(*name.split("/"))
-    except Exception:  # pragma: no cover -- isolation never blocks resolution
-        pass
+    from .paths import current_tenant, data_dir
+    if current_tenant():
+        return data_dir(*name.split("/"))
     return legacy
 
 
@@ -76,7 +74,10 @@ def extract_preferences(text: str) -> list[str]:
 
 
 def _tokens(s: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9]+", (s or "").lower()) if len(t) >= 3}
+    # Compare the topic without polarity: "always use emoji" and "never use
+    # emoji" are competing preferences, not two instructions to retain.
+    return {t for t in re.findall(r"[a-z0-9]+", (s or "").lower())
+            if len(t) >= 3 and t not in {"always", "never", "not", "please"}}
 
 
 def _near_dup(a: str, b: str) -> bool:
@@ -86,76 +87,77 @@ def _near_dup(a: str, b: str) -> bool:
     return len(ta & tb) / min(len(ta), len(tb)) >= 0.8
 
 
+def _preference_rows(world: Any, conversations: list, ts: float,
+                     max_conversations: int, turns_per_conversation: int,
+                     max_notes_per_user: int) -> list[dict]:
+    """Newest source wins within each exact person/channel scope."""
+    grouped: dict[tuple[str, str], list] = {}
+    for conv in sorted(conversations, key=lambda c: (c.last_seen, c.id), reverse=True):
+        scope = (getattr(conv, "channel", ""), getattr(conv, "user_id", ""))
+        if not all(scope):
+            continue
+        group = grouped.setdefault(scope, [])
+        if len(group) < max(1, max_conversations):
+            group.append(conv)
+    notes: list[dict] = []
+    from .pilot_learning import excluded
+    from .safety.secret_detector import redact
+    for (channel, user_id), group in grouped.items():
+        turns = []
+        for conv in group:
+            # A failed source read is unavailable, not a retraction. Abort the
+            # rebuild so a transient database failure cannot silently erase memory.
+            turns.extend(world.recent_turns(conv.id, limit=turns_per_conversation))
+        current: list[str] = []
+        for turn in sorted(turns, key=lambda t: (t.ts, t.id), reverse=True):
+            if turn.role != "user" or excluded(getattr(turn, "goal_id", None)):
+                continue
+            for candidate in reversed(extract_preferences(turn.content)):
+                pref, _ = redact(candidate)
+                pref = " ".join(pref.split())[:_MAX_NOTE_LEN]
+                if not pref or any(_near_dup(pref, prior) for prior in current):
+                    continue
+                if len(current) >= max(1, max_notes_per_user):
+                    break
+                current.append(pref)
+                notes.append({
+                    "ts": ts, "channel": channel, "user_id": user_id, "note": pref,
+                    "conversation_id": turn.conversation_id, "turn_id": turn.id,
+                    "source_ts": turn.ts,
+                    "source_revision": hashlib.sha256(turn.content.encode()).hexdigest(),
+                    "source_goal_id": getattr(turn, "goal_id", None),
+                })
+    return notes
+
+
 def consolidate(
     world: Any, *, path: Path | str | None = None,
     max_conversations: int = 20, turns_per_conversation: int = 50,
     max_notes_per_user: int = 8, now: float | None = None,
 ) -> int:
-    """Scan recent conversations and (re)write the per-user note store.
+    """Rebuild notes from each person's own recent source window.
 
-    Returns how many notes were written. The store is fully rewritten each
-    dream cycle (atomic), so an edited or deleted conversation stops feeding
-    notes on the next dream — no stale memory of retracted preferences.
+    Coworkers cannot evict a quiet person's notes. Newest source turns take
+    precedence, including an opposite-polarity correction. Source edits and
+    deletions disappear on the next successful rebuild; a failed scan preserves
+    the prior store. Erasure and rebuilding share the complete read/write lock.
     """
     p = Path(path) if path is not None else default_path()
     from .learning_guard import learning_write_allowed
     if not learning_write_allowed("user_notes", "consolidate"):
         return 0
-    ts = now if now is not None else time.time()
-    notes: list[dict] = []
+    from .file_lock import atomic_write_text, cross_process_lock
     try:
-        conversations = world.list_conversations() or []
-    except Exception as e:  # pragma: no cover -- notes never block a dream
-        log.debug("user_notes: conversation scan failed: %s", e)
-        return 0
-    conversations = sorted(
-        conversations, key=lambda c: getattr(c, "last_seen", 0.0), reverse=True,
-    )[:max(1, max_conversations)]
-    for conv in conversations:
-        channel = getattr(conv, "channel", "") or ""
-        user_id = getattr(conv, "user_id", "") or ""
-        if not channel or not user_id:
-            continue
-        per_user = [n["note"] for n in notes
-                    if n["channel"] == channel and n["user_id"] == user_id]
-        try:
-            turns = world.recent_turns(conv.id, limit=turns_per_conversation)
-        except Exception:  # pragma: no cover
-            continue
-        for turn in turns:
-            from .pilot_learning import excluded
-            if excluded(getattr(turn, "goal_id", None)):
-                continue
-            if getattr(turn, "role", "") != "user":
-                continue
-            for pref in extract_preferences(getattr(turn, "content", "") or ""):
-                if len(per_user) >= max_notes_per_user:
-                    break
-                try:
-                    from .safety.secret_detector import redact
-                    pref, _ = redact(pref)
-                except Exception:
-                    # Raw preference text may contain credentials/PII; never
-                    # persist it when the privacy boundary is unavailable.
-                    continue
-                pref = " ".join(pref.split())[:_MAX_NOTE_LEN]
-                if not pref or any(_near_dup(pref, prior) for prior in per_user):
-                    continue
-                per_user.append(pref)
-                notes.append({
-                    "ts": ts, "channel": channel, "user_id": user_id,
-                    "note": pref,
-                })
-    try:
-        # Atomic unique-temp write under a cross-process lock: consolidate (a
-        # full rebuild from the world) and erase_notes both rewrite this whole
-        # file, so serialize them and drop the fixed-".tmp" collision.
-        from .file_lock import atomic_write_text, cross_process_lock
-        body = "".join(json.dumps(n, default=str) + "\n" for n in notes)
         with cross_process_lock(p):
+            notes = _preference_rows(
+                world, world.list_conversations() or [],
+                now if now is not None else time.time(), max_conversations,
+                turns_per_conversation, max_notes_per_user,
+            )
+            body = "".join(json.dumps(n, default=str) + "\n" for n in notes)
             atomic_write_text(p, body)
-    except OSError as e:
-        log.warning("user_notes: write failed: %s", e)
+    except Exception as exc:  # noqa: BLE001 - a failed rebuild preserves prior notes
+        log.warning("user_notes: consolidation unavailable: %s", type(exc).__name__)
         return 0
     return len(notes)
 

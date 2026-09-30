@@ -50,6 +50,43 @@ def test_knowledge_access_feature_gate_is_explicit_and_strict(monkeypatch):
     assert config.knowledge_access_enabled({"knowledge_access": {"enable": True}}) is False
 
 
+def test_purpose_inventory_pages_past_250_and_omits_revoked_sources(access):
+    service, registry, rights, calls = access
+    _dataset(registry, rights, "tenant-a", "oldest-authorized-source")
+    for index in range(251):
+        asset = f"newer-revoked-{index:03d}"
+        _dataset(registry, rights, "tenant-a", asset)
+        rights[("tenant-a", asset)]["allowed"] = False
+    assert service.available_purposes("tenant-a", "user:employee") == [PURPOSE]
+    assert ("tenant-a", "oldest-authorized-source") in calls
+    rights[("tenant-a", "oldest-authorized-source")]["allowed"] = False
+    assert service.available_purposes("tenant-a", "user:employee") == []
+
+
+def test_employee_feedback_is_exact_authorized_source_and_owner_only_receipt(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "policy-source")
+    receipt = service.submit_feedback(
+        "tenant-a", "user:employee", source, purpose=PURPOSE,
+        request_type="correction", reason="The delivery time changed.",
+        request_key="employee-correction", proposed_correction="Delivery takes two days.",
+    )
+    assert receipt["schema"] == "lightwork.knowledge-feedback.v1"
+    assert receipt["status"] == "submitted"
+    assert "derivatives" not in receipt and "retention_hold" not in receipt
+    assert service.feedback_requests("tenant-a", "user:employee")[0]["id"] == receipt["id"]
+    assert service.feedback_requests("tenant-a", "user:other") == []
+    assert service.feedback_requests("tenant-b", "user:employee") == []
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
+    rights[("tenant-a", "policy-source")]["allowed"] = False
+    with pytest.raises((ResearchRegistryDenied, KnowledgeAccessDenied)):
+        service.submit_feedback(
+            "tenant-a", "user:other", source, purpose=PURPOSE,
+            request_type="exclusion", reason="Not visible.", request_key="denied-feedback",
+        )
+    assert service.feedback_requests("tenant-a", "user:other") == []
+
+
 @pytest.fixture
 def access(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -506,7 +543,7 @@ def test_expired_source_is_absent_from_search_and_cache_is_evicted(access):
     result = service.search("tenant-a", "user:reader", query="inference", purpose=PURPOSE)
 
     assert result["items"] == []
-    assert result["omitted_ineligible"] == 1
+    assert result["omitted_ineligible"] == 0  # denied records contribute no public count
     assert "inference" not in str(result["items"])
     rights[("tenant-a", "inference")]["expires_at"] = FUTURE
     service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
@@ -1778,7 +1815,7 @@ def test_revoking_one_source_keeps_other_sources_lexical_projections(access):
     result = service.search("tenant-a", "user:reader", query="policy", purpose=PURPOSE)
 
     assert [item["reference"]["asset_id"] for item in result["items"]] == ["policy-kept"]
-    assert result["omitted_ineligible"] == 1
+    assert result["omitted_ineligible"] == 0  # denied records contribute no public count
     # Only the revoked source's derived terms go; the others are the same objects.
     survivors = {identity: service._lexical[identity] for identity in service._lexical}
     assert len(survivors) == 2

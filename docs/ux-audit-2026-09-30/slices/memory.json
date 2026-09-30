@@ -1,0 +1,128 @@
+[
+  {
+    "id": "LW-105",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "user_notes._preference_rows groups exact channel/user before applying each person's conversation cap; consolidate locks the full rebuild; test_user_notes quiet-person/coworker and source-erasure cases.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Runtime retention/erasure acceptance remains unrun."
+  },
+  {
+    "id": "LW-106",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "user_notes orders actual source turns newest first, normalizes preference topic without polarity, retains exact conversation/turn/time/content hash, and rebuilds from current sources. Source changes disappear; failed scans preserve prior complete store. Regression cases cover opposite preferences and source edits.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Runtime acceptance, cross-process erasure races and adversarial phrase variants remain unrun."
+  },
+  {
+    "id": "LW-107",
+    "status": "planned",
+    "implementation_evidence": "New note records carry source conversation, turn, time, source content version and source goal; tenant failures no longer fall back to legacy storage.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs an owner-authorized notes page, exact source links, edit/delete, durable suppression that prevents regeneration, legacy unknown handling, and owner-bound audit projection. No cross-channel ownership is inferred."
+  },
+  {
+    "id": "LW-108",
+    "status": "planned",
+    "implementation_evidence": "Exact existing tenant/channel/user boundaries are retained; no inferred identity sharing added.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Implement verified identity linkage and explicit consent scope, then recheck link revocation on every shared recall. Depends on the identity/settings workstream's verified ownership protocol."
+  },
+  {
+    "id": "LW-109",
+    "status": "planned",
+    "implementation_evidence": "Existing admin learning gates remain enforced; knowledge feedback explicitly separates training authority and facts removal explicitly distinguishes retained history.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs effective employee policy projection and narrowly enforced personal recall/source-exclusion controls across relevant stores, including admin ceilings and legal hold explanation. A no-op memory_use preference was deliberately not exposed."
+  },
+  {
+    "id": "LW-110",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "KnowledgeAccessService.submit_feedback first authorizes exact source/version/purpose, bounds pending submissions, and uses existing durable request engine. feedback_requests returns requester-only limited receipts. API/UI allow operators to submit and see own status while global admin review/apply/holds remain separately gated.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Regression tests for source denial, requester/tenant isolation, unchanged source approval, and operator/admin boundaries authored and unrun."
+  },
+  {
+    "id": "LW-111",
+    "status": "planned",
+    "implementation_evidence": "Existing governed knowledge result/detail views already show exact source versions, freshness, verified/inferred state and current eligibility. This checkpoint retains those controls.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs passage-level placement of freshness/confidence in reused answers/assessment suggestions and independent per-value reject/open-exact-fragment workflow; existing knowledge detail alone does not satisfy this."
+  },
+  {
+    "id": "LW-112",
+    "status": "planned",
+    "implementation_evidence": "Facts inspector now explains provenance and stop-use/history distinction; employee feedback provides narrow own status receipts. Shared facts excludes private reserved scopes. Existing erasure/companion policy foundations retained.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs unified per-item inventory over all in-scope stores with owner/source/use/expiry/dependencies, export/correction/stop-use links, held/retired/purged/external statuses and accurate shared/external limits. Coordinate identity/privacy and companion slices."
+  },
+  {
+    "id": "LW-113",
+    "status": "planned",
+    "implementation_evidence": "Metadata finder now links governed-content search and explains the distinction; KnowledgeAccess search no longer returns counts of denied candidates. Existing exact-version rechecks remain.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs one discovery entry with separate metadata/content result groups and explicitly scoped downstream task attachment. Existing separate surfaces and links are not unified discovery."
+  },
+  {
+    "id": "LW-114",
+    "status": "planned",
+    "implementation_evidence": "New fact_records SQL paging/filtering is bounded and tenant scoped, excludes private scopes before pagination, and has an authored 10,000-row fixture. Existing source-native governed knowledge cursors remain.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs source-side historical task query beyond current caps, stable permission-bound paging for new adapters, workflows/automations/projects/connections/facts metadata adapters, recovery links and controlled performance measurement. No benchmark claimed."
+  },
+  {
+    "id": "LW-115",
+    "status": "planned",
+    "implementation_evidence": "Existing governed knowledge detail/export and exact-source rights revalidation are retained; feedback passes exact version references.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs a Use in task picker that durably binds immutable source versions into task context, rechecks ACL/purpose at admission/execution/retry/export/copy, and projects artifact provenance. No copied grants or broad source retrieval added."
+  },
+  {
+    "id": "LW-116",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_base labels the control Filter recent chats, states its 25-title scope, adds live no-match/match status and links existing /goals search for older and content-only matches.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Runtime checks for 26th chat/content-only discovery, loading/error recovery and unchanged role boundaries remain unrun."
+  },
+  {
+    "id": "LW-117",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Both WorldModel backends compare durable revisions under write locks before any mutation/history write, including delete/recreate protection. kv_memory tracks observed revisions and cannot bypass with supplied null; supervisor priority also compares. Dashboard expected revision + account/workspace binding protects edits/deletes, preserves draft and shows current comparison.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "SQLite concurrency, PostgreSQL parity, stale delete/edit, agent race, unrelated keys and dashboard context tests authored and unrun. Trusted internal unconditional maintenance writers remain explicit optional-revision callers."
+  },
+  {
+    "id": "LW-118",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Facts inspector exposes source/author, run reference, date, trust, sensitivity and available version history; historical detail can become a reviewed CAS-protected draft. Removal explains stop-use versus retained history. Shared/private namespaces are separated and exact tenant ownership applies to history.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Runtime privacy/history/restore checks unrun. No individual expiry is recorded in the existing fact model; UI states this and describes governing workspace retention rather than inventing an expiry or deletion guarantee."
+  },
+  {
+    "id": "LW-119",
+    "status": "planned",
+    "implementation_evidence": "Facts page now renders 50 rows, supports server-side name/source/age filters and paging, read-only explicit selected-item review, preserved conflict drafts, and SQL-level private namespace exclusion. Authored 10,000-fact late-item/bound fixture.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Tag metadata/filtering is not yet implemented; controlled performance/browser checks are unrun. This item remains partial until tag policy/storage/UI are implemented and qualified."
+  },
+  {
+    "id": "LW-120",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "available_purposes traverses complete source-native registry pagination and runs live detail authorization for each approved purpose before returning it. UI retry/loading state is explicit; current search authorization remains in force.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Authored beyond-250/revoked-only regression and existing cross-workspace picker coverage unrun; large-corpus runtime/UI qualification pending."
+  },
+  {
+    "id": "LW-121",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Purpose page has distinct available/empty/unavailable state. API propagates sanitized backend failure as 503; UI offers Refresh available uses, preserves query on temporary failure, routes responses through current-context/access handling and distinguishes denial.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Injected outage/recovery API regression authored and unrun; interactive retry/access-change behavior requires later browser qualification."
+  },
+  {
+    "id": "LW-122",
+    "status": "planned",
+    "implementation_evidence": "Existing administrator-confirmed cost warning and atomic core reindex replacement remain unchanged.",
+    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
+    "remaining": "Still needs durable job identity, previewed collection size, enforceable embedding cost ceiling, checkpoint progress/cancellation and reconnect status that resumes supervision rather than restarting provider work. Requires a governed job/embedding accounting integration; no stub job or unbounded automatic retry was introduced."
+  }
+]

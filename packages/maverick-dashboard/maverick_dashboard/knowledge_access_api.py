@@ -162,6 +162,7 @@ class ExportIn(_Bound):
 
 class RightsRequestIn(_Reviewed):
     reference: AssetReference
+    purpose: Purpose | None = None
     request_type: Literal["correction", "deletion", "exclusion"]
     reason: str = Field(min_length=1, max_length=2_000)
     request_key: Identifier
@@ -337,16 +338,8 @@ async def _call(function, *args, **kwargs):
         raise HTTPException(503, "Governed knowledge access is unavailable") from exc
 
 
-def _registry_purposes(registry, tenant: str) -> list[str]:
-    purposes: set[str] = set()
-    for row in registry.list(tenant, kind="dataset", limit=250):
-        manifest = row.get("manifest") if isinstance(row, dict) else None
-        if not isinstance(manifest, dict) or row.get("state") != "approved":
-            continue
-        for purpose in manifest.get("allowed_purposes") or ():
-            if isinstance(purpose, str) and purpose:
-                purposes.add(purpose)
-    return sorted(purposes)
+def _registry_purposes(service, tenant: str, actor: str) -> list[str]:
+    return service.available_purposes(tenant, actor)
 
 
 @router.get("/purposes")
@@ -356,9 +349,10 @@ async def purposes(request: Request, response: Response):
     Read-only and bound to the caller's workspace like every other read here;
     each search still rechecks the purpose against the exact source version.
     """
-    tenant, _actor, _context = _binding(request, response)
-    codes = await _call(_registry_purposes, _service(request).registry, tenant)
-    return {"items": [{"code": code} for code in codes], "count": len(codes)}
+    tenant, actor, context = _binding(request, response)
+    codes = await _call(_registry_purposes, _service(request), tenant, actor)
+    return {"context": context, "status": "available" if codes else "empty",
+            "items": [{"code": code} for code in codes], "count": len(codes)}
 
 
 @router.post("/search")
@@ -425,8 +419,12 @@ async def list_requests(
     response: Response,
     limit: Annotated[int, Query(ge=1, le=250)] = 100,
 ):
-    tenant, _, context = _binding(request, response)
-    items = await _call(_service(request).list_requests, tenant, limit=limit)
+    tenant, actor, context = _binding(request, response)
+    service = _service(request)
+    if has_global_permission(request, "admin"):
+        items = await _call(service.list_requests, tenant, limit=limit)
+    else:
+        items = await _call(service.feedback_requests, tenant, actor, limit=limit)
     return {
         "schema": "lightwork.knowledge-rights-requests.v1",
         "context": context,
@@ -438,8 +436,15 @@ async def list_requests(
 
 @router.get("/requests/{request_id}")
 async def get_request(request_id: str, request: Request, response: Response):
-    tenant, _, context = _binding(request, response)
-    item = await _call(_service(request).get_request, tenant, request_id)
+    tenant, actor, context = _binding(request, response)
+    service = _service(request)
+    if has_global_permission(request, "admin"):
+        item = await _call(service.get_request, tenant, request_id)
+    else:
+        items = await _call(service.feedback_requests, tenant, actor, request_id=request_id)
+        if not items:
+            raise HTTPException(404, "Request was not found")
+        item = items[0]
     return {
         "schema": "lightwork.knowledge-rights-request-detail.v1",
         "context": context,
@@ -457,10 +462,14 @@ async def submit_request(
         request,
         response,
         payload,
-        administrator=True,
+        administrator=False,
     )
+    service = _service(request)
+    admin = has_global_permission(request, "admin")
+    if not admin and not payload.purpose:
+        raise HTTPException(422, "Choose the use under which you opened this source")
     result = await _call(
-        _service(request).submit_request,
+        service.submit_request if admin else service.submit_feedback,
         tenant,
         actor,
         payload.reference.exact(),
@@ -468,6 +477,7 @@ async def submit_request(
         reason=payload.reason,
         request_key=payload.request_key,
         proposed_correction=payload.proposed_correction,
+        **({} if admin else {"purpose": payload.purpose}),
     )
     return {"context": context, **result}
 
@@ -578,12 +588,16 @@ async def knowledge_access_page(request: Request, response: Response):
     tenant, actor, context = _binding(request, response)
     from .app import templates
 
+    purpose_state = "available"
     try:
         purpose_codes = await run_in_threadpool(
-            _registry_purposes, _service(request).registry, tenant
+            _registry_purposes, _service(request), tenant, actor
         )
-    except Exception:  # noqa: BLE001 - the picker falls back to an empty state
+        if not purpose_codes:
+            purpose_state = "empty"
+    except Exception:  # noqa: BLE001 - unavailable is distinct from an empty inventory
         purpose_codes = []
+        purpose_state = "unavailable"
     nonce = secrets.token_urlsafe(18)
     page = templates.TemplateResponse(
         request,
@@ -594,6 +608,7 @@ async def knowledge_access_page(request: Request, response: Response):
             "knowledge_actor": actor,
             "knowledge_can_review": has_global_permission(request, "admin"),
             "knowledge_purposes": purpose_codes,
+            "knowledge_purpose_state": purpose_state,
             "knowledge_api_base": API_BASE,
             "csp_style_nonce": nonce,
         },

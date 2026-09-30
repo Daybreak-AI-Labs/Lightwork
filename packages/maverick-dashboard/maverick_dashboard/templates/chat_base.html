@@ -187,8 +187,10 @@
     </a>
     <label class="cs-search">
       <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
-      <input type="search" id="cs-filter" placeholder="Search chats" aria-label="Search chats" autocomplete="off" />
+      <input type="search" id="cs-filter" placeholder="Filter recent chats" aria-label="Filter recent chat titles" aria-describedby="cs-filter-scope" autocomplete="off" />
     </label>
+    <p id="cs-filter-scope" class="muted">Filters the 25 recent chat titles below. <a href="/goals">Find older chats and task contents</a>.</p>
+    <p id="cs-filter-status" role="status" aria-live="polite" class="muted"></p>
     <a class="cs-item" href="/overview">
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="2.6" y="8.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="8.6" width="4.8" height="4.8" rx="1.2"/></svg>
       Dashboard
@@ -301,9 +303,13 @@
       if (!input || !list) return;
       input.addEventListener('input', function () {
         var q = input.value.trim().toLowerCase();
+        var count = 0;
         Array.prototype.forEach.call(list.children, function (li) {
           li.hidden = !!q && li.textContent.toLowerCase().indexOf(q) === -1;
+          if (!li.hidden) count += 1;
         });
+        var status = document.getElementById('cs-filter-status');
+        if (status) status.textContent = q ? (count ? count + ' matching recent titles.' : 'No recent titles match. Open task search for older chats or a match in task contents.') : '';
       });
     })();
   </script>

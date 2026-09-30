@@ -448,7 +448,9 @@ class TestFacts:
 
     def test_upsert_overwrites(self):
         client.post("/api/v1/facts", json={"key": "city", "value": "Lisbon"})
-        client.post("/api/v1/facts", json={"key": "city", "value": "Tokyo"})
+        current = client.get("/api/v1/facts/record", params={"key": "city"}).json()
+        client.post("/api/v1/facts", json={"key": "city", "value": "Tokyo",
+                    "expected_revision": current["item"]["revision"], "context": current["context"]})
         assert client.get("/api/v1/facts").json() == {"city": "Tokyo"}
 
 

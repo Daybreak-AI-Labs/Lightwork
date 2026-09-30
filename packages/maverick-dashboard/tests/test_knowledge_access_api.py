@@ -306,7 +306,8 @@ def test_revoke_after_cache_blocks_search_detail_and_export(customer):
     withheld = client.post(BASE + "/search", json=search)
     assert withheld.status_code == 200, withheld.text
     assert withheld.json()["items"] == []
-    assert withheld.json()["omitted_ineligible"] == 1
+    assert withheld.json()["omitted_ineligible"] == 0
+    assert withheld.json()["candidates_examined"] == 0
     assert "cached-policy" not in str(withheld.json()["items"])
     for path, body in (
         ("/detail", {"context": context, "reference": _ref(source), "purpose": PURPOSE}),
@@ -550,3 +551,48 @@ def test_purpose_picker_lists_only_this_workspaces_approved_uses(customer):
     assert listed.json()["items"] == [{"code": PURPOSE}]
     _select(client, "knowledge-b")
     assert client.get(BASE + "/purposes").json()["items"] == []
+
+
+def test_registry_failure_is_unavailable_with_retry_not_empty_inventory(customer, monkeypatch):
+    client, service, _registry, _rights = customer
+    original = service.available_purposes
+
+    def unavailable(*_args):
+        raise OSError("INTERNAL STORAGE LOCATION")
+
+    monkeypatch.setattr(service, "available_purposes", unavailable)
+    failure = client.get(BASE + "/purposes")
+    assert failure.status_code == 503
+    assert "INTERNAL STORAGE LOCATION" not in failure.text
+    page = client.get("/knowledge-access")
+    assert page.status_code == 200
+    assert 'data-purpose-state="unavailable"' in page.text
+    assert "Refresh available uses" in page.text
+    monkeypatch.setattr(service, "available_purposes", original)
+    recovered = client.get(BASE + "/purposes")
+    assert recovered.status_code == 200 and recovered.json()["status"] == "empty"
+
+
+def test_operator_feedback_does_not_grant_admin_decision_or_lineage_access(customer, monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import knowledge_access_api
+
+    client, _service, registry, rights = customer
+    source = _dataset(registry, rights, "knowledge-a", "operator-feedback")
+    monkeypatch.setattr(knowledge_access_api, "has_global_permission", lambda *_args: False)
+    monkeypatch.setattr(knowledge_access_api, "require_global_permission", lambda *_args: (_ for _ in ()).throw(HTTPException(403, "forbidden")))
+    context = _context(client)
+    response = client.post(BASE + "/requests", json={
+        "context": context, "confirm": True, "reference": _ref(source), "purpose": PURPOSE,
+        "request_type": "exclusion", "reason": "Please review this dated passage.",
+        "request_key": "operator-feedback-request",
+    })
+    assert response.status_code == 201, response.text
+    receipt = response.json()
+    assert receipt["status"] == "submitted" and "derivatives" not in receipt
+    listed = client.get(BASE + "/requests").json()
+    assert listed["items"][0]["id"] == receipt["id"] and listed["can_review"] is False
+    assert client.post(BASE + f"/requests/{receipt['id']}/decision", json={
+        "context": context, "confirm": True, "expected_revision": 1,
+        "decision": "approve", "evidence_sha256": "a" * 64,
+    }).status_code == 403
