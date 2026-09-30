@@ -254,6 +254,8 @@ def write_record(
     from .memory_ownership import current_owner
     try:
         record.source_ownership = "unowned" if current_owner(goal_id=record.goal_id) == "" else "private"
+        if record.source_ownership != "unowned":
+            return None  # installation opt-in cannot publish an employee's private work
     except Exception:
         return None
     # Calibration interlock: if the verifier has drifted (no longer

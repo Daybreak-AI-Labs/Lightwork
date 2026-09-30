@@ -55,3 +55,5 @@ system does not manufacture a successful history. Preservation holds in external
 systems are not discovered by this retention engine, so the review explicitly
 requires records-owner confirmation before deletion. This is not an assertion
 of automatic legal-hold coverage.
+
+Private workflow templates use exact ownership across catalog, suggestions, builder, execution, schedules, triggers, source outcomes and version history. Administrator policy authority does not expose another employee's drafts or input fixtures. Bundled templates are recognized only by exact configured bundled roots. Newly installed catalog templates carry a server-written publication receipt bound to their stored bytes; edits invalidate it. Unknown legacy user-template ownership is not inferred as public. Publishing one's reviewed own revision requires operate and a passed rendering fixture; it does not share the template or start scheduled work.

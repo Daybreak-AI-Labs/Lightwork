@@ -332,8 +332,8 @@ class TestIngest:
         import json
 
         from maverick.training.ingest import load_donations
-        (tmp_path / "a.json").write_text(json.dumps({"x": 1}))
-        (tmp_path / "b.json").write_text(json.dumps({"x": 2}))
+        (tmp_path / "a.json").write_text(json.dumps({"x": 1, "source_ownership": "unowned"}))
+        (tmp_path / "b.json").write_text(json.dumps({"x": 2, "source_ownership": "unowned"}))
         records = list(load_donations(tmp_path))
         assert len(records) == 2
         assert {r["x"] for r in records} == {1, 2}
@@ -341,9 +341,9 @@ class TestIngest:
     def test_load_donations_skips_bad_json(self, tmp_path):
         from maverick.training.ingest import load_donations
         (tmp_path / "bad.json").write_text("not valid json")
-        (tmp_path / "good.json").write_text('{"x": 1}')
+        (tmp_path / "good.json").write_text('{"x": 1, "source_ownership": "unowned"}')
         records = list(load_donations(tmp_path))
-        assert records == [{"x": 1}]
+        assert records == [{"x": 1, "source_ownership": "unowned"}]
 
 
 class TestFirecrackerStrictDefault:

@@ -307,6 +307,9 @@ def export_insights(
     if not math.isfinite(ts) or ts < 0:
         raise ValueError("now must be a finite non-negative number")
     insights = load_insights(path) if path is not None else load_insights()
+    from .memory_ownership import source_allowed
+    insights = [item for item in insights if item.owner == "" and item.channel is None and item.user_id is None
+                and all(source_allowed(goal_id, "") for goal_id in item.source_goal_ids)]
     rows: list[dict[str, Any]] = []
     for insight in insights[-max_insights:]:
         text = _sanitize(insight.text, shield=None)
@@ -439,6 +442,7 @@ def _prepare_incoming(
             domain=None,
             text=persisted,
             evidence=evidence,
+            owner="",  # explicitly reviewed signed shared import; no local goal IDs inferred
         )
     return list(incoming_by_text.values())
 

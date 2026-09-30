@@ -1234,8 +1234,8 @@ def _replay_donations(
             rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        from .pilot_learning import excluded
-        if excluded(rec.get("goal_id")):
+        from .memory_ownership import source_allowed
+        if not isinstance(rec, dict) or not source_allowed(rec.get("goal_id"), ""):
             continue
         # Imported donation directories have no authenticated local subject
         # binding. Only explicitly unowned source records may become shared.

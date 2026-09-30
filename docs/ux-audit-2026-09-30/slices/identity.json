@@ -5,7 +5,7 @@
     "implementation_evidence": [
       "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Keyboard, custom-role and authenticated browser acceptance remain unrun."
   },
   {
@@ -15,7 +15,7 @@
       "e18aa52: Use standard role action and success explicitly state access is not removed.",
       "access_explanations.standard_role and admin_pages reset preview/readback follow pinned administrator, verified-group mapping and fallback role; expected_standard binds the reviewed role and powers before clearing."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Group/default fallback, custom-role power change and keyboard confirmation regression acceptance remain unrun."
   },
   {
@@ -24,7 +24,7 @@
     "implementation_evidence": [
       "e18aa52: admin_pages._users_context returns workspace membership controls before loading global roster, invitations or department grants; users.html gates global forms."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Authenticated tenant/global administrator acceptance remains unrun."
   },
   {
@@ -35,7 +35,7 @@
       "Reviewed identity/session retirement, generation-bound local credential removal, pending run-goal cancellation, durable dispatch/result steps and retained-data custodian.",
       "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Provider-side revocation, running and other-module work closure, safe uncertain-effect resume, and global Copilot operation integration remain open. Cases deliberately cannot claim complete offboarding."
   },
   {
@@ -44,9 +44,12 @@
     "implementation_evidence": [
       "027751b + 072ae1c: exact goal ownership, no shared-installation-credential bypass, resource-scoped independent expiring access with audit acknowledgement and reviewer membership checks.",
       "Audit tail/search/export projections, governed subject export, feature/installer/UI and preservation of explicit result sharing.",
-      "Current checkpoint adds approval-card content fingerprints and governed reads independent of decision authority; shoring, safety, Cortex, replay and overview side-path privacy."
+      "Current checkpoint adds approval-card content fingerprints and governed reads independent of decision authority; shoring, safety, Cortex, replay and overview side-path privacy.",
+      "4424b8f: source ownership and stop-use rechecks before task/reflection/dream/skill recall and model-memory tools; 144 passed, 6 unavailable native-adapter tests skipped.",
+      "7f65700: canonical bundled/publication receipt/exact-owner template visibility across catalog, builders, workflow history, suggestions and consumers.",
+      "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Complete consolidated route/model-recall review across sibling slices, integration of all embedded approval surfaces and global Copilot operations; authenticated cross-user acceptance remains unrun."
   },
   {
@@ -56,7 +59,7 @@
       "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
       "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Account now explains base role/department/root-tool provenance and examples. A unified per-task explanation across attenuated agent roles, runtime consent/resource limits and a persisted access-request case remains open; base-grant guidance explicitly does not claim all task checks are resolved."
   },
   {
@@ -66,7 +69,7 @@
       "e18aa52: SSO installer recommends explicit viewer/no-departments baseline, emits empty default_suites and previews deliberate operator alternative. Existing runtime defaults preserved.",
       "first_login_defaults.py and Users provide current installation fallback role/powers/departments, deliberate migration confirmation covering existing unassigned accounts, revision check, effective readback, audit acknowledgement and rollback on override/failure. Settings clarifies empty-departments semantics."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Authored migration/conflict/audit-rollback tests and actual installer/upgrade/config-precedence acceptance remain unrun."
   },
   {
@@ -75,7 +78,7 @@
     "implementation_evidence": [
       "e18aa52: Account reports active_profile separately from actual enterprise_enabled and labels enterprise profile with boundary off as overridden."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Environment override and policy precedence acceptance remains unrun."
   },
   {
@@ -84,7 +87,7 @@
     "implementation_evidence": [
       "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Multiple-tab and fixed-binding browser acceptance remains unrun; no production workspace changes performed."
   },
   {
@@ -93,7 +96,7 @@
     "implementation_evidence": [
       "e18aa52 + 072ae1c: chat and trajectory contexts and fresh permissions endpoint combine operate with exact ownership; grant-only task reads stay read-only."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Conversation worker owns actual chat template control gates and draft-preserving focus/submit revalidation; integrate and inspect their commit before marking implemented. Sessions/browser acceptance unrun."
   },
   {
@@ -102,7 +105,7 @@
     "implementation_evidence": [
       "e18aa52: auth_error.html branded accessible recovery; OIDC failure routes clear cookies and preserve only validated local return destinations; fresh login retry never replays old code."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Denied/expired/outage/state-mismatch and narrow keyboard/browser acceptance remain unrun."
   },
   {
@@ -111,7 +114,7 @@
     "implementation_evidence": [
       "027751b: retention form sends explicit null, API distinguishes omitted from null and persists zero no-pruning value, reads effective global config back and refuses masked external overrides."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Mixed-field/all-field clearing and scheduler/config precedence regression acceptance remains unrun."
   },
   {
@@ -122,7 +125,7 @@
       "Unsaved form edits invalidate preview; UI explicitly requires records-owner hold confirmation and names provenance dependency.",
       "Recorded privacy-rights holds now appear in per-workspace preview, invalidate review and block core/manual retention even when the optional ledger feature is disabled; complete integrity-checked scan, current authority/policy fence through deletion and required accepted-review audit acknowledgement."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Static checks only; authored hold, audit-failure and fenced-revocation regressions remain unrun. External holds require explicit records-owner confirmation; automatic discovery is not claimed."
   },
   {
@@ -132,7 +135,7 @@
       "027751b + 072ae1c: locked expired audit files report skipped/partial; missing signed purge tip remains unconfirmed.",
       "retention_runs.py writes per-workspace/store dispatch/outcomes persistently, retries unresolved only and retains uncertain prior effects/unconfirmed audit without false success."
     ],
-    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Authored locked-file/partial/policy-conflict/unknown-retry regression tests remain unrun; PostgreSQL and filesystem interruption acceptance deferred."
   }
 ]

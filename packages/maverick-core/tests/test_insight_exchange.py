@@ -22,7 +22,7 @@ def _seed_insights(tmp_path) -> str:
     dreaming.append_insights([dreaming.DreamInsight(
         ts=1.0, kind="failure_pattern", domain="finance_sox",
         text="Recurring failure (budget, seen 3x) on goals about ledger totals.",
-        evidence=3,
+        evidence=3, owner="",
     )], path=path)
     return path
 
@@ -385,7 +385,7 @@ def test_shield_blocked_peer_insight_is_dropped(tmp_path, keys):
 class TestFleetDonationReplay:
     def _donation(self, tmp_path, name, **kw):
         rec = {
-            "schema_version": 1, "ts": 1.0,
+            "schema_version": 1, "ts": 1.0, "source_ownership": "unowned",
             "task_brief_text": "reconcile the quarterly ledger totals",
             "outcome": "success", "tools_used": ["sql_query"],
             "verifier_critique": "",
