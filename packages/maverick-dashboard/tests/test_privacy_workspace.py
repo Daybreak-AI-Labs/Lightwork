@@ -80,6 +80,9 @@ def test_approvals_page_still_carries_shared_popout():
 
 def test_records_section_renders_all_four_types():
     from maverick import privacy_ops
+
+    from test_support.plain_language import visible_text
+
     dpa_text = (
         "processor acts on documented instructions from the controller; "
         "audit rights; retention for 12 months"
@@ -114,14 +117,17 @@ def test_records_section_renders_all_four_types():
     privacy_ops.fulfill_dsar(dsar["id"])
 
     html = client.get("/privacy").text
+    # Technical-copy checks apply to the page, not the bundled translation
+    # catalog, which also contains support copy for other workspaces.
+    page_text = visible_text(html)
     # DPA reviews tab: vendor row + the clause-detail trigger.
     assert "Acme Corp" in html and "acme-dpa.pdf" in html
     assert 'class="btn pw-dpa-clauses"' in html
     assert "a person must check it" in html
     assert "How it was read" in html
     assert "Technical record of the file" in html
-    assert "SHA-256" not in html
-    assert "document_id" not in html
+    assert "SHA-256" not in page_text
+    assert "document_id" not in page_text
     # AI registry tab: high-risk tier from the Annex III employment test.
     assert "CV screener" in html
     assert ">High</span>" in html
@@ -132,8 +138,8 @@ def test_records_section_renders_all_four_types():
     assert "jordan@example.com" in html
     assert "days left" in html
     assert "Deletion is never done from this list" in html
-    assert "maverick erase" not in html
-    assert "erase_command" not in html
+    assert "maverick erase" not in page_text
+    assert "erase_command" not in page_text
     # The records tab strip carries the counts (the old hero stat tiles were
     # superseded by the live executive board).
     assert 'data-tab="dsar"' in html and 'data-tab="ropa"' in html

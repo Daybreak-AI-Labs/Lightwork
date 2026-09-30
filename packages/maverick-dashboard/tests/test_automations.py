@@ -167,7 +167,8 @@ def test_p2_shared_primitives_and_scrim(monkeypatch, tmp_path):
     assert "--scrim:" in css and "var(--scrim)" in css
     ui = _client().get("/static/lightwork-ui.js").text
     assert "window.mvCopy" in ui
-    assert "mvConfirm('Stop work " in ui
+    # The verified stop scope selects the consequence before localization.
+    assert "mvConfirm(consequence, { productCopy: true, okText: 'Stop work' })" in ui
 
 
 def test_p2_native_confirm_alert_migrated_to_primitives():

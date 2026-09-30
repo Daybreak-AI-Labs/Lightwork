@@ -51,10 +51,17 @@ def test_remove_one_lesson(client, monkeypatch, tmp_path):
     store = tmp_path / "addenda.json"
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     sh._write_addenda({"claude-x": "Operating guidance learned for this model:\n"
-                                   "- keep this\n- drop this"}, store)
+                                   "- keep this\n- drop this\n- retained legacy lesson"}, store)
+    meta = {}
+    for line in ("keep this", "drop this"):
+        sh._upsert_line_meta(meta, "claude-x", line, {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, store)
+    assert sh.list_learned(store)["claude-x"] == ["keep this", "drop this"]
     r = client.post("/api/v1/learned/guidance/remove", json={"model_id": "claude-x", "line": "drop this"})
     assert r.json() == {"removed": True}
     assert sh.list_learned(store)["claude-x"] == ["keep this"]
+    # Removing a shared lesson neither exposes nor discards quarantined content.
+    assert "retained legacy lesson" in sh.load_addenda(store)["claude-x"]
     again = client.post("/api/v1/learned/guidance/remove", json={"model_id": "claude-x", "line": "drop this"})
     assert again.status_code == 404 and "already removed" in again.json()["detail"]
 
