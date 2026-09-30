@@ -332,13 +332,13 @@ def save_user_template(
         if dest.exists() and not overwrite:
             raise FileExistsError(f"template {name!r} already exists")
         generation = 1
+        previous_content = None
         if dest.exists():
             from .file_lock import atomic_read_text, ensure_private_file
 
             ensure_private_file(dest)
-            existing = Template.parse(
-                atomic_read_text(dest, encoding="utf-8"), name, path=dest,
-            )
+            previous_content = atomic_read_text(dest, encoding="utf-8")
+            existing = Template.parse(previous_content, name, path=dest)
             if not admin_override:
                 if existing.owner and existing.owner != owner:
                     raise PermissionError(
@@ -377,6 +377,9 @@ def save_user_template(
             front.append("params:")
             front.extend(f"  - {p}" for p in clean_params)
         content = "---\n" + "\n".join(front) + "\n---\n" + body + "\n"
+        from .workflow_versions import before_save
+
+        before_save(name, content, previous_content)
         atomic_write_text(dest, content)
     return Template.parse(content, name, path=dest)
 

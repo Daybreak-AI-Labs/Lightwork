@@ -9989,10 +9989,10 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     # Resolve the goal text: render a saved template (with params), or a prompt.
     title = (payload.title or "").strip()
     if payload.template:
-        from maverick.templates import load_template
+        from maverick.workflow_versions import execution_template
 
         try:
-            tpl = load_template(payload.template)
+            tpl, published_version = execution_template(payload.template)
             rtitle, body = tpl.render(**(payload.params or {}))
         except ValueError as e:  # unknown template / missing params
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -10019,6 +10019,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     if payload.template:
         job_payload["template_name"] = tpl.name
         job_payload["template_generation"] = tpl.generation
+        job_payload["template_version"] = published_version
 
     if tz:
         job_payload["__tz__"] = tz

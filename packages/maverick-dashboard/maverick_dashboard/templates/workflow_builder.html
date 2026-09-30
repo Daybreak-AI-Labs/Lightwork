@@ -523,7 +523,7 @@
         var step = {}; ['name','inst','tools','gate'].forEach(function (key) { step[key] = row.querySelector('.pb-step__' + key).value; }); return step;
       });
       return {format:1, fields:fields, steps:steps, mode:mode, template_started:templateWorkspaceStarted, playbook_started:playbookWorkspaceStarted,
-        template_name:wfEditingName, template_generation:wfEditGeneration, template_wall:wfEditWall,
+        template_name:wfEditingName, template_generation:wfEditGeneration, template_wall:wfEditWall, parameter_schema:collectInputFields(),
         agent_name:pbEditingName, agent_generation:pbEditGeneration, agent_preserve:pbEditPreserve};
     }
     function restoreRecovery(payload) {
@@ -547,6 +547,8 @@
         ['name','inst','tools','gate'].forEach(function (key) { row.querySelector('.pb-step__' + key).value = step[key] || ''; });
         paintGate(row);
       });
+      inputFields.replaceChildren();
+      Object.entries((payload.parameter_schema || {}).fields || {}).forEach(function (entry) { addInputField(entry[0],entry[1]); });
       renumber(); renderToolSelections();
       templateWorkspaceStarted = !!payload.template_started; playbookWorkspaceStarted = !!payload.playbook_started;
       setForm(payload.mode); schedulePbLint();
@@ -877,6 +879,7 @@
         setStatus('');
         wfEditingName = data.name;   // subsequent saves overwrite this one
         wfEditGeneration = data.generation;
+        document.dispatchEvent(new CustomEvent('lightwork:workflow-saved', {detail:{name:data.name}}));
         if (recovery) recovery.changed();
         savedMsg.textContent = 'Saved “' + (data.title || data.name) + '” as a reusable workflow'
           + ((data.params && data.params.length) ? ' (it asks for: ' + data.params.map(function (p) { return window.mvHuman ? window.mvHuman(p) : p; }).join(', ') + ').' : '.');
@@ -1613,7 +1616,7 @@
         });
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) { setStatus(plainErr(resp, 'refine it'), true); return; }
-        if (isPb) renderPlaybook(data); else renderDraft(data);
+        if (isPb) renderPlaybook(data); else { data.parameter_schema = data.parameter_schema || current.parameter_schema; renderDraft(data); }
         instrEl.value = '';
         setStatus('Refined — review the update, refine again, or save.'
           + (isPb ? playbookNoteSuffix(data) : ''));
@@ -1702,4 +1705,12 @@
     document.querySelector('.wf').addEventListener('click', function (event) { if (recovery && !event.target.closest('.draft-recovery')) recovery.changed(); });
   })();
   </script>
+  <section class="panel" id="workflow-versions" hidden aria-labelledby="workflow-versions-title">
+    <h2 id="workflow-versions-title">Draft versions and publication</h2>
+    <p>Review the saved draft here. Save edits above before checking a sample. Samples validate inputs and show rendered instructions; they never call an AI model, tool, or external service.</p>
+    <p id="workflow-versions-status" role="status" aria-live="polite"></p>
+    <button class="btn" type="button" id="workflow-versions-refresh">Refresh version review</button>
+    <div id="workflow-versions-content"></div>
+  </section>
+  <script src="/static/lightwork-workflow-versions.js"></script>
 {% endblock %}

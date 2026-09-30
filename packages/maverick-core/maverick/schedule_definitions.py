@@ -98,6 +98,8 @@ def public_definition(connection, row):
         "schedule_id": payload.get("schedule_id") or row["id"],
         "next_run": min((job["run_at"] for job in pending), default=0) if state == "active" else 0,
         "history": [dict(job) for job in jobs[:50]], "history_total": len(jobs),
+        "template_name": payload.get("template_name", ""), "template_version": payload.get("template_version", ""),
+        "template_generation": payload.get("template_generation"),
         "owner": payload.get("owner", ""), "updated_at": row["updated_at"],
     }
 

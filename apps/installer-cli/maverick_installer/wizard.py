@@ -4929,6 +4929,8 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "workflow_versioning": _q_confirm(
+            "Keep workflow version history, safe input fixtures and administrator-reviewed publication before new schedules?", default=True),
         "workflow_typed_inputs": _q_confirm(
             "Allow workflow authors to add dates, choices, optional inputs and defaults?", default=True),
         "connections_self_connect": _q_confirm(
@@ -8015,9 +8017,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("# Externally-reachable dashboard base URL for signed channel")
             lines.append("# Approve/Reject links (actionable approvals).")
             _emit_kv(lines, "public_url", advanced["flows_public_url"])
-    if "workflow_typed_inputs" in advanced:
+    if "workflow_typed_inputs" in advanced or "workflow_versioning" in advanced:
         lines.extend(["", "[workflows]"])
-        _emit_kv(lines, "typed_inputs", advanced["workflow_typed_inputs"] is True)
+        _emit_kv(lines, "typed_inputs", advanced.get("workflow_typed_inputs", True) is True)
+        _emit_kv(lines, "versioning", advanced.get("workflow_versioning", True) is True)
     if advanced.get("connections"):
         lines.append("")
         lines.append("[connections]")
