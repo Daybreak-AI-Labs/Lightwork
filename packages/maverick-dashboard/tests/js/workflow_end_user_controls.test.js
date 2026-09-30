@@ -296,7 +296,7 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
 });
 
 test("a refused chat follow-up shows the server's plain sentence and never raw validation text", () => {
-  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("      function submissionError(");
   const end = source.indexOf("\n      }\n", source.indexOf("function replyFailureText(", start)) + "\n      }\n".length;
   assert.ok(start > 0 && end > start, "the follow-up failure helpers are present");

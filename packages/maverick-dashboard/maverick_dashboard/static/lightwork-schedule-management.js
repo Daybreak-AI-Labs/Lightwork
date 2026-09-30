@@ -88,6 +88,7 @@
     if(!parked){message.textContent='Refresh to find the occurrence needing review.';return;}
     try{
       const review=await request('/api/v1/schedules/recovery/'+parked.id);if(captured!==epoch)return;
+      const operationId=crypto.randomUUID().replace(/-/g,'');
       message.textContent=review.consequence;
       box.append(node('p','Historical external result: unknown. '+review.problem));
       const choice=input(box,'Future recurrence','select','');choice.append(new Option('Create one next future occurrence','future'));
@@ -98,7 +99,7 @@
         if(apply.disabled||!stopped.checked||rationale.value.trim().length<5){message.textContent='Describe the reviewed evidence and confirm old workers are stopped.';return;}
         apply.disabled=true;
         try{
-          const result=await request('/api/v1/schedules/recovery/'+parked.id,{expected_attempts:review.attempts,expected_evidence:review.expected_evidence,context:review.context,
+          const result=await request('/api/v1/schedules/recovery/'+parked.id,{operation_id:operationId,expected_attempts:review.attempts,expected_evidence:review.expected_evidence,context:review.context,
             successor_id:choice.value==='future'?null:Number(choice.value),rearm:choice.value==='future',confirm:true,rationale:rationale.value.trim()});
           if(captured!==epoch)return;
           if(result.repaired!==true||result.historical_replayed!==false)throw new Error('Recovery result was not confirmed. Refresh before continuing.');

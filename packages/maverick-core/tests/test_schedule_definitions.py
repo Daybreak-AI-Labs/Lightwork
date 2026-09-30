@@ -82,3 +82,25 @@ def test_recovery_rejects_changed_evidence_without_replaying_history(tmp_path):
     child = queue.reconcile_recurrence(first, expected_attempts=1, expected_evidence=reviewed,
                                        rearm=True, confirm=True, actor="user:a", rationale="Reviewed old worker shutdown")
     assert queue.get(first).status == "failed" and queue.get(child).attempts == 0
+
+
+
+def test_reviewed_recovery_receipt_survives_later_changes_and_retention(tmp_path):
+    from maverick.schedule_definitions import recovery_evidence
+    queue = JobQueue(tmp_path / "jobs.db")
+    first = queue.enqueue("noop", {"__cron__": "* * * * *", "owner": "user:a"}, run_at=100)
+    with queue._conn() as connection:
+        connection.execute("UPDATE jobs SET status='failed',attempts=1,recurrence_reconcile_required=1 WHERE id=?", (first,))
+        evidence = recovery_evidence(connection, connection.execute("SELECT * FROM jobs WHERE id=?", (first,)).fetchone())
+    args = dict(expected_attempts=1, successor_id=None, expected_evidence=evidence, rearm=True,
+                actor="user:a", rationale="Reviewed old workers stopped", operation_id="a" * 32)
+    child = queue.reconcile_recurrence(first, confirm=True, **args)
+    assert queue.reconcile_recurrence(first, confirm=True, **args) == child
+    assert len(queue.list(status="pending")) == 1
+    assert queue.get(first).status == "failed"
+    with queue._conn() as connection:
+        connection.execute("DELETE FROM jobs WHERE id=?", (first,))
+    assert queue.recovery_receipt(first, **args) == child
+    with pytest.raises(ValueError, match="different reviewed"):
+        queue.reconcile_recurrence(first, confirm=True, **{**args, "rationale": "Changed explanation"})
+    assert queue.recovery_receipt(first, **{**args, "actor": "user:other"}) is None

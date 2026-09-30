@@ -144,9 +144,80 @@ def recovery_execute(request, selection, arguments, native, operation):
     return Outcome("confirmed", "Recovery evidence reviewed. Historical outcomes remain unknown; no occurrence was replayed.", value)
 
 
+
+class RepairInput(StrictInput):
+    job_id: int = Field(ge=1)
+    action: Literal["rearm", "link_successor"]
+    successor_id: int | None = Field(default=None, ge=1)
+    old_workers_stopped: bool = False
+    rationale: str = Field(min_length=5, max_length=1000)
+
+
+def repair_snapshot(request, selection):
+    from dataclasses import replace
+    state = recovery_snapshot(request, selection)
+    return replace(state, summary="Repair future recurrence only after stopping old workers and reviewing current evidence.",
+        fields=state.fields + [
+            {"name": "action", "label": "Future recurrence decision", "kind": "select", "required": True,
+             "choices": [{"value": "rearm", "label": "Admit one future occurrence"},
+                         {"value": "link_successor", "label": "Link an existing compatible successor"}]},
+            {"name": "successor_id", "label": "Existing successor job ID (leave blank for a new future occurrence)", "kind": "number"},
+            {"name": "old_workers_stopped", "label": "I confirmed old workers are stopped", "kind": "boolean", "required": True},
+            {"name": "rationale", "label": "Reason for this reviewed repair", "kind": "textarea", "required": True, "max_length": 1000}])
+
+
+def repair_prepare(request, selection, arguments):
+    from .schedule_ops_api import recurrence_recovery_review
+    if not arguments["old_workers_stopped"]:
+        raise HTTPException(422, "Confirm old workers are stopped before reviewing recurrence repair.")
+    linking = arguments["action"] == "link_successor"
+    if linking != (arguments["successor_id"] is not None):
+        raise HTTPException(422, "Choose exactly one existing successor or one new future occurrence.")
+    value = recurrence_recovery_review(request, arguments["job_id"])
+    selected = next((row for row in value["successors"] if row["id"] == arguments["successor_id"]), None)
+    if linking and selected is None:
+        raise HTTPException(409, "This successor is not in the current compatible recovery evidence. Refresh native Automations.")
+    return Preview("Repair future recurrence only. Historical business work will not be replayed; its external outcome remains unknown.",
+        [{"label": "Parked occurrence", "after": value},
+         {"label": "Reviewed decision", "after": selected if linking else "Admit exactly one future occurrence"},
+         {"label": "Stopped old workers", "after": True},
+         {"label": "Reason", "after": arguments["rationale"]}],
+        {"expected_attempts": value["attempts"], "expected_evidence": value["expected_evidence"], "context": value["context"]})
+
+
+def repair_recover(request, selection, arguments, native, operation):
+    from maverick.job_queue import JobQueue
+
+    from .draft_api import context_for
+    require_permission(request, "admin")
+    if native["context"] != context_for(request):
+        raise HTTPException(409, "Account or workspace changed. Review recurrence recovery again.")
+    try:
+        successor = JobQueue().recovery_receipt(arguments["job_id"], actor=caller_principal(request) or "local",
+            operation_id=operation, expected_attempts=native["expected_attempts"],
+            successor_id=arguments["successor_id"], rearm=arguments["action"] == "rearm",
+            expected_evidence=native["expected_evidence"], rationale=arguments["rationale"])
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if successor is None:
+        return None
+    return Outcome("replayed", "This exact future recurrence repair was already recorded. Historical work was not replayed.",
+        {"job_id": arguments["job_id"], "successor_id": successor, "historical_replayed": False, "external_outcome": "unknown"})
+
+
+def repair_execute(request, selection, arguments, native, operation):
+    from .schedule_ops_api import RecurrenceRecoveryIn, recurrence_recovery_apply
+    if not arguments["old_workers_stopped"]:
+        raise HTTPException(422, "Confirm old workers are stopped before repairing recurrence.")
+    result = recurrence_recovery_apply(request, arguments["job_id"], RecurrenceRecoveryIn(
+        **native, successor_id=arguments["successor_id"], rearm=arguments["action"] == "rearm",
+        rationale=arguments["rationale"], confirm=True, operation_id=operation))
+    return Outcome("confirmed", "Future recurrence was repaired. Historical work was not replayed and its external outcome remains unknown.", result)
+
 def entries():
     return (
         Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, connection_execute, aliases=("check my connection",)),
         Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",)),
         Adapter("schedules.recovery", "Review parked schedule recovery", "schedules", "/automations", ("/automations",), RecoveryInput, recovery_snapshot, recovery_prepare, recovery_execute),
+        Adapter("schedules.repair", "Repair reviewed future recurrence", "schedules", "/automations", ("/automations",), RepairInput, repair_snapshot, repair_prepare, repair_execute, repair_recover),
     )

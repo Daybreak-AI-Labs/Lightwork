@@ -15174,30 +15174,44 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
 def resume_goal(
     goal_id: int, request: Request, bg: BackgroundTasks, payload: GoalResumeIn | None = None
 ) -> None:
-    """Resume a blocked / cancelled goal.
+    """Use the shared guarded admission; legacy clients retain runner defaults."""
+    from .reviewed_resume import apply
+    apply(request, goal_id, bg, payload or GoalResumeIn())
 
-    Capabilities-seat finding: the CLI has ``maverick resume`` but the
-    dashboard's only way to flip a cancelled goal back was to start a
-    brand-new one. This route flips status back to 'pending' and
-    re-queues the runner, so the next goal-event poll picks it back up.
-    """
-    require_permission(request, "operate")
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    # Block resuming things that have no parked work.
-    if g.status not in ("blocked", "cancelled", "failed"):
-        raise product_error(409, "restart_unavailable", "This task is not paused or stopped. Review its current progress before starting more work.",
-                            next_action=next_action("Review task progress", f"/chat/goal/{goal_id}"))
-    max_dollars = payload.max_dollars if payload is not None else None
-    spend_ceiling = configured_max_dollars()
-    if max_dollars is not None and spend_ceiling is not None and max_dollars > spend_ceiling:
-        raise product_error(400, "budget_ceiling", "The requested spending limit is above the workspace limit. Choose a lower amount.",
-                            field_errors={"max_dollars": f"Choose an amount no greater than ${spend_ceiling:,.2f}."},
-                            next_action=next_action("Review this task's spending limit", f"/chat/goal/{goal_id}#halt-resume-form"))
-    _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
+
+@router.get("/goals/{goal_id}/resume-review")
+def resume_goal_review(goal_id: int, request: Request) -> dict:
+    from .reviewed_resume import status
+    return status(request, goal_id)
+
+
+@router.post("/goals/{goal_id}/resume-reviewed")
+def resume_goal_reviewed(goal_id: int, request: Request, bg: BackgroundTasks, payload: GoalResumeIn) -> dict:
+    from .app import _require_same_origin
+    from .reviewed_resume import apply
+    _require_same_origin(request)
+    if not payload.operation_id or not payload.expected_context or payload.expected_updated_at is None or payload.expected_owner is None:
+        raise HTTPException(422, "Review the current task and keep its exact restart reference.")
+    return apply(request, goal_id, bg, payload)
+
+
+@router.post("/goals/{goal_id}/resume-receipt")
+def resume_goal_receipt(goal_id: int, request: Request, payload: GoalResumeIn) -> dict:
+    from .reviewed_resume import recover
+    return recover(request, goal_id, payload) or {"received": False}
+
+
+@router.get("/goals/{goal_id}/resume-receipt/{operation_id}")
+def resume_goal_receipt_read(goal_id: int, operation_id: str, request: Request) -> dict:
+    from maverick import goal_resume
+
+    from .draft_api import context_for
+    from .reviewed_resume import current
+    world, _goal, actor = current(request, goal_id)
+    if len(operation_id) != 32 or any(char not in "abcdef0123456789" for char in operation_id):
+        raise HTTPException(422, "Choose a valid restart receipt reference.")
+    result = goal_resume.lookup(world, goal_id, actor=actor, operation_id=operation_id)
+    return {"context": context_for(request), **(result or {"received": False})}
 
 
 def _require_goal_restart_admission(goal_id: int) -> None:

@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS job_admissions (
   job_id INTEGER NOT NULL,
   created_at REAL NOT NULL
 );
+-- Reviewed recurrence repair receipts outlive routine completed-job retention.
+CREATE TABLE IF NOT EXISTS recurrence_recovery_receipts (
+  job_id INTEGER NOT NULL, actor TEXT NOT NULL, operation_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL, successor_id INTEGER NOT NULL, created_at REAL NOT NULL,
+  PRIMARY KEY(job_id, actor, operation_id)
+);
+
 """
 
 
@@ -545,12 +552,29 @@ class JobQueue:
                 self._advance_recurrence(c, row, now=n)
             return self._row_to_job(c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
 
+    @staticmethod
+    def _recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale):
+        return hashlib.sha256(json.dumps({"attempts": expected_attempts, "successor": successor_id,
+            "rearm": rearm, "evidence": expected_evidence, "rationale": rationale}, sort_keys=True).encode()).hexdigest()
+
+    def recovery_receipt(self, job_id, *, actor, operation_id, expected_attempts, successor_id,
+                         rearm, expected_evidence, rationale):
+        digest = self._recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale)
+        with self._conn() as connection:
+            row = connection.execute("SELECT request_hash,successor_id FROM recurrence_recovery_receipts "
+                "WHERE job_id=? AND actor=? AND operation_id=?", (job_id, actor, operation_id)).fetchone()
+        if row is None:
+            return None
+        if row["request_hash"] != digest:
+            raise ValueError("This recovery reference belongs to a different reviewed decision.")
+        return int(row["successor_id"])
+
     def reconcile_recurrence(self, job_id: int, *, expected_attempts: int,
                              successor_id: int | None = None,
                              rearm: bool = False, confirm: bool = False,
                              expected_evidence: str | None = None, actor: str = "local operator",
-                             rationale: str = "Reviewed future recurrence recovery") -> int:
-        """Local operator recovery; never called by a worker or exposed as a tool.
+                             rationale: str = "Reviewed future recurrence recovery", operation_id: str | None = None) -> int:
+        """Explicit operator recovery; never automatically called by a worker.
 
         Requires filesystem/operator authority over this queue, explicit
         confirmation and the inspected attempt. Link a reviewed compatible
@@ -561,7 +585,15 @@ class JobQueue:
             raise ValueError("confirm exactly one recovery: successor_id or rearm=True")
         from .task_file_recovery import mutation_gate
 
+        digest = self._recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale)
         with mutation_gate(), self._transaction() as c:
+            if operation_id:
+                prior = c.execute("SELECT request_hash,successor_id FROM recurrence_recovery_receipts "
+                    "WHERE job_id=? AND actor=? AND operation_id=?", (job_id, actor, operation_id)).fetchone()
+                if prior is not None:
+                    if prior["request_hash"] != digest:
+                        raise ValueError("This recovery reference belongs to a different reviewed decision.")
+                    return int(prior["successor_id"])
             row = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if row is None or row["attempts"] != expected_attempts or row["status"] != "failed":
                 raise ValueError("reconciliation state changed; inspect the job again")
@@ -605,6 +637,10 @@ class JobQueue:
                 (f"recurrence reconciled; successor job {successor_id}; "
                  "historical execution not replayed", time.time(), job_id),
             )
+            if operation_id:
+                c.execute("INSERT INTO recurrence_recovery_receipts "
+                    "(job_id,actor,operation_id,request_hash,successor_id,created_at) VALUES(?,?,?,?,?,?)",
+                    (job_id, actor, operation_id, digest, successor_id, time.time()))
             return int(successor_id)
 
     def fail(

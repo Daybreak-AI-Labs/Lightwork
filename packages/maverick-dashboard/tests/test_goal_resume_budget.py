@@ -72,7 +72,7 @@ def test_ceiling_is_the_deployment_spend_cap_not_the_fallback(resume_env, monkey
     runtime_overrides.set_budget(25000.01)
     over = client.post(f"/api/v1/goals/{goal_id}/resume", json={"max_dollars": 25000.02})
     assert over.status_code == 400
-    assert "$25,000.01" in over.json()["detail"]
+    assert "$25,000.01" in over.json()["detail"]["field_errors"]["max_dollars"]
     assert world.get_goal(goal_id).status == "blocked" and not calls
 
     response = client.post(f"/api/v1/goals/{goal_id}/resume", json={"max_dollars": 24000})
@@ -94,3 +94,65 @@ def test_budget_control_does_not_bypass_goal_ownership(resume_env, monkeypatch):
     assert response.status_code == 404
     assert world.get_goal(goal_id).status == "blocked"
     assert not calls
+
+
+def _review(client, goal_id, operation="a" * 32):
+    state = client.get(f"/api/v1/goals/{goal_id}/resume-review").json()
+    return {"operation_id": operation, "expected_context": state["context"], "expected_updated_at": state["expected_updated_at"],
+            "expected_owner": state["expected_owner"], "max_dollars": 1.0}
+
+
+def test_reviewed_restart_exact_retry_recovers_without_second_dispatch(resume_env):
+    client, world, goal_id, calls = resume_env
+    body = _review(client, goal_id)
+    first = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()["admitted"] and first.json()["execution"] == "unconfirmed"
+    lookup = client.get(f"/api/v1/goals/{goal_id}/resume-receipt/{body['operation_id']}")
+    assert lookup.status_code == 200 and lookup.json()["received"]
+    assert lookup.json()["context"] == body["expected_context"]
+    world.set_goal_status(goal_id, "failed", result="Later attempt stopped")
+    repeated = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert repeated.status_code == 200 and repeated.json()["replayed"]
+    assert len(calls) == 1 and world.get_goal(goal_id).status == "failed"
+    assert client.post(f"/api/v1/goals/{goal_id}/resume-receipt", json=body).json()["replayed"]
+
+
+def test_reviewed_restart_stale_version_and_changed_reference_refuse(resume_env):
+    client, world, goal_id, calls = resume_env
+    body = _review(client, goal_id)
+    world.set_goal_status(goal_id, "failed")
+    assert client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body).status_code == 409
+    assert not calls
+    body = _review(client, goal_id)
+    assert client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body).status_code == 200
+    body["max_dollars"] = 0.5
+    assert client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body).status_code == 409
+    assert len(calls) == 1
+
+
+def test_reviewed_restart_refuses_while_cancelled_runner_still_finishes(resume_env):
+    from maverick.task_execution_guard import lease
+    client, world, goal_id, calls = resume_env
+    world.set_goal_status(goal_id, "cancelled")
+    body = _review(client, goal_id)
+    with lease(world, goal_id):
+        response = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert response.status_code == 409 and not calls
+    assert world.get_goal(goal_id).status == "cancelled"
+
+
+def test_copilot_restart_uses_same_admission_receipt(resume_env, monkeypatch):
+    from maverick_dashboard import app
+    from maverick_dashboard import product_operations_resume as actions
+    from starlette.requests import Request
+    client, world, goal_id, calls = resume_env
+    monkeypatch.setattr(app, "_world", lambda: world)
+    request = Request({"type": "http", "method": "POST", "scheme": "http", "path": "/", "headers": []})
+    selection, args = {"kind": "goal", "id": goal_id}, {"max_dollars": 1.0}
+    reviewed = actions.prepare(request, selection, args)
+    first = actions.execute(request, selection, args, reviewed.native, "b" * 32)
+    assert first.status == "queued" and len(first.background.tasks) == 1
+    replay = actions.recover(request, selection, args, reviewed.native, "b" * 32)
+    assert replay.status == "replayed" and replay.background is None
+    assert len(world.query("SELECT * FROM goal_mutation_receipts WHERE kind='resume'")) == 1

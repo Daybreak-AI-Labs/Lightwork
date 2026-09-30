@@ -2,20 +2,24 @@
   {
     "id": "LW-001",
     "status": "planned",
-    "implementation_evidence": "Existing employee companion supports conversation independent from tasks.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Transferred to settings_integrity by root; dedicated slice-conversation-inbox owns durable queue/guidance/independent submission and safe checkpoint acknowledgement. No placeholder implementation claimed here."
+    "implementation_evidence": [
+      "Native core/API/Copilot owned by settings_integrity dedicated conversation-inbox slice.",
+      "UI checkpoints4504720,aad84a3,9326cbf,27c6cca: guidance/queue/independent modes during active work; explicit current-brief guidance decision, durable text/file edit and cancellation, fresh permissions, immutable operation receipts with no automatic retry, generation protection, exact separate snapshot preview/binding and detail preferences."
+    ],
+    "validation": "17 local jsdom controller tests pass, plus JavaScript/Jinja/whitespace checks. Core worker separately qualifies native durable service. No provider calls.",
+    "remaining": "Root must use settings_integrity final001 ledger after core/API/Copilot integration; UI complete against agreed contract. Native worker owns static route and exact delivered-at-checkpoint wording."
   },
   {
     "id": "LW-002",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Shared typed operation catalog foundation/settings adapter supplied by settings worker 5b22e3b.",
-      "product_operations_tasks.py registers native current task projection, text clarification admission/receipt recovery, CAS saved-result edit and fixed project-review responses. Explicit human confirmation, current owner/membership, source revision and exact native receipt replay remain shared with UI.",
-      "docs/ux-audit-2026-09-30/conversation-operation-matrix.md tracks actual behavior and limits."
+      "product_operations typed native registry and lightwork-product-operations.js use sealed source/context/revision, explicit review and confirmation, native receipt recovery and deterministic controls when AI suggestions are unavailable.",
+      "conversation-operation-matrix.md traces all registered families including current task, clarification, reviews, schedule lifecycle and repair, connection diagnostics, selected bundles, handoffs, task Stop/restart, and worker-owned preference/identity/knowledge/project/budget/model/notification adapters.",
+      "tasks.resume uses shared reviewed_resume/goal_resume reserve transaction and native runner lease, with native UI separate review/confirmation, exact admitted-restart receipt replay and opaque reload receipt lookup; no automatic retry or duplicate dispatch.",
+      "schedules.repair uses native recurrence_recovery_apply/JobQueue.reconcile_recurrence with exact evidence, stopped-worker confirmation and actor-bound atomic durable recovery receipt; previous historical work is not replayed."
     ],
-    "validation": "Ruff, AST and whitespace checks passed. Native regression tests authored; root coordinates full local suites after implementation per latest user authorization. No provider calls.",
-    "remaining": "Family coverage and remaining stop/restart, accepted transfer and selected bundle native adapters still in progress; do not count catalog infrastructure alone as full product parity."
+    "validation": "39 focused Python lifecycle tests passed, including native restart/readiness, schedule definitions and typed repair; four restart-controller jsdom regressions passed. Prior native task/handoff/bundle tests and shared registry tests are recorded by their owning checkpoints. Ruff/AST/Jinja/JS/whitespace passed. Root integrated and installed-browser/PostgreSQL qualification remains separate.",
+    "remaining": "Integrate companion LW001 native service/catalog checkpoint and final UI snapshot contract alongside lifecycle changes, then run root shared catalog and broader local suites. No universal arbitrary UI automation or unregistered operation is implied."
   },
   {
     "id": "LW-003",

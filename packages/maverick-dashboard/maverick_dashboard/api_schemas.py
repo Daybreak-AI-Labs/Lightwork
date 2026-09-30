@@ -157,8 +157,12 @@ class RoleOverrideIn(BaseModel):
 
 
 class GoalResumeIn(BaseModel):
-    """Optional spending limit for a resumed attempt; deployment caps still apply."""
+    """Optional spending limit plus exact reviewed restart receipt binding."""
 
+    expected_context: str | None = Field(default=None, max_length=256)
+    expected_updated_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    expected_owner: str | None = Field(default=None, max_length=256)
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     max_dollars: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 

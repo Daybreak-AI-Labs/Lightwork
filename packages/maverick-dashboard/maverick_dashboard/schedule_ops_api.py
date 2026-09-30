@@ -199,6 +199,7 @@ class ScheduleChangeIn(BaseModel):
 
 class RecurrenceRecoveryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     expected_attempts: int = Field(ge=0, strict=True)
     expected_evidence: str = Field(pattern=r"^[a-f0-9]{64}$")
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -278,7 +279,7 @@ def recurrence_recovery_apply(request: Request, job_id: int, body: RecurrenceRec
         successor = JobQueue().reconcile_recurrence(job_id, expected_attempts=body.expected_attempts,
             successor_id=body.successor_id, rearm=body.rearm, confirm=body.confirm,
             expected_evidence=body.expected_evidence, actor=caller_principal(request) or "local",
-            rationale=body.rationale)
+            rationale=body.rationale, operation_id=body.operation_id)
     except (ValueError, KeyError) as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"repaired": True, "job_id": job_id, "successor_id": successor,

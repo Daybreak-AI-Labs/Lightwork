@@ -427,7 +427,7 @@
         <div data-budget-summary></div><button class="btn btn--ghost" type="button">Refresh budget</button>
       </details>
       <script src="/static/lightwork-budget-guidance.js" defer></script>
-      <form id="halt-resume-form" class="halt-card__row">
+      <form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}">
         <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
         <details class="halt-card__budget">
           <summary>Set a spending limit for this attempt</summary>
@@ -1167,38 +1167,7 @@
       setInterval(function() { if (!done && document.visibilityState !== 'hidden') pollQuestions(); }, 5000);
     })();
   </script>
-  <script>
-    // Resume a halted goal in-app: same endpoint the CLI parity route exposes
-    // (POST /api/v1/goals/{id}/resume flips blocked/cancelled/failed back to
-    // pending and re-queues the runner).
-    (function () {
-      var btn = document.getElementById('halt-resume');
-      if (!btn) return;
-      var msg = document.getElementById('halt-resume-msg');
-      var goalId = {{ goal.id }};
-      var form = document.getElementById('halt-resume-form');
-      form.addEventListener('submit', function (event) {
-        event.preventDefault();
-        if (btn.disabled || !form.reportValidity()) return;
-        var raw = document.getElementById('halt-resume-budget').value.trim();
-        var payload = raw ? { max_dollars: Number(raw) } : {};
-        btn.disabled = true;
-        msg.textContent = 'Resuming…';
-        fetch('/api/v1/goals/' + goalId + '/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-          .then(function (r) {
-            if (r.ok || r.status === 204) { location.reload(); return null; }
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              window.mvRenderError(msg, r, 'continue the task', j);
-              btn.disabled = false;
-            });
-          })
-          .catch(function () {
-            msg.textContent = 'Could not resume — check your connection.';
-            btn.disabled = false;
-          });
-      });
-    })();
-  </script>
+  <script src="/static/lightwork-task-resume.js" defer></script>
 
 
 
