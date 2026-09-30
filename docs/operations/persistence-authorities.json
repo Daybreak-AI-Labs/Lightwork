@@ -2603,13 +2603,15 @@
       "owner": "packages/maverick-core/maverick/backup.py",
       "purpose": "Authenticated, bounded backup / transactional restore for one client.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
       "literal_path_hints": [
         ".db",
         ".json",
         ".key",
         ".sqlite3",
+        ".tenant-deletions",
+        ".tenant-namespaces",
         "backup has no manifest.json",
         "backup has no readable manifest.json",
         "control-plane-holder.json",
@@ -2625,76 +2627,94 @@
       },
       "source_sites": [
         {
-          "line": 133,
-          "function": "data_backups_dir",
-          "kind": "data_dir",
-          "expression": "data_dir('backups')"
-        },
-        {
-          "line": 1097,
-          "function": "_write_journal",
-          "kind": "atomic_write_text",
-          "expression": "file_lock.atomic_write_text(tx / _JOURNAL, json.dumps(document, sort_keys=True, separators=(',', ':')))"
-        },
-        {
-          "line": 118,
+          "line": 120,
           "function": "_client_root",
           "kind": "data_dir",
           "expression": "data_dir()"
         },
         {
-          "line": 551,
+          "line": 135,
+          "function": "data_backups_dir",
+          "kind": "data_dir",
+          "expression": "data_dir('backups')"
+        },
+        {
+          "line": 553,
           "function": "_new_private_empty",
           "kind": "atomic_create_bytes",
           "expression": "file_lock.atomic_create_bytes(path, b'')"
         },
         {
-          "line": 689,
+          "line": 691,
           "function": "_consistent_db_copy",
           "kind": "connect",
           "expression": "sqlite3.connect(str(source))"
         },
         {
-          "line": 734,
-          "function": "_world_schema_version",
-          "kind": "connect",
-          "expression": "sqlite3.connect(uri + '?mode=ro&immutable=1', uri=True)"
-        },
-        {
-          "line": 976,
-          "function": "create_backup",
-          "kind": "atomic_create_text",
-          "expression": "file_lock.atomic_create_text(manifest_path, json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False))"
-        },
-        {
-          "line": 691,
+          "line": 693,
           "function": "_consistent_db_copy",
           "kind": "connect",
           "expression": "sqlite3.connect(str(destination))"
         },
         {
-          "line": 893,
+          "line": 736,
+          "function": "_world_schema_version",
+          "kind": "connect",
+          "expression": "sqlite3.connect(uri + '?mode=ro&immutable=1', uri=True)"
+        },
+        {
+          "line": 895,
           "function": "_unique_private_empty",
           "kind": "atomic_create_bytes",
           "expression": "file_lock.atomic_create_bytes(candidate, b'')"
         },
         {
-          "line": 1298,
+          "line": 978,
+          "function": "create_backup",
+          "kind": "atomic_create_text",
+          "expression": "file_lock.atomic_create_text(manifest_path, json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False))"
+        },
+        {
+          "line": 1099,
+          "function": "_write_journal",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(tx / _JOURNAL, json.dumps(document, sort_keys=True, separators=(',', ':')))"
+        },
+        {
+          "line": 1248,
+          "function": "_publish_lifecycle_barrier",
+          "kind": "atomic_create_bytes_chunks",
+          "expression": "file_lock.atomic_create_bytes_chunks(destination, iter(lambda: reader.read(_COPY_CHUNK), b''))"
+        },
+        {
+          "line": 1355,
           "function": "_verify_restored",
           "kind": "connect",
           "expression": "sqlite3.connect(uri + '?mode=ro', uri=True)"
         },
         {
-          "line": 1505,
-          "function": "restore_backup",
-          "kind": "cross_process_lock",
-          "expression": "file_lock.cross_process_lock(lock_target, strict=True)"
-        },
-        {
-          "line": 1366,
+          "line": 1429,
           "function": "_apply_transaction",
           "kind": "atomic_write_bytes",
           "expression": "file_lock.atomic_write_bytes(destination, _DERIVED_REBUILD_MARKER_BYTES)"
+        },
+        {
+          "line": 1568,
+          "function": "restore_backup",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(lock_target, strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": ".tenant-namespaces/82/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_namespace_reservation",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
+        },
+        {
+          "sample_path": ".tenant-deletions/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_deletion_tombstone",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
         }
       ]
     },
@@ -8038,39 +8058,53 @@
     {
       "path": "packages/maverick-core/maverick/paths.py",
       "contract": "storage_primitive",
-      "owner": "delegated; inspect source callsites below",
+      "owner": "packages/maverick-core/maverick/paths.py",
       "purpose": "Tenant-aware data paths — the P1 multi-tenancy primitive.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
       "literal_path_hints": [
-        ".json"
+        ".json",
+        ".tenant-namespaces"
       ],
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 200,
+          "line": 192,
+          "function": "tenant_namespace_reserved",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 219,
           "function": "bind_tenant_namespace",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 377,
+          "line": 279,
+          "function": "bind_tenant_namespace",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(claim_path, payload)"
+        },
+        {
+          "line": 402,
           "function": "data_dir",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 394,
+          "line": 419,
           "function": "diagnostic_data_dir",
           "kind": "maverick_home",
           "expression": "maverick_home()"
-        },
+        }
+      ],
+      "persisted_authorities": [
         {
-          "line": 256,
-          "function": "bind_tenant_namespace",
-          "kind": "atomic_create_text",
-          "expression": "atomic_create_text(claim_path, payload)"
+          "sample_path": ".tenant-namespaces/82/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_namespace_reservation",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
         }
       ]
     },
@@ -13291,9 +13325,10 @@
       "owner": "packages/maverick-core/maverick/ux_store.py",
       "purpose": "Dashboard UX store: pins, saved views, trace annotations (roadmap 2027-H1 UX).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Follow-up reviewed against source b6d19b46e831ce373dd97d8ec9e9c5186a366855: default/shared stores read and write tenant-resolved dashboard/ux_store-v2.json. Legacy ux_store.json is deliberately retained unread because the former singleton did not establish reliable workspace lineage; no automatic adoption or migration by principal/goal match.",
       "governed_namespaces": [],
       "literal_path_hints": [
+        "ux_store-v2.json",
         "ux_store.json"
       ],
       "observed_mechanism_markers": {
@@ -13301,16 +13336,22 @@
       },
       "source_sites": [
         {
-          "line": 63,
+          "line": 44,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('dashboard')"
+        },
+        {
+          "line": 70,
           "function": "_save",
           "kind": "write_text",
           "expression": "tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')"
         },
         {
-          "line": 43,
-          "function": "__init__",
+          "line": 305,
+          "function": "shared",
           "kind": "data_dir",
-          "expression": "data_dir('dashboard')"
+          "expression": "data_dir('dashboard', 'ux_store-v2.json')"
         }
       ]
     },
@@ -16480,9 +16521,10 @@
       "referenced_store_owners": [
         "..quotas"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
       "literal_path_hints": [
+        ".tenant-deletions",
         "ledger.json",
         "reservations.json",
         "tenant_registry.json"
@@ -16493,88 +16535,118 @@
       },
       "source_sites": [
         {
-          "line": 376,
-          "function": "_save",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(_registry_path(), json.dumps(payload, indent=2, sort_keys=True))"
-        },
-        {
-          "line": 818,
-          "function": "_reservations_path",
-          "kind": "data_dir",
-          "expression": "data_dir('usage', 'reservations.json', tenant=tenant_id)"
-        },
-        {
-          "line": 114,
+          "line": 117,
           "function": "_registry_path",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 313,
+          "line": 122,
+          "function": "_retirement_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 149,
+          "function": "_retire",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(path, json.dumps({'version': 1, 'id': tenant_id, 'deleted_at': time.time()}, sort_keys=True))"
+        },
+        {
+          "line": 161,
+          "function": "_legacy_role_names",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 370,
           "function": "_load",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 393,
+          "line": 433,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_registry_path(), json.dumps(payload, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 450,
           "function": "_locked",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 824,
-          "function": "_load_reservations",
-          "kind": "maverick_home",
-          "expression": "maverick_home()"
-        },
-        {
-          "line": 915,
-          "function": "reserve_tenant_dollars",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path, strict=True)"
-        },
-        {
-          "line": 922,
-          "function": "reserve_tenant_dollars",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))"
-        },
-        {
-          "line": 1005,
-          "function": "release_tenant_reservation",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path, strict=True)"
-        },
-        {
-          "line": 1009,
-          "function": "release_tenant_reservation",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(_live_reservations(data, now), indent=2, sort_keys=True))"
-        },
-        {
-          "line": 398,
+          "line": 455,
           "function": "_locked",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(_registry_path(), strict=strict)"
         },
         {
-          "line": 696,
+          "line": 777,
           "function": "tenant_spend_today",
           "kind": "data_dir",
           "expression": "data_dir('usage', 'ledger.json', tenant=tid)"
         },
         {
-          "line": 974,
+          "line": 898,
+          "function": "_reservations_path",
+          "kind": "data_dir",
+          "expression": "data_dir('usage', 'reservations.json', tenant=tenant_id)"
+        },
+        {
+          "line": 904,
+          "function": "_load_reservations",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 1003,
+          "function": "reserve_tenant_dollars",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 1010,
+          "function": "reserve_tenant_dollars",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 1062,
           "function": "reserve_tenant_budget",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(path, strict=True)"
         },
         {
-          "line": 991,
+          "line": 1081,
           "function": "reserve_tenant_budget",
           "kind": "atomic_write_text",
           "expression": "atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 1095,
+          "function": "release_tenant_reservation",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 1099,
+          "function": "release_tenant_reservation",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(_live_reservations(data, now), indent=2, sort_keys=True))"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": ".tenant-deletions/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_deletion_tombstone",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
+        },
+        {
+          "sample_path": "tenant_registry.json",
+          "recovery_policy": "tenant_registry",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
         }
       ]
     },
@@ -26061,11 +26133,43 @@
           "disposition": "Retain authenticated receipt bytes under global startup hold. Reconcile current source/revision, consent and consumed-operation evidence before admission; no automatic replay, grant restoration or inference of completion from matching fact values."
         }
       ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/goal_feedback_store.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/goal_feedback_store.py",
+      "purpose": "Tenant-resolved, owner-stamped human feedback on goal results; bounded-tail display and accumulated-signal counts, separate from governed signoff and execution approval.",
+      "referenced_store_owners": [
+        "maverick.ndjson_log",
+        "maverick.paths"
+      ],
+      "review": "Reviewed source b6d19b46e831ce373dd97d8ec9e9c5186a366855: _path delegates to data_dir(\"dashboard\", \"goal-feedback-v2.ndjson\"); append_row and tail_rows retain private NDJSON semantics. This feedback projection is customer data, not an independent execution grant. The former file beside dashboard_overrides_path(), goal-feedback.ndjson, is retained unread: matching an owner string or colliding goal number cannot prove workspace lineage. Other learning stores and signoff authority retain their own controls.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "dashboard/goal-feedback-v2.ndjson",
+        "goal-feedback.ndjson"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 29,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('dashboard', 'goal-feedback-v2.ndjson')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard/goal-feedback-v2.ndjson",
+          "recovery_policy": null,
+          "disposition": "Ordinary tenant customer data, without independent execution authority. Retain old deployment-global feedback unread; restoring or matching identifiers does not authorize adopting its lineage."
+        }
+      ]
     }
   ],
   "customer_audit_additions": {
     "base_sha": "d822db99ee48aab4fdded47fc799486e8e5ea44f",
-    "module_count": 47,
+    "module_count": 48,
     "review": "September 30 customer-audit additions: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification. The Facts adapter follow-up adds metadata-only consumed-operation receipts under the same startup hold; it cannot reauthorize a restored mutation."
   }
 }

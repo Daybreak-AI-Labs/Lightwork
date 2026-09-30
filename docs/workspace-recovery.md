@@ -230,6 +230,25 @@ an administrator can explicitly retrieve an already completed report after reloa
 - Native switching and customer MSI installation need Windows native acceptance.
   Python/API and DOM tests do not verify a clean customer machine.
 
+## Tenant identity history
+
+Tenant identity history is never rolled back with ordinary workspace files.
+Whole-installation snapshots include immutable namespace claims under
+`.tenant-namespaces/<shard>/<digest>.json` and deletion tombstones under
+`.tenant-deletions/<digest>.json`. A workspace purge retains both roots. A signed
+older snapshot cannot erase or rewrite an existing claim or retirement, even
+through a direct restore with `force=True`; recovery comparison reports these as
+protected authority. An additive restore retains a newer deletion, so an older
+active roster entry cannot reactivate that tenant.
+
+New history from a restore is published atomically without replacement. If
+publication fails, ordinary files roll back while any already-published identity
+history stays reserved. Recovery of an older transaction journal follows the same
+rule. This intentionally favors an unused reserved name over reviving an old
+tenant's roles or data. An isolated bootstrap keeps the exact historical bytes
+under a startup hold until current authority is reconciled; authenticated backup
+provenance alone is not permission to resume that tenant.
+
 ## Reproduce local validation
 
 From the repository with its eight packages and test dependencies installed:

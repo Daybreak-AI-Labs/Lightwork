@@ -9,6 +9,13 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
+# Installation-wide, append-only identity history. These roots are outside
+# tenants/ so deleting a workspace cannot free its name or erase its retirement.
+TENANT_LIFECYCLE_AUTHORITY_POLICIES = {
+    ".tenant-namespaces": "tenant_namespace_reservation",
+    ".tenant-deletions": "tenant_deletion_tombstone",
+}
+
 # Tenant-local governed record stores whose restored rows require a hold or
 # store-specific authenticated reconciliation.  These rows can feed
 # approvals, external delivery, regulated status, trust, or execution gates.
@@ -176,6 +183,9 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     # resembles a lock sidecar.  Ordinary lock files carry no durable state.
     if not is_sqlite and name.endswith(".lock"):
         return None
+
+    if len(parts) > 1 and parts[0] in TENANT_LIFECYCLE_AUTHORITY_POLICIES:
+        return TENANT_LIFECYCLE_AUTHORITY_POLICIES[parts[0]]
 
     if _contains(parts, "a2a", "tasks.authority.sealed"):
         # This is a database-generation/anti-downgrade receipt, not a credential
@@ -576,6 +586,8 @@ DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES = {
 # Malformed channel records also block globally; valid records instead enter
 # the channel reconciliation protocol while retaining their exact receipts.
 GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
+    ".tenant-namespaces/aa/" + "a" * 64 + ".json": "tenant_namespace_reservation",
+    ".tenant-deletions/" + "b" * 64 + ".json": "tenant_deletion_tombstone",
     "notification-deliveries.json": "notification_dispatch_authority",
     "generated_tools/example.ownership.json": "generated_tool_authority",
     "custom/example.ownership.json": "generated_content_owner_authority",
@@ -865,6 +877,7 @@ AUTHORITY_SAMPLES = {
 
 
 __all__ = [
+    "TENANT_LIFECYCLE_AUTHORITY_POLICIES",
     "APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES",
     "CUSTOMER_FILE_AUTHORITY_POLICIES",
     "NON_AUTHORIZING_GOVERNED_NAMESPACES",
