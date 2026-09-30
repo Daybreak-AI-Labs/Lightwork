@@ -14,16 +14,14 @@
   },
   {
     "id": "LW-068",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": [
       "71c1142: template_parameters.py schema/default/conditional/date/enum validation shared by render; no-code builder and field-local feedback; recovery/refinement preservation in 532e5c0."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
-    "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
-    ]
+    "remaining": "Existing typed inputs are implemented. Final acceptance review found the requested governed connected-account picker was missing; its exact selection, revision and dispatch authority implementation is in progress. See final connections qualification checkpoint for replacement evidence."
   },
   {
     "id": "LW-069",

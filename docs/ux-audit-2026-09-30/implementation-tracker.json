@@ -8,7 +8,7 @@
       "conversation_inbox.py separates sealed durable messages and immutable operation receipts from native execution jobs. conversation_inbox_api.py plus supervised conversation_inbox_scheduler.py preserve exact-owner authority, CAS, native thread fencing, submission identities, attachment admission and no automatic repeat of uncertain runner handoffs. Agent root checkpoints deliver exact separately approved guidance without creating a new task. The coordinated lightwork-conversation-inbox.js composer supports guidance/queue/independent choices, text/file edits and cancellation, pinned explicit snapshots, durable recovery and fresh closure/permission checks. Four product_operations_conversation adapters share the native services. Typed administrator settings, installer opt-in and inherited conversation mode/detail preferences complete configuration. docs/conversation-inbox.md records limits, recovery and owner-bound My Data helper contracts."
     ],
     "validation": "18 focused local Python tests passed (core encrypted records, native HTTP/scheduler/Copilot, partial-draft cancellation/FIFO and closed-source recovery); 18 jsdom controller tests passed. One asset-response test was deselected in the final run because its route registration belongs to consolidated peer checkpoint f61d43d; the same test passed in an earlier 17-test run with those equivalent routes present locally. Ruff on seven new Python modules/tests, changed Python AST/Jinja parsing, JavaScript syntax and git diff whitespace checks passed. No live provider or network-credential calls.",
-    "remaining": "Integrated full-suite and real-browser qualification is coordinated by root. Postgres multi-process/fault-injection and visual/accessibility qualification remain unrun for this slice. Identity/privacy worker is wiring the exported owner-bound inbox helpers into the reviewed My Data inventory/export/erasure UI; do not claim that adapter wired before its checkpoint. Consolidated asset registrations depend on f61d43d; coordinated UI commits4504720,aad84a3,9326cbf,27c6cca are required. Delivery acknowledgements prove exact checkpoint insertion, not model compliance or attachment reading.",
+    "remaining": "The owner-bound inbox inventory, export and reviewed erasure hooks are integrated in personal_data_api.py, personal_data_exports.py and personal_data_requests.py. Final consolidated tests, PostgreSQL multi-process/fault injection and installed accessibility/performance qualification remain. Delivery acknowledgements prove exact checkpoint insertion, not model compliance or attachment reading.",
     "evidence_slice": "slices/conversation-inbox.json"
   },
   {
@@ -851,16 +851,14 @@
     "id": "LW-068",
     "title": "Typed workflow-template inputs",
     "category": "Workflow templates and schedules",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": [
       "71c1142: template_parameters.py schema/default/conditional/date/enum validation shared by render; no-code builder and field-local feedback; recovery/refinement preservation in 532e5c0."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
-    "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
-    ],
+    "remaining": "Existing typed inputs are implemented. Final acceptance review found the requested governed connected-account picker was missing; its exact selection, revision and dispatch authority implementation is in progress. See final connections qualification checkpoint for replacement evidence.",
     "evidence_slice": "slices/connections.json"
   },
   {
@@ -1646,7 +1644,7 @@
     "id": "LW-119",
     "title": "Facts page does not scale to a large business memory",
     "category": "Memory knowledge and search",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": [
       "facts_api.py shared-only server-filtered query/source/date/tag pages with context+revision-bound snapshot; 409 on changed sequence.",
       "world_model.py and postgres.py additive43 tags_json metadata, CAS writes advance existing fact revision; values remain encrypted, private namespaces excluded.",
@@ -1656,9 +1654,7 @@
       "14 focused local tests passed (Python3.12, unique workspace basetemp), including10000-record late match/tag filter, stale writes, private namespace exclusion, stale snapshots, installer parity.",
       "Migration governance43/43 and JS syntax passed."
     ],
-    "remaining": [
-      "Integrated suite, PostgreSQL execution and browser accessibility/performance qualification remain. Typed Copilot tag edit callback handed to shared registry owner."
-    ],
+    "remaining": "Native Facts search, detail, tags and CAS/restore UI are implemented. Final acceptance review confirmed the promised typed Copilot fact-operation callback was not yet registered. A native-authority adapter and actual page selection handoff are now in progress; no stub completion is claimed.",
     "evidence_slice": "slices/knowledge.json"
   },
   {
@@ -1727,7 +1723,7 @@
       "maverick.project_workspaces attaches governed metadata to existing project identities: outcome/criteria/labels, explicit metadata-only membership, current task/review milestone projections, separately reviewed planning prerequisites and order, pinned independently authorized context references, latest current approved review, and private reusable project structures. project_workspaces_api and project_workspaces.html/lightwork-project-workspaces.js provide complete direct controls, before/after confirmation, exact CAS/receipts and encrypted draft recovery. product_operations_projects registers ten typed native-service adapters under the existing reviews opt-in family. features.project_workspaces is strict default-off with settings descriptions and an installer question. Existing tasks, execution owners/edges and review packet ACLs are not repurposed."
     ],
     "validation": "23 focused local Python tests passed across real temporary governed records, native HTTP, typed adapters, private erasure revision barriers and installer feature opt-in; six jsdom UI regressions passed. Ruff, Python AST, Jinja parsing, JavaScript syntax and whitespace checks passed. Broader catalog run recorded 1586 passes and three known old fixture failures omitting required expected_revision in test_settings_catalog_access; settings fixture repair follows in a separate checkpoint.",
-    "remaining": "Postgres multi-process/fault-injection parity, full browser rendering/accessibility and cross-device visual qualification remain unrun. Shared registry multiselect dependency verified present in integrated staging331f01f. My Data adapters should use the provided exact-owner inventory/erasure helpers for private project defaults; identity_privacy is integrating that adapter. Only currently permitted saved results and fixed review packets are bundle sources; attaching context does not implicitly authorize model use or task execution. Configured bounds and the latest-500-task selector are documented in docs/project-workspaces.md.",
+    "remaining": "The exact-owner project-default inventory and erasure adapters are integrated in personal_data_api.py and personal_data_requests.py. Final consolidated local/browser and PostgreSQL multi-process/fault-injection qualification remain. Only currently permitted saved results and fixed review packets are bundle sources; attaching context does not authorize model use or execution. The configured bounds and latest-500-task selector remain documented in docs/project-workspaces.md.",
     "evidence_slice": "slices/project-workspaces.json"
   },
   {
