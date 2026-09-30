@@ -41,10 +41,10 @@ def _write_actor(request, body):
     return actor
 
 
-def _call(operation):
+def _call(operation, *, json_response=True):
     try:
         result = operation()
-        return JSONResponse(result, headers={"Cache-Control": "private, no-store"}) if isinstance(result, dict) else result
+        return JSONResponse(result, headers={"Cache-Control": "private, no-store"}) if json_response and isinstance(result, dict) else result
     except personal_identity.IdentityConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -107,7 +107,7 @@ def _state(request):
 
 @router.get("/my-data")
 def page(request: Request):
-    state = _call(lambda: _state(request))
+    state = _call(lambda: _state(request), json_response=False)
     return _app().templates.TemplateResponse(request, "personal_data.html", {"personal_data": state},
                                              headers={"Cache-Control": "private, no-store"})
 
