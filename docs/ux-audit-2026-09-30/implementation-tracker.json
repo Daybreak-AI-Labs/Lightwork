@@ -857,15 +857,22 @@
     "id": "LW-068",
     "title": "Typed workflow-template inputs",
     "category": "Workflow templates and schedules",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142: template_parameters.py schema/default/conditional/date/enum validation shared by render; no-code builder and field-local feedback; recovery/refinement preservation in 532e5c0."
+      "template_parameters.py retains optional/default/conditional/date/enum inputs and legacy string behavior. template_connections.py and lightwork-template-connections.js add exact own-account selections to Templates, samples, schedules and triggers; no private reusable default or implicit grant.",
+      "Migration46 stores encrypted exact owner/workspace/account/revision references atomically with task/Chat/event admission. Orchestrator, agent dispatch, worker, REST and read-only Drive credential resolution recheck current permissions and the original selection; rotation never silently rebinds. Chat draft recovery preserves references; conversion to reusable agent/flow authoring refuses dropping them.",
+      "Existing typed_inputs Settings/installer policy and native Copilot templates.accounts review cover the feature. docs/workflow-connected-inputs.md documents migration, supported adapters and qualification boundaries."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "25 focused local core tests passed (picker-core-03.xml), including seven new exact-selection, permission-revocation, atomic admission, scheduled-dispatch and Drive checks. Earlier broader targeted migration/connection cohort had 101 passed and one unknown-goal compatibility failure subsequently fixed and passed in the 25-test rerun; ten PostgreSQL-dependent cases skipped.",
+      "Five new actual-cookie/tenant HTTP tests passed across picker-http-04.xml (four) and picker-http-05.xml (native reviewed publication/schedule admission); synthetic provider only. No native authentication checks were mocked.",
+      "37 focused JS tests passed, including five picker/recovery cases; earlier 53-test input/library/editor cohort also passed. Python3.10 AST (30 changed Python files), Ruff, migration-governance heads46 and whitespace passed.",
+      "Installed local Chrome expanded enterprise lifecycle passed (browser-connected-template-04.log): real invited operator creates typed template, selects own saved Drive account, reviews readable Chat draft plus exact reference, then completes existing evidence/export/departure journey. No paid work or live provider call."
     ],
-    "remaining": "Existing typed inputs are implemented. Final acceptance review found the requested governed connected-account picker was missing; its exact selection, revision and dispatch authority implementation is in progress. See final connections qualification checkpoint for replacement evidence.",
-    "evidence_slice": "slices/connections.json"
+    "remaining": [
+      "Final merged-cohort regression run remains parent-owned. Live PostgreSQL, live provider consent/refresh, signed native builds and qualified language review remain separate environment qualification; no implementation approval is pending."
+    ],
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-069",

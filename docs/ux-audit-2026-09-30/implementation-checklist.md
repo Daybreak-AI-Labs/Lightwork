@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 187 implemented-test-needed, 3 planned, 5 test-needed.
+Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -76,7 +76,7 @@ Current dispositions: 187 implemented-test-needed, 3 planned, 5 test-needed.
 | LW-065 | Built; acceptance pending | Bring widget interaction and announcements to the dashboard's accessibility baseline |
 | LW-066 | Built; acceptance pending | Honor reduced-motion preferences for programmatic scrolling |
 | LW-067 | Built; acceptance pending | Compose template search and suggested filters |
-| LW-068 | Active implementation | Typed workflow-template inputs |
+| LW-068 | Built; acceptance pending | Typed workflow-template inputs |
 | LW-069 | Built; acceptance pending | Promote workflows through draft, test, version and publish |
 | LW-070 | Built; acceptance pending | Accept ordinary office documents when drafting workflows |
 | LW-071 | Built; acceptance pending | Make schedule-list failures visible and preserve last good state |
