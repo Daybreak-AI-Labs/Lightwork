@@ -48,6 +48,12 @@ def entries(S, C, Column):
                     "channel and gRPC processes sharing this data folder. Stale or missing acknowledgements stay "
                     "unconfirmed. This reports startup configuration, separately from service health.",
                     "toggle", "People & access", True, "maverick.runtime_configuration", subgroup="Configuration status"))
+    from maverick.config import EMPLOYEE_ACTIVATION_JOBS
+    result.append(S("dashboard", "employee_activation_jobs", "Approved first-job guides",
+                    "Choose the employee activation jobs this installation offers. Workspace choices may only narrow this catalog. Role selection never grants a department or tools; disabled departments remain hidden.",
+                    "multiselect", "People & access", list(EMPLOYEE_ACTIVATION_JOBS), "maverick.config",
+                    choices=tuple(EMPLOYEE_ACTIVATION_JOBS.items()), max_items=len(EMPLOYEE_ACTIVATION_JOBS),
+                    weaker="grow", warning="Additional guided jobs become available within each person's existing access."))
     return result
 
 

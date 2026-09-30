@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Your first useful result - Lightwork{% endblock %}
+{% block content %}
+<section class="panel" id="employee-activation">
+<h1>Your first useful result</h1><p>Choose a job, select evidence and decide how you will judge the result. Job choices never grant a role or access. Practice examples remain distinct from real work.</p>
+<p><a href="/start">Installation checklist</a> · <a href="/budget">Check your current budget</a></p>
+{% if not activation.readiness.can_start %}<p role="status">Your account can read this guidance. An operator can create and run a private draft.</p>{% endif %}
+{% if not activation.readiness.provider_ready %}<p role="status">The configured task routes are not ready. Your private draft can be saved now; ask your administrator to repair the current provider setup before starting.</p>{% endif %}
+<form id="activation-form">
+<label>Job <select class="select" id="activation-job">{% for key,job in activation.jobs.items() %}<option value="{{ key }}">{{ job.label }}</option>{% endfor %}</select></label>
+<label>Data choice <select class="select" id="activation-mode"><option value="sample">Fictional practice example</option><option value="real">Real source I am authorized to use</option></select></label>
+<p id="activation-sample" class="panel"></p>
+<div id="activation-real" hidden>
+<label>Source <select class="select" id="activation-source-kind"><option value="text">Text I provide</option><option value="connected">One connected document</option></select></label>
+<label id="activation-material-label">Source material <textarea class="textarea" id="activation-material" maxlength="10000" rows="6"></textarea></label>
+<div id="activation-connected" hidden><p>Search uses your current document-source permissions. Selecting a result does not fetch its contents until you explicitly start the reviewed task.</p><label>Find document <input class="input" id="activation-query" maxlength="300"></label><button class="btn btn--ghost" type="button" id="activation-search">Search my connected sources</button><ul id="activation-hits"></ul><p id="activation-selected-source" role="status"></p><button class="btn btn--ghost" type="button" id="activation-repair">Save draft and open Connections</button><p>After repair, use the return link in Connections to continue this exact draft. No failed task is retried automatically.</p></div>
+</div>
+<label>My acceptance criteria <textarea class="textarea" id="activation-criteria" maxlength="2000" rows="4" required></textarea></label>
+<button class="btn btn--primary" type="submit" {% if not activation.readiness.can_start %}disabled{% endif %}>Save private draft</button>
+</form>
+<p id="activation-status" role="status" aria-live="polite"></p>
+<section class="panel" id="activation-review" hidden><h2>Review before starting</h2><pre id="activation-review-text" class="wrap-pre"></pre><p>This starts a normal governed task using the existing configured model routes and limits. Provider usage may incur cost, including for practice data.</p><button class="btn btn--primary" type="button" id="activation-launch">Review and start this task</button><button class="btn btn--ghost" type="button" id="activation-refresh">Refresh exact draft and task</button></section>
+<section class="panel" id="activation-result" hidden><h2>Review the current result</h2><a id="activation-task-link" href="/chat">Open task and evidence</a><pre id="activation-result-text" class="wrap-pre"></pre><p id="activation-acceptance-state"></p><button class="btn btn--primary" type="button" id="activation-accept">Accept this exact result</button><button class="btn btn--ghost" type="button" id="activation-workflow">Save reusable private workflow draft</button><a id="activation-workflow-link" hidden>Review reusable workflow</a></section>
+<h2>Your recent activation drafts</h2><ul>{% for draft in activation.drafts %}<li><a href="/get-started/employee?draft={{ draft.id }}">{{ draft.label }}</a> · {{ draft.state|humanize }}</li>{% else %}<li>No saved drafts in this workspace.</li>{% endfor %}</ul>
+</section>
+<script id="activation-data" type="application/json">{{ activation|tojson }}</script>
+<script src="/static/lightwork-employee-activation.js" defer></script>
+{% endblock %}

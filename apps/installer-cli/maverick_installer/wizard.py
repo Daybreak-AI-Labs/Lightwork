@@ -282,6 +282,12 @@ def _q_secret(message: str) -> str:
     return _ask(questionary.password(message)) or ""
 
 
+def _employee_activation_job_choices() -> list[str]:
+    from maverick.config import EMPLOYEE_ACTIVATION_JOBS
+    chosen = _q_checkbox("Which first-job guides may employees use within their existing access?", list(EMPLOYEE_ACTIVATION_JOBS.values()), default=list(EMPLOYEE_ACTIVATION_JOBS.values()))
+    return [key for key, label in EMPLOYEE_ACTIVATION_JOBS.items() if label in chosen]
+
+
 def _q_checkbox(message: str, choices: list[str], default: list[str] | None = None) -> list[str]:
     if questionary is None:
         print(f"{message} (comma-separated numbers, blank = none)")
@@ -4626,6 +4632,7 @@ def pick_advanced() -> dict[str, Any]:
         "allow_employee_task_diagnostics": _q_confirm(
             "Show employees bounded diagnostics and support guidance for their own tasks? No additional record access is granted.", default=True,
         ),
+        "employee_activation_jobs": _employee_activation_job_choices(),
         "allow_employee_activation": _q_confirm(
             "Guide signed-in employees through readiness checks and their first allowed task? Existing policy and budget limits still apply.", default=True,
         ),
@@ -8780,13 +8787,15 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     compress_off = advanced.get("dashboard_compress") is False
     if isinstance(dept, dict) and (
         "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off or "extension_form_values" in advanced or "extension_page_structure" in advanced
+        or "local_owner_setup" in advanced or compress_off or "employee_activation_jobs" in advanced or "extension_form_values" in advanced or "extension_page_structure" in advanced
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
         # turn IdP (SCIM) team membership into a role / department grant.
         lines.append("")
         lines.append("[dashboard]")
+        if "employee_activation_jobs" in advanced:
+            _emit_kv(lines, "employee_activation_jobs", advanced["employee_activation_jobs"])
         for capture_key in ("extension_form_values", "extension_page_structure"):
             if capture_key in advanced:
                 _emit_kv(lines, capture_key, advanced[capture_key] is True)

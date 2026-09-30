@@ -1094,6 +1094,8 @@ from .cost_reconciliation_api import router as cost_reconciliation_router
 app.include_router(cost_reconciliation_router)
 from .task_diagnostics import router as task_diagnostics_router
 app.include_router(task_diagnostics_router)
+from .employee_activation import router as employee_activation_router
+app.include_router(employee_activation_router)
 from .product_operations import router as product_operations_router
 app.include_router(product_operations_router)
 from .settings_experience import router as settings_experience_router
@@ -6625,8 +6627,8 @@ def oversight_page(request: Request) -> HTMLResponse:
         source_errors.append("Emergency-stop state is unavailable. Check its controls before relying on this view.")
 
     try:
-        approvals = [a for a in w.pending_approvals()
-                     if owner_filter is None or (a.requested_by or "") == owner_filter]
+        from .content_access import can_read_approval
+        approvals = [a for a in w.pending_approvals() if can_read_approval(request, a, world=w)]
         pending = len(approvals)
     except Exception:
         approvals, pending = [], None
@@ -11545,6 +11547,7 @@ def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLRes
         reviewed_outcome=guided["outcome"] if guided else None,
     )
     state["guided"] = guided
+    state["employee_activation_enabled"] = get_features().get("employee_activation") is True
     from .local_owner import available as local_owner_available
     state["local_owner_setup_available"] = local_owner_available(request)
     return templates.TemplateResponse(

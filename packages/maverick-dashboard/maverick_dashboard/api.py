@@ -936,7 +936,7 @@ def _board_savings(w, owner, days: int) -> dict:
     return {"report": report, "daily_done": list(daily.values())}
 
 
-def _board_oversight(w, owner, days: int) -> dict:
+def _board_oversight(w, owner, days: int, request=None) -> dict:
     """Scoped guardrail metadata with explicit availability for each source."""
     from datetime import datetime, timedelta, timezone
     from .app import _audit_event_visible_to_caller, _is_intervention
@@ -983,7 +983,11 @@ def _board_oversight(w, owner, days: int) -> dict:
         if owner is not None:
             clauses += " AND COALESCE(a.requested_by, '') = ?"
             values = (owner,)
-        pending = int(w.query("SELECT COUNT(*) FROM approvals a WHERE " + clauses, values)[0][0])
+        if request is None:
+            pending = int(w.query("SELECT COUNT(*) FROM approvals a WHERE " + clauses, values)[0][0])
+        else:
+            from .content_access import can_read_approval
+            pending = sum(can_read_approval(request, row, world=w) for row in w.pending_approvals())
     except Exception:  # pragma: no cover
         pending = None
         sources["approvals"]["state"] = "unavailable"
@@ -1025,7 +1029,7 @@ def dashboard_board(request: Request, board: str, days: int | None = None) -> di
             "savings": _board_savings,
             "oversight": _board_oversight,
         }[board]
-        payload = build(w, owner, d)
+        payload = build(w, owner, d, request=request) if board == "oversight" else build(w, owner, d)
     else:
         raise HTTPException(status_code=404, detail="unknown board")
     payload.update({"board": board, "days": d, "generated_at": time.time()})

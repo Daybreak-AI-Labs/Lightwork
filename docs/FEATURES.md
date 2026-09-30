@@ -5749,3 +5749,7 @@ Provider adapters declare supported settings and refuse unsupported nonempty fie
 WorldModel and governed-record connections bound established-socket waits, including commit, rollback and pool reset, while preserving unknown outcomes without replaying writes. See [PostgreSQL client I/O deadlines](operations/postgres-io-deadlines.md) for the independent client, connection and server timeout settings and reconciliation contract.
 
 PostgreSQL learning stores use tenant-scoped keys for addenda, line metadata, transfer memory and corpus rows. [Migration 39](operations/learning-store-tenant-keys.md) preserves existing data and refuses unrecognized constraint layouts.
+
+### Personal daily work and first-job activation
+
+Today composes authorized native work, decisions, occurrences and template pins with personal card order, period and starting-page preferences. Employee activation keeps sample/real source drafts private, returns from scoped connection repair, starts through native submission receipts, requires current human acceptance and hands off reusable private workflow instructions. Both expose reviewed native Copilot operations; see [employee activation](employee-activation.md). These audit changes remain draft implementation awaiting final integrated qualification.

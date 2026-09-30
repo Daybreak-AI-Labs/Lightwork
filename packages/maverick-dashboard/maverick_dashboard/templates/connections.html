@@ -47,6 +47,8 @@
 {% endcall %}
 
 <div class="cx">
+  {% set activation_draft = request.query_params.get('activation_draft', '') %}
+  {% if activation_draft.startswith('EAP-') and activation_draft|length == 52 %}<p class="panel"><a href="/get-started/employee?draft={{ activation_draft|urlencode }}">Return to your saved activation draft</a>. Connection setup does not restart a task; review the same draft after repair.</p>{% endif %}
   {% if not connections_enabled %}
   {% from "_module_gate.html" import module_gate %}
   {{ module_gate('connections', 'Connections', detail='Save sign-ins and keys for the services your workflows use.') }}

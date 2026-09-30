@@ -3378,3 +3378,22 @@ def get_value(*, config: dict | None = None) -> dict:
         "currency": str(cfg.get("currency", "USD") or "USD").upper()[:8],
         "departments": departments,
     }
+
+
+EMPLOYEE_ACTIVATION_JOBS = {
+    "weekly_update": "Write a useful weekly update", "project_plan": "Turn notes into a project plan",
+    "privacy_evidence": "Prepare a privacy evidence summary", "security_review": "Prepare a security review brief",
+    "finance_variance": "Explain a simple budget variance",
+}
+
+
+def get_employee_activation_jobs() -> set[str]:
+    """Organization-approved first-job guides; a workspace may only narrow."""
+    key = "employee_activation_jobs"
+    ceiling = load_global_config().get("dashboard", {}).get(key, list(EMPLOYEE_ACTIVATION_JOBS))
+    selected = load_config().get("dashboard", {}).get(key, ceiling)
+    if not isinstance(ceiling, list) or not isinstance(selected, list):
+        return set()
+    if not all(isinstance(item, str) for item in [*ceiling, *selected]):
+        return set()
+    return set(ceiling) & set(selected) & EMPLOYEE_ACTIVATION_JOBS.keys()

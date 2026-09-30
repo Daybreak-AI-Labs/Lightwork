@@ -58,6 +58,9 @@
       if (--remaining < 0 || depth > 6) { node('p', 'More details are available on the native page.', target); return; }
       if (item === null || item === undefined) { node('span', 'Not specified', target); return; }
       if (typeof item !== 'object') { node('span', typeof item === 'boolean' ? (item ? 'Yes' : 'No') : item, target); return; }
+      if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href)) {
+        var local = node('a', item.label, target); local.href = item.href; local.className = 'btn btn--ghost'; return;
+      }
       var list = node('dl', undefined, target);
       Object.entries(item).slice(0, 35).forEach(function (entry) {
         node('dt', Array.isArray(item) ? String(Number(entry[0]) + 1) : entry[0].replace(/_/g, ' '), list);
@@ -66,8 +69,12 @@
     }
     append(parent, value, 0);
   }
+  function safeLocalHref(href) {
+    if (typeof href !== 'string' || !href.startsWith('/') || href.startsWith('//') || /[\\\u0000-\u0020]/.test(href)) return false;
+    try { return new URL(href, window.location.origin).origin === window.location.origin; } catch (_) { return false; }
+  }
   function nativeLink(item, parent) {
-    if (typeof item.direct_ui !== 'string' || !item.direct_ui.startsWith('/') || item.direct_ui.startsWith('//')) return;
+    if (!safeLocalHref(item.direct_ui)) return;
     var link = node('a', 'Open native controls', parent); link.className = 'btn btn--ghost'; link.href = item.direct_ui;
   }
   async function refresh() {
@@ -102,9 +109,10 @@
       if (control) control.remove();
       control = node(choices ? 'select' : spec.kind === 'textarea' ? 'textarea' : 'input', undefined, row);
       control.id = id; control.name = spec.name; control.className = 'input'; control.required = spec.required === true;
-      if (choices) choices.forEach(function (choice, index) { var option = node('option', choice.label, control); option.value = String(index); option._typedValue = choice.value; if (choice.value === spec.value) option.selected = true; });
+      if (choices && spec.kind === 'multiselect') control.multiple = true;
+      if (choices) choices.forEach(function (choice, index) { var option = node('option', choice.label, control); option.value = String(index); option._typedValue = choice.value; if (spec.kind === 'multiselect' ? Array.isArray(spec.value) && spec.value.indexOf(choice.value) >= 0 : choice.value === spec.value) option.selected = true; });
       else { control.type = spec.kind === 'boolean' ? 'checkbox' : spec.kind === 'number' ? 'number' : 'text'; if (spec.kind === 'number') { control.step = 'any'; control.min = '0'; } control.maxLength = spec.max_length || 2000; control.value = spec.value === null || spec.value === undefined ? '' : String(spec.value); if (spec.kind === 'boolean') control.checked = spec.value === true; }
-      controls[spec.name] = function () { if (choices) return control.selectedOptions[0] ? control.selectedOptions[0]._typedValue : ''; if (spec.kind === 'boolean') return control.checked; if (spec.kind === 'number') return control.value === '' ? null : Number(control.value); return control.value; };
+      controls[spec.name] = function () { if (choices && spec.kind === 'multiselect') return Array.from(control.selectedOptions, function (option) { return option._typedValue; }); if (choices) return control.selectedOptions[0] ? control.selectedOptions[0]._typedValue : ''; if (spec.kind === 'boolean') return control.checked; if (spec.kind === 'number') return control.value === '' ? null : Number(control.value); return control.value; };
     }
     install(Array.isArray(spec.choices) ? spec.choices : null);
     if (spec.depends_on && spec.choices_by) return function () {
