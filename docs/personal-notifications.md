@@ -6,12 +6,19 @@ alerts, a daily digest, event subscriptions, a time zone, quiet hours, project
 watches and temporary task mutes. Installation administrators can enable this
 in All settings; the installer provides the same choice.
 
-The delivery channel currently implemented is the in-product inbox. It refreshes
-every 30 seconds while its page is visible and catches up when reopened. There
-is no request-less scheduler or external per-person delivery routing yet. The
-UI states that limitation. Organization webhook alerts keep their separate
-policy and are not repurposed as personal destinations. This is partial LW141
-implementation, not a claim that phone/email digests are complete.
+The in-product inbox refreshes every 30 seconds while visible. Administrators
+can also enable `personal_background` in All settings or the installer. The
+dashboard then observes explicitly enrolled accounts while their pages are
+closed, releasing eligible digests at the next observation. Opening the inbox
+enrolls that named account in an encrypted tenant-local registry. The UI shows
+the last completed background observation; enabled is not described as delivered.
+The worker shares the dashboard shutdown supervisor, active-tenant checks,
+current named-account authority, and the complete source projection (including
+budget warnings). Revoked membership stops observation and removes that
+account's enrollment and inbox state. At most 100 recipients are observed per
+cycle with a rotating cursor and 20-second work budget; busy deployments may
+observe less frequently than 30 seconds. External per-person delivery routing
+is still unfinished. Organization webhook alerts keep their separate policy.
 
 The projection reads the latest 200 owned tasks and a bounded assigned-approval
 list. Coverage limits are displayed. Semantic status/question/result versions
@@ -33,8 +40,8 @@ binding. Background reads retain unsaved form edits; conflicts require an
 explicit reload before editing the latest values. Muting one task does not
 mute other tasks. Unsubscribed/off periods do not queue a later replay.
 
-Remaining: background event ingestion (including transitions between page
-refreshes), external recipient/channel binding and delivery receipts, complete
+Remaining: durable event ingestion (including transitions between background
+observations), external recipient/channel binding and delivery receipts, complete
 history pagination, shared Copilot operations and runtime qualification. The
 authored DST, recipient-isolation, deduplication, mute and revocation regression
 tests have not been executed.

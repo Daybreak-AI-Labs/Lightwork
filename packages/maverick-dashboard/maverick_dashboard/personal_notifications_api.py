@@ -28,8 +28,21 @@ def _identity(request):
     return principal
 
 
-def _projection(request, actor: str) -> tuple[list[dict], list[dict], list[dict], bool]:
-    world = _app()._world()
+def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[dict], list[dict], bool]:
+    world = world if world is not None else _app()._world()
+    if request is None:
+        from maverick.paths import current_tenant_id_strict
+        from maverick.personal_identity import principal_current
+        from . import rbac, suite_grants
+        if not principal_current(actor):
+            raise PermissionError("Personal alert account no longer has access.")
+        tenant = current_tenant_id_strict()
+        role = rbac.get_tenant_role(tenant, actor) if tenant else auth.global_role_for_principal(actor)
+        operate = "operate" in rbac.permissions_for(role)
+        suites = None if auth.is_dashboard_admin(actor) else suite_grants.granted_suites(actor)
+    else:
+        operate = auth.has_permission(request, "operate")
+        suites = auth.caller_suites(request)
     goals = world.list_goals(owner=actor, limit=201, order="desc")
     limited = len(goals) > 200
     # Own-task scope is deliberately explicit; a global administrator's normal
@@ -38,7 +51,8 @@ def _projection(request, actor: str) -> tuple[list[dict], list[dict], list[dict]
     sources, projects = [], {}
     tasks = []
     for goal in goals:
-        auth.assert_goal_access(request, goal)
+        if request is not None:
+            auth.assert_goal_access(request, goal)
         tasks.append({"id": goal.id, "title": goal.title})
         project_id = getattr(goal, "project_id", None)
         if project_id:
@@ -59,11 +73,11 @@ def _projection(request, actor: str) -> tuple[list[dict], list[dict], list[dict]
             add("question:" + str(question.id), question.id, "Needs your answer", category="needs-decision")
         if goal.deadline and goal.status not in {"done", "failed", "cancelled"} and goal.deadline <= time.time() + 3600:
             add("deadline", goal.deadline, "Deadline approaching or overdue", category="deadline")
-    if auth.has_permission(request, "operate"):
+    if operate:
         for approval in world.pending_approvals()[:200]:
             if approval.claimed_by != actor:
                 continue
-            if approval.department and not auth.suite_allowed(request, approval.department):
+            if approval.department and suites is not None and approval.department not in suites:
                 continue
             state = world.approval_state(approval.id)
             if not state or state["status"] != "pending" or actor in state["approvers"] or approval.requested_by == actor:
@@ -85,8 +99,10 @@ def _state(request, *, seen_id=None):
 def _state_locked(request, *, seen_id=None):
     from maverick import config, experience_preferences as preferences
     from maverick.personal_notifications import PersonalInbox, validate_preferences
+    from maverick.personal_notification_recipients import enroll, status
     from .draft_api import context_for
     actor = _identity(request)
+    enroll(actor)
     state = preferences.state(actor)
     choice = validate_preferences(state["values"].get("notification_preferences", {}))
     sources, tasks, projects, limited = _projection(request, actor)
@@ -97,7 +113,9 @@ def _state_locked(request, *, seen_id=None):
         allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True)
     return {**inbox, "preferences": choice, "context": context_for(request), "revision": state["revision"],
             "tasks": tasks, "projects": projects, "partial": limited,
-            "critical_allowed": (config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True}
+            "critical_allowed": (config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True,
+            "background_enabled": (config.load_config().get("notifications") or {}).get("personal_background") is True,
+            "background": status(actor)}
 
 
 @router.get("/notifications")

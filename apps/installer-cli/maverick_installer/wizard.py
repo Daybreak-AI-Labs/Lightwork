@@ -6233,7 +6233,11 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     personal_critical_bypass = personal_alerts and _q_confirm(
         "Allow people to opt approval/deadline alerts out of their quiet hours and digest timing?", default=False,
     )
-    personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass}
+    personal_background = personal_alerts and _q_confirm(
+        "Refresh enrolled people's alert inboxes and release digests while their pages are closed? The dashboard must remain running.", default=False,
+    )
+    personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
+                       "personal_background": personal_background}
     if not _q_confirm(
         "Get pinged when long runs finish? (ntfy / Pushover / Slack / Discord)",
         default=False,

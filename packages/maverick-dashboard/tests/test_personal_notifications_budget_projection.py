@@ -15,6 +15,7 @@ def test_budget_sources_preserve_current_owned_task_sources(monkeypatch):
     monkeypatch.setattr(api, "_app", lambda: SimpleNamespace(_world=lambda: world))
     monkeypatch.setattr(api.auth, "assert_goal_access", lambda *_: None)
     monkeypatch.setattr(api.auth, "has_permission", lambda *_: False)
+    monkeypatch.setattr(api.auth, "caller_suites", lambda *_: None)
     observed = []
     monkeypatch.setattr(budget_guidance, "warning_sources", lambda actor: observed.append(actor) or [warning])
     sources, tasks, _, _ = api._projection(object(), "user:alice")

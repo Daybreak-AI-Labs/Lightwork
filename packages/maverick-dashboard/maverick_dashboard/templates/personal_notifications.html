@@ -8,7 +8,8 @@
   <p id="personal-notification-status" role="status" aria-live="polite">Loading your inbox.</p>
   <p id="personal-notification-error" role="alert" hidden></p>
   <button class="btn btn--ghost" id="personal-notification-refresh" type="button">Refresh inbox</button>
-  <p class="muted">Delivery channel: this in-product inbox. It refreshes while this page is open and catches up when you return. Email, phone push and background delivery are not connected to these personal preferences yet.</p>
+  <p class="muted" id="personal-background-status">This inbox refreshes while visible and catches up when you return. Checking whether background observation is enabled.</p>
+  <p class="muted">Email and phone push are not connected to these preferences. Organization webhook destinations stay separate.</p>
   <div id="personal-notification-items"></div>
 </section>
 <form class="panel" id="notification-preferences" tabindex="-1">
@@ -20,7 +21,7 @@
   <label><input type="checkbox" name="quiet_enabled"> Hold new personal alerts during quiet hours</label>
   <label>Quiet hours start <input class="input" type="time" name="quiet_start" required></label>
   <label>Quiet hours end <input class="input" type="time" name="quiet_end" required></label>
-  <p class="muted">Times follow the selected zone through daylight-saving changes. A digest is delivered at most once per local day, at the first eligible inbox refresh after its time.</p>
+  <p class="muted">Times follow the selected zone through daylight-saving changes. A digest is released at most once per local day, at the first eligible observation after its time.</p>
   <label><input type="checkbox" name="critical_exceptions"> Let approval and deadline alerts bypass quiet hours and digest timing when organization policy permits</label>
   <p class="muted" id="personal-critical-policy"></p>
   <fieldset><legend>Notify me about</legend>

@@ -728,6 +728,11 @@ async def _lifespan(app: FastAPI):
         await _reclaim_orphans()
         await _install_queue_dispatcher()
         await _install_automation_scheduler()
+        try:
+            from .personal_notification_scheduler import start_personal_notification_scheduler
+            await run_in_threadpool(start_personal_notification_scheduler)
+        except Exception as exc:
+            log.warning("Personal notification observer did not start (%s)", type(exc).__name__)
         _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
