@@ -112,3 +112,20 @@ def test_fact_save_rejects_stale_workspace_context(client):
         "key": "company_name", "value": "wrong workspace", "context": "0" * 64,
     }).status_code == 409
     assert client.get("/api/v1/facts").json() == {}
+
+
+def test_tags_and_page_snapshot_recheck_current_state(client, monkeypatch):
+    from maverick_dashboard import facts_api
+    monkeypatch.setattr(facts_api, "tags_enabled", lambda: True)
+    client.post("/api/v1/facts", json={"key": "company", "value": "Acme"})
+    first = client.get("/api/v1/facts/records").json()
+    item = first["items"][0]
+    payload = {"key": "company", "tags": ["Renewal"], "expected_revision": item["revision"], "context": first["context"]}
+    assert client.patch("/api/v1/facts/tags", json=payload).status_code == 200
+    assert client.patch("/api/v1/facts/tags", json=payload).status_code == 409
+    assert client.get("/api/v1/facts/records", params={"snapshot": first["snapshot"]}).status_code == 409
+    page = client.get("/api/v1/facts/records", params={"tag": "renewal"}).json()
+    assert page["items"][0]["tags"] == ["renewal"]
+    assert client.get("/api/v1/facts/records", params={"offset": 50}).status_code == 409
+    monkeypatch.setattr(facts_api, "tags_enabled", lambda: False)
+    assert client.patch("/api/v1/facts/tags", json=payload).status_code == 409

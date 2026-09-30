@@ -4452,6 +4452,7 @@ def pick_advanced() -> dict[str, Any]:
             "retrieval). Every decision is audited. OFF by default.",
             default=False,
         ),
+        "fact_tags": _q_confirm("Organize shared business facts with tags? Tags do not change access.", default=False),
         "temporal_memory": _q_confirm(
             "Temporal memory? Keep a bitemporal history of every fact (validity "
             "windows) instead of overwriting -- answer 'what did we believe on "
@@ -8575,10 +8576,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[memory_guard]")
         lines.append("enable = true")
-    if advanced.get("temporal_memory"):
+    if advanced.get("temporal_memory") or advanced.get("fact_tags"):
         lines.append("")
         lines.append("[memory]")
-        lines.append("temporal = true")
+        if advanced.get("temporal_memory"):
+            lines.append("temporal = true")
+        if advanced.get("fact_tags"):
+            lines.append("fact_tags = true")
     if advanced.get("fairness_monitor"):
         lines.append("")
         lines.append("[fairness_monitor]")

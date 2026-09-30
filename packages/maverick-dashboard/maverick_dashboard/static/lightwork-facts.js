@@ -2,6 +2,7 @@
   'use strict';
   var root = document.getElementById('facts-workspace');
   if (!root) return;
+  var snapshot = "";
   var context = root.dataset.context, canEdit = root.dataset.canEdit === 'true';
   var form = document.getElementById('fact-editor'), name = document.getElementById('fact-name');
   var detail = document.getElementById('fact-detail'), status = document.getElementById('fact-status');
@@ -32,7 +33,8 @@
     root.querySelectorAll('button').forEach(function (button) { button.disabled = value; });
     if (!value) { prev.disabled = offset === 0; next.disabled = next.dataset.more !== 'true'; }
   }
-  next.dataset.more = next.disabled ? 'false' : 'true';
+  next.dataset.more = 'false'; next.disabled = true;
+  document.addEventListener('lightwork:workspace-changed', clearPrivate);
   function reset() {
     if (!form) return;
     form.reset(); name.readOnly = false; revision = 0; conflict.hidden = true;
@@ -56,16 +58,18 @@
     table.hidden = items.length === 0; document.getElementById('facts-empty').hidden = items.length > 0;
   }
   async function load() {
-    var params = new URLSearchParams({query:document.getElementById('fact-query').value, source:document.getElementById('fact-source').value, offset:offset, limit:50});
+    var params = new URLSearchParams({query:document.getElementById('fact-query').value, source:document.getElementById('fact-source').value, tag:document.getElementById('fact-tag').value, offset:offset, limit:50, snapshot:snapshot});
     var before = document.getElementById('fact-before').value;
     if (before) params.set('updated_before', new Date(before + 'T00:00:00').getTime() / 1000);
     var payload = await request('/api/v1/facts/records?' + params);
+    snapshot = payload.snapshot;
     render(payload.items); next.dataset.more = payload.has_more ? 'true' : 'false';
     status.textContent = payload.items.length + ' facts on this page. Search covers workspace fact names and source metadata.';
   }
   async function browse(delta) {
-    if (busy) return; var prior = offset; offset = Math.max(0, offset + delta); setBusy(true);
-    try { await load(); } catch (error) { offset = prior; status.textContent = error.message; } finally { setBusy(false); }
+    if (busy) return; var prior = offset;
+    if (delta === -offset) snapshot = ""; offset = Math.max(0, offset + delta); setBusy(true);
+    try { await load(); } catch (error) { offset = prior; status.textContent = error.status === 409 ? 'Facts changed. Select Find facts to start a fresh page sequence; your edit draft is preserved.' : error.message; } finally { setBusy(false); }
   }
   document.getElementById('fact-search').addEventListener('submit', function (event) { event.preventDefault(); browse(-offset); });
   prev.addEventListener('click', function () { browse(-50); }); next.addEventListener('click', function () { browse(50); });
@@ -80,6 +84,24 @@
   function showRecord(payload) {
     var item = payload.item, section = document.createElement('section');
     section.append(node('h3', label(item.key)), node('p', item.value));
+    section.append(node('p', 'Tags: ' + ((item.tags || []).join(', ') || 'None')));
+    if (canEdit && payload.tags_enabled) {
+      var tagsForm = document.createElement('form'), tagLabel = node('label', 'Tags separated by commas');
+      var tagsInput = document.createElement('input'); tagsInput.className = 'input'; tagsInput.value = (item.tags || []).join(', '); tagLabel.append(tagsInput);
+      var tagsSave = node('button', 'Save tags'); tagsSave.type = 'submit'; tagsSave.className = 'btn';
+      var tagStatus = node('p', 'Tags organize shared facts; they do not change access or sensitivity.'); tagStatus.setAttribute('role','status');
+      tagsForm.append(tagLabel,tagsSave,tagStatus); section.append(tagsForm);
+      tagsForm.addEventListener('submit', async function(event) {
+        event.preventDefault(); if (busy) return;
+        setBusy(true);
+        try {
+          var saved = await request('/api/v1/facts/tags', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:item.key,tags:tagsInput.value.split(',').map(function(v){return v.trim();}).filter(Boolean),expected_revision:item.revision,context:context})});
+          item.revision = saved.revision; snapshot = ''; offset = 0; await load(); tagStatus.textContent = 'Tags saved.';
+        } catch(error) { tagStatus.textContent = error.status === 409 ? 'The fact or policy changed. Your tag draft is preserved; reopen current details before saving again.' : error.message; }
+        finally { setBusy(false); }
+      });
+    } else if (!payload.tags_enabled) section.append(node('p', 'An administrator can enable tag editing in Settings, Memory & learning.'));
+
     section.append(node('p', 'Updated: ' + date(item.updated_at) + '. Source or author: ' + (item.source || 'Not recorded') + '. Trust: ' + ({0:'External',1:'Agent working note',2:'Learned',3:'First party'}[item.trust_tier] || 'Unknown') + '. Sensitivity: ' + item.sensitivity + '.'));
     if (item.source_episode_id) section.append(node('p', 'Source run reference: ' + item.source_episode_id));
     section.append(node('p', payload.history_notice), node('p', 'Expiry is governed by workspace retention settings; no individual expiry is recorded for this fact.'));
@@ -124,7 +146,7 @@
     if (button.hasAttribute('data-remove-fact')) {
       if (!(await window.mvConfirm('Remove "' + key + '" from new recall? Recorded versions and audit evidence may remain under workspace retention policy. This is not permanent erasure.', {okText:'Stop using this fact'}))) return;
       setBusy(true);
-      try { await request('/api/v1/facts/' + encodeURIComponent(key) + '?' + new URLSearchParams({expected_revision:row.dataset.revision,context:context}), {method:'DELETE'}); await load(); status.textContent = 'Fact removed from new recall. Retained history follows workspace policy.'; }
+      try { await request('/api/v1/facts/' + encodeURIComponent(key) + '?' + new URLSearchParams({expected_revision:row.dataset.revision,context:context}), {method:'DELETE'}); snapshot = ''; offset = 0; await load(); status.textContent = 'Fact removed from new recall. Retained history follows workspace policy.'; }
       catch (error) { status.textContent = error.status === 409 ? 'This fact changed. Refresh and review its current value before removing; nothing was removed.' : error.message; }
       finally { setBusy(false); } return;
     }
@@ -142,7 +164,7 @@
       try {
         await request('/api/v1/facts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
         reset();
-        try { await load(); status.textContent = 'Fact saved.'; }
+        try { snapshot = ''; offset = 0; await load(); status.textContent = 'Fact saved.'; }
         catch (refreshError) { status.textContent = 'Fact saved, but this list could not refresh. Refresh the list to see it.'; }
       }
       catch (error) { if (error.status === 409) await showConflict(payload.key); else status.textContent = error.message; }

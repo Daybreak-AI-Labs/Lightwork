@@ -710,6 +710,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
 ]
 
 MIGRATIONS.append((42, [_GOAL_MUTATION_SCHEMA]))
+MIGRATIONS.append((43, ["ALTER TABLE facts ADD COLUMN IF NOT EXISTS tags_json TEXT NOT NULL DEFAULT '[]'"]))
 
 # Highest migration version = the reported schema version.
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
@@ -3030,7 +3031,7 @@ class PostgresWorldModel:
         rows = self.fact_records(query=key, exact=True, limit=1)
         return rows[0] if rows else None
 
-    def fact_records(self, *, query: str = "", source: str = "",
+    def fact_records(self, *, query: str = "", source: str = "", tag: str = "",
                      updated_before: float | None = None, limit: int = 50,
                      offset: int = 0, exact: bool = False,
                      shared_only: bool = False) -> list[dict]:
@@ -3049,23 +3050,34 @@ class PostgresWorldModel:
         if updated_before is not None:
             clauses.append("updated_at < %s")
             values.append(float(updated_before))
+        if tag:
+            clauses.append("tags_json::jsonb @> %s::jsonb")
+            values.append(json.dumps([tag.strip().casefold()]))
         with self._tx() as cur:
             cur.execute(
                 "SELECT key, value, write_seq, updated_at, source, source_episode_id, "
-                "trust_tier, sensitivity FROM facts WHERE " + " AND ".join(clauses)
+                "trust_tier, sensitivity, tags_json FROM facts WHERE " + " AND ".join(clauses)
                 + " ORDER BY key LIMIT %s OFFSET %s",
                 (*values, max(1, min(limit, 101)), max(0, offset)),
             )
             rows = cur.fetchall()
         names = ("key", "value", "revision", "updated_at", "source", "source_episode_id",
-                 "trust_tier", "sensitivity")
-        return [{**dict(zip(names, row, strict=True)), "value": _unseal(row[1])}
-                for row in rows]
+                 "trust_tier", "sensitivity", "tags")
+        return [{**dict(zip(names, row, strict=True)), "value": _unseal(row[1]),
+                 "tags": json.loads(row[8])} for row in rows]
+
+    def fact_catalog_revision(self) -> str:
+        frag, params = _mutation_tenant_scope()
+        with self._tx() as cur:
+            cur.execute("SELECT COUNT(*), COALESCE(MAX(write_seq),0) FROM facts WHERE "
+                        + frag + " AND LOWER(key) NOT LIKE 'goal:%%' AND LOWER(key) NOT LIKE 'user:%%'", tuple(params))
+            row = cur.fetchone()
+        return f"{row[0]}:{row[1]}"
 
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-        expected_revision: int | None = None,
+        expected_revision: int | None = None, tags: list[str] | None = None,
     ) -> int:
         """Write the current value of ``key``.
 
@@ -3076,7 +3088,9 @@ class PostgresWorldModel:
         live ``facts`` row keeps its existing columns (the write-time screen in
         kv_memory, the primary ASI06 control, runs regardless of backend).
         """
+        from ..fact_revision import normalize_tags
         from ..world_model import _temporal_memory_enabled
+        encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
@@ -3132,7 +3146,12 @@ class PostgresWorldModel:
                 (key, _seal(value), episode_id, now, source,
                  int(trust_tier), sensitivity, tenant),
             )
-            return int(cur.fetchone()[0])
+            revision = int(cur.fetchone()[0])
+            if encoded_tags is not None:
+                frag, params = _mutation_tenant_scope()
+                cur.execute("UPDATE facts SET tags_json = %s WHERE key = %s AND " + frag,
+                            (encoded_tags, key, *params))
+            return revision
 
     def get_facts(self) -> dict[str, str]:
         frag, params = _tenant_scope()

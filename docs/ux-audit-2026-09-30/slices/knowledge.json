@@ -45,13 +45,18 @@
   },
   {
     "id": "LW-119",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "facts_api.py shared-only server-filtered query/source/date/tag pages with context+revision-bound snapshot; 409 on changed sequence.",
+      "world_model.py and postgres.py additive43 tags_json metadata, CAS writes advance existing fact revision; values remain encrypted, private namespaces excluded.",
+      "Facts page tag editing/current detail/history/bulk review; memory.fact_tags config, Settings toggle, installer question."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "14 focused local tests passed (Python3.12, unique workspace basetemp), including10000-record late match/tag filter, stale writes, private namespace exclusion, stale snapshots, installer parity.",
+      "Migration governance43/43 and JS syntax passed."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Integrated suite, PostgreSQL execution and browser accessibility/performance qualification remain. Typed Copilot tag edit callback handed to shared registry owner."
     ]
   },
   {

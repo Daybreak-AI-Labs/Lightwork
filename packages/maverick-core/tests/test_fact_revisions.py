@@ -80,10 +80,30 @@ def test_ten_thousand_fact_metadata_page_is_bounded_and_excludes_private_scopes(
         world.upsert_fact(f"business-{index:05d}", "detail", source="import")
     world.upsert_fact("goal:9:private", "private task note", source="import")
     world.upsert_fact("user:alice:private", "private personal note", source="import")
+    world.upsert_fact("business-09999", "detail", source="import", tags=["Renewal", "review"] )
+    assert [row["key"] for row in world.fact_records(tag="renewal", shared_only=True)] == ["business-09999"]
     page = world.fact_records(query="business-09999", source="import", shared_only=True)
     assert [row["key"] for row in page] == ["business-09999"]
     assert len(world.fact_records(limit=10_000, shared_only=True)) == 101
     assert world.fact_records(query="private", shared_only=True) == []
     assert world.fact_records(query="%", shared_only=True) == []
     assert world.fact_records(updated_before=0, shared_only=True) == []
+    world.close()
+
+
+def test_tags_preserve_encryption_cas_and_catalog_revision(tmp_path):
+    world = WorldModel(tmp_path / "facts.db")
+    first = world.upsert_fact("hours", "nine", tags=["Team", "team"])
+    before = world.fact_catalog_revision()
+    second = world.upsert_fact("hours", "nine", tags=["Office"], expected_revision=first)
+    assert world.fact_catalog_revision() != before
+    assert world.fact_record("hours")["tags"] == ["office"]
+    with pytest.raises(FactConflict):
+        world.upsert_fact("hours", "stale", tags=["wrong"], expected_revision=first)
+    world.upsert_fact("hours", "ten", expected_revision=second)
+    assert world.fact_record("hours")["tags"] == ["office"]
+    before = world.fact_catalog_revision()
+    world.upsert_fact("user:alice:private", "secret", tags=["office"])
+    assert world.fact_catalog_revision() == before
+    assert [row["key"] for row in world.fact_records(tag="office", shared_only=True)] == ["hours"]
     world.close()

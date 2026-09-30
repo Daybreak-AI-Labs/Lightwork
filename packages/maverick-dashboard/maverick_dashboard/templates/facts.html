@@ -26,12 +26,13 @@
     <form id="fact-search" class="mv-row__actions">
       <label for="fact-query">Name<input class="input" id="fact-query" maxlength="200" type="search"></label>
       <label for="fact-source">Source or author<input class="input" id="fact-source" maxlength="200" type="search"></label>
+      <label for="fact-tag">Tag<input class="input" id="fact-tag" maxlength="64" type="search"></label>
       <label for="fact-before">Updated before<input class="input" id="fact-before" type="date"></label>
       <button type="submit" class="btn">Find facts</button>
     </form>
-    <p class="muted">Searches shared business fact names and source information in this workspace. Personal and task working notes are excluded. Private encrypted values are not indexed. Up to 50 facts appear on each page.</p>
+    <p class="muted">Searches shared business fact names, tags and source information in this workspace. Personal and task working notes are excluded. Private encrypted values are not indexed. Up to 50 facts appear on each page.</p>
     <button type="button" class="btn" id="fact-review-selection">Review selected facts</button>
-    <p id="facts-empty" class="muted"{% if fact_records %} hidden{% endif %}>No facts match this view. Try another name or source, or add a fact above.</p>
+    <p id="facts-empty" class="muted"{% if fact_records %} hidden{% endif %}>No facts match this view. Try another name, source or tag, or add a fact above.</p>
     <table id="fact-list"{% if not fact_records %} hidden{% endif %}>
       <thead><tr><th scope="col">Select</th><th scope="col">Name</th><th scope="col">Detail</th><th scope="col">Last updated</th><th scope="col">Actions</th></tr></thead>
       <tbody>{% for item in fact_records[:50] %}<tr data-key="{{ item.key }}" data-revision="{{ item.revision }}">

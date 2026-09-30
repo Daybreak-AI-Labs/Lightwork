@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 42
+SCHEMA_VERSION = 43
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -423,6 +423,7 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    43: ["ALTER TABLE facts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"],
     42: [_GOAL_MUTATION_SCHEMA],
     40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
     41: [
@@ -2662,7 +2663,7 @@ class WorldModel:
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-        expected_revision: int | None = None,
+        expected_revision: int | None = None, tags: list[str] | None = None,
     ) -> int:
         """Write the current value of ``key``.
 
@@ -2673,6 +2674,8 @@ class WorldModel:
         ``fact_history`` and closes the prior open window -- non-destructive
         evolution. An unchanged value refreshes provenance without a new version.
         """
+        from .fact_revision import normalize_tags
+        encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         enc = _enc_field(value)
         from .fact_revision import check_expected_revision
@@ -2723,20 +2726,23 @@ class WorldModel:
                 "trust_tier = excluded.trust_tier, sensitivity = excluded.sensitivity",
                 (key, enc, episode_id, now, source, int(trust_tier), sensitivity),
             )
+            if encoded_tags is not None:
+                conn.execute("UPDATE facts SET tags_json = ? WHERE key = ?", (encoded_tags, key))
             return int(conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()[0])
 
     def fact_record(self, key: str) -> dict | None:
         row = self._read_one(
             "SELECT key, value, id AS revision, updated_at, source, source_episode_id, "
-            "trust_tier, sensitivity FROM facts WHERE key = ?", (key,),
+            "trust_tier, sensitivity, tags_json FROM facts WHERE key = ?", (key,),
         )
         if not row:
             return None
         result = dict(row)
         result["value"] = _dec_field(result["value"])
+        result["tags"] = json.loads(result.pop("tags_json"))
         return result
 
-    def fact_records(self, *, query: str = "", source: str = "",
+    def fact_records(self, *, query: str = "", source: str = "", tag: str = "",
                      updated_before: float | None = None, limit: int = 50,
                      offset: int = 0, shared_only: bool = False) -> list[dict]:
         """Bounded metadata-filtered page; encrypted values are not indexed."""
@@ -2750,13 +2756,28 @@ class WorldModel:
         if updated_before is not None:
             clauses.append("updated_at < ?")
             params.append(float(updated_before))
+        if tag:
+            clauses.append("EXISTS (SELECT 1 FROM json_each(facts.tags_json) WHERE value = ?)")
+            params.append(tag.strip().casefold())
         sql = ("SELECT key, value, id AS revision, updated_at, source, "
-               "source_episode_id, trust_tier, sensitivity FROM facts")
+               "source_episode_id, trust_tier, sensitivity, tags_json FROM facts")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY key LIMIT ? OFFSET ?"
         rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
-        return [{**dict(row), "value": _dec_field(row["value"])} for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["value"] = _dec_field(item["value"])
+            item["tags"] = json.loads(item.pop("tags_json"))
+            result.append(item)
+        return result
+
+    def fact_catalog_revision(self) -> str:
+        """Metadata clock for shared facts; never decrypt or count private namespaces."""
+        row = self._read_one("SELECT COUNT(*), COALESCE(MAX(id),0) FROM facts "
+                             "WHERE LOWER(key) NOT LIKE 'goal:%' AND LOWER(key) NOT LIKE 'user:%'")
+        return f"{row[0]}:{row[1]}"
 
     def get_facts(self) -> dict[str, str]:
         """All current facts as ``{key: value}``, newest first."""

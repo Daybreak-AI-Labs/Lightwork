@@ -721,6 +721,9 @@ SETTINGS: tuple[Setting, ...] = (
       pattern=r"[A-Za-z]{3}"),
 
     # ------------------------------------------------------- Memory & learning
+    S("memory", "fact_tags", "Organize shared facts with tags",
+      "Let operators add metadata tags to shared facts and filter by those tags. Tags never grant access.",
+      "toggle", "Memory & learning", False, "maverick.config"),
     S("memory", "temporal", "Keep the history of every fact",
       "Remember what was believed on each date instead of only the latest value.",
       "toggle", "Memory & learning", False, "maverick.config", env=("MAVERICK_TEMPORAL_MEMORY",)),

@@ -18,3 +18,17 @@ def check_expected_revision(expected: int | None, actual: int) -> None:
         raise ValueError("expected fact revision must be a nonnegative integer")
     if expected != actual:
         raise FactConflict("The fact changed. Read its current value before trying again.")
+
+
+def normalize_tags(tags: list[str]) -> list[str]:
+    """Shared metadata labels, never an authorization or content classification."""
+    if not isinstance(tags, list) or len(tags) > 20:
+        raise ValueError("Use up to 20 tags.")
+    result = set()
+    for tag in tags:
+        if not isinstance(tag, str) or not tag.strip() or len(tag.strip()) > 64:
+            raise ValueError("Tags must contain 1 to 64 characters.")
+        if any(ord(char) < 32 for char in tag):
+            raise ValueError("Tags cannot contain control characters.")
+        result.add(tag.strip().casefold())
+    return sorted(result)
