@@ -396,7 +396,19 @@ def _locked(*, strict: bool = False):
         stack.enter_context(authority_effect_fence())
         stack.enter_context(_REGISTRY_LOCK)
         stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
+        # Admission paths that already hold the roster (provider_admission)
+        # must be able to repair the default tenant without re-locking: the
+        # lock is not re-entrant and the flock would block the same process.
+        _LOCK_STATE.held = True
+        stack.callback(setattr, _LOCK_STATE, "held", False)
         return stack.pop_all()
+
+
+_LOCK_STATE = threading.local()
+
+
+def _roster_locked_by_this_thread() -> bool:
+    return bool(getattr(_LOCK_STATE, "held", False))
 
 
 def list_tenants() -> list[TenantRecord]:
@@ -522,13 +534,22 @@ def ensure_default_tenant_registered(*, actor: str = "system") -> TenantRecord |
     """
     if not _registry_path().exists():
         return None
-    with _locked():
+
+    def _register() -> TenantRecord | None:
         records = _load()
         default = _default_record(records)
-        if default is None:
-            return None
-        records[default.id] = default
-        _save(records)
+        if default is not None:
+            records[default.id] = default
+            _save(records)
+        return default
+
+    if _roster_locked_by_this_thread():
+        default = _register()
+    else:
+        with _locked():
+            default = _register()
+    if default is None:
+        return None
     _audit_default_registered(default.id, trigger="repair", actor=actor)
     log.warning("tenant registry: registered the default workspace %r so it "
                 "keeps running alongside the named workspaces", default.id)

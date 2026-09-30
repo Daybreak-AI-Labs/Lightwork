@@ -113,3 +113,31 @@ def test_creating_the_default_itself_does_not_duplicate_it(monkeypatch, audit_ro
     assert rec.display_name == "Mine"
     assert [t.id for t in tr.list_tenants()] == ["owner-browser"]
     assert audit_rows == []
+
+
+def test_repair_inside_a_held_roster_lock_does_not_deadlock(monkeypatch, audit_rows):
+    """provider_admission calls assert_tenant_active while holding the roster
+    lock; the repair must reuse that lock instead of waiting on it forever."""
+    import threading
+
+    tr.create_tenant("acme")
+    monkeypatch.setenv("MAVERICK_TENANT", "owner-browser")
+    outcome: dict[str, object] = {}
+
+    def _admit():
+        try:
+            with tr._locked(strict=True):
+                tr.assert_tenant_active("owner-browser")
+            outcome["ok"] = True
+        except Exception as exc:  # noqa: BLE001 -- the failure is the finding
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=_admit, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive(), "assert_tenant_active deadlocked on the roster lock"
+    assert outcome == {"ok": True}
+    assert tr.get_tenant("owner-browser").active
+    # And the lock is released for the next admission.
+    with tr._locked():
+        pass
