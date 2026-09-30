@@ -56,3 +56,29 @@ def test_concurrent_contexts_retain_one_store_lock_per_workspace():
             rows = ux_store.shared().annotations(7)
             assert len(rows) == 2
             assert {row["note"] for row in rows} == {workspace}
+
+
+def test_legacy_first_workspace_file_is_not_silently_adopted():
+    # Reproduce the historical first-workspace capture: a store from A is
+    # subsequently used by B, so its file cannot safely be assigned to A.
+    with paths.tenant_scope(tenant="ux-alpha"):
+        legacy_path = paths.data_dir("dashboard", "ux_store.json")
+        captured = ux_store.UxStore(path=legacy_path)
+    with paths.tenant_scope(tenant="ux-beta"):
+        captured.annotate(7, 1, "Beta private annotation", author="alice")
+        captured.pin("alice", 7)
+        captured.save_view("alice", "Beta private view", {"q": "Beta private query"})
+        captured.gallery_add(7, blurb="Beta private blurb", curator="alice")
+    ux_store.reset_shared()
+    with paths.tenant_scope(tenant="ux-alpha"):
+        current = ux_store.shared()
+        assert current.annotations(7) == []
+        assert current.pins("alice") == []
+        assert current.views("alice") == {}
+        assert current.gallery() == []
+        assert ux_store.UxStore().annotations(7) == []
+        current.annotate(7, 1, "New Alpha annotation", author="alice")
+        assert current.annotations(7)[0]["note"] == "New Alpha annotation"
+    # Bytes remain available for deliberate custodian review, not guessed
+    # ownership, destructive migration or ordinary employee publication.
+    assert ux_store.UxStore(path=legacy_path).annotations(7)[0]["note"] == "Beta private annotation"

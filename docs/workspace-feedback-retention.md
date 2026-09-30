@@ -5,6 +5,10 @@ Readback also matches the currently authorized task owner. Aggregate feedback
 counts are limited to the current account's records. Trace annotations, saved
 views, pins and curated-run entries resolve their workspace on every request;
 switching workspaces does not reuse another workspace's in-memory store.
+New shared UX records use `dashboard/ux_store-v2.json`. The older
+`ux_store.json` may contain records written by a different workspace through
+the historical singleton. It is retained for separate custodian review and is
+not automatically imported. New saved views, pins and annotations remain usable.
 
 The older deployment-wide `goal-feedback.ndjson` does not establish which
 workspace produced a row. It remains on disk but is not imported, displayed,

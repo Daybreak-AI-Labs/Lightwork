@@ -10,7 +10,7 @@ world model's run data:
     (``goal_id`` + ``seq``), so a reviewer can mark "this is where it went
     wrong" and the next person sees it.
 
-One JSON document under ``data_dir("dashboard", "ux_store.json")`` — tenant-
+One JSON document under ``data_dir("dashboard", "ux_store-v2.json")`` - tenant-
 aware via :func:`maverick.paths.data_dir`, atomic replace on write, owner-only
 permissions, thread-safe, bounded (caps below) so it can't grow unbounded.
 """
@@ -41,7 +41,7 @@ class UxStore:
     def __init__(self, path: Path | None = None):
         if path is None:
             from .paths import data_dir
-            path = data_dir("dashboard") / "ux_store.json"
+            path = data_dir("dashboard") / "ux_store-v2.json"
         self.path = Path(path)
         self._lock = threading.Lock()
 
@@ -237,7 +237,10 @@ def shared() -> UxStore:
     global _shared
     from .paths import data_dir
 
-    path = data_dir("dashboard", "ux_store.json").resolve()
+    # The previous singleton could write another workspace's records into its
+    # first workspace's file. Those rows carry no verifiable workspace lineage;
+    # do not silently assign them to that first workspace during an upgrade.
+    path = data_dir("dashboard", "ux_store-v2.json").resolve()
     with _shared_lock:
         if _shared is None:
             _shared = {}
