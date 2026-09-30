@@ -8331,12 +8331,12 @@ async def remove_skill_endpoint(request: Request, name: str) -> None:
 # ---------- self-learning: learned ledger + generated tools (#427) ----------
 
 
-def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -> dict:
+def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False, request: Request | None = None) -> dict:
     """Read-only view of the self-learning ledger + on-disk generated tools.
 
     Powers the /learned page and GET /api/v1/learned. Pending corpus
-    counts are safe for viewers, but staged candidate details may contain
-    harvested operator text and are included only for admin callers. Degrades
+    counts and details use current source ownership. Administrative authority
+    alone does not grant employee content access. Degrades
     to empty lists if the self-learning module / ledger / dir is unavailable, so a
     fresh install (feature never enabled) renders "nothing learned yet"
     instead of 500ing.
@@ -8354,11 +8354,11 @@ def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -
             for e in self_learning.history(
                 limit=limit,
                 path=self_learning.LEARNED_PATH,
+                owner=goal_owner_filter(request) if request is not None else None,
             )
         ]
-        d = self_learning.GENERATED_TOOLS_DIR
-        if d.exists():
-            tools = sorted(p.name for p in d.glob("*.py") if not p.name.startswith((".", "_")))
+        tools = sorted(name + ".py" for name in self_learning.generated_tool_names(
+            owner=goal_owner_filter(request) if request is not None else None))
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("learned snapshot failed: %s", e)
     harness, harness_enabled = _harness_guidance()
@@ -8505,7 +8505,7 @@ def _resolve_generated_tool(name: str):
 async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
     return _learned_snapshot(
-        include_pending_items=has_global_permission(request, "admin")
+        include_pending_items=has_global_permission(request, "admin"), request=request,
     )
 
 
@@ -8532,13 +8532,14 @@ async def remove_generated_tool(request: Request, name: str) -> None:
             self_learning.delete_generated_tool,
             target.stem,
             actor=caller_principal(request) or "local",
+            owner=goal_owner_filter(request),
         )
     except ValueError:
         raise HTTPException(
             status_code=400,
             detail="invalid generated-tool name",
         ) from None
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         raise HTTPException(
             status_code=404,
             detail="no such generated tool",
@@ -15566,7 +15567,7 @@ def _learning_snapshot(request: Request) -> dict:
             # (the old path silently capped the count at 50).
             from maverick import self_learning
 
-            learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH))
+            learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH, owner=goal_owner_filter(request)))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()

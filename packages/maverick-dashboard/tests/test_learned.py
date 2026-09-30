@@ -21,8 +21,8 @@ def _isolate(monkeypatch, tmp_path):
     ledger = tmp_path / "learned.ndjson"
     gen = tmp_path / "generated_tools"
     gen.mkdir()
-    monkeypatch.setattr(self_learning, "LEARNED_PATH", ledger)
-    monkeypatch.setattr(self_learning, "GENERATED_TOOLS_DIR", gen)
+    monkeypatch.setitem(self_learning.__dict__, "LEARNED_PATH", ledger)
+    monkeypatch.setitem(self_learning.__dict__, "GENERATED_TOOLS_DIR", gen)
     monkeypatch.setattr(
         consent,
         "CONSENT_LEDGER_PATH",
@@ -32,8 +32,34 @@ def _isolate(monkeypatch, tmp_path):
     return ledger, gen
 
 
+def _owned_source(target, source, *, consented=True):
+    """Create a newly published, explicitly local synthetic source."""
+    from maverick.learning_content import lineage, publish
+    from maverick.safety import consent
+    target.write_text(source, encoding="utf-8")
+    publish(target, source, lineage())
+    if consented:
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        consent.grant_persistent("register-generated-tool", scope=f"shared:{target.stem}:{digest}")
+
+
 def _write_ledger(path, entries):
-    path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    path.write_text("".join(json.dumps({"content_version": 1, "owner": "", "goal_id": None, **e}) + "\n" for e in entries), encoding="utf-8")
+
+
+def test_snapshot_uses_verified_request_owner_without_admin_bypass(monkeypatch, tmp_path):
+    from maverick import self_learning
+    from maverick.connections import bind_principal
+    from maverick_dashboard import api
+
+    ledger, _gen = _isolate(monkeypatch, tmp_path)
+    with bind_principal("user:employee"):
+        self_learning.record("employee private task", "skill", "employee_skill", path=ledger)
+    request = object()
+    monkeypatch.setattr(api, "goal_owner_filter", lambda req: "user:admin")
+    assert api._learned_snapshot(request=request)["learned"] == []
+    monkeypatch.setattr(api, "goal_owner_filter", lambda req: "user:employee")
+    assert api._learned_snapshot(request=request)["learned"][0]["name"] == "employee_skill"
 
 
 def test_learned_panel_renders_ledger_entries(monkeypatch, tmp_path):
@@ -310,7 +336,7 @@ def test_harness_guidance_shows_off_note_when_disabled(monkeypatch, tmp_path):
 
 def test_generated_tools_list_renders(monkeypatch, tmp_path):
     _ledger, gen = _isolate(monkeypatch, tmp_path)
-    (gen / "send_sms.py").write_text("# tool\n", encoding="utf-8")
+    _owned_source(gen / "send_sms.py", "# tool\n")
     (gen / ".staging_x.py").write_text("# hidden\n", encoding="utf-8")
     text = _client().get("/learned").text
     assert 'data-name="send_sms.py"' in text and "Send sms" in text
@@ -323,8 +349,8 @@ def test_generated_tools_list_renders(monkeypatch, tmp_path):
 
 def test_delete_removes_only_named_file(monkeypatch, tmp_path):
     _ledger, gen = _isolate(monkeypatch, tmp_path)
-    (gen / "bad.py").write_text("# bad\n", encoding="utf-8")
-    (gen / "good.py").write_text("# good\n", encoding="utf-8")
+    _owned_source(gen / "bad.py", "# bad\n")
+    _owned_source(gen / "good.py", "# good\n")
     client = _client()
     r = client.request(
         "DELETE", "/api/v1/generated-tools/bad.py",
@@ -342,7 +368,7 @@ def test_delete_revokes_digest_and_records_tombstone(monkeypatch, tmp_path):
 
     source = "# generated tool\n"
     target = gen / "bad.py"
-    target.write_text(source, encoding="utf-8")
+    _owned_source(target, source)
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     scope = f"shared:bad:{digest}"
     consent.grant_persistent("register-generated-tool", scope=scope)
@@ -388,7 +414,7 @@ def test_delete_audit_failure_keeps_source_but_revokes_authority(
 
     source = "# generated tool\n"
     target = gen / "bad.py"
-    target.write_text(source, encoding="utf-8")
+    _owned_source(target, source)
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     scope = f"shared:bad:{digest}"
     consent.grant_persistent("register-generated-tool", scope=scope)
@@ -443,7 +469,7 @@ def test_delete_rejects_traversal(monkeypatch, tmp_path):
 def test_delete_respects_same_origin(monkeypatch, tmp_path):
     """Cross-site DELETE (no token, bad Origin) is blocked by middleware."""
     _ledger, gen = _isolate(monkeypatch, tmp_path)
-    (gen / "bad.py").write_text("# bad\n", encoding="utf-8")
+    _owned_source(gen / "bad.py", "# bad\n")
     client = _client()
     r = client.request(
         "DELETE", "/api/v1/generated-tools/bad.py",

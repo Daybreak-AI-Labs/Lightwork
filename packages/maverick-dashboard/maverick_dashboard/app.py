@@ -3674,7 +3674,7 @@ async def learned_page(request: Request) -> HTMLResponse:
         request,
         "learned.html",
         {
-            **_learned_snapshot(include_pending_items=can_manage),
+            **_learned_snapshot(include_pending_items=can_manage, request=request),
             "can_manage": can_manage,
             "can_remove_tools": has_permission(request, "admin"),
         },
