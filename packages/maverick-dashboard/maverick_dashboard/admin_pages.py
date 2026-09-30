@@ -15,7 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import auth
+from . import _shared, auth
 
 router = APIRouter()
 
@@ -38,6 +38,15 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     persist_theme middleware (the form GETs back here with the params); the
     model choice is saved to the dashboard-owned runtime overlay."""
     return _settings_response(request, saved)
+
+
+def _api_keys_enabled() -> bool:
+    try:
+        from . import api_keys
+
+        return api_keys.enabled()
+    except Exception:
+        return False
 
 
 def _settings_response(request: Request, saved: str = "", *, notice: str = "",
@@ -187,6 +196,10 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
                                 else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
         "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
         "webhook_configured": webhook_configured,
+        # The static server token is the break-glass credential: it has no
+        # person behind it and no scopes, so Settings says so while it is set.
+        "static_token_set": bool(_shared.dashboard_token()),
+        "api_keys_enabled": _api_keys_enabled(),
         "saved": saved_msg,
         "saved_section": saved_section,
         "notice": notice,

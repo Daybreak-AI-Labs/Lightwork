@@ -74,6 +74,10 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     )),
     # GitHub PAT (ghp_/gho_/ghu_/ghr_/ghs_ prefix)
     ("github_token", re.compile(r"\bgh[ps]_[A-Za-z0-9_]{30,}\b|\bghu_[A-Za-z0-9_]{30,}\b|\bgho_[A-Za-z0-9_]{30,}\b|\bghr_[A-Za-z0-9_]{30,}\b")),
+    # Lightwork personal / service-account API key (lwk_...; see
+    # maverick_dashboard.api_keys). Only the configured default prefix is
+    # recognised here; a custom prefix must be added to this list too.
+    ("lightwork_api_key", re.compile(r"\blwk_[A-Za-z0-9_-]{20,}\b")),
     # Slack tokens (xoxb-, xoxp-, xapp-)
     ("slack_token", re.compile(r"\bxox[bpaors]-[A-Za-z0-9-]{10,}\b")),
     # Generic bearer header (Authorization: Bearer ...)

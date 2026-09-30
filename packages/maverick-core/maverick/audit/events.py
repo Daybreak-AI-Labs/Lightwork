@@ -263,6 +263,16 @@ class EventKind:
     # RUN_INGESTED payload: external_agent, outcome, cost_dollars, steps,
     # over_budget (goal_id column carries the Operating Record row).
     # ACTION_SCREENED payload: external_agent, tool, allowed, rule, reason.
+    # Personal / service-account API keys (maverick_dashboard.api_keys).
+    # API_KEY_CHANGED payload: action (created|rotated|revoked), key_id,
+    # prefix, owner, scopes, workspace, expires_at, actor -- never the secret.
+    # SERVICE_ACCOUNT_CHANGED payload: action (created|disabled), account,
+    # role, actor. BREAK_GLASS_TOKEN_USED: the static dashboard token (not a
+    # personal key) authenticated an API request; payload: path, client,
+    # rate-limited to one row per process per hour.
+    API_KEY_CHANGED = "api_key_changed"
+    SERVICE_ACCOUNT_CHANGED = "service_account_changed"
+    BREAK_GLASS_TOKEN_USED = "break_glass_token_used"
     EXTERNAL_AGENT_ENROLLED = "external_agent_enrolled"
     EXTERNAL_CREDENTIAL_MINTED = "external_credential_minted"
     EXTERNAL_RUN_INGESTED = "external_run_ingested"

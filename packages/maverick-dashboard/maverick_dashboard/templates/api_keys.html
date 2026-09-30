@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}API keys · Lightwork{% endblock %}
+{% block content %}
+  {% from "_hero.html" import hero %}
+  {{ hero('Your account', 'API keys',
+          subtitle='Keys for scripts and integrations',
+          lede='A key lets a program act as you without your password. Each key does only
+                what its scopes allow and never more than your role, stops on its expiry
+                date, and can be rotated or revoked here at any time.') }}
+
+  <div id="ak-status" class="panel" role="status" aria-live="polite">Loading your keys…</div>
+
+  <section class="panel" id="ak-secret" hidden aria-labelledby="ak-secret-title">
+    <h2 id="ak-secret-title">Copy this key now. You won't see it again.</h2>
+    <p class="muted" id="ak-secret-note"></p>
+    <p><code id="ak-secret-value" class="ak-secret"></code></p>
+    <p>
+      <button type="button" class="btn btn--primary" id="ak-copy">Copy key</button>
+      <button type="button" class="btn btn--ghost" id="ak-secret-done">I have copied it</button>
+    </p>
+  </section>
+
+  <div class="section-head"><h2 id="ak-keys-title">Your keys</h2></div>
+  <div class="panel" id="ak-keys" aria-labelledby="ak-keys-title"></div>
+
+  <div class="section-head"><h2 id="ak-new-title">Create a key</h2></div>
+  <div class="panel">
+    <form id="ak-form" aria-labelledby="ak-new-title">
+      <p>
+        <label for="ak-label">Name</label>
+        <input id="ak-label" name="label" type="text" maxlength="80" required placeholder="What will use this key, for example the nightly report script" />
+      </p>
+      <fieldset id="ak-scopes">
+        <legend>What the key may do</legend>
+        <p class="muted">Only the scopes your role allows are offered. A key can never do more than you can.</p>
+        <div id="ak-scope-boxes" role="group" aria-label="Scopes"></div>
+      </fieldset>
+      <p>
+        <label for="ak-days">Stops working after (days)</label>
+        <input id="ak-days" name="expires_in_days" type="number" min="1" step="1" />
+        <span class="muted" id="ak-days-help"></span>
+      </p>
+      <p>
+        <label for="ak-workspace">Workspace (optional)</label>
+        <input id="ak-workspace" name="workspace" type="text" maxlength="128" placeholder="Leave empty to use your current workspace" />
+      </p>
+      <p id="ak-owner-row" hidden>
+        <label for="ak-owner">Create this key for</label>
+        <select id="ak-owner" name="owner"></select>
+      </p>
+      <p><button type="submit" class="btn btn--primary">Create key</button>
+        <span class="muted" id="ak-form-msg" role="status" aria-live="polite"></span></p>
+    </form>
+  </div>
+
+  <section id="ak-admin" hidden aria-labelledby="ak-sa-title">
+    <div class="section-head"><h2 id="ak-sa-title">Service accounts</h2></div>
+    <div class="panel">
+      <p class="muted">A service account is a named identity for a program. It holds keys and a role but
+        cannot sign in. Disabling one stops all of its keys at once.</p>
+      <div id="ak-sa-note" role="note"></div>
+      <div id="ak-sa-list"></div>
+      <form id="ak-sa-form" aria-label="Create a service account">
+        <p>
+          <label for="ak-sa-name">Name</label>
+          <input id="ak-sa-name" name="name" type="text" maxlength="40" required pattern="[a-z][a-z0-9-]{1,39}" placeholder="billing-sync" />
+        </p>
+        <p>
+          <label for="ak-sa-role">Role</label>
+          <select id="ak-sa-role" name="role"></select>
+        </p>
+        <p>
+          <label for="ak-sa-desc">What it is for</label>
+          <input id="ak-sa-desc" name="description" type="text" maxlength="200" />
+        </p>
+        <p><button type="submit" class="btn btn--primary">Create service account</button>
+          <span class="muted" id="ak-sa-msg" role="status" aria-live="polite"></span></p>
+      </form>
+    </div>
+  </section>
+
+  <style>
+    .ak-secret { display: inline-block; padding: var(--space-2) var(--space-3); word-break: break-all; user-select: all; }
+    #ak-scope-boxes label { display: block; margin: var(--space-1) 0; }
+    #ak-keys table td, #ak-sa-list table td { vertical-align: top; }
+    .ak-actions button { margin-right: var(--space-2); }
+  </style>
+  <script>
+  (function () {
+    'use strict';
+    function $(id) { return document.getElementById(id); }
+    function el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+    async function request(url, options) {
+      options = options || {};
+      var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
+        headers: {Accept: 'application/json'}};
+      if (options.json !== undefined) {
+        init.headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(options.json);
+      }
+      var response = await window.fetch(url, init);
+      var data = null;
+      try { data = await response.json(); } catch (e) { data = null; }
+      if (!response.ok) {
+        var detail = (data && data.detail) ? data.detail : ('Something went wrong (' + response.status + ').');
+        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+      }
+      return data;
+    }
+    function when(ts) {
+      if (!ts) return 'never';
+      return new Date(ts * 1000).toLocaleString();
+    }
+    function statusText(k) {
+      return {active: 'Working', expiring: 'Expires soon', rotating: 'Being replaced',
+        replaced: 'Replaced', expired: 'Expired', revoked: 'Revoked'}[k.status] || k.status;
+    }
+    var state = null;
+
+    function showSecret(result) {
+      $('ak-secret-value').textContent = result.secret;
+      $('ak-secret-note').textContent = result.notice + ' Key "' + result.key.label + '" (' + result.key.prefix + '…).';
+      $('ak-secret').hidden = false;
+      $('ak-secret').scrollIntoView({behavior: 'smooth'});
+    }
+    $('ak-secret-done').addEventListener('click', function () {
+      $('ak-secret-value').textContent = '';
+      $('ak-secret').hidden = true;
+    });
+    $('ak-copy').addEventListener('click', async function () {
+      try { await navigator.clipboard.writeText($('ak-secret-value').textContent); $('ak-copy').textContent = 'Copied'; }
+      catch (e) { $('ak-copy').textContent = 'Select and copy the key above'; }
+    });
+
+    function keyTable(keys, showOwner) {
+      if (!keys.length) return el('p', 'muted', 'No keys yet.');
+      var table = el('table');
+      var head = el('thead'); var tr = el('tr');
+      ['Name', 'Starts with'].concat(showOwner ? ['Owner'] : []).concat(['Scopes', 'Stops', 'Last used', 'State', 'Actions']).forEach(function (h) {
+        var th = el('th', null, h); th.setAttribute('scope', 'col'); tr.appendChild(th);
+      });
+      head.appendChild(tr); table.appendChild(head);
+      var body = el('tbody');
+      keys.forEach(function (k) {
+        var row = el('tr');
+        row.appendChild(el('td', null, k.label));
+        row.appendChild(el('td', null, k.prefix + '…'));
+        if (showOwner) row.appendChild(el('td', null, k.owner + (k.service_account ? ' (service account)' : '')));
+        row.appendChild(el('td', null, k.scopes.join(', ') + (k.workspace ? ' · workspace ' + k.workspace : '')));
+        var stops = el('td', null, when(k.expires_at));
+        if (state.expiring_soon.indexOf(k.id) !== -1) { stops.appendChild(el('span', 'badge warn', 'soon')); }
+        row.appendChild(stops);
+        row.appendChild(el('td', null, k.last_used_at ? when(k.last_used_at) + (k.last_used_ip ? ' from ' + k.last_used_ip : '') : 'never'));
+        row.appendChild(el('td', null, statusText(k) + (k.status === 'rotating' ? ' until ' + when(k.grace_until) : '')));
+        var actions = el('td', 'ak-actions');
+        if (['active', 'expiring'].indexOf(k.status) !== -1) {
+          var rotate = el('button', 'btn btn--ghost', 'Rotate'); rotate.type = 'button';
+          rotate.setAttribute('aria-label', 'Rotate key ' + k.label);
+          rotate.addEventListener('click', function () { act(k, 'rotate'); });
+          actions.appendChild(rotate);
+        }
+        if (['active', 'expiring', 'rotating'].indexOf(k.status) !== -1) {
+          var revoke = el('button', 'btn btn--ghost', 'Revoke'); revoke.type = 'button';
+          revoke.setAttribute('aria-label', 'Revoke key ' + k.label);
+          revoke.addEventListener('click', function () {
+            if (window.confirm('Revoke "' + k.label + '"? Anything using it will stop working now.')) act(k, 'revoke');
+          });
+          actions.appendChild(revoke);
+        }
+        row.appendChild(actions);
+        body.appendChild(row);
+      });
+      table.appendChild(body);
+      return table;
+    }
+
+    async function act(key, what) {
+      try {
+        var result = await request('/api/v1/api-keys/' + encodeURIComponent(key.id) + '/' + what, {method: 'POST', json: {}});
+        if (result.secret) showSecret(result);
+        await load();
+      } catch (e) { $('ak-status').textContent = e.message; }
+    }
+
+    function render() {
+      var status = $('ak-status');
+      status.textContent = '';
+      var mine = state.keys.filter(function (k) { return k.owner === state.you; });
+      var soon = state.expiring_soon.length;
+      if (soon) {
+        status.appendChild(el('strong', null, soon === 1 ? 'One key stops working within ' + state.defaults.warning_days + ' days. ' : soon + ' keys stop working within ' + state.defaults.warning_days + ' days. '));
+        status.appendChild(document.createTextNode('Rotate them before then so nothing breaks.'));
+      } else {
+        status.textContent = state.showing_everyone ? 'Showing every key on this installation.' : (mine.length ? 'You have ' + mine.length + (mine.length === 1 ? ' key.' : ' keys.') : 'You have no keys yet.');
+      }
+      var keysPanel = $('ak-keys');
+      keysPanel.textContent = '';
+      $('ak-keys-title').textContent = state.showing_everyone ? 'Every key' : 'Your keys';
+      keysPanel.appendChild(keyTable(state.keys, state.showing_everyone));
+      if (state.admin && !state.showing_everyone) {
+        var all = el('p'); var link = el('a', null, 'Show every key on this installation'); link.href = '/account/api-keys?all=1';
+        all.appendChild(link); keysPanel.appendChild(all);
+      }
+      var boxes = $('ak-scope-boxes'); boxes.textContent = '';
+      state.scopes.forEach(function (s) {
+        if (state.scopes_available.indexOf(s.scope) === -1) return;
+        var label = el('label'); var box = el('input'); box.type = 'checkbox'; box.name = 'scopes'; box.value = s.scope;
+        if (s.scope === 'tasks:read') box.checked = true;
+        label.appendChild(box); label.appendChild(document.createTextNode(' ' + s.scope + ' — ' + s.help));
+        boxes.appendChild(label);
+      });
+      $('ak-days').value = state.defaults.default_days; $('ak-days').max = state.defaults.max_days;
+      $('ak-days-help').textContent = 'At most ' + state.defaults.max_days + ' days on this installation.';
+      if (state.admin) {
+        $('ak-admin').hidden = false;
+        var owner = $('ak-owner'); owner.textContent = '';
+        var me = el('option', null, 'Me'); me.value = ''; owner.appendChild(me);
+        (state.service_accounts || []).forEach(function (a) {
+          if (a.disabled_at) return;
+          var o = el('option', null, 'Service account ' + a.slug); o.value = a.principal; owner.appendChild(o);
+        });
+        $('ak-owner-row').hidden = owner.options.length < 2;
+        var role = $('ak-sa-role'); role.textContent = '';
+        (state.roles || []).forEach(function (r) { var o = el('option', null, r); o.value = r; role.appendChild(o); });
+        var note = $('ak-sa-note'); note.textContent = '';
+        if (state.static_token_set) {
+          note.appendChild(el('p', 'muted', 'The shared server access token is set. It never expires, has no scopes and is not tied to a person; its use is recorded as break-glass access. Prefer service accounts for programs.'));
+        }
+        var list = $('ak-sa-list'); list.textContent = '';
+        if (!(state.service_accounts || []).length) list.appendChild(el('p', 'muted', 'No service accounts yet.'));
+        (state.service_accounts || []).forEach(function (a) {
+          var h = el('h3', null, a.slug + (a.disabled_at ? ' (disabled)' : ''));
+          list.appendChild(h);
+          if (a.description) list.appendChild(el('p', 'muted', a.description));
+          list.appendChild(keyTable(a.keys, false));
+          if (!a.disabled_at) {
+            var b = el('button', 'btn btn--ghost', 'Disable ' + a.slug); b.type = 'button';
+            b.addEventListener('click', async function () {
+              if (!window.confirm('Disable "' + a.slug + '"? All of its keys stop working now.')) return;
+              try { await request('/api/v1/service-accounts/' + encodeURIComponent(a.slug) + '/disable', {method: 'POST', json: {}}); await load(); }
+              catch (e) { $('ak-sa-msg').textContent = e.message; }
+            });
+            list.appendChild(b);
+          }
+        });
+      }
+    }
+
+    async function load() {
+      var all = new URLSearchParams(window.location.search).get('all') ? '?all=1' : '';
+      try { state = await request('/api/v1/api-keys' + all); render(); }
+      catch (e) { $('ak-status').textContent = e.message; }
+    }
+
+    $('ak-form').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var scopes = Array.prototype.map.call(document.querySelectorAll('#ak-scope-boxes input:checked'), function (b) { return b.value; });
+      var body = {label: $('ak-label').value, scopes: scopes, expires_in_days: Number($('ak-days').value) || undefined,
+        workspace: $('ak-workspace').value};
+      if (!$('ak-owner-row').hidden && $('ak-owner').value) body.owner = $('ak-owner').value;
+      $('ak-form-msg').textContent = '';
+      try {
+        var result = await request('/api/v1/api-keys', {method: 'POST', json: body});
+        showSecret(result); $('ak-label').value = ''; await load();
+      } catch (e) { $('ak-form-msg').textContent = e.message; }
+    });
+    $('ak-sa-form').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      $('ak-sa-msg').textContent = '';
+      try {
+        await request('/api/v1/service-accounts', {method: 'POST', json: {name: $('ak-sa-name').value, role: $('ak-sa-role').value, description: $('ak-sa-desc').value}});
+        $('ak-sa-name').value = ''; $('ak-sa-desc').value = ''; await load();
+      } catch (e) { $('ak-sa-msg').textContent = e.message; }
+    });
+    load();
+  })();
+  </script>
+{% endblock %}

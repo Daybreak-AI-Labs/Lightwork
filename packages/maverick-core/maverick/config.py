@@ -3098,6 +3098,64 @@ def knowledge_access_enabled(cfg: dict | None = None) -> bool:
     return isinstance(section, dict) and section.get("enable", True) is True
 
 
+API_KEY_DEFAULTS: dict = {
+    "enabled": True,
+    "default_days": 90,
+    "max_days": 365,
+    "rotation_grace_hours": 24,
+    "prefix": "lwk_",
+}
+
+_API_KEY_PREFIX_RE = re.compile(r"^[a-z][a-z0-9]{1,7}_$")
+
+
+def api_key_settings(cfg: dict | None = None) -> dict:
+    """Personal and service-account API keys for scripts and integrations.
+
+    Read from ``[dashboard]``: ``api_keys`` (on by default; a key only exists
+    once a signed-in person creates one), ``api_key_default_days`` (how long a
+    new key lasts unless the person picks a shorter time), ``api_key_max_days``
+    (the longest a key may last), ``api_key_rotation_grace_hours`` (how long
+    the old secret keeps working after a rotation) and ``api_key_prefix`` (the
+    first characters of every key, so logs and scanners recognise one).
+    ``MAVERICK_DASHBOARD_API_KEYS`` overrides the on/off switch. Malformed or
+    unreadable configuration fails closed: keys are off and every limit is
+    the default.
+    """
+    out = dict(API_KEY_DEFAULTS)
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            out["enabled"] = False
+            return out
+        table = loaded.get("dashboard") if isinstance(loaded, dict) else None
+        table = table if isinstance(table, dict) else {}
+        enabled = table.get("api_keys", True)
+        out["enabled"] = enabled is True
+        for key, name, low, high in (
+            ("api_key_default_days", "default_days", 1, 3650),
+            ("api_key_max_days", "max_days", 1, 3650),
+            ("api_key_rotation_grace_hours", "rotation_grace_hours", 0, 24 * 30),
+        ):
+            raw = table.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                continue
+            if low <= raw <= high:
+                out[name] = int(raw)
+        prefix = table.get("api_key_prefix")
+        if isinstance(prefix, str) and _API_KEY_PREFIX_RE.match(prefix):
+            out["prefix"] = prefix
+        if out["default_days"] > out["max_days"]:
+            out["default_days"] = out["max_days"]
+        override = env_flag("MAVERICK_DASHBOARD_API_KEYS")
+        if override is not None:
+            out["enabled"] = override
+    except Exception:  # pragma: no cover - authority reads fail closed
+        out = dict(API_KEY_DEFAULTS)
+        out["enabled"] = False
+    return out
+
+
 def candidate_promotion_enabled(cfg: dict | None = None) -> bool:
     """Whether guarded research-candidate promotion is enabled.
 

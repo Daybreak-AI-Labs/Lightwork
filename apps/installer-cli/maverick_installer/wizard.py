@@ -175,6 +175,7 @@ STEPS: list[tuple[str, str]] = [
     ("assessments", "Assessment assists"),
     ("security_suite", "Security & GRC"),
     ("advanced", "Advanced reasoning"),
+    ("api_keys", "API access"),
     ("web_search", "Web search"),
     ("mcp_servers", "MCP servers"),
     ("plugins", "Plugins"),
@@ -4071,6 +4072,49 @@ def pick_oidc() -> dict[str, Any]:
                 "session_secret": session_secret,
             }
         )
+    return result
+
+
+def pick_api_keys() -> dict[str, Any]:
+    """API access for scripts and integrations: personal and service-account
+    keys with scopes, an expiry date and rotation.
+
+    On by default (a key only exists once a signed-in person creates one).
+    Returns the ``[dashboard]`` keys ``api_keys`` and, when changed from the
+    defaults, ``api_key_default_days`` / ``api_key_max_days`` /
+    ``api_key_rotation_grace_hours``; read by ``maverick.config.api_key_settings``.
+    """
+    console.print(
+        "[dim]API access for scripts and integrations: people create their own "
+        "keys on their account page, and administrators create service accounts "
+        "for programs. A key does only what its scopes allow and never more than "
+        "its owner's role, stops on its expiry date, and can be rotated or "
+        "revoked at any time. The shared server token stays as break-glass "
+        "access only.[/dim]"
+    )
+    result: dict[str, Any] = {
+        "api_keys": _q_confirm("Allow API keys for scripts and integrations?", default=True),
+    }
+    if not result["api_keys"]:
+        return result
+    default_days = _safe_int(
+        _q_text("  How many days should a new key last unless the person picks fewer?", default="90"),
+        default=90,
+    )
+    max_days = _safe_int(
+        _q_text("  The longest a key may last, in days", default="365"),
+        default=365,
+    )
+    grace_hours = _safe_int(
+        _q_text("  After rotating a key, how many hours should the old one keep working?", default="24"),
+        default=24,
+    )
+    if default_days != 90:
+        result["api_key_default_days"] = max(1, min(default_days, 3650))
+    if max_days != 365:
+        result["api_key_max_days"] = max(1, min(max_days, 3650))
+    if grace_hours != 24:
+        result["api_key_rotation_grace_hours"] = max(0, min(grace_hours, 720))
     return result
 
 
@@ -8633,9 +8677,17 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
+    api_keys = advanced.get("api_keys") if isinstance(advanced.get("api_keys"), dict) else {}
+    # Only a deliberate change is written: the app's defaults (on, 90 / 365
+    # days, 24 hours) apply when the table says nothing.
+    api_key_lines = {k: v for k, v in api_keys.items()
+                     if k in ("api_key_default_days", "api_key_max_days",
+                              "api_key_rotation_grace_hours")}
+    if api_keys.get("api_keys") is False:
+        api_key_lines = {"api_keys": False}
     if isinstance(dept, dict) and (
         dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off
+        or "local_owner_setup" in advanced or compress_off or api_key_lines
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
@@ -8648,6 +8700,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
+        if api_key_lines:
+            lines.append("# API keys for scripts and integrations (maverick.config.api_key_settings).")
+            for key in ("api_keys", "api_key_default_days", "api_key_max_days",
+                        "api_key_rotation_grace_hours"):
+                if key in api_key_lines:
+                    _emit_kv(lines, key, api_key_lines[key])
         if dept.get("default_suites"):
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
@@ -10036,6 +10094,14 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     advanced = state.get("advanced") or pick_advanced()
     state["advanced"] = advanced
     _save_partial(state)
+
+    _announce()
+    if "api_keys" not in advanced:
+        # Carried inside ``advanced`` so write_config's signature stays put;
+        # the writer emits the keys under [dashboard].
+        advanced["api_keys"] = pick_api_keys()
+        state["advanced"] = advanced
+        _save_partial(state)
 
     return {
         "safety": safety,
