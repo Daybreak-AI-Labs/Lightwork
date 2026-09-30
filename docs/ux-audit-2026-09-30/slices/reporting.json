@@ -151,5 +151,16 @@
     ],
     "validation": "Python 3.10 AST and JavaScript syntax passed; suites, provider calls and browser journeys not run.",
     "remaining": "Runtime/browser/Stripe/distributed-fault qualification deferred. Unresolved provider outcomes remain explicitly held for reconciliation; no new invoice identity bypass."
+  },
+  {
+    "id": "LW-174",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "maverick.cost_provenance and dashboard /cost-reconciliation join local task attempt and provider receipt evidence by permitted task and original reporting period.",
+      "View separates confirmed, reserved, estimated and unavailable amounts, source currency and included/excluded fees. Drill-through links preserve independent ledger authority; no summed cross-ledger total or provider-invoice verification is fabricated.",
+      "packages/maverick-core/tests/test_cost_provenance.py includes interrupted/unknown attempt and synthetic provider-receipt cases; root focused budget/billing/cost group passed 12 local tests."
+    ],
+    "validation": "Local synthetic cost tests passed as part of the 12-test root budget/billing/cost checkpoint. Full integrated and authenticated browser verification pending; no live provider calls.",
+    "remaining": "Final integrated local qualification and release qualification remain pending."
   }
 ]

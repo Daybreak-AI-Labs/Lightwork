@@ -15,7 +15,8 @@ def test_template_choices_never_publish_ownerless_installed_or_other_person(monk
     monkeypatch.setattr(today.auth, 'has_permission', lambda *args: True)
     monkeypatch.setattr(templates, 'list_templates', lambda: list(cases))
     monkeypatch.setattr(templates, 'user_templates_dir', lambda: user)
-    monkeypatch.setattr(templates, 'load_template', lambda name: SimpleNamespace(owner=cases[name][0], path=cases[name][1], title=name))
+    monkeypatch.setattr(templates, '_BUNDLED_CANDIDATES', [tmp_path / 'bundled'])
+    monkeypatch.setattr(templates, 'load_template', lambda name: SimpleNamespace(name=name, owner=cases[name][0], path=cases[name][1], title=name))
     assert set(today.template_choices(object())) == {'mine', 'bundled'}
 
 

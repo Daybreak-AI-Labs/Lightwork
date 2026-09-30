@@ -14,16 +14,14 @@ CARDS = {"tasks": "In-flight work", "decisions": "Pending decisions", "recent": 
 
 
 def template_choices(request):
-    from maverick.templates import list_templates, load_template, user_templates_dir
+    from maverick.templates import can_read_template, list_templates, load_template
     principal = auth.caller_principal(request)
     result = {}
     if not auth.has_permission(request, "operate"):
         return result
     for name in list_templates():
         template = load_template(name)
-        # Legacy ownerless installed templates have no inferred publication.
-        installed = template.path is None or template.path.resolve().is_relative_to(user_templates_dir().resolve())
-        if (installed and template.owner != principal) or (template.owner and template.owner != principal):
+        if not can_read_template(template, principal):
             continue
         result[name] = {"name": name, "title": template.title, "href": "/templates#template-" + quote(name, safe="")}
     return result

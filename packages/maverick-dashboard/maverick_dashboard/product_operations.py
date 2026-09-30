@@ -33,7 +33,8 @@ PURPOSE = "lightwork.product-operation.v1"
 ADAPTER_MODULES = ("product_operations_preferences", "product_operations_tasks",
                    "product_operations_connections", "product_operations_notifications",
                    "product_operations_budget", "product_operations_models", "product_operations_diagnostics",
-                   "product_operations_knowledge", "product_operations_today", "product_operations_activation")
+                   "product_operations_knowledge", "product_operations_today", "product_operations_activation",
+                   "product_operations_devices")
 
 
 @dataclass(frozen=True)

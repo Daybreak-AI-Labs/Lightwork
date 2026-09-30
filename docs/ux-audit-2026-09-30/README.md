@@ -9,8 +9,10 @@ implementation worklist, not acceptance or release evidence.
 - All 195 entries and all 24 source fields were retrieved from ten lossless
   Library parts, each checked for its expected entry count and end marker.
   `source-provenance.json` records the resolved source parts.
-- Regression tests may be authored, but test suites, application journeys and
-  provider calls remain deferred at the user's instruction.
+- Local tests and synthetic application journeys are now authorized, superseding
+  the earlier test deferral. Live provider calls remain excluded. Historical
+  slice validation notes describe their original checkpoints, not a prohibition
+  on subsequent local verification.
 - No merge, deployment, credential changes, or production changes are authorized.
 
 ## Work sequence
@@ -23,8 +25,11 @@ implementation worklist, not acceptance or release evidence.
 
 `implementation-tracker.json` retains exactly one row per audit ID. Statuses:
 `planned`, `implemented-test-needed`, `already-fixed-test-needed`,
-`test-needed` (qualification work explicitly deferred), `blocked-source`, and `deferred-decision` (must name the actual decision and why
+`test-needed` (qualification requires evidence not yet obtained), `blocked-source`, and `deferred-decision` (must name the actual decision and why
 implementation depends on it). Partial code is not an implemented disposition.
 
 Independent slices write their evidence to `slices/`; integration reconciles it
 against the complete source backlog and shared contracts.
+Run `python docs/ux-audit-2026-09-30/reconcile.py` after integration. Its explicit
+ownership order prevents older category worklists from replacing newer focused
+implementation evidence. No product or privacy decision is currently pending.
