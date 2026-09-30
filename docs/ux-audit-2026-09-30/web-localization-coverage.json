@@ -1,5 +1,5 @@
 {
-  "catalog_sources": 1073,
+  "catalog_sources": 1659,
   "draft_languages": [
     "fr",
     "de",
@@ -62,13 +62,13 @@
       "remaining": []
     },
     "project_reviews.html": {
-      "literal_bindings": 38,
+      "literal_bindings": 39,
       "remaining_literal_fragments": 0,
       "bound_sources_missing_catalog": [],
       "remaining": []
     },
     "task_file_recovery.html": {
-      "literal_bindings": 31,
+      "literal_bindings": 32,
       "remaining_literal_fragments": 0,
       "bound_sources_missing_catalog": [],
       "remaining": []

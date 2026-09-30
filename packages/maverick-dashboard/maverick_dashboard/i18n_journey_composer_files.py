@@ -1,6 +1,7 @@
 """Draft first-task file review and microphone feedback."""
 
 ROWS = [
+    ('Task files', 'Fichiers de la tâche', 'Aufgabendateien', 'タスクのファイル', '任务文件'),
     ('Conversation defaults', 'Préférences de conversation', 'Gesprächsvorgaben', '会話の既定設定', '对话默认设置'),
     ('This template is too long to start as a task. Return to Templates and shorten the title to 200 characters and details to 16,000 characters.', 'Ce modèle est trop long pour démarrer une tâche. Retournez aux Modèles et limitez le titre à 200 caractères et les détails à 16 000 caractères.', 'Diese Vorlage ist zu lang, um eine Aufgabe zu starten. Kehren Sie zu Vorlagen zurück und kürzen Sie den Titel auf 200 und die Details auf 16.000 Zeichen.', 'このテンプレートは長すぎるためタスクを開始できません。テンプレートに戻り、タイトルを200文字、詳細を16,000文字以内にしてください。', '此模板过长，无法启动任务。请返回模板，将标题缩短至200个字符以内，详情缩短至16,000个字符以内。'),
     ('Template ready. Review the task and details, then choose Start task when you are ready.', 'Le modèle est prêt. Vérifiez la tâche et les détails, puis choisissez Démarrer la tâche lorsque vous êtes prêt.', 'Vorlage bereit. Prüfen Sie die Aufgabe und Details und wählen Sie dann Aufgabe starten, wenn Sie bereit sind.', 'テンプレートの準備ができました。タスクと詳細を確認し、準備ができたら「タスクを開始」を選んでください。', '模板已就绪。请检查任务和详情，准备好后选择“开始任务”。'),

@@ -88,7 +88,7 @@ test('first-task voice feedback uses the chosen locale and keeps dictated conten
 });
 
 test('prepared template uses real input selectors and a translated review notice without submitting', async () => {
-  const dom = new JSDOM('<form class="composer"><input lang="und" dir="auto" data-user-content name="title"><details><textarea name="description"></textarea></details><p id="template-draft-notice" hidden></p></form>', {runScripts:'outside-only',url:'https://local.invalid/chat'});
+  const dom = new JSDOM('<form class="composer"><input type="hidden" name="connection_references" value="{}"><input lang="und" dir="auto" data-user-content name="title"><details><textarea name="description"></textarea></details><p id="template-draft-notice" hidden></p></form>', {runScripts:'outside-only',url:'https://local.invalid/chat'});
   const {window} = dom, doc = window.document;
   const source = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/chat.html'), 'utf8');
   const notice = 'Template ready. Review the task and details, then choose Start task when you are ready.';
@@ -96,7 +96,7 @@ test('prepared template uses real input selectors and a translated review notice
   config.textContent = JSON.stringify({language:'fr',locale:'fr-CA',catalog:{[notice]:{text:'Le modèle est prêt. Vérifiez la tâche et les détails.',lang:'fr'}}}); doc.head.append(config);
   window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-i18n.js'), 'utf8'));
   window.eval(source.slice(source.indexOf('  function chatCopy('),source.indexOf('  // A prepared template')));
-  const draft = {title:'Save مرحبا <img>', description:'Exact original task body',context:'verified',created_at:Date.now()};
+  const draft = {title:'Save مرحبا <img>', description:'Exact original task body',context:'verified',created_at:Date.now(),connection_references:{account:{connector:'chat',revision:'exact-reviewed'}}};
   window.sessionStorage.setItem('lightwork:template-draft:v1',JSON.stringify(draft));
   window.fetch = async()=>({ok:true,json:async()=>({context:'verified'})});
   let submits=0;doc.querySelector('form').addEventListener('submit',e=>{e.preventDefault();submits++;});
@@ -104,6 +104,7 @@ test('prepared template uses real input selectors and a translated review notice
   await window.eval(source.slice(start,source.indexOf('  })();',start)+'  })();'.length));
   assert.equal(doc.querySelector('input[name="title"]').value,draft.title);
   assert.equal(doc.querySelector('textarea').value,draft.description);
+  assert.deepEqual(JSON.parse(doc.querySelector('input[name="connection_references"]').value),draft.connection_references);
   assert.equal(doc.querySelector('details').open,true);
   assert.equal(doc.getElementById('template-draft-notice').lang,'fr');
   assert.match(doc.getElementById('template-draft-notice').textContent,/^Le modèle/);

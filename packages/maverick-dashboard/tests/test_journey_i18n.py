@@ -1,8 +1,18 @@
 """Partial catalogs must never mislabel English or alter source/user content."""
+import runpy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from maverick_dashboard import auth, i18n, i18n_journeys, preferences_api
+
+
+def test_selected_journey_bindings_have_actual_catalog_entries():
+    report = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts" / "journey_i18n_coverage.py"))["report"]()
+    assert report["catalog_sources"] == len(i18n_journeys.messages()), "An inventoried catalog is not wired into the product"
+    missing = {name: page["bound_sources_missing_catalog"] for name, page in report["pages"].items()
+               if page["bound_sources_missing_catalog"]}
+    assert missing == {}, f"Bound journey controls still fall back to English: {missing}"
 
 
 def request(*, query="", accept="", cookies=None):

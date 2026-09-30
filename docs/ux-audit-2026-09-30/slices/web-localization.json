@@ -1,9 +1,9 @@
 [
   {
     "id": "LW-043",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Added 1055 source-keyed product-copy entries with draft French/German/Japanese/Chinese translations, shared existing catalog validation; Arabic seed unchanged.",
+      "Integrated 1659 wired source-keyed product-copy entries with draft French/German/Japanese/Chinese translations and shared catalog/placeholder validation; Arabic seed unchanged.",
       "Explicit server regions/browser bindings across first-task, preferences, answer, project reviews and task-file recovery. Source documents, inputs, result streams and parameter values remain escaped/verbatim and independently directed.",
       "Independent interface_language account/workspace/organization inheritance, portable profile field, device/account header controls, legacy display API key normalization. Response language and response prompts remain unchanged; saves preserve editor drafts.",
       "BCP47 regional browser formatting, weighted Accept-Language, Intl date/number/currency/plurals, calendar-date no-UTC-drift, actual fallback-region lang and RTL dialog/table rules, opt-in native confirmation and field validation.",
@@ -13,7 +13,8 @@
       "Live chat clarification, exact answer acknowledgement, prepared-file upload states, stop/live-update recovery, work summaries, speech-input feedback and inherited restart USD use explicit product bindings and locale formatting. User questions, answers, tool output, trace text, filenames and prior drafts remain verbatim.",
       "Preference effective-source/lock state, reviewed saves/profile operations, closed validation failures and channel-memory posture use explicit product bindings. Interface-language saves retain the current editor and apply on the next page load. Theme names and custom guidance remain verbatim; select options contain valid text-only labels.",
       "First-task composer dynamic template review, file-selection controls and microphone feedback use explicit translations; file names, MIME values and dictated text remain verbatim. Browser DOM regressions caught and fixed two malformed title-input selectors in template/voice handling. Shared voice first-use setup feedback is localized without changing transcription data.",
-      "Coverage scanner now parses literal Jinja ui/ut arguments and separately lists any bound source missing a catalog; the selected journey templates have no missing bound-source translations in this checkpoint. Remaining literal brand/canonical identifier examples stay unchanged."
+      "Coverage scanner now parses literal Jinja ui/ut arguments and separately lists any bound source missing a catalog; the selected journey templates have no missing bound-source translations in this checkpoint. Remaining literal brand/canonical identifier examples stay unchanged.",
+      "Frozen integration d38832161d1eea7e7c7bef823704b2457859e64c includes shared navigation, budget, saved answers/planning/viewpoints, recovery/review, external voice and connected-account picker catalogs/controllers. This qualification adds the missing Task files page-title entry and checks inventoried catalog count against actual wired catalogs."
     ],
     "validation": [
       "47 selected Python tests passed: new locale/identity/escaping checks, catalog/portal, preferences, activation and project-review APIs.",
@@ -23,12 +24,15 @@
       "Workflow follow-on: 85 focused Python cases and 36 browser-controller cases passed, including publication/source isolation and localized classified request failures; Python 3.10 AST, Ruff, Jinja, Node syntax and whitespace checks passed.",
       "Conversation follow-on: 60 unique focused Python cases passed across initial55 passes plus22-case targeted rerun including repaired explicit-lang link assertion and four new draft-language route cases. 54 DOM cases passed, including source/attachment/acknowledgement preservation, exact receipt retries, current-state guidance and restart admission. Ruff, AST3.10, Jinja parsing, Node syntax and whitespace passed.",
       "Live chat/preferences follow-on: 27 focused chat/stream/attachment Python cases passed; 31 locale/catalog/memory Python cases passed, followed by 13 targeted cases after the added select/custom-theme regression. Browser checks: 41 existing workflow/authority/CLI cases, 9 locale/preferences cases and 5 final preferences/restart cases passed. These reruns overlap and are not a unique-test total. Ruff, AST3.10, Jinja parsing, inline/external JavaScript syntax and whitespace checks passed.",
-      "First-task follow-on: 19 focused Python cases passed; 29 DOM cases passed including actual file review, SpeechRecognition and prepared-template input selectors plus existing workflow handoff and draft integrity checks. Earlier locale/file-selection cohort passed 11 DOM cases before added real-composer cases. AST3.10, Jinja, actual inline JavaScript syntax, Ruff and whitespace passed."
+      "First-task follow-on: 19 focused Python cases passed; 29 DOM cases passed including actual file review, SpeechRecognition and prepared-template input selectors plus existing workflow handoff and draft integrity checks. Earlier locale/file-selection cohort passed 11 DOM cases before added real-composer cases. AST3.10, Jinja, actual inline JavaScript syntax, Ruff and whitespace passed.",
+      "Final integrated qualification: 90 unique Python cases passed across the 75-case main cohort and 22-case follow-on (seven overlap), based on JUnit case identities. The 135-case DOM cohort passed 134 initially; the remaining fixture lacked the LW068 hidden connection reference field. Updating the fixture to the actual form and asserting exact metadata preservation yielded 35/35 affected cases passing. No production controller bypass or assertion removal.",
+      "Final inventory: 1659 actual wired source messages; every literal ui/ut binding in the 10 selected journey templates has a catalog entry. Placeholder validation, Python3.10 AST, Ruff, JavaScript syntax and whitespace passed. See web-localization-qualification.md for commands and boundaries."
     ],
     "remaining": [
-      "Integrate shared shell/navigation, answer/planning/viewpoints, budget and recovery/review/voice worker checkpoints; regenerate the combined inventory and run the final integrated journey cohort. The 1055-source local inventory excludes those additive catalogs and is not end-to-end journey qualification.",
-      "Human native-language and consequence/legal-copy review for draft catalogs; Arabic community contribution and RTL keyboard/screen-reader qualification. No non-English complete-body locale advertised.",
-      "Language-specific browser rendering/assistive-technology and native surface acceptance remain pending."
+      "Native-language review of French/German/Japanese/Chinese draft translations, including approval, spending, privacy, restore and publication consequences. Automated tests do not qualify linguistic or legal wording.",
+      "Arabic remains the documented community seed. Community-authored translations, RTL keyboard, browser layout and screen-reader review remain required; no machine completion or complete Arabic support is claimed.",
+      "Language-specific browser and assistive-technology acceptance remains pending. English remains the only qualified complete-body locale; broader administrative pages and unknown backend messages retain explicit English/source fallbacks. The completed code scope is the prioritized employee onboarding/preferences/first-task/answer/review/recovery/workflow journey, not every product page.",
+      "Native application localization and installed-device qualification are tracked by their separate audit entries; this web cohort does not qualify them."
     ]
   }
 ]
