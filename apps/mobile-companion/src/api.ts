@@ -160,7 +160,7 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
   }
   const base = cfg.baseUrl.trim().replace(/\/+$/, "");
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (body) headers["Content-Type"] = "application/json";
+  if (body) { headers["Content-Type"] = "application/json"; headers.Origin = new URL(base).origin; }
   if (path === "/api/v1/offline/bundle") headers["X-Lightwork-Offline-Policy"] = "1";
   if (cfg.token) {
     headers.Authorization = `Bearer ${cfg.token.trim()}`;
@@ -182,6 +182,7 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
         const pairing = path.startsWith('/api/v1/devices/');
         const message = pairing && res.status === 401 ? 'This device connection or pairing request expired or was removed. Start device pairing again.'
           : pairing && res.status === 403 ? 'Device pairing is turned off or this account no longer has access. Check with your administrator.'
+          : path.startsWith('/api/v1/devices/actions/') && res.status === 409 ? 'The task or access changed. Keep your draft, refresh the task and review again.'
           : pairing && res.status === 409 ? 'This device connection changed. Review pairing again.' : statusMessage(res.status);
         throw new ApiError(message, res.status, res.status === 401 || res.status === 403 ? "access" : "transient");
       }
@@ -212,6 +213,22 @@ export function pollPairing(baseUrl: string, pairingToken: string, signal?: Abor
 }
 export function renewPairing(cfg: Settings, generation: number, signal?: AbortSignal): Promise<{token: string; device: DeviceInfo}> {
   return apiRequest(cfg, '/api/v1/devices/renew', signal, {generation});
+}
+
+export type DeviceActionContext = {context: string; title: string; status: string; checked_at: number;
+  answer: {revision: string; blocked: string; partial: boolean; questions: {id: number; question: string}[]};
+  stop: {revision: string; blocked: string; summary: string}};
+export type DeviceActionReview = {token: string; expires_at: number; summary: string; action: 'answer' | 'stop'; operation_id: string;
+  changes: {label?: string; field?: string; before?: unknown; after?: unknown}[]};
+export type DeviceActionOutcome = {status: 'confirmed' | 'replayed' | 'queued' | 'unconfirmed'; message: string; operation_id: string};
+export function deviceActionContext(cfg: Settings, goalId: number, signal?: AbortSignal): Promise<DeviceActionContext> {
+  return apiGet(cfg, '/api/v1/devices/actions/context?goal_id=' + goalId, signal);
+}
+export function prepareDeviceAction(cfg: Settings, body: {goal_id: number; action: 'answer' | 'stop'; context: string; revision: string; arguments: object}, signal?: AbortSignal): Promise<DeviceActionReview> {
+  return apiRequest(cfg, '/api/v1/devices/actions/prepare', signal, body);
+}
+export function executeDeviceAction(cfg: Settings, token: string, signal?: AbortSignal): Promise<DeviceActionOutcome> {
+  return apiRequest(cfg, '/api/v1/devices/actions/execute', signal, {token, confirmed: true});
 }
 
 export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = ""): Promise<Goal[]> {

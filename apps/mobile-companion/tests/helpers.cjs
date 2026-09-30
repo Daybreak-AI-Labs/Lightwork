@@ -64,6 +64,7 @@ function source(relative, mocks = {}) {
     if (name.endsWith('/components/ui')) return source('src/components/ui.tsx', mocks);
     if (name === './ui') return source('src/components/ui.tsx', mocks);
     if (name.endsWith('/components/PairingPanel')) return source('src/components/PairingPanel.tsx', mocks);
+    if (name.endsWith('/components/TaskActions')) return source('src/components/TaskActions.tsx', mocks);
     if (name.includes('/screens/')) {
       const screen = name.split('/').at(-1);
       if (screen === 'SettingsScreen') return source('src/screens/SettingsScreen.tsx', mocks);

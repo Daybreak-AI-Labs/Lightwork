@@ -209,6 +209,8 @@ def _scope(method, path, row, policy):
         return
     if method == "POST" and path in {"/api/v1/devices/renew", "/api/v1/devices/remove-self"}:
         return
+    if method == "GET" and path == "/api/v1/devices/actions/context" and row["actions"] and policy["actions"]:
+        return
     if (method == "POST" and path in {"/api/v1/devices/actions/prepare", "/api/v1/devices/actions/execute"}
             and row["actions"] and policy["actions"]):
         return

@@ -9607,9 +9607,14 @@ def cancel_goal(request: Request, goal_id: int) -> None:
     assert_goal_access(request, g)
     if g.status in ("done", "cancelled", "failed"):
         return
-    w.set_goal_status(goal_id, "cancelled", result="cancelled via dashboard")
-    # An operational stop is not a quality rating. Explicit feedback remains
-    # separate and follows the existing consequence/learning policy.
+    from uuid import uuid4
+    from .reviewed_stop import StopInput, apply
+    # Legacy direct controls use the same atomic native primitive. New reviewed
+    # clients retain their operation ID and expected revision across retries.
+    apply(request, goal_id, StopInput(expected_updated_at=float(g.updated_at),
+          expected_owner=g.owner or "", operation_id=uuid4().hex))
+    # A request to stop is not a quality rating. Preserve partial output.
+
 
 
 @router.get("/goals/{goal_id}/open_questions")

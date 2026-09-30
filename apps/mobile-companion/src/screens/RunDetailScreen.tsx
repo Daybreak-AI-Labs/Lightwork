@@ -1,11 +1,12 @@
 /* Task detail — status header + activity timeline.
  * GET /api/v1/goals/{id}/events?since=0&limit=200, polled every 5s.
- * Read-only: there is no cancel/resume/answer here by design. */
+ * Paired devices may explicitly review an answer or Stop under current policy. */
 import React, { useCallback, useMemo, useState } from "react";
 import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { GoalEvent, GoalEventsResponse, Settings } from "../api";
 import { ConnectionNotice } from "../components/ConnectionNotice";
+import { TaskActions } from "../components/TaskActions";
 import { Banner, Button, EmptyState, Loading, StatusPill } from "../components/ui";
 import { humanize, taskTitle } from "../format";
 import { offlineBanner, useCachedBundle } from "../offlineCache";
@@ -72,6 +73,8 @@ export function RunDetailScreen(props: {
       {cached && !data ? <Banner text={offlineBanner(cached)} /> : null}
       {linkError ? <Banner text={linkError} /> : null}
       <Button label="Open full task on dashboard" kind="secondary" onPress={openDashboard} />
+      {settings.pairedDevice?.actions && !accessDenied ? <TaskActions key={settings.pairedDevice.id + ':' + settings.pairedDevice.generation + ':' + runId}
+        settings={settings} goalId={runId} online={Boolean(data && !error && !unsupported)} onApplied={refresh} /> : null}
     </>;
   return (
     <View style={styles.fill}>

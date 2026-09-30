@@ -1,4 +1,4 @@
-# Lightwork mobile companion (read-only)
+# Lightwork mobile companion (preview)
 
 **Preview source; native transport, packaging and installed-device behavior
 remain unqualified.**
@@ -12,10 +12,12 @@ Watch your Lightwork swarm from a phone: runs list, run detail with a live
 event timeline, and an at-a-glance fleet summary — with an offline cache so
 losing the network shows "as of 12 min ago" instead of a blank screen.
 
-**Task browsing remains read-only.** The app reads task data with GET requests. It cannot
-start, cancel, resume, approve, or answer anything — oversight actions stay
-on the dashboard, where auth, same-origin checks, and rate limits live.
-Separately typed POSTs pair and renew this device connection. See
+**Task browsing is read-only by default.** A device explicitly enrolled for actions,
+under the administrator's separately enabled policy, can review and confirm one
+answer or request Stop on its own task. An answer can resume that task through the
+dashboard's existing budget admission service. Approvals, attachments and other
+sensitive decisions open the authenticated full dashboard. Offline copies never
+authorize or queue writes. Separately typed POSTs pair and renew the connection. See
 [device pairing](../../docs/device-pairing.md) for the exact scope and limits.
 
 ## Endpoints used (all existing dashboard routes)
@@ -28,6 +30,7 @@ From `packages/maverick-dashboard/maverick_dashboard/api.py`:
 | Run detail  | `GET /api/v1/goals/{id}/events?since=0&limit=200` |
 | Overview    | `GET /api/v1/oversight/active` + `GET /api/v1/spend` |
 | Offline     | `GET /api/v1/offline/bundle` with `X-Lightwork-Offline-Policy: 1` (optional; older dashboards still support online views, but snapshots without current retention policy are not saved) |
+| Reviewed actions | `GET /api/v1/devices/actions/context`, `POST /api/v1/devices/actions/prepare`, `POST /api/v1/devices/actions/execute`; exact own-task answer/Stop allowlist only |
 
 Organization controls in **All settings → Data retention** can disable mobile
 offline copies or narrow their retention/size. Workspace policy cannot exceed

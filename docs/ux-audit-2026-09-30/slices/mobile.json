@@ -43,10 +43,10 @@
   },
   {
     "id": "LW-049",
-    "status": "planned",
-    "implementation_evidence": "README and native/mobile request client remain explicitly read-only; no mutation authority was added based on a broad bearer token. LW185 scoped own-work credentials now support separately opted-in, default-off reviewed action enrollment; scope allowlist reserves only device answer/stop preparation/execution endpoints. No ordinary API write becomes authorized by token breadth.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement reviewed own-task answer/Stop adapters and mobile controls through the existing governed native handlers, with fresh revisions and idempotent receipts. Native signing/device qualification remains separate validation."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "device_actions.py admits only own-task answer/Stop after explicit device action enrollment plus current admin policy. Sealed expiring previews bind current context/revision/exact input; explicit confirmation executes shared synchronous clarification submission and goal_stop native CAS/receipt services under authority fence. Stop preserves partial results and never claims cleanup or external rollback. React TaskActions handles fresh online state, background invalidation, retained in-screen draft, explicit same-review recovery and no queued offline effects. Configuration/installer and browser pairing approval are supplied by device_pairing. product_operations_stop supplies the same reviewed native Stop to authorized Copilot registry.",
+    "validation": "2026-09-30: 25 local Python tests passed (Stop database CAS/receipt, device action freshness/explicit confirmation/recovery, pairing/authentication); All 83 mobile mocked tests passed, including 4 reviewed-action lifecycle tests; strict TypeScript check had zero diagnostics; Ruff and whitespace checks passed. No live provider effects. Native iOS/Android transport, keychain, accessibility and installed-device qualification require native hosts.",
+    "remaining": "Native installed-host qualification still needed; root must integrate typed product_operations_stop registry registration and shared synchronous clarification_submission dependency. Mobile decisions remain preview until platform qualification; no signing/publication performed."
   },
   {
     "id": "LW-050",

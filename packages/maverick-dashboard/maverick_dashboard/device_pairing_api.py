@@ -8,9 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import auth
 from . import device_pairing as service
+from .device_actions import router as device_actions_router
 from .draft_api import context_for
+from .reviewed_stop import router as reviewed_stop_router
 
 router = APIRouter()
+
+router.include_router(device_actions_router)
+router.include_router(reviewed_stop_router)
 
 
 class Input(BaseModel):
