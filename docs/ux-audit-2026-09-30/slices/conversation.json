@@ -3,7 +3,7 @@
     "id": "LW-001",
     "status": "planned",
     "implementation_evidence": "Existing employee companion supports conversation independent from tasks.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
     "remaining": "Durable editable queued turns/files, guidance consumption receipts/conflict decisions and checkpoint execution still required."
   },
   {
@@ -41,57 +41,57 @@
     "id": "LW-004",
     "status": "implemented-test-needed",
     "implementation_evidence": "my_work_api.py /my-work projects exact-owner tasks and saved outcomes, schedule occurrences, authorized immutable flow definitions and owner connection dependencies; explicit partial/unavailable coverage, status truth, fresh request context, paused bounded polling, native-control links from conversation. Reuses schedule_definitions and connection_dependencies from the connections slice.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-005",
     "status": "implemented-test-needed",
     "implementation_evidence": "action_center.py adds one versioned task-attention row per owned blocked/failed task, current question identity, rejected signoffs, owner changes-requested/stale review packets and exact-owner connection dependencies; explicit adapter coverage and existing private version-bound snooze/read preferences. Approval projections now require can_read_approval; task rows require current goal and suite authority.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-006",
     "status": "implemented-test-needed",
     "implementation_evidence": "lightwork-copilot.js retains failed text, blocks in-flight prompt replacement, reuses visible retry row, rejects late generation replies and fresh-checks server-bound account/workspace context before sending and publishing. Transient operation-source failures preserve drafts; auth/scope changes clear private state. Copilot endpoint validates current context before a model call.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-007",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal syncComposer keeps Stop for pending/running/blocked; ChatThreads.answer refuses terminal tasks inside the restart transaction.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-008",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal renderHalted mounts retry for initial and streamed failed/cancelled states; existing governed resume and budget form retained.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-009",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal stream errors expose stale/unknown state and last refresh, switch CONNECTING to bounded polling, offer reconnect and clear denied content.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-010",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal question reads have a 12-second deadline, explicit retry, malformed-response handling and stale-question submission fence.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-011",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal cancellation immediately reports requested/cleanup-unknown state and polls authoritative state; concurrent completion is explained without rollback promises.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-012",
@@ -112,91 +112,91 @@
     "id": "LW-013",
     "status": "implemented-test-needed",
     "implementation_evidence": "ChatThreads.history uses owner/tenant-bound keyset pagination relative to the selected goal; thread-history API and progressive retryable history UI.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-014",
     "status": "implemented-test-needed",
     "implementation_evidence": "lightwork-file-selection.js provides named type/size chips, individual removal, clear-all, duplicate indicators and batch-count notice for new and follow-up composers.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-015",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal attachments panel now retains empty state and Add file, explaining current-task scope and unconfirmed runner consumption.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-016",
     "status": "implemented-test-needed",
     "implementation_evidence": "chat_goal attachments retain per-file states and File objects for selective retry; publish_batch/SubmissionStore.admit already deduplicate exact file identities.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-017",
     "status": "implemented-test-needed",
     "implementation_evidence": "conversation_organization.py stores names/pins/archive in one owner/workspace-private governed CAS document keyed by immutable root identity. Replayed operations reuse receipts, conflicting windows refuse, explicit undo restores prior organization. All turns read root metadata; current authorized pins appear in sidebar, archive preserves history and explains retention. /conversations searches stored user/assistant content across bounded keyset pages with truthful remaining-history scope; root ownership and suite permission checked before matching or projection.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
     "remaining": "Regression tests authored but intentionally unrun. Authenticated/browser/native PostgreSQL and cross-client runtime acceptance remain for the later testing phase. Product bounds are visible: 20 active pins, 10000 organized conversations; message search excludes attachments/external records."
   },
   {
     "id": "LW-018",
     "status": "implemented-test-needed",
     "implementation_evidence": "plan_tree has abort deadline, bounded backoff, auth-denial clearing, hidden-tab pause, freshness time and explicit refresh without overlapping requests.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-123",
     "status": "implemented-test-needed",
     "implementation_evidence": "api feedback/edit return separate saved/learning_observation/training_completed fields; optional grounding exceptions are contained; editor/feedback copy no longer claims training.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-124",
     "status": "planned",
     "implementation_evidence": "Existing project ownership and packet boundary preserved.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
     "remaining": "Project workspace implementation ownership transferred to settings_integrity worker; no duplicate edits here. Root must integrate their complete per-ID evidence."
   },
   {
     "id": "LW-125",
     "status": "implemented-test-needed",
     "implementation_evidence": "ProjectReviews.revision_draft creates an idempotent owner-private unstarted task from the exact packet/comments using durable native admission. Review UI opens its spending/start review, then links a changed result to the predecessor with required change summary and fresh reviewer/team/source checks. New packet identity/status cannot inherit prior acceptance; source and packet reads remain freshly authorized.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-126",
     "status": "implemented-test-needed",
     "implementation_evidence": "approval decisions return received/required counts; UI renders progress, restores own recorded-vote state after reload and prevents repeated Approve.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-127",
     "status": "implemented-test-needed",
     "implementation_evidence": "GET /approvals/history filters requested_by plus currently accessible attached task, keyset pages exact requester records without global audit atom, uses integrity-checked/redacted approval cards and separate authorization versus current execution fields. _approvals_queue now links this history and deadline/retry controller.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-128",
     "status": "implemented-test-needed",
     "implementation_evidence": "Project-review captured-result outcome timeline labels acceptance, pending/changes/withdrawal and next owner separately from task execution, final signoff and external verification. Approval queue and private history independently label recorded authorization versus unconfirmed execution; no packet approval signs off or runs a task.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-129",
     "status": "planned",
     "implementation_evidence": "User chose explicit recipient acceptance; existing ownership remains unchanged.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
     "remaining": "Build selected-evidence transfer service with named recipient acceptance, safe in-flight boundary, independent authority/connection rebind and revocation."
   },
   {
@@ -233,43 +233,43 @@
     "id": "LW-132",
     "status": "implemented-test-needed",
     "implementation_evidence": "Explicit POST share/preview returns exact title/result/latest artifacts, anyone-with-link scope and allowed 1-hour/1-day/7-day lifetimes under the existing seven-day ceiling. Create requires confirmation plus matching source SHA; governed metadata stores label and reviewed version. New r1_ tokens fail closed until metadata exists and after any result/artifact change; public page preserves live release gates. Management shows expiry, revoked/stale state and uncertain-response recovery; legacy tokens retain existing release checks.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit."
   },
   {
     "id": "LW-133",
     "status": "implemented-test-needed",
     "implementation_evidence": "goal_share_previews persists encrypted attempt before dispatch, suppresses resend on unknown outcome, lists prior attempts across reload and reconciles via read-only GitHub lookup.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-134",
     "status": "implemented-test-needed",
     "implementation_evidence": "run_share.MissingGitHubToken and ReplayEvidenceError receive distinct remedies; evidence preparation precedes upload; confirmed 4xx rejection differs from uncertainty.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-135",
     "status": "implemented-test-needed",
     "implementation_evidence": "cancel_goal no longer submits value 0.0 learning feedback; explicit ratings continue through existing policy.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-136",
     "status": "implemented-test-needed",
     "implementation_evidence": "GitHub sharing prepares exact canonical outbound JSON, identifies destination account, previews scope/content and binds confirmation to encrypted context/digest/connection; unknown outcomes retained.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-137",
     "status": "implemented-test-needed",
     "implementation_evidence": "Downloaded standalone offline archive viewer opens schema-v1 bundles locally without network/actions, displays provenance and explicit legacy-completeness caveat, refuses invalid/newer/oversized files.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
   },
   {
     "id": "LW-138",
@@ -292,7 +292,27 @@
     "id": "LW-139",
     "status": "implemented-test-needed",
     "implementation_evidence": "Authorized handoff.html produces escaped readable objective/outcome/versioned artifacts/source URLs/questions/permissions/completeness, separate from unsanitized technical archive.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint."
+  },
+  {
+    "id": "LW-025",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Complements settings6eaca67: chat_goal.html snapshots ordinary follow-up FormData before disabling every field, restores prior disabled states on refusal, awaits encrypted recovery clear and emits composer-sent(recoveryCleared:true) only after an acknowledged same-origin task redirect. Sign-in redirects preserve draft.",
+      "Clarification submit locks fields before network request; acknowledged native receipt clears recovery only when the exact text/question/file signature remains unchanged, retaining any newer draft. Settings lightwork-chat-drafts.js owns scoped encrypted recovery, navigation warning and explicit file reselection copy."
+    ],
+    "validation": "Static source review of complementary integration; existing draft and clarification regression cases authored. Root-coordinated local recovery/navigation/authentication browser qualification pending.",
+    "remaining": "Verify reload/sign-in/account-switch recovery, revision conflict and file reselection in authenticated browser; no live provider calls needed."
+  },
+  {
+    "id": "LW-100",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Complements identity fresh scope projection: lightwork-task-authority.js gates send, stop, edit, feedback, share, sign-off, upload and resume controls, rechecks permissions on focus/visibility and before click/submit, fails closed and preserves draft.",
+      "chat_goal.html uses can_operate and read-only reason; live _chat_answer_panel.html exposes mutations only when fresh exact-owner operate projection permits them. MutationObserver applies revocation to replaced controls. Server ownership and role revalidation remains authoritative."
+    ],
+    "validation": "Static source review and existing authority/projection regression cases authored; root-coordinated local authenticated role/revocation qualification pending.",
+    "remaining": "Verify viewer/member/admin and mid-session revocation with the integrated application; exceptional content read grants must continue to render read-only."
   }
 ]
