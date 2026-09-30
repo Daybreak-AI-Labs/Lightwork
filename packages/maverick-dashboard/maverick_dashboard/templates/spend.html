@@ -70,6 +70,7 @@
 
   {% include "_spend_insights.html" %}
 
+  <p>Runtime totals exclude platform subscriptions, external-tool fees, taxes, credits and invoice adjustments unless separately evidenced. Provider receipts can be recorded, estimated, ceilings or reconciled; a verified rate card alone is not a verified invoice. <a href="/cost-reconciliation">Compare cost records</a>.</p>
   <div class="toolbar">
     <h2>Latest 50 episode attempts — independent of chart range</h2>
     <form class="spend-download" id="spend-download">
@@ -82,7 +83,8 @@
     </form>
   </div>
   <div class="panel">
-    {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
+    {% set _known = episodes | rejectattr('cost_dollars', 'none') | list %}
+    {% set _max = (_known | map(attribute='cost_dollars') | max) if _known else 0 %}
     {% if episodes %}
     <table>
       <thead>
@@ -104,8 +106,13 @@
             </td>
             <td>
               <div class="cost-cell">
+                {% if e.cost_dollars is not none %}
                 <span title="${{ '%.6f'|format(e.cost_dollars) }}">{{ e.cost_dollars | money }}</span>
                 <span class="cost-cell__bar" style="width: {{ ((e.cost_dollars / _max * 100) if _max else 0) | round(1) }}%;"></span>
+                {% else %}<span>Unknown cost</span>{% endif %}
+                <small>{{ episode_provenance[e.id].runtime_basis }}</small>
+                <small>Linked task receipts: {{ episode_provenance[e.id].basis }}</small>
+                {% if e.goal_id %}<a href="/cost-reconciliation?goal_id={{ e.goal_id }}">Review cost evidence</a>{% endif %}
               </div>
             </td>
             <td>{{ '{:,}'.format(e.input_tokens) }}</td>

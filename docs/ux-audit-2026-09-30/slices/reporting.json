@@ -119,12 +119,14 @@
   },
   {
     "id": "LW-163",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Removed never-estimated claim, clarified runtime-pricing basis and missing cost categories, added statement export basis"
+      "cost_provenance.py preserves historical receipt basis, rate evidence identifiers, original period and reconciliation review; unknown stays unknown.",
+      "Spend row/source links, streaming cost/billing exports include full provenance manifest and exclusions without treating task-wide receipts as episode costs.",
+      "cost_reconciliation_api.py and cost_reconciliation.html compare owned runtime attempts, personal acknowledged usage and exact work-item reservations by their different scopes/periods, with drill-through and interrupted-settlement explanation."
     ],
-    "validation": "Static source review only.",
-    "remaining": "Per-entry recorded/estimated/ceiling/reconciled provenance across spend view and all exports remains to implement."
+    "validation": "Python 3.10 AST and whitespace checks. Four regression cases authored; local tests now authorized and pending environment setup.",
+    "remaining": "Run local regression suites and authenticated UI/revocation fixtures. No provider invoices verified and no live provider access required."
   },
   {
     "id": "LW-164",

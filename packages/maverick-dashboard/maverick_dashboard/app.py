@@ -1080,6 +1080,8 @@ from .preferences_api import display_context as _display_preference_context
 app.include_router(preferences_router)
 from .budget_guidance_api import router as budget_guidance_router
 app.include_router(budget_guidance_router)
+from .cost_reconciliation_api import router as cost_reconciliation_router
+app.include_router(cost_reconciliation_router)
 from .settings_experience import router as settings_experience_router
 app.include_router(settings_experience_router)
 templates.context_processors.append(_display_preference_context)
@@ -3659,6 +3661,8 @@ def spend_page(request: Request) -> HTMLResponse:
     owner = goal_owner_filter(request)
     w = _world()
     episodes = w.list_episodes(limit=50, owner=owner)
+    from maverick.cost_provenance import for_goal, runtime_basis
+    episode_provenance = {e.id: {"runtime_basis": runtime_basis(e.cost_dollars), **for_goal(e.goal_id)} for e in episodes}
     # Task titles for the table (the episodes are already scoped to the caller).
     goal_titles: dict[int, str] = {}
     for gid in {e.goal_id for e in episodes if e.goal_id}:
@@ -3679,7 +3683,7 @@ def spend_page(request: Request) -> HTMLResponse:
         request,
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=owner),
-         "goal_titles": goal_titles, "csv_months": months},
+         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance},
     )
 
 
@@ -5683,10 +5687,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             import csv
             import io
             from .audit_actions_api import csv_safe
+            from maverick.cost_provenance import EXPORT_HEADERS, export_fields
             buf = io.StringIO()
             writer = csv.writer(buf)
             writer.writerow(["Run", "Task", "Started", "Finished", "Result", "Cost (USD)",
-                             "Input tokens", "Output tokens", "Tool uses", "Cost basis"])
+                             "Input tokens", "Output tokens", "Tool uses", *EXPORT_HEADERS])
             yield buf.getvalue()
             for episode in iter_episodes(w, owner=owner, since=start.timestamp(), until=end.timestamp(), finished_only=True):
                 buf.seek(0)
@@ -5697,7 +5702,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
                                  csv_safe(episode.outcome or ""),
                                  "unknown" if episode.cost_dollars is None else f"{episode.cost_dollars:.6f}",
                                  episode.input_tokens, episode.output_tokens, episode.tool_calls,
-                                 "Recorded runtime price; not provider-invoice reconciled"])
+                                 *export_fields(episode)])
                 yield buf.getvalue()
         safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
         return StreamingResponse(rows(), media_type="text/csv",
@@ -10714,6 +10719,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     def generate():
         buf = _io.StringIO()
         writer = csv.writer(buf)
+        from maverick.cost_provenance import EXPORT_HEADERS, export_fields
         writer.writerow(
             [
                 "episode_id",
@@ -10725,6 +10731,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
                 "input_tokens",
                 "output_tokens",
                 "tool_calls",
+                *EXPORT_HEADERS,
             ]
         )
         yield buf.getvalue()
@@ -10738,7 +10745,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
             writer.writerow([episode.id, episode.goal_id, episode.started_at, episode.ended_at,
                              csv_safe(episode.outcome or ""),
                              "unknown" if episode.cost_dollars is None else f"{episode.cost_dollars:.6f}",
-                             episode.input_tokens, episode.output_tokens, episode.tool_calls])
+                             episode.input_tokens, episode.output_tokens, episode.tool_calls, *export_fields(episode)])
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
@@ -10747,7 +10754,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     return StreamingResponse(
         generate(),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers={"Content-Disposition": f'attachment; filename="{fname}"', "Cache-Control": "private, no-store"},
     )
 
 
