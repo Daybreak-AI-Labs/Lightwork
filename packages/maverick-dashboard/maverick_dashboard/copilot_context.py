@@ -86,6 +86,31 @@ _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
         CopilotPageContext(
+            path="/content-access", title="Employee content access",
+            summary="Employee content stays private while administrators govern policy and audit metadata.",
+            capabilities=("Request a specific task read or exact chat-identity export for a stated purpose.",
+                          "Review, deny or revoke an independently requested read and inspect its receipts."),
+            boundaries=("Another administrator or the current content owner must approve; approvals expire within an hour.",
+                        "A read never grants mutation, publication, whole-conversation access or companion history.",
+                        "Use the page controls; this guidance does not submit or approve requests."),
+            next_steps=("Choose the exact record, purpose and duration, then request independent review.",
+                        "Confirm the activity receipt before opening approved content."),
+            suggested_questions=("Who can approve this read?", "Why did my content approval stop working?"),
+        ),
+        CopilotPageContext(
+            path="/users/departures", title="Employee departures",
+            summary="Review employee access and retained work before deactivating an exact named identity.",
+            capabilities=("Preview owned work, memberships, connections and pending run-goal schedules.",
+                          "Deactivate local access and record named responsibility for unresolved handoffs."),
+            boundaries=("Removing local credentials does not revoke external provider consent.",
+                        "Data and holds remain retained; a custodian receives no private-content access.",
+                        "Running work and other module queues remain unresolved; no complete-offboarding claim is made.",
+                        "Use the reviewed page controls; guidance does not deactivate accounts."),
+            next_steps=("Preview a known employee and name a retained-data owner.",
+                        "Review saved per-step receipts and record external handoff evidence."),
+            suggested_questions=("What remains after deactivation?", "Does a handoff owner receive private task access?"),
+        ),
+        CopilotPageContext(
             path="/companion/admin",
             title="Employee companions",
             summary=(

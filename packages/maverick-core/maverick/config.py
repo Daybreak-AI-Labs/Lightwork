@@ -1055,6 +1055,9 @@ def get_features() -> dict:
         "employee_content_access_requests": (
             not config_source_errors() and cfg.get("employee_content_access_requests", False) is True
         ),
+        "employee_departures": (
+            not config_source_errors() and cfg.get("employee_departures", False) is True
+        ),
         "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
