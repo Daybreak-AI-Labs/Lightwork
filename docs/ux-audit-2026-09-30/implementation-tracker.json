@@ -533,7 +533,7 @@
     "implementation_evidence": [
       "i18n.py still truthfully declares CONTENT_LANGS={en} and community Arabic SEED_LANGS. No invented translations or changed user content."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "Human-reviewed end-to-end catalogs and Arabic community contribution review are required before any locale can be claimed complete; locale formatting and all operational copy still require implementation.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -545,7 +545,7 @@
     "implementation_evidence": [
       "Settings worker commit6eaca67f1c16dd1b549e4969fb4827fa46b4fa92 supplies account/device in-place display preferences, OS system mode with live matchMedia changes, explicit theme override, shared base/chat display menu, font/density/text-size presets and rollback/Undo."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "Parent must integrate settings worker checkpoint with this slice. Browser/OS-follow/max-text qualification remains unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -557,7 +557,7 @@
     "implementation_evidence": [
       "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored. Settings worker6eaca67 supplies shared prior-theme Undo through the same revision-bound preferences endpoint."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
     "remaining": "Integrate settings worker6eaca67 and mobile asset-registration38fcc2f together. Browser/background/contrast qualification remains unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -569,7 +569,7 @@
     "implementation_evidence": [
       "static/lightwork-read-aloud.js owns cancellable server/browser playback, complete 3000-character request chunks, pause/resume/stop, skip-code/tables option, visible preparation/failure state, URL cleanup, navigation stop and answer-ready invalidation. chat_goal.html binds it. JS cancellation/long-answer regression authored."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
     "remaining": "PR2529 has overlapping bounded-read implementation and dynamic answer changes; integrator must preserve current review gating when combining. Engine/autoplay/native acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -581,7 +581,7 @@
     "implementation_evidence": [
       "mobile SettingsScreen.tsx captures test generation, cancels on edits/unmount, clears prior result, guards stale responses and prevents save/test overlap; native ConnectionSettingsView.swift locks tested inputs/save and verifies current normalized candidate/visible lifetime."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Delayed-response, save/unmount and native-device acceptance remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -589,12 +589,12 @@
     "id": "LW-048",
     "title": "Multiple named mobile connections and safe preference parity",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "settings.ts adds atomic secure named-profile record, list/save/switch/remove, legacy preservation, 20-profile bound and opaque isolated cache scopes. SettingsScreen exposes name/add/switch/remove with confirmation. Theme follows OS and interface truthfully remains English. Named-profile regression authored. Device appearance now explicitly selects System/Light/Dark, persists across connections and follows OS changes only in System mode; failed saves keep previous choice and show recovery."
+      "settings.ts adds atomic secure named-profile record, list/save/switch/remove, legacy preservation, 20-profile bound and opaque isolated cache scopes. SettingsScreen exposes name/add/switch/remove with confirmation. Theme follows OS and interface truthfully remains English. Named-profile regression authored. Device appearance now explicitly selects System/Light/Dark, persists across connections and follows OS changes only in System mode; failed saves keep previous choice and show recovery. language.ts and Settings add persisted device/system language, transactional failed-write rollback, regional date/time/number/USD formatting and explicit catalog controls. fr/de/ja/zh draft controls are labeled partial; Arabic remains community-only with correctly declared English fallback. Product literals alone pass through msg; task titles/results stay verbatim. This does not alter output language, account authorization, credentials or profile cache scopes."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
-    "remaining": "Native display/language parity remains incomplete: the interface truthfully remains English pending LW043 catalogs/review. Installed two-profile/keychain/large-text platform acceptance still required; mock named-profile, appearance, race and cache tests pass.",
+    "validation": "2026-09-30: all91 mobile mocked tests passed, including named-profile isolation/removal, language failed-write rollback, invalid-setting recovery, explicit Arabic fallback and verbatim task text. Actual locked-install TypeScript tsc --noEmit passed. Native screen-reader/keychain/RTL qualification remains pending.",
+    "remaining": "Installed iOS/Android accessibility, secure storage and device-language behavior need native qualification. Complete journey translation and human linguistic review remain LW043, not an unqualified language-completeness claim.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -606,7 +606,7 @@
       "device_actions.py admits only own-task answer/Stop after explicit device action enrollment plus current admin policy. Sealed expiring previews bind current context/revision/exact input; explicit confirmation executes shared synchronous clarification submission and goal_stop native CAS/receipt services under authority fence. Stop preserves partial results and never claims cleanup or external rollback. React TaskActions handles fresh online state, background invalidation, retained in-screen draft, explicit same-review recovery and no queued offline effects. Configuration/installer and browser pairing approval are supplied by device_pairing. product_operations_stop supplies the same reviewed native Stop to authorized Copilot registry."
     ],
     "validation": "2026-09-30: 25 local Python tests passed (Stop database CAS/receipt, device action freshness/explicit confirmation/recovery, pairing/authentication); All 83 mobile mocked tests passed, including 4 reviewed-action lifecycle tests; strict TypeScript check had zero diagnostics; Ruff and whitespace checks passed. No live provider effects. Native iOS/Android transport, keychain, accessibility and installed-device qualification require native hosts.",
-    "remaining": "Native installed-host qualification still needed; root must integrate typed product_operations_stop registry registration and shared synchronous clarification_submission dependency. Mobile decisions remain preview until platform qualification; no signing/publication performed.",
+    "remaining": "Root integrated devices/Stop registry entries (c97de06). Installed native iOS/Android transport, keychain, accessibility and stale/duplicate action qualification remain; no signing/publication performed.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -617,7 +617,7 @@
     "implementation_evidence": [
       "chat_goal.html pollQuestions only updates the polite question region for a new question ID and never calls answerInput.focus during polling."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "Keyboard/screen-reader refresh acceptance unrun; reconcile adjacent conversation worker polling edits.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -629,7 +629,7 @@
     "implementation_evidence": [
       "InvalidSavedConnection distinguishes corrupt records; App offers explicit confirmed reset; resetSettings probes locked stores and removes only named app keys/cache. Swift ConnectionStore.reset probes secure storage and scoped delete; UI shows reset for DecodingError only and confirms."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Keychain/SecureStore native tests unrun. Node and Swift corrupt/reset regression tests authored.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -641,7 +641,7 @@
     "implementation_evidence": [
       "RunsListScreen uses scoped server search/status and load-older offset pages with unique-ID merge, generation invalidation, scrollable search/status header, distinct empty-search copy and explicit 200-search-result bound; api.ts uses existing scoped endpoints."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "125-task, incoming-task scroll and permission runtime acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -653,7 +653,7 @@
     "implementation_evidence": [
       "RunDetailScreen expandable/selectable full bounded event content and selectable result; full-history browser handoff has only base URL+task path and no token; browser launch failure shown."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "20-line event/select-copy and separate browser authentication acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -665,7 +665,7 @@
     "implementation_evidence": [
       "App connection-owned offline-bundle projection supplies current authorized attention counts and as-of timestamp to online Overview. Online/saved active task rows open exact task; authenticated Action Center handoff supports approvals/questions."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Online/offline same-state and authority acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -677,7 +677,7 @@
     "implementation_evidence": [
       "useConnectionCache lives in App independently of tab; readiness indicator shows actual successful persistence, optional API failure never claims readiness. RunDetail reads matching cached goal/events with age and retains denial/unsupported suppression."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Tasks-first/offline detail/device storage lifecycle acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -713,7 +713,7 @@
     "implementation_evidence": [
       "theme.ts uses reactive system color scheme with shared readable light/dark tokens; screens/components use palette factories, minimum 48-unit buttons, wrapped actions and scrollable result/list headers; status remains text-labelled."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Device max-text/contrast/target measurements and screen-reader error announcements remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -725,7 +725,7 @@
     "implementation_evidence": [
       "App hardwareBackPress returns detail to Tasks and other tabs to Tasks. usePolling aborts/invalidate requests on inactive/background, blocks background automatic fetch, refreshes once on active and exposes last-success update time."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Native Back/background/resume qualification unrun. Stale-response/background regression authored.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -737,7 +737,7 @@
     "implementation_evidence": [
       "settings.DEFAULT_BASE_URL and mobile README now use8765 matching dashboard CLI; README explains phone loopback, reachable organization HTTPS and intentional proxy ports."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Controlled setup acceptance unrun; no deployment address/config changed.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -749,7 +749,7 @@
     "implementation_evidence": [
       "chat_base.html moves close default-hide before narrow-screen override; existing named close button remains focus-returning. Exact same fix independently exists in PR2529."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "Integrator should keep one equivalent fix when combining2529. 320/390/768/RTL/large-text rendered acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -761,7 +761,7 @@
     "implementation_evidence": [
       "chat_base drawer saves/restores prior inert state, isolates covered body content and wraps Tab/Shift+Tab; existing close/finder/resize paths release isolation. PR2529 supplies overlapping richer focusable filtering."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "Integrator should prefer one reconciled drawer primitive from2529 if adopted. Native assistive-technology acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -773,7 +773,7 @@
     "implementation_evidence": [
       "plan_tree.html always renders semantic server tree outside noscript, refreshes its accessible task links/status/relationships from the same tree, preserves focused link, and keeps list live if graph CDN/init/layout fails."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "JS/no-JS/CDN/canvas failure and keyboard runtime acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -785,7 +785,7 @@
     "implementation_evidence": [
       "widget panel uses border-box/min(320px, viewport insets), logical inline end, safe area/dynamic viewport and visualViewport resize handling; shrinkable input and scrollable log prevent narrow panel overflow."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "320px/landscape/200%/RTL/virtual-keyboard browser/device acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -797,7 +797,7 @@
     "implementation_evidence": [
       "Widget is labelled non-modal region with named input, aria-expanded/controls, explicit Close/Escape/focus return, bounded polite status for pending/refused/unknown/accepted and busy state; transcript is not live-announced wholesale."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "Keyboard and screen-reader host integration acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -809,7 +809,7 @@
     "implementation_evidence": [
       "lightwork-ui.js mvReveal observes reduced-motion at call time, uses instant versus smooth and discoverable focus for explicit reveal. All ten cited scroll calls across collaboration/contracts/intelligence/lifecycle/governance inventory route through it."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
     "remaining": "OS/emulated preference and explicit reveal keyboard/screen-reader acceptance unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -1508,9 +1508,10 @@
       "Owner-only My Data inventory combines personal notes, exact verified conversation scopes, owned tasks, private draft metadata, companion retention and known preservation gates.",
       "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims.",
       "personal_data_requests.py provides owner-requested exact-scope deletion, distinct current administrator review, held/requested/dispatching/purged/unconfirmed per-store records, signed database-closure receipts, fresh preservation gates, and retained/external exceptions.",
-      "Adapters cover selected conversations/tasks/attachments, personal notes, stale-tab-safe encrypted draft deletion, employee-companion history, personal style/display records, scoped model memory, private notification receipts and owned diagnostic reports. Current account identity and privacy restrictions remain explicit retained stores."
+      "Adapters cover selected conversations/tasks/attachments, personal notes, stale-tab-safe encrypted draft deletion, employee-companion history, personal style/display records, scoped model memory, private notification receipts and owned diagnostic reports. Current account identity and privacy restrictions remain explicit retained stores.",
+      "Selected activation drafts and personal project defaults now use owner/revision-bound erasure helpers with durable tombstones; active/uncertain activation dispatch blocks erasure, created workflows/source tasks remain explicit exceptions, and pending audit acknowledgments stay unconfirmed."
     ],
-    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending.",
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending. Follow-up:22 local activation/deletion/shared-operation tests and9 project-workspace tests passed.",
     "remaining": "Browser and installed multi-worker acceptance pending. Source/knowledge derivatives, shared packets, prior models, provider data and copied support downloads are explicit retained/external-unverified exceptions with governed rights handoff; local purge never claims whole-person deletion.",
     "evidence_slice": "slices/personal-memory.json"
   },
@@ -1536,13 +1537,22 @@
     "id": "LW-114",
     "title": "Make search scale limits useful to employees",
     "category": "Memory knowledge and search",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "record_history.py shared current-authority metadata service; native SQLite/PostgreSQL owner/date task/project/fact pages, governed vault/report windows, bounded questionnaire metadata windows, sealed tenant/context/filter cursors, honest current/partial/unavailable coverage and source-recovery links.",
+      "Shared finder historical source, UTC dates, oldest/newest and20/50 page controls reach beyond former1000/500-head caps. Added workflows/templates, automations, projects, exact-owner connections and shared fact-key adapters, native detail links and typed Copilot knowledge.history with same service.",
+      "Formal additive migration45 owner/date indexes on both backends; release1–44 hashes preserved.50k metadata/250 returned-head/cooperative3s scan bounds; no persistent content index, model, connector call or private notes/results/fact values projected. Existing record-search Settings+installer gate retained.",
+      "Canonical template publication/ownership and exact flow-owner metadata filtering preserved; native source details reauthorize. docs/record-search.md includes customer controls, scope, budgets, rollback and qualification limits."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "20 focused history Python checks passed after final bounded questionnaire/cursor repair;10,050-task fixture returned250 metadata heads in0.172–0.235s. Actual1005-questionnaire,501-vault and501-report beyond-cap fixtures pass; native SQLite owner/date index query plan verified.",
+      "Prior integration run passed12 existing record-search checks and31 migration-governance checks; no released migration altered. 43 finder/connection JS tests pass (including nine finder tests), including empty-window continuation, source recovery links, current context, stale paging and new exact native destinations.",
+      "Focused Ruff and changed JS syntax/whitespace pass. Existing integrated app.py import-order/E402 findings are reported to root for its shared cleanup.",
+      "Real VerifiedPrincipal exact-owner fixture passes without patching native auth; cursor confidentiality and cross-tenant rejection pass. No provider/native application execution or production calls."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Installed PostgreSQL concurrency/performance and real-browser rendering/accessibility remain qualification work; local fixtures do not certify those environments.",
+      "Current metadata only; no optional full-text ingestion enabled. Very large or slow source inventories visibly require narrower dates under scan budgets. Native governed catalog capacity and retention boundaries remain authoritative."
     ],
     "evidence_slice": "slices/knowledge.json"
   },
@@ -2420,7 +2430,7 @@
     "implementation_evidence": [
       "ConnectionStore.mayRetainSnapshot permits only explicit transient failures; both Apple models clear private data/receivedAt on 401/403 and other ineligible errors. Vision selection derives from current forest and clears when absent. Watch/vision denial and transient-retention regression sources authored."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
+    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
     "remaining": "Native mock-denial and retained-snapshot qualification remains unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2444,7 +2454,7 @@
     "implementation_evidence": [
       "GlanceView labels actual source date, UTC reporting day and source timestamp, marks failed-refresh data as a saved snapshot, removes Today wording and disables refresh while busy."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
+    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
     "remaining": "Yesterday-date, timezone and watch render acceptance remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2456,7 +2466,7 @@
     "implementation_evidence": [
       "PlanTreeVolume stores only selectedId and derives the selected node from model.forest; removal/revocation clears ID; errors render independently of selection. PlanTreeModelTests covers changed status then denial."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
+    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
     "remaining": "Native selection/error/accessibility acceptance remains unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2468,7 +2478,7 @@
     "implementation_evidence": [
       "PlanTreeVolume provides a searchable, status-labelled text hierarchy with 50-row pages for all received nodes, accessible task selection and selected-card focus, plus fit/zoom controls. Spatial rendering caps at 200 and labels the complete alternate list."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
+    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
     "remaining": "1/100/1000-node, VoiceOver and comfort/performance qualification remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2480,7 +2490,7 @@
     "implementation_evidence": [
       "dashboardData streams URLSession bytes under a hard cap (64 KiB watch, 2 MiB tree), checks cancellation and resource timeout, and invalidates the session. Models own one request, reject concurrent refresh, cancel on connection change/disposal/background and fence late responses. Cap and rapid-refresh/cancellation regression sources authored."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
+    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
     "remaining": "Actual URLSession cancellation/streaming and native disposal acceptance remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2490,10 +2500,10 @@
     "category": "Native clients and developer integrations",
     "status": "planned",
     "implementation_evidence": [
-      "Mobile and Apple READMEs explicitly label preview source and unqualified native behavior. Watch README removes the undelivered complication claim. No signed installer or support qualification is claimed."
+      "Apple project.yml plus pinned XcodeGen2.42.0, application entry points and four app/hosted-test targets remove manual source/target assembly. mobile npm lock, exact Expo52 template version+SHA512, build-native.cjs and local Swift/Kotlin bounded no-redirect transport provide reproducible local native generation and build commands. Previews and support/signing gates remain explicit in native-companion-release.md; watch complication promise stays removed."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
-    "remaining": "Signed customer distribution requires release-owner platform accounts/signing decisions and publication authorization; these are explicitly outside this task. Full compatibility matrix, generated app projects, native host qualification and signed packaging remain unfinished.",
+    "validation": "2026-09-30: locked npm install succeeded; actual dependency tsc --noEmit passed; Android project generation succeeded twice; Android/Apple local-module autolinking verified. All91 mobile mocks passed, including native adapter routing/denial/cancellation/no unsafe Fetch fallback. Apple YAML four target/source/package paths and Python build-script Ruff verified. xcodebuild/XcodeGen/JDK/Android SDK absent on Windows; no native binary was compiled or installed, no signing/upload occurred.",
+    "remaining": "JetBrains Gradle project/distribution and Zed locked artifact packaging remain engineering work outside this Apple/mobile checkpoint; root coordinating. Apple/mobile native SDK compilation, installed-host accessibility/keychain/network tests and release-owner signing/export/privacy/support approval are still required. No signed end-user installer is delivered or claimed.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -2502,10 +2512,10 @@
     "category": "Native clients and developer integrations",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Mobile detail and vision selection now hand off exact task paths to separately authenticated dashboard browsers without tokens in URLs; denied access clears native private views. Clients remain deliberately read-only. device_pairing.py/API and /devices implement five-minute code approval bound to exact named principal/tenant, encrypted bounded registry, closed own-task route credentials, current SCIM/membership/session revocation checks, explicit removal and rotating renewal with sixty-second exact-generation recovery. Admin paired devices remain own-work scoped. Mobile and shared Apple settings pair/save/renew in secure storage; no proof or credential appears in navigation URLs. Config, installer and direct status/removal UI included; product_operations_devices.py supplies the same-service reviewed own-device Copilot status/removal adapter."
+      "Mobile detail and vision selection now hand off exact task paths to separately authenticated dashboard browsers without tokens in URLs; denied access clears native private views. Task browsing remains read-only; mobile action scope is separately explicit under LW049. device_pairing.py/API and /devices implement five-minute code approval bound to exact named principal/tenant, encrypted bounded registry, closed own-task route credentials, current SCIM/membership/session revocation checks, explicit removal and rotating renewal with sixty-second exact-generation recovery. Admin paired devices remain own-work scoped. Mobile and shared Apple settings pair/save/renew in secure storage; no proof or credential appears in navigation URLs. Config, installer and direct status/removal UI included; product_operations_devices.py supplies the same-service reviewed own-device Copilot status/removal adapter."
     ],
     "validation": "2026-09-30: mocked Python pairing/auth regressions11/11; mobile mock suite79/79 including four pairing protocol/lifecycle/save failures; strict TypeScript zero diagnostics; Python AST/Ruff and JavaScript syntax checks passed. Apple protocol/persistence regressions authored; Swift/Xcode unavailable, so native builds and installed-device qualification unrun.",
-    "remaining": "Parent must add product_operations_devices to the shared registry (settings worker coordinating that additive entry) and run integrated auth/middleware tests. Real keychain, TLS transport, installed-device, signing, accessibility and revocation/cache timing qualification remain. Pairing uses a human-readable expiring device code; no QR scanner is required. Full offline revocation cannot reach a disconnected device before its previously accepted retention expiry.",
+    "remaining": "Registry registration is integrated by root (c97de06); root is running consolidated auth/middleware validation. Real keychain, TLS transport, installed-device, signing, accessibility and revocation/cache timing qualification remain. Pairing uses a human-readable expiring device code; no QR scanner is required. Full offline revocation cannot reach a disconnected device before its previously accepted retention expiry.",
     "evidence_slice": "slices/mobile.json"
   },
   {
