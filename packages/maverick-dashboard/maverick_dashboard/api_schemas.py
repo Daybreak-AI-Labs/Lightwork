@@ -692,6 +692,7 @@ class WorkflowDraftIn(BaseModel):
     artifact — a reusable ``"template"`` (default) or an agent ``"playbook"``."""
     description: str = Field("", max_length=8000)
     form: str = Field("template", max_length=16)
+    source_text: str = Field("", max_length=8000)
 
 
 class WorkflowRefineIn(BaseModel):
@@ -712,6 +713,7 @@ class WorkflowSaveIn(BaseModel):
     title: str = Field(..., max_length=200)
     body: str = Field(..., max_length=20000)
     params: list[str] = Field(default_factory=list)
+    parameter_schema: dict = Field(default_factory=dict)
     budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     budget_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     overwrite: bool = False

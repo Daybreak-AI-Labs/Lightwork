@@ -17,6 +17,7 @@ from . import settings_store
 from .auth import (
     caller_principal,
     has_global_permission,
+    has_permission,
     require_global_permission,
     require_permission,
 )
@@ -88,12 +89,17 @@ def _context(request):
 
 
 def _authority(request, response, payload=None, *, operator=False):
-    require_permission(request, "admin")
+    if operator or has_permission(request, "admin"):
+        require_permission(request, "admin")
+    else:
+        require_permission(request, "operate")
+        if not connection_oauth.self_connect_profiles():
+            raise HTTPException(403, "Ask an administrator to allow employees to connect approved own accounts in Settings.")
     if operator:
         require_global_permission(request, "admin")
     actor = caller_principal(request)
     if not actor or not actor.startswith("user:") or not current_tenant_id_strict():
-        raise HTTPException(403, "Sign in as an administrator and select a workspace to connect accounts.")
+        raise HTTPException(403, "Sign in with your named account and select a workspace to connect accounts.")
     response.headers["Cache-Control"] = "private, no-store"
     context = _context(request)
     supplied = payload.context if payload else request.headers.get("X-Lightwork-Connection-Context")
@@ -148,13 +154,15 @@ def _applications(actor, can_manage):
 def overview(request: Request, response: Response):
     actor, context = _authority(request, response)
     enabled = connection_oauth.enabled()
+    is_admin = has_permission(request, "admin")
+    approved = connection_oauth.self_connect_profiles()
     can_manage = has_global_permission(request, "admin")
     return {"context": context, "workspace_context": context_for(request), "can_manage_applications": can_manage,
-        "enabled": enabled, "connections_enabled": connections.enabled(),
+        "enabled": enabled, "connections_enabled": connections.enabled(), "can_manage_keys": is_admin,
         "desktop_return_enabled": connection_oauth.desktop_return_enabled(),
         "desktop_return_available": bool(connection_oauth.desktop_instance_id()),
         "desktop_callback_uri": connection_oauth.DESKTOP_CALLBACK,
-        "callback_uri": _callback(request), "profiles": [{"id": key, **value} for key, value in connection_oauth.PROFILES.items()],
+        "callback_uri": _callback(request), "profiles": [{"id": key, **value} for key, value in connection_oauth.PROFILES.items() if is_admin or key in approved],
         "applications": _call(lambda: _applications(actor, can_manage)) if enabled else [],
         "connections": _call(lambda: connections.list_connections(owner=actor)) if connections.enabled() else [],
         "live_provider_verified": False}
@@ -193,13 +201,15 @@ def authorize(request: Request, response: Response, payload: AuthorizeIn):
     return _call(lambda: connection_oauth.begin(actor, profile=payload.profile, name=payload.name,
         expected_revision=payload.expected_revision, site_url=payload.site_url,
         context=context, redirect_uri=callback, return_profile=payload.return_profile,
-        native_handle=payload.native_handle, prepare_ticket=payload.prepare_ticket))
+        native_handle=payload.native_handle, prepare_ticket=payload.prepare_ticket, self_connect=not has_permission(request, "admin")))
 
 
 @router.post("/desktop-return/prepare")
 def prepare_desktop_return(request: Request, response: Response, payload: NativePrepareIn):
     actor, context = _authority(request, response, payload)
     _callback(request, connection_oauth.DESKTOP_PROFILE)
+    if not has_permission(request, "admin") and payload.profile not in connection_oauth.self_connect_profiles():
+        raise HTTPException(403, "This account profile is not approved for employee connection.")
     return _call(lambda: connection_oauth.native_prepare_ticket(actor, profile=payload.profile,
         name=payload.name, expected_revision=payload.expected_revision, site_url=payload.site_url,
         context=context))

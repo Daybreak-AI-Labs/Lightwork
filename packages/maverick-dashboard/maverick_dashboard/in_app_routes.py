@@ -108,9 +108,9 @@ def prepare_template(request: Request, name: str, payload: TemplatePrepareIn) ->
         raise HTTPException(404, "This template is no longer available.")
     try:
         template = load_template(name)
-        if set(payload.params) != set(template.params):
+        if set(payload.params) - set(template.params):
             raise ValueError("Complete the template's listed inputs.")
-        if any(not value.strip() or len(value) > 10000 for value in payload.params.values()):
+        if any(len(value) > 10000 or (not value.strip() and name not in template.parameter_schema.get("fields", {})) for name, value in payload.params.items()):
             raise ValueError("Each input needs a value of at most 10,000 characters.")
         title, description = template.render(**payload.params)
         if not title.strip() or len(title) > GOAL_TITLE_MAX_LENGTH or len(description) > GOAL_DESCRIPTION_MAX_LENGTH:

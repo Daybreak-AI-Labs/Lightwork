@@ -14,6 +14,7 @@ let held = false;
 let alive = true;
 let activeRequestId = null;
 let serial = 0;
+let pageReview = null;
 const session = chrome.storage.session || chrome.storage.local;
 let persistence = Promise.resolve();
 
@@ -126,14 +127,14 @@ async function poll() {
   }
 }
 
-async function startGoal(title, description) {
+async function startGoal(title, description, capturePolicy) {
   if (submitting || held || !scope || !alive) return;
   submitting = true;
   controls();
   const epoch = generation;
   setStatus("starting…");
   try {
-    const resp = await ask({ type: "chat", scope, title, description });
+    const resp = await ask({ type: "chat", scope, title, description, capturePolicy });
     if (epoch !== generation || !alive) return;
     if (!resp.ok || resp.scope !== scope) {
       held = ["unknown", "pending"].includes(resp.kind);
@@ -201,29 +202,64 @@ function renderStructured(structured) {
 // "Send this page": ask the content script for {title, url, selection,
 // structured} and ship it as goal context alongside whatever is in the chat
 // box. Same user-triggered, localhost-only, bearer-gated path as before.
+function reviewedDescription() {
+  if (!pageReview) return "";
+  const ctx = pageReview.context;
+  let text = ($("prompt").value.trim() || "Review this page.") + "\n\n--- reviewed page source data ---";
+  if ($("share-url").checked) text += "\ntitle: " + ctx.title + "\nurl: " + ctx.url;
+  if ($("share-selection").checked && ctx.selection) text += "\nselection:\n" + ctx.selection;
+  if ($("share-structure").checked && pageReview.policy.page_structure) {
+    const structure = JSON.parse(JSON.stringify(ctx.structured || {}));
+    if (!$('share-values').checked || !pageReview.policy.form_values) for (const item of structure.elements || []) delete item.value;
+    text += renderStructured(structure);
+  }
+  if (!$('share-structure').checked && $('share-values').checked && pageReview.policy.form_values) {
+    text += "\nVisible form values:\n" + (ctx.structured?.elements || []).filter(item => item.value).map(item => (item.name || item.tag) + ": " + item.value).join("\n");
+  }
+  return text;
+}
+function renderPageReview() {
+  if (!pageReview) return;
+  $("share-values").disabled = !pageReview.policy.form_values;
+  if ($("share-values").disabled) $("share-values").checked = false;
+  $("page-preview").textContent = reviewedDescription();
+}
+function cancelPageReview() {
+  pageReview = null; $("page-preview").textContent = ""; $("page-review").hidden = true; $("send-page").focus();
+}
 async function sendPage() {
   if (submitting || held || !scope) return;
   const epoch = generation;
+  const policy = await ask({ type: "capturePolicy", scope });
+  if (epoch !== generation || !alive) return;
+  if (!policy.ok) { setStatus(policy.error || "Capture policy is unavailable. No page was sent.", true); return; }
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs && tabs[0];
-  if (!tab || tab.id === undefined) {
-    setStatus("no active tab", true);
-    return;
-  }
-  chrome.tabs.sendMessage(tab.id, { type: "getPageContext" }, async (ctx) => {
+  if (!tab || tab.id === undefined) { setStatus("No active tab.", true); return; }
+  chrome.tabs.sendMessage(tab.id, { type: "getPageContext", options:{structure:policy.data.page_structure || policy.data.form_values, formValues:policy.data.form_values} }, async (ctx) => {
     if (epoch !== generation || !alive || submitting || held) return;
-    if (chrome.runtime.lastError || !ctx) {
-      setStatus("cannot read this page (browser-internal pages are off limits)", true);
-      return;
-    }
-    const ask_ = $("prompt").value.trim();
-    const title = (ask_ ? ask_.split("\n", 1)[0] : "Look at page: " + ctx.title).slice(0, 200);
-    let description = (ask_ || "Review this page.") + "\n\n--- page context ---";
-    description += "\ntitle: " + ctx.title + "\nurl: " + ctx.url;
-    if (ctx.selection) description += "\nselection:\n" + ctx.selection;
-    description += renderStructured(ctx.structured);
-    await startGoal(title, description);
+    if (chrome.runtime.lastError || !ctx) { setStatus("Cannot read this page. Browser settings pages are unavailable.",true); return; }
+    const preferences = (await chrome.storage.local.get("capturePreferences")).capturePreferences || {};
+    if (epoch !== generation || !alive) return;
+    pageReview = { context:ctx, policy:policy.data, epoch };
+    $("share-url").checked = preferences.url !== false;
+    $("share-selection").checked = preferences.selection !== false;
+    $("share-structure").checked = policy.data.page_structure && preferences.structure === true;
+    $("share-structure").disabled = !policy.data.page_structure;
+    // Sensitive values require a fresh choice for every page, never a remembered opt-in.
+    $("share-values").checked = false;
+    $("page-policy").textContent = "This extension sends reviewed content to your local Lightwork dashboard. Lightwork may send it to its configured AI service (" + policy.data.model + ") and permitted tools under workspace policy. " + (policy.data.form_values ? "Visible form values are optional and off by default." : "Your administrator does not allow form values.");
+    $("page-review").hidden = false; renderPageReview(); $("page-confirm").focus();
   });
+}
+async function confirmPageReview() {
+  if (!pageReview || pageReview.epoch !== generation || submitting || held) return;
+  const description = reviewedDescription();
+  const reviewed = pageReview;
+  const title = ($("prompt").value.trim().split("\n",1)[0] || "Review shared page context").slice(0,200);
+  await chrome.storage.local.set({capturePreferences:{url:$("share-url").checked, selection:$("share-selection").checked, structure:$("share-structure").checked}});
+  await startGoal(title, description, {revision:reviewed.policy.revision, form_values:$("share-values").checked, page_structure:$("share-structure").checked});
+  cancelPageReview();
 }
 
 async function loadSettings() {
@@ -232,6 +268,8 @@ async function loadSettings() {
   if (epoch !== generation || !alive) return;
   $("base").value = s.base;
   $("token").value = s.token;
+  $("extension-settings").href = /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(s.base) ? s.base + "/settings#settings-access" : "#";
+  if (!s.token.trim()) { scope=""; controls(); setStatus("An access token is required. Ask your administrator, paste it in Settings, and save.",true); return; }
   $("dashboard").href = /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(s.base) ? s.base : "#";
   const identity = await ask({ type: "identity" });
   if (epoch !== generation || !alive) return;
@@ -257,6 +295,8 @@ async function saveSettings() {
     setStatus("dashboard URL must be http://127.0.0.1[:port]", true);
     return;
   }
+  if (!$("token").value.trim()) { setStatus("An access token is required before the extension can connect.",true); return; }
+  cancelPageReview();
   base = base.replace(/\/+$/, "");
   generation++;
   stopPolling();
@@ -273,6 +313,9 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSettings();
   $("send").addEventListener("click", sendChat);
   $("send-page").addEventListener("click", sendPage);
+  $("page-confirm").addEventListener("click", confirmPageReview);
+  $("page-cancel").addEventListener("click", cancelPageReview);
+  for (const id of ["share-url","share-selection","share-structure","share-values"]) $(id).addEventListener("change",renderPageReview);
   $("save").addEventListener("click", saveSettings);
   $("clear-pending").addEventListener("click", async () => {
     if (!held || submitting) return;

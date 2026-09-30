@@ -13,6 +13,7 @@
     textarea { width: 100%; box-sizing: border-box; min-height: 64px;
                background: #1d2026; color: #e6e6e6; border: 1px solid #3a3f47;
                border-radius: 4px; padding: 6px; }
+    input[type="checkbox"] { width: auto; }
     input { width: 100%; box-sizing: border-box; background: #1d2026;
             color: #e6e6e6; border: 1px solid #3a3f47; border-radius: 4px;
             padding: 4px 6px; }
@@ -38,10 +39,21 @@
     <div>
       <button id="send" type="button">Send</button>
       <button id="send-page" type="button" class="secondary"
-              title="Ship this page's title, URL, selection, and a bounded, observe-only accessibility snapshot as goal context">
+              title="Review the page information before sharing it">
         Send this page
       </button>
     </div>
+    <section id="page-review" hidden aria-labelledby="page-review-title">
+      <h2 id="page-review-title">Review what will be shared</h2>
+      <label><input id="share-url" type="checkbox" checked> Page title and URL</label>
+      <label><input id="share-selection" type="checkbox" checked> Selected text</label>
+      <label><input id="share-structure" type="checkbox"> Page structure</label>
+      <label><input id="share-values" type="checkbox"> Visible form values (may contain private information)</label>
+      <p id="page-policy" class="hint"></p>
+      <pre id="page-preview" style="max-height:180px;overflow:auto;white-space:pre-wrap"></pre>
+      <button id="page-confirm" type="button">Send reviewed context</button>
+      <button id="page-cancel" type="button" class="secondary">Cancel</button>
+    </section>
     <div id="status" class="hint" role="status" aria-live="polite"></div>
     <a id="dashboard" href="#" target="_blank" rel="noopener">Open dashboard to review</a>
     <button id="clear-pending" type="button" class="secondary" hidden>Check start status</button>
@@ -50,13 +62,11 @@
       <summary>Settings</summary>
       <label for="base">Dashboard URL (local only)</label>
       <input id="base" placeholder="http://127.0.0.1:8765">
-      <label for="token">Dashboard token (recommended)</label>
+      <label for="token">Dashboard token (required)</label>
       <input id="token" type="password" autocomplete="off"
-             placeholder="MAVERICK_DASHBOARD_TOKEN">
+             placeholder="Enter the access token provided by your administrator">
       <button id="save" type="button" class="secondary">Save</button>
-      <p class="hint">The server must opt in: set
-        <code>[dashboard] allow_extension = true</code> in
-        ~/.maverick/config.toml.</p>
+      <p class="hint"><a id="extension-settings" href="http://127.0.0.1:8765/settings#settings-access" target="_blank" rel="noopener">Open Lightwork Settings</a> and search for “Allow the browser extension”. An administrator must enable it and provide the required access token. A deployment policy may lock the setting; the effective value is shown in Settings. Return here after setup.</p>
     </details>
   </main>
   <script src="client-protocol.js"></script>

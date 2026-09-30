@@ -956,3 +956,19 @@ def test_workflow_builder_reads_plainly(monkeypatch, tmp_path):
     for phrase in ("a name (id)", "no gate", "Trigger from a webhook", "POSTing", "Failed: '", "Save failed: '"):
         assert phrase not in t
     assert "Someone must approve" in t and "Start it from another app" in t
+
+
+def test_extract_document_requires_review_and_never_calls_drafter(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr("maverick_dashboard.api._extract_binary_doc_text", lambda raw, name: "Procedure text")
+    monkeypatch.setattr("maverick_dashboard.api._drafter_for", lambda form: pytest.fail("Extraction must not call a paid drafter"))
+    response = _client().post("/api/v1/workflows/extract-source", files={"file": ("procedure.pdf", b"%PDF synthetic", "application/pdf")})
+    assert response.status_code == 200
+    assert response.json() == {"text": "Procedure text", "truncated": False, "review_required": True, "started": False}
+
+
+def test_extract_document_refuses_unsupported_empty_and_oversize(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    for name, body in [("procedure.exe", b"data"), ("empty.txt", b""), ("large.txt", b"x" * 512001)]:
+        response = _client().post("/api/v1/workflows/extract-source", files={"file": (name, body)})
+        assert response.status_code == 422

@@ -4929,6 +4929,14 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "workflow_typed_inputs": _q_confirm(
+            "Allow workflow authors to add dates, choices, optional inputs and defaults?", default=True),
+        "connections_self_connect": _q_confirm(
+            "Allow employees to connect their own read-only Google Drive account after an administrator registers the workspace provider app? Other profiles require explicit approval in Settings.", default=False),
+        "extension_form_values": _q_confirm(
+            "Allow people to review and share browser form values with the configured AI service? Values remain off by default for every page.", default=False),
+        "extension_page_structure": _q_confirm(
+            "Allow people to review and share browser page headings and controls with the configured AI service?", default=True),
         "emergent_protocol": _q_confirm(
             "Emergent coordination shorthand? Swarms evolve short codes for the boilerplate "
             "they repeat (cheaper coordination), while every code decodes EXACTLY back to "
@@ -8007,6 +8015,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("# Externally-reachable dashboard base URL for signed channel")
             lines.append("# Approve/Reject links (actionable approvals).")
             _emit_kv(lines, "public_url", advanced["flows_public_url"])
+    if "workflow_typed_inputs" in advanced:
+        lines.extend(["", "[workflows]"])
+        _emit_kv(lines, "typed_inputs", advanced["workflow_typed_inputs"] is True)
     if advanced.get("connections"):
         lines.append("")
         lines.append("[connections]")
@@ -8014,6 +8025,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# can be wired from the dashboard without <NAME>_TOKEN env vars; an")
         lines.append("# existing env var still takes precedence (maverick.connections).")
         lines.append("enable = true")
+        _emit_kv(lines, "allow_self_connect", advanced.get("connections_self_connect") is True)
+        _emit_kv(lines, "self_connect_profiles", "google-drive")
     if advanced.get("emergent_protocol"):
         lines.append("")
         lines.append("[emergent_protocol]")
@@ -8664,13 +8677,16 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     compress_off = advanced.get("dashboard_compress") is False
     if isinstance(dept, dict) and (
         "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off
+        or "local_owner_setup" in advanced or compress_off or "extension_form_values" in advanced or "extension_page_structure" in advanced
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
         # turn IdP (SCIM) team membership into a role / department grant.
         lines.append("")
         lines.append("[dashboard]")
+        for capture_key in ("extension_form_values", "extension_page_structure"):
+            if capture_key in advanced:
+                _emit_kv(lines, capture_key, advanced[capture_key] is True)
         if "local_owner_setup" in advanced:
             _emit_kv(lines, "local_owner_setup", advanced["local_owner_setup"] is True)
         if compress_off:

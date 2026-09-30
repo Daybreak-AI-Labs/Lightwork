@@ -140,3 +140,14 @@ test('authoring with attachments never silently starts an ordinary task',async()
   assert.match(w.document.getElementById('goal-error').textContent,/do not accept attachments/);
   assert.equal(w.document.querySelector('[name="title"]').value,'Review the project');w.close();
 });
+
+
+test('search and suggestion modes compose without stale empty states',async()=>{
+  const html='<input id="tplm-find"><p id="tplm-none" hidden>No matches</p>'+libraryHTML.replace('data-template-name="review"','data-template-name="review" data-tplm-text="review company"');
+  const dom=fixture(html,'lightwork-template-library.js',async()=>response({suggested:[{name:'review'}]}));
+  const w=dom.window,d=w.document,find=d.getElementById('tplm-find');
+  find.value='missing';find.dispatchEvent(new w.Event('input'));d.getElementById('templates-suggested').click();await tick();
+  assert.equal(d.querySelector('[data-template-name]').hidden,true);assert.equal(d.getElementById('tplm-none').hidden,false);
+  d.getElementById('templates-all').click();assert.equal(d.querySelector('[data-template-name]').hidden,true);
+  find.value='';find.dispatchEvent(new w.Event('input'));assert.equal(d.querySelector('[data-template-name]').hidden,false);assert.equal(d.getElementById('tplm-none').hidden,true);w.close();
+});

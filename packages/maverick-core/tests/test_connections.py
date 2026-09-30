@@ -446,3 +446,25 @@ def test_connection_principal_length_boundary():
 
     with pytest.raises(ValueError, match="1-256 printable"):
         connections.set_connection("too-long", token="x", owner="p" * 257)
+
+
+def test_readiness_receipt_is_bound_to_credential_revision_and_capability():
+    saved = connections.set_connection("test", connector="zendesk", token="test-token")
+    checked = connections.record_test_result("test", reachable=True, authenticated=False,
+        status=200, expected_revision=saved["revision"], outcome="access_unverified")
+    assert checked["last_test"]["revision"] == saved["revision"]
+    assert checked["last_test"]["outcome"] == "access_unverified"
+    assert "task access is not checked" in checked["last_test"]["capability"]
+    rotated = connections.set_connection("test", token="replacement", expected_revision=saved["revision"])
+    assert rotated["last_test"] is None
+    with pytest.raises(connections.ConnectionVersionConflict):
+        connections.record_test_result("test", reachable=True, authenticated=True, expected_revision=saved["revision"])
+
+
+def test_bad_aws_region_refuses_without_overwriting_saved_record():
+    import json
+
+    saved = connections.set_connection("storage", connector="aws_s3", token=json.dumps({"region": "ap-southeast-7", "access_key_id": "fixture", "secret_access_key": "fixture"}))
+    with pytest.raises(ValueError, match="region"):
+        connections.set_connection("storage", token=json.dumps({"region": "bad/region"}), expected_revision=saved["revision"])
+    assert connections.get_connection("storage")["revision"] == saved["revision"]

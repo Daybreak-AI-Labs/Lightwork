@@ -7979,6 +7979,7 @@ def template_market_entries() -> list[dict]:
                 "name": name,
                 "title": tpl.title,
                 "params": list(tpl.params),
+                "parameter_schema": tpl.parameter_schema,
                 "body": tpl.body[:2000],
                 "stars": stars,
                 "rating_bar": stars_bar(float(stars), 0) if stars else "unrated",
@@ -11387,6 +11388,7 @@ async def workflow_builder_page(
                 "title": t.title,
                 "body": t.body,
                 "params": list(t.params),
+                "parameter_schema": t.parameter_schema,
                 "budget_dollars": t.budget_dollars,
                 # Carry the wall-seconds cap so a save round-trip can't
                 # silently reset it to the schema default (3600).
@@ -11400,7 +11402,8 @@ async def workflow_builder_page(
 
         try:
             tpl = load_template(template)
-            prefill = {"name": tpl.name, "params": list(tpl.params), "title": tpl.title}
+            prefill = {"name": tpl.name, "params": list(tpl.params),
+                "parameter_schema": tpl.parameter_schema, "title": tpl.title}
         except (ValueError, FileNotFoundError):
             prefill = None
     return templates.TemplateResponse(
@@ -11530,6 +11533,7 @@ async def connections_page(request: Request) -> HTMLResponse:
             people = []
     return templates.TemplateResponse(request, "connections.html", {
         "connections_enabled": enabled,
+        "can_manage_keys": has_permission(request, "admin"),
         "people": people,
     })
 

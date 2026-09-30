@@ -172,9 +172,15 @@
         </button>
         <button type="button" id="wf-file-btn" class="btn btn--ghost">Upload a document…</button>
         <input type="file" id="wf-file" class="wf__file-input"
-               accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml,text/*,application/json"
+               accept=".pdf,.docx,.txt,.md,.markdown,.json,.csv,.yaml,.yml,text/*,application/json"
                aria-label="Upload a document to draft from" />
         <span class="wf__hint" id="wf-file-name"></span>
+        <div id="wf-source-review" hidden>
+          <label for="wf-source-text">Review extracted procedure</label>
+          <textarea class="textarea" id="wf-source-text" rows="8" maxlength="8000"></textarea>
+          <p class="wf__hint">Source material only. Review and remove private or irrelevant text before Draft with AI. Uploading does not start work. PDF and Word documents require the installed document parsers; maximum file size is 512 KB.</p>
+          <button class="btn btn--ghost" type="button" id="wf-source-clear">Remove document</button>
+        </div>
       </div>
     </div>
 
@@ -202,9 +208,11 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field">
-          <label for="wf-params">Information to ask for each time (separate with commas)</label>
-          <input type="text" id="wf-params" class="input" placeholder="competitor, timeframe"
-                 aria-label="Information to ask for each time" />
+          <label for="wf-params">Input names (existing templates)</label>
+          <input type="text" id="wf-params" class="input" placeholder="competitor, timeframe" aria-label="Information to ask for each time" />
+          <p class="wf__hint">Add named input fields below to choose a label, type, optional value or default. Existing names remain required text unless you customize them.</p>
+          <div id="wf-input-fields"></div>
+          <button class="btn btn--ghost" id="wf-add-input" type="button">Add input field</button>
         </div>
         <div class="wf__field wf__field--sm">
           <label for="wf-budget">Optional spending limit ($)</label>
@@ -673,8 +681,29 @@
     }
 
     fileBtn.addEventListener('click', function () { fileInput.click(); });
-    fileInput.addEventListener('change', function () {
-      fileName.textContent = fileInput.files.length ? ('Will draft from: ' + fileInput.files[0].name) : '';
+    var sourceText = document.getElementById('wf-source-text'), sourceReview = document.getElementById('wf-source-review');
+    var sourceSerial = 0, sourceReady = false;
+    document.getElementById('wf-source-clear').addEventListener('click', function () {
+      sourceSerial++; fileInput.value=''; sourceText.value=''; sourceReview.hidden=true; sourceReady=false; fileName.textContent=''; draftBtn.disabled=false;
+    });
+    fileInput.addEventListener('change', async function () {
+      var serial=++sourceSerial; sourceReady=false; sourceReview.hidden=true; sourceText.value='';
+      if (!fileInput.files.length) return;
+      var file=fileInput.files[0]; draftBtn.disabled=true;
+      fileName.textContent='Reading document for your review.';
+      try {
+        if (file.size > 512000) throw new Error('Choose a document smaller than 512 KB, or paste the relevant section.');
+        var fd=new FormData(); fd.append('file',file);
+        var response=await fetch('/api/v1/workflows/extract-source',{method:'POST',body:fd});
+        var result=await response.json();
+        if (serial!==sourceSerial) return;
+        if (!response.ok) throw new Error(response.status===422 && typeof result.detail==='string' ? result.detail : plainErr(response,'read the document'));
+        if (typeof result.text!=='string' || result.started!==false) throw new Error('The extracted document could not be confirmed. Choose the file again.');
+        sourceText.value=result.text; sourceReview.hidden=false; sourceReady=true;
+        fileName.textContent=result.truncated ? 'Only the first 8,000 characters fit. Review this excerpt or replace it with the relevant section.' : 'Document ready for review. Draft with AI sends the reviewed text.';
+        sourceText.focus();
+      } catch (error) { if (serial===sourceSerial) fileName.textContent=error.message; }
+      finally { if (serial===sourceSerial) draftBtn.disabled=false; }
     });
 
     function showSaved(href, label) {
@@ -729,12 +758,50 @@
     function plainErr(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
     }
+    var inputFields = document.getElementById('wf-input-fields');
+    function addInputField(name, field) {
+      field=field || {}; var row=document.createElement('fieldset'); row.className='wf__field';
+      var legend=document.createElement('legend'); legend.textContent='Input field'; row.appendChild(legend);
+      function control(key,label,type,value) {
+        var wrap=document.createElement('label'); wrap.textContent=label;
+        var input=document.createElement(type==='select' ? 'select' : 'input'); input.className='input'; input.dataset.inputKey=key;
+        if (type==='select') ['text','date','enum','number','email'].forEach(function (kind) { input.appendChild(new Option({text:'Text',date:'Date',enum:'Choice',number:'Number',email:'Email'}[kind],kind)); });
+        else input.type=type;
+        if (type==='checkbox') input.checked=value; else input.value=value || '';
+        input.maxLength=key==='help' ? 500 : 100; wrap.appendChild(input); row.appendChild(wrap); return input;
+      }
+      control('name','Name used in the steps','text',name);
+      control('label','Label shown to the person','text',field.label || name);
+      control('type','Type','select',field.type || 'text');
+      control('required','Required','checkbox',field.required !== false);
+      control('default','Default value (optional)','text',field.default);
+      control('choices','Choice options (separate with commas)','text',(field.choices || []).join(', '));
+      control('help','Help beside the field','text',field.help);
+      control('condition_field','Show only when this other input matches (optional)','text',field.show_when && field.show_when.field);
+      control('condition_value','Matching value','text',field.show_when && field.show_when.value);
+      var remove=document.createElement('button'); remove.type='button'; remove.className='btn btn--ghost'; remove.textContent='Remove field definition';
+      remove.addEventListener('click',function () { row.remove(); }); row.appendChild(remove); inputFields.appendChild(row);
+    }
+    document.getElementById('wf-add-input').addEventListener('click',function () { addInputField('',{}); });
+    function collectInputFields() {
+      var fields={};
+      inputFields.querySelectorAll('fieldset').forEach(function (row) {
+        var values={}; row.querySelectorAll('[data-input-key]').forEach(function (input) { values[input.dataset.inputKey]=input.type==='checkbox' ? input.checked : input.value.trim(); });
+        if (!/^[A-Za-z_]\w*$/.test(values.name) || fields[values.name]) throw new Error('Each input needs a unique name using letters, numbers and underscores.');
+        var field={type:values.type,label:values.label,required:values.required,default:values.default,help:values.help,choices:values.choices ? values.choices.split(',').map(function (v) { return v.trim(); }).filter(Boolean) : []};
+        if (values.condition_field) field.show_when={field:values.condition_field,value:values.condition_value};
+        fields[values.name]=field;
+      });
+      return Object.keys(fields).length ? {version:1,fields:fields} : {};
+    }
     function renderDraft(d, shouldScroll) {
       templateWorkspaceStarted = true;
       elName.value = d.name || '';
       elTitle.value = d.title || '';
       elSteps.value = d.body || '';
       elParams.value = (d.params || []).join(', ');
+      inputFields.replaceChildren();
+      Object.entries((d.parameter_schema || {}).fields || {}).forEach(function (entry) { addInputField(entry[0],entry[1]); });
       elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : '';
       if (recovery) recovery.changed();
       if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
@@ -759,6 +826,8 @@
         name: elName.value.trim(), title: elTitle.value.trim(), body: elSteps.value,
         params: splitList(elParams.value), budget_dollars: elBudget.value.trim() === '' ? null : Number(elBudget.value),
       };
+      t.parameter_schema=collectInputFields();
+      Object.keys(t.parameter_schema.fields || {}).forEach(function (name) { if (!t.params.includes(name)) t.params.push(name); });
       // Preserve the wall-time cap of an edited template (the form has no field
       // for it) so a save round-trip can't reset it to the server default.
       if (wfEditWall != null) t.budget_wall_seconds = wfEditWall;
@@ -1480,18 +1549,12 @@
       setStatus(draftMode === 'playbook' ? 'Drafting the playbook…' : 'Drafting the workflow…');
       try {
         var resp;
-        if (fileInput.files.length) {
-          var fd = new FormData();
-          fd.append('file', fileInput.files[0]);
-          fd.append('form', draftMode);
-          resp = await fetch('/api/v1/workflows/draft-from-file', { method: 'POST', body: fd });
-        } else {
-          if (!brief.value.trim()) { setStatus('Describe it, or upload a document.', true); return; }
-          resp = await fetch('/api/v1/workflows/draft', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description: brief.value.trim(), form: draftMode }),
-          });
-        }
+        if (fileInput.files.length && !sourceReady) { setStatus('Review a readable document before drafting, or remove it and use the brief.',true); return; }
+        if (!brief.value.trim() && !sourceText.value.trim()) { setStatus('Describe it, or upload a document.',true); return; }
+        resp = await fetch('/api/v1/workflows/draft', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({description:brief.value.trim(), source_text:sourceText.value, form:draftMode})
+        });
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) { setStatus(plainErr(resp, 'draft it'), true); return; }
         var completedStatus;

@@ -276,6 +276,14 @@ def set_connection(name: str, *, connector: str | None = None,
             # A new generation invalidates every prior readiness assertion.
             "revision": uuid.uuid4().hex,
         }
+        if rec["connector"] == "aws_s3" and token is not None:
+            try:
+                credential = json.loads(token)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Enter the AWS access key, secret key and storage region together.") from exc
+            if (not isinstance(credential, dict) or not isinstance(credential.get("region"), str)
+                    or re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]+", credential["region"]) is None):
+                raise ValueError("Enter a valid AWS storage region, such as us-east-1.")
         if existing_oauth and token is None:
             rec["oauth"] = dict(existing_oauth)
         data[slug] = rec
@@ -446,6 +454,7 @@ def record_test_result(
     status: int | None = None,
     expected_owner: str | None = None,
     expected_revision: str | None = None,
+    outcome: str | None = None,
 ) -> dict:
     """Persist a bounded, non-secret readiness receipt for a connection.
 
@@ -473,6 +482,12 @@ def record_test_result(
             "reachable": bool(reachable),
             "authenticated": bool(authenticated),
             "status": int(status) if status is not None else None,
+            "revision": str(rec.get("revision") or ""),
+            "capability": "service-address authentication check; task access is not checked",
+            "outcome": outcome if outcome in {
+                "authenticated", "access_unverified", "sign_in_refused",
+                "blocked_by_policy", "unreachable", "address_missing",
+            } else ("authenticated" if authenticated else "access_unverified" if reachable else "unreachable"),
         }
         data[slug] = updated
         _save(data)

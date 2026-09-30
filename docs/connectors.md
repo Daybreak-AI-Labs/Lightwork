@@ -60,17 +60,50 @@ SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates, NWS/NOAA
 weather, EPA, Climatiq, ...) — GET-only, low-risk, and auto-granted to analyst
 packs by suite (see **Primary-source data grounding** below).
 
-## Enabling a connector
+## Connect from Lightwork
 
-Set the connector's environment variables in `~/.maverick/.env` (chmod 600) or
-your process environment. The interactive installer can do this for you:
+Open **Connections** from Integrations. Search for the service by its business
+name. The catalog describes the authentication method and prerequisites; being
+listed is not evidence of live provider qualification.
 
-```
-maverick init        # advanced flow → "Connect any enterprise systems now?"
-```
+For an approved renewable account, choose **Connect an account**, choose the
+profile, and review its fixed permissions before signing in with the provider.
+An administrator registers the provider application once. When **Let employees
+connect their own approved accounts** is enabled in Settings, employees with
+operate permission can connect their own approved profiles. The account stays
+owner-only; sharing and application registration need an administrator. If an
+application is missing, ask the installation administrator to register it in
+Connections; this external provider prerequisite cannot be bypassed.
 
-Pick the systems by name and the wizard prompts for each one's URL and token.
-You can also add or edit them in `~/.maverick/.env` at any time.
+For a service using a key, an administrator chooses the service, gives the
+connection a distinct name, enters the API service address supplied by that
+service, and saves the key in the protected field. Basic authentication adapters
+need the provider's username/API-key format. Services marked **dedicated setup**
+have additional prerequisites; the simple key form cannot complete them. Do not
+substitute another adapter or a connection name for its tool binding.
+
+**Credential saved** confirms storage only. **Check service access** performs a
+harmless GET and records exactly when, on which credential revision, and with
+what result authentication was checked. A public service address may be reachable
+without proving authentication. Exact folder, storage or ticket permissions need
+the corresponding source or workflow check. Privacy sources link to **Privacy
+scanning** for that check. No connection check authorizes a business write.
+
+Choose **Change** on the saved row to edit its metadata. A blank key preserves the
+saved credential (including its AWS region); enter all AWS credential fields only
+when rotating it. A conflict retains your draft without its secret and requires
+a fresh review of the current record. **Remove** deletes the local sealed record;
+it does not revoke consent at the provider. Review connected apps in the provider's
+account settings separately. An unavailable list disables changes; refresh it
+before creating a replacement so an outage does not produce duplicate setup.
+
+### Operator reference
+
+The installer can collect connector prerequisites during advanced setup. Legacy
+single-user installations may use the documented environment-variable names in
+the catalog below. Authenticated enterprise work still requires the current
+principal's saved connection; operator credentials do not grant employee access.
+Normal customer setup and credential editing take place in Connections.
 
 ## Primary-source data grounding
 

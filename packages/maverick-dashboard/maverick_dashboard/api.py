@@ -5463,11 +5463,7 @@ def _require_connections() -> None:
     if not connections.enabled():
         raise HTTPException(
             status_code=403,
-            detail=(
-                "Connections aren't enabled on this server yet — an "
-                "administrator can switch them on (enable [connections] in "
-                "the server configuration, or set MAVERICK_CONNECTIONS=1)."
-            ),
+            detail={"code": "connections_disabled", "message": "Connections are turned off. An administrator can enable them in Settings."},
         )
 
 
@@ -5485,7 +5481,85 @@ async def list_connections_endpoint(request: Request) -> dict:
         raise HTTPException(
             status_code=503, detail="connection credential registry is unavailable"
         ) from exc
-    return {"connections": rows}
+    from .draft_api import context_for
+
+    return {"connections": rows, "context": context_for(request)}
+
+
+@router.get("/extension/policy")
+async def extension_capture_policy(request: Request) -> dict:
+    """Current authorized disclosure; no page content or credentials are retained."""
+    import hashlib
+
+    from maverick.config import config_source_errors, get_role_model, load_config
+
+    from .draft_api import context_for
+
+    require_permission(request, "operate")
+    if config_source_errors(include_tenant=True):
+        raise HTTPException(503, "Extension settings are unavailable. Try again after an administrator repairs settings.")
+    dashboard = load_config().get("dashboard") or {}
+    policy = {"form_values": dashboard.get("extension_form_values") is True,
+              "page_structure": dashboard.get("extension_page_structure", True) is True,
+              "context": context_for(request), "model": str(get_role_model("orchestrator") or "configured service")}
+    policy["revision"] = hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()
+    return policy
+
+
+@router.get("/connections/inventory")
+async def account_inventory_endpoint(request: Request) -> dict:
+    """Read-only facade; named credentials and provider vault entries stay distinct."""
+    from maverick import connections, oauth_providers, oauth_vault
+
+    from .auth import has_permission
+    from .draft_api import context_for
+
+    require_permission(request, "operate")
+    rows = []
+    coverage = []
+    if connections.enabled():
+        try:
+            for record in connections.list_connections(owner=_request_identity(request)):
+                identity = record.get("oauth") or {}
+                rows.append({"id": "named:" + record["name"], "name": record["name"],
+                             "provider": record["connector"], "domain": "Named workflows and sources",
+                             "owner": "Your account" if _request_identity(request) else "Workspace-managed",
+                             "identity": (identity.get("identity") or {}).get("display_name") or "See account details in Connections",
+                             "sharing": "Workspace" if record["access"] == "tenant" else "Owner and explicitly selected people",
+                             "repair_url": "/connections", "credential_kind": "named", "revision": record["revision"]})
+            coverage.append({"domain": "Named connections", "state": "available"})
+        except connections.ConnectionStoreUnavailable:
+            coverage.append({"domain": "Named connections", "state": "unavailable"})
+    else:
+        coverage.append({"domain": "Named connections", "state": "disabled"})
+    if has_permission(request, "admin") and oauth_vault.enabled():
+        try:
+            vault = oauth_vault.get_vault()
+            labels = {item["name"]: item["label"] for item in oauth_providers.provider_catalog()}
+            for provider in vault.providers():
+                status = vault.status(provider) or {}
+                rows.append({"id": "automation:" + provider, "name": labels.get(provider, provider) + " automation account",
+                             "provider": provider, "domain": "Provider-wide automation account",
+                             "owner": "Workspace-managed", "identity": "Account identity was not recorded by this legacy connection",
+                             "sharing": "Existing automation vault policy", "repair_url": "/automations#oauth-connect",
+                             "credential_kind": "automation", "expires_at": status.get("expires_at"),
+                             "expired": status.get("expired", False), "renews": status.get("has_refresh_token", False)})
+            coverage.append({"domain": "Automation accounts", "state": "available"})
+        except Exception:
+            coverage.append({"domain": "Automation accounts", "state": "unavailable"})
+    else:
+        coverage.append({"domain": "Automation accounts", "state": "administrator-only" if oauth_vault.enabled() else "disabled"})
+    return {"accounts": rows, "coverage": coverage, "context": context_for(request)}
+
+
+@router.get("/connections/catalog")
+async def connection_catalog_endpoint(request: Request) -> dict:
+    """Public setup metadata only; a catalog listing is not live qualification."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick.tools.enterprise_connectors import connection_setup_catalog
+
+    return {"connectors": connection_setup_catalog(), "live_provider_verified": False}
 
 
 @router.post("/connections", status_code=201)
@@ -5561,6 +5635,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
                 status=result.get("status"),
                 expected_owner=owner_filter,
                 expected_revision=probe_revision,
+                outcome=result.get("outcome"),
             )
         except connections.ConnectionVersionConflict as exc:
             raise HTTPException(
@@ -5580,6 +5655,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             "reachable": False,
             "authenticated": False,
             "detail": "no base URL set",
+            "outcome": "address_missing",
         }
         _persist_probe(result)
         return result
@@ -5666,6 +5742,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
                 "reachable": False,
                 "authenticated": False,
                 "detail": "base URL host is not permitted",
+                "outcome": "blocked_by_policy",
             }
         except Exception as e:  # pragma: no cover -- network varies
             return {
@@ -5676,6 +5753,9 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             }
 
     result = await run_in_threadpool(_probe)
+    result.setdefault("outcome", "authenticated" if result.get("authenticated") else
+                      "sign_in_refused" if result.get("status") in (401, 403) else
+                      "access_unverified" if result.get("reachable") else "unreachable")
     _persist_probe(result)
     return result
 
@@ -9891,7 +9971,9 @@ async def list_schedules(request: Request) -> dict:
     if owner is not None:
         jobs = [j for j in jobs if (j.payload or {}).get("owner") == owner]
     jobs.sort(key=lambda j: j.run_at)
-    return {"schedules": [_schedule_out(j).model_dump() for j in jobs]}
+    from .draft_api import context_for
+
+    return {"schedules": [_schedule_out(j).model_dump() for j in jobs], "context": context_for(request)}
 
 
 @router.post("/schedules", response_model=ScheduleOut, status_code=201)
@@ -14384,7 +14466,7 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
 
     check_goal_rate_limit(request, source="workflow-draft")
     brief = (payload.description or "").strip()
-    if not brief:
+    if not brief and not payload.source_text.strip():
         raise HTTPException(status_code=400, detail="describe the workflow you want")
     channel, user_id = _workflow_authoring_identity(request)
     try:
@@ -14396,9 +14478,10 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
             if form == "playbook":
                 return drafter(
                     brief,
+                    source_text=payload.source_text,
                     available_tools=_playbook_available_tools(channel=channel, user_id=user_id),
                 )
-            return drafter(brief)
+            return drafter(brief, source_text=payload.source_text)
 
         return await run_in_threadpool(_draft)
     except Exception as e:
@@ -14407,6 +14490,33 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
         # rather than an unhandled 500.
         detail = _safe_workflow_drafting_error(e)
         raise HTTPException(status_code=502, detail=f"workflow drafting failed: {detail}") from e
+
+
+@router.post("/workflows/extract-source")
+async def extract_workflow_source(request: Request, file: UploadFile = File(...)) -> dict:
+    """Review existing document extraction before any paid drafting call."""
+    from pathlib import Path
+
+    require_permission(request, "operate")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".txt", ".md", ".json", ".csv", ".yaml", ".yml", ".pdf", ".docx"}:
+        raise HTTPException(422, "Choose a text, PDF or Word document.")
+    raw = await file.read(_WORKFLOW_DOC_MAX_BYTES + 1)
+    if not raw or len(raw) > _WORKFLOW_DOC_MAX_BYTES:
+        raise HTTPException(422, "Choose a non-empty document smaller than 512 KB, or paste the relevant section.")
+    if suffix in {".pdf", ".docx"}:
+        text = await run_in_threadpool(_extract_binary_doc_text, raw, file.filename or "upload")
+        if text is None:
+            raise HTTPException(422, "The document could not be read. Use an unlocked PDF with selectable text or a valid Word document. Your administrator may need to enable document parsers.")
+    else:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(422, "Save this text document with UTF-8 encoding, or paste its text.") from exc
+    if not text.strip():
+        raise HTTPException(422, "No readable text was found. Paste the relevant procedure or choose another document.")
+    return {"text": text[:8000], "truncated": len(text) > 8000,
+            "review_required": True, "started": False}
 
 
 @router.post("/workflows/draft-from-file")
@@ -14518,12 +14628,17 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
     require_permission(request, "operate")
     from maverick.templates import save_user_template
 
+    from maverick.config import load_config
+
+    if payload.parameter_schema and (load_config().get("workflows") or {}).get("typed_inputs", True) is not True:
+        raise HTTPException(403, "Typed workflow input authoring is disabled by your administrator.")
     try:
         tpl = save_user_template(
             payload.name,
             title=payload.title,
             body=payload.body,
             params=payload.params,
+            parameter_schema=payload.parameter_schema,
             budget_dollars=payload.budget_dollars,
             budget_wall_seconds=payload.budget_wall_seconds,
             overwrite=payload.overwrite,
@@ -14541,7 +14656,7 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
     return {
         "name": tpl.name,
         "title": tpl.title,
-        "params": tpl.params,
+        "params": tpl.params, "parameter_schema": tpl.parameter_schema,
         "generation": tpl.generation,
         "saved": True,
     }

@@ -121,7 +121,7 @@ function isVisible(el) {
   }
 }
 
-function describeInteractive(el) {
+function describeInteractive(el, includeValues = false) {
   const tag = (el.tagName || "").toLowerCase();
   const item = {
     role: clip((el.getAttribute && el.getAttribute("role")) || tag, 32),
@@ -135,7 +135,7 @@ function describeInteractive(el) {
     if (el.disabled) item.disabled = true;
     // Visible value/placeholder ONLY — never secrets. Password fields are
     // reported by type but their value is never read.
-    if (tag !== "input" || (type || "text").toLowerCase() !== "password") {
+    if (includeValues && (tag !== "input" || (type || "text").toLowerCase() !== "password")) {
       const v = (el.value || (el.getAttribute && el.getAttribute("placeholder")) || "");
       const vc = clip(v, MAX_VALUE);
       if (vc) item.value = vc;
@@ -147,7 +147,7 @@ function describeInteractive(el) {
 // Walk the document once, OBSERVE-ONLY, collecting bounded structure. We stop
 // after MAX_SCAN nodes / the per-bucket caps so a giant page can't bloat the
 // payload or hang the page.
-function snapshot() {
+function snapshot(includeValues = false) {
   const elements = [];
   const landmarks = [];
   let scanned = 0;
@@ -177,7 +177,7 @@ function snapshot() {
     if (isInteractive && elements.length < MAX_ELEMENTS && isVisible(node)) {
       // Skip empty <a> anchors that are just layout (no name, no href).
       const hasHref = tag === "a" && node.getAttribute && node.getAttribute("href");
-      const desc = describeInteractive(node);
+      const desc = describeInteractive(node, includeValues);
       if (desc.name || hasHref || desc.value) elements.push(desc);
     }
     if (elements.length >= MAX_ELEMENTS && landmarks.length >= MAX_LANDMARKS) {
@@ -189,14 +189,14 @@ function snapshot() {
   return { elements: elements, landmarks: landmarks, truncated: truncated };
 }
 
-function getPageContext() {
+function getPageContext(options = {}) {
   const ctx = {
     title: clip(document.title, 300),
     url: String(location.href || "").slice(0, 2000),
     selection: String(window.getSelection() || "").slice(0, 4000),
   };
   try {
-    const snap = snapshot();
+    const snap = options.structure ? snapshot(options.formValues === true) : {elements: [], landmarks: [], truncated: false};
     ctx.structured = {
       lang: clip((document.documentElement && document.documentElement.lang) || "", 16),
       counts: { elements: snap.elements.length, landmarks: snap.landmarks.length },
@@ -221,7 +221,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return;
   }
   if (msg && msg.type === "getPageContext") {
-    sendResponse(getPageContext());
+    sendResponse(getPageContext(msg.options || {}));
   }
   // Synchronous response; the channel is not kept open.
 });

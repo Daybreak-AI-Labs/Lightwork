@@ -78,6 +78,7 @@ class Template:
     verified: bool = False
     owner: str = ""
     generation: int = 0
+    parameter_schema: dict = field(default_factory=dict)
 
     @classmethod
     def parse(cls, text: str, name: str, path: Path | None = None) -> Template:
@@ -119,6 +120,9 @@ class Template:
         if generation < 0:
             raise ValueError(f"template {name!r}: [generation] cannot be negative")
 
+        from .template_parameters import normalize_schema
+
+        names = meta.get("params", []) if isinstance(meta.get("params"), list) else []
         return cls(
             name=name,
             title=str(meta.get("title", name)),
@@ -131,6 +135,7 @@ class Template:
             pubkey=meta.get("pubkey") if isinstance(meta.get("pubkey"), str) else None,
             owner=meta.get("owner") if isinstance(meta.get("owner"), str) else "",
             generation=generation,
+            parameter_schema=normalize_schema(meta.get("parameter_schema"), names),
         )
 
     def render(self, **params: str) -> tuple[str, str]:
@@ -138,11 +143,9 @@ class Template:
 
         Missing required params raise ValueError.
         """
-        missing = [p for p in self.params if p not in params]
-        if missing:
-            raise ValueError(
-                f"template {self.name!r} missing required params: {missing}"
-            )
+        from .template_parameters import resolve_parameters
+
+        params = resolve_parameters(self.params, self.parameter_schema, params)
         return (
             _substitute(self.title, params),
             _substitute(self.body, params),
@@ -261,6 +264,7 @@ def save_user_template(
     owner: str | None = None,
     expected_generation: int | None = None,
     admin_override: bool = False,
+    parameter_schema: dict | None = None,
 ) -> Template:
     """Persist a user-authored (or AI-drafted) workflow as a user template.
 
@@ -307,6 +311,9 @@ def save_user_template(
         placeholder = m.group(1)
         if placeholder not in clean_params:
             clean_params.append(placeholder)
+    from .template_parameters import normalize_schema
+
+    schema = normalize_schema(parameter_schema, clean_params)
     bd = _optional_template_budget(budget_dollars)
     bw = _optional_template_budget(budget_wall_seconds)
 
@@ -364,6 +371,8 @@ def save_user_template(
             front.append(f"budget_dollars: {bd}")
         if bw is not None:
             front.append(f"budget_wall_seconds: {bw}")
+        if schema:
+            front.append("parameter_schema: " + json.dumps(schema, ensure_ascii=True, separators=(",", ":")))
         if clean_params:
             front.append("params:")
             front.extend(f"  - {p}" for p in clean_params)
@@ -438,6 +447,7 @@ def _canonical_template_signed_bytes(template: Template) -> bytes:
             "title": template.title,
             "body": template.body,
             "params": list(template.params),
+            **({"parameter_schema": template.parameter_schema} if template.parameter_schema else {}),
         },
         sort_keys=True,
         separators=(",", ":"),

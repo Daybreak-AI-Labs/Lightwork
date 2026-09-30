@@ -17,23 +17,48 @@
   function plain(text) { var e = new Error(text); e.plain = true; return e; }
   var find = document.getElementById('tplm-find');
   var none = document.getElementById('tplm-none');
-  if (find) find.addEventListener('input', function () {
-    var q = find.value.trim().toLowerCase(); var shown = 0;
-    cards.forEach(function (card) { var hit = !q || (card.dataset.tplmText || '').indexOf(q) !== -1; card.hidden = !hit; if (hit) shown += 1; });
+  var filter = {mode: 'all', names: [], notice: '', request: 0};
+  function renderFilters() {
+    var query = find ? find.value.trim().toLowerCase() : '';
+    var ordered = cards.slice(); var shown = 0;
+    if (filter.mode === 'suggested') ordered.sort(function (a, b) {
+      return filter.names.indexOf(a.dataset.templateName) - filter.names.indexOf(b.dataset.templateName);
+    });
+    ordered.forEach(function (card) {
+      card.hidden = (filter.mode === 'suggested' && !filter.names.includes(card.dataset.templateName)) ||
+        Boolean(query && (card.dataset.tplmText || '').indexOf(query) === -1);
+      if (!card.hidden) shown++;
+      card.parentElement.append(card);
+    });
     if (none) none.hidden = shown !== 0;
-  });
+    all.hidden = filter.mode === 'all';
+    suggest.setAttribute('aria-pressed', String(filter.mode === 'suggested'));
+    status.textContent = (filter.notice ? filter.notice + ' ' : '') + shown +
+      (shown === 1 ? ' template' : ' templates') + (filter.mode === 'suggested' ? ' suggested for you' : '') +
+      (query ? ' matching your search.' : '.');
+  }
+  if (find) find.addEventListener('input', renderFilters);
   cards.forEach(function (card) {
     var open = card.querySelector('[data-prepare-template]');
     if (!open) return;
     var form = card.querySelector('.template-prepare');
-    open.addEventListener('click', function () { form.hidden = false; var first = form.querySelector('textarea, button'); if (first) first.focus(); });
+    open.addEventListener('click', function () { form.hidden = false; var first = form.querySelector('input, select, textarea, button'); if (first) first.focus(); });
     form.querySelector('[data-cancel-prepare]').addEventListener('click', function () { form.hidden = true; open.focus(); });
+    function refreshInputs() {
+      var values={}; form.querySelectorAll('[data-template-param]').forEach(function (input) { values[input.dataset.templateParam]=input.value; });
+      form.querySelectorAll('[data-parameter-row]').forEach(function (row) {
+        var when=JSON.parse(row.dataset.showWhen || '{}'), input=row.querySelector('[data-template-param]');
+        row.hidden=Boolean(when.field && values[when.field] !== when.value); input.disabled=row.hidden;
+        row.querySelector('.parameter-error').textContent=input.validity.valid || row.hidden ? '' : input.validationMessage;
+      });
+    }
+    form.addEventListener('input',refreshInputs); form.addEventListener('change',refreshInputs); refreshInputs();
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
       var button = form.querySelector('[type="submit"]'); var message = form.querySelector('.prepare-status');
       if (button.disabled || !form.reportValidity()) return;
       var params = Object.create(null);
-      form.querySelectorAll('[data-template-param]').forEach(function (input) { params[input.dataset.templateParam] = input.value; });
+      form.querySelectorAll('[data-template-param]').forEach(function (input) { params[input.dataset.templateParam] = input.disabled ? '' : input.value; });
       button.disabled = true; message.textContent = 'Preparing your task…';
       try {
         var response = await fetch('/api/v1/templates/' + encodeURIComponent(card.dataset.templateName) + '/prepare', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({params:params})});
@@ -45,28 +70,29 @@
       } catch (error) { message.textContent = error && error.plain ? error.message : failText(error, 'prepare the task'); button.disabled = false; }
     });
   });
-  var originalOrder = cards.slice();
   all.addEventListener('click', function () {
-    originalOrder.forEach(function (card) { card.hidden = false; card.parentElement.append(card); });
-    all.hidden = true; status.textContent = 'Showing all templates.';
+    filter.request++; filter.mode = 'all'; filter.notice = ''; renderFilters();
   });
   suggest.addEventListener('click', async function () {
     if (suggest.disabled) return;
-    suggest.disabled = true; status.textContent = 'Finding suggestions…';
+    var request = ++filter.request;
+    suggest.disabled = true; status.textContent = 'Finding suggestions.';
     try {
       var response = await fetch('/api/v1/templates/suggested', {cache:'no-store'});
-      if (!response.ok) throw plain('Suggestions are unavailable. All templates are still available below.');
+      if (!response.ok) throw plain('Suggestions are unavailable.');
       var result = await response.json();
-      if (!Array.isArray(result.suggested)) throw plain('Suggestions could not be read. Try again.');
-      var names = result.suggested.map(function (item) { return item.name; });
-      var matches = cards.filter(function (card) { return names.includes(card.dataset.templateName); });
-      if (!matches.length) { status.textContent = 'No suggestions yet. Browse all templates below.'; return; }
-      cards.forEach(function (card) { card.hidden = !names.includes(card.dataset.templateName); });
-      matches.sort(function (a,b) { return names.indexOf(a.dataset.templateName) - names.indexOf(b.dataset.templateName); }).forEach(function (card) { card.parentElement.append(card); });
-      all.hidden = false; status.textContent = 'Suggestions based on your task history. Review before use.';
-    } catch (error) { status.textContent = error && error.plain ? error.message : 'Could not reach Lightwork. All templates are still available below.'; }
-    finally { suggest.disabled = false; }
+      if (!Array.isArray(result.suggested)) throw plain('Suggestions could not be read.');
+      if (request !== filter.request) return;
+      filter.names = result.suggested.map(function (item) { return item.name; });
+      filter.mode = filter.names.length ? 'suggested' : 'all';
+      filter.notice = filter.names.length ? 'Review suggestions before use.' : 'No suggestions yet.';
+      renderFilters();
+    } catch (error) {
+      if (request !== filter.request) return;
+      filter.mode = 'all'; filter.notice = 'Suggestions are unavailable. You can still search all templates.'; renderFilters();
+    } finally { suggest.disabled = false; }
   });
+  renderFilters();
   document.querySelectorAll('.template-rating').forEach(function (form) {
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
