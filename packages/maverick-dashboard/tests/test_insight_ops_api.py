@@ -88,6 +88,28 @@ def test_questions_accept_only_the_listed_choices(client):
         assert client.post("/api/v1/analytics/ask", json=bad).status_code == 422, bad
 
 
+@pytest.mark.parametrize("principal, title, spend", [
+    (None, None, None),
+    ("user:ada", "Ada's report", "2.5"),
+    ("user:bob", "Bob's report", "4.0"),
+])
+def test_admin_sql_keeps_the_same_employee_content_scope(client, monkeypatch, principal, title, spend):
+    pytest.importorskip("duckdb")
+    _task("user:ada", "Ada's report", 2.5)
+    _task("user:bob", "Bob's report", 4.0, status="failed")
+    if principal is not None:
+        _as(monkeypatch, "admin", principal)
+    response = client.post("/api/v1/analytics/query", json={
+        "query": "SELECT g.title, sum(e.cost) AS spend FROM goals g JOIN episodes e ON e.goal_id=g.id GROUP BY g.title ORDER BY g.title",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["rows"] == ([[title, spend]] if title is not None else [])
+    if title is not None:
+        assert data["columns"] == ["title", "spend"]
+    assert data["more"] is False
+
+
 def test_questions_say_plainly_when_the_add_on_is_missing(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "duckdb", None)
     r = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "none"})
