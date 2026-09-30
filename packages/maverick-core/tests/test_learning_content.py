@@ -82,3 +82,17 @@ def test_delete_does_not_let_admin_remove_another_owners_source(tmp_path, monkey
     with pytest.raises(PermissionError):
         self_learning.delete_generated_tool("private_tool", owner="user:admin")
     assert target.is_file()
+
+
+def test_delete_checks_reviewed_digest_before_revoking_consent(tmp_path, monkeypatch):
+    monkeypatch.setitem(self_learning.__dict__, "GENERATED_TOOLS_DIR", tmp_path)
+    target = tmp_path / "private_tool.py"
+    target.write_text("# replacement", encoding="utf-8")
+    with bind_principal("user:alice"):
+        learning_content.publish(target, "# replacement", learning_content.lineage())
+    def revoke(*args, **kwargs):
+        raise AssertionError("A changed source must not revoke current consent")
+    monkeypatch.setattr("maverick.safety.consent.revoke", revoke)
+    with pytest.raises(self_learning.GeneratedToolRemovalError, match="changed"):
+        self_learning.delete_generated_tool("private_tool", owner="user:alice", expected_digest="old digest")
+    assert target.read_text(encoding="utf-8") == "# replacement"

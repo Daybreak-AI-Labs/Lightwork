@@ -1496,7 +1496,8 @@ def generated_tool_names(*, owner: str | None = None) -> set[str]:
     return names
 
 
-def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None = None) -> dict[str, Any]:
+def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None = None,
+                          expected_digest: str | None = None) -> dict[str, Any]:
     """Revoke and remove one persisted generated tool, fail-closed.
 
     Deletion is an authority lifecycle transition, not merely ``Path.unlink``:
@@ -1526,6 +1527,8 @@ def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None
             raise FileNotFoundError(target)
         source = _read_generated_source(target)
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        if expected_digest is not None and digest != expected_digest:
+            raise GeneratedToolRemovalError("The reviewed generated source changed; review it again")
         from .learning_content import source_allowed_now
         if not source_allowed_now(target, digest, owner=owner):
             raise PermissionError("Generated source content is unavailable")

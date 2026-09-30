@@ -67,7 +67,7 @@ class DashboardConfigurable : SearchableConfigurable {
                 add(JLabel(label).apply { labelFor = component }); add(component)
             })
         }
-        field("Connection name", name); field("Dashboard address", address)
+        field("Connection name", this@DashboardConfigurable.name); field("Dashboard address", address)
         field("Replace access token", password); add(disconnect); add(status)
     }
     override fun reset() { name.text = DashboardSettings.name(); address.text = DashboardSettings.base(); password.text = ""; disconnect.isSelected = false }
