@@ -128,6 +128,7 @@ def first_workspace_for_admin(request: Request) -> RedirectResponse | None:
             FIRST_WORKSPACE["id"],
             plan=FIRST_WORKSPACE["plan"],
             display_name=FIRST_WORKSPACE["display_name"],
+            allocate_suffix=True,
         )
     except Exception:
         return None

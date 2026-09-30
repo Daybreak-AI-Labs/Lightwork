@@ -56,11 +56,9 @@ def test_create_normalizes_nfd_and_rejects_duplicate_identity():
 
 
 def test_deleted_namespace_claim_prevents_case_alias_reuse():
-    from maverick.paths import TenantNamespaceCollision
-
     tr.create_tenant("Acme")
     assert tr.delete_tenant("Acme", purge=True)
-    with pytest.raises(TenantNamespaceCollision, match="aliases namespace owned"):
+    with pytest.raises(ValueError, match="history|aliases namespace owned"):
         tr.create_tenant("acme")
 
 
@@ -262,7 +260,9 @@ def test_failed_workspace_provision_never_publishes_active_tenant(tmp_path):
     blocked.parent.mkdir()
     blocked.write_text("not a directory", encoding="utf-8")
 
-    with pytest.raises(OSError):
+    # An existing path is now refused before namespace reservation. It may be
+    # retained legacy data, so provisioning must not adopt it.
+    with pytest.raises(ValueError, match="retained legacy data"):
         tr.create_tenant("blocked")
     assert tr.get_tenant("blocked") is None
 

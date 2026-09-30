@@ -88,8 +88,38 @@ def test_audit_refusal_rolls_back_tenant_publication(monkeypatch):
     response = client.post("/api/v1/admin/tenants", json={"id": "unlogged"})
 
     assert response.status_code == 503
-    assert "not published" in response.json()["detail"]
+    assert "identifier remains reserved" in response.json()["detail"]
     assert client.get("/api/v1/admin/tenants/unlogged").status_code == 404
+
+    monkeypatch.setattr(audit, "record_global", lambda *args, **kwargs: True)
+    assert client.post("/api/v1/admin/tenants", json={"id": "unlogged"}).status_code == 409
+    retry = client.post("/api/v1/admin/tenants", json={"display_name": "Unlogged"})
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["id"] == "unlogged-2"
+
+
+@pytest.mark.parametrize("purge", [False, True])
+def test_deleted_workspace_cannot_adopt_old_membership_or_payload(purge, monkeypatch):
+    from maverick.paths import data_dir, maverick_home
+    from maverick_dashboard import rbac
+
+    # Exercise the real installation-level role path, including orphan roles.
+    monkeypatch.setattr(rbac, "tenant_store_path", lambda: maverick_home() / "dashboard-tenant-roles.json")
+    assert client.post("/api/v1/admin/tenants", json={"id": "former"}).status_code == 201
+    rbac.set_tenant_role("former", "user:old", "admin")
+    root = data_dir(tenant="former")
+    (root / "synthetic.txt").write_text("old private fixture", encoding="utf-8")
+    removed = client.request("DELETE", f"/api/v1/admin/tenants/former?purge={str(purge).lower()}")
+    assert removed.status_code == 204, removed.text
+    refused = client.post("/api/v1/admin/tenants", json={"id": "former"})
+    assert refused.status_code == 409
+    assert "history" in refused.json()["detail"]
+    fresh = client.post("/api/v1/admin/tenants", json={"display_name": "Former"})
+    assert fresh.status_code == 201, fresh.text
+    assert fresh.json()["id"] == "former-2"
+    assert rbac.get_tenant_role("former-2", "user:old") is None
+    assert not (data_dir(tenant="former-2") / "synthetic.txt").exists()
+    assert rbac.get_tenant_role("former", "user:old") == "admin"
 
 
 def test_tenant_has_no_cap_unless_one_is_chosen():

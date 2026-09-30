@@ -9,12 +9,14 @@ control-plane state, not any one tenant's data.
 Lifecycle: ``create`` → ``suspend`` / ``resume`` → ``delete`` (optionally
 purging the tenant's data dir). :func:`assert_tenant_active` is the enforcement
 hook a request path calls before doing work for a tenant, so a suspended tenant
-is refused. The registry is opt-in: with no tenants provisioned the file does
-not exist and :func:`assert_tenant_active` is a no-op, so single-tenant and
-unprovisioned deployments are unchanged.
+is refused. Identifiers are never recycled: immutable namespace reservations
+and deletion tombstones outlive the roster and optional data purge. Before any
+registry or deletion history exists, single-tenant and unprovisioned deployments
+retain their existing behavior.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -34,6 +36,7 @@ from ..paths import (
     bind_tenant_namespace,
     canonical_tenant_id,
     maverick_home,
+    tenant_namespace_reserved,
 )
 
 log = logging.getLogger(__name__)
@@ -112,6 +115,60 @@ class TenantRegistryError(RuntimeError):
 
 def _registry_path():
     return maverick_home() / "tenant_registry.json"
+
+
+def _retirement_path(tenant_id: str):
+    key = _tenant_namespace_key(tenant_id)
+    return maverick_home() / ".tenant-deletions" / (hashlib.sha256(key.encode("ascii")).hexdigest() + ".json")
+
+
+def _retired(tenant_id: str) -> bool:
+    from ..file_lock import ensure_private_file
+    path = _retirement_path(tenant_id)
+    if not path.exists():
+        return False
+    try:
+        ensure_private_file(path)
+        value = _decode_json(atomic_read_text(path), label="tenant deletion tombstone")
+        if (not isinstance(value, dict) or value.get("version") != 1
+                or _tenant_namespace_key(value["id"]) != _tenant_namespace_key(tenant_id)
+                or value["id"] != canonical_tenant_id(value["id"])):
+            raise ValueError("invalid deletion identity")
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise TenantRegistryError("Tenant deletion history is unavailable; provisioning and admission are refused.") from exc
+    return True
+
+
+def _retire(tenant_id: str) -> None:
+    from ..file_lock import atomic_create_text
+    path = _retirement_path(tenant_id)
+    if _retired(tenant_id):
+        return
+    ensure_private_directory(path.parent)
+    try:
+        atomic_create_text(path, json.dumps({"version": 1, "id": tenant_id, "deleted_at": time.time()}, sort_keys=True))
+    except FileExistsError:
+        _retired(tenant_id)  # validate the concurrent immutable winner
+
+
+def _legacy_role_names() -> set[str]:
+    """Orphan global membership keys are history, never fresh ownership proof.
+
+    Kept in core so CLI and SCIM cannot bypass the dashboard migration boundary;
+    no dashboard package dependency or membership mutation is introduced.
+    """
+    from ..file_lock import ensure_private_file
+    path = maverick_home() / "dashboard-tenant-roles.json"
+    if not path.exists():
+        return set()
+    try:
+        ensure_private_file(path)
+        value = _decode_json(atomic_read_text(path), label="legacy tenant memberships")
+        if not isinstance(value, dict) or any(not isinstance(members, dict) for members in value.values()):
+            raise ValueError("invalid membership inventory")
+        return {_tenant_namespace_key(name) for name in value}
+    except (OSError, ValueError, TypeError) as exc:
+        raise TenantRegistryError("Legacy workspace membership history is unavailable; new provisioning is refused.") from exc
 
 
 @dataclass(frozen=True)
@@ -401,16 +458,18 @@ def _locked(*, strict: bool = False):
 
 def list_tenants() -> list[TenantRecord]:
     records = _load()
-    return [records[k] for k in sorted(records)]
+    return [records[k] for k in sorted(records) if not _retired(k)]
 
 
 def get_tenant(tenant_id: str) -> TenantRecord | None:
-    return _load().get(_lookup_id(tenant_id))
+    tid = _lookup_id(tenant_id)
+    return None if tid and _retired(tid) else _load().get(tid)
 
 
 def create_tenant(
     tenant_id: str, *, plan: str = "free", display_name: str = "",
     max_daily_dollars: float = DEFAULT_TENANT_DAILY_DOLLARS,
+    allocate_suffix: bool = False,
 ) -> TenantRecord:
     """Provision a tenant + its workspace. No daily spend cap by default;
     pass ``max_daily_dollars`` to set one. Raises :class:`ValueError` if the tenant already exists.
@@ -431,8 +490,21 @@ def create_tenant(
             "multi-tenant provisioning requires a Platinum license "
             "(license enforcement is on and this deployment is not entitled)")
     _warn_if_unknown_plan(plan)
-    with _locked():
+    with _locked(strict=True):
         records = _load()
+        legacy_roles = _legacy_role_names()
+        if allocate_suffix:
+            base = tid
+            occupied = {_tenant_namespace_key(existing) for existing in records}
+            for suffix in range(1000):
+                candidate = base if suffix == 0 else f"{base}-{suffix + 1}"
+                if (_tenant_namespace_key(candidate) not in occupied and not _retired(candidate)
+                        and _tenant_namespace_key(candidate) not in legacy_roles
+                        and not tenant_namespace_reserved(candidate)):
+                    tid = candidate
+                    break
+            else:
+                raise ValueError("Choose a different workspace name; the available identifiers are reserved.")
         if tid in records:
             raise ValueError(f"tenant already exists: {tid!r}")
         namespace_key = _tenant_namespace_key(tid)
@@ -445,7 +517,9 @@ def create_tenant(
         # BEFORE publishing an active roster entry. The registry lock keeps the
         # admission check, claim, directory creation, and publication atomic to
         # other provisioning processes.
-        bind_tenant_namespace(tid)
+        if _retired(tid) or namespace_key in legacy_roles:
+            raise ValueError("Workspace identifier has retained lifecycle or membership history; choose a new identifier. Use recovery for retained data.")
+        bind_tenant_namespace(tid, require_new=True)
         from ..workspace import Workspace
         ensure_private_directory(Workspace(tid).root)
         now = time.time()
@@ -464,7 +538,7 @@ def _mutate(tenant_id: str, **changes) -> TenantRecord:
     with _locked():
         records = _load()
         rec = records.get(tid)
-        if rec is None:
+        if rec is None or _retired(tid):
             raise UnknownTenant(tid)
         rec = replace(rec, updated_at=time.time(), **changes)
         records[tid] = rec
@@ -546,7 +620,7 @@ def get_tenant_by_stripe_customer(customer_id: str) -> TenantRecord | None:
     cid = (customer_id or "").strip()
     if not cid:
         return None
-    for rec in _load().values():
+    for rec in list_tenants():
         if rec.stripe_customer_id == cid:
             return rec
     return None
@@ -580,7 +654,7 @@ def _mutate_billing(tenant_id: str, field: str, value: object) -> TenantRecord:
     with _locked():
         records = _load()
         old_rec = records.get(tid)
-        if old_rec is None:
+        if old_rec is None or _retired(tid):
             raise UnknownTenant(tid)
         prior = dict(records)
         old = getattr(old_rec, attr)
@@ -619,12 +693,17 @@ def set_plan(tenant_id: str, plan: str) -> TenantRecord:
 
 def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
     """Remove a tenant from the registry. With ``purge=True`` also delete its
-    data directory (irreversible). Returns False if the tenant was unknown."""
+    data directory (irreversible). Its identifier remains permanently reserved.
+    Returns False if the tenant was unknown."""
     tid = _lookup_id(tenant_id)
-    with _locked():
+    with _locked(strict=True):
         records = _load()
         if tid not in records:
             return False
+        # Durable before roster removal or optional purge. A crash here leaves
+        # an unavailable tenant, never a reusable incarnation or active row.
+        bind_tenant_namespace(tid)
+        _retire(tid)
         del records[tid]
         _save(records)
     if purge:
@@ -641,7 +720,7 @@ def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
 def is_active(tenant_id: str | None) -> bool:
     """Whether a tenant may do work.
 
-    The registry is opt-in: before any roster file exists, named tenants are
+    The registry is opt-in: before any roster or deletion history exists, named tenants are
     accepted for single-tenant and unprovisioned deployments. Once a roster
     exists, only provisioned active tenants may do work; unknown tenant IDs
     include deleted tenants and are refused.
@@ -650,6 +729,8 @@ def is_active(tenant_id: str | None) -> bool:
     if not tid:
         return True
     try:
+        if _retired(tid):
+            return False
         rec = _load().get(tid)
     except TenantRegistryError:
         return False
@@ -660,12 +741,14 @@ def is_active(tenant_id: str | None) -> bool:
 
 def assert_tenant_active(tenant_id: str | None) -> None:
     """Enforcement hook: raise :class:`TenantSuspended` for inactive tenants.
-    No-op for None / deployments without a registry, so existing flows are
-    unchanged until tenant provisioning is enabled.
+    No-op for None / deployments without a registry or deletion history, so
+    existing flows are unchanged until tenant provisioning is enabled.
     """
     tid = _lookup_id(tenant_id)
     if not tid:
         return
+    if _retired(tid):
+        raise TenantSuspended("Workspace was deleted; its identifier cannot be reused.")
     path = _registry_path()
     if not path.exists():
         return

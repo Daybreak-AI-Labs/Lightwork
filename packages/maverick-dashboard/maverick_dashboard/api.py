@@ -1044,6 +1044,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     from maverick.tenant import registry as tenant_registry
 
     tenant_id = body.id.strip()
+    generated_identifier = not tenant_id
     if not tenant_id:
         # People name a workspace; the stable id is made from that name.
         from .plain_labels import unique_slug
@@ -1060,6 +1061,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
             plan=body.plan,
             display_name=body.display_name,
             max_daily_dollars=body.max_daily_dollars,
+            allocate_suffix=generated_identifier,
         )
     except ValueError as e:
         # Already exists, or an invalid/over-long id.
@@ -1094,7 +1096,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
             ) from rollback_exc
         raise HTTPException(
             status_code=503,
-            detail="audit custody refused tenant creation; tenant was not published",
+            detail="Audit custody refused tenant creation. The workspace is unavailable and its identifier remains reserved; retry with a new identifier or a display name.",
         ) from exc
     return _to_tenant_out(rec)
 
