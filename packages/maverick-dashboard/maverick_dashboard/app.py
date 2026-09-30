@@ -5780,6 +5780,24 @@ def safe_audit_day(day: str | None) -> str | None:
 _AUDIT_RANGE_SCAN_LIMIT = 2_000_000
 
 
+def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> list[dict]:
+    """The deployment-wide chain's tail for a global administrator, tagged
+    ``scope=deployment``; empty when the caller may not see it or when the
+    workspace chain is already the global one."""
+    try:
+        if not has_global_permission(request, "admin"):
+            return []
+        from maverick.audit import global_audit_log
+
+        global_log = global_audit_log()
+        if getattr(global_log, "path", None) == getattr(audit_log, "path", None) or global_log is audit_log:
+            return []
+        rows = global_log.tail(n, day=day)
+    except Exception:  # pragma: no cover -- the workspace chain still renders
+        return []
+    return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -5857,9 +5875,18 @@ async def audit_page(request: Request) -> HTMLResponse:
                            "Choose fewer days or add a filter to see earlier ones.")
     else:
         events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
+        # Deployment-wide changes (a workspace created, paused or removed) are
+        # recorded in the global chain, not the workspace's own. An administrator
+        # allowed to see the whole deployment reads both here, so an action they
+        # just took never seems to have gone unrecorded.
+        events = events + await run_in_threadpool(_global_audit_tail, request, audit_log, n, day)
         kind_set = {str(e.get("kind")) for e in events if e.get("kind")}
         people_set = {_audit_plain.event_person(e) for e in events}
         events = [e for e in events if _matches(e)]
+    # Newest first by default (what happened just now is what people look for);
+    # ?order=oldest keeps the chain order.
+    order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
+    events = sorted(events, key=lambda e: float(e.get("ts") or 0), reverse=(order == "newest"))
     # Distinct kinds and people in the window (for the filter dropdowns),
     # gathered before filtering so every choice stays selectable.
     kinds = sorted(kind_set, key=_audit_plain.kind_label)
@@ -5878,6 +5905,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
             "q": q,
+            "order": order,
             "can_admin": has_permission(request, "admin"),
             "can_global_admin": has_global_permission(request, "admin"),
             "audit_signing_enabled": bool(audit_log.signing_enabled),
@@ -8116,6 +8144,11 @@ async def channels_save(request: Request) -> RedirectResponse:
         settings_store.set_channel(name, enabled, values)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .audit_actions_api import _audit_event
+
+    # Only which fields changed is recorded, never their values.
+    _audit_event(request, "channel_saved", channel=name, enabled=enabled,
+                 fields=sorted(k for k, v in values.items() if str(v).strip()))
     return RedirectResponse("/channels?saved=save", status_code=303)
 
 
@@ -8130,6 +8163,9 @@ def channels_clear(request: Request, channel: str = Form(...)) -> RedirectRespon
         settings_store.clear_channel((channel or "").strip())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .audit_actions_api import _audit_event
+
+    _audit_event(request, "channel_settings_removed", channel=(channel or "").strip())
     return RedirectResponse("/channels?saved=clear", status_code=303)
 
 

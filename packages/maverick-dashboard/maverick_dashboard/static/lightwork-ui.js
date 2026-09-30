@@ -413,6 +413,16 @@
         });
       };
       window.mvFormatTimes(document);
+      // "Resets at midnight UTC" is only meaningful next to the viewer's own
+      // clock: <span data-mv-utc-midnight></span> becomes ", which is 01:00 for you".
+      Array.prototype.forEach.call(document.querySelectorAll('[data-mv-utc-midnight]'), function (el) {
+        try {
+          var next = new Date(); next.setUTCHours(24, 0, 0, 0);
+          var local = next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          var zone = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/_/g, ' ');
+          if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
+        } catch (e) {}
+      });
       // Relative labels drift; refresh them once a minute.
       setInterval(function () {
         Array.prototype.forEach.call(document.querySelectorAll('[data-mv-time-done="relative"]'), function (el) {
