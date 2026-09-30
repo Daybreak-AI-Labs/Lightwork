@@ -14017,8 +14017,9 @@ def run_fleet_agent(
     the dispatching user's capability, while keeping its own audit principal
     (``agent:<fleet>.<agent>``), so the oversight control plane
     governs the work automatically (mirrors ``maverick fleet run``). Owner-scoped:
-    only the fleet's owner -- or an admin / auth-off caller -- may dispatch; a
-    cross-owner (or missing) fleet 404s, never revealing existence.
+    only the fleet's exact owner may dispatch, including administrators. An
+    auth-off caller may dispatch only unowned local fleets. Cross-owner and
+    missing fleets both return 404 without revealing existence.
     """
     # Dispatching a fleet agent queues a governed goal that spends provider
     # money and runs tools -- an "operate" action, exactly like compose/resume
@@ -14041,7 +14042,7 @@ def run_fleet_agent(
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
     is_admin = principal is not None and is_dashboard_admin(principal)
-    if fleet is None or (principal is not None and not is_admin and fleet.owner != principal):
+    if fleet is None or fleet.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
@@ -14176,12 +14177,7 @@ async def create_fleet(request: Request, payload: FleetCreateIn) -> dict:
     principal = caller_principal(request)
     owner = principal or ""
     existing = load_fleet(payload.name)
-    if (
-        existing is not None
-        and existing.owner != owner
-        and principal is not None
-        and not is_dashboard_admin(principal)
-    ):
+    if existing is not None and existing.owner != owner:
         raise HTTPException(status_code=404, detail="no such fleet")
 
     try:
@@ -14210,12 +14206,7 @@ async def add_fleet_agent(request: Request, fleet_name: str, payload: FleetAgent
         raise HTTPException(status_code=400, detail="invalid fleet name")
     principal = caller_principal(request)
     existing = load_fleet(fleet_name)
-    if (
-        existing is not None
-        and existing.owner != (principal or "")
-        and principal is not None
-        and not is_dashboard_admin(principal)
-    ):
+    if existing is not None and existing.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     try:
         ensure_suite_allowed(principal, suite_for(payload.pack))
@@ -14240,8 +14231,7 @@ async def delete_fleet(request: Request, fleet_name: str) -> None:
 
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
-    is_admin = principal is not None and is_dashboard_admin(principal)
-    if fleet is None or (principal is not None and not is_admin and fleet.owner != principal):
+    if fleet is None or fleet.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     remove_fleet(fleet_name)
 

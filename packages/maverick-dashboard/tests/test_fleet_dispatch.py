@@ -34,7 +34,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(dash_app, "check_goal_rate_limit", lambda request: None)
 
 
-def _save_fleet(owner="user:dana"):
+def _save_fleet(owner=""):
     from maverick.fleet import Fleet, FleetAgent, save_fleet
     save_fleet(Fleet(name="acme", owner=owner, agents=(
         FleetAgent("researcher", "analyst", "digs through sources"),
@@ -72,10 +72,12 @@ def _stub_runner(monkeypatch):
 
 def test_dispatch_runs_agent_under_role_capability(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    _save_fleet()
+    _enable_oidc_principal_map(monkeypatch)
+    _save_fleet(owner="user:dana")
     calls = _stub_runner(monkeypatch)
 
     r = _client().post("/api/v1/fleets/acme/run",
+                       headers={"Authorization": "Bearer dana"},
                        json={"agent": "coder", "prompt": "ship the build"})
     assert r.status_code == 201, r.text
     body = r.json()
@@ -281,6 +283,34 @@ def test_fleets_page_has_run_form(monkeypatch, tmp_path):
     text = _client().get("/fleets").text
     assert 'class="fleet-run-form' in text
     assert "/api/v1/fleets/" in text  # the dispatch target
+
+
+@pytest.mark.parametrize("caller", ["local", "admin"])
+def test_other_owner_fleet_mutations_are_hidden_before_effects(monkeypatch, tmp_path, caller):
+    _isolate(monkeypatch, tmp_path)
+    _save_fleet(owner="user:dana")
+    calls = _stub_runner(monkeypatch)
+    headers = {}
+    if caller == "admin":
+        _enable_oidc_principal_map(monkeypatch)
+        from maverick_dashboard import rbac
+        rbac.set_role("user:boss", "admin")
+        headers = {"Authorization": "Bearer boss"}
+    import maverick_dashboard.api as api
+    provider_checks = []
+    monkeypatch.setattr(api, "require_provider_or_400", lambda: provider_checks.append(True))
+    client = _client()
+    assert client.post("/api/v1/fleets/acme/run", headers=headers,
+                       json={"agent": "coder", "prompt": "x"}).status_code == 404
+    assert client.post("/api/v1/fleets/acme/agents", headers=headers,
+                       json={"pack": "gtm_demand_gen", "role": "researcher"}).status_code == 404
+    assert client.post("/api/v1/fleets", headers=headers,
+                       json={"name": "acme", "agents": []}).status_code == 404
+    assert client.delete("/api/v1/fleets/acme", headers=headers).status_code == 404
+    from maverick.fleet import load_fleet, load_runs
+    fleet = load_fleet("acme")
+    assert fleet.owner == "user:dana" and len(fleet.agents) == 2
+    assert not calls and not provider_checks and not load_runs("acme")
 
 
 def test_deployed_department_agent_runs_under_domain_capability(monkeypatch, tmp_path):

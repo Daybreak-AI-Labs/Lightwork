@@ -186,7 +186,7 @@ def test_start_a_change_runs_the_kernel_swarm_in_the_background(client, monkeypa
     r = client.post("/api/v1/code/features", json={"repo": "core", "title": " Add a button ",
                                                    "max_dollars": 5})
     assert r.status_code == 202
-    assert calls == [("core", "Add a button", "", 5.0)]
+    assert calls == [("core", "Add a button", "", 5.0, "", None)]
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
@@ -200,6 +200,7 @@ def test_merge_waits_for_the_approval_then_merges(client, monkeypatch, tmp_path)
     p = features.propose(world, "core", "Tune", "", lambda gid, work: (work / "a.py").write_text(
         "VALUE = 2\n"))
     pid = p["id"]
+    assert world.get_approval(p["approval_id"]).goal_id == p["goal_id"]
     detail = client.get(f"/api/v1/code/proposals/{pid}").json()
     assert detail["status"] == "pending" and detail["files"] == ["a.py"]
     assert "VALUE = 2" in detail["changes"]
@@ -229,6 +230,80 @@ def test_unknown_or_malformed_changes_are_not_found(client, monkeypatch):
     assert client.post("/api/v1/code/repos/nope/sync").status_code == 404
 
 
+def _named_code_admins(monkeypatch):
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import auth, rbac
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
+        sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))
+    for subject in ("alice", "bob"):
+        rbac.set_role(f"user:{subject}", "admin")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_named_code_runs_keep_execution_owner_and_approval_scope(client, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from maverick import llm, orchestrator, sandbox
+    from maverick.codebase import features, vault
+    from maverick_dashboard import app as dash_app
+    from maverick_dashboard import code_actions_api
+
+    _code_on(monkeypatch)
+    _named_code_admins(monkeypatch)
+    vault.register("core", str(_source_repo(tmp_path)))
+    monkeypatch.setattr(code_actions_api, "_provider_missing", lambda: False)
+    monkeypatch.setattr(llm, "LLM", lambda: object())
+    monkeypatch.setattr(sandbox, "build_sandbox", lambda workdir: SimpleNamespace(workdir=workdir))
+    monkeypatch.setattr(features, "default_reviewer", lambda: None)
+    observed = []
+
+    def run_without_provider(_llm, world, _budget, goal_id, **kwargs):
+        goal = world.get_goal(goal_id)
+        observed.append((goal_id, goal.owner, goal.execution_principal, kwargs["user_id"]))
+        from pathlib import Path
+        (Path(kwargs["sandbox"].workdir) / "a.py").write_text("VALUE = 2\n")
+        world.set_goal_status(goal_id, "done", result="local fixture")
+
+    monkeypatch.setattr(orchestrator, "run_goal_sync", run_without_provider)
+    for subject in ("alice", "bob"):
+        response = client.post("/api/v1/code/features", headers={"Authorization": f"Bearer {subject}"},
+                               json={"repo": "core", "title": f"Change for {subject}"})
+        assert response.status_code == 202, response.text
+    assert [(owner, execution, user_id) for _, owner, execution, user_id in observed] == [
+        ("user:alice", "user:alice", "alice"), ("user:bob", "user:bob", "bob")]
+    world = dash_app._world()
+    for subject, (goal_id, _, _, _) in zip(("alice", "bob"), observed, strict=True):
+        headers = {"Authorization": f"Bearer {subject}"}
+        rows = client.get("/api/v1/approvals", headers=headers).json()["approvals"]
+        assert len(rows) == 1
+        assert world.get_approval(rows[0]["id"]).goal_id == goal_id
+        other_id = next(row[0] for row in observed if row[0] != goal_id)
+        assert client.get(f"/api/v1/goals/{goal_id}", headers=headers).status_code == 200
+        assert client.get(f"/api/v1/goals/{other_id}", headers=headers).status_code == 404
+
+
+def test_named_code_background_refuses_revoked_admin_before_admission(client, monkeypatch):
+    from maverick.codebase import features, vault
+    from maverick_dashboard import code_actions_api, rbac
+
+    _code_on(monkeypatch)
+    _named_code_admins(monkeypatch)
+    monkeypatch.setattr(vault, "get", lambda name: object())
+    monkeypatch.setattr(code_actions_api, "_provider_missing", lambda: False)
+    queued = []
+    native = code_actions_api._run_feature
+    monkeypatch.setattr(code_actions_api, "_run_feature", lambda *args: queued.append(args))
+    response = client.post("/api/v1/code/features", headers={"Authorization": "Bearer alice"},
+                           json={"repo": "core", "title": "Private change"})
+    assert response.status_code == 202 and len(queued) == 1
+    rbac.set_role("user:alice", "viewer")
+    admissions = []
+    monkeypatch.setattr(features, "propose", lambda *args, **kwargs: admissions.append(kwargs))
+    native(*queued[0])
+    assert admissions == []
+
+
 # -- immune actions --------------------------------------------------------------
 
 def test_immune_settings_need_a_global_admin_and_take_effect(client, monkeypatch):
@@ -250,7 +325,7 @@ def test_reviewer_tests_respect_the_switch_and_hide_the_flaw(client, monkeypatch
     r = client.post("/api/v1/immune/canaries", json={"count": 1})
     assert r.status_code == 409 and "no recent approvals" in r.json()["detail"]
     from maverick.immune import oversight
-    monkeypatch.setattr(oversight, "generate_canary", lambda world, decision_class=None: {
+    monkeypatch.setattr(oversight, "generate_canary", lambda world, decision_class=None, requested_by="": {
         "approval_id": 9, "flaw": "SECRET-FLAW", "decision_class": "pay"})
     r = client.post("/api/v1/immune/canaries", json={"count": 3, "decision_class": "pay"})
     assert r.json() == {"planted": 3} and "SECRET" not in r.text
@@ -265,12 +340,13 @@ def test_drills_recordings_and_rules(client, monkeypatch):
     from maverick_dashboard import app as dash_app
     assert oversight.score(dash_app._world(), "drill")[("user:amy", "payments")].caught == 1
     assert client.delete("/api/v1/immune/twin/41").status_code == 404
-    path = twin.recording_path(41)
+    gid = dash_app._world().create_goal("Recorded local task")
+    path = twin.recording_path(gid)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("")
     choices = client.get("/api/v1/immune/choices").json()
-    assert [g["id"] for g in choices["recorded_goals"]] == [41]
-    assert client.delete("/api/v1/immune/twin/41").json() == {"deleted": True}
+    assert [g["id"] for g in choices["recorded_goals"]] == [gid]
+    assert client.delete(f"/api/v1/immune/twin/{gid}").json() == {"deleted": True}
     assert not path.exists()
     rules = [{"id": "no-wire", "action": "wire", "modality": "forbid", "when": {"region": "eu"}},
              {"id": "must-wire", "action": "wire", "modality": "require", "when": {"region": "eu"}}]
@@ -305,9 +381,10 @@ def test_replay_needs_a_recording_and_an_ai_provider(client, monkeypatch):
     assert client.post(f"/api/v1/immune/twin/{gid}/replay").status_code == 503
     monkeypatch.setattr(pre, "_routed_configuration_missing", lambda cfg: {})
     started = []
-    monkeypatch.setattr(immune_actions_api, "_replay_in_background", started.append)
+    monkeypatch.setattr(immune_actions_api, "_replay_in_background",
+                        lambda goal_id, principal: started.append((goal_id, principal)))
     assert client.post(f"/api/v1/immune/twin/{gid}/replay").status_code == 202
-    assert started == [gid]
+    assert started == [(gid, None)]
 
 
 def test_discovery_record_check_and_verify(client):

@@ -14,6 +14,17 @@ def _client():
     return TestClient(app)
 
 
+def _owner_client(monkeypatch):
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import auth
+    from maverick_dashboard.app import app
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
+        sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))
+    return TestClient(app, headers={"Authorization": "Bearer dana"})
+
+
 def _isolate(monkeypatch, tmp_path):
     # Fleets + audit log resolve under MAVERICK_HOME; the dashboard WorldModel
     # (used for the pending-approval count) resolves DEFAULT_DB.
@@ -40,7 +51,7 @@ def _save_fleet(name="acme", owner="user:dana"):
 def test_fleets_page_lists_a_saved_fleet(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    r = _client().get("/fleets")
+    r = _owner_client(monkeypatch).get("/fleets")
     assert r.status_code == 200
     text = r.text
     # Fleet name, owner, and each agent (name + role) are rendered.
@@ -88,7 +99,8 @@ def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
     assert r.status_code == 200
     text = r.text
     assert "recent decisions by your company rules" in text.lower()
-    assert "Shell" in text
+    assert "Shell" not in text
+    assert "requires human approval" not in text
     assert "Require human actions" in text
     # Links the operator to the pending-approval (Art 14) queue.
     assert 'href="/approvals"' in text
@@ -124,7 +136,7 @@ def test_governance_hold_gets_source_label_on_approvals(monkeypatch, tmp_path):
 def test_api_fleets_returns_roster(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    body = _client().get("/api/v1/fleets").json()
+    body = _owner_client(monkeypatch).get("/api/v1/fleets").json()
     assert len(body["fleets"]) == 1
     f = body["fleets"][0]
     assert f["name"] == "acme"

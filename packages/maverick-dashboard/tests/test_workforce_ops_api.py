@@ -138,12 +138,16 @@ def test_upcoming_tasks_are_overdue_first_and_scoped_to_the_person(client, monke
     world = open_world()
     now = time.time()
     mine = world.create_goal("Renew the supplier contract", owner="user:ann")
-    late = world.create_goal("File the quarterly return", owner="user:bob", domain="finance_vat")
+    late = world.create_goal("File the quarterly return", owner="user:ann", domain="finance_vat")
+    foreign = world.create_goal("Bob private task", owner="user:bob")
     far = world.create_goal("Plan next year", owner="user:ann")
     with world._writing() as conn:
         conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now + 3 * 86400, mine))
         conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now - 86400, late))
         conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now + 45 * 86400, far))
+        conn.execute("UPDATE goals SET deadline=? WHERE id=?", (now - 2 * 86400, foreign))
+    assert client.get(f"{API}/upcoming", params={"days": 30}).json()["tasks"] == []
+    _as(monkeypatch, "viewer", "user:ann")
     rows = client.get(f"{API}/upcoming", params={"days": 30}).json()["tasks"]
     assert [r["title"] for r in rows] == ["File the quarterly return", "Renew the supplier contract"]
     assert rows[0]["overdue"] is True and rows[0]["department"] == "finance vat"
@@ -151,7 +155,8 @@ def test_upcoming_tasks_are_overdue_first_and_scoped_to_the_person(client, monke
     assert client.get(f"{API}/upcoming", params={"days": 5}).status_code == 422
     _as(monkeypatch, "viewer", "user:ann")
     rows = client.get(f"{API}/upcoming", params={"days": 90}).json()["tasks"]
-    assert sorted(r["title"] for r in rows) == ["Plan next year", "Renew the supplier contract"]
+    assert sorted(r["title"] for r in rows) == [
+        "File the quarterly return", "Plan next year", "Renew the supplier contract"]
 
 
 def test_outside_agents_join_shared_memory_through_the_kernel(client, monkeypatch, audit_rows):
