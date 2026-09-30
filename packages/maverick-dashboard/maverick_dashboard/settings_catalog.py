@@ -865,6 +865,9 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Data retention", False, "maverick.workspace_journal"),
 
     # ------------------------------------------------------------ Integrations
+    S("notifications", "delivery_receipts", "Keep notification delivery history",
+      "Keep content-free delivery results for seven days, up to 1,000 attempts. View history and send a test on Notification delivery in Settings.",
+      "toggle", "Integrations", True, "maverick.notification_receipts"),
     S("notifications", "backend", "Send finished-task alerts with",
       "Where to send a message when a long task finishes.",
       "select", "Integrations", "ntfy", "maverick.notifications",

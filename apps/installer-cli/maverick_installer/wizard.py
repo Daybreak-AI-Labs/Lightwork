@@ -6207,6 +6207,9 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         default=False,
     ):
         return {}, []
+    delivery_receipts = _q_confirm(
+        "Keep content-free delivery results for seven days and enable in-product delivery tests?", default=True,
+    )
     pick = _q_select(
         "  Backend:",
         [
@@ -6223,11 +6226,12 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             "  ntfy topic (any unique string; treat as a password)",
             default="",
         ).strip()
-        return ({"backend": "ntfy", "ntfy_topic": topic}, []) if topic else ({}, [])
+        return ({"backend": "ntfy", "ntfy_topic": topic, "delivery_receipts": delivery_receipts}, []) if topic else ({}, [])
     if backend == "pushover":
         return (
             {
                 "backend": "pushover",
+                "delivery_receipts": delivery_receipts,
                 "user_key": "${PUSHOVER_USER_KEY}",
                 "app_token": "${PUSHOVER_APP_TOKEN}",
             },
@@ -6235,12 +6239,12 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         )
     if backend == "slack":
         return (
-            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}"},
+            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["SLACK_NOTIFY_WEBHOOK"],
         )
     if backend == "discord":
         return (
-            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}"},
+            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []

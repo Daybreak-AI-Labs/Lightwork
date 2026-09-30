@@ -1,7 +1,7 @@
 [
   {
     "id": "LW-043",
-    "status": "deferred-decision",
+    "status": "planned",
     "implementation_evidence": "i18n.py still truthfully declares CONTENT_LANGS={en} and community Arabic SEED_LANGS. No invented translations or changed user content.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
     "remaining": "Human-reviewed end-to-end catalogs and Arabic community contribution review are required before any locale can be claimed complete; locale formatting and all operational copy still require implementation."
@@ -184,30 +184,30 @@
   {
     "id": "LW-142",
     "status": "planned",
-    "implementation_evidence": "Reviewed notifications.py asynchronous enqueue versus boolean backend outcomes. No enqueue count relabelled as delivery success.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement durable sanitized receipts, admin test UI, last-success/failed status and bounded idempotent retry; preserve secret redaction."
+    "implementation_evidence": "notification_receipts.py persists bounded content-free tenant receipts with queued/sending/accepted/failed/unknown state, dedupe and three-attempt safe test retry ceiling. notifications.py records actual backend response, preserves tenant context in async workers and sanitizes secrets; notify tool says queued, PushRegistry waits for actual response. Authorized /settings/notifications direct UI + health/test/retry API + config/installer control added; sender rechecks current admin authority and config before dispatch.",
+    "validation": "2026-09-30: Python AST 10 files and JavaScript syntax 3 standalone/template blocks passed; git diff --check passed. Receipt/async queue/idempotency tests authored but unrun. No notification delivery/provider/browser calls or test suites run.",
+    "remaining": "Direct delivery UI/service implemented; Copilot operation catalog adapter absent (existing catalog supports only closed learning-example actions). Authenticated health/retry/browser and actual service delivery validation deferred. Personal preference/digest integration belongs to LW141."
   },
   {
     "id": "LW-143",
     "status": "planned",
     "implementation_evidence": "Source backlog specifies task/person/workspace/provider reservations and unknown accounting; no simplistic dollar subtraction substituted.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement authorized unified budget/headroom projection, launch estimate, binding limit/reset/timezone/owner UI and Copilot coverage with existing enforcement."
+    "remaining": "Root accepted this budget tranche for the next implementation wave; Implement authorized unified budget/headroom projection, launch estimate, binding limit/reset/timezone/owner UI and Copilot coverage with existing enforcement."
   },
   {
     "id": "LW-144",
     "status": "planned",
     "implementation_evidence": "No automatic cap increase or notification bypass added.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement authorized deduplicated threshold warning and impacted scheduled-work forecast after LW143 and recipient delivery preferences."
+    "remaining": "Root accepted this budget tranche for the next implementation wave; Implement authorized deduplicated threshold warning and impacted scheduled-work forecast after LW143 and recipient delivery preferences."
   },
   {
     "id": "LW-145",
     "status": "planned",
     "implementation_evidence": "No workspace-owner access to global provider reconciliation or receipts added.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement minimal scoped blocked-state/evidence/assignment/progress journey using existing authorized reconciliation service; depends on Action Center/accounting projections."
+    "remaining": "Root accepted this budget tranche for the next implementation wave; Implement minimal scoped blocked-state/evidence/assignment/progress journey using existing authorized reconciliation service; depends on Action Center/accounting projections."
   },
   {
     "id": "LW-178",
@@ -246,7 +246,7 @@
   },
   {
     "id": "LW-184",
-    "status": "deferred-decision",
+    "status": "planned",
     "implementation_evidence": "Mobile and Apple READMEs explicitly label preview source and unqualified native behavior. Watch README removes the undelivered complication claim. No signed installer or support qualification is claimed.",
     "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. No native, signing, device, browser or provider tests executed per user deferral.",
     "remaining": "Signed customer distribution requires release-owner platform accounts/signing decisions and publication authorization; these are explicitly outside this task. Full compatibility matrix, generated app projects, native host qualification and signed packaging remain unfinished."

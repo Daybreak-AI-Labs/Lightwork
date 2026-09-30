@@ -17,7 +17,10 @@ from starlette.concurrency import run_in_threadpool
 
 from . import auth
 
+from .notification_health import router as notification_health_router
+
 router = APIRouter()
+router.include_router(notification_health_router)
 
 
 def _app():

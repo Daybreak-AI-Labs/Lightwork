@@ -67,7 +67,7 @@ def _run(args: dict[str, Any]) -> str:
             "no notification backend is configured. "
             "Set [notifications] backend in ~/.maverick/config.toml."
         )
-    return f"sent ({count} backend{'s' if count != 1 else ''})"
+    return f"queued; delivery not yet confirmed ({count} backend{'s' if count != 1 else ''})"
 
 
 def notify_tool() -> Tool:
