@@ -200,8 +200,9 @@ def test_genuine_auth_off_local_mode_keeps_legacy_permissions(monkeypatch):
     assert auth.has_permission(request, "admin") is True
     assert auth.has_global_permission(request, "admin") is True
     assert auth.caller_suites(request) is None
-    assert auth.goal_owner_filter(request) is None
-    assert auth.can_access_goal(request, SimpleNamespace(owner="anything")) is True
+    assert auth.goal_owner_filter(request) == ""
+    assert auth.can_access_goal(request, SimpleNamespace(id=1, owner="user:employee")) is False
+    assert auth.can_access_goal(request, SimpleNamespace(id=2, owner="")) is True
 
 
 def test_verified_static_token_keeps_authenticated_operator_permissions(monkeypatch):
@@ -211,7 +212,7 @@ def test_verified_static_token_keeps_authenticated_operator_permissions(monkeypa
 
     assert auth.has_permission(request, "admin") is True
     assert auth.has_global_permission(request, "admin") is True
-    assert auth.goal_owner_filter(request) is None
+    assert auth.goal_owner_filter(request) == ""
 
 
 @pytest.mark.parametrize("mode", ["saml", "invites"])

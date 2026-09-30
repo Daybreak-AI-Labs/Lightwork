@@ -109,3 +109,45 @@ def test_private_approval_has_no_ambient_administrator_read(authority, monkeypat
 
 def test_unidentified_caller_cannot_access_a_missing_record():
     assert not auth.can_access_goal_principal(None, None)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_audit_projection_preserves_control_metadata_without_free_text(nested):
+    fields = {"principal": "user:reviewer", "actor": "user:owner", "stage": "input", "score": 0.95,
+              "obligation_id": "gdpr-art32-outbound-transfer", "regulation": "private substituted title",
+              "article": "private substituted text", "obligations_checked": ["gdpr-art17-erasure-governed-path", "private rule"],
+              "name": "private generated tool", "reason": "private prompt", "input_summary": "secret"}
+    event = {"kind": "governance_denied", **({"payload": fields} if nested else fields)}
+    projected = content_access.audit_metadata(event)
+    visible = projected["payload"] if nested else projected
+    assert visible["principal"] == "user:reviewer" and visible["actor"] == "user:owner"
+    assert visible["stage"] == "input" and visible["score"] == 0.95
+    assert visible["regulation"] == "GDPR" and visible["article"] == "Art. 32"
+    assert visible["obligations_checked"] == ["gdpr-art17-erasure-governed-path"]
+    assert "private" not in str(projected) and "secret" not in str(projected)
+
+
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), -1, 2, True, "0.9"])
+def test_audit_projection_rejects_unbounded_or_non_numeric_scores(score):
+    assert "score" not in content_access.audit_metadata({"score": score})
+
+
+@pytest.mark.parametrize("field", ["stage", "rule", "decision", "obligation_id"])
+def test_malformed_control_fields_do_not_break_metadata_projection(field):
+    assert field not in content_access.audit_metadata({field: {"private": "text"}})
+
+
+def test_oversight_local_metadata_scope_never_adopts_named_or_unknown_goals():
+    from maverick_dashboard.app import _audit_event_visible_to_caller
+    world = SimpleNamespace(get_goal=lambda value: {
+        1: SimpleNamespace(owner=""), 2: SimpleNamespace(owner="user:employee")}.get(value))
+
+    def visible(event):
+        return _audit_event_visible_to_caller(event, principal=None, owner_filter="", world=world, goal_owner_cache={})
+
+    assert visible({"goal_id": 1})
+    assert visible({"principal": "agent:worker"})
+    assert visible({})
+    for event in ({"goal_id": 2}, {"goal_id": 3}, {"goal_id": False}, {"goal_id": 1.2},
+                  {"actor": "user:employee"}, {"principal": "user:employee"}):
+        assert not visible(event)

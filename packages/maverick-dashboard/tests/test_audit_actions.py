@@ -17,6 +17,8 @@ def audit_log(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     log = AuditLog(tmp_path / "audit")
     monkeypatch.setattr(audit, "default_audit_log", lambda: log)
+    from maverick.audit import reader
+    monkeypatch.setattr(reader, "resolve_audit_dir", lambda tenant: log.audit_dir)
     return log
 
 
@@ -52,7 +54,8 @@ def test_rows_read_as_plain_words_and_filter_by_person(audit_log, client):
     only_amy = visible_text(client.get("/audit", params={"person": "user:amy@example.com"}).text)
     assert "Used a tool" in only_amy and "jailbreak attempt" not in only_amy
     words = visible_text(client.get("/audit", params={"q": "jailbreak"}).text)
-    assert "jailbreak attempt" in words and "Send email" not in words
+    assert "jailbreak attempt" not in words and "Send email" not in words
+    assert "Nothing was recorded for these dates" in words  # search never sees private reasons
 
 
 def test_empty_day_offers_a_next_step(audit_log, client):
@@ -103,13 +106,14 @@ def test_a_date_range_finds_recent_matches_behind_many_older_events(audit_log, c
     monkeypatch.setattr(export, "iter_audit_events", lambda **kw: iter(older + newest))
     monkeypatch.setattr(app_mod, "_AUDIT_RANGE_SCAN_LIMIT", 1000)
     today = time.strftime("%Y-%m-%d", time.gmtime())
-    page = client.get("/audit", params={"since": today, "until": today, "q": "jailbreak", "n": 5}).text
-    assert "jailbreak attempt" in page
+    page = client.get("/audit", params={"since": today, "until": today, "q": "Stopped by the safety filter", "n": 5}).text
+    assert "Stopped by the safety filter" in page
+    assert "jailbreak attempt" not in page
     note = client.get("/audit", params={"since": today, "until": today, "n": 5}).text
-    assert "Showing the latest 5 of 301 matching events" in note
+    assert "Showing 5 of 301 matching events before this page boundary." in note
     monkeypatch.setattr(app_mod, "_AUDIT_RANGE_SCAN_LIMIT", 100)
     cut = client.get("/audit", params={"since": today, "until": today, "n": 5}).text
-    assert "more activity than the page can search at once" in cut
+    assert "The activity scan reached its limit. This is a partial view" in cut
 
 
 def test_protection_actions_need_the_right_role(audit_log, client, monkeypatch):

@@ -6539,21 +6539,21 @@ def _audit_event_visible_to_caller(
     world,
     goal_owner_cache: dict[int, str | None],
 ) -> bool:
-    """Return whether an oversight audit row is visible to this dashboard user.
+    """Match exact task ownership before projecting intervention metadata.
 
-    ``owner_filter is None`` is the dashboard's established bypass for auth-off
-    single-user mode and admins.  Authenticated non-admins only see events tied
-    to one of their goals, or ownerless events whose explicit user principal is
-    theirs.  Unknown/malformed ownership markers fail closed so the global audit
-    log cannot leak cross-tenant guardrail metadata.
+    Local installation authority covers unowned local work only. Named task
+    owners and explicit named actors never become local through a missing login.
+    Unknown task references fail closed. Global audit review uses /audit.
     """
-    if owner_filter is None:
-        return True
-    if principal is None:
+    scope = owner_filter or ""
+    if principal and principal != scope:
         return False
-
     raw_goal_id = e.get("goal_id")
-    if raw_goal_id not in (None, ""):
+    if isinstance(raw_goal_id, bool):
+        return False
+    if raw_goal_id not in (None, "", 0):
+        if not isinstance(raw_goal_id, (str, int)):
+            return False
         try:
             goal_id = int(raw_goal_id)
         except (TypeError, ValueError):
@@ -6564,9 +6564,14 @@ def _audit_event_visible_to_caller(
                 goal_owner_cache[goal_id] = getattr(goal, "owner", None) if goal else None
             except Exception:
                 goal_owner_cache[goal_id] = None
-        return goal_owner_cache[goal_id] == owner_filter
+        return goal_owner_cache[goal_id] == scope
+    actor = e.get("principal") or e.get("actor") or ""
+    if scope:
+        return actor == scope
+    # Agent-only system events without a task carry no named employee content;
+    # only their metadata will be shown. Malformed actor markers are withheld.
+    return isinstance(actor, str) and (not actor or actor.startswith(("agent:", "local:")))
 
-    return str(e.get("principal") or "") == principal
 
 
 @app.get("/oversight", response_class=HTMLResponse)
@@ -6644,8 +6649,8 @@ def oversight_page(request: Request) -> HTMLResponse:
             return ""
         if goal_id not in titles:
             try:
-                assert_goal_access(request, goal_id)
                 goal = w.get_goal(goal_id)
+                assert_goal_access(request, goal)
             except Exception:  # pragma: no cover - a missing or private title shows a number
                 goal = None
             titles[goal_id] = (goal.title if goal is not None else "") or ""

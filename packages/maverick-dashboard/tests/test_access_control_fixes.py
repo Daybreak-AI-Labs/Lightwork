@@ -69,18 +69,19 @@ def _seeded_world():
     # thread under TestClient, so the test fixture's connection must be shareable.
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("CREATE TABLE goals (id INTEGER PRIMARY KEY, owner TEXT)")
+    conn.execute("CREATE TABLE goals (id INTEGER PRIMARY KEY, owner TEXT, domain TEXT)")
     conn.execute(
         "CREATE TABLE episodes (id INTEGER PRIMARY KEY, goal_id INT, started_at REAL,"
         " ended_at REAL, outcome TEXT, cost_dollars REAL, input_tokens INT,"
         " output_tokens INT, tool_calls INT)"
     )
-    conn.executemany("INSERT INTO goals VALUES (?,?)",
-                     [(1, "user:alice"), (2, "user:bob")])
+    conn.executemany("INSERT INTO goals VALUES (?,?,?)",
+                     [(1, "user:alice", ""), (2, "user:bob", ""), (3, "", "")])
     conn.executemany(
         "INSERT INTO episodes VALUES (?,?,?,?,?,?,?,?,?)",
         [(10, 1, 100.0, 200.0, "alice-outcome", 1.5, 10, 5, 2),
-         (20, 2, 100.0, 200.0, "bob-secret", 9.9, 1, 1, 1)],
+         (20, 2, 100.0, 200.0, "bob-secret", 9.9, 1, 1, 1),
+         (30, 3, 100.0, 200.0, "local-outcome", 2.0, 1, 1, 1)],
     )
     conn.commit()
     # The export reads through the backend-portable ``query`` contract (SQLite
@@ -98,11 +99,12 @@ def test_cost_csv_scoped_to_owner(monkeypatch):
     assert "bob-secret" not in body  # the other tenant's episode is withheld
 
 
-def test_cost_csv_admin_or_authoff_sees_all(monkeypatch):
+def test_cost_csv_authoff_only_sees_unowned(monkeypatch):
     monkeypatch.setattr(app_mod, "_world", lambda: _seeded_world())
-    monkeypatch.setattr(app_mod, "goal_owner_filter", lambda request: None)
+    monkeypatch.setattr(app_mod, "goal_owner_filter", lambda request: "")
     body = client.get("/api/v1/cost.csv").text
-    assert "alice-outcome" in body and "bob-secret" in body
+    assert "local-outcome" in body
+    assert "alice-outcome" not in body and "bob-secret" not in body
 
 
 # --- #2 GET /api/v1/cost/anomalies owner scoping -----------------------------

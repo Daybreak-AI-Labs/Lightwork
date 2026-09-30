@@ -127,23 +127,49 @@ def require_employee_content(request, owner: str, *, resource_kind: str, resourc
         raise HTTPException(403, "Employee content is private. Request a scoped, independently reviewed read in Content access.")
 
 
+def _audit_fields(event: dict) -> dict:
+    """Control metadata only; free-form explanations and tool names stay private."""
+    safe = {key: event[key] for key in (
+        "actor", "principal", "tenant", "status", "ok", "cost_usd", "input_tokens", "output_tokens",
+        "revision", "record_type", "record_id", "record_sha256", "access_request",
+    ) if key in event and isinstance(event[key], (str, bool, int, float))}
+    if isinstance(event.get("stage"), str) and event["stage"] in {"input", "tool", "output"}:
+        safe["stage"] = event["stage"]
+    if isinstance(event.get("decision"), str) and event["decision"] in {"approve", "deny", "timeout"}:
+        safe["decision"] = event["decision"]
+    if isinstance(event.get("rule"), str) and event["rule"] in {"capability", "deny_actions", "deny_min_risk", "deny_above",
+                            "require_human_actions", "require_human_min_risk", "require_human_above"}:
+        safe["rule"] = event["rule"]
+    score = event.get("score")
+    if isinstance(score, (int, float)) and not isinstance(score, bool) and 0 <= score <= 1:
+        safe["score"] = score
+    # These citations come from the shipped control catalog, not arbitrary
+    # employee text substituted into a regulation/article field.
+    from maverick.regulatory_compiler import REGULATIONS
+    obligations = {item.id: item for group in REGULATIONS.values() for item in group}
+    obligation = obligations.get(event.get("obligation_id")) if isinstance(event.get("obligation_id"), str) else None
+    if obligation:
+        safe.update(obligation_id=obligation.id, regulation=obligation.regulation, article=obligation.article)
+    checked = event.get("obligations_checked")
+    if isinstance(checked, list):
+        safe["obligations_checked"] = [item for item in checked[:16] if isinstance(item, str) and item in obligations]
+    return safe
+
+
 def audit_metadata(event: dict) -> dict:
     """Allowlist audit metadata BEFORE rendering, matching or exporting it.
 
     Raw payloads, titles, tool arguments and arbitrary text never survive.
     These projected rows are not claimed to be the original signed bytes.
+    Both native flattened rows and nested transport rows retain control fields.
     """
     safe = {key: event[key] for key in ("ts", "kind", "event_id", "hash", "prev_hash")
             if key in event and isinstance(event[key], (str, int, float))}
     if isinstance(event.get("goal_id"), int) and not isinstance(event["goal_id"], bool):
         safe["goal_id"] = event["goal_id"]
-    if event.get("stage") in {"input", "tool", "output"}:
-        safe["stage"] = event["stage"]
+    safe.update(_audit_fields(event))
     payload = event.get("payload")
     if isinstance(payload, dict):
-        safe["payload"] = {key: payload[key] for key in (
-            "actor", "tenant", "status", "ok", "cost_usd", "input_tokens", "output_tokens",
-            "revision", "record_type", "record_id", "record_sha256", "access_request",
-        ) if key in payload and isinstance(payload[key], (str, bool, int, float))}
+        safe["payload"] = _audit_fields(payload)
     safe["projection"] = "audit_metadata_only"
     return safe

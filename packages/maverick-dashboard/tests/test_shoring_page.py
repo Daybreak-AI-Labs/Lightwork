@@ -55,7 +55,7 @@ def test_page_renders_pieces():
     html = resp.text
     assert html.count("<h1") == 1                       # exactly one page title
     assert "Autonomous Shoring" in html                 # hero title
-    assert "Savings Summary" in html                    # the P&L summary
+    assert "Savings estimate" in html                    # the P&L summary
     assert "Book of Work" in html
     assert 'id="sh-form"' in html                       # add-a-function form
     assert "Waiting for a Person" in html

@@ -64,7 +64,7 @@ FIELD_LABELS: dict[str, str] = {
     "tenant_id": "Workspace", "labels": "Kinds of data", "outcome": "Outcome", "line": "Lesson",
     "phase": "Step", "repo": "Code project", "proposal": "Change",
 }
-_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id"}
+_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id", "projection"}
 _PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
 _SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
               "decision", "risk", "source", "phase", "labels", "agent"}
