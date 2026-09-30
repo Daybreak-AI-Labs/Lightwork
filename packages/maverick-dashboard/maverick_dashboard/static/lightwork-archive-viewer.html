@@ -15,10 +15,24 @@
     record.replaceChildren(); const file = input.files[0]; if (!file) return;
     if (file.size > 20 * 1024 * 1024) { status.textContent = 'This file exceeds the supported viewer size. No task data was loaded.'; return; }
     try {
-      const data = JSON.parse(await file.text());
+      const raw = await file.text(), data = JSON.parse(raw);
       if (!data || data.v !== 1 || !data.goal || !Array.isArray(data.events) || !Array.isArray(data.episodes)) throw new Error('This file is not a supported version 1 Lightwork archive. Keep the original and use a compatible viewer.');
       if (data.events.length > 10001 || data.episodes.length > 201) throw new Error('This archive exceeds the supported record count. Keep the original and use a compatible viewer.');
-      status.textContent = 'Read-only archive loaded. Contents are supplied by this file; authenticity and external outcomes are not independently verified.';
+      let integrity = 'Integrity could not be checked for this legacy file.';
+      if (data.manifest) {
+        if (data.manifest.event_count !== data.events.length || data.manifest.episode_count !== data.episodes.length) throw new Error('The archive record counts do not match its manifest. Keep the original and obtain a new export.');
+        if (data.manifest.hash_encoding === 'json-prefix-v1') {
+          const boundary = raw.lastIndexOf(',"manifest":');
+          if (boundary < 0 || !/^[a-f0-9]{64}$/.test(data.manifest.sha256 || '')) throw new Error('The archive integrity manifest is malformed.');
+          if (window.crypto && crypto.subtle) {
+            const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw.slice(0, boundary) + '}'));
+            const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+            if (actual !== data.manifest.sha256) throw new Error('The archive contents do not match its integrity manifest. Do not rely on this copy.');
+            integrity = 'Record counts and content checksum match the manifest.';
+          } else integrity = 'Record counts match; this browser cannot check the content checksum offline.';
+        }
+      }
+      status.textContent = 'Read-only archive loaded. ' + integrity + ' This does not establish who created the file or independently verify external outcomes.';
       block('Task', data.goal.title); block('Objective', data.goal.description); block('Saved outcome', data.goal.result);
       block('Provenance and scope', 'Source task ' + data.goal.id + '; recorded version ' + data.goal.updated_at + '. ' + (data.manifest ? data.manifest.scope : 'Legacy archive: completeness is unknown; older exporters may have shortened history.'));
       block('Archive manifest', data.manifest ? JSON.stringify(data.manifest, null, 2) : 'No completeness or integrity manifest.');

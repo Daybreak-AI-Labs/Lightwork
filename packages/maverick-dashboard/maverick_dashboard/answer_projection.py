@@ -1,9 +1,9 @@
 """Revalidated view projection shared by initial and live conversation answers."""
 from __future__ import annotations
 
-from dataclasses import asdict
 import hashlib
 import json
+from dataclasses import asdict
 
 from .auth import assert_goal_access, caller_principal, has_permission, require_permission
 from .draft_api import context_for

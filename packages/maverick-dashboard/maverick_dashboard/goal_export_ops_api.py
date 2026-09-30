@@ -11,11 +11,10 @@ leaves this installation.
 """
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .auth import assert_goal_access, require_permission
@@ -44,21 +43,30 @@ def _goal(request: Request, goal_id: int):
 @router.get("/api/v1/goals/{goal_id}/export.json")
 async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     """The task's goal record, events and episode summaries as one file."""
-    from maverick.goal_bundle import IncompleteGoalBundle, build_goal_bundle
+    from maverick.goal_bundle import IncompleteGoalBundle, prepare_goal_archive
 
     require_permission(request, "view")
     world, _ = _goal(request, goal_id)
     try:
-        bundle = await run_in_threadpool(build_goal_bundle, world, goal_id)
+        prepared = await run_in_threadpool(prepare_goal_archive, world, goal_id)
     except IncompleteGoalBundle as exc:
         raise HTTPException(409, str(exc)) from exc
-    if bundle is None:
+    if prepared is None:
         raise HTTPException(404, "no such goal")
-    body = json.dumps(bundle, default=str, indent=2)
-    return Response(body, media_type="application/json", headers={
+    try:
+        # Ownership/content grants must still cover the exact exported source
+        # after the snapshot is prepared and before a single byte is released.
+        _, fresh = _goal(request, goal_id)
+        if (fresh.owner or "") != (prepared.goal.owner or ""):
+            raise HTTPException(409, "Task ownership changed while preparing this archive. Review current access before downloading.")
+        assert_goal_access(request, prepared.goal)
+    except Exception:
+        prepared.close()
+        raise
+    return StreamingResponse(prepared.chunks(), media_type="application/json", headers={
         "Content-Disposition": f'attachment; filename="task-{goal_id}.json"',
         "Cache-Control": "private, no-store",
-    })
+    }, background=BackgroundTask(prepared.close))
 
 
 @router.get("/api/v1/goals/{goal_id}/handoff.html")

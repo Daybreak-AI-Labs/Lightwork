@@ -263,10 +263,20 @@
   },
   {
     "id": "LW-138",
-    "status": "planned",
-    "implementation_evidence": "build_goal_bundle requests cap+1 and visibly refuses10001events/201episodes; manifest has counts/scope/digest and archive copy no longer promises resumable/full universal history.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "True bounded streaming/chunking with one consistent database snapshot and large-history path remain; overflow is safe refusal but full acceptance is not claimed."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "goal_archive.py pins a SQLite read transaction or PostgreSQL REPEATABLE READ/READ ONLY transaction, applies native tenant scope, and reads event/episode records in bounded keyset pages.",
+      "Prepared archive enforces 10,000 events, 200 episodes, bounded individual records and a 20 MiB total; exceeding any limit refuses before releasing download bytes.",
+      "HTTP archive streams the completed private temporary file in 64 KiB chunks, rechecks current content authority and source ownership before release, and closes temporary storage on completion/cancellation.",
+      "Compatible v1 goal/events/episodes body retains canonical SHA-256; manifest records exact counts, scope and consistent snapshot. Offline viewer verifies counts and raw canonical payload checksum using local WebCrypto, or explicitly reports inability to verify."
+    ],
+    "validation": [
+      "Python AST, JavaScript syntax, Ruff on new archive/service modules and git whitespace checks passed. Native oversized/snapshot-concurrency/bounded-stream/checksum regression cases authored.",
+      "User authorized local suites after implementation; root coordinates integrated qualification. No suites or provider calls run in this checkpoint."
+    ],
+    "remaining": [
+      "Run native SQLite and PostgreSQL snapshot/concurrency qualification, authorized streaming/cancelled-download tests and offline browser checksum cases."
+    ]
   },
   {
     "id": "LW-139",

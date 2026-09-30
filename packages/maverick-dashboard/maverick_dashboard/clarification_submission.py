@@ -3,20 +3,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
 import tempfile
 import uuid
+from pathlib import Path
 
 from fastapi import HTTPException
-from starlette.concurrency import run_in_threadpool
-
 from maverick import attachments
 from maverick.attachment_submissions import SubmissionConflict, SubmissionStore
 from maverick.chat_threads import ChatThreads
 from maverick.file_lock import ensure_private_directory
 from maverick.goal_mutations import GoalMutationConflict
 from maverick.paths import data_dir
+from starlette.concurrency import run_in_threadpool
 
 from .attachment_submission import _read_staged, manifest, stage_uploads
 from .auth import assert_goal_access, caller_principal, require_permission

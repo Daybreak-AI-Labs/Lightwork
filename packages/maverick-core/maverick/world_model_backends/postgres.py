@@ -1266,7 +1266,7 @@ class PostgresWorldModel:
         )
 
     @contextmanager
-    def _tx(self) -> Iterator:
+    def _tx(self, *, snapshot: bool = False) -> Iterator:
         """Cursor scope that commits on success and ROLLS BACK on error.
 
         Critical for autocommit=False: a single failed statement aborts
@@ -1290,6 +1290,8 @@ class PostgresWorldModel:
             with self._pool.connection() as conn:
                 cur = conn.cursor()
                 try:
+                    if snapshot:
+                        cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                     self._set_tenant_guc(cur)
                     yield cur
                 finally:
@@ -1301,6 +1303,8 @@ class PostgresWorldModel:
             cur = None
             try:
                 cur = self.conn.cursor()
+                if snapshot:
+                    cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                 self._set_tenant_guc(cur)
                 yield cur
                 self.conn.commit()
