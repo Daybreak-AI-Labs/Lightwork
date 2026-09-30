@@ -32,7 +32,9 @@
   prepare.addEventListener('click',async function(){
     if(busy)return;clear();busy=true;controls();status.textContent='Preparing the support report…';
     try{
-      var response=await call('preview',{}),data=await response.json();
+      var failure=new URLSearchParams(root.location.search).get('failure');
+      var input=/^lw-failure-[0-9a-f]{32}$/.test(failure||'')?{failure_reference:failure}:{};
+      var response=await call('preview',input),data=await response.json();
       if(!data||data.context!==host.dataset.context||!/^[0-9a-f]{32}$/.test(data.preview_id)||!/^[0-9a-f]{64}$/.test(data.sha256)||!data.bundle||typeof data.bundle!=='object')throw new Error('The report could not be verified for this account.');
       current=data;preview.textContent=JSON.stringify(data.bundle,null,2);if(readable)render(readable,data.bundle,0);reference.textContent='Support reference: '+String(data.bundle.correlation_id||'Unavailable')+' · Prepared '+String(data.bundle.generated_at||'just now');
       var labels={client_binding:'Workspace identity',shield:'Safety controls',agent_trust:'Trusted agents'};

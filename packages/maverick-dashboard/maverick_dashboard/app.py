@@ -2567,15 +2567,34 @@ async def flow_payload_exception_handler(request: Request, exc: FlowPayloadError
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Catch-all so we never serve the default white "Internal Server Error"."""
-    log.exception("unhandled dashboard exception on %s", request.url.path)
+    from datetime import datetime, timezone
+    from secrets import token_hex
+
+    reference = "lw-failure-" + token_hex(16)
+    occurred_at = datetime.now(timezone.utc).isoformat()
+    route = getattr(request.scope.get("route"), "path", "unmatched route")
+    log.error("dashboard failure reference=%s time=%s action=%s route=%s",
+              reference, occurred_at, request.method, route,
+              exc_info=(type(exc), exc, exc.__traceback__))
+    headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
     if _wants_html(request):
-        return templates.TemplateResponse(
-            request,
-            "500.html",
-            {"path": request.url.path},
-            status_code=500,
-        )
-    return JSONResponse({"detail": "internal server error"}, status_code=500)
+        try:
+            return templates.TemplateResponse(
+                request, "500.html", {"failure_reference": reference, "failure_time": occurred_at,
+                                      "uncertain_mutation": request.method not in {"GET", "HEAD"}},
+                status_code=500, headers=headers,
+            )
+        except Exception:
+            # Deliberately independent of the normal layout and its data reads.
+            return HTMLResponse(
+                '<!doctype html><html lang="en"><meta charset="utf-8"><title>Lightwork needs attention</title>'
+                '<h1>Something went wrong</h1><p>Check the current state before repeating a change.</p>'
+                f'<p>Support reference: {reference}</p><p>Time: {occurred_at}</p>'
+                f'<a href="/help?failure={reference}">Open Help</a></html>',
+                status_code=500, headers=headers,
+            )
+    return JSONResponse({"detail": "The request could not be completed. Check its current state before retrying a change.",
+                         "failure_reference": reference, "occurred_at": occurred_at}, status_code=500, headers=headers)
 
 
 @app.middleware("http")

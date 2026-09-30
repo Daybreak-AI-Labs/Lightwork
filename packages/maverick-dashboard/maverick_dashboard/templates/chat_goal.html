@@ -357,6 +357,9 @@
         </div>
       {% endif %}
       {% if goal.status in ('done', 'blocked', 'failed') %}
+        {% if goal.status in ('blocked', 'failed') %}
+        <p><a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">Prepare support report</a></p>
+        {% endif %}
         {# Always-available thumbs up/down (unlike the gated sign-off above): any
            finished result can be rated, and the verdict grounds a real outcome
            into the learning loop. #}

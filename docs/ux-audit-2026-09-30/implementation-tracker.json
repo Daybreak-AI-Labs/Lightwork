@@ -1344,28 +1344,42 @@
     "id": "LW-150",
     "title": "Failure pages need a support reference tied to the actual failure",
     "category": "Onboarding support and qualification",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "maverick_dashboard.app.unhandled_exception_handler: unique reference/time + restricted log + JSON/HTML fallback",
+      "templates/500.html and support_api.PreviewIn: safe copy/help handoff into reviewed bundle",
+      "tests/test_failure_references.py: distinct references and independent rendering fallback"
+    ],
+    "validation": "Python 3.10 AST, JavaScript syntax, git diff --check passed. Regression cases authored, not executed.",
+    "remaining": "Runtime, authenticated browser and acceptance validation deferred at user request."
   },
   {
     "id": "LW-151",
     "title": "Review support-report content locally before it leaves Lightwork",
     "category": "Onboarding support and qualification",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "maverick.issue_report.build_report_fields: exact bounded local draft",
+      "support_ops_api.issue_draft/review_issue: current task authority + scrubbed edited fields",
+      "static/lightwork-support-ops.js and templates/support.html: editable local preview, explicit GitHub transfer, local copy/download, no persistent draft",
+      "tests/test_support_ops_api.py: preparation excludes external URL; edits scrubbed; revoked task denied"
+    ],
+    "validation": "Python 3.10 AST, JavaScript syntax, git diff --check passed. Regression cases authored, not executed.",
+    "remaining": "Runtime, authenticated browser and acceptance validation deferred at user request."
   },
   {
     "id": "LW-152",
     "title": "Make older failed tasks selectable in Help",
     "category": "Onboarding support and qualification",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "support_ops_api.stopped_tasks: bounded paginated traversal, title/date search, per-row authority, authorized selection",
+      "templates/chat_goal.html: stopped-task support handoff",
+      "static/lightwork-support-ops.js: older-page continuation and distinct empty/error feedback",
+      "tests/test_support_ops_api.py: 60-task oldest lookup, disjoint pages and denied selection"
+    ],
+    "validation": "Python 3.10 AST, JavaScript syntax, git diff --check passed. Regression cases authored, not executed.",
+    "remaining": "Runtime, authenticated browser and acceptance validation deferred at user request."
   },
   {
     "id": "LW-153",
