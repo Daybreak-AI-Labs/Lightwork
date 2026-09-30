@@ -441,6 +441,7 @@
       </form>
     </div>
   </div>
+  {% include "_conversation_inbox_panel.html" %}
 
 </div>
 {% endblock %}
@@ -450,6 +451,19 @@
      when there is one, and otherwise sends the next message of this thread
      (a follow-up goal run with the earlier turns as context). #}
   <div id="composer" class="ask">
+    <div id="conversation-send-options" hidden>
+      <label for="conversation-send-mode">Use this message to</label>
+      <select id="conversation-send-mode" class="input" aria-describedby="conversation-send-explanation"{% if not can_operate %} disabled{% endif %}>
+        <option value="guidance">Send guidance to this task</option>
+        <option value="queue">Queue the next task</option>
+        <option value="independent">Start a separate task</option>
+      </select>
+      <label for="conversation-independent-context" id="conversation-independent-context-label" hidden>Context for separate task</label>
+      <select id="conversation-independent-context" class="input" hidden{% if not can_operate %} disabled{% endif %}>
+        <option value="none">Only this message and selected files</option><option value="conversation_snapshot">Include this authorized conversation snapshot</option>
+      </select>
+      <p id="conversation-send-explanation" class="ask__hint"></p>
+    </div>
     <div id="question-panel" class="ask__question" style="display: none;" role="alert" aria-live="assertive">
       <p class="ask__eyebrow">Lightwork needs one thing from you</p>
       <p id="question-text" class="ask__text" role="status" aria-live="polite"></p>
@@ -481,6 +495,7 @@
 {% endblock %}
 {% block scripts_extra %}
 <script src="/static/lightwork-thread-history.js" defer></script>
+<script src="/static/lightwork-conversation-inbox.js" defer></script>
 <script src="/static/lightwork-task-authority.js" defer></script>
 <script src="/static/lightwork-file-selection.js" defer></script>
   <style>
@@ -802,13 +817,17 @@
         if (replyAttach) { replyAttach.disabled = false; replyAttach.title = asking ? 'Attach a document, PDF, image or text file to your answer' : 'Attach files to your next message'; }
         if (replyFiles) replyFiles.disabled = false;
         answerInput.placeholder = asking ? 'Reply to Lightwork…'
-          : running ? 'Lightwork is working… you can type while you wait'
+          : running ? (window.mvConversationInbox && window.mvConversationInbox.available ? 'Add guidance, queue the next task, or start separate work…' : 'Lightwork is working… you can type while you wait')
           : 'Message Lightwork…';
-        if (sendBtn) sendBtn.disabled = running;
+        const inbox = window.mvConversationInbox;
+        const inboxReady = !!(inbox && inbox.available);
+        if (sendBtn) sendBtn.disabled = running && !inboxReady;
+        if (inbox) inbox.updateComposer({asking:asking,running:running,status:currentStatus});
         cancelBtn.hidden = !stoppable;
         cancelBtn.disabled = !stoppable || stopRequested;
         answerForm.dataset.mode = asking ? 'answer' : 'reply';
       }
+      document.addEventListener('lightwork:conversation-inbox-ready', syncComposer);
       function resetField() {
         answerInput.value = '';
         answerInput.style.height = '';
@@ -923,8 +942,14 @@
           }
           return;
         }
+        if (window.mvConversationInbox && window.mvConversationInbox.available) {
+          submitting = true;
+          try { await window.mvConversationInbox.send(answerForm); }
+          finally { submitting = false; syncComposer(); }
+          return;
+        }
         if (!done) {
-          composerMessage('Lightwork is still working on the last message. Stop it, or wait for it to finish.', true);
+          composerMessage('Background message availability has not been confirmed. Refresh messages or wait for this task to finish; your draft is kept.', true);
           return;
         }
         // The next message of this chat: a follow-up goal, run with the
