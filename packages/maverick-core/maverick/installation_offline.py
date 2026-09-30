@@ -47,12 +47,21 @@ def review(folder: str, *, public_key: str) -> dict:
     """Copy and verify local bytes. Never download, install, reserve, or pause work."""
     if not isinstance(folder, str) or not folder or len(folder) > 4096:
         raise recovery.MaintenanceError("Select the local folder containing new.msi and downloads.json.")
+    if folder.startswith("\\\\"):
+        raise recovery.MaintenanceError("Select a folder on this computer; network shares are not an offline repair source.")
     selected = backup._filesystem_path(Path(folder).absolute())
+    for member in (selected, *selected.parents):
+        if backup._is_alias(member, member.lstat()):
+            raise recovery.MaintenanceError("Select a local folder without symbolic links or redirected directories.")
     metadata_path = backup._filesystem_path(selected / "downloads.json")
     if not metadata_path.is_file() or metadata_path.stat().st_size > 65536:
         raise recovery.MaintenanceError("The offline release needs bounded downloads.json metadata next to new.msi.")
     try:
-        metadata = json.loads(file_lock.atomic_read_text(metadata_path))
+        with metadata_path.open("rb") as stream:
+            payload = stream.read(65537)
+        if len(payload) > 65536:
+            raise ValueError("metadata exceeds limit")
+        metadata = json.loads(payload)
     except (ValueError, OSError) as exc:
         raise recovery.MaintenanceError("The offline release metadata is unreadable.") from exc
     if not isinstance(metadata, dict) or metadata.get("identity_transition") is not None or not hmac.compare_digest(str(metadata.get("public_key", "")), public_key):

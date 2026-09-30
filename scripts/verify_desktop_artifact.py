@@ -58,7 +58,10 @@ def verify(*, manifest: Path, signature: Path, artifact: Path, public_key: str,
     regular(manifest, 65536); regular(signature, 16384)
     # Verify immutable private copies so a swapped manifest cannot be parsed
     # after its different predecessor was authenticated.
-    payload = manifest.read_bytes(); signature_bytes = signature.read_bytes()
+    with manifest.open("rb") as stream:
+        payload = stream.read(65537)
+    with signature.open("rb") as stream:
+        signature_bytes = stream.read(16385)
     if len(payload) > 65536 or len(signature_bytes) > 16384:
         raise ValueError("Release metadata changed beyond its bound.")
     with tempfile.TemporaryDirectory(prefix="lightwork-artifact-review-") as temporary:
