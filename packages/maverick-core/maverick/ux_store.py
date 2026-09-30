@@ -203,16 +203,22 @@ class UxStore:
         return [entry for _, entry in indexed]
 
 
-_shared: UxStore | None = None
+_shared: dict[Path, UxStore] | None = None
 _shared_lock = threading.Lock()
 
 
 def shared() -> UxStore:
+    """Resolve the caller's workspace on every access, preserving its lock."""
     global _shared
+    from .paths import data_dir
+
+    path = data_dir("dashboard", "ux_store.json").resolve()
     with _shared_lock:
         if _shared is None:
-            _shared = UxStore()
-        return _shared
+            _shared = {}
+        if path not in _shared:
+            _shared[path] = UxStore(path=path)
+        return _shared[path]
 
 
 def reset_shared() -> None:

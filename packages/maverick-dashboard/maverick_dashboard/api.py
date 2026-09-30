@@ -7865,7 +7865,7 @@ async def list_installed_skills() -> list[SkillOut]:
 
 
 @router.get("/flywheel")
-def get_flywheel_state() -> dict:
+def get_flywheel_state(request: Request) -> dict:
     """What the Cognitive Data Engine has learned from the workforce's own outcomes.
 
     A read-only window into the moat: the **guardrails** it has mined (actions it
@@ -7896,7 +7896,7 @@ def get_flywheel_state() -> dict:
 
         out["signal"] = {
             "grounded_outcomes": consequence.count(),
-            "human_feedback": goal_feedback_store.count(),
+            "human_feedback": goal_feedback_store.count(owner=goal_owner_filter(request)),
         }
     except Exception:  # pragma: no cover
         pass
@@ -9886,7 +9886,7 @@ def get_feedback(request: Request, goal_id: int) -> dict:
     assert_goal_access(request, g)
     from maverick_dashboard import goal_feedback_store
 
-    return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
+    return {"feedback": goal_feedback_store.latest_for_goal(goal_id, owner=g.owner or "")}
 
 
 @router.post("/goals/{goal_id}/feedback")

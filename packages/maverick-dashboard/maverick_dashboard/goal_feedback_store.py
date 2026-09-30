@@ -17,14 +17,16 @@ from __future__ import annotations
 
 import time
 
-from maverick import config
 from maverick.ndjson_log import append_row, clamp01, tail_rows
+from maverick.paths import data_dir
 
 _MAX_ROWS = 5000  # bound the tail we read back; the file itself grows unbounded
 
 
 def _path():
-    return config.dashboard_overrides_path().parent / "goal-feedback.ndjson"
+    # The old deployment-global file has no trustworthy workspace lineage.
+    # Never adopt its rows by matching a colliding goal number or owner name.
+    return data_dir("dashboard", "goal-feedback-v2.ndjson")
 
 
 def record(goal_id: int, owner: str, rating: str, *, value: float,
@@ -48,12 +50,12 @@ def _read_rows() -> list[dict]:
     return tail_rows(_path(), _MAX_ROWS)
 
 
-def latest_for_goal(goal_id: int) -> dict | None:
+def latest_for_goal(goal_id: int, *, owner: str) -> dict | None:
     """The most recent feedback row for a goal, or ``None``."""
     gid = int(goal_id)
     hit = None
     for r in _read_rows():  # rows are append-order, so the last match is newest
-        if int(r.get("goal_id", -1)) == gid:
+        if r.get("goal_id") == gid and r.get("owner") == owner:
             hit = r
     return hit
 
