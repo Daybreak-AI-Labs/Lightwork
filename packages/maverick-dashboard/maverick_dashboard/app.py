@@ -152,16 +152,31 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-def _format_datetime(ts) -> str:
-    """Jinja filter: float epoch -> 'HH:MM:SS'."""
+def _format_datetime(ts, mode: str = "relative"):
+    """Jinja filter: epoch seconds -> a ``<time>`` the viewer reads in their zone.
+
+    The server text is the full date, time and zone (UTC), so a page without
+    JavaScript still says when; ``lightwork-ui.js`` (``mvFormatTimes``) then
+    rewrites it in the viewer's time zone -- relative with the absolute time on
+    hover (default), or absolute with ``mode="absolute"``. Never a bare
+    ``HH:MM:SS`` and never a raw epoch.
+    """
     import datetime as _dt
 
-    if ts is None:
+    from markupsafe import Markup, escape
+
+    if ts is None or ts == "":
         return "-"
     try:
-        return _dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+        stamp = float(ts)
+        when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
+    text = when.strftime("%d %b %Y, %H:%M UTC")
+    return Markup(
+        f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
+        f' data-mv-time-mode="{escape(mode)}">{text}</time>'
+    )
 
 
 templates.env.filters["datetime"] = _format_datetime
@@ -480,6 +495,22 @@ def _workspace_context(request: Request) -> dict:
 
 
 templates.context_processors.append(_workspace_context)
+
+
+def _docs_context(request: Request) -> dict:
+    """The Docs link in the top bar and the per-page Learn more link."""
+    from .docs_links import DOCS_HOME, learn_more_for
+
+    try:
+        path = request.url.path
+    except Exception:  # pragma: no cover -- shell rendering stays fail-soft
+        path = ""
+    return {"docs_home": DOCS_HOME, "docs_learn_more": learn_more_for(path)}
+
+
+templates.context_processors.append(_docs_context)
+templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
+templates.env.globals.setdefault("docs_learn_more", None)
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
