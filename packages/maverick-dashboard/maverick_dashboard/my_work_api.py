@@ -13,12 +13,8 @@ router = APIRouter(tags=["my-work"])
 LIMIT = 200
 
 
-def _model(request):
-    from .app import _world
-
-    owner = caller_principal(request) or ""
+def _task_source(request, world, owner):
     rows, coverage = [], []
-    world = _world()
     try:
         goals = world.list_goals(owner=owner, order="desc", limit=LIMIT + 1)
         for goal in goals[:LIMIT]:
@@ -41,9 +37,11 @@ def _model(request):
         coverage.append({"source": "Tasks and saved outcomes", "state": "partial" if len(goals) > LIMIT else "current"})
     except Exception:
         coverage.append({"source": "Tasks and saved outcomes", "state": "unavailable"})
-    if not has_permission(request, "operate"):
-        coverage.extend({"source": source, "state": "not permitted"} for source in ("Schedule occurrences", "Workflow runs", "Connection dependencies"))
-        return {"items": rows, "coverage": coverage, "context": context_for(request), "generated_at": time.time()}
+    return rows, coverage
+
+
+def _schedule_source(owner):
+    rows, coverage = [], []
     try:
         from maverick.job_queue import JobQueue
         from maverick.schedule_definitions import list_definitions
@@ -67,6 +65,11 @@ def _model(request):
         coverage.append({"source": "Schedule occurrences", "state": "partial" if len(schedules) > LIMIT else "current"})
     except Exception:
         coverage.append({"source": "Schedule occurrences", "state": "unavailable"})
+    return rows, coverage
+
+
+def _workflow_source(request, owner):
+    rows, coverage = [], []
     try:
         from maverick import flow
         from maverick.flow import store
@@ -101,6 +104,11 @@ def _model(request):
             coverage.append({"source": "Workflow runs", "state": source_state})
     except Exception:
         coverage.append({"source": "Workflow runs", "state": "unavailable"})
+    return rows, coverage
+
+
+def _connection_source(request):
+    rows, coverage = [], []
     try:
         from .connection_dependencies import connection_attention
 
@@ -111,6 +119,19 @@ def _model(request):
         coverage.append({"source": "Connection dependencies", "state": "partial" if len(connections["items"]) > LIMIT else connections["coverage"]})
     except Exception:
         coverage.append({"source": "Connection dependencies", "state": "unavailable"})
+    return rows, coverage
+
+def _model(request):
+    from .app import _world
+
+    owner = caller_principal(request) or ""
+    rows, coverage = _task_source(request, _world(), owner)
+    if has_permission(request, "operate"):
+        for items, source_coverage in (_schedule_source(owner), _workflow_source(request, owner), _connection_source(request)):
+            rows.extend(items)
+            coverage.extend(source_coverage)
+    else:
+        coverage.extend({"source": source, "state": "not permitted"} for source in ("Schedule occurrences", "Workflow runs", "Connection dependencies"))
     rows.sort(key=lambda row: (-float(row["updated_at"] or 0), row["kind"], row["id"]))
     return {"items": rows, "coverage": coverage, "context": context_for(request), "generated_at": time.time()}
 

@@ -311,20 +311,8 @@ def _owned_task_attention(world, principal, task_allowed=None):
     return items, [{"kind": "task_attention", "status": "unavailable" if "unavailable" in states else "partial" if "partial" in states else "current"}]
 
 
-def collect(world, *, principal: str | None, owner: str | None, specs: list[dict],
-            assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
-            project_reviews: Callable[[], list[dict]] | None = None,
-            vendor_reconciliations: Callable[[], dict] | None = None,
-            connection_attention: Callable[[], dict] | None = None,
-            approval_allowed: Callable[[object], bool] | None = None,
-            task_allowed: Callable[[object], bool] | None = None,
-            now: float | None = None) -> dict:
-    """Project only authorized content; report failed or bounded sources honestly."""
-    now = time.time() if now is None else now
+def _approval_source(world, principal, approval_allowed):
     items, coverage = [], []
-    task_items, task_coverage = _owned_task_attention(world, principal, task_allowed)
-    items.extend(task_items)
-    coverage.extend(task_coverage)
     try:
         rows = world.pending_approvals()
         for row in rows[:SOURCE_LIMIT]:
@@ -344,6 +332,11 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         coverage.append({"kind": "approval", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
     except Exception:
         coverage.append({"kind": "approval", "status": "unavailable"})
+    return items, coverage
+
+
+def _signoff_source(world, owner, specs):
+    items, coverage = [], []
     try:
         rows = world.list_goals(status="done", owner=owner, limit=SOURCE_LIMIT + 1, order="desc")
         scoped_specs = {spec["domain"]: spec for spec in specs if spec.get("gate")}
@@ -360,6 +353,11 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         coverage.append({"kind": "signoff", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
     except Exception:
         coverage.append({"kind": "signoff", "status": "unavailable"})
+    return items, coverage
+
+
+def _assessment_source(assessments, assessment_allowed, principal):
+    items, coverage = [], []
     try:
         rows = assessments()
         for row in rows:
@@ -380,6 +378,29 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
         coverage.append({"kind": "assessment", "status": "current"})
     except Exception:
         coverage.append({"kind": "assessment", "status": "unavailable"})
+    return items, coverage
+
+def collect(world, *, principal: str | None, owner: str | None, specs: list[dict],
+            assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
+            project_reviews: Callable[[], list[dict]] | None = None,
+            vendor_reconciliations: Callable[[], dict] | None = None,
+            connection_attention: Callable[[], dict] | None = None,
+            approval_allowed: Callable[[object], bool] | None = None,
+            task_allowed: Callable[[object], bool] | None = None,
+            now: float | None = None) -> dict:
+    """Project only authorized content; report failed or bounded sources honestly."""
+    now = time.time() if now is None else now
+    items, coverage = [], []
+    task_items, task_coverage = _owned_task_attention(world, principal, task_allowed)
+    items.extend(task_items)
+    coverage.extend(task_coverage)
+    for source_items, source_coverage in (
+        _approval_source(world, principal, approval_allowed),
+        _signoff_source(world, owner, specs),
+        _assessment_source(assessments, assessment_allowed, principal),
+    ):
+        items.extend(source_items)
+        coverage.extend(source_coverage)
     if project_reviews is not None:
         try:
             reviews = project_reviews()
