@@ -95,6 +95,7 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
   const context = await pageContext(request);
   await page.route('**/api/v1/knowledge-access/**', async route => {
     const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
     if (url.pathname.endsWith('/requests') && route.request().method() === 'GET') {
       return route.fulfill({json: {context, schema: 'lightwork.knowledge-rights-requests.v1',
         items: [record()], count: 1, can_review: true}});
@@ -153,6 +154,7 @@ test('empty and revoked states remove stale content and explain the next step', 
   let searches = 0;
   await page.route('**/api/v1/knowledge-access/**', route => {
     const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
     if (url.pathname.endsWith('/requests')) return route.fulfill({json: {context,
       schema: 'lightwork.knowledge-rights-requests.v1', items: [], count: 0, can_review: true}});
     if (url.pathname.endsWith('/search')) {
@@ -190,6 +192,7 @@ test('export verifies the complete authority binding with browser Web Crypto', a
   const context = await pageContext(request);
   await page.route('**/api/v1/knowledge-access/**', route => {
     const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
     if (url.pathname.endsWith('/requests')) return route.fulfill({json: {context,
       schema: 'lightwork.knowledge-rights-requests.v1', items: [], count: 0, can_review: true}});
     if (url.pathname.endsWith('/search')) return route.fulfill({json: {context,
@@ -225,6 +228,7 @@ test('an applying source retirement can be recovered in the app by exact replay'
   let submitted;
   await page.route('**/api/v1/knowledge-access/**', async route => {
     const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/task-policy')) return route.fallback();
     if (url.pathname.endsWith('/requests') && route.request().method() === 'GET') {
       const current = completed ? approved : applying;
       return route.fulfill({json: {context, schema: 'lightwork.knowledge-rights-requests.v1',
