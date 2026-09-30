@@ -26026,11 +26026,46 @@
           "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
         }
       ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/product_operations_facts.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/product_operations_facts.py",
+      "purpose": "Durable admission and completion receipts prevent replay of an exact reviewed Facts mutation, including after a fact is subsequently removed.",
+      "referenced_store_owners": [
+        "maverick.governed_records",
+        "maverick.world_model"
+      ],
+      "review": "Reviewed Facts adapter admission-before-effect, context/actor/operation digest binding, native revision CAS and historical receipt recovery (source fa3cd13019fea8ba44bc434d778e32e6f62bdd1a). Receipt metadata contains no fact name/value. Restored receipt absence or stale completion cannot authorize another effect; hold startup until current authority and consumed-operation state are reconciled. Retained minimal replay evidence is disclosed in My Data.",
+      "governed_namespaces": [
+        {
+          "namespace": "fact_operation_receipts",
+          "line": 18,
+          "recovery_policy": "fact_operation_receipt_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 18,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('fact_operation_receipts', 'FOP', 'fact_operation_receipt')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "fact_operation_receipts/FOP-example.json",
+          "recovery_policy": "fact_operation_receipt_authority",
+          "disposition": "Retain authenticated receipt bytes under global startup hold. Reconcile current source/revision, consent and consumed-operation evidence before admission; no automatic replay, grant restoration or inference of completion from matching fact values."
+        }
+      ]
     }
   ],
   "customer_audit_additions": {
     "base_sha": "d822db99ee48aab4fdded47fc799486e8e5ea44f",
-    "module_count": 46,
-    "review": "September 30 customer-audit additions: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification."
+    "module_count": 47,
+    "review": "September 30 customer-audit additions: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification. The Facts adapter follow-up adds metadata-only consumed-operation receipts under the same startup hold; it cannot reauthorize a restored mutation."
   }
 }
