@@ -261,6 +261,23 @@ class Server:
         if refusal:
             return refusal
 
+        # The adapter has authenticated the sender and tenant. A linking
+        # command is control-plane proof, never a prompt or remembered turn.
+        from .personal_identity import CHANNELS, account_identity, prove_channel_command
+        account_sha256 = getattr(msg, "_verified_channel_account_sha256", None)
+        memory_user_id = (account_identity(principal_id, account_sha256)
+                          if msg.channel in CHANNELS and account_sha256 else principal_id)
+        try:
+            proof_reply = prove_channel_command(msg.text, channel=msg.channel or "unknown", user_id=memory_user_id,
+                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256)
+        except Exception:
+            log.warning("Personal identity proof unavailable")
+            if msg.text.startswith("LIGHTWORK LINK"):
+                return "Identity linking could not be confirmed. Check My Data before retrying."
+            proof_reply = None
+        if proof_reply is not None:
+            return proof_reply
+
         # Per-tenant concurrency ceiling (noisy-neighbor protection). Derived
         # from the tenant's plan entitlement; no-op when tenant is None or the
         # plan is unlimited. Held across the whole goal run and released in the
@@ -289,14 +306,13 @@ class Server:
             disclosure = first_turn_disclosure(
                 world,
                 channel=msg.channel or "unknown",
-                user_id=principal_id,
+                user_id=memory_user_id,
             )
 
             conversation = world.get_or_create_conversation(
                 channel=msg.channel or "unknown",
-                user_id=principal_id,
+                user_id=memory_user_id,
             )
-            world.append_turn(conversation.id, "user", msg.text)
 
             from .deployment import require_enterprise_or_die
             require_enterprise_or_die()
@@ -313,10 +329,11 @@ class Server:
             goal_id = world.create_goal(
                 title,
                 msg.text,
-                owner=f"user:{execution_user_id}",
+                owner=f"user:{msg.channel or 'unknown'}:{memory_user_id}",
                 execution_principal=f"user:{execution_user_id}",
                 **({"domain": specialist} if specialist else {}),
             )
+            world.append_turn(conversation.id, "user", msg.text, goal_id=goal_id)
             if specialist:
                 log.info("goal #%s routed to specialist %s", goal_id, specialist)
 

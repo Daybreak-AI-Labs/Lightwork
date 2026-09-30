@@ -1,0 +1,30 @@
+[
+  {
+    "id": "LW-107",
+    "status": "implemented-test-needed",
+    "implementation_evidence": ["personal_memory.py provides revision-bound owned note corrections, durable exact/topic suppression read by consolidation and recall; personal_data_api.py and My Data show source date/revision or legacy unavailable and re-authorize source reads.", "Encrypted controls and metadata-only audit preserve administrator content privacy; feature knob, installer and Account entry provide the direct journey."],
+    "validation": "Python 3.10 AST, node --check and whitespace passed. Authored regression tests; targeted pytest command could not start (No module named pytest).",
+    "remaining": "Local runtime and installed/browser acceptance remain unexecuted; global Copilot integration is tracked separately."
+  },
+  {
+    "id": "LW-108",
+    "status": "partial-planned",
+    "implementation_evidence": ["personal_identity.py implements two-sided challenge proof, exact tenant/account/sender bindings, explicit dashboard confirmation, unlink and fresh membership checks.", "Durable incoming account proof binds new channel conversations and goal owners without changing execution ACL principals; legacy accountless histories remain unverified.", "My Data exposes explicit authoritative-source conflict choice and channel-only default; personal note and style recall consume current verified links."],
+    "validation": "Static checks passed; targeted tests blocked by missing pytest, no runtime success claimed.",
+    "remaining": "Finish account-bound source scope across adjacent reflexion/dream/correction recall and local-learning capture; verify queued and multi-adapter behavior."
+  },
+  {
+    "id": "LW-109",
+    "status": "partial-planned",
+    "implementation_evidence": ["My Data separates personal recall and collection, organization lesson promotion, workflow examples, source-bound local training and prior/external derivatives.", "Exact task owners can apply existing durable local-learning exclusions; user turns now bind goal_id for exclusion lineage. Personal choices cannot expand administrator ceilings or companion policy."],
+    "validation": "Static checks passed; targeted tests blocked by missing pytest, no runtime success claimed.",
+    "remaining": "Complete current per-stage learning configuration presentation and account-bound capture review; prior/external unlearning remains explicitly outside the implemented control."
+  },
+  {
+    "id": "LW-112",
+    "status": "partial-planned",
+    "implementation_evidence": ["Owner-only My Data inventory combines personal notes, exact verified conversation scopes, owned tasks, private draft metadata, companion retention and known preservation gates.", "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims."],
+    "validation": "Static checks passed; targeted tests blocked by missing pytest, no runtime success claimed.",
+    "remaining": "Complete consolidated per-store deletion review/actions/receipts, personal preference erasure integration and authorized knowledge/packet derivative lineage."
+  }
+]

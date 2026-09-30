@@ -1065,7 +1065,9 @@ async def _apply_brief_enrichments(
             # learned from; framed as untrusted self-reported data.
             from . import user_notes as _un
             _notes_block = _un.format_context(
-                _un.notes_for(channel, user_id), shield=shield,
+                _un.notes_for(channel, (goal.owner or "").removeprefix("user:" + str(channel) + ":")
+                              if (goal.owner or "").startswith("user:" + str(channel) + ":account:") else user_id,
+                              execution_identity=not (goal.owner or "").startswith("user:" + str(channel) + ":account:")), shield=shield,
             )
             if _notes_block:
                 brief = brief + "\n" + _notes_block

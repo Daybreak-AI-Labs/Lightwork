@@ -2118,6 +2118,16 @@ class Agent:
                 binding = ChatThreads(self.ctx.world).binding(self.ctx.goal_id)
                 thread_id = binding.root_id if binding and binding.owner == principal else self.ctx.goal_id
                 base += preference_prompt(principal, thread=thread_id)
+            elif user:
+                from .personal_identity import CHANNELS
+                from .personal_memory import shared_principal
+                channel = getattr(self.ctx, "channel", None)
+                goal = self.ctx.world.get_goal(self.ctx.goal_id)
+                owner = getattr(goal, "owner", "") or ""
+                if channel in CHANNELS and owner.startswith("user:" + channel + ":account:"):
+                    principal = shared_principal(channel, owner[len("user:" + channel + ":"):])
+                    if principal:
+                        base += preference_prompt(principal)
         except Exception:
             log.warning("Account response preferences are unavailable; using organization voice.")
 

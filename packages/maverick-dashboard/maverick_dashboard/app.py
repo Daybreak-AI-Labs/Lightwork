@@ -1432,9 +1432,11 @@ from .employee_companion_api import router as employee_companion_router  # noqa:
 app.include_router(employee_companion_router)
 from .content_access_api import router as content_access_router  # noqa: E402
 from .employee_departures_api import router as employee_departures_router  # noqa: E402
+from .personal_data_api import router as personal_data_router  # noqa: E402
 
 app.include_router(content_access_router)
 app.include_router(employee_departures_router)
+app.include_router(personal_data_router)
 # Settings > License (/settings/license + its install, sign and key-pair API).
 from .license_ops_api import router as license_ops_router  # noqa: E402
 

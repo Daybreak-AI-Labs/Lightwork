@@ -101,6 +101,7 @@ def _preference_rows(world: Any, conversations: list, ts: float,
             group.append(conv)
     notes: list[dict] = []
     from .pilot_learning import excluded
+    from .personal_memory import collection_allowed
     from .safety.secret_detector import redact
     for (channel, user_id), group in grouped.items():
         turns = []
@@ -115,7 +116,7 @@ def _preference_rows(world: Any, conversations: list, ts: float,
             for candidate in reversed(extract_preferences(turn.content)):
                 pref, _ = redact(candidate)
                 pref = " ".join(pref.split())[:_MAX_NOTE_LEN]
-                if not pref or any(_near_dup(pref, prior) for prior in current):
+                if not pref or not collection_allowed(channel, user_id, pref) or any(_near_dup(pref, prior) for prior in current):
                     continue
                 if len(current) >= max(1, max_notes_per_user):
                     break
@@ -164,29 +165,17 @@ def consolidate(
 
 def notes_for(
     channel: str | None, user_id: str | None,
-    path: Path | str | None = None, *, k: int = 8,
+    path: Path | str | None = None, *, k: int = 8, execution_identity: bool = False,
 ) -> list[str]:
     """The stored notes for exactly this (channel, user_id) scope."""
     if not channel or not user_id:
         return []
-    p = Path(path) if path is not None else default_path()
-    if not p.exists():
-        return []
-    out: list[str] = []
     try:
-        with open(p, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if d.get("channel") == channel and d.get("user_id") == user_id:
-                    note = str(d.get("note", "")).strip()
-                    if note:
-                        out.append(note)
-    except OSError:
+        from .personal_memory import recall
+        return recall(channel, user_id, path=path, k=k, execution_identity=execution_identity)
+    except Exception as exc:
+        log.warning("Personal recall unavailable: %s", type(exc).__name__)
         return []
-    return out[:max(1, k)]
 
 
 def erase_notes(

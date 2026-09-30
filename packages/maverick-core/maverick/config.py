@@ -1061,6 +1061,9 @@ def get_features() -> dict:
         "employee_departures": (
             not config_source_errors() and cfg.get("employee_departures", False) is True
         ),
+        "personal_data_controls": (
+            not config_source_errors() and cfg.get("personal_data_controls", False) is True
+        ),
         "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),

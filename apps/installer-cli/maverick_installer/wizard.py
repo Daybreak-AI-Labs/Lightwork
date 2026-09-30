@@ -4678,6 +4678,10 @@ def pick_advanced() -> dict[str, Any]:
             "cannot take task actions or use connected sources.",
             default=False,
         ),
+        "allow_personal_data_controls": _q_confirm(
+            "Enable My Data, owned-memory controls and verified channel linking? Sharing stays off until the employee chooses it.",
+            default=False,
+        ),
         "allow_employee_content_access_requests": _q_confirm(
             "Employee tasks and chats are private to their owner. Enable exceptional "
             "task/export reads and exact approval-card reads with a separate reviewer, a stated purpose, "
@@ -8258,6 +8262,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("employee_companions = true")
     if advanced.get("allow_employee_content_access_requests") is True:
         _feature_locks.append("employee_content_access_requests = true")
+    if advanced.get("allow_personal_data_controls") is True:
+        _feature_locks.append("personal_data_controls = true")
     if advanced.get("allow_employee_departures") is True:
         _feature_locks.append("employee_departures = true")
     if advanced.get("allow_outcome_measurement") is True:

@@ -115,6 +115,7 @@ CAPABILITY_DEFAULTS = {
 }
 FEATURE_DEFAULTS = {
     "employee_content_access_requests": False,
+    "personal_data_controls": False,
     "employee_departures": False,
     "employee_companions": False,
     "workflow_readiness": True,
@@ -159,6 +160,7 @@ CAPABILITY_INFO = {
 }
 FEATURE_INFO = {
     "employee_content_access_requests": "Allow named administrators to request an employee task or subject export, and named operators to request an exact approval-card read. Another administrator or the content owner must approve; reads expire within one hour and are recorded. Reading a card grants no voting authority. Turning this off revokes use of existing grants. Private content remains owner-only by default.",
+    "personal_data_controls": "Allow named workspace members to inspect and correct their personal memory, narrow local learning, review My Data and verify channel identity links. Linking alone shares nothing; optional cross-channel preferences never grant roles or tools. Disabling stops linked recall; previously saved channel recall restrictions remain enforced.",
     "employee_departures": "Allow named installation administrators to preview employee work, revoke Lightwork access, remove reviewed local connection credentials, cancel pending run-goal schedules and record retained-data handoff owners. External provider consent, running work and other module queues remain explicit unresolved handoffs; this does not claim complete offboarding or transfer private-content access.",
     "employee_companions": (
         "Let workspace administrators enroll employees for a personal companion "
