@@ -42,6 +42,17 @@
 <button class="btn btn--ghost" type="button" id="preference-compare" hidden>Compare current values and keep my draft</button>
 <p id="preference-status" role="status" aria-live="polite"></p>
 </form>
+{% if memory_preferences %}
+<section class="panel" aria-labelledby="preference-memory-title">
+  <h2 id="preference-memory-title">Your personal memory</h2>
+  <p>{{ memory_preferences.policy }}. Source: {{ memory_preferences.source }}.</p>
+  <p>{{ memory_preferences.message }}</p>
+  {% if memory_preferences.available %}<p>{{ memory_preferences.sharing }}.</p>
+  <dl>{% for scope in memory_preferences.scopes %}<dt>{{ scope.label }}</dt><dd>{{ scope.choice }}. Effective recall: {{ scope.effective }}. Source: {{ scope.source }}.</dd>{% endfor %}</dl>
+  {% endif %}
+  <p><a class="btn btn--ghost" href="/my-data#pd-memory">Review memory choices and sources in My Data</a></p>
+</section>
+{% endif %}
 <script id="preference-data" type="application/json">{{ preference_state|tojson }}</script>
 <script id="preference-thread" type="application/json">{{ preference_thread|tojson }}</script>
 <script id="preference-styles" type="application/json">{{ output_styles|tojson }}</script>
