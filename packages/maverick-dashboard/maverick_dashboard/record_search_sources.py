@@ -16,7 +16,8 @@ def _tasks(request):
 
     require_permission(request, "view")
     rows = _world().list_goals(owner=goal_owner_filter(request), limit=SOURCE_LIMIT + 1, order="desc")
-    specs = {spec["domain"] for spec in _deliverable_specs()}
+    specs = ({spec["domain"] for spec in _deliverable_specs()}
+             if any(row.status == "done" and row.domain for row in rows[:SOURCE_LIMIT]) else set())
     out = []
     for row in rows[:SOURCE_LIMIT]:
         if not suite_allowed(request, suite_for(row.domain) if row.domain else None):

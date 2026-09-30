@@ -435,6 +435,14 @@ def _nav_context(request: Request) -> dict:
     # The Ctrl+K page finder: same role resolution, but it also indexes pages
     # folded out of the rail (in_nav: False) -- reachable must mean searchable.
     finder = ui_visibility.finder_pages(role, scope_roles=scope_roles)
+    from .employee_companion_api import navigation_available
+
+    unavailable = {path for path, admin in (("/companion", False), ("/companion/admin", True))
+                   if not navigation_available(request, admin=admin)}
+    for collection in (groups, finder):
+        for group in collection:
+            group["links"] = [link for link in group["links"] if link["href"] not in unavailable]
+        collection[:] = [group for group in collection if group["links"]]
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     # A deployment-wide halt backend is a global control even when the caller
@@ -10970,6 +10978,29 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-answer-panel.js")
+@app.get("/static/lightwork-approval-history.js")
+@app.get("/static/lightwork-chat-drafts.js")
+@app.get("/static/lightwork-conversation-inbox.js")
+@app.get("/static/lightwork-conversation-organization.js")
+@app.get("/static/lightwork-deliverable-bundles.js")
+@app.get("/static/lightwork-deliverable-sharing.js")
+@app.get("/static/lightwork-employee-companion.js")
+@app.get("/static/lightwork-file-selection.js")
+@app.get("/static/lightwork-my-work.js")
+@app.get("/static/lightwork-permission-requests.js")
+@app.get("/static/lightwork-personal-data.js")
+@app.get("/static/lightwork-preferences.js")
+@app.get("/static/lightwork-project-workspaces.js")
+@app.get("/static/lightwork-settings-review.js")
+@app.get("/static/lightwork-settings-runtime.js")
+@app.get("/static/lightwork-task-authority.js")
+@app.get("/static/lightwork-task-handoffs.js")
+@app.get("/static/lightwork-thread-history.js")
+@app.get("/static/lightwork-employee-companion.css")
+@app.get("/static/lightwork-preferences.css")
+@app.get("/static/lightwork-product-operations.js")
+@app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-facts.js")
 @app.get("/static/lightwork-access-state.js")
 @app.get("/static/lightwork-consent-policy-editor.js")

@@ -480,6 +480,16 @@ async def update_policy(request: Request, response: Response, body: PolicyIn):
     return await _call(request, response, operation, admin=True, write=True)
 
 
+def navigation_available(request, *, admin=False):
+    """Use the page's current named-member gate for advisory shell links."""
+    try:
+        with authority_effect_fence():
+            _authority(request, admin=admin)
+        return True
+    except (HTTPException, OSError, ValueError):
+        return False
+
+
 def _page(request, *, admin=False):
     from .app import templates
 

@@ -207,3 +207,13 @@ def test_finder_knowledge_mode_delegates_current_native_acl_and_metadata_never_c
             raise HTTPException(409, "Current source access unavailable")
         monkeypatch.setattr(knowledge, "search", revoked)
         assert client.post("/api/v1/records/search", json={"query": "name", "mode": "knowledge", "purpose": "business"}).status_code == 409
+
+
+def test_ordinary_task_metadata_does_not_scan_unrelated_domain_packs(monkeypatch):
+    from maverick_dashboard import app as app_module
+    goals = [SimpleNamespace(id=1, title="Plain task", status="done", domain="")]
+    monkeypatch.setattr(app_module, "_world", lambda: SimpleNamespace(list_goals=lambda **kw: goals))
+    monkeypatch.setattr(app_module, "_deliverable_specs", lambda: pytest.fail("unrelated packs scanned"))
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
+    assert sources._tasks(object()).items[0]["kind"] == "task"

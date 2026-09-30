@@ -135,6 +135,8 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
   // The result limit is a fixed hidden value now, so it is not a tab stop.
   await expect(page.locator('#ka-limit')).toHaveAttribute('type', 'hidden');
   await page.keyboard.press('Tab');
+  await expect(page.locator('#ka-retry-purposes')).toBeFocused();
+  await page.keyboard.press('Tab');
   await expect(page.locator('#ka-search')).toBeFocused();
 
   const overflow = await page.evaluate(() => ({viewport: document.documentElement.clientWidth,
