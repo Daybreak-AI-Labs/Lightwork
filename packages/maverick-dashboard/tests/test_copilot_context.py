@@ -4,6 +4,10 @@ import pytest
 from maverick_dashboard import copilot_context
 
 CANONICAL_CONTEXTS = {
+    "/content-access": "Employee content access",
+    "/users/departures": "Employee departures",
+    "/companion/admin": "Employee companions",
+    "/companion": "My companion",
     "/assurance/cloud-agents": "Cloud Agent Governance",
     "/ai-evidence-analysis": "AI Evidence Analysis",
     "/assess/evidence-autopopulation": "Assessment Evidence Proposals",

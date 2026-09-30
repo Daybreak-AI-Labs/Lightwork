@@ -168,7 +168,7 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # Extend/Admin group.
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
         "Operate", "Observe", "Govern", "Privacy", "Consent",
-        "AI oversight", "Third parties"}
+        "AI oversight", "Third parties", "Work"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
     # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")

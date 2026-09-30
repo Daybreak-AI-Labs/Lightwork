@@ -115,6 +115,8 @@ def require_approval_content(request, approval_id, world=None):
         from ._shared import _world
         world = _world()
     row = world.get_approval(int(approval_id))
+    if row is None:
+        raise HTTPException(404, "No such approval.")
     if not can_read_approval(request, row, world):
         raise HTTPException(403, "This approval contains private employee content. Request its exact approval-card read in Content access; existing decision authority is still required.")
     return row

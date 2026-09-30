@@ -26,14 +26,32 @@ def _provider_receipts(work_item_id: str) -> tuple[list[dict], str]:
     return [asdict(receipt) for receipt in catalogue.receipts], catalogue.version
 
 
-def goal_source(request, reference):
+def _can_read_source(request, goal, *, independent_review=False):
+    if can_access_goal(request, goal):
+        return True
+    if not independent_review or getattr(request.state, "paired_device_id", None):
+        return False
+    # An independent decision mutates the pilot, not its underlying task.
+    # Its read-only resolver still requires the same exact expiring content
+    # grant and confirmed per-read audit receipt as a GET. Never change the
+    # request method or grant the reviewer task mutation/publication authority.
+    from .auth import has_global_permission
+    from .content_access import may_read_employee_content
+
+    if not has_global_permission(request, "admin"):
+        return False
+    return may_read_employee_content(request, goal.owner or "",
+                                     resource_kind="goal", resource_id=str(goal.id))
+
+
+def goal_source(request, reference, *, independent_review=False):
     from maverick.domain import suite_for
 
     from .app import _world
 
     world = _world()
     goal = world.get_goal(int(reference))
-    if goal is None or not can_access_goal(request, goal) or not suite_allowed(request, suite_for(goal.domain)):
+    if goal is None or not _can_read_source(request, goal, independent_review=independent_review) or not suite_allowed(request, suite_for(goal.domain)):
         raise LookupError("Task unavailable.")
     episodes = world.list_episodes(goal_id=goal.id, limit=2001)
     if len(episodes) > 2000:
@@ -130,9 +148,9 @@ def vendor_source(request, reference):
     return source
 
 
-def resolve(request, kind, reference):
+def resolve(request, kind, reference, *, independent_review=False):
     if kind == "goal":
-        return goal_source(request, reference)
+        return goal_source(request, reference, independent_review=independent_review)
     if kind == "vendor":
         return vendor_source(request, reference)
     raise ValueError("Choose a task or vendor case.")

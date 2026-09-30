@@ -107,7 +107,9 @@ def test_self_approval_barred_returns_403(monkeypatch, tmp_path):
         approvals_required=2,
         requested_by="u:alice",
     )
-    from maverick_dashboard import api
+    from maverick_dashboard import api, auth, rbac
+    rbac.set_role("u:alice", "operator")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "u:alice")
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
     monkeypatch.setattr("maverick.safety.dual_control.allow_self_approval",
                         lambda: False)

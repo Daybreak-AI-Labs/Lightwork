@@ -156,7 +156,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
         risk="high",
         detail=encode_approval_detail(old_card),
         provenance="browser",
-        requested_by="user:alice",
+        requested_by="",  # This protocol test exercises genuinely unowned local work.
     )
     client = _client()
 
@@ -199,7 +199,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
         risk="high",
         detail=encode_approval_detail(fresh_card),
         provenance="browser",
-        requested_by="user:alice",
+        requested_by="",
     )
     assert fresh_id != old_id
     assert fresh_card["binding_sha256"] != old_card["binding_sha256"]
@@ -480,8 +480,9 @@ def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, 
     assert developer_terms(text.replace("tenant-a", "workspace-a")) == []
 
 
-def test_empty_queue_offers_past_decisions(monkeypatch, tmp_path):
+def test_empty_queue_offers_owned_decisions(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/approvals").text
     assert "Nothing needs your decision right now." in text
-    assert 'href="/audit">See past decisions</a>' in text
+    assert 'id="request-decision-history"' in text and "Decisions on your requests" in text
+    assert 'id="request-decision-more"' in text and "/static/lightwork-approval-history.js" in text

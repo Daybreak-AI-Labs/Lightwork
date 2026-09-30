@@ -2,8 +2,11 @@
 -> grid, else text), and GET /api/v1/goals/<id>/artifacts lists the latest."""
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
+from test_support.plain_language import visible_text
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -23,7 +26,7 @@ def test_goal_page_renders_artifacts(tmp_path, monkeypatch):
     assert 'class="artifacts"' in t
     assert "Cash forecast" in t and "Variance memo" in t
     assert '<table class="deliverable__table">' in t   # table artifact -> grid
-    assert "<td>300</td>" in t
+    assert re.search(r"<td\b[^>]*>300</td>", t)
     assert "Net up 50." in t                            # markdown artifact -> text body
 
 
@@ -33,7 +36,7 @@ def test_artifact_versions_shown(tmp_path, monkeypatch):
     w.add_artifact(gid, "text", "Note", "ZZZ_BODY_ONE")
     w.add_artifact(gid, "text", "Note", "ZZZ_BODY_TWO")
     t = client.get(f"/chat/goal/{gid}").text
-    assert "Version 2 of 2" in t
+    assert "Version 2 of 2" in visible_text(t)
     assert "ZZZ_BODY_TWO" in t          # latest version rendered
     assert "ZZZ_BODY_ONE" not in t      # older version not rendered (latest only)
 
@@ -87,8 +90,10 @@ def test_version_history_loader_checks_status_and_retries(tmp_path, monkeypatch)
     w.add_artifact(gid, "text", "Note", "v one")
     w.add_artifact(gid, "text", "Note", "v two")
     t = client.get(f"/chat/goal/{gid}").text
-    loader = t[t.index("artifact__history').forEach"):]
-    loader = loader[:loader.index("</script>")]
+    assert "/static/lightwork-answer-panel.js" in t
+    response = client.get("/static/lightwork-answer-panel.js")
+    assert response.status_code == 200
+    loader = response.text
     assert "if (!r.ok)" in loader
     assert "cgErr(r, 'load earlier versions')" in loader
     assert "delete d.dataset.loaded" in loader

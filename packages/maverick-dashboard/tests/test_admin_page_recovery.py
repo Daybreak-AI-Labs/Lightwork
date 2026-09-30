@@ -43,6 +43,9 @@ def test_admin_io_yields_to_another_request_and_preserves_tenant(monkeypatch, op
     from maverick_dashboard import auth, invites
 
     name, module_name, method, data, result = operation
+    if name == "users_remove":
+        from maverick_dashboard.access_explanations import standard_role
+        data = {**data, "expected_standard": standard_role(data["principal"])["revision"]}
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
     scopes = []
 

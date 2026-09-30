@@ -92,7 +92,7 @@ def test_templates_page_shows_automate_cta(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick_dashboard.app as appmod
     monkeypatch.setattr(appmod, "template_market_entries",
-                        lambda: [{"name": "weekly-report", "title": "T", "body": "b", "params": []}])
+                        lambda owner=None: [{"name": "weekly-report", "title": "T", "body": "b", "params": []}])
     r = _client().get("/templates")
     assert r.status_code == 200
     assert "/workflow-builder?template=weekly-report" in r.text
@@ -102,7 +102,7 @@ def test_templates_rebuilt_on_shared_components(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick_dashboard.app as appmod
     monkeypatch.setattr(appmod, "template_market_entries",
-                        lambda: [{"name": "x", "title": "T", "body": "b", "params": []}])
+                        lambda owner=None: [{"name": "x", "title": "T", "body": "b", "params": []}])
     t = _client().get("/templates").text
     assert 'class="card-grid"' in t and 'class="card"' in t      # shared card components
     assert 'class="btn btn--primary"' in t                        # Use = a real primary button
@@ -111,7 +111,7 @@ def test_templates_rebuilt_on_shared_components(monkeypatch, tmp_path):
 def test_templates_empty_uses_mv_empty(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick_dashboard.app as appmod
-    monkeypatch.setattr(appmod, "template_market_entries", list)
+    monkeypatch.setattr(appmod, "template_market_entries", lambda owner=None: [])
     t = _client().get("/templates").text
     assert 'class="mv-empty"' in t and "No templates yet" in t
 
@@ -127,7 +127,7 @@ def test_templates_page_shows_edit_cta(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick_dashboard.app as appmod
     monkeypatch.setattr(appmod, "template_market_entries",
-                        lambda: [{"name": "weekly-report", "title": "T", "body": "b", "params": []}])
+                        lambda owner=None: [{"name": "weekly-report", "title": "T", "body": "b", "params": []}])
     assert "/workflow-builder?edit=weekly-report" in _client().get("/templates").text
 
 
@@ -135,7 +135,7 @@ def test_templates_automate_cta_hidden_when_automation_off(monkeypatch, tmp_path
     _isolate(monkeypatch, tmp_path)
     import maverick_dashboard.app as appmod
     monkeypatch.setattr(appmod, "template_market_entries",
-                        lambda: [{"name": "x", "title": "T", "body": "b", "params": []}])
+                        lambda owner=None: [{"name": "x", "title": "T", "body": "b", "params": []}])
     from maverick import config
     real = config.get_features
     monkeypatch.setattr(config, "get_features",
