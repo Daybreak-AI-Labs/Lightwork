@@ -25,13 +25,13 @@ as failures, investigated and rerun:
 | Two admitted pilot cohorts | Eight real admissions, repeated independent reads, baseline correction and exact export took 49 seconds. A bounded 90-second journey budget passed with assertions unchanged. |
 | Help follow-up layout | The page now has three supported follow-up groups. Assert all three, including the new search form, and check each against the floating button. Passed in 2.5 seconds. |
 | Task file recovery | Restricted Windows process could not hold native parent-directory handles. The unchanged guarded production implementation passed in an authorized unrestricted local fixture in 3.8 seconds. Alias and race guards remain enforced. |
-| Independent protected-pilot review | An independent administrator correctly lacks ambient source-task access. The test now asserts initial denial, requests each exact source with purpose and five-minute expiry, rejects requester self-approval, and obtains owner approval with acknowledged audit receipts. The GET succeeds. The subsequent review POST exposed a separate source-read/mutation distinction; final qualification awaits that repair. |
+| Independent protected-pilot review | An independent administrator correctly lacks ambient source-task access. The test now asserts initial denial, requests each exact source with purpose and five-minute expiry, rejects requester self-approval, and obtains owner approval with acknowledged audit receipts. The GET succeeds. The review POST exposed a separate source-read/mutation distinction, repaired in `f96eabe` using an explicit audited source-read resolver without task mutation rights. The complete journey then passed in 25.1 seconds, including stale-evidence refusal. |
 
 The retained-key custody journey passed with the matching checkout interpreter.
 The earlier build-identity conflict from mixing two checkouts was not bypassed.
 Per-run local logs and trace/screenshot folders are under the executor's `audit/`
 directory (`browser-slice-full3`, `browser-recovery-targeted2`,
-`browser-pilot-reviewed-access`, `browser-enterprise-thirteenth`). Generated
+`browser-pilot-reviewed-access-verified`, `browser-enterprise-thirteenth`). Generated
 runtime artifacts are not committed as application data.
 
 ## New enterprise lifecycle
@@ -74,8 +74,9 @@ the complete local run.
 
 ## Remaining qualification
 
-Run the independent-pilot regression after its source-read repair and rerun the
-final consolidated commit. Real IdP login/session expiry, approved live provider
+All 69 original cases and the new enterprise journey have passed across the
+complete run and targeted reruns. This is 70 distinct local journeys, not one
+70-case run on the final consolidated commit. Rerun that final commit. Real IdP login/session expiry, approved live provider
 consent/refresh/revocation and outages, provider-grounded model output, actual
 paid-cost reconciliation, packaged desktop/native OS behavior and customer
 acceptance require explicitly approved environments and accounts. None were
