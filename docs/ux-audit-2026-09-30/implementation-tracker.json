@@ -36,34 +36,34 @@
     "id": "LW-004",
     "title": "Give each employee a private background-work control center",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing companion private task projection preserved."
+      "my_work_api.py /my-work projects exact-owner tasks and saved outcomes, schedule occurrences, authorized immutable flow definitions and owner connection dependencies; explicit partial/unavailable coverage, status truth, fresh request context, paused bounded polling, native-control links from conversation. Reuses schedule_definitions and connection_dependencies from the connections slice."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Join task/schedule/flow/connection/result sources with coverage and per-owner authorized controls."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-005",
     "title": "Join Action Center and task questions into one actionable inbox",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing Action Center sources preserved."
+      "action_center.py adds one versioned task-attention row per owned blocked/failed task, current question identity, rejected signoffs, owner changes-requested/stale review packets and exact-owner connection dependencies; explicit adapter coverage and existing private version-bound snooze/read preferences. Approval projections now require can_read_approval; task rows require current goal and suite authority."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Add question/failed-work/rejected-review/expiring-dependency adapters, deduplicate and bind private snooze/read preferences."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-006",
     "title": "Preserve failed Copilot questions and context safely",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Failed Copilot request retains editable text; successful matched response clears it; obsolete generation results stay suppressed."
+      "lightwork-copilot.js retains failed text, blocks in-flight prompt replacement, reuses visible retry row, rejects late generation replies and fresh-checks server-bound account/workspace context before sending and publishing. Transient operation-source failures preserve drafts; auth/scope changes clear private state. Copilot endpoint validates current context before a model call."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Bind general Copilot drafts/history to freshly verified account/workspace scope even on pages without a learning-example controller."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-007",
@@ -124,12 +124,18 @@
     "id": "LW-012",
     "title": "Generic error wording hides the actual remedy",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Resume preserves safe server detail instead of always blaming spending limit."
+      "Shared product_errors.py business error envelope carries authored message, bounded field errors and caller-authorized same-origin next action.",
+      "Native resume/share/sign-off distinguish budget ceiling, unfinished task, required sign-off, stale result and outcome-pilot admission hold.",
+      "lightwork-ui.js renders structured remedies as text with validated local links; resume/sign-off/sharing preserve the composer and show actual remedies; expired authentication retains explicit sign-in wording."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Complete structured business error contract and supported remedy links across budget/unfinished/signoff/stale/auth/admission actions."
+    "validation": [
+      "Python AST, JavaScript syntax and git diff whitespace checks; authored test_product_errors.py and test_product_errors_client.js, not executed."
+    ],
+    "remaining": [
+      "Run authored regressions and authenticated acceptance for each business failure, preserved drafts, field associations and authorized destinations."
+    ]
   },
   {
     "id": "LW-013",
@@ -179,12 +185,12 @@
     "id": "LW-017",
     "title": "Add conversation organization without deleting audit evidence",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing durable thread identity and task/audit records preserved."
+      "conversation_organization.py stores names/pins/archive in one owner/workspace-private governed CAS document keyed by immutable root identity. Replayed operations reuse receipts, conflicting windows refuse, explicit undo restores prior organization. All turns read root metadata; current authorized pins appear in sidebar, archive preserves history and explains retention. /conversations searches stored user/assistant content across bounded keyset pages with truthful remaining-history scope; root ownership and suite permission checked before matching or projection."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Add user-owned rename/pin/archive/tags metadata, version conflict handling and full-history search without deleting retained evidence."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated/browser/native PostgreSQL and cross-client runtime acceptance remain for the later testing phase. Product bounds are visible: 20 active pins, 10000 organized conversations; message search excludes attachments/external records."
   },
   {
     "id": "LW-018",
@@ -201,217 +207,265 @@
     "id": "LW-019",
     "title": "Add conflict-safe deliverable revisions",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "goal_mutations.edit_result; migration 42 on SQLite/Postgres; api.edit_deliverable; chat_goal comparison; tests/test_goal_mutations.py"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Runtime concurrency/parity and receipt fault-injection qualification remain unrun. Combine companion worker truthful learning receipt fields during integration."
   },
   {
     "id": "LW-020",
     "title": "Prevent stale and concurrent settings overwrites",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "settings_all_page._revision binds effective layers and catalog environment; _catalog_update_locked compares/revalidates/writes/audits under settings_store RLock+cross-process fence; client explicit conflict comparison"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Concurrent authenticated A/B and deployment-layer qualification unrun. Existing catalog test fixtures need reviewed revision fields for the new required API contract."
   },
   {
     "id": "LW-021",
     "title": "Protect unsaved All Settings edits",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "lightwork-settings-all.js dirty beforeunload for every loaded row; opt-in recovery only safe scalar/list/picker controls through encrypted draft service; secrets/documents/table content excluded"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser reload/navigation/cancel matrix unrun. Table edits receive loss warnings; policy/credential tables are deliberately not persisted in recovery."
   },
   {
     "id": "LW-022",
     "title": "Do not erase edits typed while saving",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "lightwork-settings-all.js commit locks submitted inputs/selects/textareas/buttons, retains prior disabled states, preserves dirty unrelated rows"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Delay-response browser cases unrun."
   },
   {
     "id": "LW-023",
     "title": "Save main Settings sections without discarding other sections",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "settings.html section submit uses in-place fetch with submitted control lock, section-only dirty clearing/password clearing, explicit saved vs pending notice and partial appearance receipt"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser/provider form failure matrix unrun; no provider calls made."
   },
   {
     "id": "LW-024",
     "title": "Make preference changes previewable without navigation",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "preferences_api display POST; shared _display_preferences.html; lightwork-ui immediate class/text-size preview, persistence, rollback and Undo without navigation"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Scroll/focus/editor/reload browser qualification unrun."
   },
   {
     "id": "LW-025",
     "title": "Chat drafts lack the recovery offered to other editors",
     "category": "Save integrity and draft protection",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "lightwork-chat-drafts.js wraps main/followup composer with encrypted account/tenant/thread recovery and attachment reselection copy; successful main sends await draft clear, fields locked during dispatch"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Conversation worker must integrate followup acknowledged-send event AND await clear before navigation while locking submitted fields. Auth expiry/restart/multitab matrix unrun."
   },
   {
     "id": "LW-026",
     "title": "Settings-file check and install are not bound to one reviewed change",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "setup_guide prepare/install binds bytes + account/workspace + current sources and referenced environment; complete catalog and opaque dedicated-field impact rows include Added/Removed/Changed, inherited override/disabled flags and activation timing; exact receipts and conflict fence from 6eaca67"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Controlled config races and exact-byte/environment-reference scenarios authored, unrun. Unclassified dedicated fields withhold values and conservatively flag possible restart rather than claiming live activation."
   },
   {
     "id": "LW-027",
     "title": "Settings-file activity claims installation before the write succeeds",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "setup_guide durable reviewed/pending/uncertain/confirmed receipts; install requested/confirmed audit stages; GET result + explicit POST reconcile observed current bytes; no-op distinguished; random backup suffix"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Filesystem/audit failure injection and lost-ack qualification unrun. Reconciliation records observed current bytes; it does not claim an uncertain original write occurred."
   },
   {
     "id": "LW-028",
     "title": "Fence duplicate child-task creation in the task map",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "goal_mutations.create_child durable actor/op/payload receipt transaction; graph_editor pending guard/readonly title; per-account/tenant/parent/title session operation token; created child named+selected"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser lost acknowledgement/reload/double-click and Postgres qualification unrun."
   },
   {
     "id": "LW-029",
     "title": "Protect task-map edits from overwriting another user's current state",
     "category": "Save integrity and draft protection",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "goal_tree nodes include updated_at; required expected revision in RetitleIn/ReparentIn; goal_mutations.edit_structure transaction CAS+cycle check; graph conflict reload preserves title/parent draft"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Concurrent map/backend parity qualification unrun. Shared service available to authorized tool integrations; existing dashboard routes require reviewed versions."
   },
   {
     "id": "LW-030",
     "title": "Define personal workspace and organization preference scopes",
     "category": "Personalization and settings",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Encrypted scoped hierarchy, global-only policy ceilings, named-account runtime, source/inherit controls and in-place conflict comparison; organization policy editor settings_catalog_personalization; display defaults and personal-only pins/cards; notification adapter e3ad241 + peer cdab036"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Memory narrowing and erasure require verified dashboard-principal-to-channel/store mapping. Root owns template preference adapters and Today projections. Authorized Copilot preference journey remains to implement; no placeholder memory toggle."
   },
   {
     "id": "LW-031",
     "title": "Expose all supported persona styles consistently",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "persona.style_choices generated from runtime STYLES; settings_catalog uses shared registry and descriptions"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Roundtrip catalog/runtime registry test authored below; runtime suite unrun."
   },
   {
     "id": "LW-032",
     "title": "Add personal and per-conversation custom output styles",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "/preferences named personal custom guidance, builtins, inheritance and per-conversation override; ChatThreads canonical root binding; agent dashboard-principal prompt projection with guidance treated as untrusted presentation data"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Two-user/multiple-conversation runtime qualification unrun. Custom guidance cannot mutate tool/policy/retention settings."
   },
   {
     "id": "LW-033",
     "title": "Make the preferred user name truly per-user",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "persona.render_persona_prompt no longer injects global user_name; personal-only preferred_name; explicit admin migration action on /preferences; legacy control removed from organization catalog"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Anonymous/service receive no preferred name. Single-user migration requires establishing a named account then explicitly migrating, documented; identity/tenant matrix unrun."
   },
   {
     "id": "LW-034",
     "title": "Sync safe display preferences across devices",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "experience_preferences encrypted principal display; preferences_api.context-bound device cookies; lock precedence; base/chat display picker; persisted account style used by server rendering"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Two-device/shared-device logout/account/tenant qualification unrun."
   },
   {
     "id": "LW-035",
     "title": "Unify settings discovery across dedicated pages",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Permission-aware settings_experience.search returns scoped role/source/effective metadata, aliases and exact provider/model/display/account/notification controls; lazy catalog id loading + input focus, workspace choice focus, personal results prioritized"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Browser focus/search/permission matrix unrun. Notification anchor supplied by peer cdab036 must be integrated. Plugin/connection/channel results link to their dedicated editors; exact provider/default-model/account targets included."
   },
   {
     "id": "LW-036",
     "title": "Show effective changes and runtime impact before saving",
     "category": "Personalization and settings",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "settings_experience review endpoint shares catalog coercion/governance/access plan under revision lock; settings-review modal before/after/source/scope/timing/dependencies; exclusions revalidated; saves audit before/after revisions"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Persistent saved revision is implemented; running workers do not yet publish an applied-revision acknowledgement, so UI honestly says next configuration read/running tasks keep captured configuration. Full runtime acknowledgement plumbing remains."
   },
   {
     "id": "LW-037",
     "title": "Distinguish restore product default from inherit configuration",
     "category": "Personalization and settings",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Explicit reset vs inherit controls and backend operations; inherited source preview; scalar built-in default differs correctly from installer; deployment locks rechecked"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Core table overlays merge installer rows and cannot mask them. Reset with installer table rows now refuses clearly instead of pretending to restore product default; full table semantics require a reviewed tombstone/replacement contract or installer edit flow."
   },
   {
     "id": "LW-038",
     "title": "Portable configuration profiles without secrets",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Versioned selective organization profiles for approved voice/display/budget/model-preference keys plus personal named-style/display bundles; credential fields excluded and credential-like text rejected; unknown-version/key guidance; import validates ordinary dependencies/policy/review/CAS before writes"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Authored roundtrip/review-only/secret-exclusion/policy tests unrun. Only enumerated portable keys are accepted; other deployment controls remain explicit unsupported fields with migration guidance."
   },
   {
     "id": "LW-039",
     "title": "Expose settings history and safe selective rollback",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "settings_experience.history reads bounded deployment audit, labels actor/time/before-after+new revision bindings; safe fields selective restore through ordinary review+CAS; no secret restoration"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Audit reader/rollback concurrency and policy-change qualification unrun. History coverage explicitly last100 changes/30days; legacy revision absent labeled."
   },
   {
     "id": "LW-040",
     "title": "Save and compare outcome-oriented configuration presets",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "settings_experience PRESETS bounded research and existing regulated governance; drift, tradeoffs, expanded exact preview, deselect requested fields, explicit save and normal locks/confirmations"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Preset dependency/locked field runtime matrix unrun. No claim of local-only routing without a configured local model."
   },
   {
     "id": "LW-041",
     "title": "Personal favorites and saved navigation views",
     "category": "Personalization and settings",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Principal preferences favorites/start page; permission-filtered destinations at every read/write; keyboard Move up/down/remove; account-owned Today pins"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Cross-device/account/revocation and keyboard browser qualification unrun. Item-level recents/saved filters are not added; acceptance implemented for authorized page destinations."
   },
   {
     "id": "LW-042",
     "title": "Create a configurable daily work home from existing projections",
     "category": "Personalization and settings",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "/today composes own recent goals, in-flight tasks and results with source links/time labels; account-scoped cards/pins/landing page; mandatory Action Center reminder remains"
+    ],
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Root next wave: actual pending-decision projection, upcoming occurrences and pinned workspaces/templates; card ordering controls and narrow-screen/keyboard qualification. No independent work-state data model added."
   },
   {
     "id": "LW-043",
@@ -428,23 +482,23 @@
     "id": "LW-044",
     "title": "Add follow-system appearance and readable text scaling",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Shared in-place appearance flow is owned by settings_integrity; coordinated OS-system theme and text-size support there."
+      "Settings worker commit6eaca67f1c16dd1b549e4969fb4827fa46b4fa92 supplies account/device in-place display preferences, OS system mode with live matchMedia changes, explicit theme override, shared base/chat display menu, font/density/text-size presets and rollback/Undo."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Integrate its implementation/evidence before updating this disposition."
+    "remaining": "Parent must integrate settings worker checkpoint with this slice. Browser/OS-follow/max-text qualification remains unrun."
   },
   {
     "id": "LW-045",
     "title": "Make custom themes accessible before applying them",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored."
+      "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored. Settings worker6eaca67 supplies shared prior-theme Undo through the same revision-bound preferences endpoint."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Prior-theme undo integration belongs to the shared preference flow and remains pending. Browser/background/contrast qualification unrun."
+    "remaining": "Integrate settings worker6eaca67 and mobile asset-registration38fcc2f together. Browser/background/contrast qualification remains unrun."
   },
   {
     "id": "LW-046",
@@ -560,12 +614,12 @@
     "id": "LW-056",
     "title": "No sign-out/cache purge/retention controls",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Explicit confirmed disconnect/reset purges app secure keys and app-owned caches; user offline opt-out, 24-hour/2MB bounds, profile switch cache purge and generation/retired-scope fences prevent late cache resurrection."
+      "Existing confirmed disconnect/reset plus credential-scoped purge now remove all app offline-cache namespaces. mobile_offline_policy.py combines installation/workspace disablement and minimum age/byte ceilings, exposed in All settings and installer. Server bundle includes versioned policy and requires policy-aware client header. Mobile refuses missing/invalid policy, uses source-time expiry, invalidates live cached readers on policy/purge/expiry, serializes writes/removal and fences retired scopes/epochs/global reset. Readiness gives organization-policy message; user cannot relax ceilings."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Administrator-specific retention ceilings/disablement are not yet projected into client offline metadata. Existing local bounds do not claim full organization retention-policy parity."
+    "validation": "2026-09-30: Python AST 6 files and TypeScript static analysis of all15 mobile source files passed (zero diagnostics). JavaScript regression source syntax and git diff --check passed. Policy ceiling/denial and cache expiry/late-write regressions authored unrun. No test suites/native/provider/browser tests run.",
+    "remaining": "Device storage/timer/background qualification is unrun. Offline devices learn changed policy only on reconnect; previously accepted policy expiry bounds that interval. Existing unqualified old clients must upgrade; server refuses bundle requests without the policy protocol header. No claims about retroactively deleting pre-upgrade copies on disconnected older builds."
   },
   {
     "id": "LW-057",
@@ -786,15 +840,15 @@
     "id": "LW-074",
     "title": "Make workflow templates earn trust through measured outcomes",
     "category": "Workflow templates and schedules",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "New template_outcomes_api.py and lightwork-template-outcomes.js are in progress, not yet committed."
+      "template_outcomes_api.py projects authorized pilot reports with all planned cases, correction coverage, complete-only reported costs and explicit content-version bindings; template cards provide reviewed attribution, stale marking, exceptions and sample draft preparation; tests/test_template_outcomes.py authored unrun."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: template_outcomes_api.py and card UI bind explicitly reviewed scoped pilot evidence to template content versions; finish tests/static review and commit."
+      "Execute acceptance tests later; associations are explicitly attributed rather than independent execution provenance, and provider invoices remain unverified."
     ]
   },
   {
@@ -846,45 +900,49 @@
     "id": "LW-078",
     "title": "Preview connection dependencies and guide safe rebinding",
     "category": "Connections and extensibility",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142 already corrects local removal vs provider revocation copy; connection_dependencies.py owner-only attention adapter in progress."
+      "71c1142 already corrects local removal vs provider revocation copy; connection_dependencies.py owner-only attention adapter in progress.",
+      "connection_dependencies.py and connection_review_api.py: scoped pre-change impact digests; active-task rotation guard; staged two-record key switch, exact source CAS rebinding, retained receipts, and provider-consent handoff; Connections Used by/repair UI."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: permission-scoped dependency report, revision-bound pre-change review, staged key replacement and explicit source re-enrollment. No upstream revocation claim."
+      "Execute authored and acceptance tests during the user-authorized testing phase."
     ]
   },
   {
     "id": "LW-079",
     "title": "Publish a qualified OAuth/platform support matrix",
     "category": "Connections and extensibility",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing OAuth callback/policy and Windows recovery foundations retained; no native or provider qualification run."
+      "Existing OAuth callback/policy and Windows recovery foundations retained; no native or provider qualification run.",
+      "connection_review_api.py qualification matrix plus shared account inventory explicitly separate synthetic/native/live evidence and show every unobserved combination as not qualified; native/provider acceptance remains unexecuted by user instruction."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "Support qualification matrix still to be published. Native installed Windows and live-provider qualification are explicitly deferred by the user; no combination can be labelled qualified without observed evidence."
+      "Qualification intentionally not claimed: installed Windows/native and live-provider checks require signed distributable build, registered application, approved provider accounts and the user-authorized testing phase."
     ]
   },
   {
     "id": "LW-080",
     "title": "Guide connection setup by the job and required capabilities",
     "category": "Connections and extensibility",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142 exposes catalog auth/prerequisites and readiness coverage limits; exact job capability work remains."
+      "71c1142 exposes catalog auth/prerequisites and readiness coverage limits; exact job capability work remains.",
+      "connection_capabilities.py fixed bounded public-provider GET manifest, exact resource identity verification, declared minimum scopes, revision-scoped receipts, explicit no-write/no-replay; Used by repair links return to saved work."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: exact capability prerequisite/probe manifest and dependency repair return path. Generic service authentication is explicitly not task capability verification."
+      "Execute authored and acceptance tests during the user-authorized testing phase.",
+      "Exact intent resume uses operation recovery (LW-146); connection repair itself never starts or replays blocked work. No write capability is qualified by a read check."
     ]
   },
   {
@@ -921,15 +979,16 @@
     "id": "LW-083",
     "title": "Editing a saved non-preset connector can erase its tool binding",
     "category": "Connections and extensibility",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142: original connector preserved during edits; complete catalog metadata exposed; known dedicated setup prerequisites explained."
+      "71c1142: original connector preserved during edits; complete catalog metadata exposed; known dedicated setup prerequisites explained.",
+      "lightwork-connections.js now makes unknown/retired adapters unsaveable and explains reviewed replacement; catalog completion can safely unlock a recognized preserved adapter."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "Complete read-only enforcement for unknown/retired adapters, then author/static-review regression coverage."
+      "Execute long-tail and unknown-adapter interaction acceptance tests later."
     ]
   },
   {
@@ -966,15 +1025,16 @@
     "id": "LW-086",
     "title": "Account management is fragmented across Connections and Automations",
     "category": "Connections and extensibility",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142: read-only named/provider-vault inventory facade with separate usage domains, identity, owner, renewals, coverage/context and repair destinations."
+      "71c1142: read-only named/provider-vault inventory facade with separate usage domains, identity, owner, renewals, coverage/context and repair destinations.",
+      "shared account inventory renders distinct account domain/name/owner/identity/workspace/site/grants/renewal and dependent-work review links; exact owner/context filtering; unknown legacy identity/grants/usage coverage is visible."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "Extend named account inventory with safe workspace/scope/renewal and scoped dependents; preserve distinct legacy usage contract and incomplete coverage states."
+      "Execute authored and acceptance tests during the user-authorized testing phase."
     ]
   },
   {
@@ -1041,127 +1101,165 @@
     "id": "LW-091",
     "title": "Make new role grants least-privileged",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Fresh form cannot submit admin without explicit choice; test keyboard submission and custom roles."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Keyboard, custom-role and authenticated browser acceptance remain unrun."
   },
   {
     "id": "LW-092",
     "title": "Separate resetting role from removing access",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Viewer-to-operator fallback is visible before confirmation and in success; never claim account removed."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: Use standard role action and success explicitly state access is not removed.",
+      "access_explanations.standard_role and admin_pages reset preview/readback follow pinned administrator, verified-group mapping and fallback role; expected_standard binds the reviewed role and powers before clearing."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Group/default fallback, custom-role power change and keyboard confirmation regression acceptance remain unrun."
   },
   {
     "id": "LW-093",
     "title": "Scope Users page to tenant admin authority",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Tenant admin sees actionable membership controls and no global roster/editor; presented controls do not lead to predictable 403; global admin retains both."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: admin_pages._users_context returns workspace membership controls before loading global roster, invitations or department grants; users.html gates global forms."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Authenticated tenant/global administrator acceptance remains unrun."
   },
   {
     "id": "LW-094",
     "title": "Create complete employee departure workflow",
     "category": "Identity administration and privacy",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Employee with running work/OAuth/pending review cannot be marked fully offboarded until every item is transferred, revoked or explicitly retained with owner; retain legal holds."
+    "implementation_evidence": [
+      "ef7c5b6: employee_departures.py + API/template, config/installer feature and documented exact-owner cross-workspace inventory.",
+      "Reviewed identity/session retirement, generation-bound local credential removal, pending run-goal cancellation, durable dispatch/result steps and retained-data custodian.",
+      "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Provider-side revocation, running and other-module work closure, safe uncertain-effect resume, and global Copilot operation integration remain open. Cases deliberately cannot claim complete offboarding."
   },
   {
     "id": "LW-095",
     "title": "Define and enforce admin audit-metadata-only default",
     "category": "Identity administration and privacy",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Admin can manage policies but private employee content reads are denied; audit projection omits raw prompts/tool payloads; exceptional reads produce explicit scoped receipts."
+    "implementation_evidence": [
+      "027751b + 072ae1c: exact goal ownership, no shared-installation-credential bypass, resource-scoped independent expiring access with audit acknowledgement and reviewer membership checks.",
+      "Audit tail/search/export projections, governed subject export, feature/installer/UI and preservation of explicit result sharing.",
+      "Current checkpoint adds approval-card content fingerprints and governed reads independent of decision authority; shoring, safety, Cortex, replay and overview side-path privacy."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Complete consolidated route/model-recall review across sibling slices, integration of all embedded approval surfaces and global Copilot operations; authenticated cross-user acceptance remains unrun."
   },
   {
     "id": "LW-096",
     "title": "Explain effective permissions and their owner",
     "category": "Identity administration and privacy",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Denied action explains precise ceiling and appropriate approver without revealing inaccessible resources; explanation matches runtime decision."
+    "implementation_evidence": [
+      "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
+      "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Account now explains base role/department/root-tool provenance and examples. A unified per-task explanation across attenuated agent roles, runtime consent/resource limits and a persisted access-request case remains open; base-grant guidance explicitly does not claim all task checks are resolved."
   },
   {
     "id": "LW-097",
     "title": "Make enterprise first-login defaults explicit",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Fresh enterprise setup cannot leave unexplained operator/all-department defaults; upgrades preserve chosen behavior and show migration choice."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: SSO installer recommends explicit viewer/no-departments baseline, emits empty default_suites and previews deliberate operator alternative. Existing runtime defaults preserved.",
+      "first_login_defaults.py and Users provide current installation fallback role/powers/departments, deliberate migration confirmation covering existing unassigned accounts, revision check, effective readback, audit acknowledgement and rollback on override/failure. Settings clarifies empty-departments semantics."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Authored migration/conflict/audit-rollback tests and actual installer/upgrade/config-precedence acceptance remain unrun."
   },
   {
     "id": "LW-098",
     "title": "Show effective posture, not just profile name",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Enterprise named profile with mode=false visibly states overridden; account/readiness surfaces agree on actual enforcement."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: Account reports active_profile separately from actual enterprise_enabled and labels enterprise profile with boundary off as overridden."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Environment override and policy precedence acceptance remains unrun."
   },
   {
     "id": "LW-099",
     "title": "Make multi-tab workspace switches explicit",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Switch in tab A leaves tab B unable to act on new tenant silently; draft/approval shows clear context change and safe reopen; fixed deployment has no misleading switch."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Multiple-tab and fixed-binding browser acceptance remains unrun; no production workspace changes performed."
   },
   {
     "id": "LW-100",
     "title": "View-only users receive active mutation controls",
     "category": "Identity administration and privacy",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Viewer/member/admin sessions see only allowed task actions; permission changes disable stale affordances after fresh state; denial preserves entered work where lawful."
+    "implementation_evidence": [
+      "e18aa52 + 072ae1c: chat and trajectory contexts and fresh permissions endpoint combine operate with exact ownership; grant-only task reads stay read-only."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Conversation worker owns actual chat template control gates and draft-preserving focus/submit revalidation; integrate and inspect their commit before marking implemented. Sessions/browser acceptance unrun."
   },
   {
     "id": "LW-101",
     "title": "Failed SSO ends at a plain-text “login failed” dead end",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Denial, expiry, token exchange outage, invalid transaction and state mismatch have safe actionable outcomes; keyboard focus and narrow layout work; no provider tokens, secrets or sensitive account-existence detail appear. Restart does not replay old codes."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: auth_error.html branded accessible recovery; OIDC failure routes clear cookies and preserve only validated local return destinations; fresh login retry never replays old code."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Denied/expired/outage/state-mismatch and narrow keyboard/browser acceptance remain unrun."
   },
   {
     "id": "LW-102",
     "title": "“Keep until I choose” cannot disable an existing retention period",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Starting with a 30-day period, choosing indefinite removes the effective pruning period or clearly refuses an enforced external-policy override.\n2. Clearing all fields and clearing one while saving another both have explicit semantics.\n3. Readback and reload match effective state; policy-change audit and organizational ceilings remain intact."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "027751b: retention form sends explicit null, API distinguishes omitted from null and persists zero no-pruning value, reads effective global config back and refuses masked external overrides."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Mixed-field/all-field clearing and scheduler/config precedence regression acceptance remains unrun."
   },
   {
     "id": "LW-103",
     "title": "Retention deletion needs an impact preview tied to saved effective policy",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Review a dry run containing actual effective periods, tenant scope, counts, holds and dependencies before deletion.\n2. Invalidate review if policy or scope changes; unsaved edits are saved/reviewed or explicitly excluded.\n3. Qualify global-administrator behavior with an active tenant; irreversible deletion uses current authority."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "027751b: actual scope/workspaces/policies/counts in durable dry-run review; saved-policy fingerprint, frozen cutoff, expiry and fresh authority before store steps.",
+      "Unsaved form edits invalidate preview; UI explicitly requires records-owner hold confirmation and names provenance dependency.",
+      "Recorded privacy-rights holds now appear in per-workspace preview, invalidate review and block core/manual retention even when the optional ledger feature is disabled; complete integrity-checked scan, current authority/policy fence through deletion and required accepted-review audit acknowledgement."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Static checks only; authored hold, audit-failure and fenced-revocation regressions remain unrun. External holds require explicit records-owner confirmation; automatic discovery is not claimed."
   },
   {
     "id": "LW-104",
     "title": "Retention result hides skipped records and partial execution",
     "category": "Identity administration and privacy",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. An expired locked file cannot produce a nothing-old-enough success message.\n2. Return persistent per-store and workspace deleted, skipped, failed or unknown outcomes, including partial sequential execution.\n3. Retry only unresolved steps; never imply already removed data can be undone or an audit record succeeded without evidence."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "027751b + 072ae1c: locked expired audit files report skipped/partial; missing signed purge tip remains unconfirmed.",
+      "retention_runs.py writes per-workspace/store dispatch/outcomes persistently, retries unresolved only and retains uncertain prior effects/unconfirmed audit without false success."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Authored locked-file/partial/policy-conflict/unknown-retry regression tests remain unrun; PostgreSQL and filesystem interruption acceptance deferred."
   },
   {
     "id": "LW-105",
@@ -1387,12 +1485,12 @@
     "id": "LW-125",
     "title": "Turn team review into a complete revise-and-resubmit loop",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing version-bound review packets preserved."
+      "ProjectReviews.revision_draft creates an idempotent owner-private unstarted task from the exact packet/comments using durable native admission. Review UI opens its spending/start review, then links a changed result to the predecessor with required change summary and fresh reviewer/team/source checks. New packet identity/status cannot inherit prior acceptance; source and packet reads remain freshly authorized."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Owner revise-and-resubmit task binding, exact prior-packet provenance, change summary and duplicate resubmission receipt remain."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-126",
@@ -1409,23 +1507,23 @@
     "id": "LW-127",
     "title": "Provide requester-scoped decision history",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing global audit boundary preserved."
+      "GET /approvals/history filters requested_by plus currently accessible attached task, keyset pages exact requester records without global audit atom, uses integrity-checked/redacted approval cards and separate authorization versus current execution fields. _approvals_queue now links this history and deadline/retry controller."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Owner/requester-scoped decision history projection and UI without global audit access remain."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-128",
     "title": "Clarify different kinds of approved/completed",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Approval feedback now explicitly distinguishes action authorization from execution."
+      "Project-review captured-result outcome timeline labels acceptance, pending/changes/withdrawal and next owner separately from task execution, final signoff and external verification. Approval queue and private history independently label recorded authorization versus unconfirmed execution; no packet approval signs off or runs a task."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Cross-surface timeline must join packet review, deliverable signoff, execution and external verification with next owner/action."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-129",
@@ -1464,12 +1562,12 @@
     "id": "LW-132",
     "title": "Share-link audience, prerequisites and expiry are not visible before creation",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing current completion/signoff/hashed expiry/revocation checks preserved; PR2529 overlaps audience/prerequisite UI and routing."
+      "Explicit POST share/preview returns exact title/result/latest artifacts, anyone-with-link scope and allowed 1-hour/1-day/7-day lifetimes under the existing seven-day ceiling. Create requires confirmation plus matching source SHA; governed metadata stores label and reviewed version. New r1_ tokens fail closed until metadata exists and after any result/artifact change; public page preserves live release gates. Management shows expiry, revoked/stale state and uncertain-response recovery; legacy tokens retain existing release checks."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Version-bound public-result preview, explicit creation confirmation, policy-bounded lifetime and lifecycle display remain; coordinate2529."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated browser, native SQLite/PostgreSQL concurrency and integration checks remain for the later testing phase."
   },
   {
     "id": "LW-133",
@@ -1565,10 +1663,10 @@
     "category": "Notifications models and costs",
     "status": "planned",
     "implementation_evidence": [
-      "Reviewed notifications.py and existing batching: dispatch is organization configuration without recipient preference context. Existing behavior unchanged."
+      "personal_notifications.py validates recipient-scoped subscriptions, IANA quiet hours/daily digest, explicit organization+user critical exceptions, per-task mute and project watches; encrypted bounded personal inbox deduplicates semantic versions, rehydrates only current authorized source labels, purges revoked sources and separates available/seen. /notifications UI provides direct preference/CAS/recovery journey with own-task/assigned-decision projection. Config and installer controls added; foundation delegation supplied by settings e3ad241."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement recipient-scoped settings/service, timezone/DST quiet hours, subscriptions, task mute, critical exception policy, durable event dedupe and delivery receipts; depends on scoped preference foundation LW030."
+    "validation": "2026-09-30: Python AST 7 files, standalone JavaScript syntax 1 files and diff whitespace passed. Five DST/recipient/dedupe/mute/revocation regressions authored but unrun. No runtime/browser/provider tests or outgoing notifications executed.",
+    "remaining": "External per-person recipient/channel routing and receipts, request-less background event ingestion/delivery, transitions between page refreshes, full-history pagination and shared Copilot operation adapter remain unfinished. Implemented in-product inbox observes at most latest200 owned tasks plus bounded assigned decisions and explicitly explains visible-page polling/catch-up, not closed-page external delivery. Requires settings6eaca67 plus e3ad241 preference adapter integration."
   },
   {
     "id": "LW-142",
@@ -1576,10 +1674,10 @@
     "category": "Notifications models and costs",
     "status": "planned",
     "implementation_evidence": [
-      "Reviewed notifications.py asynchronous enqueue versus boolean backend outcomes. No enqueue count relabelled as delivery success."
+      "notification_receipts.py persists bounded content-free tenant receipts with queued/sending/accepted/failed/unknown state, dedupe and three-attempt safe test retry ceiling. notifications.py records actual backend response, preserves tenant context in async workers and sanitizes secrets; notify tool says queued, PushRegistry waits for actual response. Authorized /settings/notifications direct UI + health/test/retry API + config/installer control added; sender rechecks current admin authority and config before dispatch."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement durable sanitized receipts, admin test UI, last-success/failed status and bounded idempotent retry; preserve secret redaction."
+    "validation": "2026-09-30: Python AST 10 files and JavaScript syntax 3 standalone/template blocks passed; git diff --check passed. Receipt/async queue/idempotency tests authored but unrun. No notification delivery/provider/browser calls or test suites run.",
+    "remaining": "Direct delivery UI/service implemented; Copilot operation catalog adapter absent (existing catalog supports only closed learning-example actions). Authenticated health/retry/browser and actual service delivery validation deferred. Personal preference/digest integration belongs to LW141."
   },
   {
     "id": "LW-143",
@@ -1590,7 +1688,7 @@
       "Source backlog specifies task/person/workspace/provider reservations and unknown accounting; no simplistic dollar subtraction substituted."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement authorized unified budget/headroom projection, launch estimate, binding limit/reset/timezone/owner UI and Copilot coverage with existing enforcement."
+    "remaining": "Root accepted this budget tranche for the next implementation wave; Implement authorized unified budget/headroom projection, launch estimate, binding limit/reset/timezone/owner UI and Copilot coverage with existing enforcement."
   },
   {
     "id": "LW-144",
@@ -1601,7 +1699,7 @@
       "No automatic cap increase or notification bypass added."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement authorized deduplicated threshold warning and impacted scheduled-work forecast after LW143 and recipient delivery preferences."
+    "remaining": "Root accepted this budget tranche for the next implementation wave; Implement authorized deduplicated threshold warning and impacted scheduled-work forecast after LW143 and recipient delivery preferences."
   },
   {
     "id": "LW-145",
@@ -1612,7 +1710,7 @@
       "No workspace-owner access to global provider reconciliation or receipts added."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement minimal scoped blocked-state/evidence/assignment/progress journey using existing authorized reconciliation service; depends on Action Center/accounting projections."
+    "remaining": "Root accepted this budget tranche for the next implementation wave; Implement minimal scoped blocked-state/evidence/assignment/progress journey using existing authorized reconciliation service; depends on Action Center/accounting projections."
   },
   {
     "id": "LW-146",
@@ -1695,64 +1793,78 @@
     "id": "LW-153",
     "title": "A different service on the desktop port is treated as Lightwork",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Native desktop-runtime fixed-loopback HTTP handshake requires exact X-Lightwork-Service dashboard-v1 with HTTP200 or genuine setup503; 2-second socket/8-KiB header bounds. Desktop startup/recovery use bundled-only IPC instead of opaque CORS probes; conflicting listeners never launch/stop/adopt arbitrary processes. Rust and JS fixtures authored."
+    ],
+    "validation": "Python3.10 AST for dashboard route; JS syntax checks for startup/recovery and fixtures; rustfmt syntax/format validation. Tests/native Tauri builds unrun.",
+    "remaining": "Native occupied-port/stuck-socket/independent-dashboard/onboarding qualification and regression execution remain deferred by user."
   },
   {
     "id": "LW-154",
     "title": "Establish customer-release evidence for the Windows installer candidate",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "test-needed",
+    "implementation_evidence": [
+      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+    ],
+    "validation": "Static source review only; no tests/installers/providers executed.",
+    "remaining": "Exact signed release hashes, recognized publisher trust, clean Windows standard/admin/elevation/offline/interruption/repair/rollback matrix and actual adjacent release migration remain unrun. User explicitly deferred testing; no release acceptance is claimed."
   },
   {
     "id": "LW-155",
     "title": "Define and complete the supported non-Windows customer installation journey",
     "category": "Installation and desktop maintenance",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+    ],
+    "validation": "Static source review only; no tests/installers/providers executed.",
+    "remaining": "Supported non-Windows customer target set and production distribution/signing/notarization require owner decision. Current macOS/Linux engineering/private-source channel labels remain truthful; self-contained staging and verified release-channel engineering still required."
   },
   {
     "id": "LW-156",
     "title": "Replace manual maintenance authorization transfer with a protected handoff",
     "category": "Installation and desktop maintenance",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+    ],
+    "validation": "Static source review only; no tests/installers/providers executed.",
+    "remaining": "Build protected native handoff bound to reviewed release/recovery point and authenticated administrator; keep manual code fallback and final explicit native action."
   },
   {
     "id": "LW-157",
     "title": "Add a supported coordinated recovery path when protected rollback is refused",
     "category": "Installation and desktop maintenance",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+    ],
+    "validation": "Static source review only; no tests/installers/providers executed.",
+    "remaining": "Build structured blocker/recovery plan and direct supported forward-repair/export/drill actions without rollback bypass or accounting reset."
   },
   {
     "id": "LW-158",
     "title": "Support a verified repair option during network/update-feed outages",
     "category": "Installation and desktop maintenance",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+    ],
+    "validation": "Static source review only; no tests/installers/providers executed.",
+    "remaining": "Build locally admitted exact signed repair package path with complete product/publisher/version/signature checks and no network dependency."
   },
   {
     "id": "LW-159",
     "title": "Source-bootstrap cancellation still needs a nontechnical partial-install recovery journey",
     "category": "Installation and desktop maintenance",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+    ],
+    "validation": "Static source review only; no tests/installers/providers executed.",
+    "remaining": "Build persisted bootstrap phase/inventory and verified safe-resume/OS repair return; native cancellation/elevation matrix remains unrun."
   },
   {
     "id": "LW-160",
@@ -1946,28 +2058,34 @@
     "id": "LW-175",
     "title": "External-agent sample acts before approval",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "docs/clients/examples/external_agent_loop.py copies and screens complete arguments, waits with bounded heartbeat for exact approval ID/binding/expiry, and performs zero actions for pending/denied/stale/expired approval; Python fixtures authored."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-176",
     "title": "External-agent sample reports success after halt",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "run_tool_loop tracks completion/halt/denial/exception separately, emits supported success/failure with truthful reason and calls finish once using the original stable report key; regression fixtures cover all outcomes."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-177",
     "title": "REST polling example loses history and can poll forever",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "docs/clients/examples/rest_lifecycle.py drains every has_more page, advances only after accepted events, handles replay/noncontiguous IDs, uses server terminal acknowledgement for every terminal status, and stops on access errors; pagination fixtures authored."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-178",
@@ -1984,10 +2102,12 @@
     "id": "LW-179",
     "title": "VS Code allows remote HTTP bearer after generic consent",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "eventWatch.assertDashboardTransport rejects remote HTTP bearer transport before headers/request creation; DashboardConnections applies the same rule before migration/consent; safe HTTPS and exact loopback regression cases authored."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-180",
@@ -2037,7 +2157,7 @@
     "id": "LW-184",
     "title": "Distribution/native qualification unfinished",
     "category": "Native clients and developer integrations",
-    "status": "deferred-decision",
+    "status": "planned",
     "implementation_evidence": [
       "Mobile and Apple READMEs explicitly label preview source and unqualified native behavior. Watch README removes the undelivered complication claim. No signed installer or support qualification is claimed."
     ],
@@ -2059,90 +2179,110 @@
     "id": "LW-186",
     "title": "VS Code CLI lifecycle weaker than SSE",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "ownedCli owns a direct child, cancellation, deadline and output bound; extension tracks all owners for deactivate, fences duplicate start dialogs/work, preserves unknown-start metadata and parsed task ID, and reports nonzero/signal/timeout as unconfirmed without replay."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-187",
     "title": "VS Code first-workspace and numeric-ID friction",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "extension chooses current-editor or explicit multi-root workspace; each RunItem captures its local cwd; titled authorized task pickers plus sidebar watch/export avoid retyping IDs; local CLI and remote dashboard targets are explicitly distinguished before use."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-188",
     "title": "VS Code bearer in normal settings",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "DashboardConnections binds protected tokens to exact base addresses with SecretStorage; named configure/test/rotate/disconnect commands, migration readback before legacy deletion, usable failed-store recovery, host/token generation guards and private-view invalidation are implemented."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-189",
     "title": "JetBrains env-only setup and silent invalid input",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "JetBrains DashboardConfigurable registers native Settings with PasswordSafe background I/O and confirmed save; tool window adds named connection/test, authorized content/title search, labeled task picker/optional ID/remedies and accessible status descriptions; connection changes invalidate old requests, output and cursors."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral. Complete IntelliJ SDK build project, installed-IDE/PasswordSafe and screen-reader qualification remain required; authored checklist records exact probes."
   },
   {
     "id": "LW-190",
     "title": "Editor budgets and stop scope need direct controls",
     "category": "Native clients and developer integrations",
     "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "implementation_evidence": [
+      "VS Code reviews requested dollar/time caps and sends both CLI flags; selected authorized dashboard task cancel/resume are separate from accurately acknowledged local checkpoint emergency stop. Current UI explicitly does not label requested caps as effective."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Wire the administrator-resolved effective budget preview hook owned by the root budget workstream. Requested values are currently shown honestly; this ID remains planned until effective caps are visible."
   },
   {
     "id": "LW-191",
     "title": "Synchronous editor controls may block UI",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Neovim halt/unhalt use bounded async jobstart with progress, owned cancellation and generation guards; Emacs status/halt use bounded make-process with timeout/cancel and owner guards; exact halt acknowledgement preserved. Lua/ERT fixtures authored."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-192",
     "title": "Main API start guide omits existing receipt recovery",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "docs/api.md persists a stable Idempotency-Key before start and demonstrates exact receipt lookup; rest_lifecycle.start_or_reconcile issues one POST then GET-only reconciliation after uncertain admission, preserves key on conflict/access/missing receipt, and distinguishes acceptance from execution."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-193",
     "title": "External TS helper lacks timeout/typed recovery",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Maintained docs/clients/examples/lightwork.ts owns request abort deadlines, bounded streamed body and disposal; typed recovery errors retain safe HTTP status/retry guidance/request ID, suppress private details and never retry writes. Fake-fetch regression cases authored."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-194",
     "title": "SDK schema declaration isn't argument validation",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "SDK defineValidatedTool and optional parseArgs reject malformed/missing arguments before handler entry with protocol not_started; deadline rechecked after parsing; sanitized error and legacy declaration-only behavior documented; typed regression cases authored."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral."
   },
   {
     "id": "LW-195",
     "title": "Capability/build metadata drift",
     "category": "Native clients and developer integrations",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "VS Code README command matrix covers actual manifest commands and implemented SSE; manifest license points to governing root LICENSE per owner decision, retaining prior-release grants. Complete pinned-toolchain minimal TypeScript plugin project and build/describe instructions supplied."
+    ],
+    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
+    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral. Packaging/build/describe qualification with the pinned development toolchain has not been executed."
   }
 ]
