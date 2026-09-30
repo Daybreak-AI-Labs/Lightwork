@@ -6,6 +6,7 @@ import re
 
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
+
 from test_support.plain_language import visible_text
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
