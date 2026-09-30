@@ -78,5 +78,8 @@
   window.addEventListener('focus',()=> { if (!pending && !busy) refresh(); });
   window.addEventListener('beforeunload',event => { if (pending || (form.elements.namedItem('instruction').value && !offer.hidden)) { event.preventDefault(); event.returnValue=''; } });
   if (root.dataset.bundle) document.dispatchEvent(new CustomEvent('lightwork:copilot-selection',{detail:{selection:{kind:'bundle',id:root.dataset.bundle}}}));
-  refresh();
+  refresh().then(() => {
+    const selectedId = new URL(window.location.href).searchParams.get('open');
+    if (selectedId) return open(selectedId);
+  });
 }());

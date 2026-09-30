@@ -175,6 +175,18 @@
       }
       if (store.blocked) text(row, store.blocked + ' records require reconciliation before erasure.');
       if (store.count !== undefined) text(row, store.count + ' retained entries.');
+      if (store.coverage) text(row, store.coverage);
+      if (store.visible_count !== undefined) text(row, store.visible_count + ' owned records shown.');
+      if (store.partial) text(row, 'This view inspected the first 100 currently authorized records. Open the governed controls for other records; this is not a complete count.');
+      (store.items || []).forEach(item => {
+        const card = text(row, '', 'article'); text(card, item.name + ' - ' + item.state, 'h4');
+        text(card, 'Owner: ' + item.owner_label + '. Recipient: ' + item.recipient + '.');
+        ['use', 'source', 'source_state', 'expiry', 'dependencies', 'action'].forEach(key => { if (item[key]) text(card, item[key]); });
+        if (item.access_expires_at) text(card, (item.expiry_label || 'Recipient access expiry') + ': ' + new Date(item.access_expires_at * 1000).toLocaleString());
+        [['href', 'Review this saved record'], ['source_href', 'Open your original task'], ['dependency_href', 'Review the selected bundle']].forEach(([key, label]) => {
+          if (item[key]) { const link = text(card, label, 'a'); link.href = item[key]; }
+        });
+      });
       if (store.href) { const link = text(row, 'Open its governed controls', 'a'); link.href = store.href; }
     });
     text(el('pd-tasks'), 'Task-specific local learning', 'h3');

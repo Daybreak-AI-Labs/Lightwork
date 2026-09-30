@@ -30,3 +30,16 @@ test("new stores have explicit independently reviewed deletion choices",()=>{
   const ui=fixture({}); const rendered=content(ui.el("pd-delete-stores"));
   assert.match(rendered,/model-test history/);assert.match(rendered,/current authorized generated tools/);assert.match(rendered,/queued conversation messages/);
 });
+test("owned local copies show expiry limits and safe native links without treating expiry as erasure",async()=>{
+  const ui=fixture({holds:{blocked:false},limits:"Specific stores only",tasks:[],stores:[{
+    name:"Owned bundles",state:"current-authorized-only",visible_count:1,partial:true,coverage:"Only readable owned records are counted.",
+    items:[{name:"<img onerror=bad()>",state:"revoked",owner_label:"You",recipient:"Person",source:"Your original task",access_expires_at:100,
+      expiry:"Access expiry is not deletion.",dependencies:"The original remains separate.",action:"Review saved copy",href:"/deliverable-bundles?open=DLB-one",source_href:"/chat/goal/4"}]}]});
+  await ui.click("pd-inventory");const rendered=content(ui.el("pd-stores"));
+  assert.match(rendered,/Access expiry is not deletion/);assert.match(rendered,/first 100/);assert.match(rendered,/1 owned records shown/);
+  assert.match(rendered,/<img onerror=bad\(\)>/);
+  const all=node=>[node,...node.children.flatMap(all)],nodes=all(ui.el("pd-stores"));
+  assert.equal(nodes.some(node=>node.tagName==='img'),false);
+  assert.ok(nodes.some(node=>node.href==='/deliverable-bundles?open=DLB-one'));
+  assert.ok(nodes.some(node=>node.href==='/chat/goal/4'));
+});

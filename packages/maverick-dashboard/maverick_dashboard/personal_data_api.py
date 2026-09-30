@@ -201,8 +201,10 @@ def _inventory(request):
         {"name": "Personal preference notes", "state": "available", "action": "Edit, suppress or turn off recall above", "use": "Personal recall only", "expiry": "Until source rebuild, correction, erasure or policy restriction"},
         {"name": "Conversations, task details, attachments and subject facts", "state": "available", "action": "Export one verified scope below; request governed erasure in Compliance", "use": "Task execution and retained business history", "stores": list(RECEIPT_STORES)},
         {"name": "Erasure dependencies", "state": "review-required", "action": "Signed erasure closure reports each auxiliary store", "stores": list(AUXILIARY_ERASURE_STORES), "use": "Evidence of completed erasure; retained audit proof is distinct from content"},
-        {"name": "Shared packets, knowledge derivatives and previously trained models", "state": "external-unverified", "action": "Review Knowledge Access source lineage and rights request; copied/external data needs its custodian", "use": "Each source purpose and consent apply independently; local deletion is not model unlearning", "href": "/knowledge-access"},
+        {"name": "Knowledge derivatives and previously trained models", "state": "external-unverified", "action": "Review Knowledge Access source lineage and rights request; copied/external data needs its custodian", "use": "Each source purpose and consent apply independently; local deletion is not model unlearning", "href": "/knowledge-access"},
     ]
+    from .personal_shared_inventory import inventory as shared_inventory
+    stores.extend(shared_inventory(request, actor))
     try:
         draft_inventory = DraftStore(context_for(request)).inventory()
         stores.append({"name": "Private editor recovery copies", "state": "available", "inventory": draft_inventory,

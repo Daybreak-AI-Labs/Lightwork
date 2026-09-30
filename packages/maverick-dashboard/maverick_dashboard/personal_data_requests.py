@@ -25,7 +25,9 @@ KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
-    {"store": "shared_packets_and_knowledge", "state": "external-unverified", "reason": "Shared outputs, indexed derivatives and purpose-bound knowledge need their own source rights request.", "href": "/knowledge-access"},
+    {"store": "local_selected_result_bundles", "state": "retained", "reason": "Captured local copies and review receipts are separate from their original tasks. My Data lists currently readable owned copies. Revoking future access does not delete saved or downloaded copies.", "href": "/deliverable-bundles"},
+    {"store": "local_responsibility_handoffs", "state": "retained", "reason": "Offer and acceptance evidence remains separate. Withdraw outstanding offers in Handoffs; an accepted recipient's independent task is not yours to erase.", "href": "/task-handoffs"},
+    {"store": "knowledge_derivatives", "state": "external-unverified", "reason": "Indexed derivatives and purpose-bound knowledge need their own source rights request.", "href": "/knowledge-access"},
     {"store": "trained_models_and_external_copies", "state": "external-unverified", "reason": "Local deletion cannot unlearn prior models, remove manually copied data or certify provider deletion."},
     {"store": "source_linked_learning", "state": "retained-stop-use", "reason": "Deleted task sources become unavailable to automatic source-bound recall; retained derived files require custodian review and are not claimed purged."},
     {"store": "account_and_privacy_restrictions", "state": "retained", "reason": "Account identity, verified channel links and suppression/recall restrictions remain so deletion cannot silently re-enable collection."},
