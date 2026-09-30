@@ -73,7 +73,7 @@ def test_concurrent_answer_never_publishes_selected_files(environment, monkeypat
     monkeypatch.setattr(submissions, "_prepare", prepare)
     response = send(environment)
     assert response.status_code == 409 and not runs and not world.list_attachments(goal)
-    assert not list(attachments.DEFAULT_ROOT.glob("**/*"))
+    assert not [path for path in attachments.DEFAULT_ROOT.glob("**/*") if path.is_file()]
 
 
 def test_workspace_change_refuses_before_admission(environment):

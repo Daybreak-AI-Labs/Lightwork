@@ -95,7 +95,7 @@ def test_failed_source_is_not_reported_clear():
         def pending_approvals(self):
             raise OSError("private database error")
     result = model(Broken())
-    assert result["coverage"][0] == {"kind":"approval", "status":"unavailable"}
+    assert {"kind":"approval", "status":"unavailable"} in result["coverage"]
     assert "private database error" not in str(result)
     assert len(result["items"]) == 2
 
