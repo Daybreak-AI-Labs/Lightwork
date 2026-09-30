@@ -1,9 +1,9 @@
-{% if handoff_closed %}<p role="status">{{ ui('Responsibility was accepted by {actor}. This original conversation is closed to further execution and its history remains private.', actor=handoff_closed.actor) }} <a href="/task-handoffs">{{ ui("View the handoff receipt") }}</a>.</p>{% endif %}
 {# Shared full-page/live result projection. All values remain autoescaped. #}
 <section id="answer-panel" data-goal="{{ goal.id }}" data-updated-at="{{ goal.updated_at }}"
          data-version="{{ answer_version|default('') }}" data-context="{{ conversation_context }}"
          data-status="{{ goal.status }}" data-structured="{{ '1' if rendered and rendered.structured else '0' }}"
          data-operate="{{ '1' if can_operate else '0' }}">
+    {% if handoff_closed %}<p id="handoff-closed-notice" role="status">{{ ui('Responsibility was accepted by {actor}. This original conversation is closed to further execution and its history remains private.', actor=handoff_closed.actor) }} <a href="/task-handoffs">{{ ui("View the handoff receipt") }}</a>.</p>{% endif %}
     <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
       {% if rendered and rendered.structured %}
         {% include "_deliverable.html" %}

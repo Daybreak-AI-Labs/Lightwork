@@ -1,4 +1,6 @@
-"""Native saved-result projection regression coverage; execution deferred."""
+"""Native saved-result projection regression coverage."""
+from html.parser import HTMLParser
+
 import pytest
 from fastapi import HTTPException
 from maverick.world_model import WorldModel
@@ -72,3 +74,39 @@ def test_mid_projection_artifact_change_returns_retryable_stale_state(setup, mon
         projection.projection(request(), world, goal_id)
     assert stale.value.status_code == 409
     assert stale.value.detail["code"] == "result_changing"
+
+
+def test_handoff_closure_is_inside_the_replaceable_live_projection(setup, monkeypatch):
+    from maverick import task_handoffs
+    from maverick_dashboard import app
+
+    world, goal_id = setup
+    world.set_goal_status(goal_id, "done", result="Private original result")
+    before = projection.projection(request(), world, goal_id)
+    monkeypatch.setattr(task_handoffs, "closure", lambda *_: {"actor": "user:bob"})
+    closed = projection.projection(request(), world, goal_id)
+    assert closed["can_operate"] is False
+    assert closed["answer_version"] != before["answer_version"]
+    source = app.templates.env.get_template("_chat_answer_panel.html").render(
+        **closed, ui=lambda text, **values: text.format(**values), ut=lambda text: text,
+    )
+
+    class NoticeParser(HTMLParser):
+        in_panel = False
+        notice_in_panel = False
+
+        def handle_starttag(self, tag, attrs):
+            identifier = dict(attrs).get("id")
+            if identifier == "answer-panel":
+                self.in_panel = True
+            if identifier == "handoff-closed-notice":
+                self.notice_in_panel = self.in_panel
+
+        def handle_endtag(self, tag):
+            if tag == "section":
+                self.in_panel = False
+
+    parser = NoticeParser()
+    parser.feed(source)
+    assert parser.notice_in_panel, "Live replacement must include the accepted-handoff explanation"
+    assert 'id="edit-toggle"' not in source

@@ -1,6 +1,6 @@
 # Conversation operation evidence
 
-Implementation checkpoint: 2026-09-30. Focused native task, clarification, handoff and result tests now pass; consolidated qualification remains pending; this matrix does not certify customer acceptance.
+Acceptance reconciliation: 2026-09-30 against the consolidated implementation. Native conversation qualification has 691 distinct passing Python cases and 143 passing JavaScript cases; the precise test groups and 14 environment skips are recorded in slices/conversation-acceptance-qualification.md. This matrix records implementation, not customer acceptance or live-provider certification.
 
 All catalog operations require the shared `copilot_operations` feature, the
 administrator's enabled family, the current account/workspace, and an explicit
@@ -25,6 +25,7 @@ The registered families below extend the same contract. Each operation ID is a c
 | Operation IDs | Direct interface | Shared native service | Reviewed prerequisite and recovery |
 | --- | --- | --- | --- |
 | `tasks.resume` | Task restart review | `reviewed_resume.apply/recover` and `goal_resume.reserve` through `product_operations_resume` | Exact owner/context/revision and current workspace ceiling, old runner execution lease, native chat serialization/admission, atomic restart receipt. Separate confirmation, no automatic retry; receipt lookup after reload never dispatches. |
+| `tasks.rename`, `tasks.move` | Task map / graph editor | `api.retitle_goal/reparent_goal` and native `goal_mutations` structure receipts through `product_operations_task_map` | Exact owner/current selected task, source revision, authorized parent and native DAG invariants. Reviewed receipt recovery does not start a task or reapply an older map edit. Root registry checkpoint 50828fca9b1844258418ac9f93b5104ea002ce42. |
 | `tasks.stop` | Current task Stop | `reviewed_stop.apply/recover` through `product_operations_stop` | Exact owner, current goal revision and actor-bound receipt; requesting Stop is separate from confirmed termination. |
 | `connections.review` | Connections dependency review | `connection_dependencies.impact/require_review` | Owned connection revision and current dependency digest; no provider test or credential mutation is implied. |
 | `schedules.change` | Automations lifecycle controls | `schedule_definitions.change_definition` | Owned durable definition revision, explicit active/paused/retired choice, native version history records exact operation. Existing occurrences are not replayed. |
@@ -50,11 +51,17 @@ The registered families below extend the same contract. Each operation ID is a c
 | `content_access.status`, `content_access.request`, `content_access.decide` | Reviewed content access | `content_access_api` | Exact resource/purpose/fingerprint, independent authorized reviewer and expiring audited grant; read grants never confer mutation authority. |
 | `permissions.status`, `permissions.request`, `permissions.decide` | Access requests | `permission_requests` and `permission_requests_api` | Effective role plus suite ceiling, current request revision and independently authorized reviewer; native grant receipt. |
 
+
+| `knowledge.history` | Historical record search | `record_history.search_history` through `product_operations_record_history` | Current native source authority and bounded metadata cursor; hidden bodies and unavailable sources are never represented as searchable complete content. |
+| `personal_data.status`, `personal_data.link_begin`, `personal_data.link_confirm`, `personal_data.link_unlink`, `personal_data.recall`, `personal_data.note`, `personal_data.note_source`, `personal_data.sharing`, `personal_data.exclude_task`, `personal_data.deletion_request`, `personal_data.deletion_review`, `personal_data.deletion_status`, `personal_data.export_scope`, `personal_data.export_account` | My Data / Account | `personal_data_api`, `personal_memory`, native identity links and reviewed deletion requests through `product_operations_personal_data` | Verified named employee/channel binding, exact native revision, independently authorized deletion reviewer, per-store retained exceptions; neither export nor deletion claims whole-person coverage. Inbox, bundle and handoff inventory follows those native private store boundaries. |
+| `facts.search`, `facts.inspect`, `facts.create`, `facts.update`, `facts.restore`, `facts.tags`, `facts.remove` | Facts | `facts_api.records/record/update_fact_tags/remove_fact`, `api.save_fact` via `product_operations_facts` | Exact current fact selection, CAS revision, current context/role, metadata-only durable operation receipts. Search/inspect never imply mutation consent; restoration requires a fresh current review. Identity checkpoint fa3cd13019fea8ba44bc434d778e32e6f62bdd1a, registered in root72ae5e2, supplies this adapter. |
+| `knowledge.feedback`, `knowledge.my_feedback` | Knowledge access | `KnowledgeAccessService.submit_feedback/feedback_requests` through `product_operations_knowledge` | Current permitted source and employee binding, native receipt; employees submit and inspect their own feedback, without acquiring administrator review/apply authority. Identity checkpoint bb7de274fee0f721b9697bbb5602e36b54297fb0 supplies these entries. |
+
 The existing learning-example status/withdrawal interface remains registered in
 `copilot_operations` and uses its sealed native preparation and receipt contract.
 The durable queue/guidance operations are supplied by LW-001's
-`product_operations_conversation` adapter and its owning ledger. Integration must
-preserve the companion native service and UI checkpoints; a model cannot bypass
+`product_operations_conversation` adapter and its owning ledger. The integrated
+companion native service and UI enforce this contract; a model cannot bypass
 the separate conflict decision or choose an unreviewed snapshot.
 
 The shared `product_operations` registry checks native snapshots before and after

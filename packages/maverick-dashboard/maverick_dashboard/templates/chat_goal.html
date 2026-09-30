@@ -1253,6 +1253,32 @@
       var input = document.getElementById('attach-add');
       var msg = document.getElementById('attach-msg');
       if (!panel || !list) return;
+      var denied = false, generation = 0, requests = new Set(), loading = false, refreshAgain = false;
+      var pending = [], uploading = false, progress = null, t = null, polls = 0;
+      function clearPrivate() {
+        denied = true; generation++; requests.forEach(function (controller) { controller.abort(); });
+        clearInterval(t); list.replaceChildren(); count.textContent = ''; input.value = '';
+        pending.forEach(function (item) { item.file = null; }); pending = [];
+        if (progress) progress.replaceChildren();
+        addBtn.disabled = true; input.disabled = true;
+        cgCopy(msg, 'Task access is no longer available.');
+      }
+      async function fileRequest(options) {
+        if (denied) throw new Error('Task access is no longer available.');
+        var ticket = generation, controller = new AbortController(); requests.add(controller);
+        var timer = setTimeout(function () { controller.abort(); }, options && options.method === 'POST' ? 60000 : 12000);
+        try {
+          var response = await fetch('/api/v1/goals/' + goalId + '/attachments', Object.assign({credentials:'same-origin',cache:'no-store',signal:controller.signal}, options));
+          if (denied || ticket !== generation) throw new Error('Task access is no longer available.');
+          if (response.redirected || [401,403,404].includes(response.status)) {
+            clearPrivate(); throw new Error('Task access is no longer available.');
+          }
+          if (!response.ok) throw new Error(cgErr(response, 'load the attached files'));
+          var body = await response.json();
+          if (denied || ticket !== generation) throw new Error('Task access is no longer available.');
+          return body;
+        } finally { clearTimeout(timer); requests.delete(controller); }
+      }
 
       function fmtSize(n) {
         if(window.LightworkI18n)return window.LightworkI18n.number(n>=1048576?n/1048576:n>=1024?n/1024:n,{style:'unit',unit:n>=1048576?'megabyte':n>=1024?'kilobyte':'byte',unitDisplay:'short',maximumFractionDigits:n>=1048576?1:0});
@@ -1289,16 +1315,16 @@
           list.appendChild(li);
         });
       }
-      function refresh() {
-        fetch('/api/v1/goals/' + goalId + '/attachments')
-          .then(function (r) {
-            if (r.ok) return r.json();
-            return r.json().catch(function () { return {}; }).then(function (body) {
-              throw new Error(cgErr(r, 'load the attached files'));
-            });
-          })
-          .then(render)
-          .catch(function (error) {
+      async function refresh() {
+        if (denied || document.hidden) return;
+        if (loading) { refreshAgain = true; return; }
+        loading = true;
+        try {
+          var items = await fileRequest();
+          if (!Array.isArray(items)) throw new Error('Attachments could not be loaded. You can still add a file or retry by reloading.');
+          render(items);
+        } catch (error) {
+            if (denied) return;
             panel.style.display = 'block';
             list.textContent = '';
             var failed = document.createElement('li');
@@ -1306,12 +1332,14 @@
             cgCopy(failed,'Attachments could not be loaded. You can still add a file or retry by reloading.');
             list.appendChild(failed);
             cgCopy(msg,String(error.message || error));
-          });
+        } finally {
+          loading = false;
+          if (refreshAgain) { refreshAgain = false; refresh(); }
+        }
       }
       if (addBtn && input) {
         addBtn.addEventListener('click', function () { input.click(); });
-        var pending = [], uploading = false;
-        var progress = document.createElement('ul');
+        progress = document.createElement('ul');
         progress.setAttribute('aria-label',cgText('Upload progress'));progress.lang=window.LightworkI18n?window.LightworkI18n.languageFor('Upload progress'):'en'; msg.after(progress);
         function row(item) {
           cgCopy(item.row,'{name} — {state}',{name:item.name,state:cgText({queued:'Queued',uploading:'Uploading',complete:'Complete',failed:'Failed'}[item.state]||item.state)});
@@ -1323,27 +1351,29 @@
           }
         }
         async function drain() {
-          if (uploading) return;
+          if (uploading || denied) return;
           uploading = true; addBtn.disabled = true;
           try {
             for (var item of pending) {
+              if (denied) return;
               if (item.state !== 'queued') continue;
               item.state = 'uploading'; row(item);
               try {
                 var fd = new FormData(); fd.append('file', item.file, item.name);
-                var r = await fetch('/api/v1/goals/' + goalId + '/attachments', {method: 'POST', body: fd});
-                if (!r.ok) throw new Error('upload refused');
+                await fileRequest({method: 'POST', body: fd});
                 item.state = 'complete'; item.file = null;
               } catch (_) { item.state = 'failed'; }
+              if (denied) return;
               row(item);
             }
             cgCopy(msg,pending.some(function (i) { return i.state === 'failed'; })
               ? 'Some files were not confirmed. Retry only those files. Previously admitted files are preserved.'
               : 'Files added to this task. Extracted text may still be preparing; this does not confirm the runner has read them.');
-            refresh();
-          } finally { uploading = false; addBtn.disabled = false; }
+            refresh(); pollCompanions();
+          } finally { uploading = false; addBtn.disabled = denied; }
         }
         input.addEventListener('change', function () {
+          if (denied) { input.value = ''; return; }
           Array.from(input.files).forEach(function (file) {
             var item = {file: file, name: file.name, state: 'queued', row: document.createElement('li')};
             pending.push(item); progress.append(item.row); row(item);
@@ -1353,11 +1383,22 @@
       }
       refresh();
       // Companions land seconds after upload; refresh a few times so they appear.
-      var polls = 0;
-      var t = setInterval(function () {
-        refresh();
-        if (++polls >= 6) clearInterval(t);
-      }, 5000);
+      function pollCompanions() {
+        clearInterval(t); polls = 0;
+        t = setInterval(function () {
+          refresh();
+          if (++polls >= 6) clearInterval(t);
+        }, 5000);
+      }
+      pollCompanions();
+      document.addEventListener('lightwork:task-projection', function (event) {
+        if (event.detail && (event.detail.terminal || event.detail.artifactsChanged)) refresh();
+      });
+      document.addEventListener('lightwork:answer-panel-updated', refresh);
+      document.addEventListener('lightwork:task-access-lost', clearPrivate);
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+      window.addEventListener('focus', refresh);
+      window.addEventListener('pagehide', clearPrivate);
     })();
   </script>
   <script>

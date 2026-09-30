@@ -4,20 +4,30 @@
   var goal = wrap.dataset.goal, create = document.getElementById('share-create'), output = document.getElementById('share-url');
   var status = document.getElementById('share-msg'), list = document.getElementById('share-list');
   var review = document.createElement('section'); review.hidden = true; review.setAttribute('aria-label', 'Review public link'); wrap.append(review);
-  var preview = null;
+  var preview = null, denied = false, generation = 0, requests = new Set();
+  function accessError() {
+    var error = new Error('Your access changed. Reload and sign in before managing this task.'); error.status = 403; return error;
+  }
+  function clearPrivate() {
+    denied = true; generation++; requests.forEach(function (controller) { controller.abort(); });
+    list.replaceChildren(); review.replaceChildren(); review.hidden = true; preview = null; output.value = ''; output.style.display = 'none';
+    create.disabled = true; status.textContent = accessError().message;
+  }
   async function request(path, options) {
-    var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 15000);
+    if (denied) throw accessError();
+    var ticket = generation, controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 15000);
+    requests.add(controller);
     try {
       var response = await fetch('/api/v1/goals/' + goal + '/share' + path,
         Object.assign({credentials: 'same-origin', cache: 'no-store', headers: {'Content-Type': 'application/json'}, signal: controller.signal}, options));
       var body = await response.json().catch(function () { return {}; });
-      if (response.redirected || [401, 403].includes(response.status)) {
-        list.replaceChildren(); review.replaceChildren(); review.hidden = true; preview = null; output.value = ''; output.style.display = 'none';
-        throw new Error('Your access changed. Reload and sign in before managing this task.');
+      if (denied || ticket !== generation) throw accessError();
+      if (response.redirected || [401, 403, 404].includes(response.status)) {
+        clearPrivate(); throw accessError();
       }
       if (!response.ok) { var error = new Error(window.mvErrorText({status: response.status, detail: body.detail}, 'manage this link')); error.status = response.status; error.detail = body.detail; throw error; }
       return body;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); requests.delete(controller); }
   }
   function text(tag, value) { var node = document.createElement(tag); node.textContent = value; return node; }
   async function refresh() {
@@ -65,14 +75,22 @@
       });
       review.append(labelText, label, lifetimeText, lifetime, confirm, cancel); review.hidden = false; label.focus(); status.textContent = 'No link has been created. Review the content, audience and lifetime above.';
     } catch (error) { window.mvRenderError(status, error, 'review this public link'); }
-    finally { create.disabled = false; }
+    finally { create.disabled = denied; }
   });
   list.addEventListener('click', async function (event) {
     var button = event.target.closest('.share-revoke'); if (!button) return;
     if (!(await mvConfirm('Stop future access through this link? Downloaded and forwarded copies cannot be recalled.', {okText: 'Revoke link'}))) return;
     button.disabled = true;
     try { await request('/' + button.dataset.id + '/revoke', {method: 'POST', body: '{}'}); await refresh(); status.textContent = 'Link revoked. Existing downloaded copies remain outside Lightwork.'; }
-    catch (error) { window.mvRenderError(status, error, 'revoke this link'); button.disabled = false; }
+    catch (error) { window.mvRenderError(status, error, 'revoke this link'); button.disabled = denied; }
   });
-  refresh().catch(function () { status.textContent = 'Link status could not be loaded. Reload to check expiry and revocation before creating another.'; });
+  function refreshVisible() {
+    if (denied || document.hidden) return;
+    refresh().catch(function () { if (!denied) status.textContent = 'Link status could not be loaded. Reload to check expiry and revocation before creating another.'; });
+  }
+  document.addEventListener('lightwork:task-access-lost', clearPrivate);
+  document.addEventListener('visibilitychange', refreshVisible);
+  window.addEventListener('focus', refreshVisible);
+  window.addEventListener('pagehide', clearPrivate);
+  refreshVisible();
 }());
