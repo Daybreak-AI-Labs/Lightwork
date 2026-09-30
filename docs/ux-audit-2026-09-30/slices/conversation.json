@@ -113,10 +113,10 @@
   },
   {
     "id": "LW-017",
-    "status": "planned",
-    "implementation_evidence": "Existing durable thread identity and task/audit records preserved.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "conversation_organization.py stores names/pins/archive in one owner/workspace-private governed CAS document keyed by immutable root identity. Replayed operations reuse receipts, conflicting windows refuse, explicit undo restores prior organization. All turns read root metadata; current authorized pins appear in sidebar, archive preserves history and explains retention. /conversations searches stored user/assistant content across bounded keyset pages with truthful remaining-history scope; root ownership and suite permission checked before matching or projection.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Add user-owned rename/pin/archive/tags metadata, version conflict handling and full-history search without deleting retained evidence."
+    "remaining": "Regression tests authored but intentionally unrun. Authenticated/browser/native PostgreSQL and cross-client runtime acceptance remain for the later testing phase. Product bounds are visible: 20 active pins, 10000 organized conversations; message search excludes attachments/external records."
   },
   {
     "id": "LW-018",

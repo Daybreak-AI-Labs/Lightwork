@@ -3,7 +3,7 @@
 {% macro chat_threads(threads) %}
 <ul class="cs-list" id="cs-list">
   {% for t in threads %}
-  <li><a href="/chat/goal/{{ t.target_id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">{{ t.title }}</a></li>
+  <li><a data-conversation-root="{{ t.id }}" href="/chat/goal/{{ t.target_id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">{% if t.pinned %}Pinned: {% endif %}{{ t.title }}{% if t.archived %} (archived){% endif %}</a></li>
   {% else %}
   <li class="cs-empty">No chats yet. <a href="/chat" style="display:inline; padding:0;">Start a chat</a></li>
   {% endfor %}

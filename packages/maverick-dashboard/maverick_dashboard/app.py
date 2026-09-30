@@ -93,6 +93,7 @@ from .auth import (
     websocket_caller_principal,
 )
 from .draft_api import page_context as _draft_page_context
+from .draft_api import context_for as _conversation_context
 from .draft_api import router as draft_router
 from .health_routes import (
     health_response as _health_response,
@@ -1088,6 +1089,9 @@ app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
 from .my_work_api import router as my_work_router
 app.include_router(my_work_router)
+from .conversation_organization import present_title as _conversation_title
+from .conversation_organization import router as conversation_organization_router
+app.include_router(conversation_organization_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
@@ -8850,6 +8854,12 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         goals = w.conversation_summaries(owner=goal_owner_filter(request), limit=_THREAD_LIST_LIMIT)
     except Exception:  # pragma: no cover -- the sidebar must never 500 a page
         return []
+    from .conversation_organization import organization, pinned_roots
+    try:
+        known = {goal.id for goal in goals}
+        goals.extend(goal for goal in pinned_roots(request, w) if goal.id not in known)
+    except Exception:
+        pass  # Current authorized tasks remain readable if organization storage is unavailable.
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -8857,11 +8867,18 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         if target is None:
             continue
         assert_goal_access(request, target)
+        try:
+            metadata = organization(request, w, g.id)
+        except Exception:
+            metadata = {"title": "", "pinned": False, "archived": False}
+        if metadata["archived"] and g.id != active_root:
+            continue
         threads.append({
-            "id": g.id, "target_id": target_id, "title": g.title, "status": target.status,
+            "id": g.id, "target_id": target_id, "title": metadata["title"] or g.title, "status": target.status,
+            "pinned": metadata["pinned"], "archived": metadata["archived"],
             "active": g.id == active_root, "updated_at": g.updated_at,
         })
-    return threads
+    return sorted(threads, key=lambda row: (not row["pinned"], -row["updated_at"]))
 
 
 def _thread_turns(w, goal) -> list:
@@ -10263,7 +10280,8 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "spend_ceiling_text": (
                 f"{spend_ceiling:,.2f}" if spend_ceiling is not None else ""
             ),
-            "thread_title": root.title,
+            "thread_title": _conversation_title(request, w, root),
+            "conversation_context": _conversation_context(request),
             "latest_chat_goal_id": ChatThreads(w).latest(g.id),
             "thread_turns": _thread_turns(w, g) if can_access_goal_principal(caller_principal(request), g) else [],
             "threads": _chat_threads(request, w, active_root=root_id),

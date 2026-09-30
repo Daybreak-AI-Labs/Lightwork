@@ -310,6 +310,20 @@
       Lightwork
     </div>
     <p><a href="/my-work">View my background work</a></p>
+    <details><summary>Organize this conversation</summary>
+      <p>Names, pins and archive status apply to all its turns. Archive hides it from recents without deleting task or audit history; workspace retention still applies. You can pin up to 20 conversations.</p>
+      <form id="conversation-organization" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}" data-draft-recovery="off">
+        <label for="conversation-name">Conversation name</label><input id="conversation-name" class="input" maxlength="200" autocomplete="off">
+        <label><input id="conversation-pin" type="checkbox"> Pin this conversation</label>
+        <label><input id="conversation-archive" type="checkbox"> Archive from recents</label>
+        <button id="conversation-save" type="submit" class="btn" disabled>Save organization</button>
+        <button id="conversation-refresh" type="button" class="btn btn--ghost">Refresh saved values</button>
+        <button id="conversation-undo" type="button" class="btn btn--ghost" hidden>Undo last organization change</button>
+        <p id="conversation-organization-status" role="status" aria-live="polite"></p>
+      </form>
+      <a href="/conversations">Browse, search and restore archived conversations</a>
+    </details>
+    <script src="/static/lightwork-conversation-organization.js" defer></script>
     <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}"></p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
