@@ -32,16 +32,30 @@
     form.querySelectorAll('[data-pref]').forEach(function (field) {
       var key = field.dataset.pref;
       field.value = effective.values[key];
-      field.disabled = model.locked.indexOf(key) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page'].indexOf(key) !== -1);
+      field.disabled = model.locked.indexOf(key) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page','today_days'].indexOf(key) !== -1);
       var source = form.querySelector('[data-source-for="' + key + '"]');
       if (source) source.textContent = 'Effective source: ' + effective.sources[key] + (model.locked.indexOf(key) !== -1 ? ' · Set by organization policy' : '');
     });
-    form.querySelectorAll('[data-inherit-pref]').forEach(function (box) { box.checked = false; box.disabled = model.locked.indexOf(box.dataset.inheritPref) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page'].indexOf(box.dataset.inheritPref) !== -1); });
+    form.querySelectorAll('[data-inherit-pref]').forEach(function (box) { box.checked = false; box.disabled = model.locked.indexOf(box.dataset.inheritPref) !== -1 || (scope.value !== 'personal' && ['preferred_name','start_page','today_days'].indexOf(box.dataset.inheritPref) !== -1); });
     form.querySelectorAll('[data-today-card]').forEach(function (box) { box.checked = model.values.today_cards.indexOf(box.dataset.todayCard) !== -1; box.disabled = scope.value !== 'personal'; });
+    orderCards(model.values.today_cards);
+    form.querySelectorAll('[data-card-move]').forEach(function (button) { button.disabled = scope.value !== 'personal'; });
     form.querySelectorAll('[data-inherit-list]').forEach(function (button) { var key = button.dataset.inheritList; button.disabled = scope.value !== 'personal'; var source = form.querySelector('[data-source-for="' + key + '"]'); if (source) source.textContent = 'Effective source: ' + model.sources[key]; });
     pins = model.values.favorites.slice(); renderPins(); preview(); changes = {};
     if (compare) compare.hidden = true;
   }
+  function orderCards(order) {
+    var rows = Array.from(form.querySelectorAll('[data-today-row]'));
+    rows.sort(function (a, b) { var ai = order.indexOf(a.dataset.todayRow), bi = order.indexOf(b.dataset.todayRow); return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi); });
+    rows.forEach(function (row) { row.parentNode.appendChild(row); });
+  }
+  form.querySelectorAll('[data-card-move]').forEach(function (button) { button.addEventListener('click', function () {
+    if (busy || scope.value !== 'personal') return;
+    var row = button.closest('[data-today-row]'), other = button.dataset.cardMove === 'up' ? row.previousElementSibling : row.nextElementSibling;
+    if (!other || !other.hasAttribute('data-today-row')) return;
+    if (button.dataset.cardMove === 'up') row.parentNode.insertBefore(row, other); else row.parentNode.insertBefore(other, row);
+    changes.today_cards = Array.from(form.querySelectorAll('[data-today-card]:checked')).map(function (box) { return box.dataset.todayCard; }); button.focus();
+  }); });
   form.addEventListener('input', function (event) { if (event.target.dataset.pref) { changes[event.target.dataset.pref] = event.target.value; var inherited = form.querySelector('[data-inherit-pref="' + event.target.dataset.pref + '"]'); if (inherited) inherited.checked = false; preview(); } });
   form.addEventListener('change', function (event) {
     var target = event.target;
@@ -84,7 +98,7 @@
       if (inherit) inherit.checked = draft[key] === null;
     });
     if (draft.favorites) { pins = draft.favorites.slice(); renderPins(); }
-    if (draft.today_cards) form.querySelectorAll('[data-today-card]').forEach(function (box) { box.checked = draft.today_cards.indexOf(box.dataset.todayCard) !== -1; });
+    if (draft.today_cards) { orderCards(draft.today_cards); form.querySelectorAll('[data-today-card]').forEach(function (box) { box.checked = draft.today_cards.indexOf(box.dataset.todayCard) !== -1; }); }
     preview();
   }
   if (compare) compare.addEventListener('click', async function () {

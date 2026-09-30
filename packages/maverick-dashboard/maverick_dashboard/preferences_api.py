@@ -127,8 +127,13 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
             raise HTTPException(403, "That starting page is not available to your account.")
         if key == "favorites" and (not isinstance(value, list) or any(not isinstance(item, str) or item not in destinations for item in value)):
             raise HTTPException(403, "Only currently available pages can be pinned.")
-        if key == "today_cards" and (not isinstance(value, list) or any(not isinstance(item, str) or item not in {"tasks", "decisions", "recent"} for item in value)):
+        if key == "today_cards" and (not isinstance(value, list) or any(not isinstance(item, str) or item not in {"tasks", "decisions", "recent", "schedules", "templates"} for item in value)):
             raise HTTPException(422, "Choose an available Today card.")
+        if key == "template_favorites":
+            from .today_projection import template_choices
+            choices = template_choices(request)
+            if not isinstance(value, list) or any(not isinstance(item, str) or item not in choices for item in value):
+                raise HTTPException(403, "Only currently accessible templates can be pinned.")
     try:
         preferences.save(principal, scope=body.scope, changes=body.changes,
                          expected_revision=body.expected_revision, thread=_thread(request, body.thread), operation_id=body.operation_id)
@@ -286,17 +291,9 @@ def resolved_display(request: Request, key: str, fallback: str | None = None):
 
 @router.get('/today')
 def today_page(request: Request):
-    from datetime import datetime, timezone
-
-    principal = _principal(request)
+    from .today_projection import project
     model = _state(request)
-    world = _app()._world()
-    goals = world.list_goals(owner=principal, limit=100)
-    active = [goal for goal in goals if goal.status in {'pending', 'active', 'running', 'blocked'}]
-    recent = sorted([goal for goal in goals if goal.status in {'done', 'completed'}],
-                    key=lambda goal: goal.updated_at, reverse=True)[:10]
     return _app().templates.TemplateResponse(request, 'today.html', {
-        'today_preferences': model, 'today_active': active[:20], 'today_recent': recent,
-        'today_freshness': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
+        'today_preferences': model, 'today': project(request, _app()._world(), model),
         'today_decisions_allowed': auth.has_permission(request, 'operate'),
     }, headers={'Cache-Control': 'private, no-store'})

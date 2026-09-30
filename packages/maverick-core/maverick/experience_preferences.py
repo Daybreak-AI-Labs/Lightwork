@@ -19,13 +19,14 @@ DEFAULTS = {
     "preferred_name": "", "tone": "", "language": "en", "verbosity": "balanced",
     "output_style": "", "custom_style_name": "", "custom_style": "",
     "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard",
-    "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent"],
+    "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent", "schedules", "templates"],
+    "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
 }
-PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "start_page", "notification_preferences"})
+PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences"})
 CHOICES = {"verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
-           "text_size": {"standard", "large", "larger"}}
+           "text_size": {"standard", "large", "larger"}, "today_days": {"1", "7", "30"}}
 
 
 class PreferenceConflict(ValueError):
@@ -145,7 +146,7 @@ def _validate(key: str, value):
         raise ValueError("Choose a supported writing tone.")
     elif key == "output_style" and value not in {"", "custom", *BUILTIN_STYLES}:
         raise ValueError("Choose an available output style.")
-    elif key in {"favorites", "today_cards"}:
+    elif key in {"favorites", "today_cards", "template_favorites"}:
         if not isinstance(value, list) or len(value) > 30 or not all(isinstance(v, str) and len(v) < 180 for v in value):
             raise ValueError("Choose up to 30 named destinations.")
         return list(dict.fromkeys(value))

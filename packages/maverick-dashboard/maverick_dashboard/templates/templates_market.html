@@ -29,7 +29,7 @@
     <div class="card-grid" id="tplm-grid">
       {% for e in entries %}
         {% set label = e.name | humanize %}
-        <div class="card" data-template-name="{{ e.name }}" data-tplm-text="{{ (label ~ ' ' ~ (e.title | fill_placeholders)) | lower }}">
+        <div class="card" id="template-{{ e.name }}" tabindex="-1" data-template-name="{{ e.name }}" data-tplm-text="{{ (label ~ ' ' ~ (e.title | fill_placeholders)) | lower }}">
           <div class="tplm__head">
             <strong class="tplm__name">{{ label }}</strong>
             <span class="muted tplm__stars" title="Your team's rating">{{ 'Not rated yet' if not e.stars else e.rating_bar }}</span>
