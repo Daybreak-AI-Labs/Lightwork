@@ -14,13 +14,21 @@
   };
   const VERDICT = { done: 'Met', revise: 'Plan changed', 'continue': 'Keep going' };
   let busy = false;
-  function make(tag, cls, text) {
+  function product(node, text, values) {
+    if (window.LightworkI18n) window.LightworkI18n.set(node, text, values);
+    else node.textContent = text.replace(/\{(\w+)\}/g, (_, key) => values && values[key] !== undefined ? values[key] : _);
+  }
+  function translated(text) { return window.LightworkI18n ? window.LightworkI18n.text(text) : text; }
+  function make(tag, cls, text, source = false) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
-    if (text != null) node.textContent = text;
+    if (text != null) {
+      if (source) { node.textContent = text; node.lang = 'und'; node.dir = 'auto'; node.dataset.userContent = '1'; }
+      else product(node, text);
+    }
     return node;
   }
-  function say(text) { $('status').textContent = text; }
+  function say(text) { product($('status'), text); }
   function failText(failure) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, 'show the planning steps')
       : 'Could not show the planning steps. Please try again.';
@@ -36,7 +44,7 @@
     const plan = make('section');
     plan.append(make('h3', null, 'The plan'));
     const list = make('ol');
-    data.plan.forEach(step => list.append(make('li', null, step)));
+    data.plan.forEach(step => list.append(make('li', null, step, true)));
     plan.append(list);
     out.append(plan);
     if (data.steps.length) {
@@ -44,7 +52,7 @@
       work.append(make('h3', null, 'What each step produced'));
       data.steps.forEach(step => {
         const block = make('details');
-        block.append(make('summary', null, step.step), make('p', null, step.output || 'No output.'));
+        block.append(make('summary', null, step.step, true), make('p', null, step.output || 'No output.', !!step.output));
         work.append(block);
       });
       out.append(work);
@@ -53,12 +61,19 @@
       const reviews = make('section');
       reviews.append(make('h3', null, 'Reviews'));
       const items = make('ol');
-      data.reviews.forEach(r => items.append(make('li', null, (VERDICT[r.verdict] || 'Reviewed') + (r.notes ? ': ' + r.notes : ''))));
+      data.reviews.forEach(r => {
+        const item = make('li', null, VERDICT[r.verdict] || 'Reviewed');
+        if (r.notes) item.append(document.createTextNode(': '), make('span', null, r.notes, true));
+        items.append(item);
+      });
       reviews.append(items);
       out.append(reviews);
     }
-    out.append(make('p', 'muted', (STATUS[data.status] || 'Finished.') + ' This cost '
-      + (data.cost < 0.01 ? 'less than one cent' : '$' + data.cost.toFixed(2)) + '. Nothing about the task was changed.'));
+    const cost = data.cost < 0.01 ? translated('less than one cent') : window.LightworkI18n
+      ? window.LightworkI18n.number(data.cost, {style:'currency', currency:'USD'}) : '$' + data.cost.toFixed(2);
+    const summary = make('p', 'muted');
+    product(summary, '{status} This cost {cost}. Nothing about the task was changed.', {status:translated(STATUS[data.status] || 'Finished.'), cost:cost});
+    out.append(summary);
     out.hidden = false;
   }
   $('run').addEventListener('click', async () => {

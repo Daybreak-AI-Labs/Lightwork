@@ -19,13 +19,21 @@
   };
   let busy = false;
 
-  function make(tag, cls, text) {
+  function product(node, text, values) {
+    if (window.LightworkI18n) window.LightworkI18n.set(node, text, values);
+    else node.textContent = text.replace(/\{(\w+)\}/g, (_, key) => values && values[key] !== undefined ? values[key] : _);
+  }
+  function translated(text) { return window.LightworkI18n ? window.LightworkI18n.text(text) : text; }
+  function make(tag, cls, text, source = false) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
-    if (text != null) node.textContent = text;
+    if (text != null) {
+      if (source) { node.textContent = text; node.lang = 'und'; node.dir = 'auto'; node.dataset.userContent = '1'; }
+      else product(node, text);
+    }
     return node;
   }
-  function say(text) { status.textContent = text; }
+  function say(text) { product(status, text); }
   function failText(failure) {
     return typeof window.mvErrorText === 'function'
       ? window.mvErrorText(failure, 'get two viewpoints')
@@ -40,14 +48,15 @@
       typeof data.key_point === 'string' && typeof data.cost === 'number' && Number.isFinite(data.cost);
   }
   function money(value) {
-    return value < 0.01 ? 'less than one cent' : '$' + value.toFixed(2);
+    return value < 0.01 ? translated('less than one cent') : window.LightworkI18n
+      ? window.LightworkI18n.number(value, {style:'currency', currency:'USD'}) : '$' + value.toFixed(2);
   }
   function show(data) {
     result.replaceChildren();
     const verdict = make('section', 'cs-viewpoints__verdict');
     verdict.append(make('h3', null, 'Verdict'), make('p', null, VERDICT[data.verdict]));
-    if (data.reason) verdict.append(make('p', null, 'Why: ' + data.reason));
-    if (data.key_point) verdict.append(make('p', null, 'The point that decided it: ' + data.key_point));
+    if (data.reason) { const reason = make('p', null, 'Why:'); reason.append(document.createTextNode(' '), make('span', null, data.reason, true)); verdict.append(reason); }
+    if (data.key_point) { const point = make('p', null, 'The point that decided it:'); point.append(document.createTextNode(' '), make('span', null, data.key_point, true)); verdict.append(point); }
     result.append(verdict);
     for (const side of ['for', 'against']) {
       const turns = data.turns.filter(turn => turn.side === side);
@@ -55,11 +64,13 @@
       const block = make('section', 'cs-viewpoints__side');
       block.append(make('h3', null, SIDE[side]));
       const list = make('ol');
-      turns.forEach(turn => list.append(make('li', null, turn.text)));
+      turns.forEach(turn => list.append(make('li', null, turn.text, true)));
       block.append(list);
       result.append(block);
     }
-    result.append(make('p', 'muted', 'This cost ' + money(data.cost) + '. It is advice to help you decide; nothing was started or changed.'));
+    const summary = make('p', 'muted');
+    product(summary, 'This cost {cost}. It is advice to help you decide; nothing was started or changed.', {cost:money(data.cost)});
+    result.append(summary);
     result.hidden = false;
   }
   form.addEventListener('submit', async event => {

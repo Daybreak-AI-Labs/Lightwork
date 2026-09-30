@@ -6,6 +6,11 @@
   var message = document.getElementById('answer-refresh-status'), retry = document.getElementById('answer-refresh');
   var inFlight = null, generation = 0, lastStatus = panel.dataset.status, lastResult = null;
   var denied = false, forceAgain = false;
+  function say(node, source, values) {
+    if (window.LightworkI18n) window.LightworkI18n.set(node, source, values);
+    else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return values && values[key] !== undefined ? values[key] : _; });
+  }
+  function sourceText(node, value) { node.textContent = value; node.lang = 'und'; node.dir = 'auto'; node.dataset.userContent = '1'; }
   function cgErr(failure, action) { return window.mvErrorText(failure, action); }
   function dirty() {
     var editor = panel.querySelector('#edit-text'), note = panel.querySelector('#signoff-note');
@@ -16,7 +21,7 @@
     if (inFlight) inFlight.abort();
     document.dispatchEvent(new CustomEvent('lightwork:answer-panel-before-update'));
     panel.replaceChildren(); panel.dataset.version = '';
-    message.textContent = 'Access to the saved result changed. Sign in or reopen the authorized task to continue.';
+    say(message, 'Access to the saved result changed. Sign in or reopen the authorized task to continue.');
     retry.hidden = true;
   }
   function bind(panel) {
@@ -41,7 +46,7 @@
       function submit(decision) {
         btns.forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
-        msg.textContent = 'Recording…';
+        say(msg, 'Recording…');
         fetch('/api/v1/goals/' + goalId + '/signoff', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
@@ -58,7 +63,7 @@
           });
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          msg.textContent = cgErr(e, 'record the sign-off');
+          say(msg, cgErr(e, 'record the sign-off'));
           btns.forEach(function (b) { if (b) b.disabled = false; });
         });
       }
@@ -88,13 +93,13 @@
       function submit(rating) {
         [up, down].forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
-        msg.textContent = 'Recording…';
+        say(msg, 'Recording…');
         fetch('/api/v1/goals/' + goalId + '/feedback', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({rating: rating}),
         }).then(function (r) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) { show(rating); msg.textContent = "Feedback saved. Learning use follows your organization's policy."; return; }
+          if (r.ok) { show(rating); say(msg, "Feedback saved. Learning use follows your organization's policy."); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
             window.mvRenderError(msg, r, 'save your feedback', j);
@@ -102,7 +107,7 @@
         }).catch(function (e) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
           msg.style.color = 'var(--danger)';
-          msg.textContent = cgErr(e, 'save your feedback');
+          say(msg, cgErr(e, 'save your feedback'));
         });
       }
       if (up) up.addEventListener('click', function () { submit('up'); });
@@ -115,9 +120,9 @@
         if (window.mvCopy) { window.mvCopy(text); return; }
         if (!navigator.clipboard) return;
         navigator.clipboard.writeText(text).then(function () {
-          msg.style.color = 'var(--muted)'; msg.textContent = 'Copied.';
+          msg.style.color = 'var(--muted)'; say(msg, 'Copied.');
         }).catch(function () {
-          msg.style.color = 'var(--danger)'; msg.textContent = 'Could not copy.';
+          msg.style.color = 'var(--danger)'; say(msg, 'Could not copy.');
         });
       });
     })();
@@ -146,7 +151,7 @@
           pendingEdit = {text: textEl.value, expected_updated_at: reviewedAt, operation_id: crypto.randomUUID()};
         }
         saveBtn.disabled = true; textEl.readOnly = true;
-        editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving.';
+        editMsg.style.color = 'var(--muted)'; say(editMsg, 'Saving.');
         try {
           var response = await fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
             method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pendingEdit)
@@ -154,25 +159,26 @@
           var receipt = await response.json();
           if (response.status === 409 && receipt.detail && receipt.detail.current_updated_at) {
             var compare = document.createElement('details');
-            var heading = document.createElement('summary'); heading.textContent = 'Compare with the current saved result';
-            var current = document.createElement('pre'); current.textContent = receipt.detail.current_text || '(empty)';
+            var heading = document.createElement('summary'); say(heading, 'Compare with the current saved result');
+            var current = document.createElement('pre');
+            if (receipt.detail.current_text) sourceText(current, receipt.detail.current_text); else say(current, '(empty)');
             var review = document.createElement('button'); review.type = 'button'; review.className = 'btn btn--ghost';
-            review.textContent = 'Use this current version as the basis for my draft';
+            say(review, 'Use this current version as the basis for my draft');
             review.addEventListener('click', function () {
               reviewedAt = receipt.detail.current_updated_at; pendingEdit = null; compare.remove();
-              editMsg.textContent = 'Draft kept. Review it, then choose Save to apply it to the current result.';
+              say(editMsg, 'Draft kept. Review it, then choose Save to apply it to the current result.');
             });
             compare.append(heading, current, review); box.append(compare); compare.open = true;
-            editMsg.textContent = 'The result changed. Your draft is kept; compare before saving again.';
+            say(editMsg, 'The result changed. Your draft is kept; compare before saving again.');
             return;
           }
           if (!response.ok || !receipt.revision) throw response;
           reviewedAt = receipt.revision; savedText = textEl.value; textEl.dataset.savedText = savedText; pendingEdit = null;
           setTimeout(function () { window.mvRefreshAnswerPanel(); }, 0);
-          editMsg.textContent = 'Revision saved. Previous versions are kept; any earlier sign-off was cleared. Learning is a separate, policy-governed process.';
+          say(editMsg, 'Revision saved. Previous versions are kept; any earlier sign-off was cleared. Learning is a separate, policy-governed process.');
         } catch (failure) {
           editMsg.style.color = 'var(--danger)';
-          editMsg.textContent = cgErr(failure, 'save your edit') + ' Your draft is kept. Retry uses the same save reference.';
+          say(editMsg, '{error} Your draft is kept. Retry uses the same save reference.', {error:cgErr(failure, 'save your edit')});
         } finally { saveBtn.disabled = false; textEl.readOnly = false; }
       });
     })();
@@ -185,7 +191,7 @@
         if (!d.open || d.dataset.loaded) return;
         d.dataset.loaded = '1';
         const body = d.querySelector('.artifact__history-body');
-        body.textContent = 'Loading…';
+        say(body, 'Loading…');
         body.classList.add('muted');
         const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
                     '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
@@ -204,18 +210,18 @@
           body.textContent = '';
           body.classList.remove('muted');
           const versions = (j.versions || []).slice().reverse();  // newest first
-          if (!versions.length) { body.textContent = 'No history.'; return; }
+          if (!versions.length) { say(body, 'No history.'); return; }
           versions.forEach(function (v) {
             const wrap = document.createElement('div');
             wrap.className = 'artifact__version';
             const head = document.createElement('div');
             head.className = 'artifact__version-head';
-            head.textContent = 'v' + v.version +
-              (v.created_at ? ' · ' + new Date(v.created_at * 1000).toLocaleString() : '');
+            say(head, v.created_at ? 'Version {version} · {date}' : 'Version {version}', {version:v.version,
+              date:v.created_at ? (window.LightworkI18n ? window.LightworkI18n.formatDate(v.created_at) : new Date(v.created_at * 1000).toLocaleString()) : ''});
             wrap.appendChild(head);
             if (v.diff) {
               const pre = document.createElement('pre');
-              pre.className = 'artifact__diff';
+              pre.className = 'artifact__diff'; pre.lang = 'und'; pre.dir = 'auto'; pre.dataset.userContent = '1';
               v.diff.split('\n').forEach(function (line) {
                 const span = document.createElement('span');
                 if (line[0] === '+') span.className = 'add';
@@ -227,15 +233,14 @@
             } else {
               const p = document.createElement('div');
               p.className = 'muted';
-              p.textContent = '(initial version)';
+              say(p, '(initial version)');
               wrap.appendChild(p);
             }
             body.appendChild(wrap);
           });
         }).catch(function (e) {
           body.classList.add('muted');
-          body.textContent = 'Could not load history: ' + String(e && e.message || e) +
-                             '. Close and reopen to retry.';
+          say(body, 'Could not load history: {error}. Close and reopen to retry.', {error:String(e && e.message || e)});
           delete d.dataset.loaded;
         });
       });
@@ -264,7 +269,7 @@
       }
       if (!force && dirty()) {
         retry.hidden = false;
-        message.textContent = 'The saved result changed. Your unsaved edit or review note is kept. Refresh when you are ready to review the current version.';
+        say(message, 'The saved result changed. Your unsaved edit or review note is kept. Refresh when you are ready to review the current version.');
         // A superseded result cannot be signed off through stale controls.
         panel.querySelectorAll('#signoff-approve,#signoff-reject').forEach(function (node) { node.disabled = true; });
         if (next.dataset.operate !== '1') panel.querySelectorAll('button,input,textarea').forEach(function (node) { node.disabled = true; });
@@ -279,11 +284,11 @@
       if (inside) { var target = focusId && panel.querySelector('#' + CSS.escape(focusId));
         if (target && !target.disabled) target.focus({preventScroll:true}); }
       if (scroller) scroller.scrollTop = scrollTop;
-      retry.hidden = true; message.textContent = 'Saved result and controls updated.';
+      retry.hidden = true; say(message, 'Saved result and controls updated.');
     } catch (failure) {
       if (ticket !== generation || denied) return;
       window.mvRenderError(message, failure, 'refresh the saved result');
-      message.append(document.createTextNode(' Your draft has been kept.')); retry.hidden = false;
+      var kept = document.createElement('span'); say(kept, ' Your draft has been kept.'); message.append(kept); retry.hidden = false;
     } finally {
       clearTimeout(timer); if (inFlight === controller) inFlight = null;
       if (forceAgain && !denied) { forceAgain = false; setTimeout(function () { refresh(false); }, 0); }
@@ -291,7 +296,7 @@
   }
   window.mvRefreshAnswerPanel = function () { return refresh(false); };
   retry.addEventListener('click', async function () {
-    if (dirty() && !(await window.mvConfirm('Replace the unsaved result edit or review note with the current saved version? Your follow-up message will be kept.', {okText:'Refresh saved result'}))) return;
+    if (dirty() && !(await window.mvConfirm('Replace the unsaved result edit or review note with the current saved version? Your follow-up message will be kept.', {okText:'Refresh saved result', productCopy:true}))) return;
     refresh(true);
   });
   document.addEventListener('lightwork:task-projection', function (event) {
