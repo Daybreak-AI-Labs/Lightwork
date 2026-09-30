@@ -73,6 +73,7 @@ from .auth import (
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
+    assert_template_access,
     auth_genuinely_off,
     caller_principal,
     caller_role,
@@ -1085,8 +1086,9 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(draft_router)
-from .preferences_api import router as preferences_router
 from .preferences_api import display_context as _display_preference_context
+from .preferences_api import router as preferences_router
+
 app.include_router(preferences_router)
 from .budget_guidance_api import router as budget_guidance_router
 app.include_router(budget_guidance_router)
@@ -1099,6 +1101,7 @@ app.include_router(employee_activation_router)
 from .product_operations import router as product_operations_router
 app.include_router(product_operations_router)
 from .settings_experience import router as settings_experience_router
+
 app.include_router(settings_experience_router)
 from .settings_runtime_status import router as settings_runtime_router
 app.include_router(settings_runtime_router)
@@ -1110,6 +1113,7 @@ app.include_router(outcome_pilots_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
 from .my_work_api import router as my_work_router
+
 app.include_router(my_work_router)
 from .conversation_organization import present_title as _conversation_title
 from .conversation_organization import router as conversation_organization_router
@@ -5706,6 +5710,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
         def rows():
             import csv
             import io
+
             from .audit_actions_api import csv_safe
             from maverick.cost_provenance import EXPORT_HEADERS, export_fields
             buf = io.StringIO()
@@ -5897,7 +5902,9 @@ async def audit_page(request: Request) -> HTMLResponse:
 
     from datetime import datetime, timezone
     from urllib.parse import urlencode
+
     from maverick.audit.export import iter_audit_events
+
     from .audit_search import search_events
 
     window_note, next_href = "", None
@@ -6566,8 +6573,10 @@ def oversight_page(request: Request) -> HTMLResponse:
     total = 0
     source_errors = []
     from datetime import datetime, timezone
+
     from maverick.audit.export import iter_audit_events
     from maverick.audit.segments import ReadReport
+
     from .content_access import audit_metadata
 
     report = ReadReport()
@@ -6720,6 +6729,7 @@ async def safety_page(request: Request) -> HTMLResponse:
     from collections import Counter
 
     from maverick.audit import default_audit_log
+
     from .content_access import audit_metadata
 
     require_permission(request, "audit")
@@ -8005,7 +8015,7 @@ async def store_page(request: Request, saved: str = "") -> HTMLResponse:
     )
 
 
-def template_market_entries() -> list[dict]:
+def template_market_entries(principal: str | None = None) -> list[dict]:
     """The goal-template catalog (user-installed + bundled), annotated with the
     operator's own star ratings from the marketplace ratings ledger.
 
@@ -8014,7 +8024,7 @@ def template_market_entries() -> list[dict]:
     means everything shows unrated.
     """
     from maverick.marketplace.ratings import RatingsLedger, stars_bar
-    from maverick.templates import list_templates, load_template
+    from maverick.templates import can_read_template, list_templates, load_template
 
     try:
         ratings = RatingsLedger().all_ratings("templates")
@@ -8024,6 +8034,8 @@ def template_market_entries() -> list[dict]:
     for name in list_templates():
         try:
             tpl = load_template(name)
+            if not can_read_template(tpl, principal):
+                continue
         except (OSError, ValueError, FileNotFoundError):
             continue
         mine = ratings.get(name) or {}
@@ -8058,7 +8070,7 @@ async def templates_market_page(request: Request) -> HTMLResponse:
         request,
         "templates_market.html",
         {
-            "entries": template_market_entries(),
+            "entries": template_market_entries(caller_principal(request)),
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
         },
@@ -10758,6 +10770,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
         buf.truncate(0)
 
         from maverick.episode_reporting import iter_episodes
+
         from .audit_actions_api import csv_safe
 
         for episode in iter_episodes(w, owner=owner, since=start_ts, until=end_ts, finished_only=True):
@@ -11489,6 +11502,7 @@ async def workflow_builder_page(
 
         try:
             t = load_template(edit)
+            assert_template_access(request, t)
             edit_prefill = {
                 "name": t.name,
                 "title": t.title,
@@ -11508,6 +11522,7 @@ async def workflow_builder_page(
 
         try:
             tpl = load_template(template)
+            assert_template_access(request, tpl)
             prefill = {"name": tpl.name, "params": list(tpl.params),
                 "parameter_schema": tpl.parameter_schema, "title": tpl.title}
         except (ValueError, FileNotFoundError):
@@ -11563,7 +11578,7 @@ def workflows_index_page(request: Request) -> HTMLResponse:
     with quick edit / automate actions. The builder is reached via 'New'. (This
     is the management index; /templates remains the browse-the-catalog page.)"""
     from maverick.config import get_features
-    from maverick.templates import load_template, user_templates_dir
+    from maverick.templates import can_read_template, load_template, user_templates_dir
 
     feats = get_features()
     tpls: list[dict] = []
@@ -11574,6 +11589,8 @@ def workflows_index_page(request: Request) -> HTMLResponse:
     for name in names:
         try:
             t = load_template(name)
+            if not can_read_template(t, caller_principal(request)):
+                continue
             tpls.append({"name": t.name, "title": t.title, "params": list(t.params)})
         except (ValueError, FileNotFoundError):
             continue
@@ -11593,7 +11610,9 @@ def workflows_index_page(request: Request) -> HTMLResponse:
         if flows_enabled:
             from maverick.flow import store as _flow_store
 
-            flows = _flow_store.list_flow_summaries()
+            flows = [row for row in _flow_store.list_flow_summaries()
+                     if (flow := _flow_store.load_flow(row["id"])) is not None
+                     and flow.owner == (caller_principal(request) or "")]
     except Exception:  # pragma: no cover -- never block the page on the flow engine
         flows = []
     return templates.TemplateResponse(
@@ -11673,6 +11692,8 @@ async def flow_designer_page(
             from maverick.templates import load_template
 
             tpl = load_template(from_template)
+
+            assert_template_access(request, tpl)
             from maverick.flow.ir import single_agent_flow
 
             body = getattr(tpl, "body", "") or getattr(tpl, "title", "") or from_template

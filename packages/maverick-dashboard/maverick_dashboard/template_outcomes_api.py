@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import outcome_pilot_sources, outcome_pilots
-from .auth import caller_principal, require_permission
+from .auth import assert_template_access, caller_principal, require_permission
 from .draft_api import context_for
 
 router = APIRouter(tags=["template-outcomes"])
@@ -58,12 +58,13 @@ def _context(request):
     return context_for(request)
 
 
-def _template(name):
+def _template(request, name):
     from maverick.file_lock import atomic_read_text
     from maverick.templates import load_template
 
     try:
         template = load_template(name)
+        assert_template_access(request, template)
         version = hashlib.sha256(atomic_read_text(template.path, encoding="utf-8").encode()).hexdigest()
         return template, version
     except (ValueError, FileNotFoundError) as exc:
@@ -73,7 +74,7 @@ def _template(name):
 @router.get("/api/v1/templates/{name}/outcomes")
 def template_outcomes(request: Request, name: str):
     context = _context(request)
-    template, version = _template(name)
+    template, version = _template(request, name)
     page = outcome_pilots.listing(context, limit=200)
     evidence, choices = [], []
     for summary in page["items"]:
@@ -115,14 +116,14 @@ def bind_template_outcomes(request: Request, name: str, body: BindIn):
     _require_same_origin(request)
     if not body.confirm or not hmac.compare_digest(context, body.context):
         raise HTTPException(409, "Review this association in the current account and workspace.")
-    _, version = _template(name)
+    _, version = _template(request, name)
     if not hmac.compare_digest(body.version, version):
         raise HTTPException(409, "Template content changed. Review the association again.")
     try:
         outcome_pilots.get(body.pilot_id, context)
         def mutate(record):
             if record.get("context") != context:
-                raise LookupError()
+                raise LookupError
             record["template_bindings"] = {**record.get("template_bindings", {}), name: {
                 "version": version, "exceptions": body.exceptions, "actor": caller_principal(request) or "local"}}
         updated = outcome_pilots.STORE.update(body.pilot_id, mutate, expected_revision=body.expected_revision,

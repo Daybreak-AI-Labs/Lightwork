@@ -26,6 +26,7 @@ The title can also contain ``{{ vars }}``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -240,6 +241,30 @@ def load_template(name: str) -> Template:
     )
 
 
+def can_read_template(template: Template, principal: str | None) -> bool:
+    """Content permission is exact ownership or verifiable publication.
+
+    Unknown user-installed ownership is retained for migration, never inferred
+    from an administrator role or from the absence of owner frontmatter.
+    """
+    if template.owner and template.owner == (principal or "local"):
+        return True
+    if template.path is None:
+        return False
+    try:
+        path = template.path.resolve()
+        if not template.owner and any(path.parent == directory.resolve() for directory in _BUNDLED_CANDIDATES):
+            return True
+        if path.parent != user_templates_dir().resolve():
+            return False
+        receipt = json.loads((path.parent / (template.name + ".publication.json")).read_text(encoding="utf-8"))
+        return (receipt.get("schema") == "lightwork.catalog-template-publication.v1"
+                and receipt.get("name") == template.name
+                and receipt.get("sha256") == hashlib.sha256(path.read_bytes()).hexdigest())
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _optional_template_budget(value: float | None) -> float | None:
     if value is None:
         return None
@@ -267,6 +292,13 @@ def _template_parameters(params, title, body):
         if placeholder not in clean_params:
             clean_params.append(placeholder)
     return clean_params
+
+
+def _template_owner(value):
+    owner = str(value or "local").strip()
+    if not owner or len(owner) > 256 or any(ord(char) < 32 or ord(char) == 127 for char in owner):
+        raise ValueError("template owner must be a bounded printable principal")
+    return owner
 
 
 def save_user_template(
@@ -297,13 +329,7 @@ def save_user_template(
     False.
     """
     _validate_template_name(name)
-    owner = str(owner or "local").strip()
-    if (
-        not owner
-        or len(owner) > 256
-        or any(ord(char) < 32 or ord(char) == 127 for char in owner)
-    ):
-        raise ValueError("template owner must be a bounded printable principal")
+    owner = _template_owner(owner)
     if expected_generation is not None:
         try:
             expected_generation = int(expected_generation)
@@ -543,6 +569,15 @@ def install_template_from_catalog(
     ensure_private_directory(target_dir)
     target = target_dir / f"{name}.md"
     with cross_process_lock(target, strict=True):
+        if target.exists():
+            # Installing catalog content may not silently replace a privately
+            # authored workflow or an unknown legacy record with the same slug.
+            existing = Template.parse(target.read_text(encoding="utf-8"), name, path=target)
+            if existing.owner or not can_read_template(existing, "user:catalog-publication-check"):
+                raise ValueError("A private or unverified template already uses this name. Review it in the workflow builder before installing.")
         atomic_write_text(target, content)
+        atomic_write_text(target_dir / (name + ".publication.json"), json.dumps({
+            "schema": "lightwork.catalog-template-publication.v1", "name": name,
+            "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}))
     template.path = target
     return template

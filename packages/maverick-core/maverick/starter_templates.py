@@ -49,13 +49,15 @@ def score_template(name: str, title: str, params: list[str], profile: Counter) -
     return sum(profile[w] for w in words)
 
 
-def _local_templates() -> list:
+def _local_templates(owner: str | None = None) -> list:
     """Parsed templates from the user + bundled dirs (offline catalog)."""
-    from .templates import list_templates, load_template
+    from .templates import can_read_template, list_templates, load_template
     out = []
     for name in list_templates():
         try:
-            out.append(load_template(name))
+            template = load_template(name)
+            if can_read_template(template, owner):
+                out.append(template)
         except (OSError, ValueError, FileNotFoundError):
             continue
     return out
@@ -69,8 +71,8 @@ def suggest(world, k: int = 5, *, owner: str | None = None, templates: list | No
     ``{name, title, params, score}``; ties (including the all-zero cold start)
     break on name for a stable order.
     """
-    profile = history_profile(world, owner=owner)
-    candidates = _local_templates() if templates is None else templates
+    profile = history_profile(world, owner=owner or "")
+    candidates = _local_templates(owner) if templates is None else templates
     rows = [
         {
             "name": t.name,

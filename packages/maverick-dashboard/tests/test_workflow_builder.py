@@ -922,7 +922,7 @@ def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nResearch {{topic}}.\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nResearch {{topic}}.\n", encoding="utf-8")
     t = _client().get("/workflow-builder?edit=weekly-report").text
     assert "WF_EDIT = null" not in t and "weekly-report" in t
     assert "renderDraft(WF_EDIT)" in t and "Editing" in t
@@ -938,7 +938,7 @@ def test_builder_prefill_deeplink_jumps_to_automate(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
     r = _client().get("/workflow-builder?template=weekly-report")
     assert r.status_code == 200
     assert "weekly-report" in r.text and "WF_PREFILL = null" not in r.text

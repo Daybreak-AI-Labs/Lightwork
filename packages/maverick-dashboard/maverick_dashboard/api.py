@@ -151,8 +151,8 @@ from .api_schemas import (
     ScheduleIn,
     ScheduleOut,
     SchemaImportIn,
-    SharePointSyncIn,
     ShareLinkIn,
+    SharePointSyncIn,
     SignoffIn,
     SiteScanIn,
     SkillCreateIn,
@@ -185,6 +185,7 @@ from .api_schemas import (
 )
 from .auth import (
     assert_goal_access,
+    assert_template_access,
     auth_genuinely_off,
     caller_principal,
     caller_suites,
@@ -939,6 +940,7 @@ def _board_savings(w, owner, days: int) -> dict:
 def _board_oversight(w, owner, days: int, request=None) -> dict:
     """Scoped guardrail metadata with explicit availability for each source."""
     from datetime import datetime, timedelta, timezone
+
     from .app import _audit_event_visible_to_caller, _is_intervention
 
     day_list, since, _prev = _board_day_list(days)
@@ -1376,6 +1378,7 @@ def create_goal(
 
         try:
             tpl = load_template(payload.template)
+            assert_template_access(request, tpl)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -5286,8 +5289,8 @@ def set_fact(request: Request, payload: FactIn) -> None:
     from maverick.fact_revision import FactConflict, is_private_fact_key
     if is_private_fact_key(key):
         raise HTTPException(400, "Choose a shared fact name without a reserved personal or task prefix.")
-    from .draft_api import context_for
     from .auth import caller_principal
+    from .draft_api import context_for
     if (payload.context is not None and payload.context != context_for(request)) or (
         payload.expected_revision > 0 and payload.context is None
     ):
@@ -7865,12 +7868,13 @@ async def marketplace_stats() -> dict:
 
 
 @router.get("/templates")
-async def templates_catalog() -> dict:
+async def templates_catalog(request: Request) -> dict:
     """The goal-template catalog with the operator's own ratings — the JSON
     face of the /templates marketplace page."""
     from maverick_dashboard.app import template_market_entries
 
-    return {"templates": template_market_entries()}
+    require_permission(request, "view")
+    return {"templates": template_market_entries(caller_principal(request))}
 
 
 @router.get("/templates/suggested")
@@ -10141,10 +10145,14 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     # Resolve the goal text: render a saved template (with params), or a prompt.
     title = (payload.title or "").strip()
     if payload.template:
+        from maverick.templates import load_template
         from maverick.workflow_versions import execution_template
 
         try:
+            assert_template_access(request, load_template(payload.template))
             tpl, published_version = execution_template(payload.template)
+            if tpl.owner:
+                assert_template_access(request, tpl)
             rtitle, body = tpl.render(**(payload.params or {}))
         except ValueError as e:  # unknown template / missing params
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -10360,6 +10368,7 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
 
         try:
             target_template = load_template(payload.template)
+            assert_template_access(request, target_template)
             target_template.render(**(payload.params or {}))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -10565,6 +10574,7 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
 
         try:
             target_template = load_template(template)
+            assert_template_access(request, target_template)
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=f"template not found: {template!r}") from e
         except ValueError as e:
@@ -10889,6 +10899,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             imported_template = None
             try:
                 imported_template = load_template(res.template_name)
+                assert_template_access(request, imported_template)
                 imported_template.render(**sug_params)
             except (ValueError, FileNotFoundError) as e:
                 res.notes.append(
@@ -12209,7 +12220,6 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         public_context,
         sanitize_model_reply,
     )
-
     from .draft_api import context_for
 
     expected_context = request.headers.get("X-Lightwork-Copilot-Context")
@@ -14862,9 +14872,8 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
 async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
     """Persist an (AI-drafted, edited) workflow as a runnable user template."""
     require_permission(request, "operate")
-    from maverick.templates import save_user_template
-
     from maverick.config import load_config
+    from maverick.templates import save_user_template
 
     if payload.parameter_schema and (load_config().get("workflows") or {}).get("typed_inputs", True) is not True:
         raise HTTPException(403, "Typed workflow input authoring is disabled by your administrator.")

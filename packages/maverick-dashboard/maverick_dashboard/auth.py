@@ -711,6 +711,14 @@ def assert_goal_access(request: Request, goal) -> None:
         raise HTTPException(status_code=404, detail="no such goal")
 
 
+def assert_template_access(request: Request, template) -> None:
+    """Private template ownership is separate from policy administration."""
+    from maverick.templates import can_read_template
+    require_permission(request, "view")
+    if not can_read_template(template, caller_principal(request)):
+        raise HTTPException(404, "This template is unavailable to your account.")
+
+
 def _enforce_scim_active(principal: VerifiedPrincipal) -> None:
     """Reject a SCIM-matched principal that has been deprovisioned.
 

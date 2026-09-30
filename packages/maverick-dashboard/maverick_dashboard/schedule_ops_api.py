@@ -117,7 +117,7 @@ def schedule_options(request: Request) -> dict:
     require_permission(request, "operate")
     try:
         workflows = [{"name": e["name"], "title": e.get("title") or e["name"], "params": list(e.get("params") or [])}
-                     for e in template_market_entries()][:200]
+                     for e in template_market_entries(caller_principal(request))][:200]
     except Exception:  # an unreadable template folder still lets people schedule tasks
         workflows = []
     try:

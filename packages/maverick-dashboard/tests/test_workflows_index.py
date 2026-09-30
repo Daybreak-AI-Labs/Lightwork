@@ -25,7 +25,7 @@ def test_index_lists_user_templates_and_playbooks(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
     import maverick.domain_edit as de
     monkeypatch.setattr(de, "list_agents", lambda: [
         {"name": "invoice-clerk", "suite": "finance", "description": "pays invoices",

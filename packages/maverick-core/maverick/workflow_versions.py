@@ -9,7 +9,12 @@ import hashlib
 import json
 import time
 
-from .file_lock import atomic_read_text, atomic_write_text, cross_process_lock, ensure_private_directory
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+)
 from .templates import Template, _validate_template_name, load_template, user_templates_dir
 
 
@@ -71,8 +76,11 @@ def before_save(name, content, previous=None):
 
 def _current(name, actor, *, admin=False):
     template = load_template(name)
-    if template.owner != actor and not admin and not (actor == "local" and not template.owner):
-        raise PermissionError("Only the workflow owner or an administrator can review its version history.")
+    # Retain the keyword for callers; administrative policy authority is not
+    # authority over a person's unpublished drafts and private fixtures.
+    del admin
+    if template.owner != actor:
+        raise PermissionError("Only the workflow owner can review or change its private version history.")
     content = atomic_read_text(template.path, encoding="utf-8")
     return template, hashlib.sha256(content.encode()).hexdigest(), content
 

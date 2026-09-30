@@ -8,7 +8,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
-from .auth import caller_principal, require_global_permission, require_permission
+from .auth import (
+    assert_template_access,
+    caller_principal,
+    require_global_permission,
+    require_permission,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
@@ -108,6 +113,7 @@ def prepare_template(request: Request, name: str, payload: TemplatePrepareIn) ->
         raise HTTPException(404, "This template is no longer available.")
     try:
         template = load_template(name)
+        assert_template_access(request, template)
         if set(payload.params) - set(template.params):
             raise ValueError("Complete the template's listed inputs.")
         if any(len(value) > 10000 or (not value.strip() and name not in template.parameter_schema.get("fields", {})) for name, value in payload.params.items()):

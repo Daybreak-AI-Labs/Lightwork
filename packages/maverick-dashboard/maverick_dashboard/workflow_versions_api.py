@@ -44,7 +44,11 @@ def _authority(request, name, *, mutation=None, publish=False):
     from maverick.templates import _validate_template_name
     from maverick.workflow_versions import enabled
 
-    require_permission(request, "admin" if publish else "operate")
+    # Publishing pins a reviewed revision of one's own workflow. It neither
+    # shares private content nor arms a schedule, and needs the same operate
+    # ceiling as authoring and running that workflow.
+    del publish
+    require_permission(request, "operate")
     try:
         _validate_template_name(name)
     except ValueError as exc:
@@ -95,7 +99,7 @@ def versions(request: Request, name: str):
         item["diff"] = list(difflib.unified_diff(item["content"].splitlines(), current["content"].splitlines(),
                                                 fromfile=item["label"], tofile="Current draft", lineterm=""))
         del item["content"]
-    return {**value, **_impact(request, name), "context": context_for(request), "can_publish": admin}
+    return {**value, **_impact(request, name), "context": context_for(request), "can_publish": has_permission(request, "operate")}
 
 
 @router.post("/api/v1/workflows/{name}/fixtures")

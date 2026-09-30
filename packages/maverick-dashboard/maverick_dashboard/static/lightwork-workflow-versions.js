@@ -63,7 +63,7 @@
       const publish=control('Review publication',async()=>{
         if(!await mvConfirm('Publish this checked draft for new schedules? '+data.effect,{okText:'Publish version'}))return;
         mutate(publish,'/publish',{expected_version:data.current,impact_version:data.impact_version,label:label.value,confirm:true},()=>{status.textContent='Published. Existing schedules retain their versions.';});
-      });publish.disabled=!data.can_publish;if(!data.can_publish)publication.append(node('p','An administrator publishes reviewed versions.'));publication.append(publish);content.append(publication);
+      });publish.disabled=!data.can_publish;if(!data.can_publish)publication.append(node('p','Publishing your reviewed workflow requires current permission to operate.'));publication.append(publish);content.append(publication);
       content.append(node('h3','Version history and comparison with the current draft'));
       for(const version of [...data.versions].reverse()){
         const box=node('details');box.append(node('summary',version.label+(version.current?' · current draft':'')+(version.published?' · published':'')));
