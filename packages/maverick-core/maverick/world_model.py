@@ -857,8 +857,13 @@ def _enc_field(text: str | None) -> str | None:
 _UNSEALED_WITHHELD = "‹withheld: unsealed value in an encrypted store›"
 
 
-def _dec_field(text: str | None) -> str | None:
+def _dec_field(text: str | None, *, at_rest: bool | None = None) -> str | None:
     """Unseal a stored field from a sealed column when at-rest encryption is on.
+
+    ``at_rest`` lets a caller that already resolved :func:`at_rest_enabled`
+    for a whole result set pass it down: the policy check walks the compliance
+    profile configuration each time (~90 us), and a 200-row page read it 400
+    times.
 
     When encryption is disabled, fields are raw plaintext (which may legitimately
     begin with the public seal marker), so they pass through untouched.
@@ -877,7 +882,9 @@ def _dec_field(text: str | None) -> str | None:
         strict_at_rest,
         unseal_from_str,
     )
-    if not at_rest_enabled():
+    if at_rest is None:
+        at_rest = at_rest_enabled()
+    if not at_rest:
         return text
     if is_sealed_str(text):
         return unseal_from_str(text)
@@ -953,14 +960,26 @@ def _question_from_row(row) -> Question:
     return Question(**_row_for(Question, d))
 
 
-def _goal_from_row(row) -> Goal:
+def _goal_from_row(row, *, at_rest: bool | None = None) -> Goal:
     """Build a Goal from a row, decrypting the sealed content fields."""
+    from .crypto_at_rest import at_rest_enabled
+
+    if at_rest is None:
+        at_rest = at_rest_enabled()
     d = dict(row)
-    d["title"] = _dec_field(d.get("title"))
-    d["description"] = _dec_field(d.get("description"))
+    d["title"] = _dec_field(d.get("title"), at_rest=at_rest)
+    d["description"] = _dec_field(d.get("description"), at_rest=at_rest)
     if "result" in d:
-        d["result"] = _dec_field(d.get("result"))
+        d["result"] = _dec_field(d.get("result"), at_rest=at_rest)
     return Goal(**_row_for(Goal, d))
+
+
+def _goals_from_rows(rows) -> list[Goal]:
+    """Build Goals from a result set with one at-rest policy check per query."""
+    from .crypto_at_rest import at_rest_enabled
+
+    at_rest = at_rest_enabled()
+    return [_goal_from_row(r, at_rest=at_rest) for r in rows]
 
 
 def _goal_event_from_row(row) -> GoalEvent:
@@ -1673,7 +1692,7 @@ class WorldModel:
             "WHERE o.kind = ? AND o.ref = ? ORDER BY g.id DESC LIMIT ?",
             (str(kind), str(ref), max(1, int(limit))),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def origin_status_counts(self, kind: str, ref: str) -> dict[str, int]:
         """An automation's spawned-goal counts keyed by status (run summary)."""
@@ -2235,7 +2254,7 @@ class WorldModel:
             sql += " LIMIT ? OFFSET ?"
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def conversation_summaries(self, *, owner: str | None = None,
                                limit: int = 25, before_id: int | None = None):
@@ -2354,7 +2373,7 @@ class WorldModel:
             "ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def subgoals(self, parent_id: int, limit: int = 50) -> list[Goal]:
         """Immediate children of a goal, oldest first. Locked read."""
@@ -2365,7 +2384,7 @@ class WorldModel:
             "ORDER BY created_at ASC LIMIT ?",
             (parent_id, limit),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     # ----- episodes -----
     def start_episode(self, goal_id: int) -> int:

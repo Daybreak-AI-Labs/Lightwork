@@ -12153,6 +12153,12 @@ def main() -> None:
 # contexts and request-scope route objects receive the same final identity.
 _stabilize_effective_route_names(app)
 
+# Outermost (added last): every middleware and handler below it shares one
+# per-request memo for configuration-derived authorization predicates.
+from ._request_memo import RequestMemoMiddleware  # noqa: E402
+
+app.add_middleware(RequestMemoMiddleware)
+
 
 if __name__ == "__main__":
     main()
